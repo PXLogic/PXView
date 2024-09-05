@@ -8,7 +8,7 @@ The sigrok project aims at creating a portable, cross-platform, Free/Libre/Open-
 
 # Status
 
-The DSView software is in a usable state and has official tarball releases. However, it is still a work in progress. Some basic functionality is available and working, but other things are always on the TODO list.
+The PXView software is in a usable state and has official tarball releases. However, it is still a work in progress. Some basic functionality is available and working, but other things are always on the TODO list.
 
 # Useful links
 
