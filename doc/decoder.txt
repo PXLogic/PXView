@@ -1,0 +1,50 @@
+/*
+ * This file is part of the DSView project.
+ * 
+ * Copyright (C) 2021 DreamSourceLab <support@dreamsourcelab.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+ */
+ 
+sigrokdecode module's types
+
+output types: 
+	1.OUTPUT_ANN
+	2.OUTPUT_PYTHON
+	3.OUTPUT_BINARY
+	4.OUTPUT_META
+	
+default sample rate name: SRD_CONF_SAMPLERATE,value is 10000
+
+sigrokdecode.Decoder methods:
+
+class Decoder{
+	PyObject* put(PyObject *self, PyObject *args);
+	PyObject* register(PyObject *self, PyObject *args,PyObject *kwargs);
+	PyObject* wait(PyObject *self, PyObject *args);
+	PyObject* has_channel(PyObject *self, PyObject *args);
+}
+
+
+c can call's method of python:
+	1.reset
+	2.start
+	3.decode
+	4.metadata
+	5.printlog //print log to console, param type is string
+
+	
+decode函数返回任意值，则表示解析任务终止
+
