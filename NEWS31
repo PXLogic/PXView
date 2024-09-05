@@ -1,0 +1,30 @@
+--------------------------------------------------------------------------------
+Software download and after-sales support, requirement proposal
+--------------------------------------------------------------------------------
+逻辑分析仪QQ群：389908364
+FPGA/IC吹水群：377248676
+雷电扩展坞群：807604723
+
+--------------------------------------------------------------------------------
+
+    PXView V1.1.1
+    Date: August 1st, 2024
+    The changes are as follows:
+        *Change the default color of the data to colored
+        
+--------------------------------------------------------------------------------
+
+    PXView V1.1.0
+    Date: July 27th, 2024
+    The changes are as follows:
+        *Fix the issue of interface occlusion
+        *Reduce the 2G bandwidth in stream mode to 1.6G to ensure that all USB 3.0 hubs can meet the requirements
+
+--------------------------------------------------------------------------------
+    PXview is based on the DSview 1.3.1 and sigrock 2.0 projects, and we appreciate their contributions to open source development
+        [dreamsourceab. com]（ https://www.dreamsourcelab.com ）
+        [sigrok. org]（ https://sigrok.org ）
+        
+    Change：    
+        *Joining SCI Logic support, USB 3.0 32 channel 1G sampling rate
+        *PXview adds PWM output function based on SCI Logic

@@ -1,0 +1,90 @@
+-------------------------------------------------------------------------------
+INSTALL
+-------------------------------------------------------------------------------
+
+Requirements
+------------
+ - git
+ - gcc (>= 4.0)
+ - g++
+ - make
+ - cmake >= 2.6
+ - Qt >= 5.0
+ - libglib >= 2.32.0
+ - zlib
+ - libusb-1.0 >= 1.0.16
+	On FreeBSD, this is an integral part of the FreeBSD libc, not an extra package/library.
+	This is part of the standard OpenBSD install (not an extra package), apparently.
+ - libboost >= 1.42
+ - libfftw3 >= 3.3
+ - libpython > 3.2
+ - libtool
+ - pkg-config >= 0.22
+
+
+Building and installing
+-----------------------
+
+Step1: Installing the requirements:
+please check your respective distro's package manager tool if you use other distros
+
+Debian/Ubuntu:
+ $ sudo apt install git gcc g++ make cmake qt5-default libglib2.0-dev zlib1g-dev \
+ 	libusb-1.0-0-dev libboost-dev libfftw3-dev python3-dev libudev-dev pkg-config
+ 	 	
+   How to install qt on ubuntu?
+   	qt5: qt5-default,qtbase5-dev
+   	qt6: qt6-base-dev,libQt6Svg*,libgl1-mesa-dev*
+
+Fedora (18, 19):
+ $ sudo yum install git gcc g++ make cmake libtool pkgconfig glib2-devel \
+   zlib-devel libudev-devel libusb1-devel \
+   python3-devel qt-devel boost-devel libfftw3-devel
+
+Arch:
+ $ pacman -S base-devel git cmake glib2 zlib libusb
+   python boost qt5 fftw
+   
+Mac:
+  install git
+  install hombrew
+  brew install gcc
+  brew install g++
+  brew install make
+  brew install cmake
+  brew install gettext
+  brew install glib
+  brew install libusb
+  brew install zlib
+  brew install boost
+  brew install fftw
+  brew install python3
+  brew install qt
+  brew install pkg-config
+
+
+Step2: Get the DSView source code
+ $ git clone https://github.com/PXLogic/PXView
+
+Step3: Building SARRibbon
+ $ cd other lib
+ $ tar -xvf ./other_lib/SARibbon.tar.xz  -C ./
+ $ cd SARibbon
+ $ cmake .
+ $ make 
+ $ sudo make install
+
+Step4: Building
+ $ cmake .
+ $ make 
+ $ sudo make install
+
+or 
+sudo ./build_linux
+
+See the following wiki page for more (OS-specific) instructions:
+ http://sigrok.org/wiki/Building
+ 
+The latest source code:
+ https://github.com/PXLogic/PXView
+ 

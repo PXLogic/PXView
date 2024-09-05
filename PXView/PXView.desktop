@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Encoding=UTF-8
+Name=PXView
+Comment=GUI Program for PX USB-based Instruments
+TryExec=PXView
+Exec=PXView
+Icon=pxview
+Terminal=false
+Categories=Development;Electronics;Qt;
+Name[zh_CN]=PXView
