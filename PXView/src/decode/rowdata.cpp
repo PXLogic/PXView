@@ -3,7 +3,7 @@
  * DSView is based on PulseView.
  * 
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
- * Copyright (C) 2016 DreamSourceLab <support@dreamsourcelab.com>
+ * Copyright (C) 2016 
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
