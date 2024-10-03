@@ -1975,7 +1975,7 @@ SR_PRIV int start_transfers(const struct sr_dev_inst *sdi)
      rc =usb_wr_reg(usb->devhdl,8192+(11<<2), 0); //set_block_start
     libusb_clear_halt(usb->devhdl,0x82);
     //libusb_reset_device(usb->devhdl);
-    uint32_t pwm_freq = 20000;
+    uint32_t pwm_freq = 10000;
     uint32_t pwm_max = 120000000/pwm_freq;
 
      rc = usb_wr_reg(usb->devhdl, 2<<1, pwm_max);

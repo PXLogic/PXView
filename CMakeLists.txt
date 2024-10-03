@@ -639,10 +639,10 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
 endif()
 
-install(FILES NEWS25 DESTINATION share/PXView RENAME NEWS25)
-install(FILES NEWS31 DESTINATION share/PXView RENAME NEWS31)
-install(FILES ug25.pdf DESTINATION share/PXView RENAME ug25.pdf)
-install(FILES ug31.pdf DESTINATION share/PXView RENAME ug31.pdf)
+install(FILES doc/NEWS25 DESTINATION share/PXView RENAME NEWS25)
+install(FILES doc/NEWS31 DESTINATION share/PXView RENAME NEWS31)
+install(FILES doc/ug25.pdf DESTINATION share/PXView RENAME ug25.pdf)
+install(FILES doc/ug31.pdf DESTINATION share/PXView RENAME ug31.pdf)
 
 install(DIRECTORY libsigrokdecode/decoders DESTINATION share/PXView/libsigrokdecode)
 install(DIRECTORY lang DESTINATION share/PXView)

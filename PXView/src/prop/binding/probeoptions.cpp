@@ -1,9 +1,9 @@
 /*
  * This file is part of the PXView project.
- * PXView is based onPXView.
+ * PXView is based on DSView.
  * PXView is based on PulseView.
  *
- * Copyright (C) 2018 DreamSourceLab <support@dreamsourcelab.com>
+ * Copyright (C) 2018 
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

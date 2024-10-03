@@ -23,7 +23,6 @@
 .libs/
 /ChangeLog
 /Makefile
-/config.*
 /libsigrokdecode4DSL4DSL4DSL4DSL-*.tar.*
 /libsigrokdecode4DSL.pc
 /libtool

@@ -98,7 +98,7 @@
 #define PACKAGE "libsigrok4DSL"
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT "support@dreamsourcelab.com"
+#define PACKAGE_BUGREPORT "support@https://github.com/PXLogic/PXView"
 
 /* Define to the full name of this package. */
 #define PACKAGE_NAME "libsigrok4DSL"
@@ -110,7 +110,7 @@
 #define PACKAGE_TARNAME "libsigrok4DSL"
 
 /* Define to the home page for this package. */
-#define PACKAGE_URL "http://www.dreamsourcelab.com"
+#define PACKAGE_URL "https://github.com/PXLogic/PXView"
 
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "0.2.0"
