@@ -82,6 +82,7 @@ static void make_demo_device_to_list();
 static void process_attach_event(int isEvent);
 static struct libusb_device* get_new_attached_usb_device();
 static struct libusb_device* get_new_detached_usb_device();
+extern SR_PRIV int sr_dslogic_option_value_to_code2(const struct sr_dev_inst *sdi, int config_id, const char *value);
 
 static struct sr_lib_context lib_ctx = {
 	.event_callback = NULL,
