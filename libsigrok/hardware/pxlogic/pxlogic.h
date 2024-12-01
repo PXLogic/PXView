@@ -34,7 +34,7 @@
 #include <sys/stat.h>
 #include <inttypes.h>
 #define NUM_TRIGGER_STAGES	16
-#define FIRMWARE_VERSION 0x56900013
+#define FIRMWARE_VERSION 0x56900014
 #define PWM_CLK 125000000
 #define PWM_MAX 1000000
 
