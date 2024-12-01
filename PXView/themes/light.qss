@@ -904,6 +904,12 @@ QTabBar::tab
     padding: 5px;
 }
 
+QTabBar::tab:selected
+{
+    color: 2A2A2A;
+    background-color: #FFFAf0;
+}
+
 QTabBar::tab:!selected
 {
     color: 2A2A2A;
@@ -919,7 +925,7 @@ QTabBar::tab:disabled
 /* TOP TABS */
 QTabBar::tab:top
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-bottom: 1px transparent;
     border-top-left-radius: 2px;
     border-top-right-radius: 2px;
@@ -927,7 +933,7 @@ QTabBar::tab:top
 
 QTabBar::tab:top:!selected
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-bottom: 1px transparent;
     border-top-left-radius: 2px;
     border-top-right-radius: 2px;
@@ -935,7 +941,7 @@ QTabBar::tab:top:!selected
 
 QTabBar::tab:top:hover
 {
-    border: 1px solid #1185D1;
+    border: 1px solid #FFFAf0;
     border-bottom: 1px transparent;
 }
 
@@ -943,7 +949,7 @@ QTabBar::tab:top:hover
 /* BOTTOM TABS */
 QTabBar::tab:bottom
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-top: 1px transparent;
     border-bottom-left-radius: 2px;
     border-bottom-right-radius: 2px;
@@ -951,7 +957,7 @@ QTabBar::tab:bottom
 
 QTabBar::tab:bottom:!selected
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-top: 1px transparent;
     border-bottom-left-radius: 2px;
     border-bottom-right-radius: 2px;
@@ -959,7 +965,7 @@ QTabBar::tab:bottom:!selected
 
 QTabBar::tab:bottom:hover
 {
-    border: 1px solid #1185D1;
+    border: 1px solid #FFFAf0;
     border-top: 1px transparent;
 }
 
@@ -967,7 +973,7 @@ QTabBar::tab:bottom:hover
 /* LEFT TABS */
 QTabBar::tab:left
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-left: 1px transparent;
     border-top-right-radius: 2px;
     border-bottom-right-radius: 2px;
@@ -975,7 +981,7 @@ QTabBar::tab:left
 
 QTabBar::tab:left:!selected
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-left: 1px transparent;
     border-top-right-radius: 2px;
     border-bottom-right-radius: 2px;
@@ -983,7 +989,7 @@ QTabBar::tab:left:!selected
 
 QTabBar::tab:left:hover
 {
-    border: 1px solid #1185D1;
+    border: 1px solid #FFFAf0;
     border-left: 1px transparent;
 }
 
@@ -991,7 +997,7 @@ QTabBar::tab:left:hover
 /* RIGHT TABS */
 QTabBar::tab:right
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-right: 1px transparent;
     border-top-left-radius: 2px;
     border-bottom-left-radius: 2px;
@@ -999,7 +1005,7 @@ QTabBar::tab:right
 
 QTabBar::tab:right:!selected
 {
-    border: 1px solid #b4b4b4;
+    border: 1px solid #FFFAf0;
     border-right: 1px transparent;
     border-top-left-radius: 2px;
     border-bottom-left-radius: 2px;
@@ -1007,7 +1013,7 @@ QTabBar::tab:right:!selected
 
 QTabBar::tab:right:hover
 {
-    border: 1px solid #1185D1;
+    border: 1px solid #FFFAf0;
     border-right: 1px transparent;
 }
 

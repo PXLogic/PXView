@@ -62,11 +62,11 @@ namespace dsv{
 }
 using namespace dsv::dialogs;
 
-namespace dsv {
-    namespace appcore {
-        class MainWindowRibbonHelper;
-    }
-}
+// namespace dsv {
+//     namespace appcore {
+//         class MainWindowRibbonHelper;
+//     }
+// }
 
 namespace dsv{
 namespace toolbars{
@@ -154,8 +154,9 @@ namespace toolbars{
             void on_run_stop_action();
             void on_instant_stop_action();    
 
-        private:
-            friend class dsv::appcore::MainWindowRibbonHelper;
+        //private:
+        public:
+            // friend class dsv::appcore::MainWindowRibbonHelper;
 
             SigSession          *_session;
 

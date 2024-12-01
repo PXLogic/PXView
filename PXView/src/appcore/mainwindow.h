@@ -35,7 +35,17 @@
 #include "../interface/icallbacks.h"
 #include "eventobject.h"
 #include "../com/dstimer.h"
-#include "SARibbonMainWindow.h"
+// #include "SARibbonMainWindow.h"
+// #include "SARibbonBar.h"
+// #include "SARibbonCategory.h"
+// #include "SARibbonPannel.h"
+// #include "SARibbonQuickAccessBar.h"
+// #include "SARibbonMainWindow.h"
+// #include "SARibbonGlobal.h"
+#include <QWidgetAction>
+#include<QShortcut>
+
+#include "../QRibbon/QRibbon.h"
 
 class QAction;
 class QMenuBar;
@@ -55,6 +65,7 @@ namespace dsv{
     	class SigSession;
         class AppControl;
         class DeviceAgent;
+        //class MainWindowRibbonHelper;
 	}
 }
 
@@ -85,12 +96,13 @@ using namespace dsv::view;
 namespace dsv {
 namespace appcore {
 class SigSession;
-class MainWindowRibbonHelper;
+// class MainWindowRibbonHelper;
  
 //The mainwindow,referenced by MainFrame
 //TODO: create graph view,toolbar,and show device list
 class MainWindow : 
-    public SARibbonMainWindow,
+    //public SARibbonMainWindow,
+    public QMainWindow,
     public ISessionCallback,
     public IMainForm,
     public ISessionDataGetter,
@@ -143,6 +155,7 @@ signals:
     void prgRate(int progress);
 
 public:
+    //class MainWindowRibbonHelper;
     //IMainForm
     void switchLanguage(int language) override;
     bool able_to_close(); 
@@ -200,16 +213,16 @@ private:
     void OnMessage(int msg) override;
 
 private: 
-    friend class MainWindowRibbonHelper;
+//public:
+    //friend class MainWindowRibbonHelper;
 
-    MainWindowRibbonHelper* _ribbon_helper;
+    //MainWindowRibbonHelper* _ribbon_helper;
+    //dsv::appcore::MainWindowRibbonHelper * _ribbon_helper;
 	dsv::view::View          *_view;
     dialogs::DSMessageBox   *_msg;
 
-    //QTabWidget              _tabwidget;
 
-	QMenuBar                *_menu_bar;
-	QMenu                   *_menu_file;
+	
 	QAction                 *_action_open;
 	QAction                 *_action_connect;
 	QAction                 *_action_quit;
@@ -260,6 +273,57 @@ private:
 
     int _key_value;
     bool _key_vaild;
+
+    void MainWindowRibbonHelper();
+    //QAction* addWidget(QWidget *widget, QWidget* parent);
+    void Ribbon_setupUi();
+    void Ribbon_retranslateUi();
+    void setupQuickAccessBar();
+    void setupRightToolBar();
+    void setupFileCategory();
+    void setupDisplayCategory();
+    void setupHelpCategory();
+
+    // toolbars::SamplingBar* _sampling_bar;
+    // toolbars::TrigBar* _trig_bar;
+    // toolbars::FileBar* _file_bar;
+    // toolbars::LogoBar* _logo_bar;
+    // toolbars::TitleBar *_title_bar;
+    // QToolButton     *_close_button;
+
+    QToolBar* _right_tool_bar;
+    // SARibbonBar* ribbon;
+
+    // /* Ribbon */
+    // // Categories
+    // SARibbonCategory* _category_file;
+    // SARibbonCategory* _category_display;
+    // SARibbonCategory* _category_help;
+
+    // // Category File
+    // SARibbonPannel* _category_file_pannel_0;
+    // SARibbonPannel* _category_file_pannel_1;
+    // SARibbonPannel* _category_file_pannel_2;
+
+    // // Category Display
+    // SARibbonPannel* _category_display_pannel_0;
+    // SARibbonPannel* _category_display_pannel_1;
+    // SARibbonPannel* _category_display_pannel_2;
+
+    // // Category Help
+    // SARibbonPannel* _category_help_pannel_1;
+
+
+
+    /* Ribbon */
+    // Categories
+    QMenuBar                *_menu_bar;
+    QMenu* _category_file;
+    QMenu* _category_display;
+    QMenu* _category_help;
+
+    QRibbon* _QRibbon;
+
 };
 
 } //namespace com

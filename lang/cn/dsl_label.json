@@ -150,5 +150,29 @@
     {
         "id": "En Trigger Out",
         "text": "使能触发输出"
+    },
+    {
+        "id": "PWM0 EN",
+        "text": "PWM0 使能"
+    },
+    {
+        "id": "PWM0 Freq",
+        "text": "PWM0 频率"
+    },
+    {
+        "id": "PWM0 Duty",
+        "text": "PWM0 占空比"
+    },
+    {
+        "id": "PWM1 EN",
+        "text": "PWM1 使能"
+    },
+    {
+        "id": "PWM1 Freq",
+        "text": "PWM1 频率"
+    },
+    {
+        "id": "PWM1 Duty",
+        "text": "PWM1 占空比"
     }
 ]

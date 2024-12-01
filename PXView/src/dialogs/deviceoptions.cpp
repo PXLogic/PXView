@@ -110,6 +110,7 @@ DeviceOptions::DeviceOptions(QWidget *parent) :
     this->layout()->setDirection(QBoxLayout::TopToBottom);
     this->layout()->setAlignment(Qt::AlignTop); 
 
+
     // scroll panel
     _scroll_panel  = new QWidget();
     QVBoxLayout *scroll_lay = new QVBoxLayout();

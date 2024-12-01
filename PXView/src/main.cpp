@@ -40,12 +40,12 @@
 #include <ds_types.h>
 
 
-#include "SARibbonBar.h"
-#include "SARibbonCategory.h"
-#include "SARibbonPannel.h"
-#include "SARibbonQuickAccessBar.h"
-#include "SARibbonMainWindow.h"
-#include "SARibbonGlobal.h"
+// #include "SARibbonBar.h"
+// #include "SARibbonCategory.h"
+// #include "SARibbonPannel.h"
+// #include "SARibbonQuickAccessBar.h"
+// #include "SARibbonMainWindow.h"
+// #include "SARibbonGlobal.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif 
@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
 	}
 
 	//----------------------HightDpiScaling
-	SARibbonBar::initHighDpi();
+	// SARibbonBar::initHighDpi();
 #if QT_VERSION >= QT_VERSION_CHECK(5,6,0)
 bool bHighScale = true;
 
@@ -180,7 +180,7 @@ bool bHighScale = true;
     // Set some application metadata
     QApplication::setApplicationVersion(PX_VERSION_STRING);
     QApplication::setApplicationName(PX_TITLE);
-    QApplication::setOrganizationName("PXlogic");
+    QApplication::setOrganizationName("PXlogicV2");
     QApplication::setOrganizationDomain("www.NULL.com");
 
 	//----------------------init log

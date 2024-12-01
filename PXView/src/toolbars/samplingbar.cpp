@@ -44,7 +44,8 @@
 #include "../appcore/sigsession.h"
 
 #include <QWidgetAction>
-
+#include <QSpacerItem>
+#include <QHBoxLayout>
 #define SINGLE_ACTION_ICON  "/once.svg"
 #define REPEAT_ACTION_ICON  "/repeat.svg"
 #define LOOP_ACTION_ICON  "/loop.svg"
@@ -90,6 +91,7 @@ namespace dsv
             setContentsMargins(0, 0, 0, 0);
             layout()->setSpacing(0);
 
+
             _mode_button.setPopupMode(QToolButton::InstantPopup);
         
             _device_selector.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
@@ -102,22 +104,29 @@ namespace dsv
             //tr
             _run_stop_button.setObjectName("run_stop_button");
 
-            // QWidget *leftMargin = new QWidget(this);
-            // leftMargin->setFixedWidth(4);
-            // addWidget(leftMargin);
+            QWidget *leftMargin = new QWidget(this);
+            //leftMargin->setFixedWidth(4);
+            leftMargin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            addWidget(leftMargin);
 
-            _device_type.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-            // addWidget(&_device_type);
-            // addWidget(&_device_selector);
+            // QHBoxLayout *hlayout = new QHBoxLayout(this);
+            // QSpacerItem *spacer = new QSpacerItem(200,20,QSizePolicy::Expanding);
+
+            // hlayout->addSpacerItem(spacer);
+
+            _device_type.setToolButtonStyle(Qt::ToolButtonIconOnly);
+            addWidget(&_device_type);
+            addWidget(&_device_selector);
             _configure_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-            
-            // addWidget(&_configure_button);
-
-            // addWidget(&_sample_count);
+            //addWidget(new QLabel("   "));
+            //addWidget(&_configure_button);
+            addWidget(new QLabel("   "));
+            addWidget(&_sample_count);
             //tr
             //addWidget(new QLabel(" @ "));
-            // addWidget(new QLabel("   "));
-            // addWidget(&_sample_rate);
+            addWidget(new QLabel("   "));
+            addWidget(&_sample_rate);
+            addWidget(new QLabel("                          "));
 
             _action_single = new QAction(this);
             _action_repeat = new QAction(this);
@@ -143,6 +152,22 @@ namespace dsv
             _run_stop_action = widgetToAction(&_run_stop_button);
             _instant_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
             _instant_action = widgetToAction(&_instant_button); 
+
+            // auto widgetToAction = [](QWidget* widget, QWidget* parent = nullptr) -> QAction* {
+            //     QWidgetAction *action = new QWidgetAction(parent);
+            //     action->setDefaultWidget(widget);
+            //     return action;
+            // };
+            // _configure_action = addWidget(&_configure_button);
+            
+            // _mode_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            // _mode_action = addWidget(&_mode_button);
+
+            // _run_stop_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            // _run_stop_action = addWidget(&_run_stop_button);
+            // _instant_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            // _instant_action = addWidget(&_instant_button); 
+
 
             update_view_status();
             update_font();

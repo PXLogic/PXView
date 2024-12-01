@@ -34,7 +34,7 @@
 #endif
 
 #include "../widgets/border.h"
-#include "SARibbonMainWindow.h"
+// #include "SARibbonMainWindow.h"
 namespace dsv {
 
 namespace toolbars {

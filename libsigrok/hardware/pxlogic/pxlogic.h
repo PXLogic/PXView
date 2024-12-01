@@ -35,7 +35,8 @@
 #include <inttypes.h>
 #define NUM_TRIGGER_STAGES	16
 #define FIRMWARE_VERSION 0x56900013
-
+#define PWM_CLK 125000000
+#define PWM_MAX 1000000
 
 
 struct PX_caps {
@@ -174,6 +175,20 @@ struct PX_context {
     uint16_t trig_logic1[NUM_TRIGGER_STAGES];
     uint32_t trig_count[NUM_TRIGGER_STAGES];
 
+    gboolean    pwm0_en;
+    double      pwm0_freq;
+    double      pwm0_duty;
+
+    uint32_t    pwm0_freq_set;
+    uint32_t    pwm0_duty_set;
+
+    gboolean    pwm1_en;
+    double      pwm1_freq;
+    double      pwm1_duty;
+
+    uint32_t    pwm1_freq_set;
+    uint32_t    pwm1_duty_set;
+
 };
 
 static const uint64_t samplerates[] = {
@@ -299,10 +314,22 @@ static const int hwoptions[] = {
     SR_CONF_CLOCK_EDGE,
     SR_CONF_TRIGGER_OUT,
     
+	SR_CONF_PWM0_FREQ ,
+	SR_CONF_PWM0_DUTY ,
+    SR_CONF_PWM0_EN   ,
+	//SR_CONF_PWM1_FREQ ,
+	//SR_CONF_PWM1_DUTY ,
+    //SR_CONF_PWM1_EN   ,
     
     
 };
 
+    // devc->pwm0_en   = 0;
+    // devc->pwm0_freq = 1000;
+    // devc->pwm0_duty = 50;
+    // devc->pwm1_en   = 0;
+    // devc->pwm1_freq = 1000;
+    // devc->pwm1_duty = 50;
 static const int32_t sessions[] = {
     SR_CONF_SAMPLERATE,
     SR_CONF_LIMIT_SAMPLES,
@@ -315,6 +342,14 @@ static const int32_t sessions[] = {
     SR_CONF_FILTER,
     SR_CONF_CLOCK_EDGE,
     SR_CONF_TRIGGER_OUT,
+    
+	SR_CONF_PWM0_FREQ ,
+	SR_CONF_PWM0_DUTY ,
+    SR_CONF_PWM0_EN   ,
+	
+	//SR_CONF_PWM1_FREQ ,
+	//SR_CONF_PWM1_DUTY ,
+    //SR_CONF_PWM1_EN   ,
     
     
 };

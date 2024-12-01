@@ -119,7 +119,7 @@
     },
     {
         "id": "IDS_TOOLBAR_FILE",
-        "text": "&File"
+        "text": "File"
     },
     {
         "id": "IDS_TOOLBAR_FILE_CONFIG",
@@ -155,7 +155,7 @@
     },
     {
         "id": "IDS_TOOLBAR_HELP",
-        "text": "&Help"
+        "text": "Help"
     },
     {
         "id": "IDS_TOOLBAR_HELP_LANG",

@@ -41,11 +41,11 @@ namespace dsv{
 }
 using namespace dsv::appcore;
 
-namespace dsv {
-    namespace appcore {
-        class MainWindowRibbonHelper;
-    }
-}
+// namespace dsv {
+//     namespace appcore {
+//         class MainWindowRibbonHelper;
+//     }
+// }
 
 namespace dsv {
 namespace toolbars {
@@ -67,6 +67,12 @@ public:
     inline void set_mainform_callback(IMainForm *callback){
         _mainForm = callback;
     }
+
+    QAction *_about;
+    QAction *_manual;
+    QAction *_issue;
+    QAction *_update;
+    QAction *_log;
 
 private:
     void changeEvent(QEvent *event);
@@ -92,7 +98,7 @@ private slots:
     void on_clear_log_file();
 
 private:
-    friend class dsv::appcore::MainWindowRibbonHelper;
+    //friend class dsv::appcore::MainWindowRibbonHelper;
     
     bool _enable;
     bool _connected;
@@ -108,11 +114,11 @@ private:
     QAction *_action_en;
     QAction *_action_cn;
 
-    QAction *_about;
-    QAction *_manual;
-    QAction *_issue;
-    QAction *_update;
-    QAction *_log;
+    // QAction *_about;
+    // QAction *_manual;
+    // QAction *_issue;
+    // QAction *_update;
+    // QAction *_log;
 
     QPushButton *_log_open_bt;
     QPushButton *_log_clear_bt;

@@ -37,11 +37,11 @@ namespace dsv{
 }
 using namespace dsv::appcore;
 
-namespace dsv {
-    namespace appcore {
-        class MainWindowRibbonHelper;
-    }
-}
+// namespace dsv {
+//     namespace appcore {
+//         class MainWindowRibbonHelper;
+//     }
+// }
 
 namespace dsv {
 namespace toolbars {
@@ -82,8 +82,9 @@ private slots:
     void on_actionOpen_triggered();
     void on_actionCapture_triggered();
 
-private:
-    friend class dsv::appcore::MainWindowRibbonHelper;
+// private:
+public:
+    // friend class dsv::appcore::MainWindowRibbonHelper;
 
     SigSession* _session;
 
