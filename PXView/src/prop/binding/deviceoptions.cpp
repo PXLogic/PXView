@@ -112,12 +112,24 @@ DeviceOptions::DeviceOptions()
             bind_double(name, label, key, "V", pair<double, double>(0.0, 6.0), 1, 0.1);
             break;
 
+        case SR_CONF_PWM0_FREQ:
+		case SR_CONF_PWM1_FREQ:
+            bind_double(name, label, key, "Hz", pair<double, double>(0, 1000000), 1, 1);
+            break;
+
+        case SR_CONF_PWM0_DUTY:
+		case SR_CONF_PWM1_DUTY:
+            bind_double(name, label, key, "%", pair<double, double>(0, 100), 1, 1);
+            break;
+			
 		case SR_CONF_RLE:
         case SR_CONF_RLE_SUPPORT:
         case SR_CONF_CLOCK_TYPE:
         case SR_CONF_CLOCK_EDGE:
 		case SR_CONF_TRIGGER_OUT:
         case SR_CONF_INSTANT:
+		case SR_CONF_PWM0_EN:
+		case SR_CONF_PWM1_EN:
             bind_bool(name, label, key);
             break;
 

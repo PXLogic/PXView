@@ -97,216 +97,274 @@
 #include "appcontrol.h"
 
 /* Ribbon */
-#include "SARibbonBar.h"
-#include "SARibbonCategory.h"
-#include "SARibbonPannel.h"
-#include "SARibbonQuickAccessBar.h"
-#include "SARibbonMainWindow.h"
-#include "SARibbonGlobal.h"
+// #include "SARibbonBar.h"
+// #include "SARibbonCategory.h"
+// #include "SARibbonPannel.h"
+// #include "SARibbonQuickAccessBar.h"
+// #include "SARibbonMainWindow.h"
+// #include "SARibbonGlobal.h"
+
 #include <QWidgetAction>
 #include<QShortcut>
+
+#include <QMenu>
+#include <QMenuBar>
+#include "../QRibbon/QRibbon.h"
 
 using namespace dsv::config;
 
 namespace dsv {
 namespace appcore {
     
-    class MainWindowRibbonHelper {
-    public:
-        MainWindowRibbonHelper(MainWindow* parent);
+    // void MainWindow::MainWindowRibbonHelper()
+    // {
+        
+        
+    //     _right_tool_bar = new QToolBar();
 
-        void setupUi();
-        void retranslateUi();
+    //     /* Ribbon */
+    //     //SARibbonBar* ribbon = ribbonBar();
+    //     ribbon = ribbonBar();
+    //     ribbon->setApplicationButton(NULL);
 
-    //private:
-        void setupQuickAccessBar(SARibbonBar* ribbon);
-        void setupRightToolBar(SARibbonMainWindow* parent);
-        void setupFileCategory();
-        void setupDisplayCategory();
-        void setupHelpCategory();
-        //void retranslateUi();
+    //     ribbon->setTabOnTitle(true);
+    //     //ribbon->setTitleBarHeight;
+    //     //ribbon->applicationButton()->setText("File");
+    //     // ribbon->setRibbonAlignment(SARibbonAlignment::AlignLeft);
+    //     ribbon->setTitleVisible(false);
 
-        QAction* addWidget(QWidget *widget, QWidget* parent);
-
-        MainWindow* _main_window;
-        toolbars::SamplingBar* _sampling_bar;
-        toolbars::TrigBar* _trig_bar;
-        toolbars::FileBar* _file_bar;
-        toolbars::LogoBar* _logo_bar;
-        toolbars::TitleBar *_title_bar;
-        QToolButton     *_close_button;
-        DevMode         *_devmode;
+    //     ribbon->setMinimumMode(true);
+        
         
 
+    //     //ribbon->showMinimumModeButton(true);
+    //     // Categories
+    //     _category_file = new SARibbonCategory();
+    //     _category_display = new SARibbonCategory();
+    //     _category_help = new SARibbonCategory();
 
-        QToolBar* _right_tool_bar;
+    //     //_category_file->setBackgroundRole();
+    //     // Category File
+    //     _category_file_pannel_0 = new SARibbonPannel();
+    //     _category_file_pannel_1 = new SARibbonPannel();
+    //     _category_file_pannel_2 = new SARibbonPannel();
 
-        /* Ribbon */
-        // Categories
-        SARibbonCategory* _category_file;
-        SARibbonCategory* _category_display;
-        SARibbonCategory* _category_help;
+    //     // Category Display
+    //     _category_display_pannel_0 = new SARibbonPannel();
+    //     _category_display_pannel_1 = new SARibbonPannel();
+    //     _category_display_pannel_2 = new SARibbonPannel();
 
-        // Category File
-        SARibbonPannel* _category_file_pannel_0;
-        SARibbonPannel* _category_file_pannel_1;
-        SARibbonPannel* _category_file_pannel_2;
+    //     // Category Help
+    //     _category_help_pannel_1 = new SARibbonPannel();
 
-        // Category Display
-        SARibbonPannel* _category_display_pannel_0;
-        SARibbonPannel* _category_display_pannel_1;
-        SARibbonPannel* _category_display_pannel_2;
 
-        // Category Help
-        SARibbonPannel* _category_help_pannel_1;
-    };
 
-    ////////////////////////////////////////////////////////////////////////
-    // Referenced from Qt Source Code
-    //     void QToolBar::actionEvent(QActionEvent *event)
-    // 
-    // // reparent the action to this toolbar if it has been created
-    // // using the addAction(text) etc. convenience functions, to
-    // // preserve Qt 4.1.x behavior. The widget is already
-    // // reparented to us due to the createWidget call inside
-    // // createItem()
-    // if (widgetAction != nullptr && widgetAction->d_func()->autoCreated)
-    //     widgetAction->setParent(this);
-    ////////////////////////////////////////////////////////////////////////
-    QAction *MainWindowRibbonHelper::addWidget(QWidget *widget, QWidget* parent)
+    // }
+
+    // void MainWindow::Ribbon_setupUi() {
+    //     //SARibbonBar* ribbon = _main_window->ribbonBar();
+    //     //SARibbonBar* ribbon = ribbonBar();
+    //     //ribbon = ribbonBar();
+        
+    //     ribbon->setRibbonStyle(SARibbonBar::RibbonStyleCompactThreeRow);
+    //     //ribbon->setRibbonStyle(SARibbonBar::RibbonStyleCompactTwoRow);
+    //     sa_set_ribbon_theme(ribbon, SARibbonTheme::RibbonThemeDark);
+
+    //     _category_file->addPannel(_category_file_pannel_0);
+    //     _category_file->addPannel(_category_file_pannel_1);
+    //     _category_file->addPannel(_category_file_pannel_2);
+
+        
+
+    //     _category_display->addPannel(_category_display_pannel_0);
+    //     _category_display->addPannel(_category_display_pannel_1);
+    //     _category_display->addPannel(_category_display_pannel_2);
+
+    //     _category_help->addPannel(_category_help_pannel_1);
+
+    //     // ribbon
+    //     ribbon->addCategoryPage(_category_file);
+    //     ribbon->addCategoryPage(_category_display);
+    //     ribbon->addCategoryPage(_category_help);
+
+    //     setupQuickAccessBar();
+    //     //setupRightToolBar(_main_window);
+    //     setupRightToolBar();
+    //     setupFileCategory();
+    //     setupDisplayCategory();
+    //     setupHelpCategory();
+    //     Ribbon_retranslateUi();
+    // }
+
+    // void MainWindow::setupQuickAccessBar()
+    // {
+    //     SARibbonQuickAccessBar* quickAccessBar = ribbon->quickAccessBar();
+    //     // quickAccessBar->addAction(actionDemo);
+    //     quickAccessBar->addWidget(&_sampling_bar->_device_type);
+    //     quickAccessBar->addWidget(&_sampling_bar->_device_selector);
+    //     quickAccessBar->addWidget(&_sampling_bar->_configure_button);
+
+    //     QWidget *leftMargin0 = new QWidget();
+    //     leftMargin0->setFixedWidth(20);
+    //     quickAccessBar->addWidget(leftMargin0);
+
+    //     quickAccessBar->addWidget(&_sampling_bar->_sample_count);
+
+    //     QWidget *leftMargin1 = new QWidget();
+    //     leftMargin1->setFixedWidth(20);
+    //     quickAccessBar->addWidget(leftMargin1);
+
+    //     quickAccessBar->addWidget(&_sampling_bar->_sample_rate);
+
+    //     QWidget *leftMargin2 = new QWidget();
+    //     leftMargin2->setFixedWidth(100);
+    //     quickAccessBar->addWidget(leftMargin2);
+
+
+    // }
+
+    // void MainWindow::setupRightToolBar()
+    // {
+    //     // _right_tool_bar->setMinimumSize(100, 100);
+    //     _right_tool_bar->setIconSize(QSize(24, 24));
+    //     _right_tool_bar->addAction(_trig_bar->_protocol_action);
+    //     _right_tool_bar->addAction(_trig_bar->_measure_action);
+    //     _right_tool_bar->addAction(_trig_bar->_search_action);
+    //     _right_tool_bar->addAction(_sampling_bar->_configure_action);
+    //     _right_tool_bar->addAction(_sampling_bar->_mode_action);
+    //     _right_tool_bar->addAction(_sampling_bar->_run_stop_action);
+    //     _right_tool_bar->setFloatable(false);
+    //     //_right_tool_bar->setMovable(false);
+    //     //parent->addToolBar(Qt::RightToolBarArea, _right_tool_bar);
+    //     addToolBar(Qt::RightToolBarArea, _right_tool_bar);
+        
+    // }
+
+    // void MainWindow::setupFileCategory()
+    // {
+    //     _category_file_pannel_0->addLargeAction(_file_bar->_action_load);
+    //     _category_file_pannel_0->addLargeAction(_file_bar->_action_store);
+    //     _category_file_pannel_0->addLargeAction(_file_bar->_action_default);
+
+    //     //_category_file_pannel_1->addLargeMenu(_file_bar->_menu_session);
+    //     _category_file_pannel_1->addLargeAction(_file_bar->_action_open);
+    //     _category_file_pannel_1->addLargeAction(_file_bar->_action_save);
+
+    //     // _category_file_pannel_2->addMediumAction(_file_bar->_action_export);
+    //     // _category_file_pannel_2->addMediumAction(_file_bar->_action_capture);
+
+    //     _category_file_pannel_2->addLargeAction(_file_bar->_action_export);
+    //     _category_file_pannel_2->addLargeAction(_file_bar->_action_capture);
+    // }
+
+    // void MainWindow::setupDisplayCategory()
+    // {
+ 
+
+    //     _category_display_pannel_0->addLargeAction(_trig_bar->_action_cn);
+    //     _category_display_pannel_0->addLargeAction(_trig_bar->_action_en);
+
+    //     _category_display_pannel_1->addLargeAction(_trig_bar->_light_style);
+    //     _category_display_pannel_1->addLargeAction(_trig_bar->_dark_style);
+
+    //     _category_display_pannel_2->addLargeAction(_trig_bar->_action_dispalyOptions);
+    // }
+
+    // void MainWindow::setupHelpCategory()
+    // {
+    //     _category_help_pannel_1->addLargeAction(_logo_bar->_about);
+    //     _category_help_pannel_1->addLargeAction(_logo_bar->_manual);
+    //     _category_help_pannel_1->addLargeAction(_logo_bar->_issue);
+    //     _category_help_pannel_1->addLargeAction(_logo_bar->_update);
+    //     _category_help_pannel_1->addLargeAction(_logo_bar->_log);
+    // }
+
+    // void MainWindow::Ribbon_retranslateUi()
+    // {
+    //     // TODO: covert this to PXView translation style
+
+    //     _category_file->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "&File"));
+    //     _category_display->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
+    //     _category_help->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "&Help"));
+    
+
+    //     _category_file_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CONFIG), "Con&fig..."));
+
+
+    //     _category_display_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_LANG), "&Language"));
+    //     _category_display_pannel_1->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY_THEMES), "Themes"));
+
+
+    //     QString style = AppConfig::Instance().frameOptions.style;
+    //     //if(app.frameOptions.style == THEME_STYLE_DARK){
+    //     if(style == THEME_STYLE_DARK){
+    //         sa_set_ribbon_theme(ribbonBar(), SARibbonTheme::RibbonThemeDark2);
+    //     }
+    //     else{
+
+    //         sa_set_ribbon_theme(ribbonBar(), SARibbonTheme::RibbonThemeOffice2013);
+    //     }
+    // }
+
+    void MainWindow::MainWindowRibbonHelper()
     {
-        QWidgetAction *action = new QWidgetAction(parent);
-        action->setDefaultWidget(widget);
-        // according to the referenced source code, the behavior of comment
-        // out the following statement would be a safe action.
-        // action->d_func()->autoCreated = true;
-        return action;
-    }
-
-    MainWindowRibbonHelper::MainWindowRibbonHelper(MainWindow* parent)
-        : _main_window(parent)
-    {
         
         
-        _trig_bar = parent->_trig_bar;
-        _file_bar = parent->_file_bar;
-        _logo_bar = parent->_logo_bar;
-        _sampling_bar = parent->_sampling_bar;
-
-        // _devmode = parent->_view->_devmode;
-        // _close_button = _devmode->_close_button;
-
-        _title_bar = parent->_title_bar;
-
         _right_tool_bar = new QToolBar();
 
-        /* Ribbon */
-        SARibbonBar* ribbon = parent->ribbonBar();
-        ribbon->setApplicationButton(NULL);
-
-        ribbon->setTabOnTitle(true);
-        //ribbon->setTitleBarHeight;
-        //ribbon->applicationButton()->setText("File");
-        // ribbon->setRibbonAlignment(SARibbonAlignment::AlignLeft);
-        ribbon->setTitleVisible(false);
-
-        ribbon->setMinimumMode(true);
-        
-        
-
-        //ribbon->showMinimumModeButton(true);
         // Categories
-        _category_file = new SARibbonCategory();
-        _category_display = new SARibbonCategory();
-        _category_help = new SARibbonCategory();
+        _menu_bar = new QMenuBar(this);
+        this->setMenuBar(_menu_bar);
 
-        //_category_file->setBackgroundRole();
-        // Category File
-        _category_file_pannel_0 = new SARibbonPannel();
-        _category_file_pannel_1 = new SARibbonPannel();
-        _category_file_pannel_2 = new SARibbonPannel();
+        _category_file = _menu_bar->addMenu(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "File"));
+        _category_display = _menu_bar->addMenu(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
+        _category_help = _menu_bar->addMenu(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "Help"));
 
-        // Category Display
-        _category_display_pannel_0 = new SARibbonPannel();
-        _category_display_pannel_1 = new SARibbonPannel();
-        _category_display_pannel_2 = new SARibbonPannel();
 
-        // Category Help
-        _category_help_pannel_1 = new SARibbonPannel();
 
 
 
     }
 
-    void MainWindowRibbonHelper::setupUi() {
-        SARibbonBar* ribbon = _main_window->ribbonBar();
-        
-        ribbon->setRibbonStyle(SARibbonBar::RibbonStyleCompactThreeRow);
-        //ribbon->setRibbonStyle(SARibbonBar::RibbonStyleCompactTwoRow);
-        sa_set_ribbon_theme(ribbon, SARibbonTheme::RibbonThemeDark);
+    void MainWindow::Ribbon_setupUi() {
 
-        _category_file->addPannel(_category_file_pannel_0);
-        _category_file->addPannel(_category_file_pannel_1);
-        _category_file->addPannel(_category_file_pannel_2);
-
-        
-
-        _category_display->addPannel(_category_display_pannel_0);
-        _category_display->addPannel(_category_display_pannel_1);
-        _category_display->addPannel(_category_display_pannel_2);
-
-        _category_help->addPannel(_category_help_pannel_1);
-
-        // ribbon
-        ribbon->addCategoryPage(_category_file);
-        ribbon->addCategoryPage(_category_display);
-        ribbon->addCategoryPage(_category_help);
-
-        setupQuickAccessBar(ribbon);
-        setupRightToolBar(_main_window);
+        setupQuickAccessBar();
+        //setupRightToolBar(_main_window);
+        setupRightToolBar();
         setupFileCategory();
         setupDisplayCategory();
         setupHelpCategory();
-        retranslateUi();
+        //Ribbon_retranslateUi();
     }
 
-    void MainWindowRibbonHelper::setupQuickAccessBar(SARibbonBar* ribbon)
+    void MainWindow::setupQuickAccessBar()
     {
-        SARibbonQuickAccessBar* quickAccessBar = ribbon->quickAccessBar();
-        // quickAccessBar->addAction(actionDemo);
-        quickAccessBar->addWidget(&_sampling_bar->_device_type);
-        quickAccessBar->addWidget(&_sampling_bar->_device_selector);
-        quickAccessBar->addWidget(&_sampling_bar->_configure_button);
+        // SARibbonQuickAccessBar* quickAccessBar = ribbon->quickAccessBar();
+        // // quickAccessBar->addAction(actionDemo);
+        // quickAccessBar->addWidget(&_sampling_bar->_device_type);
+        // quickAccessBar->addWidget(&_sampling_bar->_device_selector);
+        // quickAccessBar->addWidget(&_sampling_bar->_configure_button);
 
-        QWidget *leftMargin0 = new QWidget();
-        leftMargin0->setFixedWidth(20);
-        quickAccessBar->addWidget(leftMargin0);
+        // QWidget *leftMargin0 = new QWidget();
+        // leftMargin0->setFixedWidth(20);
+        // quickAccessBar->addWidget(leftMargin0);
 
-        quickAccessBar->addWidget(&_sampling_bar->_sample_count);
+        // quickAccessBar->addWidget(&_sampling_bar->_sample_count);
 
-        QWidget *leftMargin1 = new QWidget();
-        leftMargin1->setFixedWidth(20);
-        quickAccessBar->addWidget(leftMargin1);
+        // QWidget *leftMargin1 = new QWidget();
+        // leftMargin1->setFixedWidth(20);
+        // quickAccessBar->addWidget(leftMargin1);
 
-        quickAccessBar->addWidget(&_sampling_bar->_sample_rate);
-        //quickAccessBar->addMenu(_sampling_bar->_mode_menu);
-        // quickAccessBar->addWidget(&_sampling_bar->_mode_button);
-        // quickAccessBar->addWidget(&_sampling_bar->_run_stop_button);
-        // quickAccessBar->addWidget(&_sampling_bar->_instant_button);
+        // quickAccessBar->addWidget(&_sampling_bar->_sample_rate);
 
-        QWidget *leftMargin2 = new QWidget();
-        leftMargin2->setFixedWidth(100);
-        quickAccessBar->addWidget(leftMargin2);
+        // QWidget *leftMargin2 = new QWidget();
+        // leftMargin2->setFixedWidth(100);
+        // quickAccessBar->addWidget(leftMargin2);
 
-
-            // QWidget *spacer = new QWidget();
-            // spacer->setFixedWidth(400);
-            // spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-            // quickAccessBar->addWidget(spacer);
 
     }
 
-    void MainWindowRibbonHelper::setupRightToolBar(SARibbonMainWindow* parent)
+    void MainWindow::setupRightToolBar()
     {
         // _right_tool_bar->setMinimumSize(100, 100);
         _right_tool_bar->setIconSize(QSize(24, 24));
@@ -318,85 +376,133 @@ namespace appcore {
         _right_tool_bar->addAction(_sampling_bar->_run_stop_action);
         _right_tool_bar->setFloatable(false);
         //_right_tool_bar->setMovable(false);
-        parent->addToolBar(Qt::RightToolBarArea, _right_tool_bar);
+        //parent->addToolBar(Qt::RightToolBarArea, _right_tool_bar);
+        addToolBar(Qt::RightToolBarArea, _right_tool_bar);
         
     }
 
-    void MainWindowRibbonHelper::setupFileCategory()
+    void MainWindow::setupFileCategory()
     {
-        _category_file_pannel_0->addLargeAction(_file_bar->_action_load);
-        _category_file_pannel_0->addLargeAction(_file_bar->_action_store);
-        _category_file_pannel_0->addLargeAction(_file_bar->_action_default);
+        // _category_file_pannel_0->addLargeAction(_file_bar->_action_load);
+        // _category_file_pannel_0->addLargeAction(_file_bar->_action_store);
+        // _category_file_pannel_0->addLargeAction(_file_bar->_action_default);
 
-        //_category_file_pannel_1->addLargeMenu(_file_bar->_menu_session);
-        _category_file_pannel_1->addLargeAction(_file_bar->_action_open);
-        _category_file_pannel_1->addLargeAction(_file_bar->_action_save);
+        // //_category_file_pannel_1->addLargeMenu(_file_bar->_menu_session);
+        // _category_file_pannel_1->addLargeAction(_file_bar->_action_open);
+        // _category_file_pannel_1->addLargeAction(_file_bar->_action_save);
 
-        // _category_file_pannel_2->addMediumAction(_file_bar->_action_export);
-        // _category_file_pannel_2->addMediumAction(_file_bar->_action_capture);
+        // // _category_file_pannel_2->addMediumAction(_file_bar->_action_export);
+        // // _category_file_pannel_2->addMediumAction(_file_bar->_action_capture);
 
-        _category_file_pannel_2->addLargeAction(_file_bar->_action_export);
-        _category_file_pannel_2->addLargeAction(_file_bar->_action_capture);
+        // _category_file_pannel_2->addLargeAction(_file_bar->_action_export);
+        // _category_file_pannel_2->addLargeAction(_file_bar->_action_capture);
+
+
+        _category_file->addAction(_file_bar->_action_load);
+        _category_file->addAction(_file_bar->_action_store);
+        _category_file->addAction(_file_bar->_action_default);
+
+        _category_file->addSeparator();
+
+
+        _category_file->addAction(_file_bar->_action_open);
+        _category_file->addAction(_file_bar->_action_save);
+        _category_file->addSeparator();
+
+        _category_file->addAction(_file_bar->_action_export);
+        _category_file->addAction(_file_bar->_action_capture);
+
+
+
+
     }
 
-    void MainWindowRibbonHelper::setupDisplayCategory()
+    void MainWindow::setupDisplayCategory()
     {
-        // _category_display_pannel_1->addSmallMenu(_trig_bar->_language);
-        // _category_display_pannel_1->addSmallMenu(_trig_bar->_themes);
+ 
 
-        _category_display_pannel_0->addLargeAction(_trig_bar->_action_cn);
-        _category_display_pannel_0->addLargeAction(_trig_bar->_action_en);
+        // _category_display_pannel_0->addLargeAction(_trig_bar->_action_cn);
+        // _category_display_pannel_0->addLargeAction(_trig_bar->_action_en);
 
-        _category_display_pannel_1->addLargeAction(_trig_bar->_light_style);
-        _category_display_pannel_1->addLargeAction(_trig_bar->_dark_style);
+        // _category_display_pannel_1->addLargeAction(_trig_bar->_light_style);
+        // _category_display_pannel_1->addLargeAction(_trig_bar->_dark_style);
 
-        //_category_display_pannel_1->addLargeMenu(_trig_bar->_language);
-        //_category_display_pannel_1->addLargeMenu(_trig_bar->_themes);
-        _category_display_pannel_2->addLargeAction(_trig_bar->_action_dispalyOptions);
+        // _category_display_pannel_2->addLargeAction(_trig_bar->_action_dispalyOptions);
+
+
+        _category_display->addAction(_trig_bar->_action_cn);
+        _category_display->addAction(_trig_bar->_action_en);
+        _category_display->addSeparator();
+
+        _category_display->addAction(_trig_bar->_light_style);
+        _category_display->addAction(_trig_bar->_dark_style);
+        _category_display->addSeparator();
+
+        _category_display->addAction(_trig_bar->_action_dispalyOptions);
     }
 
-    void MainWindowRibbonHelper::setupHelpCategory()
+    void MainWindow::setupHelpCategory()
     {
-        _category_help_pannel_1->addLargeAction(_logo_bar->_about);
-        _category_help_pannel_1->addLargeAction(_logo_bar->_manual);
-        _category_help_pannel_1->addLargeAction(_logo_bar->_issue);
-        _category_help_pannel_1->addLargeAction(_logo_bar->_update);
-        _category_help_pannel_1->addLargeAction(_logo_bar->_log);
+        // _category_help_pannel_1->addLargeAction(_logo_bar->_about);
+        // _category_help_pannel_1->addLargeAction(_logo_bar->_manual);
+        // _category_help_pannel_1->addLargeAction(_logo_bar->_issue);
+        // _category_help_pannel_1->addLargeAction(_logo_bar->_update);
+        // _category_help_pannel_1->addLargeAction(_logo_bar->_log);
+
+        _category_help->addAction(_logo_bar->_about);
+        _category_help->addAction(_logo_bar->_manual);
+        _category_help->addAction(_logo_bar->_issue);
+        _category_help->addAction(_logo_bar->_update);
+        _category_help->addAction(_logo_bar->_log);
+
     }
 
-    void MainWindowRibbonHelper::retranslateUi()
+    void MainWindow::Ribbon_retranslateUi()
     {
         // TODO: covert this to PXView translation style
-        //_category_file->setCategoryName(QCoreApplication::translate("MainWindow", "&File"));
-        // _category_display->setCategoryName(QCoreApplication::translate("MainWindow", "&Display"));
-        // _category_help->setCategoryName(QCoreApplication::translate("MainWindow", "&Help"));
-        _category_file->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "&File"));
-        _category_display->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
-        _category_help->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "&Help"));
-    
 
-        _category_file_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CONFIG), "Con&fig..."));
-        //_category_file_pannel_1->setPannelName(QCoreApplication::translate("MainWindow", "Temp1"));
-        //_category_file_pannel_2->setPannelName(QCoreApplication::translate("MainWindow", "Temp2"));
+        // _category_file->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "&File"));
+        // _category_display->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
+        // _category_help->setCategoryName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "&Help"));
 
-        _category_display_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_LANG), "&Language"));
-        _category_display_pannel_1->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY_THEMES), "Themes"));
-        //_category_display_pannel_2->setPannelName(QCoreApplication::translate("MainWindow", "Temp2"));
 
-        //_category_help_pannel_1->setPannelName(QCoreApplication::translate("MainWindow", "Temp2"));
+        //_category_file setObjectName
+        _category_file->setTitle(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "File"));
+        _category_display->setTitle(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
+        _category_help->setTitle(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "Help"));
+
+
+        // _category_file_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CONFIG), "Con&fig..."));
+        // _category_display_pannel_0->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_LANG), "&Language"));
+        // _category_display_pannel_1->setPannelName(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY_THEMES), "Themes"));
+
 
         QString style = AppConfig::Instance().frameOptions.style;
         //if(app.frameOptions.style == THEME_STYLE_DARK){
-        if(style == THEME_STYLE_DARK){
-            sa_set_ribbon_theme(_main_window->ribbonBar(), SARibbonTheme::RibbonThemeDark2);
+        // if(style == THEME_STYLE_DARK){
+        //     sa_set_ribbon_theme(ribbonBar(), SARibbonTheme::RibbonThemeDark2);
+        // }
+        // else{
+
+        //     sa_set_ribbon_theme(ribbonBar(), SARibbonTheme::RibbonThemeOffice2013);
+        // }
+
+        // QRibbon::install(this);
+        // QRibbon::reinitialize(this);
+        // _QRibbon->install(this);
+        if(_QRibbon != NULL){
+            _QRibbon->reinitialize(this,0,L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "File"));
+
+            _QRibbon->reinitialize(this,1,L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_DISPLAY), "Settings"));
+
+            _QRibbon->reinitialize(this,2,L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP), "Help"));
         }
-        else{
-            sa_set_ribbon_theme(_main_window->ribbonBar(), SARibbonTheme::RibbonThemeOffice2013);
-        }
+        
     }
 
     MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
-        : SARibbonMainWindow(parent)
+        //: SARibbonMainWindow(parent)
+        :QMainWindow(parent)
     {
         _msg = NULL;
         _frame = parent;
@@ -416,15 +522,21 @@ namespace appcore {
 
         _pattern_mode = "random";
         //SARibbonBar::initHighDpi(); 
-        updateWindowFlag(0x0);
+        //updateWindowFlag(0x0);
+        //_QRibbon = new QRibbon();
+        _QRibbon = NULL;
+        _QRibbon = new QRibbon();
         setup_ui();
-
+        _QRibbon->install(this);
         setContextMenuPolicy(Qt::NoContextMenu);
 
         _key_vaild = false;
         _last_key_press_time = high_resolution_clock::now();
 
         update_title_bar_text();
+        //_QRibbon = new QRibbon();
+        //_QRibbon->install(this);
+        // QRibbon::install(this);
     }
 
     void MainWindow::setup_ui()
@@ -462,12 +574,12 @@ namespace appcore {
         _logo_bar->setObjectName("logo_bar");
   
 
-        // _sampling_bar->setAllowedAreas(Qt::RightToolBarArea);
+        _sampling_bar->setAllowedAreas(Qt::RightToolBarArea);
         // _trig_bar->setAllowedAreas(Qt::RightToolBarArea);
         // _file_bar->setAllowedAreas(Qt::RightToolBarArea);
         // _logo_bar->setAllowedAreas(Qt::RightToolBarArea);
 
-        _sampling_bar->setFloatable(false);
+        //_sampling_bar->setFloatable(false);
         _trig_bar->setFloatable(false);
         _file_bar->setFloatable(false);
         _logo_bar->setFloatable(false);
@@ -494,12 +606,15 @@ namespace appcore {
         _view = new dsv::view::View(_session, _sampling_bar, this);
         _vertical_layout->addWidget(_view);
 
-        _ribbon_helper = new MainWindowRibbonHelper(this);
-        _ribbon_helper->setupUi();
+        // _ribbon_helper = new MainWindowRibbonHelper(this);
+        // _ribbon_helper->setupUi();
+
+        MainWindowRibbonHelper();
+        Ribbon_setupUi();
 
         setIconSize(QSize(16, 16));
 
-        addToolBar(Qt::LeftToolBarArea,_sampling_bar);
+        addToolBar(Qt::TopToolBarArea,_sampling_bar);
         addToolBar(Qt::LeftToolBarArea,_trig_bar);
         addToolBar(Qt::LeftToolBarArea,_file_bar);
         addToolBar(Qt::LeftToolBarArea,_logo_bar);
@@ -668,7 +783,8 @@ namespace appcore {
         _measure_dock->setWindowTitle(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MEASURE_DOCK_TITLE), "Measurement"));
         _search_dock->setWindowTitle(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SEARCH_DOCK_TITLE), "Search..."));
         _view->get_time_view()->update_lang();
-        _ribbon_helper->retranslateUi();
+        //_ribbon_helper->retranslateUi();
+        Ribbon_retranslateUi();
     }
 
     void MainWindow::on_load_file(QString file_name)
@@ -1744,7 +1860,8 @@ namespace appcore {
         qss.close();
 
         data_updated();
-        _ribbon_helper->retranslateUi();
+        //_ribbon_helper->retranslateUi();
+        Ribbon_retranslateUi();
     }
 
     void MainWindow::data_updated()

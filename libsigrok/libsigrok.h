@@ -1095,6 +1095,16 @@ enum sr_config_option_id
 
 	SR_CONF_EX_TRIGGER_MATCH = 60002,
 	SR_CONF_TRIGGER_OUT = 60003,
+
+	SR_CONF_PWM0_EN   = 60004,
+	SR_CONF_PWM0_FREQ = 60005,
+	SR_CONF_PWM0_DUTY = 60006,
+
+	SR_CONF_PWM1_EN   = 60007,
+	SR_CONF_PWM1_FREQ = 60008,
+	SR_CONF_PWM1_DUTY = 60009,
+
+
 };
 
 /** Device instance status. */

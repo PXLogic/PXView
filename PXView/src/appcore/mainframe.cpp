@@ -53,6 +53,7 @@
 #include "appcontrol.h"
 #include "../ui/langresource.h"
 #include "../log.h"
+#include "../QRibbon/QRibbon.h"
 
 using namespace dsv::config;
 
@@ -95,7 +96,7 @@ MainFrame::MainFrame()
     _mainWindow = new MainWindow(_titleBar, this);
     _mainWindow->setWindowFlags(Qt::Widget);
 
-    
+    // QRibbon::install(_mainWindow);
 
 
 
@@ -175,6 +176,7 @@ void MainFrame::closeEvent(QCloseEvent *event)
     writeSettings();
 
     if (_mainWindow->able_to_close()){
+        // _mainWindow->close();
           event->accept();
     }
     else{

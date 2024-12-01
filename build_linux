@@ -20,13 +20,13 @@
 
 set -e
 
-rm -rf SARibbon
-tar -xvf ./other_lib/SARibbon.tar.xz  -C ./
-cd SARibbon
-cmake .
-make -j 8
-make install
-cd ..
+#rm -rf SARibbon
+#tar -xvf ./other_lib/SARibbon.tar.xz  -C ./
+#cd SARibbon
+#cmake .
+#make -j 8
+#make install
+#cd ..
 
 bash ./clean
 rm -rf build
@@ -40,6 +40,6 @@ make -j 8
 make install
 #cd ..
 
-rm -rf SARibbon
+#rm -rf SARibbon
 make clean
 bash ./clean

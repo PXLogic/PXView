@@ -33,7 +33,7 @@ set(PX_DESCRIPTION "A GUI for instruments of PX")
 
 set(PX_VERSION_MAJOR 1)
 set(PX_VERSION_MINOR 3)
-set(PX_VERSION_MICRO 4)
+set(PX_VERSION_MICRO 6)
 set(PX_VERSION_STRING  ${PX_VERSION_MAJOR}.${PX_VERSION_MINOR}.${PX_VERSION_MICRO} )
 
 configure_file (
@@ -64,6 +64,7 @@ set(DISABLE_WERROR TRUE) #Build without -Werror
 set(ENABLE_SIGNALS TRUE) #Build with UNIX signals
 set(ENABLE_COTIRE FALSE) #Enable cotire
 set(STATIC_PKGDEPS_LIBS FALSE) #Statically link to (pkg-config) libraries
+
 
 if(WIN32)
 	# On Windows/MinGW we need to statically link to libraries.
@@ -242,10 +243,10 @@ find_package(Threads)
 #===============================================================================
 #= SARibbonBar
 #-------------------------------------------------------------------------------
-if (WIN32)
-set(SARibbonBar_DIR "./window/bin_qt5.15.10_GNU_x64/lib/cmake/SARibbonBar")
-endif()
-find_package(SARibbonBar REQUIRED)
+#if (WIN32)
+#set(SARibbonBar_DIR "./window/bin_qt5.15.10_GNU_x64/lib/cmake/SARibbonBar")
+#endif()
+#find_package(SARibbonBar REQUIRED)
 
 #===============================================================================
 #= PXView sources
@@ -352,7 +353,15 @@ set(PXView_SOURCES
 	PXView/src/data/logicsnapshot.cpp
 	PXView/src/data/decoderstack.cpp
 	PXView/src/data/spectrumstack.cpp
+	PXView/src/QRibbon/QRibbon.cpp
+	PXView/src/QRibbon/qribbon.ui
 )
+
+set(UIS
+	PXView/src/QRibbon/qribbon.ui
+)
+
+qt5_wrap_ui(UI_HEADERS ${UIS})
 
 set(PXView_HEADERS
 	PXView/src/mystyle.h 
@@ -425,6 +434,8 @@ set(PXView_HEADERS
 	PXView/src/data/decoderstack.h
 	PXView/src/data/spectrumstack.h
 	PXView/src/data/mathstack.h
+	PXView/src/QRibbon/QRibbon.h
+	${UI_HEADERS}
 )
  
 #===============================================================================
@@ -503,6 +514,7 @@ set(PXView_RESOURCES
     PXView/PXView.qrc
     PXView/themes/breeze.qrc
     PXView/languages/language.qrc
+	PXView/src/QRibbon/QRibbon.qrc
 )
 
 
@@ -574,7 +586,7 @@ set(PXView_LINK_LIBS
 	${LIBUSB_1_LIBRARIES}
 	${FFTW_LIBRARIES}
 	${PY_LIB}
-	SARibbonBar
+	#SARibbonBar
 )
 
 if(STATIC_PKGDEPS_LIBS)

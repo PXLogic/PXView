@@ -84,6 +84,13 @@ static struct sr_config_info sr_config_info_data[] = {
     {SR_CONF_PROBE_MAP_MAX, SR_T_FLOAT,"Map Max"},
 	{SR_CONF_EX_TRIGGER_MATCH, SR_T_LIST,"Ext Trigger Mode"},
 	{SR_CONF_TRIGGER_OUT, SR_T_BOOL, "En Trigger Out"},
+	{SR_CONF_PWM0_EN, SR_T_BOOL, "PWM0 EN"},
+	{SR_CONF_PWM1_EN, SR_T_BOOL, "PWM1 EN"},
+	{SR_CONF_PWM0_FREQ, SR_T_FLOAT,"PWM0 Freq"},
+	{SR_CONF_PWM1_FREQ, SR_T_FLOAT,"PWM1 Freq"},
+	{SR_CONF_PWM0_DUTY, SR_T_FLOAT,"PWM0 Duty"},
+	{SR_CONF_PWM1_DUTY, SR_T_FLOAT,"PWM1 Duty"},
+
     {0, 0, NULL},
 };
 

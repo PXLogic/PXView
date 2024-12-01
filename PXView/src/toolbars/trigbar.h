@@ -43,11 +43,11 @@ namespace dsv {
 using namespace dsv::appcore;
 using namespace dsv::config;
 
-namespace dsv {
-    namespace appcore {
-        class MainWindowRibbonHelper;
-    }
-}
+// namespace dsv {
+//     namespace appcore {
+//         class MainWindowRibbonHelper;
+//     }
+// }
 
 
 namespace dsv {
@@ -104,8 +104,9 @@ public slots:
     void measure_clicked();
     void search_clicked();
 
-private:
-    friend class dsv::appcore::MainWindowRibbonHelper;
+// private:
+public:
+    // friend class dsv::appcore::MainWindowRibbonHelper;
     
     SigSession  *_session;
     bool        _enable;

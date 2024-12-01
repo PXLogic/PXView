@@ -29,7 +29,7 @@
 /* DSView version information */
 #define PX_VERSION_MAJOR 1
 #define PX_VERSION_MINOR 3
-#define PX_VERSION_MICRO 4
-#define PX_VERSION_STRING "1.3.4"
+#define PX_VERSION_MICRO 6
+#define PX_VERSION_STRING "1.3.6"
 
 #endif
