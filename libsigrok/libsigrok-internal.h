@@ -445,7 +445,7 @@ SR_PRIV int ds_scan_all_device_list(libusb_context *usb_ctx, struct libusb_devic
 SR_PRIV int sr_option_value_to_code(int config_id, const char *value, const struct lang_text_map_item *array, int num);
 
 /*--- dslogic.c ------------------------------------------------------------*/
-SR_PRIV int sr_dslogic_option_value_to_code(const struct sr_dev_inst *sdi, int config_id, const char *value);
+SR_PRIV int sr_dslogic_option_value_to_code2(const struct sr_dev_inst *sdi, int config_id, const char *value);
 
 /*--- dscope.c ------------------------------------------------------------*/
 SR_PRIV int sr_dscope_option_value_to_code(const struct sr_dev_inst *sdi, int config_id, const char *value);
