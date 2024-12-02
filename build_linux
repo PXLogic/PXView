@@ -28,18 +28,20 @@ set -e
 #make install
 #cd ..
 
-bash ./clean
-rm -rf build
-rm -rf install.dir
+# bash ./clean
+# rm -rf build
+# rm -rf install.dir
 #mkdir build
 #mkdir install.dir
 #cd build
 #cmake .. -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_INSTALL_PREFIX=../install.dir
-cmake .
-make -j 8
-make install
+mkdir -p ./build
+mkdir -p ./install.dir
+cmake -B ./build -S . -G Ninja -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_INSTALL_PREFIX=./install.dir
+cmake --build ./build
+#make install
 #cd ..
 
 #rm -rf SARibbon
-make clean
-bash ./clean
+#make clean
+#bash ./clean

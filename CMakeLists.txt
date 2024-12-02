@@ -19,7 +19,7 @@
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-cmake_minimum_required(VERSION 2.8.6)
+cmake_minimum_required(VERSION 3.10.0)
 
 project(PXView)
 
@@ -47,8 +47,8 @@ configure_file (
 include(FindPkgConfig)
 include(GNUInstallDirs)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake") 
-#list(APPEND CMAKE_PREFIX_PATH "xxx.cmake find path") 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake")
+#list(APPEND CMAKE_PREFIX_PATH "xxx.cmake find path")
 
 find_package(PkgConfig)
 
@@ -131,7 +131,7 @@ else()
      	message(FATAL_ERROR  "Please install lib python3!")
      endif()
 endif()
-  
+
 #===============================================================================
 #= FFTW
 #-------------------------------------------------------------------------------
@@ -364,7 +364,7 @@ set(UIS
 qt5_wrap_ui(UI_HEADERS ${UIS})
 
 set(PXView_HEADERS
-	PXView/src/mystyle.h 
+	PXView/src/mystyle.h
 	PXView/src/prop/double.h
 	PXView/src/prop/bool.h
 	PXView/src/prop/enum.h
@@ -406,7 +406,7 @@ set(PXView_HEADERS
 	PXView/src/view/analogsignal.h
 	PXView/src/view/dsosignal.h
 	PXView/src/view/header.h
-	PXView/src/view/view.h  
+	PXView/src/view/view.h
 	PXView/src/appcore/mainframe.h
 	PXView/src/appcore/eventobject.h
 	PXView/src/appcore/mainwindow.h
@@ -437,7 +437,7 @@ set(PXView_HEADERS
 	PXView/src/QRibbon/QRibbon.h
 	${UI_HEADERS}
 )
- 
+
 #===============================================================================
 #= libsigrok source
 #-------------------------------------------------------------------------------
@@ -473,7 +473,7 @@ set(libsigrok4PX_SOURCES
     libsigrok/hardware/pxlogic/usb_ctrl.c
 	libsigrok/lib_main.c
 )
- 
+
 #===============================================================================
 #= libsigrokdecode source
 #-------------------------------------------------------------------------------
@@ -638,18 +638,18 @@ install(FILES PXView/icons/logo.svg DESTINATION share/PXView RENAME logo.svg)
 install(FILES PXView/icons/logo.svg DESTINATION share/icons/hicolor/scalable/apps RENAME pxview.svg)
 install(FILES PXView/icons/logo.svg DESTINATION share/pixmaps RENAME pxview.svg)
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")	
-	install(FILES PXView/PXView.desktop DESTINATION /usr/share/applications RENAME pxview.desktop)
-	
-	if(IS_DIRECTORY /usr/lib/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /usr/lib/udev/rules.d RENAME 60-px.rules)
-	elseif(IS_DIRECTORY /lib/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /lib/udev/rules.d RENAME 60-px.rules)
-	elseif(IS_DIRECTORY /etc/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /etc/udev/rules.d RENAME 60-px.rules)
-	endif()
+# if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+# 	install(FILES PXView/PXView.desktop DESTINATION /usr/share/applications RENAME pxview.desktop)
 
-endif()
+# 	if(IS_DIRECTORY /usr/lib/udev/rules.d)
+# 		install(FILES PXView/px.rules DESTINATION /usr/lib/udev/rules.d RENAME 60-px.rules)
+# 	elseif(IS_DIRECTORY /lib/udev/rules.d)
+# 		install(FILES PXView/px.rules DESTINATION /lib/udev/rules.d RENAME 60-px.rules)
+# 	elseif(IS_DIRECTORY /etc/udev/rules.d)
+# 		install(FILES PXView/px.rules DESTINATION /etc/udev/rules.d RENAME 60-px.rules)
+# 	endif()
+
+# endif()
 
 install(FILES doc/NEWS25 DESTINATION share/PXView RENAME NEWS25)
 install(FILES doc/NEWS31 DESTINATION share/PXView RENAME NEWS31)
