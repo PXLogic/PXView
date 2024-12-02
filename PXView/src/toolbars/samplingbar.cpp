@@ -97,7 +97,7 @@ namespace dsv
             _device_selector.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             _sample_rate.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             //_sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
-            _sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToMinimumContentsLength);
+            _sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             _device_selector.setMaximumWidth(ComboBoxMaxWidth);
             _sample_count.setFixedWidth(100);
             _sample_count.setMinimumContentsLength(100);
