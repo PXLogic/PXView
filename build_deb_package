@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+
+# This script will build .deb package on Ubuntu 22.04.
+
+# Building deb package requires some developer packages installed
+# If not, run:
+# sudo apt-get install devscripts build-essential lintian
+
+# Install build dependencies
+sudo mk-build-deps -ir
+
+# Make .deb package
+debuild
+
+# If build was successful, created package will be found in ".."
