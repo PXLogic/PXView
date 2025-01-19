@@ -1038,6 +1038,11 @@ QTabBar QToolButton::left-arrow:disabled
     image: url(:/light/left_arrow_disabled.svg);
 }
 
+QTabWidget::tab-bar
+{
+    alignment: left;
+}
+
 QDockWidget
 {
     background: #FFFAf0;
