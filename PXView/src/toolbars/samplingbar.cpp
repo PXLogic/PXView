@@ -97,7 +97,7 @@ namespace dsv
             _device_selector.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             _sample_rate.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             //_sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
-            _sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToMinimumContentsLength);
+            _sample_count.setSizeAdjustPolicy(DsComboBox::AdjustToContents);
             _device_selector.setMaximumWidth(ComboBoxMaxWidth);
             _sample_count.setFixedWidth(100);
             _sample_count.setMinimumContentsLength(100);
@@ -1058,8 +1058,9 @@ namespace dsv
                         _session->set_collect_mode(COLLECT_SINGLE);
                     }
 
-
-                    if (_device_agent->is_stream_mode() || _device_agent->is_demo())
+                    //buff模式增加滚动模式
+                    if (1)
+                    //if (_device_agent->is_stream_mode() || _device_agent->is_demo())
                         _action_loop->setVisible(true);
                 }
                 _run_stop_action->setVisible(true);
@@ -1230,7 +1231,9 @@ namespace dsv
                 }
                 
                 if (mode == LOGIC && _device_agent->is_file() == false){
-                    if (_device_agent->is_stream_mode() || _device_agent->is_demo())
+                    //if (_device_agent->is_stream_mode() || _device_agent->is_demo())
+                    //buff模式增加滚动模式
+                    if (1)
                         _action_loop->setVisible(true);
                 }                
             }

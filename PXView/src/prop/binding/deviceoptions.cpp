@@ -121,6 +121,9 @@ DeviceOptions::DeviceOptions()
 		case SR_CONF_PWM1_DUTY:
             bind_double(name, label, key, "%", pair<double, double>(0, 100), 1, 1);
             break;
+		case SR_CONF_STREAM_BUFF:
+            bind_double(name, label, key, "GB", pair<double, double>(1, 128), 0, 1);
+            break;
 			
 		case SR_CONF_RLE:
         case SR_CONF_RLE_SUPPORT:

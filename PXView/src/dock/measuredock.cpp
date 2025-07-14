@@ -41,7 +41,7 @@
 #include "../appcore/sigsession.h"
 #include "../ui/fn.h"
 #include "../log.h"
-
+#include <QtGlobal>
 using namespace boost;
 using namespace dsv::config;
 using namespace dsv::view;
@@ -257,7 +257,12 @@ void MeasureDock::build_dist_pannel()
     int dex = 0;
     QLabel cal_lb;
     cal_lb.setFont(font);
-    int bt_w = cal_lb.fontMetrics().width ("22") + 8;
+    //int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #else
+        int bt_w = cal_lb.fontMetrics().width("22") + 8;
+    #endif
 
     for (auto &o : _dist_row_list)
     {
@@ -380,8 +385,12 @@ void MeasureDock::build_edge_pannel()
     int dex = 0;
     QLabel cal_lb;
     cal_lb.setFont(font);
-    int bt_w = cal_lb.fontMetrics().width ("22") + 8;
-
+    //int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #else
+        int bt_w = cal_lb.fontMetrics().width("22") + 8;
+    #endif
     for (auto &o : _edge_row_list)
     {
         QWidget *row_widget = new QWidget(_widget);
@@ -767,7 +776,12 @@ void MeasureDock::cursor_update()
 
     QLabel cal_lb;
     cal_lb.setFont(font);
-    int bt_w = cal_lb.fontMetrics().width ("22") + 8;
+    //int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        int bt_w = cal_lb.fontMetrics().horizontalAdvance("22") + 8;
+    #else
+        int bt_w = cal_lb.fontMetrics().width("22") + 8;
+    #endif
 
     int index = 1;
     int cursor_dex = 0;

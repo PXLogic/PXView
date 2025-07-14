@@ -186,7 +186,7 @@ void Viewport::doPaint()
   
     std::vector<Trace*> traces;
     _view.get_traces(_type, traces);
-
+    //dsv_info("doPaint");
     for(auto t : traces){
         t->paint_back(p, 0, _view.get_view_width(), fore, back);
         if (_view.back_ready())
@@ -226,6 +226,7 @@ void Viewport::doPaint()
                     if (_view.session().get_capture_status(triggered, captured_progress)){
                         _view.show_captured_progress(triggered, captured_progress);
                     }
+                    //dsv_info("triggered = %d captured_progress = %d",triggered,captured_progress);
                 }
             }
             else if (_type == TIME_VIEW) {

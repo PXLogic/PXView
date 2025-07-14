@@ -171,7 +171,7 @@ bool bHighScale = true;
 		QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
       	QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 	}
-#endif 
+#endif
 
 	//----------------------init app
     QApplication a(argcFinal, argvFinal);
@@ -181,7 +181,10 @@ bool bHighScale = true;
     QApplication::setApplicationVersion(PX_VERSION_STRING);
     QApplication::setApplicationName(PX_TITLE);
     QApplication::setOrganizationName("PXlogicV2");
-    QApplication::setOrganizationDomain("www.NULL.com");
+    QApplication::setOrganizationDomain("www.marrychip.com");
+
+    // Disable native menu bar (e.g. macOS global menu)
+    QApplication::setAttribute(Qt::AA_DontUseNativeMenuBar);
 
 	//----------------------init log
 	dsv::dsv_log_init(); // Don't call before QApplication be inited

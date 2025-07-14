@@ -300,8 +300,9 @@ GSList *DeviceAgent::get_channels()
 
  bool DeviceAgent::is_stream_mode()
  { 
-    return 1 ;
-    //return get_hardware_operation_mode() == LO_OP_STREAM;
+    //return 1 ;
+    //工作模式
+    return get_hardware_operation_mode() == LO_OP_STREAM;
  }
 
  bool DeviceAgent::check_firmware_version()

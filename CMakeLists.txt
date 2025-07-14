@@ -19,7 +19,7 @@
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-cmake_minimum_required(VERSION 2.8.6)
+cmake_minimum_required(VERSION 3.10)
 
 project(PXView)
 
@@ -32,8 +32,8 @@ set(PX_TITLE PXView)
 set(PX_DESCRIPTION "A GUI for instruments of PX")
 
 set(PX_VERSION_MAJOR 1)
-set(PX_VERSION_MINOR 3)
-set(PX_VERSION_MICRO 7)
+set(PX_VERSION_MINOR 4)
+set(PX_VERSION_MICRO 5)
 set(PX_VERSION_STRING  ${PX_VERSION_MAJOR}.${PX_VERSION_MINOR}.${PX_VERSION_MICRO} )
 
 configure_file (
@@ -178,41 +178,49 @@ include_directories(${ZLIB_INCLUDE_DIRS})
 #= Qt5 or Qt6
 #-------------------------------------------------------------------------------
 
-find_package(Qt5Core QUIET)
+set(QT_VERSION_FORCE "" CACHE STRING "Force the use of Qt6 by setting this option to 6")
 
-if(Qt5Core_FOUND)
-	message("----- Qt5:")
-	message(STATUS "	 includes:" ${Qt5Core_INCLUDE_DIRS})
-	#find_package(Qt5WinExtras REQUIRED)
-	find_package(Qt5Widgets REQUIRED)
-	find_package(Qt5Gui REQUIRED)
-	find_package(Qt5Svg REQUIRED)
-	# win32
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt5Widgets_EXECUTABLE_COMPILE_FLAGS}")
-	if (WIN32)
-		find_package(Qt5WinExtras REQUIRED)
-		message(STATUS "	 libraries:" ${Qt5WinExtras_LIBRARIES})
-		set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS} ${Qt5WinExtras_INCLUDE_DIRS} ${Qt5Svg_INCLUDE_DIRS})
-		set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::WinExtras Qt5::Svg)
-		add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS} ${Qt5WinExtras_DEFINITIONS}  ${Qt5Svg_DEFINITIONS} )
-	else()
-		set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS})
-		set(QT_LIBRARIES Qt5::Gui Qt5::Widgets)
-		add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS})
+if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
+	find_package(Qt5Core QUIET)
+	if(Qt5Core_FOUND)
+		message("----- Qt5:")
+		message(STATUS "	 includes:" ${Qt5Core_INCLUDE_DIRS})
+		#find_package(Qt5WinExtras REQUIRED)
+		find_package(Qt5Widgets REQUIRED)
+		find_package(Qt5Gui REQUIRED)
+		find_package(Qt5Svg REQUIRED)
+		# win32
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt5Widgets_EXECUTABLE_COMPILE_FLAGS}")
+		if (WIN32)
+			find_package(Qt5WinExtras REQUIRED)
+			message(STATUS "	 libraries:" ${Qt5WinExtras_LIBRARIES})
+			set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS} ${Qt5WinExtras_INCLUDE_DIRS} ${Qt5Svg_INCLUDE_DIRS})
+			set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::WinExtras Qt5::Svg)
+			add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS} ${Qt5WinExtras_DEFINITIONS}  ${Qt5Svg_DEFINITIONS} )
+		else()
+			set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS})
+			set(QT_LIBRARIES Qt5::Gui Qt5::Widgets)
+			add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS})
+		endif()
 	endif()
-else()
-	find_package(Qt6Core QUIET)
 endif()
 
-if(Qt6Core_FOUND)
-    	message("----- Qt6:")
+if(NOT Qt5Core_FOUND OR "${QT_VERSION_FORCE}" STREQUAL "6")
+	find_package(Qt6 REQUIRED COMPONENTS Core)
+    message("----- Qt6:")
 	message(STATUS "	 includes:" ${Qt6Core_INCLUDE_DIRS})
-	find_package(Qt6Widgets REQUIRED)
-	find_package(Qt6Gui REQUIRED)
+        find_package(Qt6Widgets REQUIRED)
+        find_package(Qt6Gui REQUIRED)
+        find_package(Qt6Svg REQUIRED)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt6Widgets_EXECUTABLE_COMPILE_FLAGS}")
 	set(QT_INCLUDE_DIRS ${Qt6Gui_INCLUDE_DIRS} ${Qt6Widgets_INCLUDE_DIRS})
-	set(QT_LIBRARIES Qt6::Gui Qt6::Widgets)
+        set(QT_LIBRARIES Qt6::Gui Qt6::Widgets Qt6::Svg)
 	add_definitions(${Qt6Gui_DEFINITIONS} ${Qt6Widgets_DEFINITIONS})
+
+	if(APPLE)
+		find_package(Qt6DBus REQUIRED)
+		set(QT_LIBRARIES ${QT_LIBRARIES} Qt6::DBus)
+	endif()
 endif()
 
 if(NOT Qt5Core_FOUND AND NOT Qt6Core_FOUND)
@@ -361,7 +369,17 @@ set(UIS
 	PXView/src/QRibbon/qribbon.ui
 )
 
-qt5_wrap_ui(UI_HEADERS ${UIS})
+if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
+	find_package(Qt6Core QUIET)
+	if(Qt6Core)
+		qt6_wrap_ui(UI_HEADERS ${UIS})
+	else()
+		qt5_wrap_ui(UI_HEADERS ${UIS})
+	endif()
+endif()
+
+
+#qt_wrap_ui(UI_HEADERS ${UIS})
 
 set(PXView_HEADERS
 	PXView/src/mystyle.h 
@@ -567,11 +585,12 @@ endif()
 #===============================================================================
 #= Release flags
 #-------------------------------------------------------------------------------
-set(CMAKE_CXX_FLAGS "-Wall -Wextra")
-set(CMAKE_BUILD_TYPE Release)
+if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+    add_compile_options(-O3)
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-add_compile_options(-O3)
 
 #===============================================================================
 #= Linker Configuration
@@ -608,7 +627,7 @@ add_executable(${PROJECT_NAME}
 	${PXView_FORMS_HEADERS}
 	${PXView_RESOURCES_RCC}
 	${libsigrok4PX_SOURCES}
-	${libsigrokdecode_SOURCES}
+        ${libsigrokdecode_SOURCES}
 )
 
 target_link_libraries(${PROJECT_NAME} ${PXView_LINK_LIBS})
@@ -616,6 +635,19 @@ target_link_libraries(${PROJECT_NAME} ${PXView_LINK_LIBS})
 if(WIN32)
 # Pass -mwindows so that no "DOS box" will open when PulseView is started.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "-mwindows")
+endif()
+
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        BUNDLE TRUE
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.pxlogic.${PROJECT_NAME}
+        MACOSX_BUNDLE_BUNDLE_NAME ${PROJECT_NAME}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PX_VERSION_STRING}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PX_VERSION_STRING}
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac_appbundle_template.plist.in
+        MACOSX_BUNDLE_ICON_FILE PXView.icns
+    )
 endif()
 
 if(ENABLE_COTIRE)
@@ -631,14 +663,25 @@ set(EXECUTABLE_OUTPUT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/build.dir")
 #-------------------------------------------------------------------------------
 
 # Install the executable.
-install(TARGETS ${PROJECT_NAME} DESTINATION bin)
-install(DIRECTORY PXView/res DESTINATION share/PXView)
-install(DIRECTORY PXView/demo DESTINATION share/PXView)
-install(FILES PXView/icons/logo.svg DESTINATION share/PXView RENAME logo.svg)
-install(FILES PXView/icons/logo.svg DESTINATION share/icons/hicolor/scalable/apps RENAME pxview.svg)
-install(FILES PXView/icons/logo.svg DESTINATION share/pixmaps RENAME pxview.svg)
+if(APPLE)
+    install(TARGETS ${PROJECT_NAME} BUNDLE DESTINATION .)
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")	
+    # Normally resources in macOS app bundle are packed at Contents/Resources
+    set(MAC_RES_PREFIX ${CMAKE_INSTALL_PREFIX}/${PROJECT_NAME}.app/Contents/Resources/)
+
+    # Adding icon via add_executable / target_sources does not work, hack around this
+    install(FILES PXView.icns DESTINATION ${MAC_RES_PREFIX})
+else()
+    install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+endif()
+
+install(DIRECTORY PXView/res DESTINATION ${MAC_RES_PREFIX}share/PXView)
+install(DIRECTORY PXView/demo DESTINATION ${MAC_RES_PREFIX}share/PXView)
+install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME logo.svg)
+install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/icons/hicolor/scalable/apps RENAME pxview.svg)
+install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/pixmaps RENAME pxview.svg)
+
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 	install(FILES PXView/PXView.desktop DESTINATION /usr/share/applications RENAME pxview.desktop)
 	
 	if(IS_DIRECTORY /usr/lib/udev/rules.d)
@@ -651,13 +694,13 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
 endif()
 
-install(FILES doc/NEWS25 DESTINATION share/PXView RENAME NEWS25)
-install(FILES doc/NEWS31 DESTINATION share/PXView RENAME NEWS31)
-install(FILES doc/ug25.pdf DESTINATION share/PXView RENAME ug25.pdf)
-install(FILES doc/ug31.pdf DESTINATION share/PXView RENAME ug31.pdf)
+install(FILES doc/NEWS25 DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME NEWS25)
+install(FILES doc/NEWS31 DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME NEWS31)
+install(FILES doc/ug25.pdf DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME ug25.pdf)
+install(FILES doc/ug31.pdf DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME ug31.pdf)
 
-install(DIRECTORY libsigrokdecode/decoders DESTINATION share/PXView/libsigrokdecode)
-install(DIRECTORY lang DESTINATION share/PXView)
+install(DIRECTORY libsigrokdecode/decoders DESTINATION ${MAC_RES_PREFIX}share/PXView/libsigrokdecode)
+install(DIRECTORY lang DESTINATION ${MAC_RES_PREFIX}share/PXView)
 
 #===============================================================================
 #= Packaging (handled by CPack)

@@ -551,7 +551,10 @@ namespace appcore {
             }
 
             if (is_loop_mode() && !_is_stream_mode){
-                set_collect_mode(COLLECT_SINGLE); // Reset the capture mode.
+                //buff模式增加滚动模式，并且支持数据是滚动的，无需采集完再查看
+                //set_collect_mode(COLLECT_SINGLE); // Reset the capture mode.
+                set_collect_mode(COLLECT_LOOP); // Reset the capture mode.
+                
             }
 
             if (is_loop_mode() && _device_agent.is_demo())

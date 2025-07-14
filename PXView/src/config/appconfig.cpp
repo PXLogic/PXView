@@ -423,14 +423,9 @@ QString AppConfig::GetAppDataDir()
 
 #ifdef Q_OS_DARWIN
     QDir dir1(QCoreApplication::applicationDirPath());
-    //"./res" is not exists
-    if (dir1.cd("res") == false){
-        QDir dir(QCoreApplication::applicationDirPath());
-        // ../share/PXView
-        if (dir.cd("..") && dir.cd("share") && dir.cd("PXView"))
-        {
-            return dir.absolutePath();
-        }
+    // "../Resources/share/PXView"
+    if (dir1.cd("..") && dir1.cd("Resources") && dir1.cd("share") && dir1.cd("PXView")){
+        return dir1.absolutePath();
     }
 #endif
 
@@ -453,6 +448,14 @@ QString AppConfig::GetFirmwareDir()
     {
          return dir.absolutePath();
     }
+
+#ifdef Q_OS_MAC
+    // macOS bundle (../Resources/share/PXView/res)
+    if (dir.cd("..") && dir.cd("Resources") && dir.cd("share") && dir.cd("PXView") && dir.cd("res"))
+    {
+         return dir.absolutePath();
+    }
+#endif
  
     dsv_err("%s%s", "Resource directory is not exists:", dir1.absolutePath().toUtf8().data());
     return dir1.absolutePath();
@@ -478,12 +481,21 @@ QString AppConfig::GetDecodeScriptDir()
          return path;     
     }
 
+#ifdef Q_OS_MAC
+    dir1.cd(QCoreApplication::applicationDirPath());
+    if (dir1.cd("..") && dir1.cd("Resources") && dir1.cd("share") && dir1.cd("PXView") &&
+        dir1.cd("libsigrokdecode") && dir1.cd("decoders"))
+    {
+         return dir1.absolutePath();
+    }
+#elif defined(Q_OS_UNIX)
     QDir dir(QCoreApplication::applicationDirPath());
     // ../share/PXView/libsigrokdecode/decoders
     if (dir.cd("..") && dir.cd("share")&& dir.cd("PXView")  && dir.cd("libsigrokdecode") && dir.cd("decoders"))
     {
         return dir.absolutePath();        
     }
+#endif
     return "";
 }
 

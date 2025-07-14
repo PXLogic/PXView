@@ -1104,6 +1104,8 @@ enum sr_config_option_id
 	SR_CONF_PWM1_FREQ = 60008,
 	SR_CONF_PWM1_DUTY = 60009,
 
+	SR_CONF_STREAM_BUFF = 60010,
+
 
 };
 

@@ -33,10 +33,20 @@
 
 #include <sys/stat.h>
 #include <inttypes.h>
+#include "usb_ctrl.h"
 #define NUM_TRIGGER_STAGES	16
-#define FIRMWARE_VERSION 0x56900014
+#define FIRMWARE_VERSION 0x56900020
 #define PWM_CLK 125000000
 #define PWM_MAX 1000000
+
+#define TRIG_CHECKID 0x55555555
+
+#define PXLOGIC_ATOMIC_BITS 6
+#define PXLOGIC_ATOMIC_SAMPLES (1 << PXLOGIC_ATOMIC_BITS)
+#define PXLOGIC_ATOMIC_SIZE (1 << (PXLOGIC_ATOMIC_BITS - 3))
+#define PXLOGIC_ATOMIC_MASK (0xFFFFFFFF << PXLOGIC_ATOMIC_BITS)
+
+
 
 
 struct PX_caps {
@@ -174,6 +184,7 @@ struct PX_context {
     uint16_t trig_logic0[NUM_TRIGGER_STAGES];
     uint16_t trig_logic1[NUM_TRIGGER_STAGES];
     uint32_t trig_count[NUM_TRIGGER_STAGES];
+    double   stream_buff_size;
 
     gboolean    pwm0_en;
     double      pwm0_freq;
@@ -188,6 +199,12 @@ struct PX_context {
 
     uint32_t    pwm1_freq_set;
     uint32_t    pwm1_duty_set;
+
+    int is_loop;
+    uint8_t  usb_data_align_en;
+    struct ds_trigger_pos *trigger_pos;
+    uint32_t trigger_pos_set;
+    struct ctl_data cmd_data;
 
 };
 
@@ -320,6 +337,7 @@ static const int hwoptions[] = {
 	//SR_CONF_PWM1_FREQ ,
 	//SR_CONF_PWM1_DUTY ,
     //SR_CONF_PWM1_EN   ,
+    SR_CONF_STREAM_BUFF,
     
     
 };
@@ -346,6 +364,7 @@ static const int32_t sessions[] = {
 	SR_CONF_PWM0_FREQ ,
 	SR_CONF_PWM0_DUTY ,
     SR_CONF_PWM0_EN   ,
+    SR_CONF_STREAM_BUFF,
 	
 	//SR_CONF_PWM1_FREQ ,
 	//SR_CONF_PWM1_DUTY ,

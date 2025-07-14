@@ -90,7 +90,8 @@ static struct sr_config_info sr_config_info_data[] = {
 	{SR_CONF_PWM1_FREQ, SR_T_FLOAT,"PWM1 Freq"},
 	{SR_CONF_PWM0_DUTY, SR_T_FLOAT,"PWM0 Duty"},
 	{SR_CONF_PWM1_DUTY, SR_T_FLOAT,"PWM1 Duty"},
-
+	{SR_CONF_STREAM_BUFF, SR_T_FLOAT,"Stream buff Size"},
+	
     {0, 0, NULL},
 };
 

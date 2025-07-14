@@ -368,6 +368,7 @@ namespace appcore {
     {
         // _right_tool_bar->setMinimumSize(100, 100);
         _right_tool_bar->setIconSize(QSize(24, 24));
+        _right_tool_bar->addAction(_trig_bar->_trig_action);
         _right_tool_bar->addAction(_trig_bar->_protocol_action);
         _right_tool_bar->addAction(_trig_bar->_measure_action);
         _right_tool_bar->addAction(_trig_bar->_search_action);
