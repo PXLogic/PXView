@@ -588,8 +588,8 @@ namespace dsv
 
             if (mode == DSO)
                 duration = max_timebase;
-            else if (stream_mode)
-                duration = sw_depth / (samplerate * (1.0 / SR_SEC(1)));
+            //else if (stream_mode)
+            //    duration = sw_depth / (samplerate * (1.0 / SR_SEC(1)));
             else if (rle_support)
                 duration = rle_depth / (samplerate * (1.0 / SR_SEC(1)));
             else
