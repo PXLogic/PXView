@@ -289,6 +289,7 @@ void TriggerDock::device_updated()
             _position_spinBox->setEnabled(!stream);
             _position_slider->setEnabled(!stream);
 
+            //if (stream|_session->is_loop_mode())
             if (stream)
                 maxRange = 1;
             else if (hw_depth >= sample_limits)
@@ -315,7 +316,8 @@ void TriggerDock::device_updated()
         }
     }
 
-    this->setEnabled(_session->is_loop_mode() == false);
+    //this->setEnabled(_session->is_loop_mode() == false);
+    this->setEnabled((_session->is_loop_mode() == true && stream == true)==false);
 }
 
 bool TriggerDock::commit_trigger()

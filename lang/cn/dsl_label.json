@@ -174,5 +174,9 @@
     {
         "id": "PWM1 Duty",
         "text": "PWM1 占空比"
+    },
+    {
+        "id": "Stream buff Size",
+        "text": "流模式buff大小"
     }
 ]

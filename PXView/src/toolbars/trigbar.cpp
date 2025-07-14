@@ -133,7 +133,8 @@ TrigBar::TrigBar(SigSession *session, QWidget *parent) :
     _protocol_button.setContentsMargins(0,0,0,0);
 
     _pwm_action = addWidget(&_pwm_button);
-    _trig_action = addWidget(&_trig_button);
+    //_trig_action = addWidget(&_trig_button);
+    _trig_action = widgetToAction(&_trig_button);
     _protocol_action = widgetToAction(&_protocol_button);
     _measure_action = widgetToAction(&_measure_button);
     _search_action = widgetToAction(&_search_button);
@@ -300,9 +301,9 @@ void TrigBar::reload()
     int mode = _session->get_device()->get_work_mode();
 
     if (mode == LOGIC) {
-        //_trig_action->setVisible(true);
-         _pwm_action->setVisible(false);
-        _trig_action->setVisible(false);
+        _trig_action->setVisible(true);
+        _pwm_action->setVisible(false);
+        //_trig_action->setVisible(false);
         _protocol_action->setVisible(true);
         _measure_action->setVisible(true);
         _search_action->setVisible(true);

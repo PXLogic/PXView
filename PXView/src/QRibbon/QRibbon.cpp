@@ -18,6 +18,8 @@
 #include <QDebug>
 #include <QTimer>
 #include <QMainWindow>
+#include <QActionGroup>
+#include <QTabBar>
 
 
 //const auto MINIMUM_HEIGHT = 62;

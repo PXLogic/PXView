@@ -32,7 +32,7 @@
 #include "../ui/langresource.h"
 #include "../log.h" 
 #include "../ui/fn.h"
-#include "../appcore/sigsession.h" 
+#include "../appcore/sigsession.h"
 
 using namespace dsv::config;
 

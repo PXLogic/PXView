@@ -2,6 +2,31 @@
 //libusb_device_handle *usbdevh = NULL;
 //volatile bool usb_busy = false;
 
+
+SR_PRIV int command_ctl_rddata(libusb_device_handle *usbdevh, struct ctl_data *data)
+{
+    int ret;
+
+    //assert(usbdevh);
+
+    /* Send the control message. */
+    if(usbdevh){
+        ret = libusb_control_transfer(usbdevh, LIBUSB_REQUEST_TYPE_VENDOR |
+            LIBUSB_ENDPOINT_IN, CMD_CTL_RD, 0x0000, 0x0000,
+            (unsigned char *)data, sizeof(struct ctl_data), 3000);
+
+        if (ret < 0) {
+            // sr_err("Unable to send CMD_CTL_RD command: %s.",
+            //     libusb_error_name(ret));
+            return SR_ERR;
+        }
+    }
+    else {
+        return SR_ERR;
+    }
+    return SR_OK;
+}
+
 unsigned int usb_wr_reg(libusb_device_handle *usbdevh,unsigned int reg_addr,unsigned int reg_data){
     int rc = 0;
     unsigned  int buf[4]={};
@@ -38,7 +63,7 @@ unsigned int usb_rd_reg(libusb_device_handle *usbdevh,unsigned int reg_addr,unsi
          //发送寄存器读请求
          rc=libusb_bulk_transfer(usbdevh, 0x01, (uint8_t*)buf, 16,NULL, 1000);
          if(rc!=0){
-             return 1;
+             return rc;
          }
          //读取寄存器值
          rc=libusb_bulk_transfer(usbdevh, 0x81, (uint8_t*)buf, 16,NULL, 1000);
@@ -48,9 +73,58 @@ unsigned int usb_rd_reg(libusb_device_handle *usbdevh,unsigned int reg_addr,unsi
          *reg_data = buf[3];
          return 0;
       }
+    return 3;
+}
+
+
+unsigned int usb_wr_reg2(libusb_device_handle *usbdevh,unsigned int reg_addr,unsigned int reg_data){
+    int rc = 0;
+    unsigned  int buf[4]={};
+    buf[0]=0xfefe0000;
+    buf[1]=0x08;
+    buf[2] = reg_addr;
+    buf[3] = reg_data;
+     if(usbdevh ){
+        rc=libusb_bulk_transfer(usbdevh, 0x04, (uint8_t*)buf, 16,NULL, 10);
+        if(rc!=0){
+            return 1;
+        }
+        rc=libusb_bulk_transfer(usbdevh, 0x84, (uint8_t*)buf, 16,NULL, 10);
+        if(rc!=0){
+            return 2;
+        }
+        if(buf[3]!=0xfefefefe) return 3;
+        return 0;
+     }
     return 1;
 }
 
+
+
+
+unsigned int usb_rd_reg2(libusb_device_handle *usbdevh,unsigned int reg_addr,unsigned int *reg_data){
+    int rc = 0;
+    unsigned  int buf[4]={};
+    buf[0]=0xfefe0001;
+    buf[1]=0x08;
+    buf[2] = reg_addr;
+    buf[3] = 0;
+     if(usbdevh){
+         //发送寄存器读请求
+         rc=libusb_bulk_transfer(usbdevh, 0x04, (uint8_t*)buf, 16,NULL, 10);
+         if(rc!=0){
+             return rc;
+         }
+         //读取寄存器值
+         rc=libusb_bulk_transfer(usbdevh, 0x84, (uint8_t*)buf, 16,NULL, 10);
+         if(rc!=0){
+             return 2;
+         }
+         *reg_data = buf[3];
+         return 0;
+      }
+    return 3;
+}
 
 
 unsigned int usb_wr_data(libusb_device_handle *usbdevh,unsigned char *buff,int length,unsigned int timeout){
