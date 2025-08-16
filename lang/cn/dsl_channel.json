@@ -120,6 +120,12 @@
         "id": "Use 32 Channels (Max 250MHz)",
         "text": "使用32个通道(最大采样率 250MHz)"
     },
+
+    {
+        "id": "Use 16 Channels (Max 250MHz)",
+        "text": "使用16个通道(最大采样率 250MHz)"
+    },
+
     {
         "id": "Use 16 Channels (Max 500MHz)",
         "text": "使用16个通道(最大采样率 500MHz)"
