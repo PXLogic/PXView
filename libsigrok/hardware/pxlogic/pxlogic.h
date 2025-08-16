@@ -34,8 +34,10 @@
 #include <sys/stat.h>
 #include <inttypes.h>
 #include "usb_ctrl.h"
+#define PXVIEW_BL_EN 0
 #define NUM_TRIGGER_STAGES	16
-#define FIRMWARE_VERSION 0x56900020
+#define FIRMWARE_VERSION 0x56900026
+#define FIRMWARE_BL_VERSION 0x56900000
 #define PWM_CLK 125000000
 #define PWM_MAX 1000000
 
@@ -63,6 +65,7 @@ struct PX_profile {
     uint16_t vid;
     uint16_t pid;
     enum libusb_speed usb_speed;
+    uint32_t   logic_mode;
 
     const char *vendor;
     const char *model;
@@ -70,6 +73,8 @@ struct PX_profile {
 
     const char *firmware;
     uint32_t   firmware_version;
+    const char *firmware_bl;
+    uint32_t   firmware_bl_version;
     const char *fpga_bit;
     const char *fpga_rst_bit;
 
@@ -80,12 +85,13 @@ struct PX_profile {
 
 enum PX_CHANNEL_ID {
     BUFFER_LOGIC250x32 = 0,
+    BUFFER_LOGIC250x16  ,
     BUFFER_LOGIC500x16  ,
     BUFFER_LOGIC1000x8  ,
     
 //usb3.0 stream
     STREAM_LOGIC50x32   ,
-    STREAM_LOGIC100x16  ,
+    STREAM_LOGIC125x16  ,
     STREAM_LOGIC250x8   ,
     STREAM_LOGIC500x4   ,
     STREAM_LOGIC1000x2  ,
@@ -380,16 +386,19 @@ static const int32_t sessions[] = {
 
 static const struct PX_profile supported_PX[] = {
     /*
-     * Demo
+     * 32 ch old pid vid
      */
     {0x1A86, 
       0x5237, 
       LIBUSB_SPEED_SUPER,
+      0,
       "PX_Tool",
       "PX-Logic U3 channel 32",
       NULL,
       "SCI_LOGIC.bin",
       FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
       "hspi_ddr.bin",
       "hspi_ddr_RST.bin",
 //PX_caps;
@@ -398,7 +407,7 @@ static const struct PX_profile supported_PX[] = {
      // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
       CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
       (1 << BUFFER_LOGIC250x32) | (1 << BUFFER_LOGIC500x16)| (1 << BUFFER_LOGIC1000x8) |
-      (1 << STREAM_LOGIC50x32) | (1 << STREAM_LOGIC100x16) | (1 << STREAM_LOGIC250x8) | (1 << STREAM_LOGIC500x4) | (1 << STREAM_LOGIC1000x2) ,
+      (1 << STREAM_LOGIC50x32) | (1 << STREAM_LOGIC125x16) | (1 << STREAM_LOGIC250x8) | (1 << STREAM_LOGIC500x4) | (1 << STREAM_LOGIC1000x2) ,
       SR_Gn(4),
       0,
       BUFFER_LOGIC250x32,
@@ -410,11 +419,14 @@ static const struct PX_profile supported_PX[] = {
      {0x1A86, 
       0x5237, 
       LIBUSB_SPEED_HIGH,
+      0,
       "PX_Tool",
       "PX-Logic U2 channel 32",
       NULL,
       "SCI_LOGIC.bin",
       FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
       "hspi_ddr.bin",
       "hspi_ddr_RST.bin",
 //PX_caps;
@@ -430,6 +442,233 @@ static const struct PX_profile supported_PX[] = {
       SR_NS(500)
       }
     },   
+
+    //32 ch new pid vid
+     {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_SUPER,
+      0,
+      "PX_Tool",
+      "PX-Logic U3 channel 32",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC250x32) | (1 << BUFFER_LOGIC500x16)| (1 << BUFFER_LOGIC1000x8) |
+      (1 << STREAM_LOGIC50x32) | (1 << STREAM_LOGIC125x16) | (1 << STREAM_LOGIC250x8) | (1 << STREAM_LOGIC500x4) | (1 << STREAM_LOGIC1000x2) ,
+      SR_Gn(4),
+      0,
+      BUFFER_LOGIC250x32,
+      SR_NS(500)
+      }
+    },
+// usb 2.0 stream
+ 
+     {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_HIGH,
+      0,
+      "PX_Tool",
+      "PX-Logic U2 channel 32",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC250x32) | (1 << BUFFER_LOGIC500x16)| (1 << BUFFER_LOGIC1000x8) |
+      (1 << STREAM_LOGIC200x1) | (1 << STREAM_LOGIC100x2) | (1 << STREAM_LOGIC50x4) | (1 << STREAM_LOGIC25x8) | (1 << STREAM_LOGIC10x16) | (1 << STREAM_LOGIC5x32),
+      SR_Gn(4),
+      0,
+      BUFFER_LOGIC500x16,
+      SR_NS(500)
+      }
+    }, 
+
+
+
+//16 ch 1G new pid vid
+    {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_SUPER,
+      1,
+      "PX_Tool",
+      "PX-Logic U3 channel 16 Pro",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC500x16)| (1 << BUFFER_LOGIC1000x8) |
+      (1 << STREAM_LOGIC125x16) | (1 << STREAM_LOGIC250x8) | (1 << STREAM_LOGIC500x4) | (1 << STREAM_LOGIC1000x2) ,
+      SR_Gn(4),
+      0,
+      BUFFER_LOGIC500x16,
+      SR_NS(500)
+      }
+    },
+// usb 2.0 stream
+ 
+     {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_HIGH,
+      1,
+      "PX_Tool",
+      "PX-Logic U2 channel 16 Pro",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC500x16)| (1 << BUFFER_LOGIC1000x8) |
+      (1 << STREAM_LOGIC200x1) | (1 << STREAM_LOGIC100x2) | (1 << STREAM_LOGIC50x4) | (1 << STREAM_LOGIC25x8) | (1 << STREAM_LOGIC10x16),
+      SR_Gn(4),
+      0,
+      BUFFER_LOGIC500x16,
+      SR_NS(500)
+      }
+     },
+
+
+//16 ch 500M new pid vid
+    {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_SUPER,
+      2,
+      "PX_Tool",
+      "PX-Logic U3 channel 16 Plus",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC500x16)|
+      (1 << STREAM_LOGIC125x16) | (1 << STREAM_LOGIC250x8) | (1 << STREAM_LOGIC500x4) ,
+      SR_Gn(2),
+      0,
+      BUFFER_LOGIC500x16,
+      SR_NS(500)
+      }
+    },
+// usb 2.0 stream
+ 
+     {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_HIGH,
+      2,
+      "PX_Tool",
+      "PX-Logic U2 channel 16 Plus",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC500x16)|
+      (1 << STREAM_LOGIC200x1) | (1 << STREAM_LOGIC100x2) | (1 << STREAM_LOGIC50x4) | (1 << STREAM_LOGIC25x8) | (1 << STREAM_LOGIC10x16),
+      SR_Gn(2),
+      0,
+      BUFFER_LOGIC500x16,
+      SR_NS(500)
+      }
+    }, 
+
+//16 ch 250M new pid vid
+    {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_SUPER,
+      3,
+      "PX_Tool",
+      "PX-Logic U3 channel 16 Base",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC250x16)|
+      (1 << STREAM_LOGIC125x16) | (1 << STREAM_LOGIC250x8) ,
+      SR_Gn(1),
+      0,
+      BUFFER_LOGIC250x16,
+      SR_NS(500)
+      }
+    },
+// usb 2.0 stream
+ 
+     {0x16C0, 
+      0x05DC, 
+      LIBUSB_SPEED_HIGH,
+      3,
+      "PX_Tool",
+      "PX-Logic U2 channel 16 Base",
+      NULL,
+      "SCI_LOGIC.bin",
+      FIRMWARE_VERSION,
+      "SCI_LOGIC_BL.bin",
+      FIRMWARE_BL_VERSION,
+      "hspi_ddr.bin",
+      "hspi_ddr_RST.bin",
+//PX_caps;
+     {
+      CAPS_MODE_LOGIC,
+     // CAPS_FEATURE_NONE|CAPS_FEATURE_USB30|CAPS_FEATURE_LA_CH32|CAPS_FEATURE_BUF,
+      CAPS_FEATURE_USB30|CAPS_FEATURE_BUF,
+      (1 << BUFFER_LOGIC250x16)|
+      (1 << STREAM_LOGIC200x1) | (1 << STREAM_LOGIC100x2) | (1 << STREAM_LOGIC50x4) | (1 << STREAM_LOGIC25x8) | (1 << STREAM_LOGIC10x16),
+      SR_Gn(1),
+      0,
+      BUFFER_LOGIC250x16,
+      SR_NS(500)
+      }
+    }, 
 
     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,{0, 0, 0, 0, 0, 0, 0}}
 };

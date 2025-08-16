@@ -33,7 +33,7 @@ set(PX_DESCRIPTION "A GUI for instruments of PX")
 
 set(PX_VERSION_MAJOR 1)
 set(PX_VERSION_MINOR 4)
-set(PX_VERSION_MICRO 6)
+set(PX_VERSION_MICRO 7)
 set(PX_VERSION_STRING  ${PX_VERSION_MAJOR}.${PX_VERSION_MINOR}.${PX_VERSION_MICRO} )
 
 configure_file (
@@ -177,6 +177,10 @@ include_directories(${ZLIB_INCLUDE_DIRS})
 #===============================================================================
 #= Qt5 or Qt6
 #-------------------------------------------------------------------------------
+if(APPLE)
+	set(QT_VERSION_FORCE Qt6)
+endif()
+
 
 set(QT_VERSION_FORCE "" CACHE STRING "Force the use of Qt6 by setting this option to 6")
 
@@ -369,14 +373,27 @@ set(UIS
 	PXView/src/QRibbon/qribbon.ui
 )
 
-if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
-	find_package(Qt6Core QUIET)
-	if(Qt6Core)
-		qt6_wrap_ui(UI_HEADERS ${UIS})
-	else()
-		qt5_wrap_ui(UI_HEADERS ${UIS})
+if(APPLE)
+	qt_wrap_ui(UI_HEADERS ${UIS})
+else()
+	if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
+		find_package(Qt6Core QUIET)
+		if(Qt6Core)
+			qt6_wrap_ui(UI_HEADERS ${UIS})
+		else()
+			qt5_wrap_ui(UI_HEADERS ${UIS})
+		endif()
 	endif()
 endif()
+
+#if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
+#	find_package(Qt6Core QUIET)
+#	if(Qt6Core)
+#		qt6_wrap_ui(UI_HEADERS ${UIS})
+#	else()
+#		qt5_wrap_ui(UI_HEADERS ${UIS})
+#	endif()
+#endif()
 
 
 #qt_wrap_ui(UI_HEADERS ${UIS})

@@ -1,2 +1,3 @@
 SUBSYSTEM=="usb", ATTRS{idVendor}=="2a0e", MODE="0666"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="16c0", MODE="0666"

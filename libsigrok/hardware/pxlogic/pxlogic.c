@@ -115,6 +115,9 @@ static const struct PX_channels channel_modes[] = {
     {BUFFER_LOGIC250x32,  LOGIC,  SR_CHANNEL_LOGIC,  0,32, 1, SR_MHZ(250), SR_MHZ(250),
      SR_KHZ(2), SR_MHZ(250), "Use 32 Channels (Max 250MHz)"},
 
+    {BUFFER_LOGIC250x16,  LOGIC,  SR_CHANNEL_LOGIC,  0,16, 1, SR_MHZ(250), SR_MHZ(250),
+     SR_KHZ(2), SR_MHZ(250), "Use 16 Channels (Max 250MHz)"},
+
     {BUFFER_LOGIC500x16,  LOGIC,  SR_CHANNEL_LOGIC,  0,16, 1, SR_MHZ(500), SR_MHZ(500),
      SR_KHZ(2), SR_MHZ(500), "Use 16 Channels (Max 500MHz)"},
 
@@ -125,11 +128,11 @@ static const struct PX_channels channel_modes[] = {
     {STREAM_LOGIC50x32,  LOGIC,  SR_CHANNEL_LOGIC,  1,32, 1, SR_MHZ(50), SR_MHZ(50),
      SR_KHZ(2), SR_MHZ(50), "Use 32 Channels (Max50MHz)"},
 
-    {STREAM_LOGIC100x16,  LOGIC,  SR_CHANNEL_LOGIC,  1,16, 1, SR_MHZ(100), SR_MHZ(100),
-     SR_KHZ(2), SR_MHZ(100), "Use 16 Channels (Max 100MHz)"},
+    {STREAM_LOGIC125x16,  LOGIC,  SR_CHANNEL_LOGIC,  1,16, 1, SR_MHZ(125), SR_MHZ(125),
+     SR_KHZ(2), SR_MHZ(125), "Use 16 Channels (Max 125MHz)"},
 
-    {STREAM_LOGIC250x8,  LOGIC,  SR_CHANNEL_LOGIC, 1,8, 1, SR_MHZ(200), SR_MHZ(200),
-     SR_KHZ(2), SR_MHZ(200), "Use 8 Channels (Max 200MHz)"},
+    {STREAM_LOGIC250x8,  LOGIC,  SR_CHANNEL_LOGIC, 1,8, 1, SR_MHZ(250), SR_MHZ(250),
+     SR_KHZ(2), SR_MHZ(250), "Use 8 Channels (Max 250MHz)"},
 
     {STREAM_LOGIC500x4,  LOGIC,  SR_CHANNEL_LOGIC, 1,4, 1, SR_MHZ(500), SR_MHZ(500),
      SR_KHZ(2), SR_MHZ(500), "Use 4 Channels (Max 500MHz)"},
@@ -167,7 +170,7 @@ static struct sr_list_item channel_mode_cn_map[] = {
     {BUFFER_LOGIC1000x8, "使用8个通道(最大采样率 1000MHz)"},
 
     {STREAM_LOGIC50x32, "使用32个通道(最大采样率 50MHz)"},
-    {STREAM_LOGIC100x16, "使用16个通道(最大采样率 100MHz)"},
+    {STREAM_LOGIC125x16, "使用16个通道(最大采样率 125MHz)"},
     {STREAM_LOGIC250x8, "使用8个通道(最大采样率 250MHz)"},
     {STREAM_LOGIC500x4, "使用4个通道(最大采样率500MHz)"},
     {STREAM_LOGIC1000x2, "使用2个通道(最大采样率 1000MHz)"},
@@ -338,7 +341,7 @@ static struct PX_context *DSLogic_dev_new(const struct PX_profile *prof)
 	return devc;
 }
 
-SR_PRIV gboolean logic_check_conf_profile(libusb_device *dev)
+SR_PRIV gboolean logic_check_conf_profile(libusb_device *dev,uint32_t *logic_mode)
 {
     struct libusb_device_descriptor des;
     struct libusb_device_handle *hdl;
@@ -365,16 +368,36 @@ SR_PRIV gboolean logic_check_conf_profile(libusb_device *dev)
             return FALSE;
         }
 
-        // if ((ret = libusb_get_string_descriptor_ascii(hdl,
-        //         des.iManufacturer, strdesc, sizeof(strdesc))) < 0){
-        //     sr_err("%s:%d, Failed to get device descriptor ascii: %s", 
-		// 	    __func__, __LINE__, libusb_error_name(ret));
-        //     break;
-        // }
+        ret = libusb_claim_interface(hdl, USB_INTERFACE_C);
+        ret = libusb_claim_interface(hdl, USB_INTERFACE_D);
 
-        // if (strncmp((const char *)strdesc, "DreamSourceLab", 14))
-        //     break;
+        if ((ret = libusb_get_string_descriptor_ascii(hdl,
+                des.iManufacturer, strdesc, sizeof(strdesc))) < 0){
+            sr_err("%s:%d, Failed to get device descriptor ascii: %s", 
+			    __func__, __LINE__, libusb_error_name(ret));
+            break;
+        }
 
+        if (strncmp((const char *)strdesc, "PX", 2))
+            break;
+
+        uint32_t reg_addr;
+        uint32_t reg_data;
+        int ret = 0;
+         //char *res_path = DS_RES_PATH;
+        reg_addr = 8192+22*4;
+        //ret =  usb_wr_reg(usb->devhdl,reg_addr,0x0);
+        ret =  usb_rd_reg(hdl,reg_addr,&reg_data);
+
+        if(ret == 0){
+            bSucess = TRUE;
+            *logic_mode = reg_data;
+
+        }
+        else {
+            bSucess = FALSE;
+            break;
+        }
         // if ((ret = libusb_get_string_descriptor_ascii(hdl,
         //         des.iProduct, strdesc, sizeof(strdesc))) < 0){
         //     sr_err("%s:%d, Failed to get device descriptor ascii: %s", 
@@ -386,10 +409,12 @@ SR_PRIV gboolean logic_check_conf_profile(libusb_device *dev)
         //     break;
 
         /* If we made it here, it must be an dsl device. */
-        bSucess = TRUE;
+        //bSucess = TRUE;
     }
 
     if (hdl){
+        ret = libusb_release_interface(hdl, USB_INTERFACE_C);
+        ret = libusb_release_interface(hdl, USB_INTERFACE_D);
         libusb_close(hdl);
     }
 
@@ -474,7 +499,7 @@ static GSList *hw_scan(GSList *options)
 			continue;
 		}
 
-        if (des.idVendor != supported_PX[0].vid)
+        if (des.idVendor != supported_PX[0].vid && des.idVendor != supported_PX[2].vid)
             continue;
 
 
@@ -497,7 +522,7 @@ static GSList *hw_scan(GSList *options)
                 des.idProduct == supported_PX[j].pid) {
                 if (usb_speed == supported_PX[j].usb_speed) {
                     prof = &supported_PX[j];
-                    sr_info("Found a zzy usb: vid:0x%4x,address:0x%4x", supported_PX[j].vid , supported_PX[j].pid);
+                    sr_info("Found a PX usb: vid:0x%4x,address:0x%4x", supported_PX[j].vid , supported_PX[j].pid);
                     break;
                 }
 
@@ -519,8 +544,22 @@ static GSList *hw_scan(GSList *options)
         bus = libusb_get_bus_number(device_handle);
         address = libusb_get_device_address(device_handle);
         sr_info("Found a new device,handle:%p,bus:%d,address:%d", device_handle, bus, address);
+        uint32_t logic_mode = 0;
+        if (logic_check_conf_profile(device_handle,&logic_mode)) {
+            for (j = 0; supported_PX[j].vid; j++) {
+                if (des.idVendor == supported_PX[j].vid &&
+                    des.idProduct == supported_PX[j].pid) {
+                    if (usb_speed == supported_PX[j].usb_speed &&
+                        logic_mode == supported_PX[j].logic_mode 
+                        ) {
+                        prof = &supported_PX[j];
+                        sr_info("Found a PX usb: vid:0x%4x,address:0x%4x", supported_PX[j].vid , supported_PX[j].pid);
+                        break;
+                    }
 
-        if (logic_check_conf_profile(device_handle)) {
+                }
+            }
+
             devc = DSLogic_dev_new(prof);
             devc ->usb_speed = usb_speed;
             sr_info("DSLogic_dev_new");
@@ -617,7 +656,15 @@ SR_PRIV int firmware_config(struct libusb_device_handle *usbdevh, const char *fi
 
     if(mode == 0){
         if ((buf = x_malloc(48*4*1024)) == NULL) {
-            sr_err("FPGA configure buf malloc failed.");
+            sr_err("wch569 app configure buf malloc failed.");
+            fclose(fw);
+            return SR_ERR;
+        }
+
+    }
+    else if(mode == 2){
+        if ((buf = x_malloc(48*4*1024)) == NULL) {
+            sr_err("wch569 bl configure buf malloc failed.");
             fclose(fw);
             return SR_ERR;
         }
@@ -644,6 +691,21 @@ if(mode == 0){
 
 
     length =length*3;
+    libusb_clear_halt(usbdevh,0x03);
+    ret =  usb_wr_data_update(usbdevh,base_addr,length,0,buf,0);
+    //g_usleep(10* 1000);
+    // base_addr = 96*1024;
+    // ret =  usb_wr_data_update(usbdevh,base_addr,length,0,buf,1000);
+
+}
+else if(mode == 2){
+    base_addr = 0;
+    length = 32*1024;
+    fread(buf, 1, filesize, fw);
+    memset(buf+filesize,0xff,length-filesize);
+    memcpy(buf+length,buf,length);
+
+    length =length;
     libusb_clear_halt(usbdevh,0x03);
     ret =  usb_wr_data_update(usbdevh,base_addr,length,0,buf,0);
     //g_usleep(10* 1000);
@@ -740,29 +802,48 @@ static int hw_usb_open(struct sr_dev_driver *di, struct sr_dev_inst *sdi, gboole
         ret =  usb_rd_reg(usb->devhdl,reg_addr,&reg_data);
        if(ret == 0){
             sr_info("current   firmware_version = %x   new firmware_version = %x",reg_data,devc->profile->firmware_version);
+            if(reg_data == devc->profile->firmware_bl_version && PXVIEW_BL_EN == 1){
+                char *firmware;
+                char *res_path = DS_RES_PATH;
+                sr_info(" open cpu firmware file %s ", res_path);
+                if (!(firmware = x_malloc(strlen(res_path)+strlen(devc->profile->firmware_bl) + 5))) {
+                    sr_err("firmware  path malloc error!");
+                    return SR_ERR_MALLOC;
+                }
+                strcpy(firmware, res_path);
+                strcat(firmware, "/");
+                strcat(firmware, devc->profile->firmware_bl);
+                sr_info(" open bl bin file %s ", firmware);
+                ret = firmware_config(usb->devhdl, firmware,2);
+                x_free(firmware);
+                sr_info("firmware  end");
+                //rst usb
+
+            }
+
             if(reg_data != devc->profile->firmware_version){
                 char *firmware;
                 char *res_path = DS_RES_PATH;
                 sr_info(" open cpu firmware file %s ", res_path);
-            if (!(firmware = x_malloc(strlen(res_path)+strlen(devc->profile->firmware) + 5))) {
-                sr_err("firmware  path malloc error!");
-                return SR_ERR_MALLOC;
-            }
-            strcpy(firmware, res_path);
-            strcat(firmware, "/");
-            strcat(firmware, devc->profile->firmware);
-            sr_info(" open FPGA bit file %s ", firmware);
-            ret = firmware_config(usb->devhdl, firmware,0);
-            x_free(firmware);
-             sr_info("firmware  end");
-            //rst usb
-             sr_info("rst usb ");
-            reg_addr = 8192+12*4;
-            reg_data = 0;
-            ret =  usb_wr_reg(usb->devhdl,reg_addr,reg_data);
-             sdi->status = SR_ST_INITIALIZING;
+                if (!(firmware = x_malloc(strlen(res_path)+strlen(devc->profile->firmware) + 5))) {
+                    sr_err("firmware  path malloc error!");
+                    return SR_ERR_MALLOC;
+                }
+                strcpy(firmware, res_path);
+                strcat(firmware, "/");
+                strcat(firmware, devc->profile->firmware);
+                sr_info(" open app bin file %s ", firmware);
+                ret = firmware_config(usb->devhdl, firmware,0);
+                x_free(firmware);
+                sr_info("firmware  end");
+                //rst usb
+                sr_info("rst usb ");
+                reg_addr = 8192+12*4;
+                reg_data = 0;
+                ret =  usb_wr_reg(usb->devhdl,reg_addr,reg_data);
+                sdi->status = SR_ST_INITIALIZING;
 
-             return SR_ERR_DEVICE_CLOSED;
+                return SR_ERR_DEVICE_CLOSED;
 
             }
             sdi->status = SR_ST_ACTIVE;
@@ -1620,6 +1701,7 @@ static void receive_transfer(struct libusb_transfer *transfer)
     }
 
      switch (transfer->status) {
+    case LIBUSB_TRANSFER_STALL:
     case LIBUSB_TRANSFER_NO_DEVICE:
         //free_transfer(transfer);
     	abort_acquisition(devc);
@@ -2212,7 +2294,15 @@ SR_PRIV int start_transfers(const struct sr_dev_inst *sdi)
     sr_info(" samples_ch_1s_align_4k =  %d",samples_ch_1s_align_4k);
 
 
-    usb_buff_max = usb_samples_1s/100/8; //10ms
+    //usb_buff_max = usb_samples_1s/100/8; //10ms
+    if(devc->usb_speed == LIBUSB_SPEED_SUPER){
+        //usb_buff_max = usb_samples_1s/100/8; //10ms
+        usb_buff_max = 4*1024*1024; //4M
+    }
+    else{
+        usb_buff_max = usb_samples_1s/100/8; //10ms
+    }
+
     //usb_buff_max = 8*1024*1024;
     usb_buff_max = align_4k(usb_buff_max);
     sr_info(" usb_buff_max =  %d",usb_buff_max);
@@ -2667,7 +2757,7 @@ static int hw_dev_acquisition_start(struct sr_dev_inst *sdi,
     // devc->usbfd[i] = -1;
     // free(lupfd);
 
-    sr_session_source_add ((gintptr) devc->channel, G_IO_IN | G_IO_ERR,20, receive_data2, sdi);
+    sr_session_source_add ((gintptr) devc->channel, G_IO_IN | G_IO_ERR,5, receive_data2, sdi);
     
 
     std_session_send_df_header(sdi, LOG_PREFIX);
