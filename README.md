@@ -2,8 +2,7 @@
 
 
 # PXView 
-- [PXLogic](https://marrychip.com)
-www.marrychip.com
+- [PXLogic](https://marrychip.com)(https://marrychip.com)
 
 PXView is a GUI program for supporting various instruments from [PXLogic](https://github.com/PXLogic/PXView), including logic analyzers, oscilloscopes, etc. PXView is based on the [sigrok project](https://sigrok.org).
 
