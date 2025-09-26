@@ -3,7 +3,7 @@
 ##
 ## Copyright (C) 2011 Gareth McMullin <gareth@blacksphere.co.nz>
 ## Copyright (C) 2012-2014 Uwe Hermann <uwe@hermann-uwe.de>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -233,7 +233,7 @@ class Decoder(srd.Decoder):
             self.reset_state()
             return
         # Ignore sample if the clock pin hasn't changed.
-        if first or not self.matched[0]:
+        if first or (not self.matched & (0b1 << 0)):
             return
 
         #Check clock edge type

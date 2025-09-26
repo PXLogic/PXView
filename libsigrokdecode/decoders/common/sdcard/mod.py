@@ -148,4 +148,3 @@ sd_status = {
     # 311:0: Reserved for manufacturer
     # 391:312: Reserved
 }
-

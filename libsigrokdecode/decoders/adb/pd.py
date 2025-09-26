@@ -1,5 +1,4 @@
-## Copyright (C) 2022 Jun Wako <wakojun@gmail.com>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## Permission is hereby granted, free of charge, to any person obtaining a copy
 ## of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +33,10 @@ class Decoder(srd.Decoder):
     channels = (
         {'id': 'data', 'name': 'Data', 'desc': 'Data line'},
     )
-    options = ()
+    options = (
+        {'id': 'format', 'desc': 'Data format', 'default': 'hex',
+            'values': ('hex', 'dec', 'oct', 'bin')},
+    )
     tags = ['PC']
     annotations = (
         ('lo', 'Low'),                  # 0
@@ -90,7 +92,15 @@ class Decoder(srd.Decoder):
         self.put(ss, es, self.out_ann, [4, ['%X' % b]])
 
     def putD(self, ss, es, D):
-        self.put(ss, es, self.out_ann, [5, ['%02X' % D]])
+        fmt = self.options['format']
+        if fmt == 'hex':
+            self.put(ss, es, self.out_ann, [5, ['%02X' % D]])
+        elif fmt == 'dec':
+            self.put(ss, es, self.out_ann, [5, ['%d' % D]])
+        elif fmt == 'oct':
+            self.put(ss, es, self.out_ann, [5, ['%03o' % D]])
+        elif fmt == 'bin':
+            self.put(ss, es, self.out_ann, [5, ['%08b' % D]])
 
     def putC(self, ss, es, C):
         addr = (C >> 4) & 0x0f

@@ -5,7 +5,7 @@
 ## Based broadly on work by the following for DS1307
 ## Copyright (C) 2012-2014 Uwe Hermann <uwe@hermann-uwe.de>
 ## Copyright (C) 2013 Matt Ranostay <mranostay@gmail.com>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by

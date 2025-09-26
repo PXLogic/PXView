@@ -78,7 +78,7 @@ class process_info:
             return self.enum == other.enum and self.mode == other.mode
         return False
 
-#read adress(address mode, 24BIT, 32BIT)
+#read adress（address mode、24BIT,32BIT）
 READ_ADDRESS = process_info(process_enum.ADDRESS_BY_MODE , process_mode.SINGLE)
 READ_3B_ADDRESS = process_info(process_enum.ADDRESS_24BIT , process_mode.SINGLE)
 READ_4B_ADDRESS = process_info(process_enum.ADDRESS_32BIT , process_mode.SINGLE)
@@ -93,7 +93,7 @@ READ_ADDRESS_QUAD = process_info(process_enum.ADDRESS_BY_MODE , process_mode.QUA
 READ_3B_ADDRESS_QUAD = process_info(process_enum.ADDRESS_24BIT , process_mode.DUAL)
 READ_4B_ADDRESS_QUAD = process_info(process_enum.ADDRESS_32BIT , process_mode.QUAD)
 
-#Read Byte(IO1, DUAL, QUAD)
+#Read Byte（IO1, DUAL,QUAD）
 READ_BYTE_SINGLE = process_info(process_enum.READ_BYTE , process_mode.SINGLE)
 READ_BYTE_DUAL = process_info(process_enum.READ_BYTE , process_mode.DUAL)
 READ_BYTE_QUAD = process_info(process_enum.READ_BYTE , process_mode.QUAD)
@@ -114,7 +114,7 @@ DUMMY_CYCLE = process_info(process_enum.DUMMY_BY_MODE , process_mode.SINGLE)
 DUMMY_CYCLE_8BIT = process_info(process_enum.DUMMY_8BIT , process_mode.SINGLE)
 DUMMY_CYCLE_8BIT_QUAD = process_info(process_enum.DUMMY_8BIT , process_mode.QUAD)
 
-#Command list(command, name, abb, data after command)
+#Command list（command、name、abb、data after command）
 command = {
    0x06 : ['Write Enable' , 'WREN' , []],
    0x04 : ['Write Disable' , 'WRDI' , []],

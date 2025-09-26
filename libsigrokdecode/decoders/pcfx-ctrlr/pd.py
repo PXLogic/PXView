@@ -2,7 +2,7 @@
 ## This file is part of the libsigrokdecode project.
 ##
 ## Copyright (C) 2023 David Shadoff <david.shadoff@gmail.com>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -148,10 +148,10 @@ class Decoder(srd.Decoder):
                 # a) clock line (channel 1) goes low while trigger (channel 0) is low: (RESET joypad counter)
                 # b) trigger line (channel 0) goes high (completion of trigger)
                 (trg, clk, dataval, self.dir) = self.wait([{0: 'l', 1: 'f'}, {0: 'r'}])
-                if (self.matched[0]):
+                if (self.matched & (0b1 << 0)):
                     self.triggertype = 1   # this is a RESET joypad counter event; continue to search for trigger end
 
-                if (self.matched[0]):
+                if (self.matched & (0b1 << 0)):
                     self.state = 'START BIT'
                     self.bitcount = 0
                     self.bits_start.clear()
@@ -167,7 +167,7 @@ class Decoder(srd.Decoder):
                         
             elif self.state == 'START BIT':
                 (trg, clk, dataval, self.dir) = self.wait([{1: 'f'}, {0: 'f'}])
-                if (self.matched[0]):
+                if (self.matched & (0b1 << 0)):
                     self.bitvalue = dataval
                     self.bits_start.append(self.startbit)
                     self.bits_value.append((1 - self.bitvalue))  # internal value is inverted
@@ -176,7 +176,7 @@ class Decoder(srd.Decoder):
 
             elif self.state == 'END BIT':
                 self.wait([{1: 'r'}, {0: 'f'}])
-                if (self.matched[0]):
+                if (self.matched & (0b1 << 0)):
 
                     self.bits_end.append(self.samplenum)
 

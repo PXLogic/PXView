@@ -3,7 +3,7 @@
 ##
 ## Copyright (C) 2017 Kevin Redon <kingkevin@cuvoodoo.info>
 ## Copyright (C) 2020 Arik Yavilevich <arik_sigrok@yavilevich.com>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by

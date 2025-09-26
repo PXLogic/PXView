@@ -1,8 +1,6 @@
 ##
 ## This file is part of the libsigrokdecode project.
 ##
-## Copyright (C) 2023 ottojo
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by

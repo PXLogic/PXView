@@ -72,6 +72,10 @@ spi_mode = {
 
 class ChannelError(Exception):
     pass
+CLK = 0
+MISO = 1
+MOSI = 2
+CS = 3
 
 class Decoder(srd.Decoder):
     api_version = 3
@@ -84,23 +88,27 @@ class Decoder(srd.Decoder):
     outputs = ['spi']
     tags = ['Embedded/industrial']
     channels = (
-        {'id': 'clk', 'name': 'CLK', 'desc': 'Clock'},
+        {'id': 'clk', 'name': 'CLK', 'desc': 'Clock(串行时钟)'},
     )
     optional_channels = (
-        {'id': 'miso', 'name': 'MISO', 'desc': 'Master in, slave out'},
-        {'id': 'mosi', 'name': 'MOSI', 'desc': 'Master out, slave in'},
-        {'id': 'cs', 'name': 'CS#', 'desc': 'Chip-select'},
+        {'id': 'miso', 'name': 'MISO', 'desc': 'Master in, slave out(主入从出)'},
+        {'id': 'mosi', 'name': 'MOSI', 'desc': 'Master out, slave in(主出从入)'},
+        {'id': 'cs', 'name': 'CS#', 'desc': 'Chip-select(片选信号)'},
     )
     options = (
-        {'id': 'cs_polarity', 'desc': 'CS# polarity', 'default': 'active-low',
+        {'id': 'cs_polarity', 'desc': 'CS# polarity(片选极性)', 'default': 'active-low',
             'values': ('active-low', 'active-high')},
-        {'id': 'cpol', 'desc': 'Clock polarity', 'default': 0,
+        {'id': 'cpol', 'desc': 'Clock polarity(时钟极性)', 'default': 0,
             'values': (0, 1)},
-        {'id': 'cpha', 'desc': 'Clock phase', 'default': 0,
+        {'id': 'cpha', 'desc': 'Clock phase(时钟相位)', 'default': 0,
             'values': (0, 1)},
-        {'id': 'bitorder', 'desc': 'Bit order',
+        {'id': 'bitorder', 'desc': 'Bit order(位序)',
             'default': 'msb-first', 'values': ('msb-first', 'lsb-first')},
-        {'id': 'wordsize', 'desc': 'Word size', 'default': 8},
+        {'id': 'wordsize', 'desc': 'Word size(字长)', 'default': 8},
+        {'id': 'format', 'desc': 'Data format(数据格式)', 'default': 'hex',
+            'values': ('ascii', 'dec', 'hex', 'oct', 'bin')},
+        {'id': 'show_data_point', 'desc': 'Show data point(数据点显示)', 'default': 'yes',
+            'values': ('yes', 'no')},
     )
     annotations = (
         ('miso-data', 'MISO data'),
@@ -110,6 +118,9 @@ class Decoder(srd.Decoder):
         ('warning', 'Warning'),
         ('miso-transfer', 'MISO transfer'),
         ('mosi-transfer', 'MOSI transfer'),
+        ('atk-data-point', 'ATK Data point'),   #7
+        ('atk-rising-edge', 'ATK Rising edge'), #8
+        ('atk-falling-edge', 'ATK Falling edge'), #9
     )
     annotation_rows = (
         ('miso-bits', 'MISO bits', (2,)),
@@ -119,6 +130,7 @@ class Decoder(srd.Decoder):
         ('mosi-data-vals', 'MOSI data', (1,)),
         ('mosi-transfers', 'MOSI transfers', (6,)),
         ('other', 'Other', (4,)),
+        ('atk-signs', 'ATK signs', (7,8,9)),
     )
     binary = (
         ('miso', 'MISO'),
@@ -148,6 +160,7 @@ class Decoder(srd.Decoder):
         self.out_bitrate = self.register(srd.OUTPUT_META,
                 meta=(int, 'Bitrate', 'Bitrate during transfers'))
         self.bw = (self.options['wordsize'] + 7) // 8
+        self.show_data_point = self.options['show_data_point'] == 'yes'
 
     def metadata(self, key, value):
        if key == srd.SRD_CONF_SAMPLERATE:
@@ -189,10 +202,34 @@ class Decoder(srd.Decoder):
                 self.put(bit[1], bit[2], self.out_ann, [3, ['%d' % bit[0]]])
 
         # Dataword annotations.
+        # 数据字注释
         if self.have_miso:
-            self.put(ss, es, self.out_ann, [0, ['%02X' % self.misodata]])
+            self.miso_format = self.options['format']
+            if self.miso_format == 'hex':     
+                self.miso_data = "%02x"%(self.misodata)
+            elif self.miso_format == 'dec':
+                self.miso_data = f"{self.misodata}"
+            elif self.miso_format == 'oct':
+                self.miso_data = "%03o"%(self.misodata)
+            elif self.miso_format == 'bin':
+                self.miso_data = f"{self.misodata:08b}"
+            elif self.miso_format == 'ascii':
+                self.miso_data = chr(self.misodata) if 32 <= self.misodata <= 126 else f"{self.misodata:02X}"
+            self.put(ss, es, self.out_ann, [0, [self.miso_data]])
         if self.have_mosi:
-            self.put(ss, es, self.out_ann, [1, ['%02X' % self.mosidata]])
+            self.mosi_format = self.options['format']
+            if self.mosi_format == 'hex':     
+                self.mosi_data = "%02x"%(self.mosidata)
+            elif self.mosi_format == 'dec':
+                self.mosi_data = f"{self.mosidata}"
+            elif self.mosi_format == 'oct':
+                self.mosi_data = "%03o"%(self.mosidata)
+            elif self.mosi_format == 'bin':
+                self.mosi_data = f"{self.mosidata:08b}"
+            elif self.mosi_format == 'ascii':
+                self.mosi_data = chr(self.mosidata) if 32 <= self.mosidata <= 126 else f"{self.mosidata:02X}"
+            self.put(ss, es, self.out_ann, [1, [self.mosi_data]])
+            # self.put(ss, es, self.out_ann, [1, [self.mosidata]])
 
     def reset_decoder_state(self):
         self.misodata = 0 if self.have_miso else None
@@ -217,16 +254,16 @@ class Decoder(srd.Decoder):
 
         # Receive MISO bit into our shift register.
         if self.have_miso:
-            if bo == 'msb-first':
+            if bo == 'msb-first':   # 高位优先
                 self.misodata |= miso << (ws - 1 - self.bitcount)
-            else:
+            else:                   # 低位优先
                 self.misodata |= miso << self.bitcount
 
         # Receive MOSI bit into our shift register.
         if self.have_mosi:
-            if bo == 'msb-first':
+            if bo == 'msb-first':   # 高位优先
                 self.mosidata |= mosi << (ws - 1 - self.bitcount)
-            else:
+            else:                   # 低位优先
                 self.mosidata |= mosi << self.bitcount
 
         # Guesstimate the endsample for this bit (can be overridden below).
@@ -266,9 +303,23 @@ class Decoder(srd.Decoder):
             self.putw([4, ['CS# was deasserted during this data word!']])
 
         self.reset_decoder_state()
-
+    
+    # Format the bytes according to the selected format
+    def format_data(self, bytes_list, format_type):
+        if format_type == 'hex':
+            return ' '.join(f"{x.val:02X}" for x in bytes_list)
+        elif format_type == 'dec':
+            return ' '.join(f"{x.val:d}" for x in bytes_list)
+        elif format_type == 'oct':
+            return ' '.join(f"{x.val:03o}" for x in bytes_list)
+        elif format_type == 'bin':
+            return ' '.join(f"{x.val:08b}" for x in bytes_list)
+        elif format_type == 'ascii':
+            return ''.join(chr(x.val) if 32 <= x.val <= 126 else f'\\x{x.val:02X}' for x in bytes_list)
+        return ''
+    
     def find_clk_edge(self, miso, mosi, clk, cs, first):
-        if self.have_cs and (first or self.matched[self.have_cs]):
+        if self.have_cs and (first or (self.matched & (0b1 << self.have_cs))):
             # Send all CS# pin value changes.
             oldcs = None if first else 1 - cs
             self.put(self.samplenum, self.samplenum, self.out_python,
@@ -279,12 +330,19 @@ class Decoder(srd.Decoder):
                 self.misobytes = []
                 self.mosibytes = []
             elif self.ss_transfer != -1:
+                fmt = self.options['format']
                 if self.have_miso:
-                    self.put(self.ss_transfer, self.samplenum, self.out_ann,
-                        [5, [' '.join(format(x.val, '02X') for x in self.misobytes)]])
+                    formatted_miso = self.format_data(self.misobytes, fmt)
+                    self.put(self.ss_transfer, self.samplenum,self.out_ann,
+                            [5, [formatted_miso]])
+                    # self.put(self.ss_transfer, self.samplenum, self.out_ann,
+                    #     [5, [' '.join(format(x.val, '02X') for x in self.misobytes)]])
                 if self.have_mosi:
+                    formatted_mosi = self.format_data(self.mosibytes, fmt)
                     self.put(self.ss_transfer, self.samplenum, self.out_ann,
-                        [6, [' '.join(format(x.val, '02X') for x in self.mosibytes)]])
+                            [6, [formatted_mosi]])
+                    # self.put(self.ss_transfer, self.samplenum, self.out_ann,
+                    #     [6, [' '.join(format(x.val, '02X') for x in self.mosibytes)]])
                 self.put(self.ss_transfer, self.samplenum, self.out_python,
                     ['TRANSFER', self.mosibytes, self.misobytes])
 
@@ -296,24 +354,43 @@ class Decoder(srd.Decoder):
             return
 
         # Ignore sample if the clock pin hasn't changed.
-        if first or not self.matched[0]:
+        if first or (not self.matched & (0b1 << 0)):
             return
 
         # Sample data on rising/falling clock edge (depends on mode).
         mode = spi_mode[self.options['cpol'], self.options['cpha']]
-        if mode == 0 and clk == 0:   # Sample on rising clock edge
+        # if mode == 0 and clk == 0:   # Sample on rising clock edge
+        #     return
+        # elif mode == 1 and clk == 1: # Sample on falling clock edge
+        #     return
+        # elif mode == 2 and clk == 1: # Sample on falling clock edge
+        #     return
+        # elif mode == 3 and clk == 0: # Sample on rising clock edge
+        #     return
+        
+        # 上升沿采样
+        if (mode == 0 and clk == 1) or (mode == 3 and clk == 1):
+            if self.show_data_point:
+                self.put(self.samplenum, self.samplenum, self.out_ann,[8,['%d'% CLK]])
+                self.put(self.samplenum, self.samplenum, self.out_ann,[7,['%d'% MISO]])
+                self.put(self.samplenum, self.samplenum, self.out_ann,[7,['%d'% MOSI]])
+        # 下降沿采样
+        elif (mode == 1 and clk == 0) or (mode == 2 and clk == 0):
+            if self.show_data_point:
+                self.put(self.samplenum, self.samplenum, self.out_ann,[9,['%d'% CLK]])
+                self.put(self.samplenum, self.samplenum, self.out_ann,[7,['%d'% MISO]])
+                self.put(self.samplenum, self.samplenum, self.out_ann,[7,['%d'% MOSI]])
+        else:
             return
-        elif mode == 1 and clk == 1: # Sample on falling clock edge
-            return
-        elif mode == 2 and clk == 1: # Sample on falling clock edge
-            return
-        elif mode == 3 and clk == 0: # Sample on rising clock edge
-            return
-
+        
         # Found the correct clock edge, now get the SPI bit(s).
         self.handle_bit(miso, mosi, clk, cs)
-
+    
     def decode(self):
+        self.put(self.samplenum, self.samplenum, self.out_ann, [7,["color:#F32FDC"]])
+        self.put(self.samplenum, self.samplenum, self.out_ann, [8,["color:#F32FDC"]])
+        self.put(self.samplenum, self.samplenum, self.out_ann, [9,["color:#F32FDC"]])
+
         # The CLK input is mandatory. Other signals are (individually)
         # optional. Yet either MISO or MOSI (or both) must be provided.
         # Tell stacked decoders when we don't have a CS# signal.
@@ -326,7 +403,7 @@ class Decoder(srd.Decoder):
         self.have_cs = self.has_channel(3)
         if not self.have_cs:
             self.put(0, 0, self.out_python, ['CS-CHANGE', None, None])
-
+        
         # We want all CLK changes. We want all CS changes if CS is used.
         # Map 'have_cs' from boolean to an integer index. This simplifies
         # evaluation in other locations.

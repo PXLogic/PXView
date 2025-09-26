@@ -161,11 +161,11 @@ bool bHighScale = true;
     delete a1;
 	a1 = NULL;
 
-	if (sk >= 1.5 && sy <= 1080){
-		QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
-        QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-		bHighScale = false;
-	} 
+	//if (sk >= 1.5 && sy <= 1080){
+	//	QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    //    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+	//	bHighScale = false;
+	//} 
 #endif
 	if (bHighScale){
 		QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
