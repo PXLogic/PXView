@@ -2,7 +2,7 @@
 ## This file is part of the libsigrokdecode project.
 ##
 ## Copyright (C) 2014 Sebastien Bourdelin <sebastien.bourdelin@savoirfairelinux.com>
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -38,6 +38,8 @@ class Decoder(srd.Decoder):
     options = (
         { 'id': 'invert', 'desc': 'Signal ist invertiert',
           'default': 'nein', 'values': ('ja', 'nein') },
+        {'id': 'format', 'desc': 'Data format', 'default': 'hex',
+            'values': ('hex', 'dec', 'oct', 'bin')},
     )
     annotations = (
         ('controller_0', 'Reglerwort ID 0'), # 0
@@ -161,6 +163,23 @@ class Decoder(srd.Decoder):
             if bit == 0:
                 self.dataWord |= 1
 
+    def format_data(self, value, bit_width=None):
+        fmt = self.options.get('format', 'hex')  # 默认为hex
+        if bit_width is not None:
+            value &= (1 << bit_width) - 1  # 限制位数
+        
+        if fmt == 'hex':
+            width = max(2, (bit_width + 3) // 4) if bit_width else 0
+            return f"{value:0{width}x}"
+        elif fmt == 'oct':
+            width = max(3, (bit_width + 2) // 3) if bit_width else 0
+            return f"{value:0{width}o}"
+        elif fmt == 'bin':
+            width = bit_width if bit_width else 0
+            return f"{value:0{width}b}"
+        else:  # dec或其他
+            return str(value)
+    
     def print_reglerdatenwort(self):
         regler_id = self.get_value_from_dataword(6, 3)
         regler_str = str(regler_id)
@@ -223,40 +242,47 @@ class Decoder(srd.Decoder):
         befehl = self.get_flipped_value_from_dataword(3, 5)
         regler = self.get_flipped_value_from_dataword(0, 3)
         #self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [11, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        if befehl == 0: # Geschwindigkeit programmieren
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [11, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 1: # Bremswert programmieren
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [12, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 2: # Tank programmieren
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [13, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 4: # Werte fuer Fahrzeug
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [14, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 5: # Tanken möglich Modus
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [15, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 6: # Position des Fahrers
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [16, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 7: # Rennen beendet
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [17, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 8: # Zieldurchfahrt mit Bestzeit
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [18, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 9: # Zieldurchfahrt
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [19, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 10: # Tankstand
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [20, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 11: # Frühstart
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [21, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 16: # Ampel
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [22, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 17: # Rundenzahl upper Nibble
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [23, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 18: # Rundenzahl lower Nibble
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [23, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 19: # Reset
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [24, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 20: # Pitlandeadapter konfigurieren
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [25, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
-        elif befehl == 21: # Performance Messmodus
-            self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [26, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        desc = "Befehl: {}, Regler: {}, Wert: {}".format(
+        self.format_data(befehl, 5),
+        self.format_data(regler, 3),
+        self.format_data(wert, 4))
+    
+        self.put(self.beginDataWord, self.endDatatWord, self.out_ann, 
+                [11 + befehl, [desc]])
+        # if befehl == 0: # Geschwindigkeit programmieren
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [11, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 1: # Bremswert programmieren
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [12, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 2: # Tank programmieren
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [13, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 4: # Werte fuer Fahrzeug
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [14, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 5: # Tanken möglich Modus
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [15, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 6: # Position des Fahrers
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [16, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 7: # Rennen beendet
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [17, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 8: # Zieldurchfahrt mit Bestzeit
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [18, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 9: # Zieldurchfahrt
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [19, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 10: # Tankstand
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [20, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 11: # Frühstart
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [21, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 16: # Ampel
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [22, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 17: # Rundenzahl upper Nibble
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [23, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 18: # Rundenzahl lower Nibble
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [23, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 19: # Reset
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [24, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 20: # Pitlandeadapter konfigurieren
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [25, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
+        # elif befehl == 21: # Performance Messmodus
+        #     self.put(self.beginDataWord, self.endDatatWord, self.out_ann, [26, ["Befehl: {}, Regler: {}, Wert: {}".format(befehl, regler, wert)]])
 
         
 

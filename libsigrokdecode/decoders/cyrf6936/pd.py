@@ -1,6 +1,6 @@
 ##
 ## Copyright (C) 2016 Soenke J. Peters
-## Copyright (C) 2023 ALIENTEK(正点原子) <39035605@qq.com>
+
 ##
 ## Based on decoders/nrf24l01/pd.py of the libsigrokdecode project,
 ## copyright (C) 2014 Jens Steinhauser <jens.steinhauser@gmail.com>

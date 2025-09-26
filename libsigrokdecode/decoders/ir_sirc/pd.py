@@ -49,11 +49,11 @@ class Decoder(srd.Decoder):
     inputs = ['logic']
     outputs = []
     channels = (
-        {'id': 'ir', 'name': 'IR', 'desc': 'IR data line', 'idn':'dec_ir_sirc_chan_ir'},
+        {'id': 'ir', 'name': 'IR', 'desc': 'IR data line'},
     )
     options = (
         {'id': 'polarity', 'desc': 'Polarity', 'default': 'active-low',
-            'values': ('active-low', 'active-high'), 'idn':'dec_ir_sirc_opt_polarity'},
+            'values': ('active-low', 'active-high')},
     )
     annotations = (
         ('bit', 'Bit'),
@@ -108,15 +108,15 @@ class Decoder(srd.Decoder):
     def read_pulse(self, high, time):
         e = 'f' if high else 'r'
         max_time = int(time * 1.30)
-        (ir,), ss, es, matched = self.wait_wrap([{0: e}], max_time)
-        if (matched & 0b1) or not self.tolerance(ss, es, time):
+        (ir,), ss, es, (edge, timeout) = self.wait_wrap([{0: e}], max_time)
+        if timeout or not self.tolerance(ss, es, time):
             raise SIRCError('Timeout')
-        return ir, ss, es, matched
+        return ir, ss, es, (edge, timeout)
 
     def read_bit(self):
         e = 'f' if self.active else 'r'
-        _, high_ss, high_es, matched = self.wait_wrap([{0: e}], 2000)
-        if (matched & 0b1):
+        _, high_ss, high_es, (edge, timeout) = self.wait_wrap([{0: e}], 2000)
+        if timeout:
             raise SIRCError('Bit High Timeout')
         if self.tolerance(high_ss, high_es, ONE_USEC):
             bit = 1
