@@ -1,0 +1,74 @@
+[
+    {
+        "id": "IDS_GLITCH_FILTER_BOTH",
+        "text": "Both"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HIGH",
+        "text": "High"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_LOW",
+        "text": "Low"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_TYPE",
+        "text": "Filter Type"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_PERIOD",
+        "text": "Filter Period"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_UNIT",
+        "text": "cycles"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HINT",
+        "text": "*Check channels and click Apply, pulses narrower than the specified width will be filtered.\n(Both: filter high and low pulses; High: filter low glitches on high level; Low: filter high glitches on low level)"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_HINT",
+        "text": "*Check channels and click Apply, signal levels will be inverted (0→1, 1→0)"
+    },
+    {
+        "id": "IDS_LOGIC_MODE_ONLY",
+        "text": "This function is only available in Logic mode"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_TITLE",
+        "text": "Signal Invert"
+    },
+    {
+        "id": "IDS_SELECT_ALL",
+        "text": "Select All"
+    },
+    {
+        "id": "IDS_DESELECT_ALL",
+        "text": "Deselect All"
+    },
+    {
+        "id": "IDS_APPLY_INVERT",
+        "text": "Apply Invert"
+    },
+    {
+        "id": "IDS_RESTORE_ORIGINAL_DATA",
+        "text": "Restore Original Data"
+    },
+    {
+        "id": "IDS_INVERT_ACTIVE",
+        "text": "Inverted"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_TITLE",
+        "text": "Glitch Filter"
+    },
+    {
+        "id": "IDS_APPLY_FILTER",
+        "text": "Apply Filter"
+    },
+    {
+        "id": "IDS_FILTER_ACTIVE",
+        "text": "Filtered"
+    }
+]

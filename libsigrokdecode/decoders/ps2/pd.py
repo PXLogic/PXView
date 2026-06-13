@@ -26,6 +26,13 @@ class Ann:
 
 Bit = namedtuple('Bit', 'val ss es')
 
+class Ps2Packet:
+    def __init__(self, val, host=False, pok=False, ack=False):
+        self.val  = val
+        self.host = host
+        self.pok  = pok
+        self.ack  = ack
+
 class Decoder(srd.Decoder):
     api_version = 3
     id = 'ps2'
@@ -34,7 +41,7 @@ class Decoder(srd.Decoder):
     desc = 'PS/2 keyboard/mouse interface.'
     license = 'gplv2+'
     inputs = ['logic']
-    outputs = []
+    outputs = ['ps2']
     tags = ['PC']
     channels = (
         {'id': 'clk', 'type': 0, 'name': 'Clock', 'desc': 'Clock line', 'idn':'dec_ps2_chan_clk'},
@@ -75,6 +82,7 @@ class Decoder(srd.Decoder):
 
     def start(self):
         self.out_ann = self.register(srd.OUTPUT_ANN)
+        self.out_python = self.register(srd.OUTPUT_PYTHON)
         self.HtoD = 1 if self.options['HtoD_Clock'] == 'rise' else 0
         self.DtoH = 1 if self.options['DtoH_Clock'] == 'fall' else 0
     def putb(self, bit, ann_idx):
@@ -130,6 +138,11 @@ class Decoder(srd.Decoder):
         else:
             self.putx(9, [Ann.PARITY_ERR, ['Parity error', 'Par err', 'PE']])
         self.putx(10, [Ann.STOP, ['Stop bit', 'Stop', 'St', 'T']])
+
+        # Send Python output for stacked decoders (ps2_keyboard, ps2_mouse).
+        host = (self.state == 'HtoD')
+        pkt = Ps2Packet(val=word, host=host, pok=parity_ok, ack=False)
+        self.put(self.bits[0].ss, self.bits[10].es, self.out_python, pkt)
 
         self.bits, self.bitcount = [], 0
         self.state == 'NULL'

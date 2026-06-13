@@ -13,6 +13,15 @@
 /* DreamSourceLab hardware driver support */
 #define HAVE_DSL_DEVICE 1
 
+/* Standard sigrok compatible drivers support */
+/* #undef HAVE_COMPAT_DRIVERS */
+
+/* fx2lafw driver support */
+/* #undef HAVE_DRIVER_FX2LAFW */
+
+/* saleae-logic16 driver support */
+/* #undef HAVE_DRIVER_SALEAE_LOGIC16 */
+
 /* Define to 1 if you have the <fcntl.h> header file. */
 #define HAVE_FCNTL_H 1
 
@@ -95,19 +104,19 @@
 #define LT_OBJDIR ".libs/"
 
 /* Name of package */
-#define PACKAGE "libsigrok4DSL"
+#define PACKAGE "libsigrok"
 
 /* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "support@https://github.com/PXLogic/PXView"
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME "libsigrok4DSL"
+#define PACKAGE_NAME "libsigrok"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "libsigrok4DSL 0.2.0"
+#define PACKAGE_STRING "libsigrok 0.2.0"
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME "libsigrok4DSL"
+#define PACKAGE_TARNAME "libsigrok"
 
 /* Define to the home page for this package. */
 #define PACKAGE_URL "https://github.com/PXLogic/PXView"

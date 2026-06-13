@@ -41,16 +41,16 @@
 #define LT_OBJDIR ".libs/"
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT "support@dreamsourcelab.com"
+#define PACKAGE_BUGREPORT "support@https://github.com/PXLogic/PXView"
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME "libsigrokdecode4DSL"
+#define PACKAGE_NAME "libsigrokdecode"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "libsigrokdecode4DSL 0.6.0"
+#define PACKAGE_STRING "libsigrokdecode 0.6.0"
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME "libsigrokdecode4DSL"
+#define PACKAGE_TARNAME "libsigrokdecode"
 
 /* Define to the home page for this package. */
 #define PACKAGE_URL "https://github.com/PXLogic/PXView"
@@ -58,28 +58,28 @@
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "0.6.0"
 
-/* Binary age of libsigrokdecode4DSL. */
+/* Binary age of libsigrokdecode. */
 #define SRD_LIB_VERSION_AGE 0
 
-/* Binary version of libsigrokdecode4DSL. */
+/* Binary version of libsigrokdecode. */
 #define SRD_LIB_VERSION_CURRENT 4
 
-/* Binary revision of libsigrokdecode4DSL. */
+/* Binary revision of libsigrokdecode. */
 #define SRD_LIB_VERSION_REVISION 0
 
-/* Binary version triple of libsigrokdecode4DSL. */
+/* Binary version triple of libsigrokdecode. */
 #define SRD_LIB_VERSION_STRING "4:0:0"
 
-/* Major version number of libsigrokdecode4DSL. */
+/* Major version number of libsigrokdecode. */
 #define SRD_PACKAGE_VERSION_MAJOR 0
 
-/* Micro version number of libsigrokdecode4DSL. */
+/* Micro version number of libsigrokdecode. */
 #define SRD_PACKAGE_VERSION_MICRO 0
 
-/* Minor version number of libsigrokdecode4DSL. */
+/* Minor version number of libsigrokdecode. */
 #define SRD_PACKAGE_VERSION_MINOR 6
 
-/* Version of libsigrokdecode4DSL. */
+/* Version of libsigrokdecode. */
 #define SRD_PACKAGE_VERSION_STRING "0.6.0-git-3914467"
 
 /* Define to 1 if you have the ANSI C header files. */
@@ -110,5 +110,5 @@
 
 /* The targeted POSIX standard. */
 #ifndef _POSIX_C_SOURCE
-# define _POSIX_C_SOURCE 200112L
+# define _POSIX_C_SOURCE 200809L
 #endif

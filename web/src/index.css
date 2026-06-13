@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-casing: #E5E0D8;
+  --color-bg-casing-dark: #D5D0C8;
+  --color-bg-screen: #111111;
+  --color-bg-screen-light: #1A1A1A;
+  --color-border: #000000;
+  
+  --color-text-casing: #000000;
+  --color-text-casing-muted: #555555;
+  --color-text-screen: #FFB000; /* Amber CRT */
+  --color-text-screen-alt: #33FF00; /* Green CRT */
+  
+  --color-accent: #D35400; /* Burnt Orange */
+  --color-success: #2ECC71; /* LED Green */
+  --color-error: #C0392B; /* LED Red */
+  --color-warning: #F39C12; /* LED Amber */
+  
+  --font-mono: 'VT323', 'JetBrains Mono', 'Courier New', monospace;
+  --font-sans: 'VT323', 'JetBrains Mono', 'Courier New', monospace; /* Force monospace everywhere for retro feel */
+}
+
+body {
+  font-family: var(--font-mono);
+  background-color: var(--color-bg-casing);
+  color: var(--color-text-casing);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100vh;
+  /* Add subtle texture to the casing */
+  background-image: url("data:image/svg+xml,%3Csvg width='4' height='4' viewBox='0 0 4 4' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 3h1v1H1V3zm2-2h1v1H3V1z' fill='%23000000' fill-opacity='0.03' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Industrial Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  background: var(--color-bg-casing);
+  border-left: 2px solid var(--color-border);
+}
+::-webkit-scrollbar-track {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--color-bg-casing),
+    var(--color-bg-casing) 2px,
+    var(--color-bg-casing-dark) 2px,
+    var(--color-bg-casing-dark) 4px
+  );
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-casing-muted);
+  border: 2px solid var(--color-border);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-casing);
+}
+
+/* CRT scanline effect overlay */
+.scanlines {
+  position: relative;
+}
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0) 50%,
+    rgba(0,0,0,0.1) 50%,
+    rgba(0,0,0,0.1)
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Markdown Styles for Cassette Futurism Mode */
+.markdown-body p { margin-bottom: 0.5em; }
+.markdown-body pre { background-color: var(--color-bg-casing-dark); padding: 0.5rem; border: 2px solid var(--color-border); margin: 0.5rem 0; overflow-x: auto; color: var(--color-text-casing); }
+.markdown-body code { background-color: var(--color-bg-casing-dark); padding: 0.1rem 0.3rem; border: 1px solid var(--color-border); color: var(--color-text-casing); }
+.markdown-body pre code { background-color: transparent; padding: 0; border: none; }
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; border: 2px solid var(--color-border); }
+.markdown-body th, .markdown-body td { border: 1px solid var(--color-border); padding: 0.25rem 0.5rem; }
+.markdown-body th { background-color: var(--color-bg-casing-dark); text-align: left; border-bottom: 2px solid var(--color-border); }
+.markdown-body a { text-decoration: underline; color: inherit; }
+.markdown-body ul { list-style-type: square; margin-left: 1.5rem; margin-bottom: 0.5em; }
+.markdown-body ol { list-style-type: decimal; margin-left: 1.5rem; margin-bottom: 0.5em; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; text-transform: uppercase; border-bottom: 2px solid var(--color-border); display: inline-block; }

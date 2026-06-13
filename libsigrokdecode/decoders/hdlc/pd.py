@@ -259,7 +259,7 @@ class Decoder(srd.Decoder):
         wait_cond = [{0: 'e'}]
         if self.have_en:
             self.have_en = len(wait_cond)
-            wait_cond.append({3: 'e'})
+            wait_cond.append({2: 'e'})
 
         # "Pixel compatibility" with the v2 implementation. Grab and
         # process the very first sample before checking for edges. The

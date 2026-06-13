@@ -1,14 +1,5 @@
 echo "clean cmake cache begin..."
 
-rm -rf ./SARibbon
-rm -rf ./install.dir
-
-echo "rm ./_CPack_Packages"
-rm -rf ./_CPack_Packages
-
-echo "rm ./build"
-rm -rf ./build
-
 echo "rm ./build.dir"
 rm -rf ./build.dir
 
@@ -30,8 +21,8 @@ rm -f ./CMakeCache.txt
 echo "rm ./*.cmake"
 rm -f ./*.cmake
 
-echo "rm ./DSView.qrc.depends"
-rm -f ./DSView.qrc.depends
+echo "rm ./PXView.qrc.depends"
+rm -f ./PXView.qrc.depends
 
 echo "rm ./moc_*.cpp*"
 find . -name 'moc_*.cpp*' | xargs rm -rf

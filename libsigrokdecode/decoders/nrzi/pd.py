@@ -145,7 +145,7 @@ class Decoder(srd.Decoder):
                 self.wait([{0: 'e'}, {'skip': self.symbol_len}])
 
                 # Check if transition was detected
-                if self.matched == (True, False):
+                if self.matched & (1 << 0):
                     # Adjust symbol length so transition is at mid-point
                     edge_samp = self.samplenum - start_sample           # Edge position within symbol
                     offset = int(self.symbol_len / 2) - edge_samp       # Edge offset from mid-point of symbol

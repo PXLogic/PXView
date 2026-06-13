@@ -172,7 +172,7 @@ bits = {
 
 info = {
     AnnInfo.WARN: ["Warnings", "Warn", "W"],
-    AnnInfo.BADADD: ["Uknown slave address", "Unknown address", "Uknown",
+    AnnInfo.BADADD: ["Unknown slave address", "Unknown address", "Unknown",
                      "Unk", "U"],
     AnnInfo.CHECK: ["Slave presence check", "Slave check", "Check",
                     "Chk", "C"],

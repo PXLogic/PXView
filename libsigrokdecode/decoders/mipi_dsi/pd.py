@@ -44,17 +44,16 @@ command.
 
 # CMD: [annotation-type-index, long annotation, short annotation]
 proto = {
-    'ESC Mode':           [0, 'Escape mode entry',                  'ESC'],
-    'BTA':                [1, 'Bi-directional Data Lane Turnaround','BTA'],
-    'DATA':               [2, 'Data',                              'Data'],
-    'STOP':               [3, 'Stop',                                 'S'],
-    'LPDT':               [4, 'LPDT Command',                      'LPDT'],
-    'DI':                 [5, 'Data Identifier',                     'DI'],
-    'ECC':                [6, 'Error Correction Code',              'ECC'],
-    'WC':                 [7, 'Word count',                          'WC'],
-    'CRC':                [8, 'CheckSUM',                           'CRC'],
-    'ULPS':               [9, 'Ultra-Low Power State',             'ULPS'],
-    'IDLE':               [10,'Idle',                              'Idle'],
+    'ESC Mode':           [4, 'Escape mode entry',                  'ESC'],
+    'BTA':                [5, 'Bi-directional Data Lane Turnaround','BTA'],
+    'DATA':               [7, 'Data',                              'Data'],
+    'STOP':               [11, 'Stop',                                 'S'],
+    'LPDT':               [6, 'LPDT Command',                      'LPDT'],
+    'DI':                 [7, 'Data Identifier',                     'DI'],
+    'ECC':                [8, 'Error Correction Code',              'ECC'],
+    'WC':                 [9, 'Word count',                          'WC'],
+    'CRC':                [10, 'CheckSUM',                           'CRC'],
+    'IDLE':               [12,'Idle',                              'Idle'],
 }
 # LP state
 lp_state = ['LP-00','LP-01','LP-10','LP-11']

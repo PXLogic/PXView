@@ -415,9 +415,7 @@ static const struct DEMO_profile supported_Demo[] = {
      * Demo
      */
     {"DreamSourceLab", "Demo Device", NULL,
-     {
-    //CAPS_MODE_LOGIC | CAPS_MODE_ANALOG | CAPS_MODE_DSO,
-      CAPS_MODE_LOGIC,
+     {CAPS_MODE_LOGIC | CAPS_MODE_ANALOG | CAPS_MODE_DSO,
       CAPS_FEATURE_NONE,
       (1 << DEMO_LOGIC100x16) |
       (1 << DEMO_ANALOG10x2) |

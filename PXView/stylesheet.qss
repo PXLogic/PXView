@@ -119,42 +119,6 @@ QComboBox::down-arrow:on { /* shift the arrow when popup is open */
 }
 /* <<< QToolBar: QLineEdit/QComboBox */
 
-/* >>> QDockWidget */
-QDockWidget {
-    margin: 0px;
-    background-color: rgb(17, 133, 209,  255);
-    border: 0px;
-    padding: 0px;
-    color: rgb(17, 133, 209,  255);
-    font-size: 15px;
-    font-weight: bold;
-}
-
-QDockWidget::title  {
-    margin: 0px;
-    text-align: left center;
-    background-color: rgb(255, 255, 255, 255);
-    border: 0px;
-    color: white;
-    padding: 8px;
-}
-QDockWidget > QWidget{
-    margin: 0px;
-    background-color: rgb(17, 133, 209,  255);
-    border: 0px;
-    padding: 0px;
-}
-
-QScrollArea #measureWidget,
-QScrollArea #dsoTriggerWidget,
-QScrollArea #triggerWidget,
-QScrollArea #protocolWidget{
-    margin: 0px;
-    background-color: rgb(17, 133, 209,  255);
-    border: 0px;
-    padding: 0px;
-}
-
 QGroupBox {
     margin: 0px;
     background-color: rgb(17, 133, 209,  255);
@@ -280,5 +244,3 @@ QHeaderView::section:vertical
 {
     border-left: 1px solid #fffff8;
 }
-
-/* <<< QDockWidget */

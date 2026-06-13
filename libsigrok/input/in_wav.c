@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <strings.h>
 #include "../log.h"
 #include <stdlib.h>
 
@@ -96,7 +97,7 @@ static int init(struct sr_input *in, const char *filename)
 	if (get_wav_header(filename, buf) != SR_OK)
 		return SR_ERR;
 
-	if (!(ctx = x_malloc(sizeof(struct context)))){
+	if (!(ctx = malloc(sizeof(struct context)))){
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		return SR_ERR_MALLOC;
 	}

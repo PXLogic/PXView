@@ -1,0 +1,199 @@
+[
+    {
+        "id": "Use 16 Channels (Max 20MHz)",
+        "text": "使用16個通道(最大採樣率 20MHz)"
+    },
+    {
+        "id": "Use 12 Channels (Max 25MHz)",
+        "text": "使用12個通道(最大採樣率 25MHz)"
+    },
+    {
+        "id": "Use 6 Channels (Max 50MHz)",
+        "text": "使用6個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 3 Channels (Max 100MHz)",
+        "text": "使用3個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 20MHz)",
+        "text": "使用16個通道(最大採樣率 20MHz)"
+    },
+    {
+        "id": "Use 12 Channels (Max 25MHz)",
+        "text": "使用12個通道(最大採樣率 25MHz)"
+    },
+    {
+        "id": "Use 6 Channels (Max 50MHz)",
+        "text": "使用6個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 3 Channels (Max 100MHz)",
+        "text": "使用3個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 32 Channels (Max 10MHz)",
+        "text": "使用32個通道(最大採樣率 10MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 20MHz)",
+        "text": "使用16個通道(最大採樣率 20MHz)"
+    },
+    {
+        "id": "Use 12 Channels (Max 25MHz)",
+        "text": "使用12個通道(最大採樣率 25MHz)"
+    },
+    {
+        "id": "Use 6 Channels (Max 50MHz)",
+        "text": "使用6個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 3 Channels (Max 100MHz)",
+        "text": "使用3個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 32 Channels (Max 50MHz)",
+        "text": "使用32個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 30 Channels (Max 100MHz)",
+        "text": "使用30個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 12 Channels (Max 250MHz)",
+        "text": "使用12個通道(最大採樣率 250MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 125MHz)",
+        "text": "使用16個通道(最大採樣率 125MHz)"
+    },
+    {
+        "id": "Use 12 Channels (Max 250MHz)",
+        "text": "使用12個通道(最大採樣率 250MHz)"
+    },
+    {
+        "id": "Use 6 Channels (Max 500MHz)",
+        "text": "使用6個通道(最大採樣率 500MHz)"
+    },
+    {
+        "id": "Use 3 Channels (Max 1GHz)",
+        "text": "使用3個通道(最大採樣率 1GHz)"
+    },
+    {
+        "id": "Use Channels 0~15 (Max 100MHz)",
+        "text": "使用通道 0~15 (最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use Channels 0~7 (Max 200MHz)",
+        "text": "使用通道 0~7 (最大採樣率 200MHz)"
+    },
+    {
+        "id": "Use Channels 0~3 (Max 400MHz)",
+        "text": "使用通道 0~3 (最大採樣率 400MHz)"
+    },
+    {
+        "id": "Use Channels 0~31 (Max 250MHz)",
+        "text": "使用通道 0~31 (最大採樣率 250MHz)"
+    },
+    {
+        "id": "Use Channels 0~15 (Max 500MHz)",
+        "text": "使用通道 0~15 (最大採樣率 500MHz)"
+    },
+    {
+        "id": "Use Channels 0~7 (Max 1GHz)",
+        "text": "使用通道 0~7 (最大採樣率 1GHz)"
+    },
+    {
+        "id": "Use Channels 0~1 (Max 10MHz)",
+        "text": "使用通道 0~1 (最大採樣率 10MHz)"
+    },
+    {
+        "id": "Use Channels 0~1 (Max 200MHz)",
+        "text": "使用通道 0~1 (最大採樣率 200MHz)"
+    },
+    {
+        "id": "Use Channels 0~1 (Max 1GHz)",
+        "text": "使用通道 0~1 (最大採樣率 1GHz)"
+    },
+
+    {
+        "id": "Use 32 Channels (Max 250MHz)",
+        "text": "使用32個通道(最大採樣率 250MHz)"
+    },
+
+    {
+        "id": "Use 16 Channels (Max 250MHz)",
+        "text": "使用16個通道(最大採樣率 250MHz)"
+    },
+
+    {
+        "id": "Use 16 Channels (Max 500MHz)",
+        "text": "使用16個通道(最大採樣率 500MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max 1000MHz)",
+        "text": "使用8個通道(最大採樣率 1000MHz)"
+    },
+
+    {
+        "id": "Use 32 Channels (Max50MHz)",
+        "text": "使用32個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 100MHz)",
+        "text": "使用16個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max 200MHz)",
+        "text": "使用8個通道(最大採樣率 200MHz)"
+    },
+    {
+        "id": "Use 4 Channels (Max 400MHz)",
+        "text": "使用4個通道(最大採樣率 400MHz)"
+    },
+    {
+        "id": "Use 2 Channels (Max 800MHz)",
+        "text": "使用2個通道(最大採樣率 800MHz)"
+    },
+
+    {
+        "id": "Use 8 Channels (Max 250MHz)",
+        "text": "使用8個通道(最大採樣率 250MHz)"
+    },
+
+    {
+        "id": "Use 4 Channels (Max 500MHz)",
+        "text": "使用4個通道(最大採樣率 500MHz)"
+    },
+    {
+        "id": "Use 2 Channels (Max 1000MHz)",
+        "text": "使用2個通道(最大採樣率 1000MHz)"
+    },
+
+
+    {
+        "id": "Use 1 Channels (Max200MHz)",
+        "text": "使用1個通道(最大採樣率 200MHz)"
+    },
+
+    {
+        "id": "Use 2 Channels (Max100MHz)",
+        "text": "使用2個通道(最大採樣率 100MHz)"
+    },
+    {
+        "id": "Use 4 Channels (Max50MHz)",
+        "text": "使用4個通道(最大採樣率 50MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max25MHz)",
+        "text": "使用8個通道(最大採樣率 25MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max10MHz)",
+        "text": "使用16個通道(最大採樣率10MHz)"
+    },
+    {
+        "id": "Use 32 Channels (Max5MHz)",
+        "text": "使用32個通道(最大採樣率 5MHz)"
+    }
+]

@@ -287,10 +287,11 @@ static GSList *scan(GSList *options)
     num = 0;
     is_speed_not_match = 0;
  
-    if (options != NULL)
+    if (options != NULL) {
         sr_info("Scan DSLogic device with options.");
-    else 
+    } else {
         sr_info("Scan DSLogic device...");
+    }
 
 	conn = NULL;
 	for (l = options; l; l = l->next) {

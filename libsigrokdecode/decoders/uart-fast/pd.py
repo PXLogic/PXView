@@ -552,7 +552,8 @@ class Decoder(srd.Decoder):
                 cond_edge_idx[rxtx] = len(conds)
                 conds.append({rxtx: 'e'})
 
-            signal = self.wait(conds)
+            (signal1,signal0) = self.wait(conds)
+            signal = [signal1,signal0]
 
             for rxtx in enabled_rxtx:
                 sig = signal[rxtx]

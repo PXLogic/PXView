@@ -1,0 +1,381 @@
+[
+    {
+        "id": "IDS_MSG_OK",
+        "text": "確定"
+    },
+    {
+        "id": "IDS_MSG_SKIP",
+        "text": "跳過"
+    },
+    {
+        "id": "IDS_MSG_CANCEL",
+        "text": "取消"
+    },{
+        "id": "IDS_MSG_ATTENTION",
+        "text": "注意"
+    },   
+    {
+        "id": "IDS_MSG_ERROR",
+        "text": "錯誤"
+    },
+    {
+        "id": "IDS_MSG_INFORMATION",
+        "text": "訊息"
+    }, 
+    {
+        "id": "IDS_MSG_CONTINUE",
+        "text": "繼續"
+    }, 
+    {
+        "id": "IDS_MSG_AUTO_CALIB_START",
+        "text": "自動校準程序將啟動。不要連接任何探頭。\n這可能需要一段時間!"
+    },
+    {
+        "id": "IDS_MSG_AUTO_CALIB",
+        "text": "自動校準"
+    },
+    {
+        "id": "IDS_MSG_ADJUST_SAVE",
+        "text": "請調整零偏差並儲存結果"
+    },
+    {
+        "id": "IDS_MSG_SAVE_CAPDATE",
+        "text": "儲存採集到的資料?"
+    },
+    {
+        "id": "IDS_MSG_NOT_FOND_DEFAULT_PROFILE",
+        "text": "找不到此裝置的預設設定檔!"
+    },
+    {
+        "id": "IDS_MSG_OPEN_FILE_ERROR",
+        "text": "開啟檔案錯誤!"
+    },
+    {
+        "id": "IDS_MSG_PROFILE_NOT_COMPATIBLE",
+        "text": "設定檔與目前裝置或模式不相容!"
+    },
+    {
+        "id": "IDS_MSG_RESTORE_WINDOW_ERROR",
+        "text": "還原視窗狀態錯誤!"
+    },
+    {
+        "id": "IDS_MSG_DECODE_INVAILD_CURSOR",
+        "text": "用於指定採樣範圍的游標無效!"
+    },
+    {
+        "id": "IDS_MSG_SEL_FILENAME",
+        "text": "您需要選擇檔名"
+    },
+    {
+        "id": "IDS_MSG_DECODER_REPEAT",
+        "text": "存在重複id或name的解碼器:"
+    },
+    {
+        "id": "IDS_MSG_DECODER_LIST_EMPTY",
+        "text": "解碼器列表為空!"
+    },
+    {
+        "id": "IDS_MSG_NO_SEL_DECODER",
+        "text": "請選擇一個解碼器!"
+    },
+    {
+        "id": "IDS_MSG_FIND_BASE_DECODER_ERROR",
+        "text": "沒有找到對應的底層解碼器!"
+    },
+    {
+        "id": "IDS_MSG_NO_DECODER_DEL",
+        "text": "沒有可移除的解碼器!"
+    },
+    {
+        "id": "IDS_MSG_DECODER_CONFIRM_DEL_ALL",
+        "text": "是否確定要移除所有解碼器?"
+    },
+    {
+        "id": "IDS_MSG_DECODER_CONFIRM_DEL",
+        "text": "是否確定要移除這個解碼器?"
+    },   
+    {
+        "id": "IDS_MSG_CLOSE_DEVICE",
+        "text": "是否確定要移除這個裝置?"
+    },
+    {
+        "id": "IDS_MSG_SET_DEF_CAL_SETTING",
+        "text": "所有校準設定將儲存為預設值!"
+    },
+    {
+        "id": "IDS_MSG_ALL_CHANNEL_DISABLE",
+        "text": "所有通道已停用，請至少啟用一個通道!"
+    },
+    {
+        "id": "IDS_MSG_MAX_CHANNEL_COUNT_WARNING",
+        "text": "目前模式僅支援最大 {0} 通道數!"
+    },
+    {
+        "id": "IDS_MSG_TRI_SET_ISSUE",
+        "text": "觸發設定問題"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_HOR_TRI_POS_FAIL",
+        "text": "更改水平觸發位置失敗!"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_TRI_HOLDOFF_TIME_FAIL",
+        "text": "更改觸發釋抑時間失敗!"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_SENSITIVITY_FAIL",
+        "text": "更改觸發靈敏度失敗!"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_SOURCE_FAIL",
+        "text": "更改觸發源失敗!"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_CHANNEL_FAIL",
+        "text": "更改觸發通道失敗!"
+    },
+    {
+        "id": "IDS_MSG_CHANGE_TYPE_FAIL",
+        "text": "更改觸發類型失敗!"
+    },
+    {
+        "id": "IDS_MSG_PLEASE_INSERT_CURSOR",
+        "text": "請在使用游標測量之前先插入游標."
+    },
+    {
+        "id": "IDS_MSG_SEARCH",
+        "text": "尋找"
+    },
+    {
+        "id": "IDS_MSG_NO_SAMPLE_DATA",
+        "text": "無採樣資料!"
+    },
+    {
+        "id": "IDS_MSG_SEARCH_AT_START",
+        "text": "在起始位置搜尋游標!"
+    },
+    {
+        "id": "IDS_MSG_PATTERN_NOT_FOUND",
+        "text": "找不到符合項!"
+    },
+    {
+        "id": "IDS_MSG_SEARCH_AT_END",
+        "text": "搜尋游標處於結束位置!"
+    },
+    {
+        "id": "IDS_MSG_TRIGGER",
+        "text": "觸發"
+    },
+    {
+        "id": "IDS_MSG_STREAM_NO_AD_TRIGGER",
+        "text": "流模式不支援進階觸發功能!"
+    },
+    {
+        "id": "IDS_MSG_AD_TRIGGER_NEED_HARDWARE",
+        "text": "進階觸發需要硬體支援!"
+    },
+    {
+        "id": "IDS_MSG_SET_TRI_MULTI_CHANNEL",
+        "text": "同時有多個通道設定了觸發條件!\n僅當所有通道在同一時刻同時滿足觸發條件時才會觸發"
+    },
+    {
+        "id": "IDS_MSG_NOT_SHOW_AGAIN",
+        "text": "不再顯示"
+    },
+    {
+        "id": "IDS_MSG_CLEAR_TRIG",
+        "text": "清除觸發"
+    },
+    {
+        "id": "IDS_MSG_IGNORE",
+        "text": "忽略"
+    },
+    {
+        "id": "IDS_MSG_OPEN",
+        "text": "開啟"
+    },
+    {
+        "id": "IDS_MSG_FAIL_TO_LOAD",
+        "text": "載入失敗"
+    },
+    {
+        "id": "IDS_MSG_HARDWARE_ERROR",
+        "text": "硬體操作失敗"
+    },
+    {
+        "id": "IDS_MSG_HARDWARE_ERROR_DET",
+        "text": "請重新插入裝置以重新整理硬體設定!"
+    },
+    {
+        "id": "IDS_MSG_MALLOC_ERROR",
+        "text": "動態記憶體分配錯誤"
+    },
+    {
+        "id": "IDS_MSG_MALLOC_ERROR_DET",
+        "text": "記憶體不足，無法容納此採樣量!\n請降低採樣深度!"
+    },
+    {
+        "id": "IDS_MSG_PACKET_ERROR",
+        "text": "資料包錯誤"
+    },
+    {
+        "id": "IDS_MSG_PACKET_ERROR_DET",
+        "text": "接收到的資料包格式不正確!"
+    },
+    {
+        "id": "IDS_MSG_DATA_OVERFLOW",
+        "text": "資料溢位"
+    },
+    {
+        "id": "IDS_MSG_DATA_OVERFLOW_DET",
+        "text": "USB頻寬無法支援目前採樣設定!\n請降低採樣率或者通道數!"
+    },
+    {
+        "id": "IDS_MSG_UNDEFINED_ERROR",
+        "text": "未定義錯誤"
+    },
+    {
+        "id": "IDS_MSG_UNDEFINED_ERROR_DET",
+        "text": "意外錯誤!"
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR1",
+        "text": "PXView目前不支援\n多資料類型的檔案儲存."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR2",
+        "text": "沒有要儲存的資料."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR3",
+        "text": "沒有檔名."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR4",
+        "text": "產生暫存檔資料失敗."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR5",
+        "text": "產生解碼檔資料失敗."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR6",
+        "text": "產生會話檔資料失敗."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVESTART_ERROR7",
+        "text": "產生zip檔案失敗."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVEPROC_ERROR1",
+        "text": "無法建立zip檔案,記憶體分配錯誤."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_SAVEPROC_ERROR2",
+        "text": "無法建立zip檔案,請檢查此路徑的寫入權限."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR1",
+        "text": "PXView目前不支援\n多資料類型的檔案匯出."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR2",
+        "text": "沒有要儲存的資料."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR3",
+        "text": "沒有設定檔名."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR4",
+        "text": "匯出格式無效."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTPROC_ERROR1",
+        "text": "不支援的資料類型."
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTPROC_ERROR2",
+        "text": "緩衝區記憶體分配失敗."
+    },
+    {
+        "id": "IDS_MSG_SAVE_FILE",
+        "text": "儲存檔案"
+    },
+    {
+        "id": "IDS_MSG_EXPORT_DATA",
+        "text": "匯出資料"
+    },
+    {
+        "id": "IDS_MSG_STORESESS_EXPORTPROC_ERROR2",
+        "text": "緩衝區記憶體分配失敗."
+    },
+    {
+        "id": "IDS_MSG_EXPORT_DATA",
+        "text": "匯出檔案"
+    },
+    {
+        "id": "IDS_MSG_DECODERSTACK_DECODE_WORK_ERROR",
+        "text": "沒有設定需要解碼哪些通道的資料!"
+    },
+    {
+        "id": "IDS_MSG_DECODERSTACK_DECODE_DATA_ERROR",
+        "text": "至少有一個需要解碼的通道未使能."
+    },
+    {
+        "id": "IDS_MSG_DECODERSTACK_DECODE_STACK_ERROR",
+        "text": "未能建立解碼實例"
+    },
+    {
+        "id": "IDS_MSG_MESSAGE",
+        "text": "訊息"
+    },
+    {
+        "id": "IDS_MSG_BOX_CONFIRM",
+        "text": "確認"
+    },
+    {
+        "id": "IDS_MSG_NO_DATA",
+        "text": "沒有資料!"
+    },
+    {
+        "id": "IDS_MSG_TO_SWITCH_DEVICE",
+        "text": "是否切換到新裝置?"
+    },
+    {
+        "id": "IDS_MSG_DISABLED_CHANNEL_TRIG",
+        "text": "停用通道不能用於觸發!"
+    },
+    {
+        "id": "IDS_MSG_TO_RECONNECT_FOR_FIRMWARE",
+        "text": "韌體版本錯誤，請重新連接裝置!"
+    },
+    {
+        "id": "IDS_MSG_DEVICE_BUSY_SWITCH_FAILED",
+        "text": "裝置被其它程式佔用，切換失敗!"
+    },
+    {
+        "id": "IDS_MSG_NO_ENABLED_CHANNEL",
+        "text": "未啟用通道!"
+    },
+    {
+        "id": "IDS_MSG_FILE_NOT_EXIST",
+        "text": "檔案不存在!"
+    },
+    {
+        "id": "IDS_MSG_DEVICE_SPEED_TOO_LOW",
+        "text": "錯誤: 目前連接的USB埠速率過低(<480Mbps)!"
+    },
+    {
+        "id": "IDS_MSG_FIRMWARE_NOT_EXIST",
+        "text": "錯誤: 韌體檔案不存在!"
+    },
+    {
+        "id": "IDS_MSG_DEVICE_USB_IO_ERROR",
+        "text": "Error: USB讀寫錯誤!"
+    },
+    {
+        "id": "IDS_TAB_TITLE",
+        "text": "標籤%1"
+    }
+]

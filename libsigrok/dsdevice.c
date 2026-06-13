@@ -24,6 +24,9 @@
 #include "log.h"
 #include <string.h>
 #include <assert.h>
+#ifdef HAVE_LIBSERIALPORT
+#include <libserialport.h>
+#endif
 
 #undef LOG_PREFIX
 #define LOG_PREFIX "device: "
@@ -47,7 +50,7 @@ SR_PRIV struct sr_channel *sr_channel_new(uint16_t index, int type, gboolean ena
 {
 	struct sr_channel *probe;
 
-	probe = x_malloc(sizeof(struct sr_channel));
+	probe = malloc(sizeof(struct sr_channel));
 	if (probe == NULL) {
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		return NULL;
@@ -58,7 +61,7 @@ SR_PRIV struct sr_channel *sr_channel_new(uint16_t index, int type, gboolean ena
 	probe->type = type;
 	probe->enabled = enabled;
 	if (name)
-		probe->name = str_clone(name);
+		probe->name = g_strdup(name);
     probe->vga_ptr = NULL;
 
 	return probe;
@@ -85,7 +88,7 @@ SR_PRIV int sr_dev_probe_name_set(const struct sr_dev_inst *sdi,
 {
 	GSList *l;
 	struct sr_channel *probe;
-	int ret;
+	int ret = SR_ERR_ARG;
 
 	if (!sdi) {
 		sr_err("%s: sdi was NULL", __func__);
@@ -96,8 +99,8 @@ SR_PRIV int sr_dev_probe_name_set(const struct sr_dev_inst *sdi,
 	for (l = sdi->channels; l; l = l->next) {
 		probe = l->data;
 		if (probe->index == probenum) {
-			x_free(probe->name);
-			probe->name = str_clone(name);
+			if (probe->name) g_free(probe->name);
+			probe->name = g_strdup(name);
 			ret = SR_OK;
 			break;
 		}
@@ -122,7 +125,7 @@ SR_PRIV int sr_dev_probe_enable(const struct sr_dev_inst *sdi, int probenum,
 {
 	GSList *l;
 	struct sr_channel *probe;
-	int ret;
+	int ret = SR_ERR_ARG;
 
 	if (!sdi)
 		return SR_ERR_ARG;
@@ -159,7 +162,7 @@ SR_PRIV int sr_dev_trigger_set(const struct sr_dev_inst *sdi, uint16_t probenum,
 {
 	GSList *l;
 	struct sr_channel *probe;
-	int ret;
+	int ret = SR_ERR_ARG;
 
 	if (!sdi)
 		return SR_ERR_ARG;
@@ -169,8 +172,8 @@ SR_PRIV int sr_dev_trigger_set(const struct sr_dev_inst *sdi, uint16_t probenum,
 		probe = l->data;
 		if (probe->index == probenum) {
 			/* If the probe already has a trigger, kill it first. */
-            safe_free(probe->trigger);
-            probe->trigger = str_clone(trigger);
+            if (probe->trigger) g_free(probe->trigger);
+            probe->trigger = g_strdup(trigger);
 			ret = SR_OK;
 			break;
 		}
@@ -184,25 +187,24 @@ SR_PRIV struct sr_dev_inst *sr_dev_inst_new(int mode, int status,
 		const char *vendor, const char *model, const char *version)
 {
 	struct sr_dev_inst *sdi;
-	if (!(sdi = x_malloc(sizeof(struct sr_dev_inst)))) {
+	if (!(sdi = g_malloc0(sizeof(struct sr_dev_inst)))) {
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		return NULL;
 	}
-	memset(sdi, 0, sizeof(struct sr_dev_inst));
  
     sdi->mode = mode;
 	sdi->status = status;
     sdi->handle = (ds_device_handle)sdi;
 
 	if (vendor != NULL){
-		sdi->vendor = str_clone(vendor);
+		sdi->vendor = g_strdup(vendor);
 	}
 	if (version != NULL){
-		sdi->version = str_clone(version);
+		sdi->version = g_strdup(version);
 	}
 
 	if (model && *model){ 
-		sdi->name = str_clone(model);
+		sdi->name = g_strdup(model);
 	}
 
 	return sdi;
@@ -216,10 +218,10 @@ SR_PRIV void sr_dev_probes_free(struct sr_dev_inst *sdi)
 
     for (l = sdi->channels; l; l = l->next) {
         probe = l->data;
-        safe_free(probe->name);
-        safe_free(probe->trigger);
+        if (probe->name) g_free(probe->name);
+        if (probe->trigger) g_free(probe->trigger);
 		safe_free(probe->vga_ptr);
-        x_free(probe);
+        safe_free(probe); // probe was allocated with malloc
     }
 	g_safe_free_list(sdi->channels);
 }
@@ -230,22 +232,26 @@ SR_PRIV void sr_dev_inst_free(struct sr_dev_inst *sdi)
 		return;
 
 	sr_dev_probes_free(sdi);
-	
+
 	safe_free(sdi->conn);
 	safe_free(sdi->priv);
-	safe_free(sdi->vendor);
-	safe_free(sdi->version);
-	safe_free(sdi->path);
-	safe_free(sdi->name);
+	if (sdi->vendor) { g_free(sdi->vendor); sdi->vendor = NULL; }
+	if (sdi->version) { g_free(sdi->version); sdi->version = NULL; }
+	if (sdi->path) { g_free(sdi->path); sdi->path = NULL; }
+	if (sdi->name) { g_free(sdi->name); sdi->name = NULL; }
+	if (sdi->model) { g_free(sdi->model); sdi->model = NULL; }
+	if (sdi->serial_num) { g_free(sdi->serial_num); sdi->serial_num = NULL; }
+	if (sdi->connection_id) { g_free(sdi->connection_id); sdi->connection_id = NULL; }
+	if (sdi->channel_groups) { g_slist_free(sdi->channel_groups); sdi->channel_groups = NULL; }
 
-	x_free(sdi);
+	g_free(sdi);
 }
 
 /** @private */
 SR_PRIV struct sr_usb_dev_inst *sr_usb_dev_inst_new(uint8_t bus, uint8_t address)
 {
 	struct sr_usb_dev_inst *udi;
-	if (!(udi = x_malloc(sizeof(struct sr_usb_dev_inst)))) {
+	if (!(udi = malloc(sizeof(struct sr_usb_dev_inst)))) {
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		return NULL;
 	}
@@ -291,15 +297,15 @@ SR_PRIV struct sr_serial_dev_inst *sr_serial_dev_inst_new(const char *port,
 		return NULL;
 	}
 
-	if (!(serial = x_malloc(sizeof(struct sr_serial_dev_inst)))) {
+	if (!(serial = malloc(sizeof(struct sr_serial_dev_inst)))) {
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		return NULL;
 	}
 	memset(serial, 0, sizeof(struct sr_serial_dev_inst));
 
-	serial->port = str_clone(port);
+	serial->port = g_strdup(port);
 	if (serialcomm)
-		serial->serialcomm = str_clone(serialcomm);
+		serial->serialcomm = g_strdup(serialcomm);
 	serial->fd = -1;
 
 	return serial;
@@ -308,15 +314,23 @@ SR_PRIV struct sr_serial_dev_inst *sr_serial_dev_inst_new(const char *port,
 /** @private */
 SR_PRIV void sr_serial_dev_inst_free(struct sr_serial_dev_inst *serial)
 {
-	x_free(serial->port);
-	x_free(serial->serialcomm);
-	x_free(serial);
+#ifdef HAVE_LIBSERIALPORT
+	if (serial->sp_data) {
+		struct sp_port *port = (struct sp_port *)serial->sp_data;
+		sp_close(port);
+		sp_free_port(port);
+		serial->sp_data = NULL;
+	}
+#endif
+	g_free(serial->port);
+	g_free(serial->serialcomm);
+	g_free(serial);
 }
 
 SR_PRIV int sr_enable_device_channel(struct sr_dev_inst *sdi, const struct sr_channel *probe, gboolean enable)
 {
 	GSList *l;
-	int ret;
+	int ret = SR_ERR_CALL_STATUS;
 	struct sr_channel *ch;	
 
 	if (sdi == NULL || probe == NULL){

@@ -1,6 +1,6 @@
 /*
  * This file is part of the PXView project.
- * PXView is based onPXView.
+ * PXView is based on DSView.
  * PXView is based on PulseView.
  * 
  * Copyright (C) 2022 DreamSourceLab <support@dreamsourcelab.com>

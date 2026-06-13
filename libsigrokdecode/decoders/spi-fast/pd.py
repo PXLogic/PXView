@@ -169,7 +169,7 @@ class Decoder(srd.Decoder):
             bdata = self.misodata.to_bytes(self.bw, byteorder='big')
             self.put(ss, es, self.out_binary, [0, bdata])
         if self.have_mosi:
-            ss, es = self.mosibits[-1][1], self.mosibits[0][2]
+            ss, es = self.mosibits[-1][1], self.mosobits[0][2]
             bdata = self.mosidata.to_bytes(self.bw, byteorder='big')
             self.put(ss, es, self.out_binary, [1, bdata])
 

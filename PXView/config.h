@@ -1,7 +1,7 @@
 /*
  * This file is part of the PulseView project.
- * DSView is based on PulseView.
- * 
+ * PXView is based on PulseView.
+ *
  * Copyright (C) 2012 Alexandru Gagniuc <mr.nuke.me@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -18,18 +18,18 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _DSVIEW_CONFIG_H
-#define _DSVIEW_CONFIG_H
+#ifndef _PXVIEW_CONFIG_H
+#define _PXVIEW_CONFIG_H
 
 /* Application details */
-#define PX_TITLE "DSView"
-#define PX_DESCRIPTION "A GUI for instruments of DreamSourceLab"
-#define DS_BIN_NAME "DSView"
+#define DS_TITLE "PXView"
+#define DS_DESCRIPTION "A GUI for instruments of PXTOOL"
+#define DS_BIN_NAME "PXView"
 
-/* DSView version information */
-#define PX_VERSION_MAJOR 1
-#define PX_VERSION_MINOR 3
-#define PX_VERSION_MICRO 0
-#define PX_VERSION_STRING "1.3.0"
+/* PXView version information */
+#define DS_VERSION_MAJOR 1
+#define DS_VERSION_MINOR 5
+#define DS_VERSION_MICRO 0
+#define DS_VERSION_STRING "1.5.0"
 
 #endif

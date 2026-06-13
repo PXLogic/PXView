@@ -24,6 +24,10 @@
         "text": "&Options"
     },
     {
+        "id": "IDS_TOOLBAR_SIGNAL_PROCESSING",
+        "text": "&Filter"
+    },
+    {
         "id": "IDS_TOOLBAR_CAPTURE_MODE",
         "text": "Mod&e"
     },
@@ -84,6 +88,14 @@
     {
         "id": "IDS_TOOLBAR_FUNCTION",
         "text": "Fu&nction"
+    },
+    {
+        "id": "IDS_TOOLBAR_LOG",
+        "text": "&Log"
+    },
+    {
+        "id": "IDS_TOOLBAR_MCP",
+        "text": "&MCP"
     },
     {
         "id": "IDS_TOOLBAR_FUNCTION_FFT",
@@ -167,7 +179,11 @@
     },
     {
         "id": "IDS_TOOLBAR_HELP_LANG_CN",
-        "text": "中文(&C)"
+        "text": "Chinese(Simplified)"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LANG_TRADITIONAL",
+        "text": "Chinese(Traditional)"
     },  
     {
         "id": "IDS_TOOLBAR_HELP_ABOUT",
@@ -188,10 +204,25 @@
     {
         "id": "IDS_TOOLBAR_HELP_LOG",
         "text": "L&og Options"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLING_SETTINGS",
+        "text": "Sampling Settings"
+    },
+    {
+        "id": "IDS_TOOLBAR_DEVICE",
+        "text": "Device"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLE_DEPTH",
+        "text": "Sample Depth"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLE_RATE",
+        "text": "Sample Rate"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE_ROW",
+        "text": "Capture Mode"
     }
-
-
-    
-
-    
 ]

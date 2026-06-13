@@ -1,0 +1,7 @@
+{
+	"decoder": "qspi_c",
+	"samplerate": 24000000,
+	"num_annotations": 0,
+	"annotations": [
+	]
+}

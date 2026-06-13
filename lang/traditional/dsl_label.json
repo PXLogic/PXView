@@ -1,0 +1,194 @@
+[
+    {
+        "id": "Connection",
+        "text": "連接"
+    },
+    {
+        "id": "Serial communication",
+        "text": "串列通訊"
+    },
+    {
+        "id": "Sample rate",
+        "text": "採樣率"
+    },
+    {
+        "id": "Sample depth",
+        "text": "採樣深度"
+    },
+    {
+        "id": "Sample count",
+        "text": "實際採樣數"
+    },
+    {
+        "id": "Using External Clock",
+        "text": "使用外部輸入時鐘採樣"
+    },
+    {
+        "id": "Using Clock Negedge",
+        "text": "使用時鐘下降沿採樣"
+    },
+    {
+        "id": "Pre-trigger capture ratio",
+        "text": "觸發前採樣比例"
+    },
+    {
+        "id": "Run Length Encoding",
+        "text": "RLE編碼"
+    },
+    {
+        "id": "Wait Buffer Upload",
+        "text": "上傳已採集資料"
+    },
+    {
+        "id": "Trigger slope",
+        "text": "觸發沿"
+    },
+    {
+        "id": "Trigger source",
+        "text": "觸發源"
+    },
+    {
+        "id": "Trigger channel",
+        "text": "觸發通道"
+    },
+    {
+        "id": "Horizontal trigger position",
+        "text": "觸發位置"
+    },
+    {
+        "id": "Trigger hold off",
+        "text": "觸發釋抑時間"
+    },
+    {
+        "id": "Trigger margin",
+        "text": "觸發靈敏度"
+    },
+    {
+        "id": "Buffer size",
+        "text": "快取大小"
+    },
+    {
+        "id": "Time base",
+        "text": "時基"
+    },
+    {
+        "id": "Max Height",
+        "text": "最大高度"
+    },
+    {
+        "id": "Max Height value",
+        "text": "最大高度值"
+    },
+    {
+        "id": "Filter Targets",
+        "text": "濾波器設定"
+    },
+    {
+        "id": "Datalog",
+        "text": "資料記錄"
+    },
+    {
+        "id": "Operation Mode",
+        "text": "執行模式"
+    },
+    {
+        "id": "Stop Options",
+        "text": "停止選項"
+    },
+    {
+        "id": "Channel Mode",
+        "text": "通道模式"
+    },
+    {
+        "id": "Threshold Levels",
+        "text": "閾值電壓"
+    },
+    {
+        "id": "Threshold Level",
+        "text": "閾值電壓"
+    },
+    {
+        "id": "Enable RLE Compress",
+        "text": "RLE硬體壓縮"
+    },
+    {
+        "id": "Bandwidth Limit",
+        "text": "頻寬限制"
+    },
+    {
+        "id": "Coupling",
+        "text": "耦合"
+    },
+    {
+        "id": "Volts/div",
+        "text": "電壓/格"
+    },
+    {
+        "id": "Probe Factor",
+        "text": "探頭衰減"
+    },
+    {
+        "id": "Map Default",
+        "text": "預設電壓"
+    },
+    {
+        "id": "Map Unit",
+        "text": "對應單位"
+    },
+    {
+        "id": "Map Min",
+        "text": "對應最小值"
+    },
+    {
+        "id": "Map Max",
+        "text": "對應最大值"
+    },
+    {
+        "id": "Ext Trigger Mode",
+        "text": "外部觸發模式"
+    },
+    {
+        "id": "En Trigger Out",
+        "text": "使能觸發輸出"
+    },
+    {
+        "id": "PWM0 EN",
+        "text": "PWM0 使能"
+    },
+    {
+        "id": "PWM0 Freq",
+        "text": "PWM0 頻率"
+    },
+    {
+        "id": "PWM0 Duty",
+        "text": "PWM0 工作週期"
+    },
+    {
+        "id": "PWM1 EN",
+        "text": "PWM1 使能"
+    },
+    {
+        "id": "PWM1 Freq",
+        "text": "PWM1 頻率"
+    },
+    {
+        "id": "PWM1 Duty",
+        "text": "PWM1 工作週期"
+    },
+    {
+        "id": "Mem Buff Size (no cache)",
+        "text": "記憶體緩衝區大小(無磁碟快取時)"
+    },
+    {
+        "id": "Disk Buff Size (with cache)",
+        "text": "磁碟緩衝區大小(開啟磁碟快取時)"
+    },
+    {
+        "id": "Disk Cache Enable",
+        "text": "磁碟快取"
+    },
+    {
+        "id": "Disk Cache Path",
+        "text": "快取路徑"
+    }
+]

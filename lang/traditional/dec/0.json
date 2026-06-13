@@ -1,0 +1,182 @@
+[
+    {
+        "id": "dec_0i2c_chan_scl",
+        "text": "串列時鐘線"
+    },
+    {
+        "id": "dec_0i2c_chan_sda",
+        "text": "串列資料線"
+    },
+    {
+        "id": "dec_0i2c_opt_addr",
+        "text": "顯示從機位址格式"
+    },
+    {
+        "id": "dec_0spi_chan_clk",
+        "text": "時鐘"
+    },
+    {
+        "id": "dec_0spi_opt_chan_miso",
+        "text": "主入從出"
+    },
+    {
+        "id": "dec_0spi_opt_chan_mosi",
+        "text": "主出從入"
+    },
+    {
+        "id": "dec_0spi_opt_chan_cs",
+        "text": "片選"
+    },
+    {
+        "id": "dec_0spi_opt_cs_pol",
+        "text": "片選極性"
+    },
+    {
+        "id": "dec_0spi_opt_cpol",
+        "text": "時鐘極性(CPOL)"
+    },
+    {
+        "id": "dec_0spi_opt_cpha",
+        "text": "時鐘相位(CPHA)"
+    },
+    {
+        "id": "dec_0spi_opt_bitorder",
+        "text": "位元序"
+    },
+    {
+        "id": "dec_0spi_opt_wordsize",
+        "text": "字長"
+    },
+    {
+        "id": "dec_0uart_chan_rxtx",
+        "text": "UART訊號線"
+    },
+    {
+        "id": "dec_0uart_opt_baudrate",
+        "text": "鮑率"
+    },
+    {
+        "id": "dec_0uart_opt_num_data_bits",
+        "text": "資料位元數"
+    },
+    {
+        "id": "dec_0uart_opt_parity_type",
+        "text": "校驗方式"
+    },
+    {
+        "id": "dec_0uart_opt_parity_check",
+        "text": "是否校驗？"
+    },
+    {
+        "id": "dec_0uart_opt_num_stop_bits",
+        "text": "停止位元"
+    },
+    {
+        "id": "dec_0uart_opt_bit_order",
+        "text": "位元序"
+    },
+    {
+        "id": "dec_0uart_opt_format",
+        "text": "資料格式"
+    },
+    {
+        "id": "dec_0uart_opt_invert",
+        "text": "反轉訊號？"
+    },
+    {
+        "id": "dec_0uart_anno_startstop",
+        "text": "顯示起/停?"
+    },
+    {
+        "id": "dec_1i2c_chan_scl",
+        "text": "串列時鐘線"
+    },
+    {
+        "id": "dec_1i2c_chan_sda",
+        "text": "串列資料線"
+    },
+    {
+        "id": "dec_1i2c_opt_addr",
+        "text": "顯示從機位址格式"
+    },
+    {
+        "id": "dec_1spi_chan_clk",
+        "text": "時鐘"
+    },
+    {
+        "id": "dec_1spi_opt_chan_miso",
+        "text": "主入從出"
+    },
+    {
+        "id": "dec_1spi_opt_chan_mosi",
+        "text": "主出從入"
+    },
+    {
+        "id": "dec_1spi_opt_chan_cs",
+        "text": "片選"
+    },
+    {
+        "id": "dec_1spi_opt_cs_pol",
+        "text": "片選極性"
+    },
+    {
+        "id": "dec_1spi_opt_cpol",
+        "text": "時鐘極性(CPOL)"
+    },
+    {
+        "id": "dec_1spi_opt_cpha",
+        "text": "時鐘相位(CPHA)"
+    },
+    {
+        "id": "dec_1spi_opt_bitorder",
+        "text": "位元序"
+    },
+    {
+        "id": "dec_1spi_opt_wordsize",
+        "text": "字長"
+    },
+    {
+        "id": "dec_1spi_opt_frame",
+        "text": "訊框解碼"
+    },
+    {
+        "id": "dec_1uart_chan_rxtx",
+        "text": "UART訊號線"
+    },
+    {
+        "id": "dec_1uart_opt_baudrate",
+        "text": "鮑率"
+    },
+    {
+        "id": "dec_1uart_opt_num_data_bits",
+        "text": "資料位元"
+    },
+    {
+        "id": "dec_1uart_opt_parity_type",
+        "text": "校驗方式"
+    },
+    {
+        "id": "dec_1uart_opt_parity_check",
+        "text": "是否校驗?"
+    },
+    {
+        "id": "dec_1uart_opt_num_stop_bits",
+        "text": "停止位元"
+    },
+    {
+        "id": "dec_1uart_opt_bit_order",
+        "text": "位元序"
+    },
+    {
+        "id": "dec_1uart_opt_format",
+        "text": "資料格式"
+    },
+    {
+        "id": "dec_1uart_opt_invert",
+        "text": "反轉訊號?"
+    },
+    {
+        "id": "dec_1uart_anno_startstop",
+        "text": "顯示起/停?"
+    }
+]

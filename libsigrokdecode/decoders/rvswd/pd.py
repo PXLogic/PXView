@@ -309,7 +309,7 @@ class Decoder(srd.Decoder):
                 #  c) STOP condition (P): CLK = high (not rising or falling), DIO = rising
                 pins = self.wait([{clk: "r"}, {clk: "f"}, {clk: "h", dio: "r"}])
 
-                if self.matched == (False, False, True):
+                if self.matched == 0b100:
                     self.process_packet()
                     self.handle_stop_condition()
                 else:

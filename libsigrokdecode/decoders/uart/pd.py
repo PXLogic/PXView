@@ -264,9 +264,6 @@ class Decoder(srd.Decoder):
         self.init_format()
         self.init_packet_idle()
         self.init_state_machine()
-        for rxtx in (RX, TX):
-            channel_rxtx = Ann.RX_DATA + rxtx
-            self.putgse(0, 0, [channel_rxtx, ['%d'.format(channel_rxtx)]])
 
 
     def metadata(self, key, value):
@@ -775,8 +772,8 @@ class Decoder(srd.Decoder):
                     else:
                         cond_idle_idx[rxtx] = None
 
-            signal = self.wait(conds)
-
+            (signal1,signal0) = self.wait(conds)
+            signal = [signal1,signal0]
             for rxtx in (RX, TX):
                 if has_pin[rxtx]:
                     if cond_data_idx[rxtx] is not None and (self.matched & (0b1 << cond_data_idx[rxtx])):

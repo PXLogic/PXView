@@ -1,6 +1,7 @@
 /*
- * This file is part of the DSView project.
- * DSView is based on PulseView.
+ * This file is part of the PXView project.
+ * PXView is based on DSView.
+ * PXView is based on PulseView.
  *
  * Copyright (C) 2022 DreamSourceLab <support@dreamsourcelab.com>
  *
@@ -19,7 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+/* Ensure POSIX declarations (e.g. usleep) are visible with strict C standard */
+#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 200809L
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libsigrok-internal.h"
+#include "hardware/compat/compat.h"
 #include "log.h"
 #include <pthread.h>
 #include <stdlib.h>
@@ -30,6 +38,7 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <time.h>
 #endif
 
 #define MAX_DEVCIE_LIST_LENGTH  20
@@ -345,7 +354,7 @@ SR_API int ds_active_device(ds_device_handle handle)
 	GSList *l;
 	struct sr_dev_inst *dev;
 	int bFind = 0;
-	int ret;
+	int ret = 0;
 	struct sr_dev_inst *old_dev;
 
 	lib_ctx.last_error = SR_OK;
@@ -544,7 +553,7 @@ SR_API int ds_have_actived_device()
 SR_API int ds_device_from_file(const char *file_path)
 { 	
 	struct sr_dev_inst *dev;
-	int ret;
+	int ret = 0;
 
 	if (file_path == NULL || *file_path == '\0'){
 		sr_err("Error!File name is empty.");
@@ -572,20 +581,46 @@ SR_API int ds_device_from_file(const char *file_path)
 SR_API const GSList *ds_get_actived_device_mode_list()
 {
 	struct sr_dev_inst *dev;
+	GVariant *gvar;
+	GSList *l;
 
 	dev = lib_ctx.actived_device_instance;
 
 	if (dev == NULL)
 	{
 		sr_err("Have no actived device.");
+		return NULL;
 	}
-	if (dev->driver == NULL || dev->driver->dev_mode_list == NULL)
+	if (dev->driver == NULL)
 	{
 		sr_err("Module not implemented.");
 		return NULL;
 	}
 
-	return dev->driver->dev_mode_list(dev);
+	if (dev->driver->dev_mode_list != NULL)
+		return dev->driver->dev_mode_list(dev);
+
+	/* Compat driver - no dev_mode_list callback.
+	 * Build a default mode list based on the device config. */
+	l = NULL;
+
+	if (sr_config_get(dev->driver, dev, NULL, NULL,
+			SR_CONF_LOGIC_ANALYZER, &gvar) == SR_OK) {
+		g_variant_unref(gvar);
+		l = g_slist_append(l, (gpointer)&sr_mode_list[0]); /* LOGIC */
+		return l;
+	}
+
+	if (sr_config_get(dev->driver, dev, NULL, NULL,
+			SR_CONF_OSCILLOSCOPE, &gvar) == SR_OK) {
+		g_variant_unref(gvar);
+		l = g_slist_append(l, (gpointer)&sr_mode_list[2]); /* DSO */
+		return l;
+	}
+
+	/* Fallback: assume LOGIC mode */
+	l = g_slist_append(l, (gpointer)&sr_mode_list[0]);
+	return l;
 }
 
 /**
@@ -650,7 +685,7 @@ SR_API int ds_get_actived_device_info(struct ds_device_full_info *fill_info)
 {
 	struct sr_dev_inst *dev;
 	struct ds_device_full_info *p;
-	int ret; 
+	int ret = SR_ERR_CALL_STATUS;
  
 
 	if (fill_info == NULL)
@@ -677,7 +712,12 @@ SR_API int ds_get_actived_device_info(struct ds_device_full_info *fill_info)
 		p->dev_type = dev->dev_type;
 		p->di = dev;
 		p->actived_times = dev->actived_times;
-		strncpy(p->name, (const char*)dev->name, sizeof(p->name) - 1);
+
+		/* Compat: if sdi->name is NULL but sdi->model is set, use model as name */
+		if (dev->name != NULL)
+			strncpy(p->name, (const char*)dev->name, sizeof(p->name) - 1);
+		else if (dev->model != NULL)
+			strncpy(p->name, (const char*)dev->model, sizeof(p->name) - 1);
 
 		if (dev->driver && dev->driver->name)
 		{
@@ -687,6 +727,11 @@ SR_API int ds_get_actived_device_info(struct ds_device_full_info *fill_info)
 		if ((dev->dev_type == DEV_TYPE_FILELOG || dev->dev_type == DEV_TYPE_DEMO) && dev->path != NULL){
 			strncpy(p->path, dev->path, sizeof(p->path) - 1);
 		}
+
+		/* Compat: infer dev_type from inst_type if still unknown */
+		if (p->dev_type == DEV_TYPE_UNKOWN && dev->inst_type == SR_INST_USB)
+			p->dev_type = DEV_TYPE_USB;
+
 		ret = SR_OK;
 	}
 
@@ -717,7 +762,7 @@ SR_API int ds_get_actived_device_mode()
  */
 SR_API int ds_start_collect()
 {
-	int ret;
+	int ret = 0;
 	struct sr_dev_inst *di;
 	di = lib_ctx.actived_device_instance;
 
@@ -774,7 +819,7 @@ static gpointer collect_run_proc(gpointer data)
 {
 	(void)data;
 
-	int ret;
+	int ret = 0;
 	struct sr_dev_inst *di;
 	int bError;
 	
@@ -901,9 +946,7 @@ int ds_trigger_is_enabled()
 {
 	GSList *l;
 	struct sr_channel *p;
-	int ret;
-
-	ret = 0;
+	int ret = 0;
 	pthread_mutex_lock(&lib_ctx.mutext);
 
 	if (lib_ctx.actived_device_instance != NULL)
@@ -1002,7 +1045,14 @@ SR_API int ds_get_actived_device_status(struct sr_status *status, gboolean prg)
 		return SR_ERR_CALL_STATUS;
 	}
 
-	return sr_status_get(lib_ctx.actived_device_instance, status, prg);
+	if (lib_ctx.actived_device_instance->driver != NULL
+		&& lib_ctx.actived_device_instance->driver->dev_status_get != NULL)
+		return sr_status_get(lib_ctx.actived_device_instance, status, prg);
+
+	/* Compat driver - no dev_status_get callback.
+	 * Return zeroed status with SR_OK. */
+	memset(status, 0, sizeof(struct sr_status));
+	return SR_OK;
 }
 
 SR_API struct sr_config *ds_new_config(int key, GVariant *data)
@@ -1018,8 +1068,7 @@ SR_API void ds_free_config(struct sr_config *src)
 SR_API int ds_dsl_option_value_to_code(int work_mode, int config_id, const char *value)
 { 
 	if (work_mode == LOGIC)
-		//return sr_dslogic_option_value_to_code(lib_ctx.actived_device_instance, config_id, value);
-		return sr_dslogic_option_value_to_code2(lib_ctx.actived_device_instance, config_id, value);
+		return sr_dslogic_option_value_to_code(lib_ctx.actived_device_instance, config_id, value);
 	else
 		return sr_dscope_option_value_to_code(lib_ctx.actived_device_instance, config_id, value);
 }
@@ -1070,9 +1119,7 @@ int ds_channel_is_enabled()
 {
 	GSList *l;
 	struct sr_channel *p;
-	int ret;
-
-	ret = 0;
+	int ret = 0;
 	pthread_mutex_lock(&lib_ctx.mutext);
 
 	if (lib_ctx.actived_device_instance != NULL)
@@ -1567,7 +1614,7 @@ static gpointer post_event_proc(gpointer event)
 {
 	if (lib_ctx.event_callback != NULL)
 	{
-		lib_ctx.event_callback((int)((unsigned long)event));
+		lib_ctx.event_callback((int)((uintptr_t)event));
 	}
 
 	pthread_mutex_lock(&lib_ctx.mutext);
@@ -1583,7 +1630,7 @@ static void post_event_async(int event)
 	lib_ctx.callback_thread_count++;
 	pthread_mutex_unlock(&lib_ctx.mutext);
 
-	g_thread_new("callback_thread", post_event_proc, (gpointer)((unsigned long)event));
+	g_thread_new("callback_thread", post_event_proc, (gpointer)((uintptr_t)event));
 }
 
 static void send_event(int event)
@@ -1694,7 +1741,8 @@ SR_PRIV void xsleep(int ms)
 #ifdef _WIN32
 	Sleep(ms);
 #else
-	usleep(ms * 1000);
+	struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+	nanosleep(&ts, NULL);
 #endif
 }
 

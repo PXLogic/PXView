@@ -1,0 +1,439 @@
+{
+	"decoder": "ps2_keyboard",
+	"samplerate": 1000000,
+	"num_annotations": 45,
+	"annotations": [
+		{
+			"start_sample": 40,
+			"end_sample": 120,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 120,
+			"end_sample": 200,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 200,
+			"end_sample": 280,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 280,
+			"end_sample": 360,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 360,
+			"end_sample": 440,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 440,
+			"end_sample": 520,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 520,
+			"end_sample": 600,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 600,
+			"end_sample": 680,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 680,
+			"end_sample": 760,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 760,
+			"end_sample": 840,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 840,
+			"end_sample": 880,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 40,
+			"end_sample": 120,
+			"ann_class": 2,
+			"ann_type": 50,
+			"texts": [
+				"Device Start", 
+				"Device", 
+				"DS"
+			]
+		}, 
+		{
+			"start_sample": 120,
+			"end_sample": 760,
+			"ann_class": 7,
+			"ann_type": 65,
+			"texts": [
+				"Data: 1c", 
+				"D: 1c", 
+				"1c"
+			]
+		}, 
+		{
+			"start_sample": 760,
+			"end_sample": 840,
+			"ann_class": 4,
+			"ann_type": 7,
+			"texts": [
+				"Parity OK", 
+				"Par OK", 
+				"P"
+			]
+		}, 
+		{
+			"start_sample": 840,
+			"end_sample": 880,
+			"ann_class": 3,
+			"ann_type": 1000,
+			"texts": [
+				"Stop bit", 
+				"Stop", 
+				"St", 
+				"T"
+			]
+		}, 
+		{
+			"start_sample": 2240,
+			"end_sample": 2320,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 2320,
+			"end_sample": 2400,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 2400,
+			"end_sample": 2480,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 2480,
+			"end_sample": 2560,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 2560,
+			"end_sample": 2640,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 2640,
+			"end_sample": 2720,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 2720,
+			"end_sample": 2800,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 2800,
+			"end_sample": 2880,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 2880,
+			"end_sample": 2960,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 2960,
+			"end_sample": 3040,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 3040,
+			"end_sample": 3080,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 2240,
+			"end_sample": 2320,
+			"ann_class": 2,
+			"ann_type": 50,
+			"texts": [
+				"Device Start", 
+				"Device", 
+				"DS"
+			]
+		}, 
+		{
+			"start_sample": 2320,
+			"end_sample": 2960,
+			"ann_class": 7,
+			"ann_type": 65,
+			"texts": [
+				"Data: f0", 
+				"D: f0", 
+				"f0"
+			]
+		}, 
+		{
+			"start_sample": 2960,
+			"end_sample": 3040,
+			"ann_class": 4,
+			"ann_type": 7,
+			"texts": [
+				"Parity OK", 
+				"Par OK", 
+				"P"
+			]
+		}, 
+		{
+			"start_sample": 3040,
+			"end_sample": 3080,
+			"ann_class": 3,
+			"ann_type": 1000,
+			"texts": [
+				"Stop bit", 
+				"Stop", 
+				"St", 
+				"T"
+			]
+		}, 
+		{
+			"start_sample": 3440,
+			"end_sample": 3520,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 3520,
+			"end_sample": 3600,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 3600,
+			"end_sample": 3680,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 3680,
+			"end_sample": 3760,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 3760,
+			"end_sample": 3840,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 3840,
+			"end_sample": 3920,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 3920,
+			"end_sample": 4000,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 4000,
+			"end_sample": 4080,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 4080,
+			"end_sample": 4160,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 4160,
+			"end_sample": 4240,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"0"
+			]
+		}, 
+		{
+			"start_sample": 4240,
+			"end_sample": 4280,
+			"ann_class": 0,
+			"ann_type": 207,
+			"texts": [
+				"1"
+			]
+		}, 
+		{
+			"start_sample": 3440,
+			"end_sample": 3520,
+			"ann_class": 2,
+			"ann_type": 50,
+			"texts": [
+				"Device Start", 
+				"Device", 
+				"DS"
+			]
+		}, 
+		{
+			"start_sample": 3520,
+			"end_sample": 4160,
+			"ann_class": 7,
+			"ann_type": 65,
+			"texts": [
+				"Data: 1c", 
+				"D: 1c", 
+				"1c"
+			]
+		}, 
+		{
+			"start_sample": 4160,
+			"end_sample": 4240,
+			"ann_class": 4,
+			"ann_type": 7,
+			"texts": [
+				"Parity OK", 
+				"Par OK", 
+				"P"
+			]
+		}, 
+		{
+			"start_sample": 4240,
+			"end_sample": 4280,
+			"ann_class": 3,
+			"ann_type": 1000,
+			"texts": [
+				"Stop bit", 
+				"Stop", 
+				"St", 
+				"T"
+			]
+		}
+	]
+}

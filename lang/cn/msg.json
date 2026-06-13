@@ -276,7 +276,7 @@
     },
     {
         "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR1",
-        "text": "DSView当前不支持\n多数据类型的文件导出."
+        "text": "PXView当前不支持\n多数据类型的文件导出."
     },
     {
         "id": "IDS_MSG_STORESESS_EXPORTSTART_ERROR2",
@@ -363,10 +363,6 @@
         "text": "文件不存在!"
     },
     {
-        "id": "IDS_MSG_TO_CLEAR_LOG",
-        "text": "确定清除日志文件?"
-    },
-    {
         "id": "IDS_MSG_DEVICE_SPEED_TOO_LOW",
         "text": "错误: 当前连接的USB端口速率过低(<480Mbps)!"
     },
@@ -377,5 +373,9 @@
     {
         "id": "IDS_MSG_DEVICE_USB_IO_ERROR",
         "text": "Error: USB读写错误!"
+    },
+    {
+        "id": "IDS_TAB_TITLE",
+        "text": "标签%1"
     }
 ]

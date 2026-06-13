@@ -28,26 +28,10 @@
 #include <Python.h> /* First, so we avoid a _POSIX_C_SOURCE warning. */
 #include "libsigrokdecode.h"
 #include <structmember.h>
-#include <mem/alloc.h>
 
-#define safe_free(p) if((p)){x_free((p)); (p) = NULL;}
+#define safe_free(p) if((p)){free((p)); (p) = NULL;}
 
-enum {
-	SRD_TERM_HIGH,
-	SRD_TERM_LOW,
-	SRD_TERM_RISING_EDGE,
-	SRD_TERM_FALLING_EDGE,
-	SRD_TERM_EITHER_EDGE,
-	SRD_TERM_NO_EDGE,
-	SRD_TERM_SKIP,
-};
-
-struct srd_term {
-	int type;
-	int channel;
-	uint64_t num_samples_to_skip;
-	uint64_t num_samples_already_skipped;
-};
+/* srd_term_type enum and struct srd_term are now in libsigrokdecode.h */
 
 /* Custom Python types: */
 
@@ -78,6 +62,8 @@ SRD_PRIV int process_samples_until_condition_match(struct srd_decoder_inst *di, 
 SRD_PRIV int srd_inst_terminate_reset(struct srd_decoder_inst *di);
 SRD_PRIV void srd_inst_free(struct srd_decoder_inst *di);
 SRD_PRIV void srd_inst_free_all(struct srd_session *sess);
+SRD_PRIV struct srd_decoder_inst *create_c_decoder_inst(struct srd_session *sess,
+		struct srd_decoder *dec, GHashTable *options);
 
 /* log.c */
 #if defined(G_OS_WIN32) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 4))
@@ -103,6 +89,7 @@ SRD_PRIV PyObject *srd_logic_type_new(void);
 
 /* module_sigrokdecode.c */
 PyMODINIT_FUNC PyInit_sigrokdecode(void);
+extern SRD_PRIV PyObject *srd_ChunkDone_exc;
 
 /* util.c */
 SRD_PRIV PyObject *py_import_by_name(const char *name);
@@ -118,7 +105,7 @@ SRD_PRIV int py_strseq_to_char(PyObject *py_strseq, char ***out_strv);
 SRD_PRIV GVariant *py_obj_to_variant(PyObject *py_obj);
 
 /*
-	python string object to c string, free by _free()
+	python string object to c string, free by g_free()
 	if success, return 0;
 */
 #define py_object_to_str_alloc py_str_as_str

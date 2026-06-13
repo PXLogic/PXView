@@ -20,7 +20,6 @@
  
 #include "libsigrok-internal.h"
 #include <glib.h>
-#include <mem/alloc.h>
 #include "config.h" /* Needed for HAVE_LIBUSB_1_0 and others. */
 #include "log.h"
 #include <assert.h>
@@ -318,7 +317,7 @@ SR_PRIV int sr_init(struct sr_context **ctx)
 	}
 
 	/* + 1 to handle when struct sr_context has no members. */
-	context = x_malloc(sizeof(struct sr_context));
+	context = malloc(sizeof(struct sr_context));
 	if (!context) {
 		sr_err("%s,ERROR:failed to alloc memory.", __func__);
 		ret = SR_ERR_MALLOC;
@@ -341,7 +340,7 @@ SR_PRIV int sr_init(struct sr_context **ctx)
 
 done:
 	if (context)
-		x_free(context);
+		g_free(context);
 	return ret;
 }
 
@@ -365,7 +364,7 @@ SR_PRIV int sr_exit(struct sr_context *ctx)
 
 	libusb_exit(ctx->libusb_ctx);
 	
-	x_free(ctx);
+	g_free(ctx);
 
 	return SR_OK;
 }
@@ -394,7 +393,7 @@ LIBUSB_CALL int sr_hotplug_callback(struct libusb_context *ctx, struct libusb_de
 
 SR_PRIV int sr_listen_hotplug(struct sr_context *ctx, hotplug_event_callback callback)
 {
-	int ret;
+	int ret = 0;
 
 	if (!ctx) {
 		sr_err("%s(): libsigrok context was NULL.", __func__);
