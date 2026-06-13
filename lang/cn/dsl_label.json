@@ -176,7 +176,19 @@
         "text": "PWM1 占空比"
     },
     {
-        "id": "Stream buff Size",
-        "text": "流模式buff大小"
+        "id": "Mem Buff Size (no cache)",
+        "text": "内存缓冲区大小(无磁盘缓存时)"
+    },
+    {
+        "id": "Disk Buff Size (with cache)",
+        "text": "磁盘缓冲区大小(开启磁盘缓存时)"
+    },
+    {
+        "id": "Disk Cache Enable",
+        "text": "磁盘缓存"
+    },
+    {
+        "id": "Disk Cache Path",
+        "text": "缓存路径"
     }
 ]

@@ -1,0 +1,52 @@
+{
+	"decoder": "spi",
+	"samplerate": 1000000,
+	"num_annotations": 5,
+	"annotations": [
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 7,
+			"ann_type": 14,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 8,
+			"ann_type": 15,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 9,
+			"ann_type": 16,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 2000,
+			"ann_class": 5,
+			"ann_type": 12,
+			"texts": [
+				""
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 2000,
+			"ann_class": 6,
+			"ann_type": 13,
+			"texts": [
+				""
+			]
+		}
+	]
+}

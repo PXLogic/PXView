@@ -76,7 +76,7 @@ SR_PRIV int std_hw_init(struct sr_context *sr_ctx, struct sr_dev_driver *di,
 SR_PRIV int std_session_send_df_header(const struct sr_dev_inst *sdi,
 				       const char *prefix)
 {
-	int ret;
+	int ret = 0;
 	struct sr_datafeed_packet packet;
 	struct sr_datafeed_header header;
 

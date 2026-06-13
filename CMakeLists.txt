@@ -27,18 +27,17 @@ project(PXView)
 #= Config Header
 #-------------------------------------------------------------------------------
 
-set(PX_TITLE PXView)
+set(DS_TITLE PXView)
+set(DS_DESCRIPTION "A GUI for instruments of PXTOOL")
 
-set(PX_DESCRIPTION "A GUI for instruments of PX")
-
-set(PX_VERSION_MAJOR 1)
-set(PX_VERSION_MINOR 4)
-set(PX_VERSION_MICRO 9)
-set(PX_VERSION_STRING  ${PX_VERSION_MAJOR}.${PX_VERSION_MINOR}.${PX_VERSION_MICRO} )
+set(DS_VERSION_MAJOR 1)
+set(DS_VERSION_MINOR 5)
+set(DS_VERSION_MICRO 0)
+set(DS_VERSION_STRING  ${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO})
 
 configure_file (
-	${PROJECT_SOURCE_DIR}/PXView/src/config.h.in
-	${PROJECT_BINARY_DIR}/PXView/src/config.h
+	${PROJECT_SOURCE_DIR}/PXView/config.h.in
+	${PROJECT_BINARY_DIR}/PXView/config.h
 )
 
 #===============================================================================
@@ -63,8 +62,8 @@ endif()
 set(DISABLE_WERROR TRUE) #Build without -Werror
 set(ENABLE_SIGNALS TRUE) #Build with UNIX signals
 set(ENABLE_COTIRE FALSE) #Enable cotire
+set(ENABLE_TESTS  FALSE) #Enable unit tests
 set(STATIC_PKGDEPS_LIBS FALSE) #Statically link to (pkg-config) libraries
-
 
 if(WIN32)
 	# On Windows/MinGW we need to statically link to libraries.
@@ -110,7 +109,10 @@ link_directories(${GLIB_LIBDIR})
 #= python3
 #-------------------------------------------------------------------------------
 
-find_package(Python3 COMPONENTS Development QUIET)
+if(POLICY CMP0148)
+	cmake_policy(SET CMP0148 NEW)
+endif()
+find_package(Python3 COMPONENTS Interpreter Development)
 
 if (Python3_FOUND)
 	message("----- python3:")
@@ -119,17 +121,7 @@ if (Python3_FOUND)
 	include_directories(${Python3_INCLUDE_DIRS})
 	set(PY_LIB ${Python3_LIBRARIES})
 else()
-     find_package(PythonLibs 3 QUIET)
-
-     if(PYTHONLIBS_FOUND)
-     	message("----- python(${PYTHONLIBS_VERSION_STRING}):")
-	message(STATUS "	 includes:" ${PYTHON_INCLUDE_DIRS})
-	message(STATUS "	 libraries:" ${PYTHON_LIBRARIES})
-	include_directories(${PYTHON_INCLUDE_DIRS})
-	set(PY_LIB ${PYTHON_LIBRARIES})
-     else()
-     	message(FATAL_ERROR  "Please install lib python3!")
-     endif()
+	message(FATAL_ERROR  "Please install lib python3!")
 endif()
   
 #===============================================================================
@@ -175,67 +167,44 @@ message(STATUS "	 libraries:" ${ZLIB_LIBRARIES})
 include_directories(${ZLIB_INCLUDE_DIRS})
 
 #===============================================================================
-#= Qt5 or Qt6
+#= Qt6
 #-------------------------------------------------------------------------------
+
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Widgets Gui GuiPrivate Svg Concurrent WebSockets)
+message("----- Qt6:")
+message(STATUS "	 includes:" ${Qt6Core_INCLUDE_DIRS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt6Widgets_EXECUTABLE_COMPILE_FLAGS}")
+set(QT_INCLUDE_DIRS ${Qt6Gui_INCLUDE_DIRS} ${Qt6Widgets_INCLUDE_DIRS} ${Qt6Svg_INCLUDE_DIRS} ${Qt6Concurrent_INCLUDE_DIRS})
+set(QT_LIBRARIES Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::WebSockets)
+add_definitions(${Qt6Gui_DEFINITIONS} ${Qt6Widgets_DEFINITIONS})
 if(APPLE)
-	set(QT_VERSION_FORCE Qt6)
+	find_package(Qt6DBus REQUIRED)
+	set(QT_LIBRARIES ${QT_LIBRARIES} Qt6::DBus)
 endif()
 
 
-set(QT_VERSION_FORCE "" CACHE STRING "Force the use of Qt6 by setting this option to 6")
-
-if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
-	find_package(Qt5Core QUIET)
-	if(Qt5Core_FOUND)
-		message("----- Qt5:")
-		message(STATUS "	 includes:" ${Qt5Core_INCLUDE_DIRS})
-		#find_package(Qt5WinExtras REQUIRED)
-		find_package(Qt5Widgets REQUIRED)
-		find_package(Qt5Gui REQUIRED)
-		find_package(Qt5Svg REQUIRED)
-		# win32
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt5Widgets_EXECUTABLE_COMPILE_FLAGS}")
-		if (WIN32)
-			find_package(Qt5WinExtras REQUIRED)
-			message(STATUS "	 libraries:" ${Qt5WinExtras_LIBRARIES})
-			set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS} ${Qt5WinExtras_INCLUDE_DIRS} ${Qt5Svg_INCLUDE_DIRS})
-			set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::WinExtras Qt5::Svg)
-			add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS} ${Qt5WinExtras_DEFINITIONS}  ${Qt5Svg_DEFINITIONS} )
-		else()
-			set(QT_INCLUDE_DIRS ${Qt5Gui_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS})
-			set(QT_LIBRARIES Qt5::Gui Qt5::Widgets)
-			add_definitions(${Qt5Gui_DEFINITIONS} ${Qt5Widgets_DEFINITIONS})
-		endif()
-	endif()
-endif()
-
-if(NOT Qt5Core_FOUND OR "${QT_VERSION_FORCE}" STREQUAL "6")
-	find_package(Qt6 REQUIRED COMPONENTS Core)
-    message("----- Qt6:")
-	message(STATUS "	 includes:" ${Qt6Core_INCLUDE_DIRS})
-        find_package(Qt6Widgets REQUIRED)
-        find_package(Qt6Gui REQUIRED)
-        find_package(Qt6Svg REQUIRED)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt6Widgets_EXECUTABLE_COMPILE_FLAGS}")
-	set(QT_INCLUDE_DIRS ${Qt6Gui_INCLUDE_DIRS} ${Qt6Widgets_INCLUDE_DIRS})
-        set(QT_LIBRARIES Qt6::Gui Qt6::Widgets Qt6::Svg)
-	add_definitions(${Qt6Gui_DEFINITIONS} ${Qt6Widgets_DEFINITIONS})
-
-	if(APPLE)
-		find_package(Qt6DBus REQUIRED)
-		set(QT_LIBRARIES ${QT_LIBRARIES} Qt6::DBus)
-	endif()
-endif()
-
-if(NOT Qt5Core_FOUND AND NOT Qt6Core_FOUND)
-	message("Error!The qt5 or qt6 can't find, if them has been installed, please append the install path to CMAKE_PREFIX_PATH, the command as:")
-	message("list(APPEND CMAKE_PREFIX_PATH \"xxx install path\")" )
-	message(FATAL_ERROR  "Can't find Qt5 or Qt6!")
+#===============================================================================
+#= nlohmann/json (header-only JSON library for API layer)
+#-------------------------------------------------------------------------------
+# Try system package first, fall back to FetchContent
+find_package(nlohmann_json 3.2.0 QUIET)
+if(NOT nlohmann_json_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
 #===============================================================================
 #= boost
 #-------------------------------------------------------------------------------
+if(POLICY CMP0167)
+	cmake_policy(SET CMP0167 NEW)
+endif()
 find_package(Boost 1.42 QUIET)
 
 if(NOT Boost_FOUND)
@@ -253,277 +222,475 @@ include_directories(${Boost_INCLUDE_DIRS})
 find_package(Threads)
 
 #===============================================================================
-#= SARibbonBar
-#-------------------------------------------------------------------------------
-#if (WIN32)
-#set(SARibbonBar_DIR "./window/bin_qt5.15.10_GNU_x64/lib/cmake/SARibbonBar")
-#endif()
-#find_package(SARibbonBar REQUIRED)
-
-#===============================================================================
 #= PXView sources
 #-------------------------------------------------------------------------------
 
 set(PXView_SOURCES
-	PXView/src/log.cpp
-	PXView/src/main.cpp
-	PXView/src/utility/path.cpp
-	PXView/src/utility/array.cpp
-	PXView/src/utility/encoding.cpp
-	PXView/src/config/appconfig.cpp
-	PXView/src/decode/rowdata.cpp
-	PXView/src/decode/annotationrestable.cpp
-	PXView/src/decode/decoder.cpp
-	PXView/src/decode/row.cpp
-	PXView/src/decode/annotation.cpp
-	PXView/src/decode/decoderstatus.cpp
-	PXView/src/prop/property.cpp
-	PXView/src/prop/double.cpp
-	PXView/src/prop/int.cpp
-	PXView/src/prop/bool.cpp
-	PXView/src/prop/enum.cpp
-	PXView/src/prop/string.cpp
-	PXView/src/prop/binding/deviceoptions.cpp
-	PXView/src/prop/binding/decoderoptions.cpp
-	PXView/src/prop/binding/probeoptions.cpp
-	PXView/src/prop/binding/binding.cpp
-	PXView/src/dialogs/protocollist.cpp
-	PXView/src/dialogs/interval.cpp
-	PXView/src/dialogs/search.cpp
-	PXView/src/dialogs/fftoptions.cpp
-	PXView/src/dialogs/waitingdialog.cpp
-	PXView/src/dialogs/regionoptions.cpp
-	PXView/src/dialogs/deviceoptions.cpp
-	PXView/src/dialogs/decoderoptionsdlg.cpp
-	PXView/src/dialogs/applicationpardlg.cpp
-	PXView/src/dialogs/storeprogress.cpp
-	PXView/src/dialogs/shadow.cpp
-	PXView/src/dialogs/protocolexp.cpp
-	PXView/src/dialogs/calibration.cpp
-	PXView/src/dialogs/dsdialog.cpp
-	PXView/src/dialogs/about.cpp
-	PXView/src/dialogs/mathoptions.cpp
-	PXView/src/dialogs/dsmessagebox.cpp
-	PXView/src/dialogs/lissajousoptions.cpp
-	PXView/src/dialogs/dsomeasure.cpp
-	PXView/src/view/viewport.cpp
-	PXView/src/view/view.cpp
-	PXView/src/view/groupsignal.cpp
-	PXView/src/view/devmode.cpp
-	PXView/src/view/dsosignal.cpp
-	PXView/src/view/timemarker.cpp
-	PXView/src/view/viewstatus.cpp
-	PXView/src/view/mathtrace.cpp
-	PXView/src/view/trace.cpp
-	PXView/src/view/logicsignal.cpp
-	PXView/src/view/dsldial.cpp
-	PXView/src/view/spectrumtrace.cpp
-	PXView/src/view/analogsignal.cpp
-	PXView/src/view/signal.cpp
-	PXView/src/view/cursor.cpp
-	PXView/src/view/header.cpp
-	PXView/src/view/ruler.cpp
-	PXView/src/view/decodetrace.cpp
-	PXView/src/view/lissajoustrace.cpp
-	PXView/src/view/xcursor.cpp
-	PXView/src/appcore/mainframe.cpp
-	PXView/src/appcore/appcontrol.cpp
-	PXView/src/appcore/deviceagent.cpp
-	PXView/src/appcore/mainwindow.cpp
-	PXView/src/appcore/eventobject.cpp
-	PXView/src/appcore/sigsession.cpp
-	PXView/src/com/storesession.cpp
-	PXView/src/com/zipmaker.cpp
-	PXView/src/com/dstimer.cpp
-	PXView/src/widgets/decodergroupbox.cpp
-	PXView/src/widgets/decodermenu.cpp
-	PXView/src/widgets/border.cpp
-	PXView/src/widgets/fakelineedit.cpp
-	PXView/src/ui/dscombobox.cpp
-	PXView/src/ui/langresource.cpp
-	PXView/src/ui/fn.cpp
-	PXView/src/ui/msgbox.cpp
-	PXView/src/dock/triggerdock.cpp
-	PXView/src/dock/keywordlineedit.cpp
-	PXView/src/dock/searchcombobox.cpp
-	PXView/src/dock/measuredock.cpp
-	PXView/src/dock/dsotriggerdock.cpp
-	PXView/src/dock/searchdock.cpp
-	PXView/src/dock/protocolitemlayer.cpp
-	PXView/src/dock/protocoldock.cpp
-	PXView/src/toolbars/samplingbar.cpp
-	PXView/src/toolbars/logobar.cpp
-	PXView/src/toolbars/trigbar.cpp
-	PXView/src/toolbars/titlebar.cpp
-	PXView/src/toolbars/filebar.cpp
-	PXView/src/data/analogsnapshot.cpp
-	PXView/src/data/decodermodel.cpp
-	PXView/src/data/signaldata.cpp
-	PXView/src/data/snapshot.cpp
-	PXView/src/data/dsosnapshot.cpp
-	PXView/src/data/mathstack.cpp
-	PXView/src/data/logicsnapshot.cpp
-	PXView/src/data/decoderstack.cpp
-	PXView/src/data/spectrumstack.cpp
-	PXView/src/QRibbon/QRibbon.cpp
-	PXView/src/QRibbon/qribbon.ui
+    PXView/main.cpp
+    PXView/application.cpp
+    PXView/pv/log.cpp
+    PXView/pv/sigsession.cpp
+    PXView/pv/sessionmanager.cpp
+    PXView/pv/mainwindow.cpp
+    PXView/pv/data/snapshot.cpp
+    PXView/pv/data/signaldata.cpp
+    PXView/pv/data/logicsnapshot.cpp
+    PXView/pv/data/disk_buffer_manager.cpp
+    PXView/pv/data/disk_write_thread.cpp
+    PXView/pv/data/disk_read_cache.cpp
+    PXView/pv/data/mmap_allocator.cpp
+    PXView/pv/data/analogsnapshot.cpp
+    PXView/pv/data/sessionsnapshot.cpp
+    PXView/pv/data/sessiondocument.cpp
+    PXView/pv/dialogs/deviceoptions.cpp
+    PXView/pv/prop/property.cpp
+    PXView/pv/prop/int.cpp
+    PXView/pv/prop/enum.cpp
+    PXView/pv/prop/double.cpp
+    PXView/pv/prop/bool.cpp
+    PXView/pv/prop/binding/binding.cpp
+    PXView/pv/toolbars/samplingbar.cpp
+    PXView/pv/view/viewport.cpp
+    PXView/pv/view/edge_nav_button.cpp
+    PXView/pv/view/view.cpp
+    PXView/pv/view/timemarker.cpp
+    PXView/pv/view/signal.cpp
+    PXView/pv/view/ruler.cpp
+    PXView/pv/view/logicsignal.cpp
+    PXView/pv/view/header.cpp
+    PXView/pv/view/cursor.cpp
+    PXView/pv/view/analogsignal.cpp
+    PXView/pv/prop/binding/deviceoptions.cpp
+    PXView/pv/toolbars/trigbar.cpp
+    PXView/pv/toolbars/filebar.cpp
+    PXView/pv/dock/protocoldock.cpp
+    PXView/pv/dock/triggerdock.cpp
+    PXView/pv/dock/measuredock.cpp
+    PXView/pv/dock/searchdock.cpp
+    PXView/pv/dock/logdock.cpp
+    PXView/pv/dock/deviceoptionsdock.cpp
+    PXView/pv/dock/signalprocessingdock.cpp
+    PXView/pv/dock/mcpcontroldock.cpp
+    PXView/pv/toolbars/logobar.cpp
+    PXView/pv/dialogs/about.cpp
+    PXView/pv/dialogs/search.cpp
+    PXView/pv/data/dsosnapshot.cpp
+    PXView/pv/view/dsosignal.cpp
+    PXView/pv/view/dsldial.cpp
+    PXView/pv/dock/dsotriggerdock.cpp
+    PXView/pv/view/trace.cpp
+    PXView/pv/view/selectableitem.cpp
+    PXView/pv/data/decoderstack.cpp
+    PXView/pv/data/decode/rowdata.cpp
+    PXView/pv/data/decode/row.cpp
+    PXView/pv/data/decode/decoder.cpp
+    PXView/pv/data/decode/annotation.cpp
+    PXView/pv/view/decodetrace.cpp
+    PXView/pv/prop/binding/decoderoptions.cpp
+    PXView/pv/widgets/fakelineedit.cpp
+    PXView/pv/widgets/searchpatterninput.cpp
+    PXView/pv/widgets/decodermenu.cpp
+    PXView/pv/widgets/decodergroupbox.cpp
+    PXView/pv/prop/string.cpp
+    PXView/pv/dialogs/storeprogress.cpp
+    PXView/pv/storesession.cpp
+    PXView/pv/view/devmode.cpp
+    PXView/pv/dialogs/waitingdialog.cpp
+    PXView/pv/dialogs/dsomeasure.cpp
+    PXView/pv/dialogs/calibration.cpp
+    PXView/pv/data/decodermodel.cpp
+    PXView/pv/dialogs/protocollist.cpp
+    PXView/pv/dialogs/protocolexp.cpp
+    PXView/pv/dialogs/fftoptions.cpp
+    PXView/pv/data/mathstack.cpp
+    PXView/pv/view/mathtrace.cpp   
+    PXView/pv/toolbars/titlebar.cpp
+    PXView/pv/mainframe.cpp
+    PXView/pv/submainframe.cpp
+    PXView/pv/widgets/border.cpp
+    PXView/pv/widgets/slidingdrawer.cpp
+    PXView/pv/widgets/smoothscrollbar.cpp
+    PXView/pv/widgets/smoothscrollarea.cpp
+    PXView/pv/widgets/smoothtablehelper.cpp
+    PXView/pv/widgets/sidebar.cpp
+    PXView/pv/widgets/sidebarbutton.cpp
+    PXView/pv/dialogs/dsmessagebox.cpp
+    PXView/pv/dialogs/shadow.cpp
+    PXView/pv/dialogs/dsdialog.cpp
+    PXView/pv/dialogs/interval.cpp
+    PXView/pv/prop/binding/probeoptions.cpp
+    PXView/pv/view/viewstatus.cpp
+    PXView/pv/dialogs/lissajousoptions.cpp
+    PXView/pv/view/lissajoustrace.cpp
+    PXView/pv/view/spectrumtrace.cpp
+    PXView/pv/data/spectrumstack.cpp
+    PXView/pv/dialogs/mathoptions.cpp
+    PXView/pv/dialogs/regionoptions.cpp
+    PXView/pv/view/xcursor.cpp
+    PXView/pv/dock/protocoldock.cpp
+    PXView/pv/data/decoderstack.cpp
+    PXView/pv/data/decode/annotation.cpp
+    PXView/pv/data/decode/decoder.cpp
+    PXView/pv/data/decode/row.cpp
+    PXView/pv/data/decode/rowdata.cpp
+    PXView/pv/prop/binding/decoderoptions.cpp
+    PXView/pv/view/decodetrace.cpp
+    PXView/pv/widgets/decodergroupbox.cpp
+    PXView/pv/widgets/decodermenu.cpp
+    PXView/pv/config/appconfig.cpp
+    PXView/pv/config/shortcutdefs.cpp
+    PXView/pv/appcontrol.cpp
+    PXView/pv/dstimer.cpp
+    PXView/pv/eventobject.cpp
+    PXView/pv/ZipMaker.cpp
+    PXView/pv/data/decode/annotationrestable.cpp
+    PXView/pv/data/decode/decoderstatus.cpp
+    PXView/pv/dock/protocolitemlayer.cpp
+    PXView/pv/ui/msgbox.cpp
+    PXView/pv/ui/toast.cpp
+    PXView/pv/ui/dscombobox.cpp
+    PXView/pv/ui/dsspinbox.cpp
+    PXView/pv/dsvdef.cpp
+    PXView/pv/dialogs/applicationpardlg.cpp
+    PXView/pv/dock/keywordlineedit.cpp
+    PXView/pv/dock/searchcombobox.cpp
+    PXView/pv/dialogs/decoderoptionsdlg.cpp
+    PXView/pv/utility/encoding.cpp
+    PXView/pv/utility/path.cpp
+    PXView/pv/utility/array.cpp
+    PXView/pv/deviceagent.cpp
+    PXView/pv/ui/langresource.cpp
+    PXView/pv/ui/fn.cpp
+    PXView/pv/ui/xtoolbutton.cpp
+    PXView/pv/ui/draggabletabbar.cpp
+    PXView/pv/ui/draggabletabwidget.cpp
+    PXView/pv/ui/uimanager.cpp
+    PXView/pv/ui/popupdlglist.cpp
+    PXView/pv/ui/iconcache.cpp
+    PXView/pv/ui/widgetinspector.cpp
+    PXView/pv/tabcontext.cpp
+    PXView/pv/api/session_service.cpp
+    PXView/pv/api/app_service.cpp
+    PXView/pv/api/rpc_dispatcher.cpp
+    PXView/pv/api/ws_transport.cpp
+    PXView/pv/api/mcp_transport.cpp
 )
 
 set(UIS
-	PXView/src/QRibbon/qribbon.ui
 )
 
 if(APPLE)
 	qt_wrap_ui(UI_HEADERS ${UIS})
 else()
-	if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
-		find_package(Qt6Core QUIET)
-		if(Qt6Core)
-			qt6_wrap_ui(UI_HEADERS ${UIS})
-		else()
-			qt5_wrap_ui(UI_HEADERS ${UIS})
-		endif()
+	if(Qt5Core_FOUND)
+		qt5_wrap_ui(UI_HEADERS ${UIS})
+	elseif(Qt6Core_FOUND)
+		qt6_wrap_ui(UI_HEADERS ${UIS})
 	endif()
 endif()
 
-#if(NOT QT_VERSION_FORCE OR "${QT_VERSION_FORCE}" STREQUAL "5")
-#	find_package(Qt6Core QUIET)
-#	if(Qt6Core)
-#		qt6_wrap_ui(UI_HEADERS ${UIS})
-#	else()
-#		qt5_wrap_ui(UI_HEADERS ${UIS})
-#	endif()
-#endif()
-
-
-#qt_wrap_ui(UI_HEADERS ${UIS})
+# Windows-specific QT source files
+if(WIN32)
+	list(APPEND PXView_SOURCES
+		PXView/pv/winnativewidget.cpp
+		PXView/pv/winshadow.cpp
+		PXView/pv/wintaskbarprogress.cpp
+	)
+	list(APPEND PXView_HEADERS
+		PXView/pv/wintaskbarprogress.h
+	)
+endif ()
 
 set(PXView_HEADERS
-	PXView/src/mystyle.h 
-	PXView/src/prop/double.h
-	PXView/src/prop/bool.h
-	PXView/src/prop/enum.h
-	PXView/src/prop/property.h
-	PXView/src/prop/int.h
-	PXView/src/prop/string.h
-	PXView/src/dialogs/deviceoptions.h
-	PXView/src/dialogs/calibration.h
-	PXView/src/dialogs/protocollist.h
-	PXView/src/dialogs/waitingdialog.h
-	PXView/src/dialogs/search.h
-	PXView/src/dialogs/regionoptions.h
-	PXView/src/dialogs/fftoptions.h
-	PXView/src/dialogs/dsmessagebox.h
-	PXView/src/dialogs/dsdialog.h
-	PXView/src/dialogs/dsomeasure.h
-	PXView/src/dialogs/lissajousoptions.h
-	PXView/src/dialogs/about.h
-	PXView/src/dialogs/shadow.h
-	PXView/src/dialogs/decoderoptionsdlg.h
-	PXView/src/dialogs/interval.h
-	PXView/src/dialogs/protocolexp.h
-	PXView/src/dialogs/storeprogress.h
-	PXView/src/dialogs/mathoptions.h
-	PXView/src/view/viewport.h
-	PXView/src/view/mathtrace.h
-	PXView/src/view/xcursor.h
-	PXView/src/view/spectrumtrace.h
-	PXView/src/view/decodetrace.h
-	PXView/src/view/devmode.h
-	PXView/src/view/ruler.h
-	PXView/src/view/logicsignal.h
-	PXView/src/view/lissajoustrace.h
-	PXView/src/view/signal.h
-	PXView/src/view/cursor.h
-	PXView/src/view/viewstatus.h
-	PXView/src/view/timemarker.h
-	PXView/src/view/trace.h
-	PXView/src/view/analogsignal.h
-	PXView/src/view/dsosignal.h
-	PXView/src/view/header.h
-	PXView/src/view/view.h  
-	PXView/src/appcore/mainframe.h
-	PXView/src/appcore/eventobject.h
-	PXView/src/appcore/mainwindow.h
-	PXView/src/com/dstimer.h
-	PXView/src/com/storesession.h
-	PXView/src/widgets/fakelineedit.h
-	PXView/src/widgets/decodermenu.h
-	PXView/src/widgets/decodergroupbox.h
-	PXView/src/widgets/border.h
-	PXView/src/ui/dscombobox.h
-	PXView/src/dock/searchdock.h
-	PXView/src/dock/protocolitemlayer.h
-	PXView/src/dock/searchcombobox.h
-	PXView/src/dock/triggerdock.h
-	PXView/src/dock/keywordlineedit.h
-	PXView/src/dock/protocoldock.h
-	PXView/src/dock/measuredock.h
-	PXView/src/dock/dsotriggerdock.h
-	PXView/src/toolbars/samplingbar.h
-	PXView/src/toolbars/trigbar.h
-	PXView/src/toolbars/titlebar.h
-	PXView/src/toolbars/filebar.h
-	PXView/src/toolbars/logobar.h
-	PXView/src/data/signaldata.h
-	PXView/src/data/decoderstack.h
-	PXView/src/data/spectrumstack.h
-	PXView/src/data/mathstack.h
-	PXView/src/QRibbon/QRibbon.h
-	${UI_HEADERS}
+    PXView/mystyle.h
+    PXView/pv/log.h
+    PXView/pv/sigsession.h
+    PXView/pv/sessionmanager.h
+    PXView/pv/interface/icontextaware.h
+    PXView/pv/mainwindow.h
+    PXView/pv/dialogs/deviceoptions.h
+    PXView/pv/prop/property.h
+    PXView/pv/prop/int.h
+    PXView/pv/prop/enum.h
+    PXView/pv/prop/double.h
+    PXView/pv/prop/bool.h
+    PXView/pv/toolbars/samplingbar.h
+    PXView/pv/view/viewport.h
+    PXView/pv/view/edge_nav_button.h
+    PXView/pv/view/view.h
+    PXView/pv/view/timemarker.h
+    PXView/pv/view/ruler.h
+    PXView/pv/view/header.h
+    PXView/pv/view/cursor.h
+    PXView/pv/toolbars/trigbar.h
+    PXView/pv/toolbars/filebar.h
+    PXView/pv/dock/protocoldock.h
+    PXView/pv/dock/triggerdock.h
+    PXView/pv/dock/measuredock.h
+    PXView/pv/dock/searchdock.h
+    PXView/pv/dock/logdock.h
+    PXView/pv/dock/deviceoptionsdock.h
+    PXView/pv/dock/signalprocessingdock.h
+    PXView/pv/dock/mcpcontroldock.h
+    PXView/pv/toolbars/logobar.h
+    PXView/pv/dialogs/about.h
+    PXView/pv/dialogs/search.h
+    PXView/pv/dock/dsotriggerdock.h
+    PXView/pv/view/trace.h
+    PXView/pv/view/selectableitem.h
+    PXView/pv/data/decoderstack.h
+    PXView/pv/view/decodetrace.h
+    PXView/pv/widgets/fakelineedit.h
+    PXView/pv/widgets/searchpatterninput.h
+    PXView/pv/widgets/decodermenu.h
+    PXView/pv/widgets/decodergroupbox.h
+    PXView/pv/prop/string.h
+    PXView/pv/dialogs/storeprogress.h
+    PXView/pv/storesession.h
+    PXView/pv/view/devmode.h
+    PXView/pv/dialogs/waitingdialog.h
+    PXView/pv/dialogs/dsomeasure.h
+    PXView/pv/dialogs/calibration.h
+    PXView/pv/dialogs/protocollist.h
+    PXView/pv/dialogs/protocolexp.h
+    PXView/pv/dialogs/fftoptions.h
+    PXView/pv/data/mathstack.h
+    PXView/pv/view/mathtrace.h
+    PXView/pv/view/viewstatus.h
+    PXView/pv/toolbars/titlebar.h
+    PXView/pv/mainframe.h
+    PXView/pv/submainframe.h
+    PXView/pv/widgets/border.h
+    PXView/pv/widgets/slidingdrawer.h
+    PXView/pv/widgets/smoothscrollbar.h
+    PXView/pv/widgets/smoothscrollarea.h
+    PXView/pv/widgets/smoothtablehelper.h
+    PXView/pv/widgets/sidebar.h
+    PXView/pv/widgets/sidebarbutton.h
+    PXView/pv/dialogs/dsmessagebox.h
+    PXView/pv/dialogs/shadow.h
+    PXView/pv/dialogs/dsdialog.h
+    PXView/pv/dialogs/interval.h
+    PXView/pv/dialogs/lissajousoptions.h
+    PXView/pv/view/lissajoustrace.h
+    PXView/pv/view/spectrumtrace.h
+    PXView/pv/data/spectrumstack.h
+    PXView/pv/data/decodermodel.h
+    PXView/pv/data/datasource.h
+    PXView/pv/data/sessionsnapshot.h
+    PXView/pv/data/sessiondocument.h
+    PXView/pv/dialogs/mathoptions.h
+    PXView/pv/dialogs/regionoptions.h
+    PXView/pv/view/xcursor.h
+    PXView/pv/view/signal.h
+    PXView/pv/view/logicsignal.h
+    PXView/pv/view/analogsignal.h
+    PXView/pv/view/dsosignal.h 
+    PXView/pv/dock/protocoldock.h
+    PXView/pv/data/decoderstack.h
+    PXView/pv/view/decodetrace.h
+    PXView/pv/widgets/decodergroupbox.h
+    PXView/pv/widgets/decodermenu.h
+    PXView/pv/config/appconfig.h
+    PXView/pv/appcontrol.h
+    PXView/pv/dstimer.h
+    PXView/pv/eventobject.h
+    PXView/pv/ZipMaker.h
+    PXView/pv/data/decode/annotationrestable.h
+    PXView/pv/data/decode/decoderstatus.h
+    PXView/pv/dock/protocolitemlayer.h
+    PXView/pv/ui/msgbox.h
+    PXView/pv/ui/toast.h
+    PXView/pv/ui/dscombobox.h
+    PXView/pv/ui/dsspinbox.h
+    PXView/pv/dsvdef.h
+    PXView/pv/dialogs/applicationpardlg.h
+    PXView/pv/dock/keywordlineedit.h
+    PXView/pv/dock/searchcombobox.h
+    PXView/pv/dialogs/decoderoptionsdlg.h
+    PXView/pv/utility/encoding.h
+    PXView/pv/utility/path.h
+    PXView/pv/utility/array.h
+    PXView/pv/deviceagent.h
+    PXView/pv/ui/fn.h
+    PXView/pv/ui/xtoolbutton.h
+    PXView/pv/ui/draggabletabbar.h
+    PXView/pv/ui/draggabletabwidget.h
+    PXView/pv/ui/iconcache.h
+    PXView/pv/ui/widgetinspector.h
+    PXView/pv/tabcontext.h
+    PXView/pv/api/session_service.h
+    PXView/pv/api/app_service.h
+    PXView/pv/api/rpc_dispatcher.h
+    PXView/pv/api/ws_transport.h
+    PXView/pv/api/mcp_transport.h
+    ${UI_HEADERS}
 )
  
+# Windows-specific QT headers
+if(WIN32)
+	list(APPEND PXView_HEADERS
+		PXView/pv/winnativewidget.h
+		PXView/pv/winshadow.h
+	)
+endif ()
+
+set(PXView_HEADERS_NO_MOC
+    PXView/pv/log.h
+    PXView/pv/sigsession.h
+    PXView/pv/sessionmanager.h
+    PXView/pv/interface/icontextaware.h
+    PXView/pv/data/datasource.h
+    PXView/pv/data/sessionsnapshot.h
+    PXView/pv/data/sessiondocument.h
+    PXView/pv/config/appconfig.h
+    PXView/pv/appcontrol.h
+    PXView/pv/ZipMaker.h
+    PXView/pv/data/decode/annotationrestable.h
+    PXView/pv/data/decode/decoderstatus.h
+    PXView/pv/ui/msgbox.h
+    PXView/pv/dsvdef.h
+    PXView/pv/utility/encoding.h
+    PXView/pv/utility/path.h
+    PXView/pv/utility/array.h
+    PXView/pv/deviceagent.h
+    PXView/pv/ui/fn.h
+    PXView/pv/ui/iconcache.h
+    PXView/pv/tabcontext.h
+)
+
+if(WIN32)
+    list(APPEND PXView_HEADERS_NO_MOC PXView/pv/winnativewidget.h)
+endif()
+
+list(REMOVE_ITEM PXView_HEADERS ${PXView_HEADERS_NO_MOC})
+
+#===============================================================================
+#= Compat drivers option
+#-------------------------------------------------------------------------------
+option(ENABLE_COMPAT_DRIVERS "Enable standard sigrok compatible drivers" OFF)
+option(ENABLE_DRIVER_FX2LAFW "Enable fx2lafw driver" OFF)
+option(ENABLE_DRIVER_SALEAE_LOGIC16 "Enable saleae-logic16 driver" OFF)
+option(ENABLE_DRIVER_RASPBERRYPI_PICO "Enable raspberrypi-pico driver" OFF)
+
+if(ENABLE_COMPAT_DRIVERS)
+    add_definitions(-DHAVE_COMPAT_DRIVERS)
+
+    # Find libserialport for serial compat layer
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(LIBSERIALPORT QUIET libserialport)
+    endif()
+    if(LIBSERIALPORT_FOUND)
+        add_definitions(-DHAVE_LIBSERIALPORT)
+        include_directories(${LIBSERIALPORT_INCLUDE_DIRS})
+    endif()
+
+    if(ENABLE_DRIVER_FX2LAFW)
+        add_definitions(-DHAVE_DRIVER_FX2LAFW)
+    endif()
+    if(ENABLE_DRIVER_SALEAE_LOGIC16)
+        add_definitions(-DHAVE_DRIVER_SALEAE_LOGIC16)
+    endif()
+    if(ENABLE_DRIVER_RASPBERRYPI_PICO)
+        add_definitions(-DHAVE_DRIVER_RASPBERRYPI_PICO)
+    endif()
+endif()
+
 #===============================================================================
 #= libsigrok source
 #-------------------------------------------------------------------------------
-set(libsigrok4PX_SOURCES
-	libsigrok/version.c
-	libsigrok/strutil.c
-	libsigrok/std.c
-	libsigrok/session_driver.c
-	libsigrok/session.c
-	libsigrok/log.c
-	libsigrok/hwdriver.c
-	libsigrok/error.c
-	libsigrok/backend.c
-	libsigrok/output/output.c
-	libsigrok/input/input.c
-	libsigrok/hardware/demo/demo.c
-	libsigrok/input/in_binary.c
-	libsigrok/input/in_vcd.c
-	libsigrok/input/in_wav.c
-	libsigrok/output/csv.c
-	libsigrok/output/gnuplot.c
-	libsigrok/output/srzip.c
-	libsigrok/output/vcd.c
-	libsigrok/hardware/DSL/dslogic.c
-	libsigrok/hardware/common/usb.c
-	libsigrok/hardware/common/ezusb.c
-	libsigrok/trigger.c
-	libsigrok/dsdevice.c
-	libsigrok/hardware/DSL/dscope.c
-	libsigrok/hardware/DSL/command.c
-	libsigrok/hardware/DSL/dsl.c
-	libsigrok/hardware/pxlogic/pxlogic.c
+set(libsigrok_SOURCES
+    libsigrok/version.c
+    libsigrok/strutil.c
+    libsigrok/std.c
+    libsigrok/session_driver.c
+    libsigrok/session.c
+    libsigrok/log.c
+    libsigrok/hwdriver.c
+    libsigrok/error.c
+    libsigrok/backend.c
+    libsigrok/output/output.c
+    libsigrok/input/input.c
+    libsigrok/hardware/demo/demo.c
+    libsigrok/input/in_binary.c
+    libsigrok/input/in_vcd.c
+    libsigrok/input/in_wav.c
+    libsigrok/output/csv.c
+    libsigrok/output/gnuplot.c
+    libsigrok/output/srzip.c
+    libsigrok/output/vcd.c
+    libsigrok/hardware/DSL/dslogic.c
+    libsigrok/hardware/common/usb.c
+    libsigrok/hardware/common/ezusb.c
+    libsigrok/trigger.c
+    libsigrok/dsdevice.c
+    libsigrok/hardware/DSL/dscope.c
+    libsigrok/hardware/DSL/command.c
+    libsigrok/hardware/DSL/dsl.c
+    libsigrok/hardware/pxlogic/pxlogic.c
     libsigrok/hardware/pxlogic/usb_ctrl.c
-	libsigrok/lib_main.c
+    libsigrok/lib_main.c
+)
+
+if(ENABLE_COMPAT_DRIVERS)
+    list(APPEND libsigrok_SOURCES
+        libsigrok/hardware/compat/compat_helpers.c
+        libsigrok/hardware/compat/compat_serial.c
+    )
+    if(ENABLE_DRIVER_FX2LAFW)
+        list(APPEND libsigrok_SOURCES
+            libsigrok/hardware/fx2lafw/api.c
+            libsigrok/hardware/fx2lafw/protocol.c
+        )
+    endif()
+    if(ENABLE_DRIVER_SALEAE_LOGIC16)
+        list(APPEND libsigrok_SOURCES
+            libsigrok/hardware/saleae-logic16/api.c
+            libsigrok/hardware/saleae-logic16/protocol.c
+        )
+    endif()
+    if(ENABLE_DRIVER_RASPBERRYPI_PICO)
+        list(APPEND libsigrok_SOURCES
+            libsigrok/hardware/raspberrypi-pico/api.c
+            libsigrok/hardware/raspberrypi-pico/protocol.c
+        )
+    endif()
+endif()
+
+set(libsigrok_HEADERS
+    libsigrok/version.h
+    libsigrok/libsigrok-internal.h
+    libsigrok/libsigrok.h
+    libsigrok/config.h
+    libsigrok/hardware/DSL/command.h
+    libsigrok/hardware/DSL/dsl.h
 )
  
 #===============================================================================
 #= libsigrokdecode source
 #-------------------------------------------------------------------------------
 set(libsigrokdecode_SOURCES
-	libsigrokdecode/type_decoder.c
-	libsigrokdecode/srd.c
-	libsigrokdecode/module_sigrokdecode.c
-	libsigrokdecode/decoder.c
-	libsigrokdecode/error.c
-	libsigrokdecode/exception.c
-	libsigrokdecode/instance.c
-	libsigrokdecode/log.c
-	libsigrokdecode/session.c
-	libsigrokdecode/util.c
-	libsigrokdecode/version.c
+    libsigrokdecode/type_decoder.c
+    libsigrokdecode/srd.c
+    libsigrokdecode/module_sigrokdecode.c
+    libsigrokdecode/decoder.c
+    libsigrokdecode/dll_registry.c
+    libsigrokdecode/error.c
+    libsigrokdecode/exception.c
+    libsigrokdecode/instance.c
+    libsigrokdecode/log.c
+    libsigrokdecode/session.c
+    libsigrokdecode/util.c
+    libsigrokdecode/version.c
+    libsigrokdecode/c_decoder_api.c
+)
+
+set(libsigrokdecode_HEADERS
+    libsigrokdecode/libsigrokdecode-internal.h
+    libsigrokdecode/libsigrokdecode.h
+    libsigrokdecode/config.h
+    libsigrokdecode/version.h
 )
 
 #===============================================================================
@@ -531,11 +698,17 @@ set(libsigrokdecode_SOURCES
 #-------------------------------------------------------------------------------
 
 set(common_SOURCES
-	common/minizip/zip.c
-	common/minizip/unzip.c
-	common/minizip/ioapi.c
-	common/log/xlog.c
-	common/mem/alloc.c
+    common/minizip/zip.c
+    common/minizip/unzip.c
+    common/minizip/ioapi.c
+    common/log/xlog.c
+)
+
+set(common_HEADERS
+    common/minizip/zip.h
+    common/minizip/unzip.h
+    common/minizip/ioapi.h
+    common/log/xlog.h
 )
 
 #===============================================================================
@@ -549,40 +722,37 @@ set(PXView_RESOURCES
     PXView/PXView.qrc
     PXView/themes/breeze.qrc
     PXView/languages/language.qrc
-	PXView/src/QRibbon/QRibbon.qrc
 )
 
 
 if(WIN32)
 	# Use the PXView icon for the PXView.exe executable.
-	set(CMAKE_RC_COMPILE_OBJECT "${CMAKE_RC_COMPILER} -O coff -I${CMAKE_CURRENT_SOURCE_DIR} <SOURCE> <OBJECT>")
 	enable_language(RC)
 	# app icon
         list(APPEND PXView_SOURCES applogo.rc)
+	# Unicode support for Windows API
+	add_definitions(-DUNICODE -D_UNICODE)
 endif()
 
-if(Qt5Core_FOUND)
-	qt5_wrap_cpp(PXView_HEADERS_MOC ${PXView_HEADERS})
-	qt5_wrap_ui(PXView_FORMS_HEADERS ${PXView_FORMS})
-	qt5_add_resources(PXView_RESOURCES_RCC ${PXView_RESOURCES})
-endif()
+qt6_wrap_cpp(PXView_HEADERS_MOC ${PXView_HEADERS})
+qt6_add_resources(PXView_RESOURCES_RCC ${PXView_RESOURCES})
 
-if(Qt6Core_FOUND)
-	qt6_wrap_cpp(PXView_HEADERS_MOC ${PXView_HEADERS})
-	qt6_wrap_ui(PXView_FORMS_HEADERS ${PXView_FORMS})
-	qt6_add_resources(PXView_RESOURCES_RCC ${PXView_RESOURCES})
-endif()
+
 
 
 add_definitions(${QT_DEFINITIONS})
-add_definitions(-Wall -Wextra -Wno-return-type -Wno-ignored-qualifiers)
+
+# Compiler warnings - only for C/C++, not for RC
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-return-type -Wno-ignored-qualifiers")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-return-type -Wno-ignored-qualifiers")
 
 if(NOT DISABLE_WERROR)
-        add_definitions(-Werror)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
 endif()
 
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 
 
 include_directories(
@@ -604,7 +774,7 @@ endif()
 #-------------------------------------------------------------------------------
 if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "-Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
     add_compile_options(-O3)
 endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
@@ -614,7 +784,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 #-------------------------------------------------------------------------------
 
 
-set(PXView_LINK_LIBS
+set(PXVIEW_LINK_LIBS
 	-lz
 	-lglib-2.0
 	${CMAKE_THREAD_LIBS_INIT}
@@ -622,35 +792,45 @@ set(PXView_LINK_LIBS
 	${LIBUSB_1_LIBRARIES}
 	${FFTW_LIBRARIES}
 	${PY_LIB}
-	#SARibbonBar
 )
 
 if(STATIC_PKGDEPS_LIBS)
 	link_directories(${PKGDEPS_STATIC_LIBRARY_DIRS})
-	list(APPEND PXView_LINK_LIBS ${PKGDEPS_STATIC_LIBRARIES})
+	list(APPEND PXVIEW_LINK_LIBS ${PKGDEPS_STATIC_LIBRARIES})
 if(WIN32)
 	# Workaround for a MinGW linking issue.
 	list(APPEND PULSEVIEW_LINK_LIBS "-llzma -llcms2")
 endif()
 else()
 	link_directories(${PKGDEPS_LIBRARY_DIRS})
-	list(APPEND PXView_LINK_LIBS ${PKGDEPS_LIBRARIES})
+	list(APPEND PXVIEW_LINK_LIBS ${PKGDEPS_LIBRARIES})
+endif()
+
+# Add libserialport if found (for serial compat layer)
+if(LIBSERIALPORT_FOUND)
+	list(APPEND PXVIEW_LINK_LIBS ${LIBSERIALPORT_LIBRARIES})
+	link_directories(${LIBSERIALPORT_LIBRARY_DIRS})
 endif()
 
 add_executable(${PROJECT_NAME}
 	${common_SOURCES}
 	${PXView_SOURCES}
 	${PXView_HEADERS_MOC}
+	${PXView_HEADERS_NO_MOC}
 	${PXView_FORMS_HEADERS}
 	${PXView_RESOURCES_RCC}
-	${libsigrok4PX_SOURCES}
-        ${libsigrokdecode_SOURCES}
+	${libsigrok_SOURCES}
+	${libsigrokdecode_SOURCES}
 )
 
-target_link_libraries(${PROJECT_NAME} ${PXView_LINK_LIBS})
+target_link_libraries(${PROJECT_NAME} ${PXVIEW_LINK_LIBS} nlohmann_json::nlohmann_json)
+
+if(NOT WIN32 AND NOT APPLE)
+	target_link_libraries(${PROJECT_NAME} "-Wl,--export-dynamic")
+endif()
 
 if(WIN32)
-# Pass -mwindows so that no "DOS box" will open when PulseView is started.
+# Pass -mwindows so that no "DOS box" will open when PXView is started.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "-mwindows")
 endif()
 
@@ -660,8 +840,8 @@ if(APPLE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER com.pxlogic.${PROJECT_NAME}
         MACOSX_BUNDLE_BUNDLE_NAME ${PROJECT_NAME}
-        MACOSX_BUNDLE_BUNDLE_VERSION ${PX_VERSION_STRING}
-        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PX_VERSION_STRING}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${DS_VERSION_STRING}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${DS_VERSION_STRING}
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac_appbundle_template.plist.in
         MACOSX_BUNDLE_ICON_FILE PXView.icns
     )
@@ -674,6 +854,155 @@ endif()
 
 message(STATUS "Output dir: ${CMAKE_CURRENT_SOURCE_DIR}/build.dir")
 set(EXECUTABLE_OUTPUT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/build.dir")
+
+#===============================================================================
+#= C decoder DLL/SO build rules
+#-------------------------------------------------------------------------------
+
+set(C_DECODER_OUTPUT_DIR "${EXECUTABLE_OUTPUT_PATH}/decoders/c_decoders")
+
+set(C_DECODERS spi_c i2c_c uart_c can_c jtag_c swd_c onewire_c i2s_c lin_c hdlc_c microwire_c mdio_c ps2_c dmx512_c nrzi_c ir_nec_c ir_rc5_c dcf77_c cec_c spdif_c usb_signalling_c 4b5b_c can_fd_c iso7816_c lpc_c dali_c c2_c graycode_c counter_c lm75_c ds1307_c ds3231_c numbers_and_state_c seven_segment_c pwm_c wiegand_c ir_sirc_c edid_c i2c_packet_c i2cdemux_c i2cfilter_c ltc26x7_c ad5593r_c adxl345_c atsha204a_c bh1750_c eeprom24xx_c flexray_c mipi_rffe_c usb_power_delivery_c iebus_c spacewire_c qspi_c sdio_c spi_dual_quad_c uart_fast_c cjtag_c mlx90614_c mpu6050_c mxc6225xu_c nunchuk_c pca9571_c rtc8564_c ssd1306_c st25dv_c tcs3472x_c tpm_tis_i2c_c tmc_c sent_c sle44xx_c pjdl_c onewire_link_c ac97_c sdcard_sd_c emmc_sd_c swim_c rvswd_c a7105_c ad5626_c ad79x0_c ade77xx_c adf435x_c adb_c afsk_c am230x_c caliper_c carrera_c xfp_c hdcp_c hdmi_scdc_c tca6408a_c tmp102_c dcc_c delta_sigma_c dsi_c em4100_c em4305_c enc28j60_c ltc242x_c max6954_c max7219_c mrf24j40_c ieee488_c ir_irmp_c ir_ltto_c ir_rc6_c ir_recoil_c eth_an_c fsi_c gpib_c guess_bitrate_c iec_c adns5020_c as5047_c avr_isp_c cc1101_c cyrf6936_c mvb_c mcs48_c one_single_wire_c ook_c opentherm_c jitter_c lfast_c maple_bus_c miller_c morse_c nes_gamepad_c nrf24l01_c nrf905_c rfm12_c ssi32_c st25r39xx_spi_c sdcard_spi_c spiflash_c spi_tpm_c tpm_tis_spi_c x2444m_c rgb_led_spi_c sda2506_c signature_c sony_md_c st7735_c st7789_c parallel_c pcfx_ctrlr_c rinnai_control_panel_c rpm_c sae_j1850_vpw_c arm_itm_c arm_tpiu_c bluetooth_h4_c boost_c crsf_c bean_c ccd_c cjtag_oscan0_c rgb_led_ws281x_c stepper_motor_c j1708_c midi_c modbus_c pan1321_c pn532_c sbus_futaba_c scs_c ufcs_c amulet_ascii_c streletz_c z80_c adat_c arm_etmv3_c aud_c avr_pdi_c jtag_avr_c jtag_ejtag_c jtag_stm32_c mipi_dsi_c pxx1_c qi_c rc_encode_c sdq_c onewire_network_c ds2408_c ds243x_c ds28ea00_c eeprom93xx_c spi_fast_c swi_c t55xx_c tdm_audio_c timing_c tlc5620_c xy2_100_c cfp_c ps2_keyboard_c ps2_mouse_c usb_packet_c usb_request_c avclan_c ethernet_c arp_c ipv4_c udp_c ook_oregon_c ook_vis_c ltar_smartdevice_c ir_ltto_decode_c sony_md_decode_c sipi_c pjon_c tpm_fifo_tis_c tm1637_c tm1638_c ltar_smartdevice_decode_c)
+
+foreach(dec ${C_DECODERS})
+	add_library(decoder_${dec} MODULE
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/c_decoders/${dec}.c
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/c_decoder_api.c
+	)
+
+	target_include_directories(decoder_${dec} PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode
+		${CMAKE_CURRENT_SOURCE_DIR}/common
+		${GLIB_INCLUDE_DIRS}
+		${Python3_INCLUDE_DIRS}
+	)
+
+	target_compile_definitions(decoder_${dec} PRIVATE
+		SRD_C_DECODER_DLL
+	)
+
+	target_link_libraries(decoder_${dec}
+		-lglib-2.0
+	)
+
+	set_target_properties(decoder_${dec} PROPERTIES
+		OUTPUT_NAME ${dec}
+		LIBRARY_OUTPUT_DIRECTORY ${C_DECODER_OUTPUT_DIR}
+		RUNTIME_OUTPUT_DIRECTORY ${C_DECODER_OUTPUT_DIR}
+	)
+endforeach()
+
+#===============================================================================
+#= irmp shared library
+#-------------------------------------------------------------------------------
+
+add_library(irmp SHARED
+	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/irmp/irmp-main-sharedlib.c
+)
+
+target_include_directories(irmp PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/irmp
+	${GLIB_INCLUDE_DIRS}
+	${Python3_INCLUDE_DIRS}
+)
+
+target_compile_definitions(irmp PRIVATE
+	IRMP_PROTOCOL_NAMES=1
+)
+
+if(WIN32)
+	target_compile_definitions(irmp PRIVATE WIN32)
+endif()
+
+target_link_libraries(irmp
+	Python3::Python
+	-lglib-2.0
+)
+
+set_target_properties(irmp PROPERTIES
+	PREFIX ""
+	LIBRARY_OUTPUT_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
+	RUNTIME_OUTPUT_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
+)
+
+#===============================================================================
+#= Copy language files to output directory (for development)
+#-------------------------------------------------------------------------------
+if(WIN32)
+    # Create lang directories in output directory
+    file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/lang/cn)
+    file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/lang/cn/dec)
+    file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/lang/en)
+
+    # Copy language files
+    file(GLOB CN_LANG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/lang/cn/*.json)
+    file(GLOB CN_DEC_LANG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/lang/cn/dec/*.json)
+    file(GLOB EN_LANG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/lang/en/*.json)
+
+    foreach(file ${CN_LANG_FILES})
+        file(COPY ${file} DESTINATION ${EXECUTABLE_OUTPUT_PATH}/lang/cn)
+    endforeach()
+
+    foreach(file ${CN_DEC_LANG_FILES})
+        file(COPY ${file} DESTINATION ${EXECUTABLE_OUTPUT_PATH}/lang/cn/dec)
+    endforeach()
+
+    foreach(file ${EN_LANG_FILES})
+        file(COPY ${file} DESTINATION ${EXECUTABLE_OUTPUT_PATH}/lang/en)
+    endforeach()
+
+    message(STATUS "Language files copied to: ${EXECUTABLE_OUTPUT_PATH}/lang")
+
+    # Copy decoder files to output directory
+    file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/decoders)
+    file(GLOB DECODER_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/package/decoders/*)
+    foreach(dir ${DECODER_DIRS})
+        if(IS_DIRECTORY ${dir})
+            get_filename_component(dir_name ${dir} NAME)
+            file(COPY ${dir} DESTINATION ${EXECUTABLE_OUTPUT_PATH}/decoders)
+        endif()
+    endforeach()
+
+    message(STATUS "Decoder files copied to: ${EXECUTABLE_OUTPUT_PATH}/decoders")
+
+    file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/decoders/c_decoders)
+
+    message(STATUS "C decoder output directory: ${EXECUTABLE_OUTPUT_PATH}/decoders/c_decoders")
+endif()
+
+#===============================================================================
+#= Vite web client build (optional, run: cmake --build . --target webui)
+#-------------------------------------------------------------------------------
+
+find_program(NPM_EXECUTABLE npm)
+
+if(NPM_EXECUTABLE)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html
+        COMMAND ${NPM_EXECUTABLE} install
+        COMMAND ${NPM_EXECUTABLE} run build
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/web
+        COMMENT "Building Vite web client..."
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/package.json
+    )
+
+    add_custom_target(webui
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html
+        COMMENT "Build the MCP web client (Vite)"
+    )
+
+    add_custom_target(install-webui
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/web/dist
+            ${CMAKE_INSTALL_PREFIX}/bin/webui
+        COMMENT "Copy web client to install directory"
+        DEPENDS webui
+    )
+
+    message(STATUS "Web UI build target available: cmake --build . --target webui")
+    message(STATUS "Web UI install target available: cmake --build . --target install-webui")
+else()
+    message(STATUS "npm not found, web UI build targets not available")
+endif()
 
 #===============================================================================
 #= Installation
@@ -691,7 +1020,6 @@ if(APPLE)
 else()
     install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 endif()
-
 install(DIRECTORY PXView/res DESTINATION ${MAC_RES_PREFIX}share/PXView)
 install(DIRECTORY PXView/demo DESTINATION ${MAC_RES_PREFIX}share/PXView)
 install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME logo.svg)
@@ -699,40 +1027,133 @@ install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/icons/hic
 install(FILES PXView/icons/logo.svg DESTINATION ${MAC_RES_PREFIX}share/pixmaps RENAME pxview.svg)
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-	install(FILES PXView/PXView.desktop DESTINATION /usr/share/applications RENAME pxview.desktop)
-	
-	if(IS_DIRECTORY /usr/lib/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /usr/lib/udev/rules.d RENAME 60-px.rules)
-	elseif(IS_DIRECTORY /lib/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /lib/udev/rules.d RENAME 60-px.rules)
-	elseif(IS_DIRECTORY /etc/udev/rules.d)
-		install(FILES PXView/px.rules DESTINATION /etc/udev/rules.d RENAME 60-px.rules)
+	install(FILES PXView/PXView.desktop DESTINATION ${MAC_RES_PREFIX}share/applications RENAME pxview.desktop)
+
+	#add_compile_definitions(_DEFAULT_SOURCE)
+
+	# udev rules: install to system path for system prefixes, local prefix otherwise
+	if(CMAKE_INSTALL_PREFIX STREQUAL "/usr" OR CMAKE_INSTALL_PREFIX STREQUAL "/usr/local")
+		if(IS_DIRECTORY /usr/lib/udev/rules.d)
+			install(FILES PXView/px.rules DESTINATION /usr/lib/udev/rules.d RENAME 60-px.rules)
+		elseif(IS_DIRECTORY /lib/udev/rules.d)
+			install(FILES PXView/px.rules DESTINATION /lib/udev/rules.d RENAME 60-px.rules)
+		elseif(IS_DIRECTORY /etc/udev/rules.d)
+			install(FILES PXView/px.rules DESTINATION /etc/udev/rules.d RENAME 60-px.rules)
+		endif()
+	else()
+		install(FILES PXView/px.rules DESTINATION ${MAC_RES_PREFIX}lib/udev/rules.d RENAME 60-px.rules)
 	endif()
 
 endif()
 
-install(FILES doc/NEWS25 DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME NEWS25)
-install(FILES doc/NEWS31 DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME NEWS31)
-install(FILES doc/ug25.pdf DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME ug25.pdf)
-install(FILES doc/ug31.pdf DESTINATION ${MAC_RES_PREFIX}share/PXView RENAME ug31.pdf)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/doc/ DESTINATION ${MAC_RES_PREFIX}share/PXView)
 
-install(DIRECTORY libsigrokdecode/decoders DESTINATION ${MAC_RES_PREFIX}share/PXView/libsigrokdecode)
+install(DIRECTORY libsigrokdecode/decoders DESTINATION ${MAC_RES_PREFIX}share/libsigrokdecode)
+
+foreach(dec ${C_DECODERS})
+	install(TARGETS decoder_${dec}
+		DESTINATION ${MAC_RES_PREFIX}share/libsigrokdecode/c_decoders
+	)
+endforeach()
+
+install(TARGETS irmp DESTINATION ${MAC_RES_PREFIX}bin)
+
 install(DIRECTORY lang DESTINATION ${MAC_RES_PREFIX}share/PXView)
+
+# Install web client if it has been built
+install(CODE "
+    if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html\")
+        file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\"
+             TYPE DIRECTORY FILES \"${CMAKE_CURRENT_SOURCE_DIR}/web/dist/\")
+        message(STATUS \"Installing web client to: \${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\")
+    else()
+        message(STATUS \"Web client not built, skipping. Run: ninja webui\")
+    endif()
+")
 
 #===============================================================================
 #= Packaging (handled by CPack)
 #-------------------------------------------------------------------------------
 
-set(CPACK_PACKAGE_VERSION_MAJOR ${PX_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${PX_VERSION_MINOR})
-set(CPACK_PACKAGE_VERSION_PATCH ${PX_VERSION_MICRO})
+set(CPACK_PACKAGE_VERSION_MAJOR ${DS_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${DS_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${DS_VERSION_MICRO})
 set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/PXView/README)
 set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/PXView/COPYING)
 set(CPACK_SOURCE_IGNORE_FILES ${CMAKE_CURRENT_BINARY_DIR} ".gitignore" ".git")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME
-	"${CMAKE_PROJECT_NAME}-${PX_VERSION_MAJOR}.${PX_VERSION_MINOR}.${PX_VERSION_MICRO}")
+	"${CMAKE_PROJECT_NAME}-${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO}")
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_PACKAGE_CONTACT "913461865@qq.com")
 include(CPack)
 
+#===============================================================================
+#= Tests
+#-------------------------------------------------------------------------------
 
+if(ENABLE_TESTS)
+	add_subdirectory(test)
+	enable_testing()
+	add_test(test ${CMAKE_CURRENT_BINARY_DIR}/PXView/test/PXView-test)
+endif(ENABLE_TESTS)
+
+#===============================================================================
+#= decoder_test - C decoder test harness
+#-------------------------------------------------------------------------------
+
+option(BUILD_DECODER_TEST "Build the C decoder test program" OFF)
+
+if(BUILD_DECODER_TEST)
+	# Static library for libsigrokdecode so decoder_test can link against it.
+	# The main PXView executable compiles these sources directly; this static
+	# library exists solely to provide a linkable target for decoder_test.
+	add_library(sigrokdecode_static STATIC
+		${libsigrokdecode_SOURCES}
+		${CMAKE_CURRENT_SOURCE_DIR}/common/log/xlog.c
+	)
+
+	target_include_directories(sigrokdecode_static PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode
+		${CMAKE_CURRENT_SOURCE_DIR}/common
+		${GLIB_INCLUDE_DIRS}
+		${Python3_INCLUDE_DIRS}
+	)
+
+	target_link_libraries(sigrokdecode_static
+		-lglib-2.0
+		${PY_LIB}
+	)
+
+	# decoder_test executable
+	add_executable(decoder_test
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/tests/decoder_test.c
+	)
+
+	target_include_directories(decoder_test PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}                        # for <libsigrokdecode/libsigrokdecode.h>
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode        # for internal headers via sigrokdecode_static
+		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/tests  # for "cJSON.h"
+		${GLIB_INCLUDE_DIRS}
+	)
+
+	# CJSON_IMPLEMENTATION is needed by the cJSON single-header library.
+	# It is also defined in decoder_test.c itself; the CMake definition
+	# ensures it is set regardless of source-level changes.
+	target_compile_definitions(decoder_test PRIVATE
+		CJSON_IMPLEMENTATION
+	)
+
+	target_link_libraries(decoder_test
+		sigrokdecode_static
+		-lglib-2.0
+	)
+
+	set_target_properties(decoder_test PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
+	)
+endif()
+
+
+
+#add_executable(test_font test_font.cpp)
+#target_link_libraries(test_font Qt6::Gui Qt6::Widgets)

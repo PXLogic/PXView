@@ -255,21 +255,27 @@ class Decoder(srd.Decoder):
 
             self.es_bitstring = self.samplenum
 
-            t = self.state.value[-2:] + ' TDI'
-            b = ''.join(map(str, self.bits_tdi[1:]))
-            h = ' (0x%x' % int('0b0' + b, 2) + ')'
-            s = t + ': ' + b + h + ', ' + str(len(self.bits_tdi[1:])) + ' bits'
-            self.putx_bs([30, [s]])
-            self.putp_bs([t, [b, self.bits_samplenums_tdi[1:]]])
+            # Check for None (unknown) bits — skip bitstring if present
+            has_invalid_tdi = any(b is None for b in self.bits_tdi[1:])
+            has_invalid_tdo = any(b is None for b in self.bits_tdo[1:])
+
+            if not has_invalid_tdi and len(self.bits_tdi) > 1:
+                t = self.state.value[-2:] + ' TDI'
+                b = ''.join(map(str, self.bits_tdi[1:]))
+                h = ' (0x%x' % int('0b0' + b, 2) + ')'
+                s = t + ': ' + b + h + ', ' + str(len(self.bits_tdi[1:])) + ' bits'
+                self.putx_bs([30, [s]])
+                self.putp_bs([t, [b, self.bits_samplenums_tdi[1:]]])
             self.bits_tdi = []
             self.bits_samplenums_tdi = []
 
-            t = self.state.value[-2:] + ' TDO'
-            b = ''.join(map(str, self.bits_tdo[1:]))
-            h = ' (0x%x' % int('0b0' + b, 2) + ')'
-            s = t + ': ' + b + h + ', ' + str(len(self.bits_tdo[1:])) + ' bits'
-            self.putx_bs([31, [s]])
-            self.putp_bs([t, [b, self.bits_samplenums_tdo[1:]]])
+            if not has_invalid_tdo and len(self.bits_tdo) > 1:
+                t = self.state.value[-2:] + ' TDO'
+                b = ''.join(map(str, self.bits_tdo[1:]))
+                h = ' (0x%x' % int('0b0' + b, 2) + ')'
+                s = t + ': ' + b + h + ', ' + str(len(self.bits_tdo[1:])) + ' bits'
+                self.putx_bs([31, [s]])
+                self.putp_bs([t, [b, self.bits_samplenums_tdo[1:]]])
             self.bits_tdo = []
             self.bits_samplenums_tdo = []
 

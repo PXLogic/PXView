@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+    	<file>icons/win_title_logo.svg</file>
         <file>icons/Blackman.png</file>
         <file>icons/Flat_top.png</file>
         <file>icons/Hamming.png</file>
@@ -36,12 +37,13 @@
         <file>icons/dark/moder.svg</file>
         <file>icons/dark/modes.svg</file>
         <file>icons/dark/trigger.svg</file>
-        <file>icons/dark/pwm.svg</file>
         <file>icons/light/about.svg</file>
         <file>icons/light/add.svg</file>
         <file>icons/light/bug.svg</file>
         <file>icons/light/capture.svg</file>
         <file>icons/light/close.svg</file>
+        <file>icons/light/header-collapse.svg</file>
+        <file>icons/light/header-expand.svg</file>
         <file>icons/light/dark.svg</file>
         <file>icons/light/del.svg</file>
         <file>icons/light/display.svg</file>
@@ -70,12 +72,13 @@
         <file>icons/light/start.svg</file>
         <file>icons/light/stop.svg</file>
         <file>icons/light/trigger.svg</file>
-        <file>icons/light/pwm.svg</file>
         <file>icons/dark/about.svg</file>
         <file>icons/dark/add.svg</file>
         <file>icons/dark/bug.svg</file>
         <file>icons/dark/capture.svg</file>
         <file>icons/dark/close.svg</file>
+        <file>icons/dark/header-collapse.svg</file>
+        <file>icons/dark/header-expand.svg</file>
         <file>icons/dark/dark.svg</file>
         <file>icons/dark/del.svg</file>
         <file>icons/dark/display.svg</file>
@@ -113,7 +116,11 @@
         <file>icons/lissajous.svg</file>
         <file>icons/dark/single.svg</file>
         <file>icons/dark/measure.svg</file>
+        <file>icons/dark/pin.svg</file>
+        <file>icons/dark/unpin.svg</file>
         <file>icons/light/measure.svg</file>
+        <file>icons/light/pin.svg</file>
+        <file>icons/light/unpin.svg</file>
         <file>icons/dark/daq.svg</file>
         <file>icons/dark/la.svg</file>
         <file>icons/dark/osc.svg</file>
@@ -127,7 +134,19 @@
         <file>icons/dark/square-la.svg</file>
         <file>icons/dark/square-osc.svg</file>
         <file>icons/light/search.svg</file>
+        <file>icons/light/zap.svg</file>
+        <file>icons/light/binary.svg</file>
+        <file>icons/light/ruler.svg</file>
+        <file>icons/light/sliders.svg</file>
+        <file>icons/light/play.svg</file>
+        <file>icons/light/step-forward.svg</file>
         <file>icons/dark/search.svg</file>
+        <file>icons/dark/zap.svg</file>
+        <file>icons/dark/binary.svg</file>
+        <file>icons/dark/ruler.svg</file>
+        <file>icons/dark/sliders.svg</file>
+        <file>icons/dark/play.svg</file>
+        <file>icons/dark/step-forward.svg</file>
         <file>icons/dark/function.svg</file>
         <file>icons/light/function.svg</file>
         <file>icons/light/logo_color.svg</file>
@@ -144,7 +163,18 @@
         <file>icons/dark/loop.svg</file>
         <file>icons/light/log.svg</file>
         <file>icons/dark/log.svg</file>
+        <file>icons/light/scroll-text.svg</file>
+        <file>icons/dark/scroll-text.svg</file>
+        <file>icons/light/workflow.svg</file>
+        <file>icons/dark/workflow.svg</file>
+        <file>icons/dark/audio-waveform.svg</file>
+        <file>icons/light/scroll-bottom.svg</file>
+        <file>icons/light/audio-waveform.svg</file>
+        <file>icons/dark/scroll-bottom.svg</file>
         <file>icons/light/update.svg</file>
         <file>icons/dark/update.svg</file>
+        <file>fonts/OPPOSans-M.ttf</file>
+        <file>fonts/SourceCodePro-Medium.ttf</file>
+        <file>fonts/SourceHanSansCN-Regular.otf</file>
     </qresource>
 </RCC>

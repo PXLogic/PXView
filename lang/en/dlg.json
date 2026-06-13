@@ -4,6 +4,62 @@
         "text": "Log Options"
     },
     {
+        "id": "IDS_DLG_LOG_DOCK_TITLE",
+        "text": "Log"
+    },
+    {
+        "id": "IDS_DLG_MCP_DOCK_TITLE",
+        "text": "MCP Server"
+    },
+    {
+        "id": "IDS_DLG_MCP_WEB_CONSOLE",
+        "text": "Web Console"
+    },
+    {
+        "id": "IDS_DLG_MCP_WEB_CONSOLE_DESC",
+        "text": "Open the visual diagnostic interface to control devices using natural language."
+    },
+    {
+        "id": "IDS_DLG_MCP_OPEN_WEB",
+        "text": "Open MCP Web Console"
+    },
+    {
+        "id": "IDS_DLG_MCP_DEVELOPER",
+        "text": "Connect AI Tool"
+    },
+    {
+        "id": "IDS_DLG_MCP_DEVELOPER_DESC",
+        "text": "Run the command below in your terminal to connect your AI tool to PXView."
+    },
+    {
+        "id": "IDS_DLG_MCP_RESTART",
+        "text": "Restart MCP Service"
+    },
+    {
+        "id": "IDS_DLG_MCP_RUNNING",
+        "text": "Running"
+    },
+    {
+        "id": "IDS_DLG_MCP_STOPPED",
+        "text": "Stopped"
+    },
+    {
+        "id": "IDS_DLG_MCP_COPY_TOOLTIP",
+        "text": "Copy to clipboard"
+    },
+    {
+        "id": "IDS_DLG_LOG_NO_FILE",
+        "text": "No log file found."
+    },
+    {
+        "id": "IDS_DLG_LOG_OPEN_FAIL",
+        "text": "Failed to open log file."
+    },
+    {
+        "id": "IDS_DLG_LOG_AUTO_SCROLL",
+        "text": "Auto Scroll"
+    },
+    {
         "id": "IDS_DLG_LOG_LEVEL",
         "text": "Log Level"
     },
@@ -118,6 +174,10 @@
     {
         "id": "IDS_DLG_DEVICE_OPTIONS",
         "text": "Device Options"
+    },
+    {
+        "id": "IDS_DLG_SIGNAL_PROCESSING",
+        "text": "Signal Processing"
     },
     {
         "id": "IDS_DLG_MODE",
@@ -396,6 +456,10 @@
         "text": "Enable floating measurement"
     },
     {
+        "id": "IDS_DLG_PANEL_ALPHA_NOTE",
+        "text": "*Adjust the alpha channel of \"Panel Background\" in Options > Style > Global Colors to change panel transparency"
+    },
+    {
         "id": "IDS_DLG_CURSOR_DISTANCE",
         "text": "Cursor Distance"
     },
@@ -580,6 +644,10 @@
         "text": "Auto(Roll)"
     },
     {
+        "id": "IDS_DLG_AUTO_SCROLL_LATEAST_DATA",
+        "text": "Auto scroll latest"
+    },
+    {
         "id": "IDS_DLG_WAITING_TRIG",
         "text": "Waiting Trig"
     },
@@ -714,5 +782,1025 @@
     {
         "id": "IDS_DLG_ABORT",
         "text": "Abort"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_X",
+        "text": "X: Don't care"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_0",
+        "text": "0: Low level"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_1",
+        "text": "1: High level"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_R",
+        "text": "R: Rising edge"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_F",
+        "text": "F: Falling edge"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_LABEL_C",
+        "text": "C: Rising/Falling edge"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_COL_START",
+        "text": "Start"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_COL_LENGTH",
+        "text": "Length"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_COL_INDEX",
+        "text": "#"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_COL_TIME",
+        "text": "Start Time"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_COL_DURATION",
+        "text": "Duration"
+    },
+    {
+        "id": "IDS_DLG_SEARCH_TIME_HINT",
+        "text": "Enter time (e.g. 1.5us, 100ns, 2ms) or index, press Enter to search"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_ENABLE",
+        "text": "Disk Cache"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_PATH",
+        "text": "Cache Path"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_ON",
+        "text": "Disk Cache: ON"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_PATH_LABEL",
+        "text": "Path: "
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_WRITE",
+        "text": "Write: "
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_QUEUE",
+        "text": "Queue: "
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_DISK",
+        "text": "Disk: "
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_FULL",
+        "text": "DISK FULL"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_SLOW_WARNING",
+        "text": "Disk write speed is too slow"
+    },
+    {
+        "id": "IDS_DLG_DISK_CACHE_SLOW_DETAIL",
+        "text": "Detected speed: %1 MB/s\nRecommended: NVMe SSD for 250MB/s capture.\nCapture may fail with data loss."
+    },
+    {
+        "id": "IDS_DLG_SETTINGS",
+        "text": "Settings"
+    },
+    {
+        "id": "IDS_DLG_NAV_DISPLAY",
+        "text": "Display"
+    },
+    {
+        "id": "IDS_DLG_NAV_SHORTCUTS",
+        "text": "Shortcuts"
+    },
+    {
+        "id": "IDS_DLG_NAV_STYLE",
+        "text": "Style"
+    },
+    {
+        "id": "IDS_DLG_SC_ACTION",
+        "text": "Action"
+    },
+    {
+        "id": "IDS_DLG_SC_SHORTCUT",
+        "text": "Shortcut"
+    },
+    {
+        "id": "IDS_DLG_SC_EDIT",
+        "text": "Edit"
+    },
+    {
+        "id": "IDS_DLG_SC_APPLY",
+        "text": "Apply"
+    },
+    {
+        "id": "IDS_DLG_SC_RESET_ALL",
+        "text": "Reset All"
+    },
+    {
+        "id": "IDS_DLG_SC_OK",
+        "text": "OK"
+    },
+    {
+        "id": "IDS_DLG_SC_ACCEPT",
+        "text": "Accept"
+    },
+    {
+        "id": "IDS_DLG_SC_RESTORE",
+        "text": "Restore"
+    },
+    {
+        "id": "IDS_DLG_SC_RESET_DEFAULT",
+        "text": "Reset Default"
+    },
+    {
+        "id": "IDS_DLG_SC_DELETE_KEY",
+        "text": "Delete Key"
+    },
+    {
+        "id": "IDS_DLG_SC_CLASH_WARNING",
+        "text": "Clashing shortcuts will be ignored."
+    },
+    {
+        "id": "IDS_DLG_STYLE_TOKEN",
+        "text": "Token"
+    },
+    {
+        "id": "IDS_DLG_STYLE_PREVIEW",
+        "text": "Preview"
+    },
+    {
+        "id": "IDS_DLG_STYLE_VALUE",
+        "text": "Value"
+    },
+    {
+        "id": "IDS_DLG_STYLE_SELECT_COLOR",
+        "text": "Select Color"
+    },
+    {
+        "id": "IDS_DLG_STYLE_IMPORT",
+        "text": "Import"
+    },
+    {
+        "id": "IDS_DLG_STYLE_EXPORT",
+        "text": "Export"
+    },
+    {
+        "id": "IDS_DLG_STYLE_FILE_FILTER",
+        "text": "Style Files (*.pxstyle)"
+    },
+    {
+        "id": "IDS_DLG_SC_RUN_STOP",
+        "text": "Run/Stop"
+    },
+    {
+        "id": "IDS_DLG_SC_INSTANT",
+        "text": "Instant Sampling"
+    },
+    {
+        "id": "IDS_DLG_SC_TRIGGER",
+        "text": "Trigger Panel"
+    },
+    {
+        "id": "IDS_DLG_SC_DECODE",
+        "text": "Decode Panel"
+    },
+    {
+        "id": "IDS_DLG_SC_MEASURE",
+        "text": "Measure Panel"
+    },
+    {
+        "id": "IDS_DLG_SC_SEARCH",
+        "text": "Search Panel"
+    },
+    {
+        "id": "IDS_DLG_SC_OPTIONS",
+        "text": "Device Options"
+    },
+    {
+        "id": "IDS_DLG_SC_DEVICE_SELECT",
+        "text": "Select Device"
+    },
+    {
+        "id": "IDS_DLG_SC_PAGE_UP",
+        "text": "Page Left"
+    },
+    {
+        "id": "IDS_DLG_SC_PAGE_DOWN",
+        "text": "Page Right"
+    },
+    {
+        "id": "IDS_DLG_SC_ZOOM_IN",
+        "text": "Zoom In"
+    },
+    {
+        "id": "IDS_DLG_SC_ZOOM_OUT",
+        "text": "Zoom Out"
+    },
+    {
+        "id": "IDS_DLG_SC_DSO_CH0",
+        "text": "DSO Channel 0"
+    },
+    {
+        "id": "IDS_DLG_SC_DSO_CH1",
+        "text": "DSO Channel 1"
+    },
+    {
+        "id": "IDS_DLG_SC_DSO_VUP",
+        "text": "DSO V-Dial Up"
+    },
+    {
+        "id": "IDS_DLG_SC_DSO_VDOWN",
+        "text": "DSO V-Dial Down"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_OPEN",
+        "text": "Open File"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_SAVE",
+        "text": "Save File"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_EXPORT",
+        "text": "Export Data"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_LOAD",
+        "text": "Load Config"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_STORE",
+        "text": "Store Config"
+    },
+    {
+        "id": "IDS_DLG_SC_SCREENSHOT",
+        "text": "Screenshot"
+    },
+    {
+        "id": "IDS_DLG_SC_FFT",
+        "text": "FFT"
+    },
+    {
+        "id": "IDS_DLG_SC_MATH",
+        "text": "Math"
+    },
+    {
+        "id": "IDS_DLG_SC_LISSAJOUS",
+        "text": "Lissajous"
+    },
+    {
+        "id": "IDS_DLG_SC_SETTINGS",
+        "text": "Settings"
+    },
+    {
+        "id": "IDS_DLG_SC_LOG",
+        "text": "Log"
+    },
+    {
+        "id": "IDS_DLG_SC_FUNCTION",
+        "text": "Function"
+    },
+    {
+        "id": "IDS_DLG_SC_THEME_TOGGLE",
+        "text": "Toggle Theme"
+    },
+    {
+        "id": "IDS_DLG_SC_NEW_TAB",
+        "text": "New Tab"
+    },
+    {
+        "id": "IDS_DLG_SC_CLOSE_TAB",
+        "text": "Close Tab"
+    },
+    {
+        "id": "IDS_DLG_SC_ZOOM_FIT",
+        "text": "Zoom Fit"
+    },
+    {
+        "id": "IDS_DLG_STYLE_CUSTOM",
+        "text": "Custom"
+    },
+    {
+        "id": "IDS_DLG_STYLE_DARK",
+        "text": "Dark"
+    },
+    {
+        "id": "IDS_DLG_STYLE_LIGHT",
+        "text": "Light"
+    },
+    {
+        "id": "IDS_DLG_STYLE_ATOM",
+        "text": "Atom One Dark"
+    },
+    {
+        "id": "IDS_DLG_STYLE_AYU",
+        "text": "Ayu Light"
+    },
+    {
+        "id": "IDS_DLG_STYLE_DARK_CARDS",
+        "text": "Dark (Colored Cards)"
+    },
+    {
+        "id": "IDS_DLG_STYLE_LIGHT_CARDS",
+        "text": "Light (Colored Cards)"
+    },
+    {
+        "id": "IDS_DLG_STYLE_PRESET",
+        "text": "Preset Theme:"
+    },
+    {
+        "id": "IDS_DLG_STYLE_PICKER",
+        "text": "Picker Tool"
+    },
+    {
+        "id": "IDS_DLG_STYLE_EDIT_JSON",
+        "text": "Edit JSON Source"
+    },
+    {
+        "id": "IDS_DLG_STYLE_SAVE_AS_PRESET",
+        "text": "Save as Preset"
+    },
+    {
+        "id": "IDS_DLG_STYLE_SAVE_PRESET",
+        "text": "Save Preset"
+    },
+    {
+        "id": "IDS_DLG_STYLE_PRESET_NAME",
+        "text": "Preset Name:"
+    },
+    {
+        "id": "IDS_DLG_STYLE_SAVE_SUCCESS",
+        "text": "Success"
+    },
+    {
+        "id": "IDS_DLG_STYLE_SAVE_SUCCESS_MSG",
+        "text": "Preset saved successfully."
+    },
+    {
+        "id": "IDS_STYLE_CAT_GLOBAL",
+        "text": "Global Colors"
+    },
+    {
+        "id": "IDS_STYLE_CAT_ACCENT",
+        "text": "Accents & Status"
+    },
+    {
+        "id": "IDS_STYLE_CAT_SIGNAL",
+        "text": "Analog & Generic"
+    },
+    {
+        "id": "IDS_STYLE_CAT_LOGIC",
+        "text": "Logic Channels"
+    },
+    {
+        "id": "IDS_STYLE_CAT_DECODER",
+        "text": "Decoder Colors"
+    },
+    {
+        "id": "IDS_STYLE_CAT_TYPOGRAPHY",
+        "text": "Typography"
+    },
+    {
+        "id": "IDS_STYLE_BG_BASE",
+        "text": "Base Background"
+    },
+    {
+        "id": "IDS_STYLE_BG_BASE_DESC",
+        "text": "Main window background"
+    },
+    {
+        "id": "IDS_STYLE_BG_OVERLAY",
+        "text": "Overlay Background"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_BG",
+        "text": "Title Bar Background"
+    },
+    {
+        "id": "IDS_STYLE_RIBBON_BG",
+        "text": "Ribbon Background"
+    },
+    {
+        "id": "IDS_STYLE_TABVIEW_BG",
+        "text": "Waveform Base Background"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_BG",
+        "text": "Sidebar Background"
+    },
+    {
+        "id": "IDS_STYLE_STATUSBAR_BG",
+        "text": "Status Bar Background"
+    },
+    {
+        "id": "IDS_STYLE_PANEL_BG",
+        "text": "Panel Background"
+    },
+    {
+        "id": "IDS_STYLE_GROUP_CARD_BG",
+        "text": "Waveform Group Card"
+    },
+    {
+        "id": "IDS_STYLE_GROUP_CARD_COLORED",
+        "text": "Colored Group Cards"
+    },
+    {
+        "id": "IDS_STYLE_GROUP_CARD_COLORED_DESC",
+        "text": "Use channel signal color as group card background"
+    },
+    {
+        "id": "IDS_STYLE_FG_BASE",
+        "text": "Primary Text"
+    },
+    {
+        "id": "IDS_STYLE_FG_BRIGHT",
+        "text": "Bright Text"
+    },
+    {
+        "id": "IDS_STYLE_FG_MUTED",
+        "text": "Muted Text"
+    },
+    {
+        "id": "IDS_STYLE_PANEL_TEXT",
+        "text": "Panel Text"
+    },
+    {
+        "id": "IDS_STYLE_BORDER",
+        "text": "Input Border"
+    },
+    {
+        "id": "IDS_STYLE_BORDER_STRONG",
+        "text": "Panel Border"
+    },
+    {
+        "id": "IDS_STYLE_ACCENT",
+        "text": "Accent"
+    },
+    {
+        "id": "IDS_STYLE_ACCENT_DESC",
+        "text": "Theme color for highlights and selections"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_ACCENT",
+        "text": "Sidebar Icon Accent"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_ACCENT_DESC",
+        "text": "Sidebar selected indicator bar color"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_ICON",
+        "text": "Titlebar Icon Accent"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_ICON_DESC",
+        "text": "Titlebar icon active color"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_ICON_COLOR",
+        "text": "Titlebar Icon Unselected"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_ICON_COLOR_DESC",
+        "text": "Default icon color in Titlebar/Ribbon"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_TEXT",
+        "text": "Titlebar Text Color"
+    },
+    {
+        "id": "IDS_STYLE_TITLEBAR_TEXT_DESC",
+        "text": "Text color in Titlebar/Ribbon"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_ICON",
+        "text": "Sidebar Icon Unselected"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_ICON_DESC",
+        "text": "Sidebar unselected icon color"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_TEXT",
+        "text": "Sidebar Text Color"
+    },
+    {
+        "id": "IDS_STYLE_SIDEBAR_TEXT_DESC",
+        "text": "Sidebar unselected text color"
+    },
+    {
+        "id": "IDS_STYLE_DANGER",
+        "text": "Danger/Warning"
+    },
+    {
+        "id": "IDS_STYLE_STATUS_OK",
+        "text": "Status: OK"
+    },
+    {
+        "id": "IDS_STYLE_STATUS_ERROR",
+        "text": "Status: Error"
+    },
+    {
+        "id": "IDS_STYLE_ICON_ACCENT",
+        "text": "Icon Accent"
+    },
+    {
+        "id": "IDS_STYLE_ICON_ACCENT_DESC",
+        "text": "Color for blue functional icons"
+    },
+    {
+        "id": "IDS_STYLE_ICON_SPECIAL",
+        "text": "Icon Special Color"
+    },
+    {
+        "id": "IDS_STYLE_ICON_SPECIAL_DESC",
+        "text": "Color for special function icons"
+    },
+    {
+        "id": "IDS_STYLE_ICON_FOREGROUND",
+        "text": "Icon Foreground"
+    },
+    {
+        "id": "IDS_STYLE_ICON_FOREGROUND_DESC",
+        "text": "Color for window control and search icons"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_CH1",
+        "text": "Analog Ch1"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_CH2",
+        "text": "Analog Ch2"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_CH3",
+        "text": "Analog Ch3"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_CH4",
+        "text": "Analog Ch4"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_CH5",
+        "text": "Analog Ch5"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH0",
+        "text": "Logic Ch0"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH1",
+        "text": "Logic Ch1"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH2",
+        "text": "Logic Ch2"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH3",
+        "text": "Logic Ch3"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH4",
+        "text": "Logic Ch4"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH5",
+        "text": "Logic Ch5"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH6",
+        "text": "Logic Ch6"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH7",
+        "text": "Channel 7"
+    },
+    {
+        "id": "IDS_STYLE_LOGIC_CH_HEIGHT",
+        "text": "Channel Height"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH0",
+        "text": "Ch 0"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH1",
+        "text": "Ch 1"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH2",
+        "text": "Ch 2"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH3",
+        "text": "Ch 3"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH4",
+        "text": "Ch 4"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH5",
+        "text": "Ch 5"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH6",
+        "text": "Ch 6"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH7",
+        "text": "Ch 7"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH8",
+        "text": "Ch 8"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH9",
+        "text": "Ch 9"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH10",
+        "text": "Ch 10"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH11",
+        "text": "Ch 11"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH12",
+        "text": "Ch 12"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH13",
+        "text": "Ch 13"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH14",
+        "text": "Ch 14"
+    },
+    {
+        "id": "IDS_STYLE_DEC_CH15",
+        "text": "Ch 15"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ERROR",
+        "text": "Decode Error BG"
+    },
+    {
+        "id": "IDS_STYLE_DEC_NO_DECODE",
+        "text": "No Decode BG"
+    },
+    {
+        "id": "IDS_STYLE_CAT_DECODER_ANN",
+        "text": "Decoder Annotation Colors"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_0",
+        "text": "Annotation 0"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_1",
+        "text": "Annotation 1"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_2",
+        "text": "Annotation 2"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_3",
+        "text": "Annotation 3"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_4",
+        "text": "Annotation 4"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_5",
+        "text": "Annotation 5"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_6",
+        "text": "Annotation 6"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_7",
+        "text": "Annotation 7"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_8",
+        "text": "Annotation 8"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_9",
+        "text": "Annotation 9"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_10",
+        "text": "Annotation 10"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_11",
+        "text": "Annotation 11"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_12",
+        "text": "Annotation 12"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_13",
+        "text": "Annotation 13"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_14",
+        "text": "Annotation 14"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_15",
+        "text": "Annotation 15"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT0",
+        "text": "Annotation Outline 0"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT1",
+        "text": "Annotation Outline 1"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT2",
+        "text": "Annotation Outline 2"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT3",
+        "text": "Annotation Outline 3"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT4",
+        "text": "Annotation Outline 4"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT5",
+        "text": "Annotation Outline 5"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT6",
+        "text": "Annotation Outline 6"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT7",
+        "text": "Annotation Outline 7"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT8",
+        "text": "Annotation Outline 8"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT9",
+        "text": "Annotation Outline 9"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT10",
+        "text": "Annotation Outline 10"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT11",
+        "text": "Annotation Outline 11"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT12",
+        "text": "Annotation Outline 12"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT13",
+        "text": "Annotation Outline 13"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT14",
+        "text": "Annotation Outline 14"
+    },
+    {
+        "id": "IDS_STYLE_DEC_ANN_OUT15",
+        "text": "Annotation Outline 15"
+    },
+    {
+        "id": "IDS_STYLE_FONT_MAIN_TITLE",
+        "text": "Main Title Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_SECTION_TITLE",
+        "text": "Section Title Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_LABEL",
+        "text": "Label Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_CONTENT",
+        "text": "Content Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_FP_LABEL",
+        "text": "Floating Panel Label Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_FP_VALUE",
+        "text": "Floating Panel Value Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_TITLEBAR",
+        "text": "Titlebar Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_TOOLBAR",
+        "text": "Toolbar Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_SIDEBAR",
+        "text": "Sidebar Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_DIALOG",
+        "text": "Dialog Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_TRACE_LABEL",
+        "text": "Trace Label Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_RULER",
+        "text": "Ruler Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_CURSOR",
+        "text": "Cursor Size"
+    },
+    {
+        "id": "IDS_STYLE_FONT_DECODER",
+        "text": "Decoder Font Size"
+    },
+    {
+        "id": "IDS_STYLE_INPUT_BG",
+        "text": "Input Background"
+    },
+    {
+        "id": "IDS_STYLE_ALTERNATE_ROW",
+        "text": "Alternate Row"
+    },
+    {
+        "id": "IDS_STYLE_HEADER_H_BG",
+        "text": "Header Background"
+    },
+    {
+        "id": "IDS_STYLE_DANGER_HOVER",
+        "text": "Danger Hover"
+    },
+    {
+        "id": "IDS_STYLE_DANGER_PRESSED",
+        "text": "Danger Pressed"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_LIGHT_BLUE",
+        "text": "Signal Light Blue"
+    },
+    {
+        "id": "IDS_STYLE_SIGNAL_LIGHT_RED",
+        "text": "Signal Light Red"
+    },
+    {
+        "id": "IDS_STYLE_WARN_RED",
+        "text": "Warning Red"
+    },
+    {
+        "id": "IDS_STYLE_CAT_INTERACTION",
+        "text": "Interaction"
+    },
+    {
+        "id": "IDS_STYLE_SCROLLBAR",
+        "text": "Scrollbar"
+    },
+    {
+        "id": "IDS_STYLE_SCROLLBAR_HOVER",
+        "text": "Scrollbar Hover"
+    },
+    {
+        "id": "IDS_STYLE_TAB_HOVER",
+        "text": "Tab Hover"
+    },
+    {
+        "id": "IDS_STYLE_TOOLBTN_HOVER",
+        "text": "Tool Button Hover"
+    },
+    {
+        "id": "IDS_STYLE_WINBTN_HOVER",
+        "text": "Window Button Hover"
+    },
+    {
+        "id": "IDS_STYLE_WINBTN_PRESSED",
+        "text": "Window Button Pressed"
+    },
+    {
+        "id": "IDS_STYLE_FLAT_HOVER_BG",
+        "text": "Flat Button Hover"
+    },
+    {
+        "id": "IDS_STYLE_FLAT_HOVER_FG",
+        "text": "Flat Button Hover Text"
+    },
+    {
+        "id": "IDS_STYLE_BTN_CHECKED_MID",
+        "text": "Button Checked"
+    },
+    {
+        "id": "IDS_STYLE_CAT_SLIDER",
+        "text": "Slider & Progress"
+    },
+    {
+        "id": "IDS_STYLE_SLIDER_GROOVE",
+        "text": "Slider Groove"
+    },
+    {
+        "id": "IDS_STYLE_SLIDER_INACTIVE",
+        "text": "Slider Inactive"
+    },
+    {
+        "id": "IDS_STYLE_SLIDER_DISABLED",
+        "text": "Slider Disabled"
+    },
+    {
+        "id": "IDS_STYLE_PROGRESS_TRACK",
+        "text": "Progress Track"
+    },
+    {
+        "id": "IDS_STYLE_CAT_COMPONENT",
+        "text": "Components"
+    },
+    {
+        "id": "IDS_STYLE_COMBO_ACTIVE",
+        "text": "Combo Active"
+    },
+    {
+        "id": "IDS_STYLE_COMBO_SELECTION",
+        "text": "Combo Selection"
+    },
+    {
+        "id": "IDS_STYLE_COMBO_HIGHLIGHT",
+        "text": "Combo Highlight"
+    },
+    {
+        "id": "IDS_STYLE_DOCK_GRIDLINE",
+        "text": "Dock Gridline"
+    },
+    {
+        "id": "IDS_STYLE_GRIDLINE",
+        "text": "Table Gridline"
+    },
+    {
+        "id": "IDS_STYLE_DOCK_SECTION_TITLE_FG",
+        "text": "Dock Section Title"
+    },
+    {
+        "id": "IDS_STYLE_SEARCH_INPUT_LABEL",
+        "text": "Search Label"
+    },
+    {
+        "id": "IDS_DLG_RESET_ROW_HEIGHT",
+        "text": "Reset Row Height"
+    },
+    {
+        "id": "IDS_DLG_RESET_ALL_ROW_HEIGHT",
+        "text": "Reset All Row Heights"
+    },
+    {
+        "id": "IDS_DLG_SET_CHANNEL_HEIGHT",
+        "text": "Set Channel Height"
+    },
+    {
+        "id": "IDS_DLG_BATCH_SET_HEIGHT",
+        "text": "Batch Set"
+    },
+    {
+        "id": "IDS_DLG_CUSTOM_HEIGHT",
+        "text": "Custom..."
+    },
+    {
+        "id": "IDS_DLG_STYLE_DELETE_PRESET",
+        "text": "Delete Preset"
+    },
+    {
+        "id": "IDS_DLG_STYLE_DELETE_CONFIRM",
+        "text": "Are you sure you want to delete this preset?"
     }
 ]

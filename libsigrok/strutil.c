@@ -21,6 +21,7 @@
 #include "libsigrok-internal.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include "log.h"
 
@@ -182,7 +183,7 @@ SR_API char *sr_period_string(uint64_t frequency)
 	int r;
 
 	/* Allocate enough for a uint64_t as string + " ms". */
-	if (!(o = x_malloc(30 + 1))) {
+	if (!(o = g_malloc(30 + 1))) {
 		sr_err("%s: o malloc failed", __func__);
 		return NULL;
 	}
@@ -198,7 +199,7 @@ SR_API char *sr_period_string(uint64_t frequency)
 
 	if (r < 0) {
 		/* Something went wrong... */
-		x_free(o);
+		g_free(o);
 		return NULL;
 	}
 
@@ -223,7 +224,7 @@ SR_API char *sr_time_string(uint64_t time)
     int r;
 
     /* Allocate enough for a uint64_t as string + " ms". */
-    if (!(o = x_malloc(30 + 1))) {
+    if (!(o = g_malloc(30 + 1))) {
         sr_err("%s: o malloc failed", __func__);
         return NULL;
     }
@@ -245,7 +246,7 @@ SR_API char *sr_time_string(uint64_t time)
 
     if (r < 0) {
         /* Something went wrong... */
-        x_free(o);
+        g_free(o);
         return NULL;
     }
 
@@ -271,7 +272,7 @@ SR_API char *sr_voltage_string(uint64_t v_p, uint64_t v_q)
 	int r;
 	char *o;
 
-	if (!(o = x_malloc(30 + 1))) {
+	if (!(o = g_malloc(30 + 1))) {
 		sr_err("%s: o malloc failed", __func__);
 		return NULL;
 	}
@@ -285,7 +286,7 @@ SR_API char *sr_voltage_string(uint64_t v_p, uint64_t v_q)
 
 	if (r < 0) {
 		/* Something went wrong... */
-		x_free(o);
+		g_free(o);
 		return NULL;
 	}
 

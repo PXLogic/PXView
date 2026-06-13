@@ -60,8 +60,14 @@
         <file>dark/close-pressed.svg</file>
         <file>dark/undock.svg</file>
         <file>dark/undock-hover.svg</file>
-        <file>light.qss</file>
-        <file>dark.qss</file>
+        <file>theme.qss</file>
+        <file>theme-schema.json</file>
+        <file>dark.json</file>
+        <file>light.json</file>
+        <file>atom.json</file>
+        <file>ayu.json</file>
+        <file>dark_cards.json</file>
+        <file>light_cards.json</file>
         <file>light/checkbox_checked.svg</file>
         <file>light/checkbox_checked_disabled.svg</file>
         <file>light/checkbox_checked-hover.svg</file>

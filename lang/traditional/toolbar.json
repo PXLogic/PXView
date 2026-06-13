@@ -1,0 +1,226 @@
+[
+    {
+        "id": "IDS_DEVICE_MODE_LOGIC",
+        "text": "邏輯分析儀"
+    },
+    {
+        "id": "IDS_DEVICE_MODE_ANALOG",
+        "text": "資料記錄儀"
+    },
+    {
+        "id": "IDS_DEVICE_MODE_DSO",
+        "text": "示波器"
+    },
+    {
+        "id": "IDS_TOOLBAR_DEVICE_TYPE_DEMO",
+        "text": "演示"
+    },
+    {
+        "id": "IDS_TOOLBAR_DEVICE_TYPE_FILE",
+        "text": "檔案"
+    },
+    {
+        "id": "IDS_TOOLBAR_DEVICE_OPTION",
+        "text": "選項"
+    },
+    {
+        "id": "IDS_TOOLBAR_SIGNAL_PROCESSING",
+        "text": "濾波"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE",
+        "text": "模式"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE_SINGLE",
+        "text": "單次"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE_REPEAT",
+        "text": "重複"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE_LOOP",
+        "text": "捲動"
+    },
+    {
+        "id": "IDS_TOOLBAR_RUN_START",
+        "text": "開始"
+    },
+    {
+        "id": "IDS_TOOLBAR_RUN_STOP",
+        "text": "停止"
+    },
+    {
+        "id": "IDS_TOOLBAR_ONE_SINGLE",
+        "text": "單次"
+    },
+    {
+        "id": "IDS_TOOLBAR_ONE_INSTANT",
+        "text": "立即"
+    },
+    {
+        "id": "IDS_TOOLBAR_ONE_STOP",
+        "text": "停止"
+    },
+    {
+        "id": "IDS_TOOLBAR_TRIGGER",
+        "text": "觸發"
+    },
+    {
+        "id": "IDS_TOOLBAR_PWM",
+        "text": "PWM"
+    },
+    {
+        "id": "IDS_TOOLBAR_DECODE",
+        "text": "解碼"
+    },
+    {
+        "id": "IDS_TOOLBAR_MEASURE",
+        "text": "測量"
+    },
+    {
+        "id": "IDS_TOOLBAR_SEARCH",
+        "text": "搜尋"
+    },
+    {
+        "id": "IDS_TOOLBAR_FUNCTION",
+        "text": "函式"
+    },
+    {
+        "id": "IDS_TOOLBAR_LOG",
+        "text": "日誌"
+    },
+    {
+        "id": "IDS_TOOLBAR_MCP",
+        "text": "MCP"
+    },
+    {
+        "id": "IDS_TOOLBAR_FUNCTION_FFT",
+        "text": "&FFT"
+    },
+    {
+        "id": "IDS_TOOLBAR_FUNCTION_MATH",
+        "text": "數學運算"
+    },
+    {
+        "id": "IDS_TOOLBAR_DISPLAY",
+        "text": "設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_DISPLAY_THEMES",
+        "text": "主題"
+    },
+    {
+        "id": "IDS_TOOLBAR_DISPLAY_LISSAJOUS",
+        "text": "李薩如圖"
+    },  
+    {
+        "id": "IDS_TOOLBAR_DISPLAY_THEMES_DARK",
+        "text": "暗黑"
+    },
+    {
+        "id": "IDS_TOOLBAR_DISPLAY_THEMES_LIGHT",
+        "text": "清新"
+    },   
+    {
+        "id": "IDS_TOOLBAR_DISPLAY_OPTIONS",
+        "text": "選項"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE",
+        "text": "檔案"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_CONFIG",
+        "text": "設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_CONFIG_LOAD",
+        "text": "載入設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_CONFIG_STORE",
+        "text": "儲存設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_CONFIG_DEFAULT",
+        "text": "載入預設設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_OPEN",
+        "text": "開啟"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_SAVE",
+        "text": "儲存"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_EXPORT",
+        "text": "匯出"
+    },
+    {
+        "id": "IDS_TOOLBAR_FILE_CAPTURE",
+        "text": "截圖"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP",
+        "text": "說明"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LANG",
+        "text": "語言"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LANG_EN",
+        "text": "&English"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LANG_CN",
+        "text": "中文(简体)"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LANG_TRADITIONAL",
+        "text": "中文(繁體)"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_ABOUT",
+        "text": "關於"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_MANUAL",
+        "text": "手冊"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_BUG",
+        "text": "報告問題"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_UPDATE",
+        "text": "更新"
+    },
+    {
+        "id": "IDS_TOOLBAR_HELP_LOG",
+        "text": "日誌選項"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLING_SETTINGS",
+        "text": "採樣設定"
+    },
+    {
+        "id": "IDS_TOOLBAR_DEVICE",
+        "text": "裝置"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLE_DEPTH",
+        "text": "採樣深度"
+    },
+    {
+        "id": "IDS_TOOLBAR_SAMPLE_RATE",
+        "text": "採樣率"
+    },
+    {
+        "id": "IDS_TOOLBAR_CAPTURE_MODE_ROW",
+        "text": "擷取模式"
+    }
+]

@@ -108,34 +108,20 @@ class IrmpLibrary:
         '''
 
         filename = self._library_filename()
-        self._lib = ctypes.cdll.LoadLibrary(filename)
+        if platform.system() == 'Windows':
+            try:
+                # Python 3.8+ changed DLL loading rules; winmode=0 restores legacy PATH/CWD search
+                self._lib = ctypes.CDLL(filename, winmode=0)
+            except TypeError:
+                self._lib = ctypes.cdll.LoadLibrary(filename)
+        else:
+            self._lib = ctypes.cdll.LoadLibrary(filename)
         self._library_setup_api()
 
-    def __del__(self):
-        '''
-        Release a disposed library instance.
-        '''
-
-        if self._inst:
-            self._lib.irmp_instance_free(self._inst)
-        self._inst = None
-
     def __enter__(self):
-        '''
-        Enter a context (lock management).
-        '''
-
-        if self._inst is None:
-            self._inst = self._lib.irmp_instance_alloc()
-        self._lib.irmp_instance_lock(self._inst, 1)
         return self
 
     def __exit__(self, extype, exvalue, trace):
-        '''
-        Leave a context (lock management).
-        '''
-
-        self._lib.irmp_instance_unlock(self._inst)
         return False
 
     def client_id(self):

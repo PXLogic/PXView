@@ -1,0 +1,200 @@
+{
+  "categories": [
+    {
+      "id": "global.colors",
+      "name": "IDS_STYLE_CAT_GLOBAL",
+      "tokens": [
+        { "id": "@bg-base", "type": "color", "label": "IDS_STYLE_BG_BASE", "desc": "IDS_STYLE_BG_BASE_DESC" },
+        { "id": "@bg-overlay", "type": "color", "label": "IDS_STYLE_BG_OVERLAY" },
+        { "id": "@titlebar-bg", "type": "color", "label": "IDS_STYLE_TITLEBAR_BG" },
+        { "id": "@ribbon-bg", "type": "color", "label": "IDS_STYLE_RIBBON_BG" },
+        { "id": "@tabview-bg", "type": "color", "label": "IDS_STYLE_TABVIEW_BG" },
+        { "id": "@sidebar-bg", "type": "color", "label": "IDS_STYLE_SIDEBAR_BG" },
+        { "id": "@statusbar-bg", "type": "color", "label": "IDS_STYLE_STATUSBAR_BG" },
+        { "id": "@panel-bg", "type": "color", "label": "IDS_STYLE_PANEL_BG" },
+        { "id": "@group-card-bg", "type": "color", "label": "IDS_STYLE_GROUP_CARD_BG" },
+        { "id": "@input-bg", "type": "color", "label": "IDS_STYLE_INPUT_BG" },
+        { "id": "@alternate-row", "type": "color", "label": "IDS_STYLE_ALTERNATE_ROW" },
+        { "id": "@header-h-bg", "type": "color", "label": "IDS_STYLE_HEADER_H_BG" },
+        { "id": "@fg-base", "type": "color", "label": "IDS_STYLE_FG_BASE" },
+        { "id": "@fg-bright", "type": "color", "label": "IDS_STYLE_FG_BRIGHT" },
+        { "id": "@fg-muted", "type": "color", "label": "IDS_STYLE_FG_MUTED" },
+        { "id": "@panel-text", "type": "color", "label": "IDS_STYLE_PANEL_TEXT" },
+        { "id": "@input-border", "type": "color", "label": "IDS_STYLE_BORDER" },
+        { "id": "@border-strong", "type": "color", "label": "IDS_STYLE_BORDER_STRONG" },
+        { "id": "@group-card-colored", "type": "bool", "label": "IDS_STYLE_GROUP_CARD_COLORED", "desc": "IDS_STYLE_GROUP_CARD_COLORED_DESC" }
+      ]
+    },
+    {
+      "id": "accent.colors",
+      "name": "IDS_STYLE_CAT_ACCENT",
+      "tokens": [
+        { "id": "@accent", "type": "color", "label": "IDS_STYLE_ACCENT", "desc": "IDS_STYLE_ACCENT_DESC" },
+        { "id": "@sidebar-accent", "type": "color", "label": "IDS_STYLE_SIDEBAR_ACCENT", "desc": "IDS_STYLE_SIDEBAR_ACCENT_DESC" },
+        { "id": "@titlebar-icon-color", "type": "color", "label": "IDS_STYLE_TITLEBAR_ICON_COLOR", "desc": "IDS_STYLE_TITLEBAR_ICON_COLOR_DESC" },
+        { "id": "@titlebar-icon-accent", "type": "color", "label": "IDS_STYLE_TITLEBAR_ICON", "desc": "IDS_STYLE_TITLEBAR_ICON_DESC" },
+        { "id": "@titlebar-text-color", "type": "color", "label": "IDS_STYLE_TITLEBAR_TEXT", "desc": "IDS_STYLE_TITLEBAR_TEXT_DESC" },
+        { "id": "@sidebar-icon-color", "type": "color", "label": "IDS_STYLE_SIDEBAR_ICON", "desc": "IDS_STYLE_SIDEBAR_ICON_DESC" },
+        { "id": "@sidebar-text-color", "type": "color", "label": "IDS_STYLE_SIDEBAR_TEXT", "desc": "IDS_STYLE_SIDEBAR_TEXT_DESC" },
+        { "id": "@danger", "type": "color", "label": "IDS_STYLE_DANGER" },
+        { "id": "@danger-hover", "type": "color", "label": "IDS_STYLE_DANGER_HOVER" },
+        { "id": "@danger-pressed", "type": "color", "label": "IDS_STYLE_DANGER_PRESSED" },
+        { "id": "@dock-status-ok", "type": "color", "label": "IDS_STYLE_STATUS_OK" },
+        { "id": "@dock-status-error", "type": "color", "label": "IDS_STYLE_STATUS_ERROR" },
+        { "id": "@icon-accent", "type": "color", "label": "IDS_STYLE_ICON_ACCENT", "desc": "IDS_STYLE_ICON_ACCENT_DESC" },
+        { "id": "@icon-special", "type": "color", "label": "IDS_STYLE_ICON_SPECIAL", "desc": "IDS_STYLE_ICON_SPECIAL_DESC" },
+        { "id": "@icon-foreground", "type": "color", "label": "IDS_STYLE_ICON_FOREGROUND", "desc": "IDS_STYLE_ICON_FOREGROUND_DESC" }
+      ]
+    },
+    {
+      "id": "interaction.colors",
+      "name": "IDS_STYLE_CAT_INTERACTION",
+      "tokens": [
+        { "id": "@scrollbar", "type": "color", "label": "IDS_STYLE_SCROLLBAR" },
+        { "id": "@scrollbar-hover", "type": "color", "label": "IDS_STYLE_SCROLLBAR_HOVER" },
+        { "id": "@tab-hover", "type": "color", "label": "IDS_STYLE_TAB_HOVER" },
+        { "id": "@toolbtn-hover", "type": "color", "label": "IDS_STYLE_TOOLBTN_HOVER" },
+        { "id": "@winbtn-hover", "type": "color", "label": "IDS_STYLE_WINBTN_HOVER" },
+        { "id": "@winbtn-pressed", "type": "color", "label": "IDS_STYLE_WINBTN_PRESSED" },
+        { "id": "@flat-hover-bg", "type": "color", "label": "IDS_STYLE_FLAT_HOVER_BG" },
+        { "id": "@flat-hover-fg", "type": "color", "label": "IDS_STYLE_FLAT_HOVER_FG" },
+        { "id": "@btn-checked-mid", "type": "color", "label": "IDS_STYLE_BTN_CHECKED_MID" }
+      ]
+    },
+    {
+      "id": "slider.colors",
+      "name": "IDS_STYLE_CAT_SLIDER",
+      "tokens": [
+        { "id": "@slider-groove", "type": "color", "label": "IDS_STYLE_SLIDER_GROOVE" },
+        { "id": "@slider-inactive", "type": "color", "label": "IDS_STYLE_SLIDER_INACTIVE" },
+        { "id": "@slider-disabled", "type": "color", "label": "IDS_STYLE_SLIDER_DISABLED" },
+        { "id": "@progress-track", "type": "color", "label": "IDS_STYLE_PROGRESS_TRACK" }
+      ]
+    },
+    {
+      "id": "component.colors",
+      "name": "IDS_STYLE_CAT_COMPONENT",
+      "tokens": [
+        { "id": "@combo-active", "type": "color", "label": "IDS_STYLE_COMBO_ACTIVE" },
+        { "id": "@combo-selection", "type": "color", "label": "IDS_STYLE_COMBO_SELECTION" },
+        { "id": "@combo-highlight", "type": "color", "label": "IDS_STYLE_COMBO_HIGHLIGHT" },
+        { "id": "@dock-gridline", "type": "color", "label": "IDS_STYLE_DOCK_GRIDLINE" },
+        { "id": "@dock-section-title-fg", "type": "color", "label": "IDS_STYLE_DOCK_SECTION_TITLE_FG" },
+        { "id": "@gridline", "type": "color", "label": "IDS_STYLE_GRIDLINE" },
+        { "id": "@search-input-label", "type": "color", "label": "IDS_STYLE_SEARCH_INPUT_LABEL" }
+      ]
+    },
+    {
+      "id": "signal.colors",
+      "name": "IDS_STYLE_CAT_SIGNAL",
+      "tokens": [
+        { "id": "@signal-red", "type": "color", "label": "IDS_STYLE_SIGNAL_CH1" },
+        { "id": "@signal-orange", "type": "color", "label": "IDS_STYLE_SIGNAL_CH2" },
+        { "id": "@signal-blue", "type": "color", "label": "IDS_STYLE_SIGNAL_CH3" },
+        { "id": "@signal-green", "type": "color", "label": "IDS_STYLE_SIGNAL_CH4" },
+        { "id": "@signal-purple", "type": "color", "label": "IDS_STYLE_SIGNAL_CH5" },
+        { "id": "@signal-light-blue", "type": "color", "label": "IDS_STYLE_SIGNAL_LIGHT_BLUE" },
+        { "id": "@signal-light-red", "type": "color", "label": "IDS_STYLE_SIGNAL_LIGHT_RED" },
+        { "id": "@warn-red", "type": "color", "label": "IDS_STYLE_WARN_RED" }
+      ]
+    },
+    {
+      "id": "logic.colors",
+      "name": "IDS_STYLE_CAT_LOGIC",
+      "tokens": [
+        { "id": "@logic-channel-0", "type": "color", "label": "IDS_STYLE_LOGIC_CH0" },
+        { "id": "@logic-channel-1", "type": "color", "label": "IDS_STYLE_LOGIC_CH1" },
+        { "id": "@logic-channel-2", "type": "color", "label": "IDS_STYLE_LOGIC_CH2" },
+        { "id": "@logic-channel-3", "type": "color", "label": "IDS_STYLE_LOGIC_CH3" },
+        { "id": "@logic-channel-4", "type": "color", "label": "IDS_STYLE_LOGIC_CH4" },
+        { "id": "@logic-channel-5", "type": "color", "label": "IDS_STYLE_LOGIC_CH5" },
+        { "id": "@logic-channel-6", "type": "color", "label": "IDS_STYLE_LOGIC_CH6" },
+        { "id": "@logic-channel-7", "type": "color", "label": "IDS_STYLE_LOGIC_CH7" },
+        { "id": "@logic-channel-height", "type": "size", "label": "IDS_STYLE_LOGIC_CH_HEIGHT" }
+      ]
+    },
+    {
+      "id": "decoder.colors",
+      "name": "IDS_STYLE_CAT_DECODER",
+      "tokens": [
+        { "id": "@decoder-channel-0", "type": "color", "label": "IDS_STYLE_DEC_CH0" },
+        { "id": "@decoder-channel-1", "type": "color", "label": "IDS_STYLE_DEC_CH1" },
+        { "id": "@decoder-channel-2", "type": "color", "label": "IDS_STYLE_DEC_CH2" },
+        { "id": "@decoder-channel-3", "type": "color", "label": "IDS_STYLE_DEC_CH3" },
+        { "id": "@decoder-channel-4", "type": "color", "label": "IDS_STYLE_DEC_CH4" },
+        { "id": "@decoder-channel-5", "type": "color", "label": "IDS_STYLE_DEC_CH5" },
+        { "id": "@decoder-channel-6", "type": "color", "label": "IDS_STYLE_DEC_CH6" },
+        { "id": "@decoder-channel-7", "type": "color", "label": "IDS_STYLE_DEC_CH7" },
+        { "id": "@decoder-channel-8", "type": "color", "label": "IDS_STYLE_DEC_CH8" },
+        { "id": "@decoder-channel-9", "type": "color", "label": "IDS_STYLE_DEC_CH9" },
+        { "id": "@decoder-channel-10", "type": "color", "label": "IDS_STYLE_DEC_CH10" },
+        { "id": "@decoder-channel-11", "type": "color", "label": "IDS_STYLE_DEC_CH11" },
+        { "id": "@decoder-channel-12", "type": "color", "label": "IDS_STYLE_DEC_CH12" },
+        { "id": "@decoder-channel-13", "type": "color", "label": "IDS_STYLE_DEC_CH13" },
+        { "id": "@decoder-channel-14", "type": "color", "label": "IDS_STYLE_DEC_CH14" },
+        { "id": "@decoder-channel-15", "type": "color", "label": "IDS_STYLE_DEC_CH15" },
+        { "id": "@decoder-error-bg", "type": "color", "label": "IDS_STYLE_DEC_ERROR" },
+        { "id": "@decoder-no-decode", "type": "color", "label": "IDS_STYLE_DEC_NO_DECODE" }
+      ]
+    },
+    {
+      "id": "decoder.ann.colors",
+      "name": "IDS_STYLE_CAT_DECODER_ANN",
+      "tokens": [
+        { "id": "@decoder-ann-0", "type": "color", "label": "IDS_STYLE_DEC_ANN_0" },
+        { "id": "@decoder-ann-1", "type": "color", "label": "IDS_STYLE_DEC_ANN_1" },
+        { "id": "@decoder-ann-2", "type": "color", "label": "IDS_STYLE_DEC_ANN_2" },
+        { "id": "@decoder-ann-3", "type": "color", "label": "IDS_STYLE_DEC_ANN_3" },
+        { "id": "@decoder-ann-4", "type": "color", "label": "IDS_STYLE_DEC_ANN_4" },
+        { "id": "@decoder-ann-5", "type": "color", "label": "IDS_STYLE_DEC_ANN_5" },
+        { "id": "@decoder-ann-6", "type": "color", "label": "IDS_STYLE_DEC_ANN_6" },
+        { "id": "@decoder-ann-7", "type": "color", "label": "IDS_STYLE_DEC_ANN_7" },
+        { "id": "@decoder-ann-8", "type": "color", "label": "IDS_STYLE_DEC_ANN_8" },
+        { "id": "@decoder-ann-9", "type": "color", "label": "IDS_STYLE_DEC_ANN_9" },
+        { "id": "@decoder-ann-10", "type": "color", "label": "IDS_STYLE_DEC_ANN_10" },
+        { "id": "@decoder-ann-11", "type": "color", "label": "IDS_STYLE_DEC_ANN_11" },
+        { "id": "@decoder-ann-12", "type": "color", "label": "IDS_STYLE_DEC_ANN_12" },
+        { "id": "@decoder-ann-13", "type": "color", "label": "IDS_STYLE_DEC_ANN_13" },
+        { "id": "@decoder-ann-14", "type": "color", "label": "IDS_STYLE_DEC_ANN_14" },
+        { "id": "@decoder-ann-15", "type": "color", "label": "IDS_STYLE_DEC_ANN_15" },
+        { "id": "@decoder-ann-outline-0", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT0" },
+        { "id": "@decoder-ann-outline-1", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT1" },
+        { "id": "@decoder-ann-outline-2", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT2" },
+        { "id": "@decoder-ann-outline-3", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT3" },
+        { "id": "@decoder-ann-outline-4", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT4" },
+        { "id": "@decoder-ann-outline-5", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT5" },
+        { "id": "@decoder-ann-outline-6", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT6" },
+        { "id": "@decoder-ann-outline-7", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT7" },
+        { "id": "@decoder-ann-outline-8", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT8" },
+        { "id": "@decoder-ann-outline-9", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT9" },
+        { "id": "@decoder-ann-outline-10", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT10" },
+        { "id": "@decoder-ann-outline-11", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT11" },
+        { "id": "@decoder-ann-outline-12", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT12" },
+        { "id": "@decoder-ann-outline-13", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT13" },
+        { "id": "@decoder-ann-outline-14", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT14" },
+        { "id": "@decoder-ann-outline-15", "type": "color", "label": "IDS_STYLE_DEC_ANN_OUT15" }
+      ]
+    },
+    {
+      "id": "typography",
+      "name": "IDS_STYLE_CAT_TYPOGRAPHY",
+      "tokens": [
+        { "id": "@dock-font-main-title", "type": "size", "label": "IDS_STYLE_FONT_MAIN_TITLE" },
+        { "id": "@dock-font-section-title", "type": "size", "label": "IDS_STYLE_FONT_SECTION_TITLE" },
+        { "id": "@dock-font-label", "type": "size", "label": "IDS_STYLE_FONT_LABEL" },
+        { "id": "@dock-font-content", "type": "size", "label": "IDS_STYLE_FONT_CONTENT" },
+        { "id": "@floating-panel-font-label", "type": "size", "label": "IDS_STYLE_FONT_FP_LABEL" },
+        { "id": "@floating-panel-font-value", "type": "size", "label": "IDS_STYLE_FONT_FP_VALUE" },
+        { "id": "@titlebar-font-size", "type": "size", "label": "IDS_STYLE_FONT_TITLEBAR" },
+        { "id": "@toolbar-font-size", "type": "size", "label": "IDS_STYLE_FONT_TOOLBAR" },
+        { "id": "@sidebar-font-size", "type": "size", "label": "IDS_STYLE_FONT_SIDEBAR" },
+        { "id": "@dialog-font-size", "type": "size", "label": "IDS_STYLE_FONT_DIALOG" },
+        { "id": "@trace-label-font-size", "type": "size", "label": "IDS_STYLE_FONT_TRACE_LABEL" },
+        { "id": "@ruler-font-size", "type": "size", "label": "IDS_STYLE_FONT_RULER" },
+        { "id": "@decoder-font-size", "type": "size", "label": "IDS_STYLE_FONT_DECODER" },
+        { "id": "@cursor-font-size", "type": "size", "label": "IDS_STYLE_FONT_CURSOR" }
+      ]
+    }
+  ],
+  "hidden": ["@icon-dir"]
+}

@@ -147,6 +147,31 @@ def create_annots(annots_dict):
 
 
 
+def format_data(value, radix):
+    """Format a data value according to the specified radix.
+
+    Arguments
+    ---------
+    value : int
+        The value to format.
+    radix : str
+        The number format: "Hex", "Dec", "Oct", or "Bin".
+
+    Returns
+    -------
+    str
+        Formatted string representation of the value.
+    """
+    if radix == "Dec":
+        return str(value)
+    elif radix == "Oct":
+        return "{:o}".format(value)
+    elif radix == "Bin":
+        return "{:b}".format(value)
+    else:  # Hex (default)
+        return "0x{:02X}".format(value)
+
+
 def compose_annot(ann_label="", ann_value=None, ann_unit=None,
                   ann_action=None):
     """Compose list of annotations enriched with value and unit.

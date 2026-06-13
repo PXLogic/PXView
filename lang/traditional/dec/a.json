@@ -1,0 +1,326 @@
+[
+    {
+        "id": "dec_ac97_chan_sync",
+        "text": "訊框同步"
+    },
+    {
+        "id": "dec_ac97_chan_clk",
+        "text": "資料位元時鐘"
+    },
+    {
+        "id": "dec_ac97_opt_chan_out",
+        "text": "資料輸出"
+    },
+    {
+        "id": "dec_ac97_opt_chan_in",
+        "text": "資料輸入"
+    },
+    {
+        "id": "dec_ac97_opt_chan_rst",
+        "text": "復位線"
+    },
+    {
+        "id": "dec_ad79x0_opt_vref",
+        "text": "參考電壓(V)"
+    },
+    {
+        "id": "dec_am230x_chan_sda",
+        "text": "單線串列資料線"
+    },
+    {
+        "id": "dec_am230x_opt_device",
+        "text": "裝置類型"
+    },
+    {
+        "id": "dec_amulet_ascii_opt_ms_chan",
+        "text": "主機->從機 通道"
+    },
+    {
+        "id": "dec_amulet_ascii_opt_sm_chan",
+        "text": "從機->主機 通道"
+    },
+    {
+        "id": "dec_arm_etmv3_opt_objdump",
+        "text": "反組譯路徑"
+    },
+    {
+        "id": "dec_arm_etmv3_opt_objdump_opts",
+        "text": "反組譯選項"
+    },
+    {
+        "id": "dec_arm_etmv3_opt_elffile",
+        "text": "elf路徑"
+    },
+    {
+        "id": "dec_arm_etmv3_opt_branch_enc",
+        "text": "分支編碼"
+    },
+    {
+        "id": "dec_arm_itm_opt_objdump",
+        "text": "反組譯路徑"
+    },
+    {
+        "id": "dec_arm_itm_opt_objdump_opts",
+        "text": "反組譯選項"
+    },
+    {
+        "id": "dec_arm_itm_opt_elffile",
+        "text": "elf路徑"
+    },
+    {
+        "id": "dec_arm_tpiu_opt_stream",
+        "text": "流索引"
+    },
+    {
+        "id": "dec_arm_tpiu_sync_offset",
+        "text": "起始同步偏移"
+    },
+    {
+        "id": "dec_aud_chan_audck",
+        "text": "AUD時鐘"
+    },
+    {
+        "id": "dec_aud_chan_naudsync",
+        "text": "AUD同步"
+    },
+    {
+        "id": "dec_aud_chan_audata3",
+        "text": "AUD資料線3"
+    },
+    {
+        "id": "dec_aud_chan_audata2",
+        "text": "AUD資料線2"
+    },
+    {
+        "id": "dec_aud_chan_audata1",
+        "text": "AUD資料線1"
+    },
+    {
+        "id": "dec_aud_chan_audata0",
+        "text": "AUD資料線0"
+    },
+    {
+        "id": "dec_avr_pdi_chan_reset",
+        "text": "復位/PDI時鐘"
+    },
+    {
+        "id": "dec_avr_pdi_chan_data",
+        "text": "PDI資料"
+    },
+    {
+        "id": "dec_c2_chan_c2ck",
+        "text": "時鐘"
+    },
+    {
+        "id": "dec_c2_chan_c2d",
+        "text": "資料"
+    },
+    {
+        "id": "dec_caliper_chan_clk",
+        "text": "串列時鐘線"
+    },
+    {
+        "id": "dec_caliper_chan_data",
+        "text": "串列資料線"
+    },
+    {
+        "id": "dec_caliper_opt_timeout_ms",
+        "text": "資料包逾時(毫秒),0表示停用 "
+    },
+    {
+        "id": "dec_caliper_opt_unit",
+        "text": "轉換單位"
+    },
+    {
+        "id": "dec_caliper_opt_changes",
+        "text": "僅關注變化"
+    },
+    {
+        "id": "dec_can_chan_can_rx",
+        "text": "CAN訊號"
+    },
+    {
+        "id": "dec_can_opt_bitrate",
+        "text": "鮑率"
+    },
+    {
+        "id": "dec_can_opt_nominal_bitrate",
+        "text": "低鮑率"
+    },
+    {
+        "id": "dec_can_opt_fast_bitrate",
+        "text": "高鮑率"
+    },
+    {
+        "id": "dec_can_opt_sample_point",
+        "text": "採樣點(%d)"
+    },
+    {
+        "id": "dec_cec_chan_cec",
+        "text": "CEC訊號"
+    },
+    {
+        "id": "dec_1uart_chan_rxtx",
+        "text": "UART訊號線"
+    },
+    {
+        "id": "dec_cjtag_oscan0_chan_tdi",
+        "text": "測試資料輸入"
+    },
+    {
+        "id": "dec_cjtag_oscan0_chan_tdo",
+        "text": "測試資料輸出"
+    },
+    {
+        "id": "dec_cjtag_oscan0_chan_tck",
+        "text": "測試時鐘"
+    },
+    {
+        "id": "dec_cjtag_oscan0_chan_tms",
+        "text": "測試模式選擇"
+    },
+    {
+        "id": "dec_cjtag_oscan0_opt_chan_trst",
+        "text": "測試復位"
+    },
+    {
+        "id": "dec_cjtag_oscan0_opt_chan_srst",
+        "text": "系統復位"
+    },
+    {
+        "id": "dec_cjtag_oscan0_opt_chan_rtck",
+        "text": "返回時鐘訊號"
+    },
+    {
+        "id": "dec_counter_chan_data",
+        "text": "資料線"
+    },
+    {
+        "id": "dec_counter_opt_chan_reset",
+        "text": "復位線"
+    },
+    {
+        "id": "dec_counter_opt_data_edge",
+        "text": "計數邊沿(資料)"
+    },
+    {
+        "id": "dec_counter_opt_divider",
+        "text": "字計數長度(字寬)"
+    },
+    {
+        "id": "dec_counter_opt_reset_edge",
+        "text": "清除（重置）計數器的邊沿"
+    },
+    {
+        "id": "dec_counter_opt_edge_off",
+        "text": "重置後的邊沿計數器值"
+    },
+    {
+        "id": "dec_counter_opt_word_off",
+        "text": "重置後的字計數器值"
+    },
+    {
+        "id": "dec_counter_opt_dead_cycles",
+        "text": "忽視重置後的邊沿數"
+    },
+    {
+        "id": "dec_counter_opt_start_with_reset",
+        "text": "假設解碼從重置開始"
+    },
+    {
+        "id": "dec_dali_chan_dali",
+        "text": "DALI資料線"
+    },
+    {
+        "id": "dec_dali_opt_polarity",
+        "text": "極性"
+    },
+    {
+        "id": "dec_dcf77_chan_data",
+        "text": "資料線"
+    },
+    {
+        "id": "dec_dmx512_chan_dmx",
+        "text": "DMX資料線"
+    },
+    {
+        "id": "dec_dmx512_opt_invert",
+        "text": "反轉訊號?"
+    },
+    {
+        "id": "dec_dsi_chan_dsi",
+        "text": "DSI資料線"
+    },
+    {
+        "id": "dec_dsi_opt_polarity",
+        "text": "極性"
+    },
+    {
+        "id": "dec_eeprom24xx_opt_chip",
+        "text": "片選"
+    },
+    {
+        "id": "dec_eeprom24xx_opt_addr_counter",
+        "text": "初始位址計數器值"
+    },
+    {
+        "id": "dec_eeprom93xx_opt_addresssize",
+        "text": "位址大小"
+    },
+    {
+        "id": "dec_eeprom93xx_opt_wordsize",
+        "text": "字大小"
+    },
+    {
+        "id": "dec_em4100_chan_data",
+        "text": "資料線"
+    },
+    {
+        "id": "dec_em4100_opt_polarity",
+        "text": "極性"
+    },
+    {
+        "id": "dec_em4100_opt_datarate",
+        "text": "傳輸速率"
+    },
+    {
+        "id": "dec_em4100_opt_coilfreq",
+        "text": "工作頻率"
+    },
+    {
+        "id": "dec_em4305_chan_data",
+        "text": "資料線"
+    },
+    {
+        "id": "dec_em4305_opt_coilfreq",
+        "text": "工作頻率"
+    },
+    {
+        "id": "dec_em4305_opt_first_field_stop",
+        "text": "第一欄位停止位元最小值"
+    },
+    {
+        "id": "dec_em4305_opt_w_gap",
+        "text": "寫入間隔最小值"
+    },
+    {
+        "id": "dec_em4305_opt_w_one_max",
+        "text": "寫入1最大值"
+    },
+    {
+        "id": "dec_em4305_opt_w_zero_on_min",
+        "text": "寫入0起始最小值"
+    },
+    {
+        "id": "dec_em4305_opt_w_zero_off_max",
+        "text": "寫入0關閉最大值"
+    },
+    {
+        "id": "dec_em4305_opt_em4100_decode",
+        "text": "EM4100解碼器"
+    },
+    {
+        "id": "dec_eth_an_chan_dp",
+        "text": "ETH TX+訊號"
+    }
+]

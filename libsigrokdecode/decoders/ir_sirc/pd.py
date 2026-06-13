@@ -108,14 +108,17 @@ class Decoder(srd.Decoder):
     def read_pulse(self, high, time):
         e = 'f' if high else 'r'
         max_time = int(time * 1.30)
-        (ir,), ss, es, (edge, timeout) = self.wait_wrap([{0: e}], max_time)
+        (ir,), ss, es, matched = self.wait_wrap([{0: e}], max_time)
+        edge = matched & (1 << 0)
+        timeout = matched & (1 << 1)
         if timeout or not self.tolerance(ss, es, time):
             raise SIRCError('Timeout')
         return ir, ss, es, (edge, timeout)
 
     def read_bit(self):
         e = 'f' if self.active else 'r'
-        _, high_ss, high_es, (edge, timeout) = self.wait_wrap([{0: e}], 2000)
+        _, high_ss, high_es, matched = self.wait_wrap([{0: e}], 2000)
+        timeout = matched & (1 << 1)
         if timeout:
             raise SIRCError('Bit High Timeout')
         if self.tolerance(high_ss, high_es, ONE_USEC):

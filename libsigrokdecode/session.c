@@ -21,11 +21,11 @@
 #include "config.h"
 #include "libsigrokdecode-internal.h" /* First, so we avoid a _POSIX_C_SOURCE warning. */
 #include "libsigrokdecode.h"
-#include <inttypes.h>
-#include <glib.h>
 #include "log.h"
+#include <glib.h>
+#include <inttypes.h>
 
-SRD_PRIV int srd_call_sub_decoder_end(struct srd_decoder_inst *di, char **error);
+SRD_PRIV int srd_call_sub_decoder_end(struct srd_decoder_inst* di, char** error);
 
 /**
  * @file
@@ -43,8 +43,9 @@ SRD_PRIV int srd_call_sub_decoder_end(struct srd_decoder_inst *di, char **error)
 
 /** @cond PRIVATE */
 
-SRD_PRIV GSList *sessions = NULL;
+SRD_PRIV GSList* sessions = NULL;
 SRD_PRIV int max_session_id = -1;
+SRD_PRIV GRWLock sessions_rwlock;
 
 /** @endcond */
 
@@ -61,30 +62,30 @@ SRD_PRIV int max_session_id = -1;
  *
  * @since 0.3.0
  */
-SRD_API int srd_session_new(struct srd_session **sess)
+SRD_API int srd_session_new(struct srd_session** sess)
 {
-	struct srd_session *se = NULL;
+    struct srd_session* se = NULL;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	se = x_malloc(sizeof(struct srd_session));
-	if (se == NULL){
-		srd_err("%s,ERROR:failed to alloc memory.", __func__);
-		return SRD_ERR;
-	}
-	memset(se, 0, sizeof(struct srd_session));
+    se = g_malloc0(sizeof(struct srd_session));
+    if (se == NULL) {
+        srd_err("%s,ERROR:failed to alloc memory.", __func__);
+        return SRD_ERR;
+    }
 
-	se->session_id = ++max_session_id;
+    se->session_id = ++max_session_id;
 
-	/* Keep a list of all sessions, so we can clean up as needed. */
-	sessions = g_slist_append(sessions, se);
+    g_rw_lock_writer_lock(&sessions_rwlock);
+    sessions = g_slist_append(sessions, se);
+    g_rw_lock_writer_unlock(&sessions_rwlock);
 
-	*sess = se;
+    *sess = se;
 
-	//srd_info("Creating session %d.", (*sess)->session_id);
+    // srd_info("Creating session %d.", (*sess)->session_id);
 
-	return SRD_OK;
+    return SRD_OK;
 }
 
 /**
@@ -99,60 +100,72 @@ SRD_API int srd_session_new(struct srd_session **sess)
  *
  * @since 0.3.0
  */
-SRD_API int srd_session_start(struct srd_session *sess, char **error)
+SRD_API int srd_session_start(struct srd_session* sess, char** error)
 {
-	GSList *d;
-	struct srd_decoder_inst *di;
-	int ret;
+    GSList* d;
+    struct srd_decoder_inst* di;
+    int ret;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	srd_info("Calling start() of all instances in session %d.", sess->session_id);
+    srd_info("Calling start() of all instances in session %d.", sess->session_id);
 
-	/* Run the start() method of all decoders receiving frontend data. */
-	ret = SRD_OK;
-	for (d = sess->di_list; d; d = d->next) {
-		di = d->data;
+    /* Run the start() method of all decoders receiving frontend data. */
+    ret = SRD_OK;
+    for (d = sess->di_list; d; d = d->next) {
+        di = d->data;
         if ((ret = srd_inst_start(di, error)) != SRD_OK)
-			break;
-	}
+            break;
+    }
 
-	return ret;
+    return ret;
 }
 
-static int srd_inst_send_meta(struct srd_decoder_inst *di, int key,
-		GVariant *data)
+static int srd_inst_send_meta(struct srd_decoder_inst* di, int key,
+    GVariant* data)
 {
-	PyObject *py_ret;
-	GSList *l;
-	struct srd_decoder_inst *next_di;
-	int ret;
-	PyGILState_STATE gstate;
+    PyObject* py_ret;
+    GSList* l;
+    struct srd_decoder_inst* next_di;
+    int ret;
+    PyGILState_STATE gstate;
 
-	if (key != SRD_CONF_SAMPLERATE)
-		/* This is the only key we pass on to the decoder for now. */
-		return SRD_OK;
+    if (key != SRD_CONF_SAMPLERATE)
+        return SRD_OK;
 
-	gstate = PyGILState_Ensure();
+    if (di->is_c_inst) {
+        if (key == SRD_CONF_SAMPLERATE && data)
+            di->samplerate = g_variant_get_uint64(data);
+        if (di->c_dec_inst->metadata) {
+            di->c_dec_inst->metadata(di, key, di->samplerate);
+        }
+        for (l = di->next_di; l; l = l->next) {
+            next_di = l->data;
+            if ((ret = srd_inst_send_meta(next_di, key, data)) != SRD_OK)
+                return ret;
+        }
+        return SRD_OK;
+    }
 
-	if (PyObject_HasAttrString(di->py_inst, "metadata")) {
-		py_ret = PyObject_CallMethod(di->py_inst, "metadata", "lK",
-				(long)SRD_CONF_SAMPLERATE,
-				(unsigned long long)g_variant_get_uint64(data));
-		Py_XDECREF(py_ret);
-	}
+    gstate = PyGILState_Ensure();
 
-	PyGILState_Release(gstate);
+    if (PyObject_HasAttrString(di->py_inst, "metadata")) {
+        py_ret = PyObject_CallMethod(di->py_inst, "metadata", "lK",
+            (long)SRD_CONF_SAMPLERATE,
+            (unsigned long long)g_variant_get_uint64(data));
+        Py_XDECREF(py_ret);
+    }
 
-	/* Push metadata to all the PDs stacked on top of this one. */
-	for (l = di->next_di; l; l = l->next) {
-		next_di = l->data;
-		if ((ret = srd_inst_send_meta(next_di, key, data)) != SRD_OK)
-			return ret;
-	}
+    PyGILState_Release(gstate);
 
-	return SRD_OK;
+    for (l = di->next_di; l; l = l->next) {
+        next_di = l->data;
+        if ((ret = srd_inst_send_meta(next_di, key, data)) != SRD_OK)
+            return ret;
+    }
+
+    return SRD_OK;
 }
 
 /**
@@ -168,49 +181,49 @@ static int srd_inst_send_meta(struct srd_decoder_inst *di, int key,
  *
  * @since 0.3.0
  */
-SRD_API int srd_session_metadata_set(struct srd_session *sess, int key,
-		GVariant *data)
+SRD_API int srd_session_metadata_set(struct srd_session* sess, int key,
+    GVariant* data)
 {
-	GSList *l;
-	int ret;
+    GSList* l;
+    int ret;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	if (!key) {
-		srd_err("Invalid key.");
-		return SRD_ERR_ARG;
-	}
+    if (!key) {
+        srd_err("Invalid key.");
+        return SRD_ERR_ARG;
+    }
 
-	if (!data) {
-		srd_err("Invalid value.");
-		return SRD_ERR_ARG;
-	}
+    if (!data) {
+        srd_err("Invalid value.");
+        return SRD_ERR_ARG;
+    }
 
-	/* Hardcoded to samplerate/uint64 for now. */
+    /* Hardcoded to samplerate/uint64 for now. */
 
-	if (key != SRD_CONF_SAMPLERATE) {
-		srd_err("Unknown config key %d.", key);
-		return SRD_ERR_ARG;
-	}
-	if (!g_variant_is_of_type(data, G_VARIANT_TYPE_UINT64)) {
-		srd_err("Invalid value type: expected uint64, got %s",
-				g_variant_get_type_string(data));
-		return SRD_ERR_ARG;
-	}
+    if (key != SRD_CONF_SAMPLERATE) {
+        srd_err("Unknown config key %d.", key);
+        return SRD_ERR_ARG;
+    }
+    if (!g_variant_is_of_type(data, G_VARIANT_TYPE_UINT64)) {
+        srd_err("Invalid value type: expected uint64, got %s",
+            g_variant_get_type_string(data));
+        return SRD_ERR_ARG;
+    }
 
-	srd_dbg("Setting session %d samplerate to %"G_GUINT64_FORMAT".",
-			sess->session_id, g_variant_get_uint64(data));
+    srd_dbg("Setting session %d samplerate to %" G_GUINT64_FORMAT ".",
+        sess->session_id, g_variant_get_uint64(data));
 
-	ret = SRD_OK;
-	for (l = sess->di_list; l; l = l->next) {
-		if ((ret = srd_inst_send_meta(l->data, key, data)) != SRD_OK)
-			break;
-	}
+    ret = SRD_OK;
+    for (l = sess->di_list; l; l = l->next) {
+        if ((ret = srd_inst_send_meta(l->data, key, data)) != SRD_OK)
+            break;
+    }
 
-	g_variant_unref(data);
+    g_variant_unref(data);
 
-	return ret;
+    return ret;
 }
 
 /**
@@ -271,24 +284,25 @@ SRD_API int srd_session_metadata_set(struct srd_session *sess, int key,
  *
  * @since 0.4.0
  */
-SRD_API int srd_session_send(struct srd_session *sess,
-		uint64_t abs_start_samplenum, uint64_t abs_end_samplenum,
-        const uint8_t **inbuf, const uint8_t *inbuf_const, uint64_t inbuflen, char **error)
+SRD_API int srd_session_send(struct srd_session* sess,
+    uint64_t abs_start_samplenum, uint64_t abs_end_samplenum,
+    const uint8_t** inbuf, const uint8_t* inbuf_const, uint64_t inbuflen, char** error)
 {
-	GSList *d;
-	int ret;
+    GSList* d;
+    int ret;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	//foreach srd_decoder_inst* stack
-	for (d = sess->di_list; d; d = d->next) {
-		if ((ret = srd_inst_decode(d->data, abs_start_samplenum,
-                abs_end_samplenum, inbuf, inbuf_const, inbuflen, error)) != SRD_OK)
-			return ret;
-	}
+    // foreach srd_decoder_inst* stack
+    for (d = sess->di_list; d; d = d->next) {
+        if ((ret = srd_inst_decode(d->data, abs_start_samplenum,
+                 abs_end_samplenum, inbuf, inbuf_const, inbuflen, error))
+            != SRD_OK)
+            return ret;
+    }
 
-	return SRD_OK;
+    return SRD_OK;
 }
 
 /**
@@ -313,21 +327,21 @@ SRD_API int srd_session_send(struct srd_session *sess,
  *
  * @since 0.5.1
  */
-SRD_API int srd_session_terminate_reset(struct srd_session *sess)
+SRD_API int srd_session_terminate_reset(struct srd_session* sess)
 {
-	GSList *d;
-	int ret;
+    GSList* d;
+    int ret;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	for (d = sess->di_list; d; d = d->next) {
-		ret = srd_inst_terminate_reset(d->data);
-		if (ret != SRD_OK)
-			return ret;
-	}
+    for (d = sess->di_list; d; d = d->next) {
+        ret = srd_inst_terminate_reset(d->data);
+        if (ret != SRD_OK)
+            return ret;
+    }
 
-	return SRD_OK;
+    return SRD_OK;
 }
 
 /**
@@ -349,12 +363,16 @@ SRD_API int srd_session_destroy(struct srd_session *sess)
 		return SRD_ERR_ARG;
 
 	session_id = sess->session_id;
+
+	g_rw_lock_writer_lock(&sessions_rwlock);
+	sessions = g_slist_remove(sessions, sess);
+	g_rw_lock_writer_unlock(&sessions_rwlock);
+
 	if (sess->di_list)
 		srd_inst_free_all(sess);
 	if (sess->callbacks)
 		g_slist_free_full(sess->callbacks, g_free);
-	sessions = g_slist_remove(sessions, sess);
-	x_free(sess);
+	g_free(sess);
 
 	srd_info("Destroyed session %d.", session_id);
 
@@ -377,135 +395,152 @@ SRD_API int srd_session_destroy(struct srd_session *sess)
  *
  * @since 0.3.0
  */
-SRD_API int srd_pd_output_callback_add(struct srd_session *sess,
-		int output_type, srd_pd_output_callback cb, void *cb_data)
+SRD_API int srd_pd_output_callback_add(struct srd_session* sess,
+    int output_type, srd_pd_output_callback cb, void* cb_data)
 {
-	struct srd_pd_callback *pd_cb;
+    struct srd_pd_callback* pd_cb;
 
-	if (!sess)
-		return SRD_ERR_ARG;
+    if (!sess)
+        return SRD_ERR_ARG;
 
-	srd_dbg("Registering new callback for output type %s.",
-		output_type_name(output_type));
+    srd_dbg("Registering new callback for output type %s.",
+        output_type_name(output_type));
 
-	pd_cb = x_malloc(sizeof(struct srd_pd_callback));
-	if (pd_cb == NULL){
-		srd_err("%s,ERROR:failed to alloc memory.", __func__);
-		return SRD_ERR;
-	}
-	memset(pd_cb, 0, sizeof(struct srd_pd_callback));
-	
-	pd_cb->output_type = output_type;
-	pd_cb->cb = cb;
-	pd_cb->cb_data = cb_data;
-	sess->callbacks = g_slist_append(sess->callbacks, pd_cb);
+    pd_cb = g_malloc0(sizeof(struct srd_pd_callback));
+    if (pd_cb == NULL) {
+        srd_err("%s,ERROR:failed to alloc memory.", __func__);
+        return SRD_ERR;
+    }
 
-	return SRD_OK;
+    pd_cb->output_type = output_type;
+    pd_cb->cb = cb;
+    pd_cb->cb_data = cb_data;
+    sess->callbacks = g_slist_append(sess->callbacks, pd_cb);
+
+    return SRD_OK;
 }
 
 /** @private */
-SRD_PRIV struct srd_pd_callback *srd_pd_output_callback_find(
-		struct srd_session *sess, int output_type)
+SRD_PRIV struct srd_pd_callback* srd_pd_output_callback_find(
+    struct srd_session* sess, int output_type)
 {
-	GSList *l;
-	struct srd_pd_callback *tmp, *pd_cb;
+    GSList* l;
+    struct srd_pd_callback *tmp, *pd_cb;
 
-	if (!sess)
-		return NULL;
+    if (!sess)
+        return NULL;
 
-	pd_cb = NULL;
-	for (l = sess->callbacks; l; l = l->next) {
-		tmp = l->data;
-		if (tmp->output_type == output_type) {
-			pd_cb = tmp;
-			break;
-		}
-	}
+    pd_cb = NULL;
+    for (l = sess->callbacks; l; l = l->next) {
+        tmp = l->data;
+        if (tmp->output_type == output_type) {
+            pd_cb = tmp;
+            break;
+        }
+    }
 
-	return pd_cb;
+    return pd_cb;
 }
 
-SRD_API int srd_session_end(struct srd_session *sess, char **error)
+SRD_API int srd_session_end(struct srd_session* sess, char** error)
 {
-	GSList *d;
-	struct srd_decoder_inst *di;
-	PyGILState_STATE gstate;
-	PyObject *py_res;
-	int ret;
+    GSList* d;
+    struct srd_decoder_inst* di;
+    PyGILState_STATE gstate;
+    PyObject* py_res;
+    int ret;
 
-	if (!sess || !sess->di_list){
-		return SRD_ERR;
-	}
+    if (!sess || !sess->di_list) {
+        return SRD_ERR;
+    }
 
-	gstate = PyGILState_Ensure();
+    gstate = PyGILState_Ensure();
 
-	for (d = sess->di_list; d; d = d->next)
-	{
-		di = d->data;
+    for (d = sess->di_list; d; d = d->next) {
+        di = d->data;
 
-		if (PyObject_HasAttrString(di->py_inst, "end"))
-		{
-			//set the last sample index
-			PyObject *py_cur_samplenum = PyLong_FromUnsignedLongLong(di->abs_cur_samplenum);
+        if (di->is_c_inst) {
+            di->last_samplenum = di->abs_cur_samplenum;
+            if (di->c_dec_inst->end) {
+                di->c_dec_inst->end(di);
+            }
+            if (di->next_di != NULL) {
+                ret = srd_call_sub_decoder_end(di, error);
+                if (ret != SRD_OK) {
+                    PyGILState_Release(gstate);
+                    return ret;
+                }
+            }
+            continue;
+        }
+
+        if (PyObject_HasAttrString(di->py_inst, "end")) {
+            PyObject* py_cur_samplenum = PyLong_FromUnsignedLongLong(di->abs_cur_samplenum);
             PyObject_SetAttrString(di->py_inst, "last_samplenum", py_cur_samplenum);
             Py_DECREF(py_cur_samplenum);
 
-			py_res = PyObject_CallMethod(di->py_inst, "end", NULL);
+            py_res = PyObject_CallMethod(di->py_inst, "end", NULL);
 
-			if (!py_res)
-			{ 
-				srd_exception_catch(error, "Protocol decoder instance %s",
-									di->inst_id);
-				PyGILState_Release(gstate);
-				return SRD_ERR_PYTHON;
-			}
-		}
+            if (!py_res) {
+                srd_exception_catch(error, "Protocol decoder instance %s",
+                    di->inst_id);
+                PyGILState_Release(gstate);
+                return SRD_ERR_PYTHON;
+            }
+        }
 
-		if (di->next_di != NULL){
-			ret = srd_call_sub_decoder_end(di, error);
-			if (ret != SRD_OK){
-				PyGILState_Release(gstate);
-				return ret;
-			}
-		}
-	}
+        if (di->next_di != NULL) {
+            ret = srd_call_sub_decoder_end(di, error);
+            if (ret != SRD_OK) {
+                PyGILState_Release(gstate);
+                return ret;
+            }
+        }
+    }
 
-	PyGILState_Release(gstate);
-	return SRD_OK;
+    PyGILState_Release(gstate);
+    return SRD_OK;
 }
 
-
-SRD_PRIV int srd_call_sub_decoder_end(struct srd_decoder_inst *di, char **error)
+SRD_PRIV int srd_call_sub_decoder_end(struct srd_decoder_inst* di, char** error)
 {
-	assert(di && di->next_di);
+    assert(di && di->next_di);
 
-	GSList *l;
-	struct srd_decoder_inst *sub_dec;
-	PyObject *py_res; 
+    GSList* l;
+    struct srd_decoder_inst* sub_dec;
+    PyObject* py_res;
 
-	for (l = di->next_di; l; l = l->next){
-		sub_dec = l->data;
+    for (l = di->next_di; l; l = l->next) {
+        sub_dec = l->data;
 
-		if (PyObject_HasAttrString(sub_dec->py_inst, "end"))
-		{
-			py_res = PyObject_CallMethod(sub_dec->py_inst, "end", NULL);
+        if (sub_dec->is_c_inst) {
+            if (sub_dec->c_dec_inst->end) {
+                sub_dec->c_dec_inst->end(sub_dec);
+            }
+            if (sub_dec->next_di != NULL) {
+                if (srd_call_sub_decoder_end(sub_dec, error) != SRD_OK)
+                    return SRD_ERR_PYTHON;
+            }
+            continue;
+        }
 
-			if (!py_res)
-			{ 
-				srd_exception_catch(error, "Protocol decoder instance %s",
-									sub_dec->inst_id);
-				return SRD_ERR_PYTHON;
-			}
-		}
+        if (PyObject_HasAttrString(sub_dec->py_inst, "end")) {
+            py_res = PyObject_CallMethod(sub_dec->py_inst, "end", NULL);
 
-		//next level decoder
-		if (sub_dec->next_di != NULL){
-			if (srd_call_sub_decoder_end(sub_dec, error) != SRD_OK)
-				return SRD_ERR_PYTHON;
-		}
-	}
+            if (!py_res) {
+                srd_exception_catch(error, "Protocol decoder instance %s",
+                    sub_dec->inst_id);
+                return SRD_ERR_PYTHON;
+            }
+        }
 
-	return SRD_OK;
+        if (sub_dec->next_di != NULL) {
+            if (srd_call_sub_decoder_end(sub_dec, error) != SRD_OK)
+                return SRD_ERR_PYTHON;
+        }
+    }
+
+    return SRD_OK;
 }
 
 /** @} */

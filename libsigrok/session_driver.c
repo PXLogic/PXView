@@ -242,7 +242,7 @@ static int receive_data(int fd, int revents, const struct sr_dev_inst *sdi)
     struct sr_datafeed_logic logic;
     struct sr_datafeed_dso dso;
     struct sr_datafeed_analog analog;
-    int ret;
+    int ret = 0;
     char file_name[32];
     struct sr_channel *probe = NULL;
     GSList *pl;
@@ -420,8 +420,8 @@ static int receive_data_logic_dso_v2(int fd, int revents, const struct sr_dev_in
     struct sr_datafeed_logic logic;
     struct sr_datafeed_dso dso;
 
-    int ret;
-    char file_name[32]; 
+    int ret = 0;
+    char file_name[32];
     int ch_index, malloc_chan_index;
     struct session_packet_buffer *pack_buffer;
     unz_file_info64 fileInfo;
@@ -463,7 +463,7 @@ static int receive_data_logic_dso_v2(int fd, int revents, const struct sr_dev_in
     if (vdev->packet_buffer == NULL){
         vdev->cur_block = 0;
 
-        vdev->packet_buffer = x_malloc(sizeof(struct session_packet_buffer));
+        vdev->packet_buffer = malloc(sizeof(struct session_packet_buffer));
         if (vdev->packet_buffer == NULL){
             sr_err("%s: vdev->packet_buffer malloc failed", __func__);
             return SR_ERR_MALLOC;
@@ -479,7 +479,7 @@ static int receive_data_logic_dso_v2(int fd, int revents, const struct sr_dev_in
         else
             vdev->packet_buffer->post_buf_len = chan_num * 10000;
 
-        vdev->packet_buffer->post_buf = x_malloc(vdev->packet_buffer->post_buf_len + 1);
+        vdev->packet_buffer->post_buf = malloc(vdev->packet_buffer->post_buf_len + 1);
         if (vdev->packet_buffer->post_buf == NULL){
             sr_err("%s: vdev->packet_buffer->post_buf malloc failed", __func__);
             return SR_ERR_MALLOC;
@@ -567,11 +567,11 @@ static int receive_data_logic_dso_v2(int fd, int revents, const struct sr_dev_in
                         for (malloc_chan_index = 0; malloc_chan_index < chan_num; malloc_chan_index++){   
                             // Release the old buffer.
                             if (pack_buffer->block_bufs[malloc_chan_index] != NULL){
-                                x_free(pack_buffer->block_bufs[malloc_chan_index]);
+                                free(pack_buffer->block_bufs[malloc_chan_index]);
                                 pack_buffer->block_bufs[malloc_chan_index] = NULL;
                             }
 
-                            pack_buffer->block_bufs[malloc_chan_index] = x_malloc(pack_buffer->block_data_len + 1);
+                            pack_buffer->block_bufs[malloc_chan_index] = malloc(pack_buffer->block_data_len + 1);
                             if (pack_buffer->block_bufs[malloc_chan_index] == NULL){
                                 sr_err("%s: block buffer malloc failed", __func__);
                                 send_error_packet(sdi, vdev, &packet);
@@ -636,6 +636,7 @@ static int receive_data_logic_dso_v2(int fd, int revents, const struct sr_dev_in
             if ((pack_buffer->block_data_len - pack_buffer->block_read_len) % 8 != 0)
             {
                 sr_err("The block data is not align with 8 byte.");
+                bToEnd = 1;
                 break;
             }  
         }
@@ -734,7 +735,7 @@ static int dev_clear(void)
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
-    int ret;
+    int ret = 0;
     struct session_vdev *vdev;
 
     assert(sdi);
@@ -746,7 +747,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 
     assert(sdi->priv == NULL);
 
-    vdev = x_malloc(sizeof(struct session_vdev));
+    vdev = malloc(sizeof(struct session_vdev));
     if (vdev == NULL)
     {
         sr_err("%s: sdi->priv malloc failed", __func__);
@@ -762,7 +763,7 @@ static int dev_open(struct sr_dev_inst *sdi)
     sdi->priv = vdev;
     sdi->status = SR_ST_ACTIVE;
 
-    vdev->buf = x_malloc(CHUNKSIZE + sizeof(uint64_t));
+    vdev->buf = malloc(CHUNKSIZE + sizeof(uint64_t));
     if (vdev->buf == NULL){
         sr_err("%s: vdev->buf malloc failed", __func__);
         return SR_ERR_MALLOC;
@@ -793,7 +794,7 @@ static void free_temp_buffer(struct session_vdev *vdev)
 
         for (i = 0; i < SESSION_MAX_CHANNEL_COUNT; i++){
             if (pack_buf->block_bufs[i] != NULL){
-                x_free(pack_buf->block_bufs[i]);
+                free(pack_buf->block_bufs[i]);
                 pack_buf->block_bufs[i] = NULL;
             }
             else{
@@ -1061,6 +1062,7 @@ static int config_set(int id, GVariant *data, struct sr_dev_inst *sdi,
     struct session_vdev *vdev;
     const char *stropt;
     unsigned int i;
+    int pv;
 
     assert(sdi);
     assert(sdi->priv);
@@ -1125,7 +1127,7 @@ static int config_set(int id, GVariant *data, struct sr_dev_inst *sdi,
         {
             if (sdi->mode == LOGIC)
             {
-                if (!(vdev->logic_buf = x_malloc(CHUNKSIZE / 16 * vdev->num_probes)))
+                if (!(vdev->logic_buf = malloc(CHUNKSIZE / 16 * vdev->num_probes)))
                 {
                     sr_err("%s: vdev->logic_buf malloc failed", __func__);
                 }
@@ -1198,10 +1200,11 @@ static int config_set(int id, GVariant *data, struct sr_dev_inst *sdi,
             vdev->mstatus.ch1_cyc_plen = g_variant_get_uint32(data);
         break;
     case SR_CONF_STATUS_LLEN:
+        pv = g_variant_get_uint32(data);
         if (ch->index == 0)
-            vdev->mstatus.ch0_cyc_llen = g_variant_get_uint32(data);
+            vdev->mstatus.ch0_cyc_llen = pv;
         else
-            vdev->mstatus.ch0_cyc_llen = g_variant_get_uint32(data);
+            vdev->mstatus.ch1_cyc_llen = pv;
         break;
     case SR_CONF_STATUS_LEVEL:
         if (ch->index == 0)
@@ -1509,7 +1512,7 @@ SR_PRIV int sr_new_virtual_device(const char *filename, struct sr_dev_inst **out
         return SR_ERR;
     }
 
-    if (!(metafile = x_malloc(fileInfo.uncompressed_size)))
+    if (!(metafile = malloc(fileInfo.uncompressed_size)))
     {
         sr_err("%s: metafile malloc failed", __func__);
         return SR_ERR_MALLOC;
@@ -1553,15 +1556,15 @@ SR_PRIV int sr_new_virtual_device(const char *filename, struct sr_dev_inst **out
     }
     g_strfreev(sections);
     g_key_file_free(kf);
-    x_free(metafile);
+    g_free(metafile);
 
     sdi = sr_dev_inst_new(mode, SR_ST_INACTIVE, NULL, NULL, NULL);
     sdi->driver = &session_driver;
     sdi->dev_type = DEV_TYPE_FILELOG;
 
     get_file_short_name(filename, short_name, sizeof(short_name) - 1);
-    sdi->name = str_clone((const char*)short_name);
-    sdi->path = str_clone(filename);
+    sdi->name = g_strdup((const char*)short_name);
+    sdi->path = g_strdup(filename);
 
     *out_di = sdi;
 
@@ -1626,7 +1629,7 @@ static int sr_load_virtual_device_session(struct sr_dev_inst *sdi)
         return SR_ERR;
     }
 
-    if (!(metafile = x_malloc(fileInfo.uncompressed_size)))
+    if (!(metafile = malloc(fileInfo.uncompressed_size)))
     {
         sr_err("%s: metafile malloc failed", __func__);
         return SR_ERR_MALLOC;
@@ -2066,7 +2069,7 @@ static int sr_load_virtual_device_session(struct sr_dev_inst *sdi)
     }
     g_strfreev(sections);
     g_key_file_free(kf);
-    x_free(metafile);
+    g_free(metafile);
 
     return SR_OK;
 }

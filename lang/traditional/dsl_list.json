@@ -1,0 +1,77 @@
+[
+    {
+        "id": "Buffer Mode",
+        "text": "Buffer模式"
+    },
+    {
+        "id": "Stream Mode",
+        "text": "Stream模式"
+    },
+    {
+        "id": "Internal Test",
+        "text": "內部測試"
+    },
+    {
+        "id": "External Test",
+        "text": "外部測試"
+    },
+    {
+        "id": "DRAM Loopback Test",
+        "text": "記憶體回環測試"
+    },
+    {
+        "id": "Stop immediately",
+        "text": "立即停止"
+    },
+    {
+        "id": "Upload captured data",
+        "text": "上傳已採集的資料"
+    },
+    {
+        "id": "None",
+        "text": "無"
+    },
+    {
+        "id": "1 Sample Clock",
+        "text": "1個採樣週期"
+    },
+    {
+        "id": "Normal",
+        "text": "正常"
+    },
+    {
+        "id": "Full Bandwidth",
+        "text": "全頻寬"
+    },
+    {
+        "id": "20MHz",
+        "text": "20MHz"
+    },
+
+
+
+    {
+        "id": "close",
+        "text": "關閉"
+    },
+    {
+        "id": "Rising",
+        "text": "上升沿"
+    },
+    {
+        "id": "One",
+        "text": "高電平"
+    },
+    {
+        "id": "Falling",
+        "text": "下降沿"
+    },
+    {
+        "id": "Zero",
+        "text": "低電平"
+    },
+    {
+        "id": "Edge",
+        "text": "雙沿"
+    }
+]

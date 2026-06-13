@@ -23,10 +23,10 @@
 //#include <stdarg.h>
 #include <glib.h>
 #include <ds_types.h>
-#include <mem/alloc.h>
+#include "config.h" /* Needed for HAVE_LIBUSB_1_0 and others. */
 #include <libusb-1.0/libusb.h>
 #include "libsigrok.h"
-#include "config.h" /* Needed for HAVE_LIBUSB_1_0 and others. */
+
 /**
  * @file
  *
@@ -56,12 +56,6 @@
 #define g_safe_free_list(p) 	if((p)) g_slist_free((p)); ((p)) = NULL;
 
 #define DS_VENDOR_ID	0x2A0E
-
-#ifdef _WIN32
-	#define UNREF_DEV_LIST_FALG		0
-#else
-	#define UNREF_DEV_LIST_FALG		1
-#endif
 
 enum device_transaction_types
 {
@@ -184,6 +178,19 @@ struct sr_dev_inst {
     void *priv;
 
 	int actived_times;
+
+    /** Device model name (compat). */
+    char *model;
+    /** Serial number (compat). */
+    char *serial_num;
+    /** Connection ID (compat). */
+    char *connection_id;
+    /** List of channel groups (compat). */
+    GSList *channel_groups;
+    /** Instance type: SR_INST_USB/SERIAL/SCPI etc (compat). */
+    int inst_type;
+    /** Session this device belongs to (compat). */
+    struct sr_session *session;
 };
 
 struct sr_session 
@@ -225,6 +232,9 @@ struct sr_serial_dev_inst {
 	char *port;
 	char *serialcomm;
 	int fd;
+#ifdef HAVE_LIBSERIALPORT
+	void *sp_data; /**< struct sp_port * from libserialport */
+#endif
 };
 
 /* Private driver context. */
@@ -445,7 +455,7 @@ SR_PRIV int ds_scan_all_device_list(libusb_context *usb_ctx, struct libusb_devic
 SR_PRIV int sr_option_value_to_code(int config_id, const char *value, const struct lang_text_map_item *array, int num);
 
 /*--- dslogic.c ------------------------------------------------------------*/
-SR_PRIV int sr_dslogic_option_value_to_code2(const struct sr_dev_inst *sdi, int config_id, const char *value);
+SR_PRIV int sr_dslogic_option_value_to_code(const struct sr_dev_inst *sdi, int config_id, const char *value);
 
 /*--- dscope.c ------------------------------------------------------------*/
 SR_PRIV int sr_dscope_option_value_to_code(const struct sr_dev_inst *sdi, int config_id, const char *value);

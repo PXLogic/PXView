@@ -1,0 +1,62 @@
+[
+    {
+        "id": "IDS_GLITCH_FILTER_BOTH",
+        "text": "雙向"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HIGH",
+        "text": "高電平"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_LOW",
+        "text": "低電平"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HINT",
+        "text": "*勾選通道並點擊應用濾波後，小於設定寬度的脈衝將被濾除。\n(雙向：高低脈衝都濾；高電平：僅濾除高電平上的低脈衝雜波；低電平：僅濾除低電平上的高脈衝雜波)"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_HINT",
+        "text": "*勾選通道並點擊應用後，信號電平將被翻轉（0→1, 1→0）"
+    },
+    {
+        "id": "IDS_LOGIC_MODE_ONLY",
+        "text": "此功能僅在 Logic 模式下可用"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_TITLE",
+        "text": "信號取反"
+    },
+    {
+        "id": "IDS_SELECT_ALL",
+        "text": "全選"
+    },
+    {
+        "id": "IDS_DESELECT_ALL",
+        "text": "取消全選"
+    },
+    {
+        "id": "IDS_APPLY_INVERT",
+        "text": "應用取反"
+    },
+    {
+        "id": "IDS_RESTORE_ORIGINAL_DATA",
+        "text": "恢復原始數據"
+    },
+    {
+        "id": "IDS_INVERT_ACTIVE",
+        "text": "已取反"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_TITLE",
+        "text": "毛刺過濾"
+    },
+    {
+        "id": "IDS_APPLY_FILTER",
+        "text": "應用濾波"
+    },
+    {
+        "id": "IDS_FILTER_ACTIVE",
+        "text": "已濾波"
+    }
+]

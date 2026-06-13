@@ -189,7 +189,7 @@ class Decoder(srd.Decoder):
                     self.bit_append(self.fall, self.samplenum, 1 if self.invert else 0)
                 elif timeB > RESET_RATIO_MIN * SYMBOL_DURATION_US and timeB < RESET_RATIO_MAX * SYMBOL_DURATION_US: # not a symbol but an idle zone and a new reset
                     self.bits_reset()
-                    self.put(self.rise, self.samplenum, self.out_ann, [ANN_ID_RESET, ['Reset: %d' % time]])
+                    self.put(self.rise, self.samplenum, self.out_ann, [ANN_ID_RESET, ['Reset: %d' % timeB]])
                     self.bytes_flush(self.fall)
                 else:
                     self.bits_reset()

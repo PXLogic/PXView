@@ -151,19 +151,18 @@ class Decoder(srd.Decoder):
                 if (self.matched & (0b1 << 0)):
                     self.triggertype = 1   # this is a RESET joypad counter event; continue to search for trigger end
 
-                if (self.matched & (0b1 << 0)):
-                    self.state = 'START BIT'
-                    self.bitcount = 0
-                    self.bits_start.clear()
-                    self.bits_value.clear()
-                    self.bits_end.clear()
-                    self.startbit = self.samplenum
-                    if self.triggertype == 0:
-                        self.put(self.startsamplenum, self.samplenum, self.out_ann,
-                                 [0, ['Trigger', 'Trig', 'T']])
-                    else:
-                        self.put(self.startsamplenum, self.samplenum, self.out_ann,
-                                 [1, ['Reset Joy Count', 'Reset', 'R']])
+                self.state = 'START BIT'
+                self.bitcount = 0
+                self.bits_start.clear()
+                self.bits_value.clear()
+                self.bits_end.clear()
+                self.startbit = self.samplenum
+                if self.triggertype == 0:
+                    self.put(self.startsamplenum, self.samplenum, self.out_ann,
+                             [0, ['Trigger', 'Trig', 'T']])
+                else:
+                    self.put(self.startsamplenum, self.samplenum, self.out_ann,
+                             [1, ['Reset Joy Count', 'Reset', 'R']])
                         
             elif self.state == 'START BIT':
                 (trg, clk, dataval, self.dir) = self.wait([{1: 'f'}, {0: 'f'}])

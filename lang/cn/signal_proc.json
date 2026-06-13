@@ -1,0 +1,74 @@
+[
+    {
+        "id": "IDS_GLITCH_FILTER_BOTH",
+        "text": "双向"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HIGH",
+        "text": "高电平"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_LOW",
+        "text": "低电平"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_TYPE",
+        "text": "滤波类型"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_PERIOD",
+        "text": "滤波周期"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_UNIT",
+        "text": "周期"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_HINT",
+        "text": "*勾选通道并点击应用滤波后，小于设定宽度的脉冲将被滤除。\n(双向：高低脉冲都滤；高电平：仅滤除高电平上的低脉冲杂波；低电平：仅滤除低电平上的高脉冲杂波)"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_HINT",
+        "text": "*勾选通道并点击应用后，信号电平将被翻转（0→1, 1→0）"
+    },
+    {
+        "id": "IDS_LOGIC_MODE_ONLY",
+        "text": "此功能仅在 Logic 模式下可用"
+    },
+    {
+        "id": "IDS_SIGNAL_INVERT_TITLE",
+        "text": "信号取反"
+    },
+    {
+        "id": "IDS_SELECT_ALL",
+        "text": "全选"
+    },
+    {
+        "id": "IDS_DESELECT_ALL",
+        "text": "取消全选"
+    },
+    {
+        "id": "IDS_APPLY_INVERT",
+        "text": "应用取反"
+    },
+    {
+        "id": "IDS_RESTORE_ORIGINAL_DATA",
+        "text": "恢复原始数据"
+    },
+    {
+        "id": "IDS_INVERT_ACTIVE",
+        "text": "已取反"
+    },
+    {
+        "id": "IDS_GLITCH_FILTER_TITLE",
+        "text": "毛刺过滤"
+    },
+    {
+        "id": "IDS_APPLY_FILTER",
+        "text": "应用滤波"
+    },
+    {
+        "id": "IDS_FILTER_ACTIVE",
+        "text": "已滤波"
+    }
+]

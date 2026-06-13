@@ -1,0 +1,34 @@
+{
+	"decoder": "spi_c",
+	"samplerate": 1000000,
+	"num_annotations": 3,
+	"annotations": [
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 7,
+			"ann_type": 14,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 8,
+			"ann_type": 15,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}, 
+		{
+			"start_sample": 0,
+			"end_sample": 0,
+			"ann_class": 9,
+			"ann_type": 16,
+			"texts": [
+				"color:#F32FDC"
+			]
+		}
+	]
+}

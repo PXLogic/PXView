@@ -302,6 +302,8 @@ unsigned int usb_rd_data_update(libusb_device_handle *usbdevh,unsigned int base_
 //                  1 fpga flash
 //                  2 fpga ddr
 unsigned int usb_rd_data_req(libusb_device_handle *usbdevh,unsigned int base_addr,int length,unsigned int mode,unsigned char *buff,unsigned int timeout){
+    (void)buff;
+    (void)timeout;
     unsigned  int addr;
     int rc = 0;
 

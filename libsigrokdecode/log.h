@@ -1,8 +1,8 @@
 /*
  * This file is part of the PXView project.
- * PXView is based onPXView.
+ * PXView is based on DSView.
  * PXView is based on PulseView.
- * 
+ *
  * Copyright (C) 2022 DreamSourceLab <support@dreamsourcelab.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -23,8 +23,9 @@
 #ifndef _SRD_LOG_H_
 #define _SRD_LOG_H_
 
-#include <log/xlog.h>
 #include "libsigrokdecode.h"
+#include <log/xlog.h>
+
 
 extern xlog_writer *srd_log;
 
@@ -48,11 +49,16 @@ SRD_API void srd_log_set_context(xlog_context *ctx);
  */
 SRD_API void srd_log_level(int level);
 
-#define LOG_PREFIX "" 
-#define srd_err(fmt, args...) xlog_err(srd_log, LOG_PREFIX fmt, ## args)
-#define srd_warn(fmt, args...) xlog_warn(srd_log, LOG_PREFIX fmt, ## args)
-#define srd_info(fmt, args...) xlog_info(srd_log, LOG_PREFIX fmt, ## args)
-#define srd_dbg(fmt, args...) xlog_dbg(srd_log, LOG_PREFIX fmt, ## args)
-#define srd_detail(fmt, args...) xlog_detail(srd_log, LOG_PREFIX fmt, ## args)
+#define LOG_PREFIX ""
+#define srd_err(fmt, args...) ((void)xlog_err(srd_log, LOG_PREFIX fmt, ##args))
+#define srd_warn(fmt, args...) ((void)xlog_warn(srd_log, LOG_PREFIX fmt, ##args))
+#define srd_info(fmt, args...) ((void)xlog_info(srd_log, LOG_PREFIX fmt, ##args))
+#ifndef NDEBUG
+#define srd_dbg(fmt, args...) ((void)xlog_dbg(srd_log, LOG_PREFIX fmt, ##args))
+#define srd_detail(fmt, args...) ((void)xlog_detail(srd_log, LOG_PREFIX fmt, ##args))
+#else
+#define srd_dbg(fmt, args...) ((void)0)
+#define srd_detail(fmt, args...) ((void)0)
+#endif
 
 #endif

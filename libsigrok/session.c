@@ -144,7 +144,7 @@ SR_PRIV int sr_session_destroy(void)
 static int sr_session_iteration(gboolean block)
 {
 	unsigned int i;
-	int ret;
+	int ret = 0;
 
 	if (session == NULL){
 		sr_err("sr_session_iteration(), session is null.");

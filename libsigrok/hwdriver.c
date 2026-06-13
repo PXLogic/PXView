@@ -90,8 +90,11 @@ static struct sr_config_info sr_config_info_data[] = {
 	{SR_CONF_PWM1_FREQ, SR_T_FLOAT,"PWM1 Freq"},
 	{SR_CONF_PWM0_DUTY, SR_T_FLOAT,"PWM0 Duty"},
 	{SR_CONF_PWM1_DUTY, SR_T_FLOAT,"PWM1 Duty"},
-	{SR_CONF_STREAM_BUFF, SR_T_FLOAT,"Stream buff Size"},
-	
+	{SR_CONF_STREAM_BUFF, SR_T_FLOAT,"Disk Buff Size (with cache)"},
+	{SR_CONF_DISK_CACHE_ENABLE, SR_T_BOOL, "Disk Cache Enable"},
+	{SR_CONF_DISK_CACHE_PATH, SR_T_CHAR, "Disk Cache Path"},
+	{SR_CONF_STREAM_MEM_BUFF, SR_T_FLOAT, "Mem Buff Size (no cache)"},
+
     {0, 0, NULL},
 };
 
@@ -105,6 +108,17 @@ extern SR_PRIV struct sr_dev_driver DSLogic_driver_info;
 extern SR_PRIV struct sr_dev_driver DSCope_driver_info;
 extern SR_PRIV struct sr_dev_driver px_driver_test_info;
 #endif
+#ifdef HAVE_COMPAT_DRIVERS
+#ifdef HAVE_DRIVER_FX2LAFW
+extern SR_PRIV struct sr_dev_driver fx2lafw_driver_info;
+#endif
+#ifdef HAVE_DRIVER_SALEAE_LOGIC16
+extern SR_PRIV struct sr_dev_driver saleae_logic16_driver_info;
+#endif
+#ifdef HAVE_DRIVER_RASPBERRYPI_PICO
+extern SR_PRIV struct sr_dev_driver raspberrypi_pico_driver_info;
+#endif
+#endif
 /** @endcond */
 
 static struct sr_dev_driver *drivers_list[] = {
@@ -112,9 +126,20 @@ static struct sr_dev_driver *drivers_list[] = {
 	&demo_driver_info,
 #endif
 #ifdef HAVE_DSL_DEVICE
-    //&DSLogic_driver_info,
-    //&DSCope_driver_info,
+    &DSLogic_driver_info,
+    &DSCope_driver_info,
 	&px_driver_test_info,
+#endif
+#ifdef HAVE_COMPAT_DRIVERS
+#ifdef HAVE_DRIVER_FX2LAFW
+    &fx2lafw_driver_info,
+#endif
+#ifdef HAVE_DRIVER_SALEAE_LOGIC16
+    &saleae_logic16_driver_info,
+#endif
+#ifdef HAVE_DRIVER_RASPBERRYPI_PICO
+    &raspberrypi_pico_driver_info,
+#endif
 #endif
 	NULL,
 };
@@ -147,7 +172,7 @@ SR_PRIV struct sr_dev_driver **sr_driver_list(void)
  */
 SR_PRIV int sr_driver_init(struct sr_context *ctx, struct sr_dev_driver *driver)
 {
-	int ret;
+	int ret = 0;
 
 	if (!ctx) {
 		sr_err("Invalid libsigrok context, can't initialize.");
@@ -234,7 +259,7 @@ SR_PRIV int sr_config_get(const struct sr_dev_driver *driver,
                          const struct sr_channel_group *cg,
                          int key, GVariant **data)
 {
-	int ret;
+	int ret = 0;
 
 	if (!driver || !data)
 		return SR_ERR;
@@ -271,7 +296,7 @@ SR_PRIV int sr_config_set(struct sr_dev_inst *sdi,
                          struct sr_channel_group *cg,
                          int key, GVariant *data)
 {
-	int ret;
+	int ret = 0;
 
 	assert(data);
 	g_variant_ref_sink(data);
@@ -314,7 +339,7 @@ SR_PRIV int sr_config_list(const struct sr_dev_driver *driver,
                           const struct sr_channel_group *cg,
                           int key, GVariant **data)
 {
-	int ret;
+	int ret = 0;
 
 	if (!driver || !data){
 		ret = SR_ERR;
@@ -364,7 +389,7 @@ SR_PRIV const struct sr_config_info *sr_config_info_get(int key)
 SR_PRIV int sr_status_get(const struct sr_dev_inst *sdi,
                          struct sr_status *status, gboolean prg)
 {
-    int ret;
+    int ret = 0;
 
     if (!sdi->driver)
         ret = SR_ERR;
@@ -383,7 +408,7 @@ SR_PRIV int ds_scan_all_device_list(libusb_context *usb_ctx,struct libusb_device
 	libusb_device **devlist;
 	int i;
 	int wr;
-    int ret;
+    int ret = 0;
 	struct libusb_device_descriptor des;
 
 	assert(list_buf);
@@ -420,7 +445,7 @@ SR_PRIV int ds_scan_all_device_list(libusb_context *usb_ctx,struct libusb_device
 
 	*count = wr;
 
-	libusb_free_device_list(devlist, UNREF_DEV_LIST_FALG);
+	libusb_free_device_list(devlist, 0);
 
 	return SR_OK;
 }
