@@ -680,7 +680,13 @@ void Viewport::paintSignals(QPainter &p, QColor fore, QColor back) {
          _view.get_signalHeight() != _curSignalHeight ||
          _view.get_vOffset() != _curVOffset);
 
-    if (view_params_changed || _need_update) {
+    const qreal dpr = devicePixelRatioF();
+    const QSize pixmapSize = (QSizeF(size()) * dpr).toSize();
+    const bool pixmap_changed =
+        _pixmap.isNull() || _pixmap.size() != pixmapSize ||
+        !qFuzzyCompare(_pixmap.devicePixelRatioF(), dpr);
+
+    if (view_params_changed || _need_update || pixmap_changed) {
       rebuilt = true;
       (void)rebuilt;
 #ifndef NDEBUG
@@ -693,13 +699,11 @@ void Viewport::paintSignals(QPainter &p, QColor fore, QColor back) {
       _curSignalHeight = _view.get_signalHeight();
       _curVOffset = _view.get_vOffset();
 
-      const qreal dpr = devicePixelRatioF();
-      _pixmap = QPixmap(size() * dpr);
+      _pixmap = QPixmap(pixmapSize);
       _pixmap.setDevicePixelRatio(dpr);
       _pixmap.fill(Qt::transparent);
 
       QPainter dbp(&_pixmap);
-      dbp.scale(dpr, dpr);
       dbp.translate(0, -_view.get_vOffset());
 
       bool bFirst = true;
@@ -767,9 +771,16 @@ void Viewport::paintSignals(QPainter &p, QColor fore, QColor back) {
       p.restore();
     }
   } else {
+    const qreal dpr = devicePixelRatioF();
+    const QSize pixmapSize = (QSizeF(size()) * dpr).toSize();
+    const bool pixmap_changed =
+        _pixmap.isNull() || _pixmap.size() != pixmapSize ||
+        !qFuzzyCompare(_pixmap.devicePixelRatioF(), dpr);
+
     if (_view.scale() != _curScale || _view.offset() != _curOffset ||
         _view.get_signalHeight() != _curSignalHeight ||
-        _view.get_vOffset() != _curVOffset || _need_update) {
+        _view.get_vOffset() != _curVOffset || _need_update ||
+        pixmap_changed) {
 
       rebuilt = true;
 #ifndef NDEBUG
@@ -782,13 +793,11 @@ void Viewport::paintSignals(QPainter &p, QColor fore, QColor back) {
       _curSignalHeight = _view.get_signalHeight();
       _curVOffset = _view.get_vOffset();
 
-      const qreal dpr = devicePixelRatioF();
-      _pixmap = QPixmap(size() * dpr);
+      _pixmap = QPixmap(pixmapSize);
       _pixmap.setDevicePixelRatio(dpr);
       _pixmap.fill(Qt::transparent);
 
       QPainter dbp(&_pixmap);
-      dbp.scale(dpr, dpr);
       dbp.translate(0, -_view.get_vOffset());
 
       bool isLissa = false;
