@@ -1223,8 +1223,13 @@ SRD_API int srd_c_decoder_register(struct srd_c_decoder* dec)
     d->channels = NULL;
     if (dec->num_channels > 0 && dec->channels) {
         for (i = 0; i < dec->num_channels; i++) {
-            struct srd_channel* ch = g_malloc(sizeof(struct srd_channel));
-            memcpy(ch, &dec->channels[i], sizeof(struct srd_channel));
+            struct srd_channel* ch = g_malloc0(sizeof(struct srd_channel));
+            ch->id = dec->channels[i].id ? g_strdup(dec->channels[i].id) : NULL;
+            ch->name = dec->channels[i].name ? g_strdup(dec->channels[i].name) : NULL;
+            ch->desc = dec->channels[i].desc ? g_strdup(dec->channels[i].desc) : NULL;
+            ch->order = dec->channels[i].order;
+            ch->type = dec->channels[i].type;
+            ch->idn = dec->channels[i].idn ? g_strdup(dec->channels[i].idn) : NULL;
             d->channels = g_slist_append(d->channels, ch);
         }
     }
@@ -1232,8 +1237,13 @@ SRD_API int srd_c_decoder_register(struct srd_c_decoder* dec)
     d->opt_channels = NULL;
     if (dec->num_optional_channels > 0 && dec->optional_channels) {
         for (i = 0; i < dec->num_optional_channels; i++) {
-            struct srd_channel* ch = g_malloc(sizeof(struct srd_channel));
-            memcpy(ch, &dec->optional_channels[i], sizeof(struct srd_channel));
+            struct srd_channel* ch = g_malloc0(sizeof(struct srd_channel));
+            ch->id = dec->optional_channels[i].id ? g_strdup(dec->optional_channels[i].id) : NULL;
+            ch->name = dec->optional_channels[i].name ? g_strdup(dec->optional_channels[i].name) : NULL;
+            ch->desc = dec->optional_channels[i].desc ? g_strdup(dec->optional_channels[i].desc) : NULL;
+            ch->order = dec->optional_channels[i].order;
+            ch->type = dec->optional_channels[i].type;
+            ch->idn = dec->optional_channels[i].idn ? g_strdup(dec->optional_channels[i].idn) : NULL;
             d->opt_channels = g_slist_append(d->opt_channels, ch);
         }
     }
@@ -1241,8 +1251,19 @@ SRD_API int srd_c_decoder_register(struct srd_c_decoder* dec)
     d->options = NULL;
     if (dec->num_options > 0 && dec->options) {
         for (i = 0; i < dec->num_options; i++) {
-            struct srd_decoder_option* o = g_malloc(sizeof(struct srd_decoder_option));
-            memcpy(o, &dec->options[i], sizeof(struct srd_decoder_option));
+            struct srd_decoder_option* o = g_malloc0(sizeof(struct srd_decoder_option));
+            o->id = dec->options[i].id ? g_strdup(dec->options[i].id) : NULL;
+            o->idn = dec->options[i].idn ? g_strdup(dec->options[i].idn) : NULL;
+            o->desc = dec->options[i].desc ? g_strdup(dec->options[i].desc) : NULL;
+            if (dec->options[i].def) {
+                o->def = g_variant_ref(dec->options[i].def);
+            }
+            if (dec->options[i].values) {
+                GSList *l;
+                for (l = dec->options[i].values; l; l = l->next) {
+                    o->values = g_slist_append(o->values, g_variant_ref((GVariant*)l->data));
+                }
+            }
             d->options = g_slist_append(d->options, o);
         }
     }

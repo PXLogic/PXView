@@ -1066,18 +1066,22 @@ static int config_get(int id, GVariant** data, const struct sr_dev_inst* sdi,
         *data = g_variant_new_byte(devc->max_height);
         break;
     case SR_CONF_HW_DEPTH:
-        if (devc->op_mode == OP_BUFFER) {
-            *data = g_variant_new_uint64(devc->profile->dev_caps.hw_depth / channel_modes[devc->ch_mode].unit_bits / devc->ch_num);
-        } else if (devc->op_mode == OP_STREAM) {
-            if (devc->disk_cache_enable) {
-                // Disk cache mode: mmap backed by disk file
-                *data = g_variant_new_uint64((uint64_t)(devc->stream_buff_size * 1024 * 1024 * 1024) * 8 / channel_modes[devc->ch_mode].unit_bits / devc->ch_num);
+        {
+            uint16_t ch_num_div = devc->ch_num ? devc->ch_num : 1;
+            uint16_t unit_bits = channel_modes[devc->ch_mode].unit_bits ? channel_modes[devc->ch_mode].unit_bits : 1;
+            if (devc->op_mode == OP_BUFFER) {
+                *data = g_variant_new_uint64(devc->profile->dev_caps.hw_depth / unit_bits / ch_num_div);
+            } else if (devc->op_mode == OP_STREAM) {
+                if (devc->disk_cache_enable) {
+                    // Disk cache mode: mmap backed by disk file
+                    *data = g_variant_new_uint64((uint64_t)(devc->stream_buff_size * 1024 * 1024 * 1024) * 8 / unit_bits / ch_num_div);
+                } else {
+                    // Memory mode: mmap backed by pagefile
+                    *data = g_variant_new_uint64((uint64_t)(devc->stream_mem_buff_size * 1024 * 1024 * 1024) * 8 / unit_bits / ch_num_div);
+                }
             } else {
-                // Memory mode: mmap backed by pagefile
-                *data = g_variant_new_uint64((uint64_t)(devc->stream_mem_buff_size * 1024 * 1024 * 1024) * 8 / channel_modes[devc->ch_mode].unit_bits / devc->ch_num);
+                *data = g_variant_new_uint64(devc->profile->dev_caps.hw_depth / unit_bits / ch_num_div);
             }
-        } else {
-            *data = g_variant_new_uint64(devc->profile->dev_caps.hw_depth / channel_modes[devc->ch_mode].unit_bits / devc->ch_num);
         }
         break;
     case SR_CONF_VLD_CH_NUM:

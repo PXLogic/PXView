@@ -165,11 +165,11 @@ namespace pv
         public:
             SigSession          *_session;
             QLabel              *_device_type_label;
-            XToolButton         _device_type;
-            DsComboBox          _device_selector;
-            DsComboBox          _sample_count;
-            DsComboBox          _sample_rate;
-            XToolButton         _mode_button;
+            XToolButton         *_device_type;
+            DsComboBox          *_device_selector;
+            DsComboBox          *_sample_count;
+            DsComboBox          *_sample_rate;
+            XToolButton         *_mode_button;
 
             QAction             *_mode_action;
          

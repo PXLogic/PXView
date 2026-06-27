@@ -69,9 +69,12 @@ const QString SamplingBar::RLEString = "(RLE)";
 const QString SamplingBar::DIVString = " / div";
 
 SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
-    : QToolBar("Sampling Bar", parent), _device_type(this),
-      _device_selector(this), _sample_count(this), _sample_rate(this),
-      _mode_button(this) {
+    : QToolBar("Sampling Bar", parent) {
+  _device_type = new XToolButton(this);
+  _device_selector = new DsComboBox(this);
+  _sample_count = new DsComboBox(this);
+  _sample_rate = new DsComboBox(this);
+  _mode_button = new XToolButton(this);
   _updating_device_list = false;
   _updating_sample_rate = false;
   _updating_sample_count = false;
@@ -95,37 +98,37 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
   setContentsMargins(0, 0, 0, 0);
   layout()->setSpacing(0);
 
-  _mode_button.setPopupMode(QToolButton::InstantPopup);
+  _mode_button->setPopupMode(QToolButton::InstantPopup);
 
-  _device_selector.setSizeAdjustPolicy(
+  _device_selector->setSizeAdjustPolicy(
       DsComboBox::AdjustToMinimumContentsLengthWithIcon);
-  _sample_rate.setSizeAdjustPolicy(
+  _sample_rate->setSizeAdjustPolicy(
       DsComboBox::AdjustToMinimumContentsLengthWithIcon);
-  _sample_count.setSizeAdjustPolicy(
+  _sample_count->setSizeAdjustPolicy(
       DsComboBox::AdjustToMinimumContentsLengthWithIcon);
-  _device_selector.setMinimumContentsLength(15);
-  _sample_rate.setMinimumContentsLength(15);
-  _sample_count.setMinimumContentsLength(15);
-  _device_selector.setMaximumWidth(ComboBoxMaxWidth);
+  _device_selector->setMinimumContentsLength(15);
+  _sample_rate->setMinimumContentsLength(15);
+  _sample_count->setMinimumContentsLength(15);
+  _device_selector->setMaximumWidth(ComboBoxMaxWidth);
 
   QWidget *leftMargin = new QWidget(this);
   leftMargin->setFixedWidth(4);
   addWidget(leftMargin);
 
-  // _device_type.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  _device_type.setToolButtonStyle(Qt::ToolButtonIconOnly);
-  addWidget(&_device_type);
+  // _device_type->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  _device_type->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  addWidget(_device_type);
   addWidget(new QLabel("  "));
   _device_type_label = new QLabel(this);
   addWidget(_device_type_label);
   addWidget(new QLabel("  "));
-  addWidget(&_device_selector);
+  addWidget(_device_selector);
 
-  addWidget(&_sample_count);
+  addWidget(_sample_count);
   // tr
   //  addWidget(new QLabel(" @ "));
   addWidget(new QLabel("  "));
-  addWidget(&_sample_rate);
+  addWidget(_sample_rate);
 
   _action_single = new QAction(this);
   _action_repeat = new QAction(this);
@@ -135,7 +138,7 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
   _mode_menu->addAction(_action_single);
   _mode_menu->addAction(_action_repeat);
   _mode_menu->addAction(_action_loop);
-  _mode_button.setMenu(_mode_menu);
+  _mode_button->setMenu(_mode_menu);
 
   auto widgetToAction = [](QWidget *widget,
                            QWidget *parent = nullptr) -> QAction * {
@@ -144,15 +147,15 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
     return action;
   };
 
-  _mode_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  _mode_action = widgetToAction(&_mode_button);
+  _mode_button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  _mode_action = widgetToAction(_mode_button);
 
   update_view_status();
 
-  connect(&_device_selector,
+  connect(_device_selector,
           QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &SamplingBar::on_device_selected);
-  connect(&_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  connect(_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplecount_sel);
   connect(_action_single, &QAction::triggered, this,
           &SamplingBar::on_collect_mode);
@@ -160,7 +163,7 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
           &SamplingBar::on_collect_mode);
   connect(_action_loop, &QAction::triggered, this,
           &SamplingBar::on_collect_mode);
-  connect(&_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  connect(_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplerate_sel);
 
   ADD_UI(this);
@@ -205,14 +208,14 @@ QWidget *SamplingBar::createSamplingSettingsWidget(QWidget *parent) {
   grid->addWidget(_dev_label, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
   // 拆除原来的 QHBoxLayout，图标放第1列，下拉框放第2列
-  grid->addWidget(&_device_type, 0, 1, Qt::AlignCenter);
+  grid->addWidget(_device_type, 0, 1, Qt::AlignCenter);
 
-  _device_selector.setMinimumWidth(target_w);
-  _device_selector.setMaximumWidth(QWIDGETSIZE_MAX);
-  _device_selector.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  _device_selector.setFont(contentFont);
-  _device_selector.setObjectName("dock_content");
-  grid->addWidget(&_device_selector, 0, 2);
+  _device_selector->setMinimumWidth(target_w);
+  _device_selector->setMaximumWidth(QWIDGETSIZE_MAX);
+  _device_selector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  _device_selector->setFont(contentFont);
+  _device_selector->setObjectName("dock_content");
+  grid->addWidget(_device_selector, 0, 2);
 
   // Row 1: 采样深度
   _depth_label = new QLabel(
@@ -222,11 +225,11 @@ QWidget *SamplingBar::createSamplingSettingsWidget(QWidget *parent) {
   _depth_label->setObjectName("dock_label");
   grid->addWidget(_depth_label, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
-  _sample_count.setMinimumWidth(target_w);
-  _sample_count.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  _sample_count.setFont(contentFont);
-  _sample_count.setObjectName("dock_content");
-  grid->addWidget(&_sample_count, 1, 2); // 注意这里放在第2列
+  _sample_count->setMinimumWidth(target_w);
+  _sample_count->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  _sample_count->setFont(contentFont);
+  _sample_count->setObjectName("dock_content");
+  grid->addWidget(_sample_count, 1, 2); // 注意这里放在第2列
 
   // Row 2: 采样率
   _rate_label = new QLabel(
@@ -236,11 +239,11 @@ QWidget *SamplingBar::createSamplingSettingsWidget(QWidget *parent) {
   _rate_label->setObjectName("dock_label");
   grid->addWidget(_rate_label, 2, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
-  _sample_rate.setMinimumWidth(target_w);
-  _sample_rate.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  _sample_rate.setFont(contentFont);
-  _sample_rate.setObjectName("dock_content");
-  grid->addWidget(&_sample_rate, 2, 2); // 注意这里放在第2列
+  _sample_rate->setMinimumWidth(target_w);
+  _sample_rate->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  _sample_rate->setFont(contentFont);
+  _sample_rate->setObjectName("dock_content");
+  grid->addWidget(_sample_rate, 2, 2); // 注意这里放在第2列
 
   // Row 3: 捕获模式
   _mode_label = new QLabel(
@@ -289,10 +292,10 @@ QWidget *SamplingBar::createSamplingSettingsWidget(QWidget *parent) {
 
   // 控件从 QToolBar 移出时 QWidgetAction::releaseWidget() 会自动 hide()，
   // 需要显式 show() 恢复可见性
-  _device_type.show();
-  _device_selector.show();
-  _sample_count.show();
-  _sample_rate.show();
+  _device_type->show();
+  _device_selector->show();
+  _sample_count->show();
+  _sample_rate->show();
 
   return group;
 }
@@ -318,10 +321,10 @@ void SamplingBar::bind_context(TabContext *ctx) {
     update_sample_rate_selector();
 
     if (doc && doc->_dock_sample_rate > 0) {
-      for (int i = _sample_rate.count() - 1; i >= 0; i--) {
+      for (int i = _sample_rate->count() - 1; i >= 0; i--) {
         if (doc->_dock_sample_rate >=
-            _sample_rate.itemData(i).value<uint64_t>()) {
-          _sample_rate.setCurrentIndex(i);
+            _sample_rate->itemData(i).value<uint64_t>()) {
+          _sample_rate->setCurrentIndex(i);
           break;
         }
       }
@@ -330,9 +333,9 @@ void SamplingBar::bind_context(TabContext *ctx) {
     if (doc && doc->_dock_sample_limit > 0 && doc->_dock_sample_rate > 0) {
       double duration =
           (double)doc->_dock_sample_limit / doc->_dock_sample_rate * SR_SEC(1);
-      for (int i = 0; i < _sample_count.count(); i++) {
-        if (duration >= _sample_count.itemData(i).value<double>()) {
-          _sample_count.setCurrentIndex(i);
+      for (int i = 0; i < _sample_count->count(); i++) {
+        if (duration >= _sample_count->itemData(i).value<double>()) {
+          _sample_count->setCurrentIndex(i);
           break;
         }
       }
@@ -341,10 +344,10 @@ void SamplingBar::bind_context(TabContext *ctx) {
     update_sample_rate_selector_value();
     update_sample_count_selector_value();
     reload();
-    if (_device_selector.parentWidget()) {
-      _device_selector.parentWidget()->adjustSize();
-      if (_device_selector.parentWidget()->parentWidget())
-        _device_selector.parentWidget()->parentWidget()->adjustSize();
+    if (_device_selector->parentWidget()) {
+      _device_selector->parentWidget()->adjustSize();
+      if (_device_selector->parentWidget()->parentWidget())
+        _device_selector->parentWidget()->parentWidget()->adjustSize();
     }
   }
 }
@@ -354,16 +357,16 @@ void SamplingBar::unbind_context() {
       _device_agent->have_instance()) {
     auto doc = _context->document();
 
-    if (_sample_rate.count() > 0 && _sample_rate.currentIndex() >= 0) {
+    if (_sample_rate->count() > 0 && _sample_rate->currentIndex() >= 0) {
       doc->_dock_sample_rate =
-          _sample_rate.itemData(_sample_rate.currentIndex()).value<uint64_t>();
+          _sample_rate->itemData(_sample_rate->currentIndex()).value<uint64_t>();
     } else {
       doc->_dock_sample_rate = _device_agent->get_sample_rate();
     }
 
-    if (_sample_count.count() > 0 && _sample_count.currentIndex() >= 0) {
+    if (_sample_count->count() > 0 && _sample_count->currentIndex() >= 0) {
       double duration =
-          _sample_count.itemData(_sample_count.currentIndex()).value<double>();
+          _sample_count->itemData(_sample_count->currentIndex()).value<double>();
       uint64_t s_rate = doc->_dock_sample_rate > 0
                             ? doc->_dock_sample_rate
                             : _device_agent->get_sample_rate();
@@ -400,17 +403,17 @@ void SamplingBar::retranslateUi() {
 
       if (usb_speed == LIBUSB_SPEED_HIGH) {
         _device_type_label->setText("USB 2.0");
-        _device_type.setToolTip(tr("USB 2.0 (High Speed)\nMax bandwidth: ~40 MB/s\nStream mode: lower sample rates\nBuffer mode: full sample rates"));
+        _device_type->setToolTip(tr("USB 2.0 (High Speed)\nMax bandwidth: ~40 MB/s\nStream mode: lower sample rates\nBuffer mode: full sample rates"));
       } else if (usb_speed == LIBUSB_SPEED_SUPER) {
         _device_type_label->setText("USB 3.0");
-        _device_type.setToolTip(tr("USB 3.0 (SuperSpeed)\nMax bandwidth: ~400 MB/s\nStream mode: higher sample rates available"));
+        _device_type->setToolTip(tr("USB 3.0 (SuperSpeed)\nMax bandwidth: ~400 MB/s\nStream mode: higher sample rates available"));
       } else {
         _device_type_label->setText("USB UNKNOWN");
-        _device_type.setToolTip(tr("USB speed unknown"));
+        _device_type->setToolTip(tr("USB speed unknown"));
       }
     }
   }
-  _mode_button.setText(
+  _mode_button->setText(
       L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_CAPTURE_MODE), "Mode"));
 
   _action_single->setText(
@@ -437,17 +440,17 @@ void SamplingBar::reStyle() {
 
   if (bDev) {
     if (_device_agent->is_demo())
-      _device_type.setIcon(IconCache::Instance().icon(":/icons/demo.svg"));
+      _device_type->setIcon(IconCache::Instance().icon(":/icons/demo.svg"));
     else if (_device_agent->is_file())
-      _device_type.setIcon(IconCache::Instance().icon(":/icons/data.svg"));
+      _device_type->setIcon(IconCache::Instance().icon(":/icons/data.svg"));
     else {
       int usb_speed = LIBUSB_SPEED_HIGH;
       _device_agent->get_config_int32(SR_CONF_USB_SPEED, usb_speed);
 
       if (usb_speed == LIBUSB_SPEED_SUPER)
-        _device_type.setIcon(IconCache::Instance().icon(":/icons/usb3.svg"));
+        _device_type->setIcon(IconCache::Instance().icon(":/icons/usb3.svg"));
       else
-        _device_type.setIcon(IconCache::Instance().icon(":/icons/usb2.svg"));
+        _device_type->setIcon(IconCache::Instance().icon(":/icons/usb2.svg"));
     }
   }
 
@@ -476,11 +479,11 @@ void SamplingBar::zero_adj() {
     }
   }
 
-  const int index_back = _sample_count.currentIndex();
+  const int index_back = _sample_count->currentIndex();
   int i = 0;
 
-  for (i = 0; i < _sample_count.count(); i++) {
-    if (_sample_count.itemData(i).value<uint64_t>() == ZeroTimeBase)
+  for (i = 0; i < _sample_count->count(); i++) {
+    if (_sample_count->itemData(i).value<uint64_t>() == ZeroTimeBase)
       break;
   }
 
@@ -508,10 +511,10 @@ void SamplingBar::zero_adj() {
 }
 
 void SamplingBar::set_sample_rate(uint64_t sample_rate) {
-  for (int i = _sample_rate.count() - 1; i >= 0; i--) {
-    uint64_t cur_index_sample_rate = _sample_rate.itemData(i).value<uint64_t>();
+  for (int i = _sample_rate->count() - 1; i >= 0; i--) {
+    uint64_t cur_index_sample_rate = _sample_rate->itemData(i).value<uint64_t>();
     if (sample_rate >= cur_index_sample_rate) {
-      _sample_rate.setCurrentIndex(i);
+      _sample_rate->setCurrentIndex(i);
       break;
     }
   }
@@ -530,7 +533,7 @@ void SamplingBar::update_sample_rate_selector() {
     return;
   }
 
-  disconnect(&_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  disconnect(_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
              this, &SamplingBar::on_samplerate_sel);
 
   if (_device_agent->have_instance() == false) {
@@ -542,8 +545,8 @@ void SamplingBar::update_sample_rate_selector() {
 
   gvar_dict = _device_agent->get_config_list(NULL, SR_CONF_SAMPLERATE);
   if (gvar_dict == NULL) {
-    _sample_rate.clear();
-    _sample_rate.show();
+    _sample_rate->clear();
+    _sample_rate->show();
     _updating_sample_rate = false;
     return;
   }
@@ -552,27 +555,27 @@ void SamplingBar::update_sample_rate_selector() {
                                           G_VARIANT_TYPE("at")))) {
     elements = (const uint64_t *)g_variant_get_fixed_array(
         gvar_list, &num_elements, sizeof(uint64_t));
-    _sample_rate.clear();
+    _sample_rate->clear();
 
     for (unsigned int i = 0; i < num_elements; i++) {
       char *const s = sr_samplerate_string(elements[i]);
-      _sample_rate.addItem(QString(s), QVariant::fromValue(elements[i]));
+      _sample_rate->addItem(QString(s), QVariant::fromValue(elements[i]));
       g_free(s);
     }
 
-    _sample_rate.show();
+    _sample_rate->show();
     g_variant_unref(gvar_list);
   }
 
-  // _sample_rate.setMinimumWidth(_sample_rate.sizeHint().width() + 15);
-  _sample_rate.view()->setMinimumWidth(_sample_rate.sizeHint().width() + 30);
+  // _sample_rate->setMinimumWidth(_sample_rate->sizeHint().width() + 15);
+  _sample_rate->view()->setMinimumWidth(_sample_rate->sizeHint().width() + 30);
 
   _updating_sample_rate = false;
   g_variant_unref(gvar_dict);
 
   update_sample_rate_selector_value();
 
-  connect(&_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  connect(_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplerate_sel);
 
   update_sample_count_selector();
@@ -585,12 +588,12 @@ void SamplingBar::update_sample_rate_selector_value() {
 
   const uint64_t samplerate = _device_agent->get_sample_rate();
   uint64_t cur_value =
-      _sample_rate.itemData(_sample_rate.currentIndex()).value<uint64_t>();
+      _sample_rate->itemData(_sample_rate->currentIndex()).value<uint64_t>();
 
   if (samplerate != cur_value) {
-    for (int i = _sample_rate.count() - 1; i >= 0; i--) {
-      if (samplerate >= _sample_rate.itemData(i).value<uint64_t>()) {
-        _sample_rate.setCurrentIndex(i);
+    for (int i = _sample_rate->count() - 1; i >= 0; i--) {
+      if (samplerate >= _sample_rate->itemData(i).value<uint64_t>()) {
+        _sample_rate->setCurrentIndex(i);
         break;
       }
     }
@@ -627,7 +630,7 @@ void SamplingBar::update_sample_count_selector() {
     return;
   }
 
-  disconnect(&_sample_count,
+  disconnect(_sample_count,
              QOverload<int>::of(&QComboBox::currentIndexChanged), this,
              &SamplingBar::on_samplecount_sel);
 
@@ -661,13 +664,13 @@ void SamplingBar::update_sample_count_selector() {
     _device_agent->get_config_uint64(SR_CONF_MIN_TIMEBASE, min_timebase);
   }
 
-  if (0 != _sample_count.count())
+  if (0 != _sample_count->count())
     pre_duration =
-        _sample_count.itemData(_sample_count.currentIndex()).value<double>();
-  _sample_count.clear();
+        _sample_count->itemData(_sample_count->currentIndex()).value<double>();
+  _sample_count->clear();
   const uint64_t samplerate =
-      _sample_rate.itemData(_sample_rate.currentIndex()).value<uint64_t>();
-  const double hw_duration = hw_depth / (samplerate * (1.0 / SR_SEC(1)));
+      _sample_rate->itemData(_sample_rate->currentIndex()).value<uint64_t>();
+  const double hw_duration = (samplerate > 0) ? (hw_depth / (samplerate * (1.0 / SR_SEC(1)))) : 0;
 
   if (mode == DSO)
     duration = max_timebase;
@@ -705,7 +708,7 @@ void SamplingBar::update_sample_count_selector() {
                      : (!stream_mode && duration > hw_duration) ? RLEString
                                                                 : "";
     char *const s = sr_time_string(duration);
-    _sample_count.addItem(QString(s) + suffix, QVariant::fromValue(duration));
+    _sample_count->addItem(QString(s) + suffix, QVariant::fromValue(duration));
     g_free(s);
 
     double unit;
@@ -743,18 +746,18 @@ void SamplingBar::update_sample_count_selector() {
 
   } while (not_last);
 
-  _sample_count.view()->setMinimumWidth(_sample_count.sizeHint().width() + 30);
+  _sample_count->view()->setMinimumWidth(_sample_count->sizeHint().width() + 30);
 
   _updating_sample_count = true;
 
-  if (pre_duration > _sample_count.itemData(0).value<double>()) {
+  if (pre_duration > _sample_count->itemData(0).value<double>()) {
     set_sample_count_index(0);
-  } else if (pre_duration < _sample_count.itemData(_sample_count.count() - 1)
+  } else if (pre_duration < _sample_count->itemData(_sample_count->count() - 1)
                                 .value<double>()) {
-    set_sample_count_index(_sample_count.count() - 1);
+    set_sample_count_index(_sample_count->count() - 1);
   } else {
-    for (int i = 0; i < _sample_count.count(); i++) {
-      double sel_val = _sample_count.itemData(i).value<double>();
+    for (int i = 0; i < _sample_count->count(); i++) {
+      double sel_val = _sample_count->itemData(i).value<double>();
       if (pre_duration >= sel_val) {
         set_sample_count_index(i);
         break;
@@ -764,9 +767,9 @@ void SamplingBar::update_sample_count_selector() {
   _updating_sample_count = false;
 
   update_sample_count_selector_value();
-  on_samplecount_sel(_sample_count.currentIndex());
+  on_samplecount_sel(_sample_count->currentIndex());
 
-  connect(&_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  connect(_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplecount_sel);
 }
 
@@ -798,10 +801,10 @@ void SamplingBar::update_sample_count_selector_value() {
   _updating_sample_count = true;
 
   double cur_duration =
-      _sample_count.itemData(_sample_count.currentIndex()).value<double>();
+      _sample_count->itemData(_sample_count->currentIndex()).value<double>();
   if (duration != cur_duration) {
-    for (int i = 0; i < _sample_count.count(); i++) {
-      double sel_val = _sample_count.itemData(i).value<double>();
+    for (int i = 0; i < _sample_count->count(); i++) {
+      double sel_val = _sample_count->itemData(i).value<double>();
       if (duration >= sel_val) {
         set_sample_count_index(i);
         break;
@@ -839,7 +842,7 @@ void SamplingBar::on_samplecount_sel(int index) {
 }
 
 double SamplingBar::get_hori_res() {
-  return _sample_count.itemData(_sample_count.currentIndex()).value<double>();
+  return _sample_count->itemData(_sample_count->currentIndex()).value<double>();
 }
 
 double SamplingBar::hori_knob(int dir) {
@@ -849,14 +852,14 @@ double SamplingBar::hori_knob(int dir) {
     assert(false);
   }
 
-  disconnect(&_sample_count,
+  disconnect(_sample_count,
              QOverload<int>::of(&QComboBox::currentIndexChanged), this,
              &SamplingBar::on_samplecount_sel);
 
   if (0 == dir) {
     hori_res = commit_hori_res();
-  } else if ((dir > 0) && (_sample_count.currentIndex() > 0)) {
-    set_sample_count_index(_sample_count.currentIndex() - 1);
+  } else if ((dir > 0) && (_sample_count->currentIndex() > 0)) {
+    set_sample_count_index(_sample_count->currentIndex() - 1);
     hori_res = commit_hori_res();
 
     if (_session->have_view_data() == false) {
@@ -864,8 +867,8 @@ double SamplingBar::hori_knob(int dir) {
       _session->broadcast_msg(DSV_MSG_DEVICE_DURATION_UPDATED);
     }
   } else if ((dir < 0) &&
-             (_sample_count.currentIndex() < _sample_count.count() - 1)) {
-    set_sample_count_index(_sample_count.currentIndex() + 1);
+             (_sample_count->currentIndex() < _sample_count->count() - 1)) {
+    set_sample_count_index(_sample_count->currentIndex() + 1);
     hori_res = commit_hori_res();
 
     if (_session->have_view_data() == false) {
@@ -874,7 +877,7 @@ double SamplingBar::hori_knob(int dir) {
     }
   }
 
-  connect(&_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
+  connect(_sample_count, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplecount_sel);
 
   return hori_res;
@@ -882,7 +885,7 @@ double SamplingBar::hori_knob(int dir) {
 
 double SamplingBar::commit_hori_res() {
   const double hori_res =
-      _sample_count.itemData(_sample_count.currentIndex()).value<double>();
+      _sample_count->itemData(_sample_count->currentIndex()).value<double>();
 
   const uint64_t sample_limit = _device_agent->get_sample_limit();
   uint64_t max_sample_rate;
@@ -916,9 +919,9 @@ void SamplingBar::commit_settings() {
     update_sample_count_selector_value();
   } else {
     const double sample_duration =
-        _sample_count.itemData(_sample_count.currentIndex()).value<double>();
+        _sample_count->itemData(_sample_count->currentIndex()).value<double>();
     const uint64_t sample_rate =
-        _sample_rate.itemData(_sample_rate.currentIndex()).value<uint64_t>();
+        _sample_rate->itemData(_sample_rate->currentIndex()).value<uint64_t>();
 
     if (_device_agent->have_instance()) {
       if (sample_rate != _device_agent->get_sample_rate())
@@ -932,7 +935,7 @@ void SamplingBar::commit_settings() {
         if (sample_count != _device_agent->get_sample_limit())
           _device_agent->set_config_uint64(SR_CONF_LIMIT_SAMPLES, sample_count);
 
-        bool rle_mode = _sample_count.currentText().contains(RLEString);
+        bool rle_mode = _sample_count->currentText().contains(RLEString);
         _device_agent->set_config_bool(SR_CONF_RLE, rle_mode);
       }
     }
@@ -1059,7 +1062,7 @@ void SamplingBar::on_device_selected() {
   if (_updating_device_list) {
     return;
   }
-  if (_device_selector.currentIndex() == -1) {
+  if (_device_selector->currentIndex() == -1) {
     pxv_err("Have no selected device.");
     return;
   }
@@ -1067,12 +1070,12 @@ void SamplingBar::on_device_selected() {
   _session->session_save();
 
   ds_device_handle devHandle =
-      (ds_device_handle)_device_selector.currentData().toULongLong();
+      (ds_device_handle)_device_selector->currentData().toULongLong();
   if (_session->have_hardware_data() && _session->is_first_store_confirm()) {
     if (MsgBox::Confirm(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_CAPDATE),
                             "Save captured data?"))) {
       _updating_device_list = true;
-      _device_selector.setCurrentIndex(_last_device_index);
+      _device_selector->setCurrentIndex(_last_device_index);
       _updating_device_list = false;
       _next_switch_device = devHandle; // Save end, auto switch to this device.
       sig_store_session_data();
@@ -1081,7 +1084,7 @@ void SamplingBar::on_device_selected() {
   }
 
   if (_session->set_device(devHandle)) {
-    _last_device_index = _device_selector.currentIndex();
+    _last_device_index = _device_selector->currentIndex();
   } else {
     update_device_list(); // Reload the list.
   }
@@ -1094,15 +1097,15 @@ void SamplingBar::enable_toggle(bool enable) {
     _device_agent->get_config_bool(SR_CONF_TEST, test);
   }
   if (!test) {
-    _sample_count.setDisabled(!enable);
+    _sample_count->setDisabled(!enable);
 
     if (_device_agent->get_work_mode() == DSO)
-      _sample_rate.setDisabled(true);
+      _sample_rate->setDisabled(true);
     else
-      _sample_rate.setDisabled(!enable);
+      _sample_rate->setDisabled(!enable);
   } else {
-    _sample_count.setDisabled(true);
-    _sample_rate.setDisabled(true);
+    _sample_count->setDisabled(true);
+    _sample_rate->setDisabled(true);
   }
 }
 
@@ -1268,11 +1271,11 @@ void SamplingBar::update_device_list() {
   struct ds_device_base_info *p = NULL;
   ds_device_handle cur_dev_handle = NULL_HANDLE;
 
-  _device_selector.clear();
+  _device_selector->clear();
 
   for (int i = 0; i < dev_count; i++) {
     p = (array + i);
-    _device_selector.addItem(
+    _device_selector->addItem(
         QString(p->name), QVariant::fromValue((unsigned long long)p->handle));
 
     if (i == select_index)
@@ -1280,7 +1283,7 @@ void SamplingBar::update_device_list() {
   }
   free(array);
 
-  _device_selector.setCurrentIndex(select_index);
+  _device_selector->setCurrentIndex(select_index);
 
   if (cur_dev_handle != _last_device_handle) {
     update_sample_rate_list();
@@ -1288,8 +1291,8 @@ void SamplingBar::update_device_list() {
   }
 
   _last_device_index = select_index;
-  int width = _device_selector.sizeHint().width();
-  _device_selector.view()->setMinimumWidth(width + 30);
+  int width = _device_selector->sizeHint().width();
+  _device_selector->view()->setMinimumWidth(width + 30);
 
   _updating_device_list = false;
 }
@@ -1300,8 +1303,8 @@ void SamplingBar::update_view_status() {
   int bEnable = _session->is_working() == false;
   int mode = _session->get_device()->get_work_mode();
 
-  _device_type.setEnabled(bEnable);
-  _device_selector.setEnabled(bEnable);
+  _device_type->setEnabled(bEnable);
+  _device_selector->setEnabled(bEnable);
 
   if (_radio_single) {
     _radio_single->setEnabled(bEnable);
@@ -1311,26 +1314,26 @@ void SamplingBar::update_view_status() {
   }
 
   if (_session->get_device()->is_file()) {
-    _sample_rate.setEnabled(false);
-    _sample_count.setEnabled(false);
+    _sample_rate->setEnabled(false);
+    _sample_count->setEnabled(false);
   } else if (mode == DSO) {
-    _sample_rate.setEnabled(false);
-    _sample_count.setEnabled(bEnable);
+    _sample_rate->setEnabled(false);
+    _sample_count->setEnabled(bEnable);
 
     if (_session->is_working() && _session->is_instant() == false) {
-      _sample_count.setEnabled(true);
+      _sample_count->setEnabled(true);
     }
   } else {
-    _sample_rate.setEnabled(bEnable);
-    _sample_count.setEnabled(bEnable);
+    _sample_rate->setEnabled(bEnable);
+    _sample_count->setEnabled(bEnable);
 
     if (mode == LOGIC && _session->get_device()->is_hardware()) {
       int mode_val = 0;
       if (_session->get_device()->get_config_int16(SR_CONF_OPERATION_MODE,
                                                    mode_val)) {
         if (mode_val == LO_OP_INTEST) {
-          _sample_rate.setEnabled(false);
-          _sample_count.setEnabled(false);
+          _sample_rate->setEnabled(false);
+          _sample_count->setEnabled(false);
         }
       }
     }
@@ -1354,8 +1357,8 @@ void SamplingBar::update_view_status() {
     QString opt_mode = _device_agent->get_demo_operation_mode();
 
     if (opt_mode != "random" && mode == LOGIC) {
-      _sample_rate.setEnabled(false);
-      _sample_count.setEnabled(false);
+      _sample_rate->setEnabled(false);
+      _sample_count->setEnabled(false);
     }
   }
 }
@@ -1376,11 +1379,11 @@ void SamplingBar::update_mode_icon() {
   };
 
   if (_session->is_repeat_mode())
-    _mode_button.setIcon(getIcon(REPEAT_ACTION_ICON));
+    _mode_button->setIcon(getIcon(REPEAT_ACTION_ICON));
   else if (_session->is_loop_mode())
-    _mode_button.setIcon(getIcon(LOOP_ACTION_ICON));
+    _mode_button->setIcon(getIcon(LOOP_ACTION_ICON));
   else
-    _mode_button.setIcon(getIcon(SINGLE_ACTION_ICON));
+    _mode_button->setIcon(getIcon(SINGLE_ACTION_ICON));
 }
 
 void SamplingBar::run_or_stop() { on_run_stop(); }
@@ -1398,7 +1401,7 @@ void SamplingBar::UpdateFont() {
   update_view_status();
 }
 
-void SamplingBar::device_selected() { _mode_button.click(); }
+void SamplingBar::device_selected() { _mode_button->click(); }
 
 void SamplingBar::set_context(SigSession *session, pv::view::View *view) {
   _session = session;
@@ -1411,14 +1414,14 @@ void SamplingBar::set_context(SigSession *session, pv::view::View *view) {
 void SamplingBar::set_readonly(bool readonly) {
   _is_readonly = readonly;
 
-  _device_selector.setEnabled(!readonly);
-  _sample_rate.setEnabled(!readonly);
-  _sample_count.setEnabled(!readonly);
-  _mode_button.setEnabled(!readonly);
+  _device_selector->setEnabled(!readonly);
+  _sample_rate->setEnabled(!readonly);
+  _sample_count->setEnabled(!readonly);
+  _mode_button->setEnabled(!readonly);
 }
 
 void SamplingBar::set_sample_count_index(int index) {
-  _sample_count.setCurrentIndex(index);
+  _sample_count->setCurrentIndex(index);
 }
 
 } // namespace toolbars

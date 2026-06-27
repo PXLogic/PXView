@@ -130,15 +130,20 @@ DraggableTabWidget::DraggableTabWidget(QWidget *parent)
     _draggable_tab_bar = new DraggableTabBar(this);
     setTabBar(_draggable_tab_bar);
 
+    // Ensure QSS fully overrides native frame drawing (fixes Linux Fusion style white line)
+    setAttribute(Qt::WA_StyledBackground, true);
+
     // Add left padding to the content pane so the tab bar can extend
     // to the left edge while the content area stays offset
     if (auto *pane = findChild<QStackedWidget*>()) {
-        pane->setContentsMargins(0, 0, 0, 0);
+        pane->setContentsMargins(10, 0, 0, 0);
+        // Force styled background so QSS border:none overrides native Fusion frame on Linux
+        pane->setAttribute(Qt::WA_StyledBackground, true);
     }
 
     setTabsClosable(true);
     setMovable(false);
-    setDocumentMode(true);
+    setDocumentMode(false); // Do not use document mode on Linux, it draws native separators
 
     connect(_draggable_tab_bar, &DraggableTabBar::detachTab,
             this, &DraggableTabWidget::onDetachTab);
@@ -181,6 +186,7 @@ DraggableTabWidget::DraggableTabWidget(QWidget *parent)
     _tab_bottom_line = new QWidget(this);
     _tab_bottom_line->setObjectName("TabBottomLine");
     _tab_bottom_line->setFixedHeight(1);
+    _tab_bottom_line->setAttribute(Qt::WA_StyledBackground, true);
     _tab_bottom_line->raise();
     _tab_bottom_line->show();
 

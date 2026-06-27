@@ -23,6 +23,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QFrame>
+#include <QTextEdit>
 
 namespace pv {
 namespace dock {
@@ -110,6 +111,69 @@ void McpControlDock::setup_ui()
     _btn_restart->setMinimumHeight(36);
     connect(_btn_restart, &QPushButton::clicked, this, &McpControlDock::on_restart_mcp);
     layout->addWidget(_btn_restart);
+
+    layout->addSpacing(8);
+
+    // --- Section 3: System Prompt ---
+    QLabel *section3_title = new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT), "System Prompt (for AI)"), this);
+    section3_title->setFont(title_font);
+    layout->addWidget(section3_title);
+
+    QLabel *section3_desc = new QLabel(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT_DESC),
+            "Copy this text and give it to your AI tool to guide its behavior:"),
+        this);
+    section3_desc->setWordWrap(true);
+    section3_desc->setFont(content_font);
+    layout->addWidget(section3_desc);
+
+    QString system_prompt = 
+        "You are an AI assistant that controls a PXView logic analyzer through MCP tools. You help users capture signals, decode protocols, and analyze data.\n\n"
+        "## Recommended Workflow\n"
+        "1. **get_devices** — Find connected devices first\n"
+        "2. **add_analyzer** — Add decoders BEFORE starting capture (this is critical for auto-decode)\n"
+        "3. **start_capture** — Start signal capture with device and channel config\n"
+        "4. **wait_capture** — Wait for capture to complete\n"
+        "5. **get_analyzer_results** — Read decoded protocol data\n\n"
+        "## Key Rules\n"
+        "- Always call get_devices first to discover available devices and their IDs\n"
+        "- Add analyzers BEFORE starting capture so auto-decode triggers on capture completion\n"
+        "- Use list_analyzers to discover available protocol decoders\n"
+        "- Use get_analyzer_options to see required channels and options for each decoder\n"
+        "- When presenting decode results, summarize key findings (frequencies, duty cycles, data bytes, etc.)\n"
+        "- If a tool call fails, explain the error and suggest alternatives\n\n"
+        "## Available Operations\n"
+        "- Device discovery and configuration\n"
+        "- Signal capture (logic/analog/DSO modes)\n"
+        "- Protocol decoding (SPI, I2C, UART, CAN, PWM, etc.)\n"
+        "- Data export (CSV, binary)\n"
+        "- Signal measurements\n\n"
+        "Respond in the same language as the user's message.";
+
+    QFrame *prompt_frame = new QFrame(this);
+    prompt_frame->setFrameShape(QFrame::StyledPanel);
+    prompt_frame->setObjectName("mcpPromptFrame");
+    QVBoxLayout *prompt_layout = new QVBoxLayout(prompt_frame);
+    prompt_layout->setContentsMargins(8, 8, 8, 8);
+    prompt_layout->setSpacing(8);
+
+    QTextEdit *prompt_text = new QTextEdit(this);
+    prompt_text->setPlainText(system_prompt);
+    prompt_text->setReadOnly(true);
+    prompt_text->setFont(QFont("Consolas", 9));
+    prompt_text->setFrameShape(QFrame::NoFrame);
+    prompt_text->setStyleSheet("background: transparent;");
+    prompt_layout->addWidget(prompt_text);
+
+    QPushButton *copy_prompt_btn = new QPushButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_SYSTEM_PROMPT), "Copy System Prompt"), this);
+    copy_prompt_btn->setMinimumHeight(24);
+    copy_prompt_btn->setFont(QFont("", 8));
+    copy_prompt_btn->setToolTip(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_TOOLTIP), "Copy to clipboard"));
+    copy_prompt_btn->setProperty("cmd_text", system_prompt);
+    connect(copy_prompt_btn, &QPushButton::clicked, this, &McpControlDock::on_copy_command);
+    prompt_layout->addWidget(copy_prompt_btn);
+
+    layout->addWidget(prompt_frame);
 
     layout->addStretch();
 }

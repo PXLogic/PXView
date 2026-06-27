@@ -3062,6 +3062,10 @@ Result<void> SessionService::export_data(const ExportConfig &config) {
     store._sessionDataGetter = nullptr;
     store.SetFileName(QString::fromStdString(config.output_path));
     store.SetDataRange(config.start_sample, config.end_sample);
+    
+    // Set specific channels and type for export
+    store.set_export_channels(config.channels);
+    store.set_export_channel_type(config.is_logic ? SR_CHANNEL_LOGIC : SR_CHANNEL_ANALOG);
 
     // Apply analog downsample ratio if > 1
     if (config.analog_downsample_ratio > 1) {

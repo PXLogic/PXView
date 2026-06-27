@@ -176,6 +176,7 @@ TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
     _bottomLine = new QWidget(this);
     _bottomLine->setObjectName("TitleBarBottomLine");
     _bottomLine->setFixedHeight(1);
+    _bottomLine->setAttribute(Qt::WA_StyledBackground, true);
     _bottomLine->move(0, 31);
     _bottomLine->show();
   }
@@ -202,6 +203,7 @@ TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
     _ribbonLayout->setSpacing(0);
 
     _categoryStack = new QStackedWidget(_ribbonPanel);
+    _categoryStack->setFrameShape(QFrame::NoFrame);
     _categoryStack->setContentsMargins(0, 0, 0, 0);
     _categoryStack->setFixedHeight(_ribbonExpandedHeight - 1);
     _categoryStack->setMinimumWidth(800);
@@ -210,6 +212,7 @@ TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
     QWidget *_ribbonBottomLine = new QWidget(_ribbonPanel);
     _ribbonBottomLine->setObjectName("RibbonBottomLine");
     _ribbonBottomLine->setFixedHeight(1);
+    _ribbonBottomLine->setAttribute(Qt::WA_StyledBackground, true);
     _ribbonLayout->addWidget(_ribbonBottomLine);
 
     _pinButton = new QToolButton(_ribbonPanel);

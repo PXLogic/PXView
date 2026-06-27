@@ -48,6 +48,19 @@
         "text": "Copy to clipboard"
     },
     {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT",
+        "text": "System Prompt (for AI)"
+    },
+    {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT_DESC",
+        "text": "Copy this text and give it to your AI tool to guide its behavior:"
+    },
+    {
+        "id": "IDS_DLG_MCP_COPY_SYSTEM_PROMPT",
+        "text": "Copy System Prompt"
+    },
+
+    {
         "id": "IDS_DLG_LOG_NO_FILE",
         "text": "No log file found."
     },

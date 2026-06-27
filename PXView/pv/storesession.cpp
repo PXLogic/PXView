@@ -794,6 +794,13 @@ bool StoreSession::export_start()
 {
     std::set<int> type_set;
     for(auto s : _session->get_signals()) {
+        if (!_export_channels.empty()) {
+            if (std::find(_export_channels.begin(), _export_channels.end(), s->get_index()) == _export_channels.end()) {
+                continue;
+            }
+        } else if (_export_channel_type >= 0 && s->get_type() != _export_channel_type) {
+            continue;
+        }
         int _tp = s->get_type();
         type_set.insert(_tp);
     }
@@ -898,6 +905,33 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     output.sdi = _session->get_device()->inst();
     output.param = NULL;
     output.start_sample_index = 0;
+
+    struct ChannelStateRestorer {
+        GSList *channels;
+        std::vector<bool> original_states;
+        ChannelStateRestorer(GSList *channels, const std::vector<int32_t> &export_channels) : channels(channels) {
+            if (channels) {
+                for (GSList *l = channels; l; l = l->next) {
+                    struct sr_channel *ch = (struct sr_channel *)l->data;
+                    original_states.push_back(ch->enabled);
+                    if (!export_channels.empty() && std::find(export_channels.begin(), export_channels.end(), ch->index) == export_channels.end()) {
+                        ch->enabled = FALSE;
+                    }
+                }
+            }
+        }
+        ~ChannelStateRestorer() {
+            if (channels) {
+                size_t i = 0;
+                for (GSList *l = channels; l; l = l->next) {
+                    struct sr_channel *ch = (struct sr_channel *)l->data;
+                    if (i < original_states.size()) {
+                        ch->enabled = original_states[i++];
+                    }
+                }
+            }
+        }
+    } restorer(_session->get_device()->get_channels(), _export_channels);
 
     if (channel_type == SR_CHANNEL_LOGIC){
         output.start_sample_index = _start_index;
@@ -1028,6 +1062,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 break;
 
             for(auto s : _session->get_signals()) {
+                if (!_export_channels.empty() && std::find(_export_channels.begin(), _export_channels.end(), s->get_index()) == _export_channels.end()) {
+                    continue;
+                }
                 int ch_type = s->get_type();
                 if (ch_type == SR_CHANNEL_LOGIC) {
                     int ch_index = s->get_index();

@@ -48,6 +48,19 @@
         "text": "复制到剪贴板"
     },
     {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT",
+        "text": "系统提示词 (给 AI)"
+    },
+    {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT_DESC",
+        "text": "复制此文本并提供给您的 AI 工具以指导其行为："
+    },
+    {
+        "id": "IDS_DLG_MCP_COPY_SYSTEM_PROMPT",
+        "text": "复制系统提示词"
+    },
+
+    {
         "id": "IDS_DLG_LOG_NO_FILE",
         "text": "未找到日志文件。"
     },
