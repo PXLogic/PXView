@@ -183,6 +183,11 @@ QWidget
     outline: 0;
 }
 
+QMainWindow#MainWindow
+{
+    background-color: @bg-base;
+}
+
 
 QPushButton#flat{
     text-align:left;
@@ -347,6 +352,7 @@ QMenuBar
 {
     background-color: @titlebar-bg;
     color: @fg-base;
+    border: none;
 }
 
 QMenuBar::item
@@ -647,7 +653,7 @@ QToolBar#sidebar {
 
 QStackedWidget
 {
-    border: 1px transparent;
+    border: none;
 }
 
 QToolBar
@@ -861,32 +867,33 @@ QLabel
 QTabWidget::pane
 {
     padding: 0px;
+    padding-right: 3px;
     margin: 0px;
-
+    border: none;
 }
 
 QTabWidget::pane:top
 {
     border: none;
-    top: -1px;
+    top: 0px;
 }
 
 QTabWidget::pane:bottom
 {
     border: none;
-    bottom: -1px;
+    bottom: 0px;
 }
 
 QTabWidget::pane:left
 {
     border: none;
-    right: -1px;
+    right: 0px;
 }
 
 QTabWidget::pane:right
 {
     border: none;
-    left: -1px;
+    left: 0px;
 }
 
 
@@ -921,22 +928,16 @@ QTabBar::close-button:pressed
 QTabBar::tab:top
 {
     border: none;
-    border-top: none;
-    border-bottom: 1px transparent;
 }
 
 QTabBar::tab:top:!selected
 {
     border: none;
-    border-top: none;
-    border-bottom: 1px transparent;
 }
 
 QTabBar::tab:top:hover
 {
     border: none;
-    border-top: none;
-    border-bottom: 1px transparent;
 }
 
 
@@ -944,19 +945,16 @@ QTabBar::tab:top:hover
 QTabBar::tab:bottom
 {
     border: none;
-    border-top: 1px transparent;
 }
 
 QTabBar::tab:bottom:!selected
 {
     border: none;
-    border-top: 1px transparent;
 }
 
 QTabBar::tab:bottom:hover
 {
     border: none;
-    border-top: 1px transparent;
 }
 
 
@@ -964,19 +962,16 @@ QTabBar::tab:bottom:hover
 QTabBar::tab:left
 {
     border: none;
-    border-left: 1px transparent;
 }
 
 QTabBar::tab:left:!selected
 {
     border: none;
-    border-left: 1px transparent;
 }
 
 QTabBar::tab:left:hover
 {
     border: none;
-    border-left: 1px transparent;
 }
 
 
@@ -984,19 +979,16 @@ QTabBar::tab:left:hover
 QTabBar::tab:right
 {
     border: none;
-    border-right: 1px transparent;
 }
 
 QTabBar::tab:right:!selected
 {
     border: none;
-    border-right: 1px transparent;
 }
 
 QTabBar::tab:right:hover
 {
     border: none;
-    border-right: 1px transparent;
 }
 
 
@@ -1023,6 +1015,7 @@ QTabBar QToolButton::left-arrow:disabled
 QTabWidget::tab-bar
 {
     alignment: left;
+    border: none;
 }
 
 QTreeView,
@@ -1682,7 +1675,12 @@ QWidget#TitleBar QToolButton {
     color: @titlebar-text-color;
 }
 
-QWidget#TitleBarBottomLine {
+QWidget#TitleBarBottomLine,
+QWidget#RibbonBottomLine {
+    background: @border-strong;
+}
+
+QWidget#TabBottomLine {
     background: @border-strong;
 }
 
@@ -1699,7 +1697,7 @@ QWidget#SubTitleRow {
 }
 
 QTabBar {
-    background: transparent;
+    background: @bg-base;
     border: none;
     outline: none;
 }
@@ -1710,12 +1708,12 @@ QTabBar::tab {
     margin: 0px;
     font-size: 12px;
     color: @fg-bright;
-    background: transparent;
+    background: @bg-base;
     border: none;
 }
 
 QTabBar::tab:selected {
-    background: transparent;
+    background: @bg-base;
     border-bottom: 2px solid @fg-bright;
 }
 
@@ -1724,14 +1722,14 @@ QTabBar::tab:hover:!selected {
 }
 
 QTabBar::tab:selected:hover {
-    background: transparent;
+    background: @bg-base;
     border-bottom: 2px solid @fg-bright;
 }
 
 QTabBar::tab:disabled
 {
     color: @fg-muted;
-    background: transparent;
+    background: @bg-base;
 }
 
 QWidget#TabBottomLine {

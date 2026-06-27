@@ -100,7 +100,6 @@ MainFrame::MainFrame()
     isWin32 = true;
 #else
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
-    setAttribute(Qt::WA_TranslucentBackground);
     _is_win32_parent_window = false;
 #endif
  
@@ -114,11 +113,6 @@ MainFrame::MainFrame()
    setMinimumWidth(MainWindow::Min_Width);
    setMinimumHeight(MainWindow::Min_Height);  
 
-    setAutoFillBackground(true);
-    QPalette framePal = palette();
-    framePal.setColor(QPalette::Window, AppConfig::Instance().GetStyleColor());
-    setPalette(framePal);
-
     QIcon icon;
     icon.addFile(QString::fromUtf8(":/icons/logo.svg"), QSize(), QIcon::Normal, QIcon::Off);
     setWindowIcon(icon);
@@ -127,14 +121,29 @@ MainFrame::MainFrame()
     _mainWindow = new MainWindow(_titleBar, this);
     _mainWindow->setWindowFlags(Qt::Widget);
 
+    // Set opaque background AFTER MainWindow creation, because MainWindow's
+    // constructor calls switchTheme() which loads the theme tokens.
+    // Before that, GetStyleColor() returns a fallback (#262626) instead of
+    // the real @bg-base (#202020).
+    setAutoFillBackground(true);
+    QPalette framePal = palette();
+    framePal.setColor(QPalette::Window, AppConfig::Instance().GetStyleColor());
+    setPalette(framePal);
+
     setMenuBar(_titleBar);
 
     QWidget *centralWidget = new QWidget(this);
+    // Fill centralWidget with opaque background so that any sub-pixel gaps
+    // between Border/MainWindow children don't reveal the transparent desktop
+    // (WA_TranslucentBackground makes the base window pixmap transparent on Linux).
+    centralWidget->setAutoFillBackground(true);
+    centralWidget->setPalette(palette());  // reuse the just-updated MainFrame palette
+
     _layout = new QGridLayout(centralWidget);
     _layout->setSpacing(0);
     _layout->setContentsMargins(0,0,0,0);
 
-    if (!isWin32 || !_is_win32_parent_window)
+    if (isWin32 && !_is_win32_parent_window)
     {
         _top_left = new widgets::Border (TopLeft, this);
         _top_left->setFixedSize(Margin, Margin);
@@ -174,16 +183,12 @@ MainFrame::MainFrame()
         _layout->addWidget(_bottom_right, 2, 2);
     }
     else{
+        // Windows with native parent, and Linux: MainWindow fills the grid
         _layout->addWidget(_mainWindow, 0, 0);
     }
 
     setCentralWidget(centralWidget);
 
-    // Ensure no spacing between menu bar (titlebar), central widget, and tool bars (sidebar)
-    if (auto *mainLayout = layout()) {
-        mainLayout->setSpacing(0);
-        mainLayout->setContentsMargins(0, 0, 0, 0);
-    }
 
 #ifdef _WIN32
     _taskPrg = new WinTaskbarProgress();

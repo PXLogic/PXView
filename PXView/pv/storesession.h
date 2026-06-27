@@ -96,6 +96,14 @@ public:
         _end_index = end_index;
     }
 
+    inline void set_export_channels(const std::vector<int32_t>& channels) {
+        _export_channels = channels;
+    }
+
+    inline void set_export_channel_type(int type) {
+        _export_channel_type = type;
+    }
+
     inline bool is_busy(){
         return _is_busy;
     }
@@ -145,6 +153,8 @@ private:
     volatile bool   _is_busy;
     uint64_t        _analog_downsample_ratio = 1;
     bool            _iso8601_timestamp = false;
+    std::vector<int32_t> _export_channels;
+    int             _export_channel_type = -1;
 };
 
 } // pv

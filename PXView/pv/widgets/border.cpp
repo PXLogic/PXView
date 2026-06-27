@@ -35,13 +35,13 @@ const QColor Border::dark_border0 = QColor(80, 80, 80, 255);
 const QColor Border::dark_border1 = QColor(48, 47, 47, 200);
 const QColor Border::dark_border2 = QColor(48, 47, 47, 150);
 const QColor Border::dark_border3 = QColor(48, 47, 47, 100);
-const QColor Border::dark_border4 = QColor(48, 47, 47, 80);
+const QColor Border::dark_border4 = QColor(48, 47, 47, 10);
 
 const QColor Border::light_border0 = QColor(100, 100, 100, 255);
 const QColor Border::light_border1 = QColor(150, 150, 150, 150);
 const QColor Border::light_border2 = QColor(150, 150, 150, 100);
 const QColor Border::light_border3 = QColor(150, 150, 150, 50);
-const QColor Border::light_border4 = QColor(150, 150, 150, 30);
+const QColor Border::light_border4 = QColor(150, 150, 150, 0);
 
 Border::Border(int type, QWidget *parent) :
     QWidget(parent),

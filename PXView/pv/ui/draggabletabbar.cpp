@@ -45,6 +45,7 @@ DraggableTabBar::DraggableTabBar(QWidget *parent)
       _drop_index(-1)
 {
     setDrawBase(false);
+    setAttribute(Qt::WA_StyledBackground, true);
 }
 
 DraggableTabBar::~DraggableTabBar()

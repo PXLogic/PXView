@@ -48,6 +48,19 @@
         "text": "複製到剪貼簿"
     },
     {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT",
+        "text": "系統提示詞 (給 AI)"
+    },
+    {
+        "id": "IDS_DLG_MCP_SYSTEM_PROMPT_DESC",
+        "text": "複製此文本並提供給您的 AI 工具以指導其行為："
+    },
+    {
+        "id": "IDS_DLG_MCP_COPY_SYSTEM_PROMPT",
+        "text": "複製系統提示詞"
+    },
+
+    {
         "id": "IDS_DLG_LOG_NO_FILE",
         "text": "未找到日誌檔案。"
     },

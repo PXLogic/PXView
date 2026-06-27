@@ -165,6 +165,7 @@ let mcpClient: McpClient | null = null;
 let llmClient: LlmClient | null = null;
 let abortController: AbortController | null = null;
 let devicePollTimer: ReturnType<typeof setInterval> | null = null;
+let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 
 function updateMessage(messages: ConversationMessage[], id: string, patch: Partial<ConversationMessage>): ConversationMessage[] {
   return messages.map(m => m.id === id ? { ...m, ...patch } : m);
@@ -247,12 +248,35 @@ export const useAppStore = create<AppState>((set, get) => {
                 set({ deviceInfo: null });
               }
             }
+
+          } catch {}
+        };
+
+        const fetchStatus = async () => {
+          if (!mcpClient) return;
+          try {
+            const statusResult = await mcpClient.callTool('get_capture_status', {});
+            const statusText = statusResult.content?.[0]?.text;
+            if (statusText) {
+              const statusData = JSON.parse(statusText);
+              let newStatus: 'idle' | 'capturing' | 'completed' = 'idle';
+              if (statusData.state === 1 || statusData.state === 2 || statusData.state === 3) {
+                newStatus = 'capturing';
+              } else if (statusData.state === 4) {
+                newStatus = 'completed';
+              }
+              set({ captureStatus: newStatus });
+            }
           } catch {}
         };
 
         await fetchDevices();
         if (!devicePollTimer) {
           devicePollTimer = setInterval(fetchDevices, 3000);
+        }
+        await fetchStatus();
+        if (!statusPollTimer) {
+          statusPollTimer = setInterval(fetchStatus, 500);
         }
       } catch (err) {
         mcpClient = null;
@@ -264,6 +288,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (devicePollTimer) {
         clearInterval(devicePollTimer);
         devicePollTimer = null;
+      }
+      if (statusPollTimer) {
+        clearInterval(statusPollTimer);
+        statusPollTimer = null;
       }
       if (get().isProcessing) {
         get().stopGeneration();
@@ -506,6 +534,10 @@ export const useAppStore = create<AppState>((set, get) => {
                   }
                 : undefined;
 
+              if (tc.function.name === 'configure_and_start' || tc.function.name === 'start_capture') {
+                set({ captureStatus: 'capturing' });
+              }
+
               const result = await mcpClient.callTool(tc.function.name, tcStatus.args, onProgress, signal);
               let resultText = result.content?.map(c => c.text).join('\n') || '';
               if (resultText.length > MAX_TOOL_RESULT_LENGTH) {
@@ -716,9 +748,31 @@ export const useAppStore = create<AppState>((set, get) => {
             } catch {}
           };
 
+          const fetchStatus = async () => {
+            if (!mcpClient) return;
+            try {
+              const statusResult = await mcpClient.callTool('get_capture_status', {});
+              const statusText = statusResult.content?.[0]?.text;
+              if (statusText) {
+                const statusData = JSON.parse(statusText);
+                let newStatus: 'idle' | 'capturing' | 'completed' = 'idle';
+                if (statusData.state === 1 || statusData.state === 2 || statusData.state === 3) {
+                  newStatus = 'capturing';
+                } else if (statusData.state === 4) {
+                  newStatus = 'completed';
+                }
+                set({ captureStatus: newStatus });
+              }
+            } catch {}
+          };
+
           await fetchDevices();
           if (!devicePollTimer) {
             devicePollTimer = setInterval(fetchDevices, 3000);
+          }
+          await fetchStatus();
+          if (!statusPollTimer) {
+            statusPollTimer = setInterval(fetchStatus, 500);
           }
 
           set({
