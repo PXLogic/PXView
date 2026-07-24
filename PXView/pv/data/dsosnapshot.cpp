@@ -195,7 +195,11 @@ void DsoSnapshot::free_data()
 void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sample_count,
                                 GSList *channels, bool instant, bool isFile)
 {
-    assert(channels);  
+    if (!channels) {
+        pxv_warn("%s", "DsoSnapshot::first_payload: channels is NULL");
+        return;
+    }
+    assert(channels);
 
     bool channel_changed = false;
     uint16_t channel_num = 0;
@@ -356,16 +360,26 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
 
 	assert(start_sample >= 0);
     assert(start_sample < (int64_t)_sample_count);
-	assert(end_sample >= 0);
+    assert(end_sample >= 0);
     assert(end_sample < (int64_t)_sample_count);
-	assert(start_sample <= end_sample);
+    assert(start_sample <= end_sample);
 
     int order = get_ch_order(ch_index);
 
     if (order == -1){
         pxv_err("The channel index is not exist:%d", ch_index);
         assert(false);
-    } 
+        return nullptr;
+    }
+
+    /* AGENTS.md: assert() is a no-op in Release. If _ch_data[order] has
+     * not been allocated yet (channel data not populated), return nullptr
+     * so callers can check for null instead of dereferencing a wild pointer
+     * (NULL + start_sample). */
+    if (!_ch_data[order]) {
+        pxv_warn("DsoSnapshot::get_samples: _ch_data[%d] is NULL", order);
+        return nullptr;
+    }
 
     return (uint8_t*)_ch_data[order] + start_sample;
 }
@@ -376,6 +390,12 @@ void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
 	assert(end <= get_sample_count());
 	assert(start <= end);
 	assert(min_length > 0);
+
+    const int order = get_ch_order(probe_index);
+    if (order == -1) {
+        s.length = 0;
+        return;
+    }
 
     if (!_envelope_done) {
         s.length = 0;
@@ -391,12 +411,12 @@ void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
 
 	s.start = start << scale_power;
 	s.scale = 1 << scale_power;
-    if (_envelope_levels[probe_index][min_level].length == 0)
+    if (_envelope_levels[order][min_level].length == 0)
         s.length = 0;
     else
         s.length = end - start;
 
-    s.samples = _envelope_levels[probe_index][min_level].samples + start;
+    s.samples = _envelope_levels[order][min_level].samples + start;
 }
 
 void DsoSnapshot::reallocate_envelope(Envelope &e)

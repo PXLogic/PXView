@@ -25,12 +25,13 @@
 #include "trace.h"
 #include "../sigsession.h" 
 
-#include <assert.h> 
-#include <QStyleOption>
+#include <assert.h>
+#include <QHBoxLayout>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QRect>
-#include <QHBoxLayout>
+#include <QStyleOption>
 
 #include "../config/appconfig.h"
 #include "../ui/msgbox.h"
@@ -44,10 +45,35 @@
 
 static const struct dev_mode_name dev_mode_name_list[] =
 {
-    {LOGIC, "la.svg"},
+    {LOGIC,  "la.svg"},
     {ANALOG, "daq.svg"},
-    {DSO, "osc.svg"},
+    {DSO,    "osc.svg"},
+    {MSO,    "osc.svg"},
 };
+
+// Returns the localized display text for a work mode.
+// Used by both set_device() and on_mode_change() to keep the button label
+// consistent with the menu entries.
+static QString mode_display_text(int mode)
+{
+    switch (mode) {
+    case LOGIC:
+        return L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_LOGIC),
+                   "Logic Analyzer");
+    case ANALOG:
+        return L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_ANALOG),
+                   "Data Acquisition");
+    case DSO:
+        return L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_DSO),
+                   "Oscilloscope");
+    case MSO:
+        return L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_MSO),
+                   "Mixed Signal Oscilloscope");
+    default:
+        return L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_LOGIC),
+                   "Logic Analyzer");
+    }
+}
   
 namespace pv {
 namespace view {
@@ -59,7 +85,7 @@ DevMode::DevMode(QWidget *parent, SigSession *session) :
     _header_collapsed = false;
 
     _session = session;
-    _device_agent = session->get_device();
+    _device_agent = session->device();
 
     QHBoxLayout *layout = new QHBoxLayout(this);
     layout->setSpacing(0);
@@ -144,30 +170,18 @@ void DevMode::set_device()
         action->setIcon(IconCache::Instance().icon(iconPath + "square-" + icon_name));
 
         int md = mode->mode;
-
-        if (md == LOGIC)
-            action->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_LOGIC), "Logic Analyzer"));
-        else if (md == ANALOG)
-            action->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_ANALOG), "Data Acquisition"));
-        else if (md == DSO)
-            action->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_DSO), "Oscilloscope"));
+        action->setText(mode_display_text(md));
 
         connect(action, &QAction::triggered, this, &DevMode::on_mode_change);
 
         _mode_list[action] = mode;
         int cur_mode = _device_agent->get_work_mode();
-          
+
         if (cur_mode == _mode_list[action]->mode)
         {
             QString icon_fname = iconPath + icon_name;
             _mode_btn->setIcon(IconCache::Instance().icon(icon_fname));
-            
-            if (cur_mode == LOGIC)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_LOGIC), "Logic Analyzer"));
-            else if (cur_mode == ANALOG)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_ANALOG), "Data Acquisition"));
-            else if (cur_mode == DSO)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_DSO), "Oscilloscope"));
+            _mode_btn->setText(mode_display_text(cur_mode));
         }
         _pop_menu->addAction(action);
     }
@@ -196,8 +210,9 @@ void DevMode::on_mode_change()
 {
     if (_device_agent->have_instance() == false){
         assert(false);
+        return;
     }
-    
+
     QAction *action = qobject_cast<QAction *>(sender());
 
     if (_device_agent->get_work_mode() == _mode_list[action]->mode){
@@ -216,25 +231,18 @@ void DevMode::on_mode_change()
                 break;
             }
             
-            _session->stop_capture();            
-            _session->session_save();                                    
-            _session->switch_work_mode(mode);
+            emit stop_capture_requested();
+            emit save_session_requested();
+            emit mode_change_requested(mode);
 
             auto *mode_name = get_mode_name(mode);
             QString icon_fname = iconPath + "/" + QString::fromLocal8Bit(mode_name->_logo);
-            
-            _mode_btn->setIcon(IconCache::Instance().icon(icon_fname));
-            int cur_mode = mode_name->_mode;
 
-            if (cur_mode == LOGIC)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_LOGIC), "Logic Analyzer"));
-            else if (cur_mode == ANALOG)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_ANALOG), "Data Acquisition"));
-            else if (cur_mode == DSO)
-                _mode_btn->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_DEVICE_MODE_DSO), "Oscilloscope"));
-               
-            break;                
-        }      
+            _mode_btn->setIcon(IconCache::Instance().icon(icon_fname));
+            _mode_btn->setText(mode_display_text(mode));
+
+            break;
+        }
     }
 
     UpdateFont();
@@ -244,10 +252,11 @@ void DevMode::on_close()
 {
    if (_device_agent->have_instance() == false){
         assert(false);
+        return;
     }
 
     if (_bFile && MsgBox::Confirm(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CLOSE_DEVICE), "Are you sure to close the device?"))){
-        _session->close_file(_device_agent->handle());
+        emit close_file_requested(_device_agent->handle());
     }
 }
 

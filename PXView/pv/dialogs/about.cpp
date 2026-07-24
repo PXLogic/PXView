@@ -43,7 +43,7 @@ namespace pv {
 namespace dialogs {
 
 About::About(QWidget *parent) :
-    DSDialog(parent, true)
+    PxDialog(parent, true)
 {
     setFixedHeight(600);
     setFixedWidth(800);

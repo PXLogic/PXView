@@ -27,7 +27,8 @@
 #include <utility>
 #include <vector>
 
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h>
+#include "../dsvdef.h"
 #include "snapshot.h"
  
 namespace DsoSnapshotTest {

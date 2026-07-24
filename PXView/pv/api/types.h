@@ -15,6 +15,7 @@ enum class WorkMode : int8_t {
     Logic   = 0,
     Analog  = 1,
     Dso     = 2,
+    Mso     = 3,   // Mixed Signal Oscilloscope
     Unknown = -1
 };
 
@@ -35,9 +36,10 @@ enum class CollectMode : int8_t {
 };
 
 enum class ChannelType : int8_t {
-    Logic  = 0,
-    Analog = 1,
-    Dso    = 2
+    Logic   = 0,
+    Analog  = 1,
+    Dso     = 2,
+    Unknown = 99
 };
 
 enum class TriggerSlope : int8_t {
@@ -114,11 +116,26 @@ enum class ServiceEvent : int32_t {
     DecoderRemoved         = 402,
     DecodeProgress         = 403,
 
+    SampleConfigChanged    = 450,
+    ChannelConfigChanged   = 451,
+    TriggerConfigChanged   = 452,
+
     SaveComplete           = 500,
     LoadComplete           = 501,
     ExportComplete         = 502,
 
     SignalsChanged         = 600,
+
+    // View operations (broadcast requests; View layer subscribes via
+    // IServiceEventListener and applies them. In Headless mode these are
+    // no-ops because there is no View.)
+    ViewShowRegion         = 700,
+    ViewZoomFit            = 701,
+    ViewZoomIn             = 702,
+    ViewZoomOut            = 703,
+    ViewCursorAdded        = 704,
+    ViewCursorRemoved      = 705,
+    ViewCursorsCleared      = 706,
 
     ErrorOccurred          = 900
 };

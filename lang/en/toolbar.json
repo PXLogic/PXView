@@ -12,6 +12,10 @@
         "text": "Os&cilloscope"
     },
     {
+        "id": "IDS_DEVICE_MODE_MSO",
+        "text": "&Mixed Signal Oscilloscope"
+    },
+    {
         "id": "IDS_TOOLBAR_DEVICE_TYPE_DEMO",
         "text": "Demo"
     },
@@ -22,10 +26,6 @@
     {
         "id": "IDS_TOOLBAR_DEVICE_OPTION",
         "text": "&Options"
-    },
-    {
-        "id": "IDS_TOOLBAR_SIGNAL_PROCESSING",
-        "text": "&Filter"
     },
     {
         "id": "IDS_TOOLBAR_CAPTURE_MODE",

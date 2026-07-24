@@ -37,7 +37,7 @@
 #include "../data/decode/row.h"
 #include "../data/decode/annotation.h"
 #include "../view/decodetrace.h"
-#include "../data/decodermodel.h"
+#include "../view/decodermodel.h"
 #include "../eventobject.h"
 #include "../config/appconfig.h"
 #include "../dsvdef.h"
@@ -54,9 +54,10 @@ using namespace pv::data::decode;
 namespace pv {
 namespace dialogs {
 
-ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session) :
-    DSDialog(parent),
+ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session, pv::view::DecoderModel *decoder_model) :
+    PxDialog(parent),
     _session(session),
+    _decoder_model(decoder_model),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this),
     _export_cancel(false)
@@ -72,8 +73,6 @@ ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session) :
     _flayout->setLabelAlignment(Qt::AlignLeft);
     _flayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     _flayout->addRow(new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_EXPORT_FORMAT), "Export Format: "), this), _format_combobox);
-
-    pv::data::DecoderModel* decoder_model = _session->get_decoder_model();
 
     const auto decoder_stack = decoder_model->getDecoderStack();
     if (decoder_stack) {
@@ -228,7 +227,7 @@ void ProtocolExp::save_proc()
         return;
     }
 
-    pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+    pv::view::DecoderModel *decoder_model = _decoder_model;
     const auto decoder_stack = decoder_model->getDecoderStack();
     
     int fd_row_dex = 0;
@@ -331,9 +330,13 @@ void ProtocolExp::save_proc()
     file.close();
 }
 
-bool ProtocolExp::compare_ann_index(const data::decode::Annotation *a, 
+bool ProtocolExp::compare_ann_index(const data::decode::Annotation *a,
                     const data::decode::Annotation *b)
-{   
+{
+    if (!a || !b) {
+        pxv_warn("%s", "ProtocolExp::compare_ann_index: annotation pointer is NULL");
+        return false;
+    }
     assert(a);
     assert(b);
     return a->start_sample() < b->start_sample();

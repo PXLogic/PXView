@@ -72,11 +72,11 @@
         "text": "時基"
     },
     {
-        "id": "Max Height",
+        "id": "Max height",
         "text": "最大高度"
     },
     {
-        "id": "Max Height value",
+        "id": "Max height value",
         "text": "最大高度值"
     },
     {
@@ -84,28 +84,52 @@
         "text": "濾波器設定"
     },
     {
+        "id": "Filter",
+        "text": "濾波器"
+    },
+    {
         "id": "Datalog",
         "text": "資料記錄"
     },
     {
-        "id": "Operation Mode",
+        "id": "Operation mode",
         "text": "執行模式"
+    },
+    {
+        "id": "Buffer options",
+        "text": "緩衝選項"
     },
     {
         "id": "Stop Options",
         "text": "停止選項"
     },
     {
-        "id": "Channel Mode",
+        "id": "Channel mode",
         "text": "通道模式"
     },
     {
-        "id": "Threshold Levels",
+        "id": "Threshold levels",
         "text": "閾值電壓"
     },
     {
         "id": "Threshold Level",
         "text": "閾值電壓"
+    },
+    {
+        "id": "Voltage threshold",
+        "text": "電壓閾值"
+    },
+    {
+        "id": "Clock edge",
+        "text": "時鐘邊沿"
+    },
+    {
+        "id": "External trigger match",
+        "text": "外部觸發匹配"
+    },
+    {
+        "id": "Trigger output enable",
+        "text": "觸發輸出使能"
     },
     {
         "id": "Enable RLE Compress",
@@ -141,6 +165,34 @@
     },
     {
         "id": "Map Max",
+        "text": "對應最大值"
+    },
+    {
+        "id": "Probe coupling",
+        "text": "耦合"
+    },
+    {
+        "id": "Probe V/div",
+        "text": "電壓/格"
+    },
+    {
+        "id": "Probe factor",
+        "text": "探頭衰減"
+    },
+    {
+        "id": "Probe map default",
+        "text": "預設電壓"
+    },
+    {
+        "id": "Probe map unit",
+        "text": "對應單位"
+    },
+    {
+        "id": "Probe map min",
+        "text": "對應最小值"
+    },
+    {
+        "id": "Probe map max",
         "text": "對應最大值"
     },
     {

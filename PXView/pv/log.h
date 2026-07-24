@@ -49,4 +49,51 @@ QString get_pxv_log_path();
 #define pxv_dbg(fmt, args...) xlog_dbg(pxv_log, LOG_PREFIX fmt, ## args)
 #define pxv_detail(fmt, args...) xlog_detail(pxv_log, LOG_PREFIX fmt, ## args)
 
+// ============================================================================
+// pxv_assert: 不弹 Windows 模态对话框的 assert 替代。
+//
+// 背景: Windows C Runtime 的 assert() 在失败时会弹出模态对话框
+// (Abort/Retry/Ignore),该对话框运行自己的消息泵,会强制推进 qApp 事件循环,
+// 把排队的 broadcast_async<T> 事件强行派发,造成 EventBus _broadcast_depth
+// 护栏被打穿,形成"assert 弹窗 → 消息泵重入 → EventBus 嵌套 → 又一个 assert
+// 弹窗"的死循环,最终导致状态不一致与 SIGSEGV。
+//
+// 行为:
+// - Release (NDEBUG): pxv_err 记录 + no-op(符合 project_memory.md 规则:
+//   "assert 在 Release 应为 no-op,所有指针检查必须前置显式 if(!ptr) 检查")
+// - Debug + Windows:
+//   * 挂载调试器(IsDebuggerPresent): pxv_err + __debugbreak()(SIGTRAP,
+//     gdb 捕获,不弹窗)
+//   * 未挂调试器: pxv_err + abort()(直接终止,不弹窗)
+// - Debug + 非 Windows: pxv_err + abort()
+//
+// 关键: 不调用 C Runtime 的 assert(),避免触发 Windows 模态对话框。
+// ============================================================================
+
+#ifdef NDEBUG
+  #define pxv_assert(cond, fmt, args...) \
+    do { if (!(cond)) { pxv_err(fmt, ## args); } } while (0)
+#else
+  #ifdef _WIN32
+    extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
+    #define pxv_assert(cond, fmt, args...) \
+      do { if (!(cond)) { pxv_err(fmt, ## args); \
+           if (IsDebuggerPresent()) { __debugbreak(); } \
+           else { abort(); } \
+      } } while (0)
+  #else
+    #define pxv_assert(cond, fmt, args...) \
+      do { if (!(cond)) { pxv_err(fmt, ## args); abort(); } } while (0)
+  #endif
+#endif
+
+// ============================================================================
+// 重定义 assert 宏: 不弹 Windows 模态对话框,改为 pxv_assert。
+// 避免 assert 弹窗的消息泵重入打穿 EventBus 护栏。
+// project_memory.md 规则: assert 在 Release 应为 no-op。
+// 所有 include "log.h" 的文件中的 assert() 自动变为不弹窗版本。
+// ============================================================================
+#undef assert
+#define assert(cond) pxv_assert(cond, "Assertion failed: %s, file %s, line %d", #cond, __FILE__, __LINE__)
+
 #endif

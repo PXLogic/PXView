@@ -34,7 +34,6 @@
 #include "../int.h"
 #include "../../config/appconfig.h"
 #include "../../log.h"
-#include "../../appcontrol.h"
 #include "../../sigsession.h"
 #include "../../deviceagent.h"
 #include "../../ui/langresource.h"
@@ -45,33 +44,55 @@ namespace pv {
 namespace prop {
 namespace binding {
 
-DeviceOptions::DeviceOptions()
+DeviceAgent* DeviceOptions::_static_device_agent = nullptr;
+
+DeviceOptions::DeviceOptions(SigSession *session)
 {
 	GVariant *gvar_opts, *gvar_list;
 	gsize num_opts;
 
-	SigSession *session = AppControl::Instance()->GetSession();
 	_device_agent = session->get_device();
+	_static_device_agent = _device_agent;
+
+    pxv_info("DeviceOptions binding: driver=%s, is_hardware=%d, is_dsl=%d, is_stream=%d",
+             _device_agent->driver_name().toUtf8().constData(),
+             _device_agent->is_hardware(),
+             _device_agent->is_dsl_device(),
+             _device_agent->is_stream_mode());
 
 	gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
-	 
-    if (gvar_opts == NULL)
+
+    if (gvar_opts == NULL) {
+        pxv_warn("DeviceOptions binding: get_config_list(SR_CONF_DEVICE_OPTIONS) returned NULL");
 		/* Driver supports no device instance options. */
 		return;
+    }
 
-	const int *const options = (const int32_t *)g_variant_get_fixed_array(
-		gvar_opts, &num_opts, sizeof(int32_t));
-	
+	const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
+		gvar_opts, &num_opts, sizeof(uint32_t));
+
+    pxv_info("DeviceOptions binding: num_opts=%zu", num_opts);
+
 	for (unsigned int i = 0; i < num_opts; i++) {
+		/* Mask off capability bits (SR_CONF_GET/SET/LIST, top 3 bits) to
+		 * get the bare config key. pxlogic.c now routes DEVICE_OPTIONS through
+		 * STD_CONFIG_LIST which returns uint32 entries with cap bits
+		 * (e.g. SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST).
+		 * sr_key_info_get only recognizes bare keys.
+		 * SR_CONF_MASK = 0x1fffffff (libsigrok-internal.h, not public). */
+		const int key = (int)(options[i] & 0x1fffffff);
+
 		const struct sr_config_info *const info =
-			_device_agent->get_config_info(options[i]);
+			_device_agent->get_config_info(key);
 
 		if (!info)
 			continue;
 
-		const int key = info->key;
-
-		gvar_list = _device_agent->get_config_list(NULL, key);
+		/* 只在驱动声明了 SR_CONF_LIST 能力位时才查询可选值列表。
+		 * 否则 hwdriver.c check_key() 会因 pub_opt & SR_CONF_LIST == 0
+		 * 打印 "Option 'xxx' not available to list" 错误日志。 */
+		const bool can_list = (options[i] & SR_CONF_LIST) != 0;
+		gvar_list = can_list ? _device_agent->get_config_list(NULL, key) : NULL;
 
         const QString name(info->name);
         const char *label_char = info->name;
@@ -80,24 +101,31 @@ DeviceOptions::DeviceOptions()
 		switch(key)
 		{
 		case SR_CONF_SAMPLERATE:
-            bind_samplerate(name, label, gvar_list);
-			break;
+            /* Skip: SamplingBar already provides the sample-rate dropdown in
+             * the device-options dock. Creating a duplicate here would show
+             * two sample-rate controls. The key stays in devopts[] so
+             * hwdriver.c check_key() permits get/set/list from SamplingBar. */
+            continue;
 
 		case SR_CONF_CAPTURE_RATIO:
             bind_int(name, label, key, "%", pair<int64_t, int64_t>(0, 100));
 			break;
 
+		case SR_CONF_MAX_HEIGHT:
+		case SR_CONF_MAX_HEIGHT_VALUE:
+		case SR_CONF_INSTANT:
+            /* Skip: DeviceOptionsDock 不显示这三个 key。
+             * MAX_HEIGHT/MAX_HEIGHT_VALUE 由 SamplingBar 的下拉框控制，
+             * INSTANT 由 sidebar 的 SIDEBAR_INSTANT 按钮控制。
+             * 驱动 devopts[] 保留声明，其它路径仍可 get/set/list。 */
+            continue;
+
 		case SR_CONF_PATTERN_MODE:
 		case SR_CONF_BUFFERSIZE:
-		case SR_CONF_TRIGGER_SOURCE:		
-        case SR_CONF_MAX_HEIGHT:
-        case SR_CONF_MAX_HEIGHT_VALUE:
-        case SR_CONF_PROBE_COUPLING:
+		case SR_CONF_TRIGGER_SOURCE:
         case SR_CONF_PROBE_EN:
-        case SR_CONF_ZERO:
         case SR_CONF_STREAM:
         case SR_CONF_TEST:
-        case SR_CONF_STATUS:
         case SR_CONF_PROBE_FACTOR:
             bind_enum(name, label, key, gvar_list);
 			break;
@@ -115,45 +143,42 @@ DeviceOptions::DeviceOptions()
             break;
 
         case SR_CONF_PWM0_FREQ:
-		case SR_CONF_PWM1_FREQ:
-            bind_double(name, label, key, "Hz", pair<double, double>(0, 1000000), 1, 1);
+            bind_double(name, "PWM0 Freq", key, "Hz", pair<double, double>(0, 1000000), 1, 1);
+            break;
+        case SR_CONF_PWM1_FREQ:
+            bind_double(name, "PWM1 Freq", key, "Hz", pair<double, double>(0, 1000000), 1, 1);
             break;
 
         case SR_CONF_PWM0_DUTY:
-		case SR_CONF_PWM1_DUTY:
-            bind_double(name, label, key, "%", pair<double, double>(0, 100), 1, 1);
+            bind_double(name, "PWM0 Duty", key, "%", pair<double, double>(0, 100), 1, 1);
             break;
-		case SR_CONF_STREAM_BUFF:
-            bind_double(name, label, key, "GB", pair<double, double>(1, 1024), 0, 1);
-            break;
-		case SR_CONF_STREAM_MEM_BUFF:
-            bind_double(name, label, key, "GB", pair<double, double>(1, 64), 0, 1);
-            break;
-		case SR_CONF_DISK_CACHE_ENABLE:
-            bind_bool(name, label, key);
-            break;
-		case SR_CONF_DISK_CACHE_PATH:
-            bind_string(name, label, key);
+        case SR_CONF_PWM1_DUTY:
+            bind_double(name, "PWM1 Duty", key, "%", pair<double, double>(0, 100), 1, 1);
             break;
 
 		case SR_CONF_RLE:
-        case SR_CONF_RLE_SUPPORT:
         case SR_CONF_CLOCK_TYPE:
         case SR_CONF_CLOCK_EDGE:
 		case SR_CONF_TRIGGER_OUT:
-        case SR_CONF_INSTANT:
-		case SR_CONF_PWM0_EN:
-		case SR_CONF_PWM1_EN:
             bind_bool(name, label, key);
+            break;
+        case SR_CONF_PWM0_EN:
+            bind_bool(name, "PWM0 EN", key);
+            break;
+        case SR_CONF_PWM1_EN:
+            bind_bool(name, "PWM1 EN", key);
             break;
 
 		case SR_CONF_TIMEBASE:
-            bind_enum(name, label, key, gvar_list, print_timebase);
-			break;
-
-        case SR_CONF_PROBE_VDIV:
-            bind_enum(name, label, key, gvar_list, print_vdiv);
-            break;
+            /* Skip: SamplingBar 已经提供时基下拉框（DSO 模式下由
+             * SR_CONF_MAX/MIN_TIMEBASE 驱动生成 500ms/div ... 10ns/div
+             * 列表）。此处再次绑定会出现重复控件，且 print_timebase 期望
+             * GVariant 类型为 "(tt)" 元组，但 demo 等驱动 config_list
+             * 返回 uint64 数组（std_gvar_array_u64），类型不匹配导致
+             * g_variant_get 取到未初始化值，下拉框显示成错误的"8s"。
+             * 驱动 devopts[] 保留 SR_CONF_TIMEBASE 声明，hwdriver.c
+             * check_key() 仍允许 SamplingBar 路径 get/set/list。 */
+            continue;
 
         case SR_CONF_BANDWIDTH_LIMIT:
             bind_bandwidths(name, label, key, gvar_list);
@@ -168,25 +193,64 @@ DeviceOptions::DeviceOptions()
 	}
     if (gvar_opts)
         g_variant_unref(gvar_opts);
+
+    // App-layer C-class controls (DISK_CACHE_ENABLE/PATH, STREAM_BUFF,
+    // STREAM_MEM_BUFF): served by DeviceAgent's app-layer config state for
+    // ALL devices (including PXLogic — these are not driver-backed anymore).
+    // Show them for any hardware device so users can configure disk cache
+    // regardless of whether the driver is PXLogic or fx2lafw.
+    // Labels match dsl_label.json ids so LangResource translates them.
+    if (_device_agent->is_hardware()) {
+        pxv_info("DeviceOptions binding: adding app-layer stream/disk-cache controls");
+        // Non-DSL hardware devices (fx2lafw etc.): add a Buffer/Stream run-mode
+        // dropdown via SR_CONF_OPERATION_MODE. DeviceAgent serves the string
+        // list/get/set from app-layer state so the driver doesn't need to
+        // implement these. DSL/PXLogic devices already declare
+        // SR_CONF_OPERATION_MODE in their devopts and handled by the switch
+        // above (bind_list), so we only bind here for non-DSL devices.
+        if (!_device_agent->is_dsl_device()) {
+            GVariant *opmode_list = _device_agent->get_config_list(
+                NULL, SR_CONF_OPERATION_MODE);
+            bind_list("operation_mode", "Operation mode",
+                      SR_CONF_OPERATION_MODE, opmode_list);
+            if (opmode_list)
+                g_variant_unref(opmode_list);
+        }
+        bind_bool("disk_cache_enable", "Disk Cache Enable",
+                  SR_CONF_DISK_CACHE_ENABLE);
+        bind_string("disk_cache_path", "Disk Cache Path",
+                    SR_CONF_DISK_CACHE_PATH);
+        bind_double("stream_buff", "Disk Buff Size (with cache)",
+                    SR_CONF_STREAM_BUFF,
+                    "GB", pair<double, double>(1, 1024), 0, 1);
+        bind_double("stream_mem_buff", "Mem Buff Size (no cache)",
+                    SR_CONF_STREAM_MEM_BUFF,
+                    "GB", pair<double, double>(1, 64), 0, 1);
+    } else {
+        pxv_info("DeviceOptions binding: skipping app-layer controls "
+                 "(is_hardware=%d)",
+                 _device_agent->is_hardware());
+    }
 }
 
 GVariant* DeviceOptions::config_getter(int key)
 { 
-	SigSession *session = AppControl::Instance()->GetSession();
-	DeviceAgent *_device_agent = session->get_device();	
-	return _device_agent->get_config(key);
+	return _static_device_agent->get_config(key);
 }
 
 void DeviceOptions::config_setter(int key, GVariant* value)
 {
-	SigSession *session = AppControl::Instance()->GetSession();
-	DeviceAgent *_device_agent = session->get_device();
-    _device_agent->set_config(key, value);
+    _static_device_agent->set_config(key, value);
 }
 
 void DeviceOptions::bind_bool(const QString &name, const QString label, int key)
 {
-	QString text = LangResource::Instance()->get_lang_text(STR_PAGE_DSL, label.toLocal8Bit().data(), label.toLocal8Bit().data());
+	// Bool::labeled_widget() returns true, so get_property_form() skips its
+	// LangResource translation and the label is shown verbatim on the QCheckBox.
+	// Translate here so Bool labels get i18n too.
+	QString text = QString::fromUtf8(
+		LangResource::Instance()->get_lang_text(STR_PAGE_DSL,
+			label.toLocal8Bit().data(), label.toLocal8Bit().data()));
 	_properties.push_back(
         new Bool(name, text, bind(config_getter, key),
 			bind(config_setter, key, _1)));
@@ -206,6 +270,10 @@ void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
 	GVariantIter iter;
 	std::vector< pair<GVariant*, QString> > values;
 
+	if (!gvar_list) {
+		pxv_warn("%s", "DeviceOptions::bind_enum: gvar_list is NULL");
+		return;
+	}
 	assert(gvar_list);
 
 	g_variant_iter_init (&iter, gvar_list);
@@ -263,6 +331,10 @@ void DeviceOptions::bind_samplerate(const QString &name, const QString label,
 {
 	GVariant *gvar_list_samplerates;
 
+	if (!gvar_list) {
+		pxv_warn("%s", "DeviceOptions::bind_samplerate: gvar_list is NULL");
+		return;
+	}
 	assert(gvar_list);
 
 	if ((gvar_list_samplerates = g_variant_lookup_value(gvar_list,
@@ -329,7 +401,7 @@ QString DeviceOptions::print_timebase(GVariant *const gvar)
 {
 	uint64_t p, q;
 	g_variant_get(gvar, "(tt)", &p, &q);
-	return QString(sr_period_string(p * q));
+	return QString(sr_period_string(p, q));
 }
 
 QString DeviceOptions::print_vdiv(GVariant *const gvar)
@@ -347,25 +419,40 @@ void DeviceOptions::bind_bandwidths(const QString &name, const QString label, in
 	bool bw_limit = false;
 	GVariant *gvar;
 	std::vector< pair<GVariant*, QString> > values;
-	struct sr_list_item *plist;
 
+	if (!gvar_list) {
+		pxv_warn("%s", "DeviceOptions::bind_bandwidths: gvar_list is NULL");
+		return;
+	}
 	assert(gvar_list);
-	plist = (struct sr_list_item*)g_variant_get_uint64(gvar_list);
-	assert(plist);
+
+	/* Task 10.5: config_list now returns a GVariant string array
+	 * (g_variant_new_strv) instead of a uint64 bare-pointer cast.
+	 * Note: g_variant_get_strv returns const gchar** (the strings are
+	 * owned by the variant); only the array itself is freed via g_free. */
+	gsize n_items;
+	const gchar **strs = g_variant_get_strv(gvar_list, &n_items);
+	if (!strs) {
+		pxv_warn("%s", "DeviceOptions::bind_bandwidths: strs is NULL");
+		return;
+	}
 
 	_device_agent->get_config_bool(SR_CONF_BANDWIDTH, bw_limit);
 
     if (bw_limit == false){
+        g_free((gpointer)strs);
         return;
 	}
 
-	while (plist && plist->id >= 0)
-	{ 
-		QString v = LangResource::Instance()->get_lang_text(STR_PAGE_DSL, plist->name, plist->name);
-		gvar = g_variant_new_int16(plist->id);
+	for (gsize i = 0; i < n_items; i++)
+	{
+		QString v = QString::fromUtf8(
+			LangResource::Instance()->get_lang_text(STR_PAGE_DSL, strs[i], strs[i]));
+		gvar = g_variant_new_string(strs[i]);
 		values.push_back(make_pair(gvar, v));
-        plist++;
 	}
+
+	g_free((gpointer)strs);
 
 	_properties.push_back(
         new Enum(name, label, values,
@@ -377,19 +464,33 @@ void DeviceOptions::bind_list(const QString &name, const QString label, int key,
 {
 	GVariant *gvar;
 	std::vector< pair<GVariant*, QString> > values;
-	struct sr_list_item *plist;
 
-	assert(gvar_list);
-	plist = (struct sr_list_item*)g_variant_get_uint64(gvar_list);
-	assert(plist);
-
-	while (plist && plist->id >= 0)
-	{ 
-		QString v = LangResource::Instance()->get_lang_text(STR_PAGE_DSL, plist->name, plist->name);
-		gvar = g_variant_new_int16(plist->id);
-		values.push_back(make_pair(gvar, v));
-        plist++;
+	if (!gvar_list) {
+		pxv_warn("%s", "DeviceOptions::bind_list: gvar_list is NULL");
+		return;
 	}
+	assert(gvar_list);
+
+	/* Task 10.5: config_list now returns a GVariant string array
+	 * (g_variant_new_strv) instead of a uint64 bare-pointer cast. The
+	 * selected string is passed to config_setter as a string GVariant,
+	 * which the driver validates via std_str_idx. */
+	gsize n_items;
+	const gchar **strs = g_variant_get_strv(gvar_list, &n_items);
+	if (!strs) {
+		pxv_warn("%s", "DeviceOptions::bind_list: strs is NULL");
+		return;
+	}
+
+	for (gsize i = 0; i < n_items; i++)
+	{
+		QString v = QString::fromUtf8(
+			LangResource::Instance()->get_lang_text(STR_PAGE_DSL, strs[i], strs[i]));
+		gvar = g_variant_new_string(strs[i]);
+		values.push_back(make_pair(gvar, v));
+	}
+
+	g_free((gpointer)strs);
 
 	_properties.push_back(
         new Enum(name, label, values,

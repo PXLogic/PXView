@@ -23,8 +23,10 @@
 #include "protocolitemlayer.h"
 #include "../config/appconfig.h"
 #include "../dsvdef.h"
+#include "../log.h"
 #include "../ui/dockfonts.h"
 #include <assert.h>
+#include <stdexcept>
 #include "../ui/iconcache.h"
 
 namespace pv {
@@ -32,6 +34,14 @@ namespace dock {
 
 ProtocolItemLayer::ProtocolItemLayer(QWidget *parent, QString protocolName,
                                      IProtocolItemLayerCallback *callback) {
+  if (!parent) {
+    pxv_warn("%s", "ProtocolItemLayer: parent is NULL");
+    throw std::invalid_argument("ProtocolItemLayer: parent is NULL");
+  }
+  if (!callback) {
+    pxv_warn("%s", "ProtocolItemLayer: callback is NULL");
+    throw std::invalid_argument("ProtocolItemLayer: callback is NULL");
+  }
   assert(parent);
   assert(callback);
 
@@ -174,6 +184,10 @@ void ProtocolItemLayer::LoadFormatSelect(bool bSingle) {
 }
 
 void ProtocolItemLayer::SetProtocolFormat(const char *format) {
+  if (!format) {
+    pxv_warn("%s", "ProtocolItemLayer::SetProtocolFormat: format is NULL");
+    return;
+  }
   assert(format);
 
   m_bSetting = true;

@@ -33,7 +33,7 @@
 #include <QSlider>
 #include "../view/dsosignal.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include "../ui/uimanager.h"
 
 namespace pv {
@@ -46,7 +46,7 @@ class View;
 
 namespace dialogs {
 
-class MathOptions : public DSDialog, public IUiWindow
+class MathOptions : public PxDialog, public IUiWindow
 {
 	Q_OBJECT
 

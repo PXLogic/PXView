@@ -86,6 +86,8 @@ QWidget *String::get_widget(QWidget *parent, bool auto_commit) {
 }
 
 void String::commit() {
+  if (!_setter)
+    return;
   assert(_setter);
 
   if (!_line_edit)

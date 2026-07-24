@@ -18,10 +18,12 @@
 #include "session_service.h"
 #include "../appcontrol.h"
 #include "../sigsession.h"
+#include "../core/documentregistry.h"
 #include "../deviceagent.h"
 #include "../config/appconfig.h"
+#include "../data/sessiondocument.h"
 
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
 #include <algorithm>
 
 namespace pv {
@@ -52,6 +54,19 @@ Result<void> AppService::initialize()
     if (session) {
         int session_id = _next_session_id++;
         auto* svc = new SessionService(session, session->get_device());
+
+        // Create the MCP-dedicated document used as the stable target container
+        // for MCP operations, decoupled from the UI's _active_document cursor.
+        // This runs on the AppControl::Start() path, which is shared by both
+        // headless (--headless) and GUI modes, so the api document is ready in
+        // either case. SessionDocument takes the owning SigSession* so its
+        // SignalConfigStore can reach DeviceAgent via session->get_device().
+        // phase 2: document ownership is held by DocumentRegistry (created via
+        // create_api_document, which returns the owning index). SessionService
+        // stores the index and releases it in its destructor.
+        size_t api_doc_idx = session->document_registry()->create_api_document(session);
+        svc->set_api_document(api_doc_idx);
+
         _sessions[session_id] = svc;
         _active_session_id = session_id;
     }
@@ -185,7 +200,7 @@ Result<void> AppService::connect_device(const std::string& device_id)
         return Result<void>::Fail(ErrorCode::InvalidRequest,
                                   "Device id is empty");
 
-    ds_device_handle handle = reinterpret_cast<ds_device_handle>(
+    ds_device_handle handle = static_cast<ds_device_handle>(
         std::stoull(device_id));
 
     if (!session->set_device(handle))
@@ -231,37 +246,34 @@ Result<int> AppService::create_session(
         return Result<int>::Fail(ErrorCode::InternalError,
                                  "No SigSession available");
 
-    // Simplified: map the current single SigSession as session_id.
-    // If a default session already exists, return it.
-    if (!_sessions.empty()) {
-        // Return existing session id (the first one)
-        int existing_id = _sessions.begin()->first;
-        return Result<int>::Success(existing_id);
-    }
-
+    // ---- Device / file connection ----
+    // This MUST happen before the existing-session early-return below.
+    // Reason: AppService::initialize() pre-creates a SessionService wrapping
+    // the SigSession WITHOUT any device connected (especially in headless
+    // mode, where no device is selected at startup). If we early-returned
+    // here without calling set_device(), the SessionService would keep
+    // reporting "No device connected" for every capture/decoder call.
     // If a file path is provided, open the file
     if (!file_path.empty()) {
         if (!session->set_file(QString::fromStdString(file_path)))
             return Result<int>::Fail(ErrorCode::LoadFailed,
                                      "Failed to open file");
-    }
-
-    // If a device_id is specified, connect to that device.
-    // However, if the device is already the active device in SigSession,
-    // skip set_device() to avoid triggering DSV_MSG_CURRENT_DEVICE_CHANGED
-    // which causes massive UI rebuilds that can crash/hang when invoked
-    // from the MCP context.
-    if (!device_id.empty() && file_path.empty()) {
+    } else if (!device_id.empty()) {
+        // If a device_id is specified, connect to that device.
+        // However, if the device is already the active device in SigSession,
+        // skip set_device() to avoid triggering CurrentDeviceChanged
+        // which causes massive UI rebuilds that can crash/hang when invoked
+        // from the MCP context.
         bool device_already_active = false;
         if (session->get_device() && session->get_device()->have_instance()) {
             ds_device_handle current_handle = session->get_device()->handle();
-            ds_device_handle requested_handle = reinterpret_cast<ds_device_handle>(
+            ds_device_handle requested_handle = static_cast<ds_device_handle>(
                 std::stoull(device_id));
             device_already_active = (current_handle == requested_handle);
         }
 
         if (!device_already_active) {
-            ds_device_handle handle = reinterpret_cast<ds_device_handle>(
+            ds_device_handle handle = static_cast<ds_device_handle>(
                 std::stoull(device_id));
             if (!session->set_device(handle))
                 return Result<int>::Fail(ErrorCode::DeviceError,
@@ -269,13 +281,33 @@ Result<int> AppService::create_session(
         }
     }
 
+    // Simplified: map the current single SigSession as session_id.
+    // If a default session already exists, return it. The device connection
+    // (if requested) has already been performed above, so the existing
+    // SessionService (which holds a stable pointer to SigSession's
+    // DeviceAgent) will see the updated device state.
+    if (!_sessions.empty()) {
+        int existing_id = _sessions.begin()->first;
+        _active_session_id = existing_id;
+        return Result<int>::Success(existing_id);
+    }
+
     int session_id = _next_session_id++;
     auto* svc = new SessionService(session, session->get_device());
+
+    // Inject the MCP-dedicated document (same rationale as in initialize()).
+    // This branch is only reached when no SessionService exists yet; the
+    // common path returns early above, reusing the SessionService created in
+    // initialize() which already has its api document set.
+    // phase 2: document owned by DocumentRegistry; SessionService stores index.
+    size_t api_doc_idx = session->document_registry()->create_api_document(session);
+    svc->set_api_document(api_doc_idx);
+
     _sessions[session_id] = svc;
     _active_session_id = session_id;
 
     // Note: Do NOT call _on_new_tab_requested() here.
-    // set_device() above already triggers DSV_MSG_CURRENT_DEVICE_CHANGED
+    // set_device() above already triggers CurrentDeviceChanged
     // which rebuilds signals for the current tab. Creating a new tab
     // from the MCP context can cause crashes due to UI callback conflicts.
 

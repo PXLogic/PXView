@@ -48,7 +48,7 @@ public:
     };
 
 public:
-    MathTrace(bool enable, pv::data::MathStack *math_stack,
+    MathTrace(bool enable, std::shared_ptr<pv::data::MathStack> math_stack,
               view::DsoSignal *dsoSig1,
               view::DsoSignal *dsoSig2);
 
@@ -128,7 +128,7 @@ public:
 
     bool mouse_wheel(int right, const QPoint pt, const int shift);
 
-    pv::data::MathStack* get_math_stack();
+    std::shared_ptr<pv::data::MathStack> get_math_stack();
 
 protected:
     void paint_type_options(QPainter &p, int right, const QPoint pt, QColor fore);
@@ -145,7 +145,7 @@ private:
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
 
 private:
-    pv::data::MathStack *_math_stack;
+    std::shared_ptr<pv::data::MathStack> _math_stack;
     view::DsoSignal *_dsoSig1;
     view::DsoSignal *_dsoSig2;
     bool _enable;

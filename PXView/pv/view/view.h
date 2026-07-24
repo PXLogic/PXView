@@ -24,29 +24,42 @@
 #ifndef PXVIEW_PV_VIEW_VIEW_H
 #define PXVIEW_PV_VIEW_VIEW_H
 
-#include <set>
+#include <list>
+#include <map>
+#include <memory>
 #include <stdint.h>
 #include <vector>
 
-#include <QDateTime>
 #include <QElapsedTimer>
-#include <QPaintEvent>
 #include <QScrollArea>
-#include <QSizeF>
-#include <QSplitter>
+#include <QTimer>
 
-#include "../data/datasource.h"
-#include "../data/signaldata.h"
-#include "../dsvdef.h"
-#include "../interface/icallbacks.h"
-#include "../toolbars/samplingbar.h"
+#include "../data/pulse_analyzer.h"
 #include "../ui/uimanager.h"
-#include "../view/viewport.h"
-#include "cursor.h"
-#include "signal.h"
-#include "viewstatus.h"
-#include "xcursor.h"
+#include "dock_ui_state.h"
+#include "view_cursors.h"
+#include "view_glitch_filter.h"
 
+// Forward declarations (replaces the former includes of signal.h, viewport.h,
+// cursor.h, xcursor.h, viewstatus.h, view_derived_traces.h, view_layout.h,
+// datasource.h, signaldata.h, samplingbar.h, icallbacks.h
+// — Phase H header hygiene; Phase K additionally forward-declares the
+// unique_ptr delegate types ViewLayout / ViewDataSync /
+// ViewDerivedTraces / ViewSignalSync and the value-type QSizeF used only
+// as a static data member declaration).
+// Pointers/references to these types are used as members/function params
+// only, so forward declarations suffice; the full definitions are pulled in
+// by view.cpp (and other consumers) as needed. unique_ptr members require
+// the complete type only at the point of View's destructor definition
+// (defined out-of-line in view.cpp).
+QT_BEGIN_NAMESPACE
+class QPaintEvent;
+class QSizeF;
+class QSplitter;
+QT_END_NAMESPACE
+
+struct srd_decoder;
+class DecoderStatus;
 class DeviceAgent;
 
 namespace pv {
@@ -56,13 +69,17 @@ class SamplingBar;
 }
 
 namespace dialogs {
-class Calibration;
 class Lissajous;
 } // namespace dialogs
 
 namespace data {
+class DataSource;
 class SessionDocument;
 struct SignalConfig;
+class DecoderStack;
+namespace decode {
+class Decoder;
+} // namespace decode
 } // namespace data
 
 class SigSession;
@@ -74,7 +91,27 @@ class DevMode;
 class Ruler;
 class Trace;
 class Viewport;
-class LissajousFigure;
+class DecodeTrace;
+class SpectrumTrace;
+class MathTrace;
+class LissajousTrace;
+class GlitchFilterPopup;
+class LogicSignal;
+class Cursor;
+class XCursor;
+class ViewStatus;
+class Signal;
+
+// Phase K forward declarations for the unique_ptr delegate types. Full
+// definitions live in view_layout.h / view_data_sync.h /
+// view_derived_traces.h / view_signal_sync.h, which are
+// included by view.cpp (and by other TUs that touch the delegate types
+// directly). view_cursors.h is included directly above because Cursor /
+// XCursor are used by too many TUs as complete types.
+class ViewLayout;
+class ViewDataSync;
+class ViewDerivedTraces;
+class ViewSignalSync;
 
 struct SignalGroup {
   int group_id;
@@ -88,14 +125,8 @@ class View : public QScrollArea, public IUiWindow {
   Q_PROPERTY(QColor groupCardColor READ get_group_card_color WRITE
                  set_group_card_color)
 
-private:
-  static const int LabelMarginWidth;
-  static const int RulerHeight;
-
-  static const int MaxScrollValue;
-  static const int MaxHeightUnit;
-
 public:
+  // ---- Public static constants ----
   static const int MinSignalHeight;
   static const int MaxSignalHeight;
   static const int GroupGap = 10;
@@ -126,20 +157,40 @@ public:
   static QColor LightBlue;
   static QColor LightRed;
 
+  // ---- Public static methods ----
   static void refreshSignalColors();
+  static bool compare_trace_v_offsets(const Trace *a, const Trace *b);
+  static bool compare_trace_view_index(const Trace *a, const Trace *b);
+  static bool compare_trace_y(const Trace *a, const Trace *b);
 
-public:
+  // ---- Construction ----
   explicit View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
                 QWidget *parent = 0);
 
   ~View();
 
+  // ---- Data source / document binding ----
   void set_data_source(pv::data::DataSource *source);
+  inline pv::data::DataSource* data_source() { return _data_source; }
   void set_data_document(pv::data::SessionDocument *doc);
   void clone_signals_for_document(pv::data::SessionDocument *doc);
   void set_signal_data_from_source(pv::data::DataSource *source);
   void clear_signal_data();
 
+  /**
+   * Returns the DataSource for snapshot data only. When the bound
+   * SessionDocument has captured data (_document->has_data()), returns
+   * _document so snapshot/samplerate/sampletime queries read the
+   * per-tab captured data; otherwise falls back to _data_source (the
+   * SigSession DataSource).
+   *
+   * SignalModels are NOT available through this — SessionDocument's
+   * _signal_models is never populated. Use _data_source directly for
+   * SignalModel access (e.g. SignalFactory::create_signals/update_signals).
+   */
+  data::DataSource *document_snapshot_source();
+
+  // ---- Session / scale / offset accessors ----
   inline SigSession &session() { return *_session; }
 
   /**
@@ -171,6 +222,7 @@ public:
 
   void capture_init();
 
+  // ---- Scale / offset mutation (delegate to ViewLayout) ----
   void zoom(double steps);
   bool zoom(double steps, int offset);
 
@@ -183,8 +235,10 @@ public:
   void limit_scale_offset();
   void set_preScale_preOffset();
 
+  // ---- Traces access ----
   void get_traces(int type, std::vector<Trace *> &traces);
 
+  // ---- Cursor visibility ----
   /**
    * Returns true if cursors are displayed. false otherwise.
    */
@@ -194,6 +248,20 @@ public:
 
   inline bool search_cursor_shown() { return _show_search_cursor; }
 
+  /**
+   * Shows or hides the cursors.
+   */
+  void show_cursors(bool show = true);
+
+  inline const QPoint &hover_point() { return _hover_point; }
+
+  void normalize_layout();
+
+  void show_trig_cursor(bool show = true);
+
+  void show_search_cursor(bool show = true);
+
+  // ---- Vertical layout ----
   inline int get_spanY() { return _spanY; }
 
   inline int get_signalHeight() { return _signalHeight; }
@@ -215,19 +283,7 @@ public:
 
   inline Ruler *get_ruler() { return _ruler; }
 
-  /**
-   * Shows or hides the cursors.
-   */
-  void show_cursors(bool show = true);
-
-  inline const QPoint &hover_point() { return _hover_point; }
-
-  void normalize_layout();
-
-  void show_trig_cursor(bool show = true);
-
-  void show_search_cursor(bool show = true);
-
+  // ---- Cursors list management (delegate to ViewCursors) ----
   /*
    * cursorList
    */
@@ -245,6 +301,16 @@ public:
   inline Cursor *get_trig_cursor() { return _trig_cursor; }
 
   Cursor *get_cursor_by_index(int index);
+
+  // Task C2.7: write a dragged cursor's new position back to the Core-layer
+  // CursorRegistry via DataSource::set_cursor_position. Called by the
+  // ruler / viewport drag handlers after TimeMarker::set_index.
+  void sync_cursor_position(Cursor *cursor);
+
+  // Task C2.7: reconcile the View's rendering cursor list with the Core
+  // CursorRegistry. Called on data-source binding so cursors added by MCP
+  // while headless appear once the View is created.
+  void sync_cursors_from_core();
 
   inline Cursor *get_search_cursor() { return _search_cursor; }
 
@@ -265,6 +331,7 @@ public:
 
   inline std::list<XCursor *> &get_xcursorList() { return _xcursorList; }
 
+  // ---- Viewport update ----
   void set_update(Viewport *viewport, bool need_update);
   void set_all_update(bool need_update);
 
@@ -279,6 +346,9 @@ public:
   int get_view_width();
   int get_view_height();
   int get_work_mode() const;
+  // 统一 LOGIC 与 MSO 模式的渲染/交互路径：MSO 视为 "LOGIC + 模拟通道"，
+  // 所有 LOGIC 模式下的渲染、交互行为在 MSO 模式下应当照常生效。
+  bool is_logic_rendering_mode() const;
 
   double get_hori_res();
 
@@ -307,11 +377,111 @@ public:
 
   int get_cursor_index_by_key(uint64_t key);
 
-  void check_calibration();
   void rebuild_signals();
   void rebuild_signals_from_config(const data::SignalConfig &config);
 
+  // ---- Decoder management (delegate to ViewDerivedTraces) ----
+  /**
+   * Adds a protocol decoder.
+   * Calls Core layer (SigSession::add_decoder) to create the DecoderStack,
+   * then directly creates a DecodeTrace wrapping that stack. Does NOT rely
+   * on the signals_changed event callback to populate the View's
+   * DecodeTrace list.
+   *
+   * @param dec The srd_decoder to add.
+   * @param silent If true, do not auto-start the decode task.
+   * @param dstatus The DecoderStatus to associate with the new stack.
+   * @param sub_decoders Sub-decoders to attach to the root decoder.
+   * @param out_stack Output: the newly created DecoderStack (Core-owned).
+   * @return true on success, false on failure.
+   */
+  bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus,
+                   std::list<pv::data::decode::Decoder *> &sub_decoders,
+                   std::shared_ptr<pv::data::DecoderStack> &out_stack);
+
+  /**
+   * Removes a protocol decoder.
+   * The View deletes its DecodeTrace (View-owned) first, then notifies
+   * the Core layer to delete the corresponding DecoderStack via
+   * remove_decoder_by_key_handel.
+   *
+   * @param trace The DecodeTrace to remove. Must be owned by this View.
+   */
+  void remove_decoder(DecodeTrace *trace);
+
+  /**
+   * Removes a protocol decoder by index in the View's DecodeTrace list.
+   */
+  void remove_decoder(int index);
+
+  /**
+   * Removes a protocol decoder by the key handle of its DecoderStack.
+   * This is the primary entry point for GUI components (e.g., ProtocolDock)
+   * that hold the key_handle but not the DecodeTrace pointer. The method
+   * finds the matching DecodeTrace, deletes it, then notifies Core to
+   * delete the DecoderStack.
+   *
+   * @param key_handel The key handle returned by DecoderStack::get_key_handel().
+   */
+  void remove_decoder_by_key_handel(void *key_handel);
+
+  /**
+   * Removes all protocol decoders from this View.
+   * The View deletes all its DecodeTrace objects first, then notifies Core
+   * to clear all DecoderStacks. This is the View layer entry point for
+   * ProtocolDock::del_all_protocol().
+   */
+  void clear_all_decoders();
+
+  /**
+   * Resets (re-opens options dialog + re-runs decode) a protocol decoder
+   * by its DecoderStack key handle.
+   *
+   * The View layer first looks up the DecodeTrace that wraps the given
+   * DecoderStack, then re-opens the DecoderOptionsDlg via
+   * DecodeTrace::create_popup(false). If the user cancels the dialog (no
+   * settings change), no reset is performed and the existing configuration
+   * is preserved. Otherwise the View forwards to Core's
+   * rst_decoder_by_key_handel() to clear and re-add the decode task.
+   *
+   * This restores the pre-de-view-ization behavior where SigSession called
+   * DecodeTrace::create_popup(false) directly; that call was removed because
+   * Core must not depend on Qt Widgets.
+   *
+   * @param handel The key handle of the DecoderStack to reset.
+   * @return true if the reset proceeded (user accepted the dialog),
+   *         false if the decoder was not found or the user cancelled.
+   */
+  bool rst_decoder_by_key_handel(void *handel, QPoint anchor = QPoint());
+
   inline std::vector<Signal *> &get_own_signals() { return _own_signals; }
+
+  /**
+   * View-owned wrapper lists for derived trace types.
+   * These wrap the Core layer's Stack/Model objects (DecoderStack,
+   * SpectrumStack, MathStack, LissajousModel) into View layer Trace
+   * subclasses so that the rendering code can operate on view::Trace*.
+   * Synced lazily via sync_derived_traces() when the underlying data
+   * source changes.
+   */
+  inline std::vector<DecodeTrace *> &get_own_decode_traces() {
+    sync_derived_traces();
+    return _own_decode_traces;
+  }
+  inline std::vector<SpectrumTrace *> &get_own_spectrum_traces() {
+    sync_derived_traces();
+    return _own_spectrum_traces;
+  }
+  inline MathTrace *get_own_math_trace() {
+    sync_derived_traces();
+    return _own_math_trace;
+  }
+  inline LissajousTrace *get_own_lissajous_trace() {
+    sync_derived_traces();
+    return _own_lissajous_trace;
+  }
+  void sync_derived_traces();
+  void mark_derived_traces_dirty();
 
   void update_view_port();
 
@@ -330,38 +500,99 @@ public:
 
   bool view_is_ready();
 
-signals:
-  void hover_point_changed();
-  void cursor_update();
-  void xcursor_update();
-  void cursor_moving();
-  void cursor_moved();
-  void measure_updated();
-  void prgRate(int progress);
-  void resize();
-  void auto_trig(int index);
+  /**
+   * Glitch filter preview ranges cached per-signal for overlay rendering.
+   * Populated by on_glitch_preview_changed() while the GlitchFilterPopup is
+   * open; consumed by LogicSignal::paint_mid_align() via get_preview_ranges().
+   * Returns nullptr when no preview is cached for the given signal.
+   */
+  const std::vector<pv::data::PulseAnalyzer::Pulse> *
+  get_preview_ranges(LogicSignal *sig) const;
 
-private:
-  static bool compare_trace_v_offsets(const Trace *a, const Trace *b);
-  void get_scroll_layout(int64_t &length, int64_t &offset);
-  void update_scroll();
-  void update_margins();
-  void set_scale(double scale);
+  /**
+   * Undo stack snapshot for the glitch filter. Records the activation state
+   * and the prior thresholds/modes before each apply so the user can undo
+   * (Ctrl+Z) the most recent filter application. undo_filter() restores the
+   * exact previous state: if was_active==true, set_glitch_filter(thresholds,
+   * modes) is called; if was_active==false, clear_glitch_filter() is called.
+   */
+  struct FilterSnapshot {
+    std::map<int, uint32_t> thresholds;
+    std::map<int, GlitchFilterMode> modes;
+    bool was_active;
+  };
 
-  void clear();
-  void reconstruct();
-  bool eventFilter(QObject *object, QEvent *event);
-  bool viewportEvent(QEvent *e);
-  void paintEvent(QPaintEvent *event);
-  void resizeEvent(QResizeEvent *e);
-  void scrollContentsBy(int dx, int dy);
+  void undo_filter();
+  bool can_undo_filter() const { return !_filter_undo_stack.empty(); }
 
-public:
-  static bool compare_trace_view_index(const Trace *a, const Trace *b);
+  /**
+   * Forwards glitch filter completion/clearing notifications (originating
+   * from FilterProcessor via MainWindow::on_filter_completed) to the
+   * GlitchFilterPopup. If the popup is currently open for a LogicSignal,
+   * it will recompute the histogram to reflect the updated LogicSnapshot
+   * data (filtered pulses become long pulses after applying the filter).
+   * No-op when the popup is closed.
+   */
+  void on_glitch_filter_completed();
+  void on_glitch_filter_cleared();
 
-  static bool compare_trace_y(const Trace *a, const Trace *b);
+  /**
+   * Per-tab UI state cache for dock widgets and the sampling toolbar.
+   * View is per-tab and survives tab switches without destruction, so
+   * hosting DockUiState here gives docks/toolbar a stable per-tab store
+   * accessed via `ctx->view()->dock_ui_state()`. Replaces the former
+   * `_dock_*` fields on SessionDocument (Core layer).
+   */
+  DockUiState &dock_ui_state() { return _dock_ui_state; }
+  const DockUiState &dock_ui_state() const { return _dock_ui_state; }
 
+  void show_wait_trigger();
+  void set_device();
+  void set_receive_len(uint64_t len);
+  int get_body_width();
+  int get_body_height();
+
+  // ---- Signal lifecycle (signals_changed event family) ----
   void signals_changed(const Trace *eventTrace);
+
+  /**
+   * Handler for the Core-layer signals_changed event.
+   * Incrementally updates _own_signals to match the Core's SignalModel
+   * list via SignalFactory::update_signals(), preserving UI state
+   * (selection, visibility, v_offset, etc.) for signals that survive.
+   * Does NOT directly affect DecodeTrace/SpectrumTrace/MathTrace — those
+   * are managed by sync_derived_traces() based on Core's Stack list.
+   * Then calls signals_changed(NULL) to refresh layout and trigger lazy
+   * sync of derived traces.
+   *
+   * This is intended as the View-layer entry point for the
+   * ISessionCallback::signals_changed() event. Currently MainWindow
+   * dispatches the event to View::signals_changed(NULL); once
+   * ISessionCallback is split (Task 13), MainWindow should call
+   * View::on_signals_changed() instead.
+   */
+  void on_signals_changed();
+
+  /**
+   * Incremental layout update for newly added signals.
+   * Called after SignalFactory::update_signals(Added) added new signals
+   * to _own_signals. Triggers signals_changed(NULL) for layout recalculation.
+   */
+  void signals_added_layout();
+
+  /**
+   * Incremental layout update for removed signals.
+   * Called after SignalFactory::update_signals(Removed) removed signals
+   * from _own_signals. Triggers signals_changed(NULL) for layout recalculation.
+   */
+  void signals_removed_layout();
+
+  /**
+   * Incremental update for modified signal properties.
+   * Called after SignalFactory::update_signals(Modified) refreshed properties.
+   * Only repaints the affected signals, no layout changes needed.
+   */
+  void signals_modified_refresh();
 
 public slots:
   void reload();
@@ -370,8 +601,6 @@ public slots:
   void data_updated();
   void update_scale_offset();
   void show_region(uint64_t start, uint64_t end, bool keep);
-  // -- calibration
-  void hide_calibration();
   void status_clear();
   void repeat_unshow();
 
@@ -398,55 +627,132 @@ public slots:
 
   void mode_changed();
 
-private slots:
+  // -- glitch filter popup handlers (Task 7)
+  void on_show_glitch_filter_popup(pv::view::LogicSignal *sig);
+  void on_clear_glitch_filter_requested(bool all_channels);
+  void on_toggle_invert_requested(pv::view::LogicSignal *sig);
 
-  void h_scroll_value_changed(int value);
-  void v_scroll_value_changed(int value);
-
-  void marker_time_changed();
-  void on_traces_moved();
-
-  // calibration for oscilloscope
-  void show_calibration();
-  void on_measure_updated();
-
-  void splitterMoved(int pos, int index);
-  void on_calibration_closed();
-  void on_header_collapse_changed(bool collapsed);
-
-public slots:
+  // -- trig pos / lissajous
   void set_trig_pos(int percent);
   void show_lissajous(bool show);
 
+signals:
+  void hover_point_changed();
+  void cursor_update();
+  void xcursor_update();
+  void cursor_moving();
+  void cursor_moved();
+  void measure_updated();
+  void prgRate(int progress);
+  void resize();
+  void auto_trig(int index);
+  // Emitted (after a 100ms debounce) whenever _scale / _offset / view_width
+  // changes in a way that alters the visible sample range. Listeners (e.g.
+  // ProtocolDock) use this to filter their list to the visible portion.
+  void visible_range_changed();
+
+private slots:
+  void h_scroll_value_changed(int value);
+  void v_scroll_value_changed(int value);
+
+  void on_traces_moved();
+  void on_measure_updated();
+
+  void splitterMoved(int pos, int index);
+  void on_header_collapse_changed(bool collapsed);
+
+  // -- glitch filter popup internal handlers (Task 7)
+  void
+  on_glitch_preview_changed(pv::view::LogicSignal *sig, uint32_t threshold,
+                            GlitchFilterMode mode);
+  void on_glitch_apply_requested(pv::view::LogicSignal *sig, uint32_t threshold,
+                                 GlitchFilterMode mode, bool all_channels);
+  void on_glitch_popup_closed();
+  // 批量模式:对一组逻辑通道统一应用/预览滤波
+  void on_apply_batch_requested(const std::vector<pv::view::LogicSignal *> &sigs,
+                                uint32_t threshold, GlitchFilterMode mode);
+  void on_preview_batch_changed(const std::vector<pv::view::LogicSignal *> &sigs,
+                                uint32_t threshold, GlitchFilterMode mode);
+
 private:
+  // ---- Friends (delegates touch View's private state directly) ----
+  // Phase E delegates — friend classes so they can touch View's private
+  // state (_scale / _offset / _own_decode_traces / _trig_cursor / …)
+  // directly. Each delegate owns *behaviour*; the state still lives on View.
+  friend class ViewLayout;
+  friend class ViewCursors;
+  friend class ViewDerivedTraces;
+  // Phase J delegates — signal-sync / glitch-filter / data-sync behaviour
+  // extracted from the View God-class during modernize-view-layer-v3.
+  friend class ViewSignalSync;
+  friend class ViewGlitchFilter;
+  friend class ViewDataSync;
+
+  // ---- Private static constants ----
+  static const int LabelMarginWidth;
+  static const int RulerHeight;
+  static const int MaxScrollValue;
+  static const int MaxHeightUnit;
+
+  // ---- Internal helpers (delegate to ViewLayout / ViewCursors) ----
+  void get_scroll_layout(int64_t &length, int64_t &offset);
+  void update_scroll();
+  void update_margins();
+  void set_scale(double scale);
+
   void set_trig_cursor_posistion(uint64_t percent);
   void make_cursors_order();
 
-public:
-  data::DataSource *effective_data_source();
+  void clear();
+  void reconstruct();
+  bool eventFilter(QObject *object, QEvent *event);
+  bool viewportEvent(QEvent *e);
+  void paintEvent(QPaintEvent *event);
+  void resizeEvent(QResizeEvent *e);
+  void scrollContentsBy(int dx, int dy);
 
-public:
-  void show_wait_trigger();
-  void set_device();
-  void set_receive_len(uint64_t len);
-  int get_body_width();
-  int get_body_height();
+  // Restart the visible-range debounce timer. Repeated calls while the
+  // timer is already running restart it (QTimer::start semantics), so only
+  // the last call in a burst of drag/zoom events fires visible_range_changed.
+  void schedule_visible_range_notify();
 
-private:
+  // ---- Delegate members (Phase E + J) ----
+  std::unique_ptr<ViewLayout> _layout;
+  std::unique_ptr<ViewCursors> _cursors;
+  std::unique_ptr<ViewDerivedTraces> _derived;
+  std::unique_ptr<ViewSignalSync> _signal_sync;
+  std::unique_ptr<ViewGlitchFilter> _glitch_filter;
+  std::unique_ptr<ViewDataSync> _data_sync;
+
+  // ---- Session / data source ----
   SigSession *_session;
   pv::data::DataSource *_data_source;
   pv::data::SessionDocument *_document;
   pv::toolbars::SamplingBar *_sampling_bar;
-  std::vector<Signal *> _own_signals;
-  std::vector<sr_channel *> _config_probes;
+  DockUiState _dock_ui_state;
+  // Re-entrancy guard for rebuild_signals_from_config(). Set while a rebuild
+  // is in progress so a nested broadcast (e.g. DeviceOptionsUpdated) cannot
+  // recurse into another rebuild and stack-overflow. The RAII guard in
+  // rebuild_signals_from_config() resets it on all exit paths.
+  bool _rebuild_in_progress = false;
 
+  // ---- View-owned signal/trace wrappers ----
+  std::vector<Signal *> _own_signals;
+  // View-owned wrapper traces for derived types. Synced lazily from the
+  // Core layer's Stack/Model objects via sync_derived_traces().
+  std::vector<DecodeTrace *> _own_decode_traces;
+  std::vector<SpectrumTrace *> _own_spectrum_traces;
+  MathTrace *_own_math_trace = nullptr;
+  LissajousTrace *_own_lissajous_trace = nullptr;
+  bool _derived_traces_dirty = true;
+
+  // ---- Viewport / widgets ----
   QWidget *_viewcenter;
   ViewStatus *_viewbottom;
   QSplitter *_vsplitter;
   Viewport *_time_viewport;
   Viewport *_fft_viewport;
   Viewport *_active_viewport;
-  LissajousFigure *_lissajous;
   std::list<QWidget *> _viewport_list;
   std::map<int, int> _trace_view_map;
   Ruler *_ruler;
@@ -454,11 +760,20 @@ private:
   DevMode *_devmode;
   bool _header_collapsed;
 
+  // ---- Scale / offset ----
   /// The view time scale in seconds per pixel.
   double _scale;
   double _preScale;
   double _maxscale;
   double _minscale;
+  /// DSO user zoom factor (1.0 = fit one frame to viewport width).
+  /// DSO mode update_scale_offset() forces _scale = cur_view_time/width
+  /// every frame (called from data_updated()). To let the user zoom in
+  /// and pan horizontally like LOGIC mode, we keep this factor separate
+  /// and reapply it: _scale = base_scale * _dso_zoom_factor. zoom() only
+  /// mutates this factor; data frames re-derive _scale from it. Reset to
+  /// 1.0 on mode change (ViewDataSync::mode_changed).
+  double _dso_zoom_factor = 1.0;
 
   /// The pixels offset of the left edge of the view
   int64_t _offset;
@@ -472,9 +787,16 @@ private:
   QColor _group_card_color;
   bool _updating_scroll;
 
+  // ---- Visible-range notify debounce ----
+  // Single-shot 100ms timer coalescing bursts of scale/offset/resize changes
+  // into a single visible_range_changed() emission. Owned by View (parent
+  // QObject) so it is destroyed automatically.
+  QTimer *_viewport_change_timer = nullptr;
+
   // trigger position fix
   double _trig_hoff;
 
+  // ---- Cursors ----
   bool _show_cursors;
   std::list<Cursor *> _logic_cursors;
   std::list<Cursor *> _dso_cursors;
@@ -488,8 +810,8 @@ private:
   bool _show_xcursors;
   std::list<XCursor *> _xcursorList;
 
+  // ---- Misc ----
   QPoint _hover_point;
-  dialogs::Calibration *_cali;
 
   bool _dso_auto;
   bool _show_lissajous;
@@ -497,6 +819,15 @@ private:
   bool _destroying = false;
   DeviceAgent *_device_agent;
   QElapsedTimer _data_updated_timer;
+
+  // ---- Glitch filter popup (View-owned, Task 7) ----
+  GlitchFilterPopup *_glitch_filter_popup = nullptr;
+  // Per-signal cached preview ranges (orange overlay) while the popup is open.
+  std::map<LogicSignal *, std::vector<pv::data::PulseAnalyzer::Pulse>>
+      _preview_ranges;
+  // Undo stack for glitch filter applications (Task 9). Accessed only on the
+  // GUI thread (slots + Ctrl+Z handler), so no synchronization needed.
+  std::vector<FilterSnapshot> _filter_undo_stack;
 };
 
 } // namespace view

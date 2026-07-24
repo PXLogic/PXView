@@ -118,6 +118,11 @@ public:
 
     uint64_t get_annotation_index(
         const decode::Row &row, uint64_t start_sample);
+    // Returns the half-open [start_idx, end_idx) annotation index range that
+    // overlaps [start_sample, end_sample] for the given row. Used by
+    // ProtocolDock to filter its list to the visible viewport portion.
+    std::pair<size_t, size_t> get_visible_range(
+        const decode::Row &row, uint64_t start_sample, uint64_t end_sample);
     uint64_t get_max_annotation(const decode::Row &row);
     uint64_t get_min_annotation(const decode::Row &row); // except instant(end=start) annotation
 
@@ -193,6 +198,21 @@ public:
     void set_owner_document(data::SessionDocument *doc) { _owner_document = doc; }
     data::SessionDocument* get_owner_document() { return _owner_document; }
 
+    // Unique handle id assigned by SigSession when the stack is created.
+    // Allows the API/MCP layer to stably reference a decoder stack across
+    // re-creation (a brand-new stack always gets a fresh handle_id). The
+    // version is bumped when an existing stack is re-created in place (e.g.
+    // by restart_decoders) so consumers can invalidate cached results.
+    inline uint64_t handle_id() const { return _handle_id; }
+    inline uint64_t version() const { return _version; }
+    inline void set_handle_id(uint64_t id) { _handle_id = id; }
+    inline void bump_version() { _version++; }
+
+    // Set by callers (e.g. SigSession) to mark a stack for asynchronous
+    // deletion by the decode thread. Mirrors the legacy
+    // view::DecodeTrace::_delete_flag mechanism.
+    volatile bool _delete_flag = false;
+
 private:
     void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
 	void execute_decode_stack();
@@ -214,6 +234,8 @@ private:
   
     SigSession      *_session;
     data::SessionDocument *_owner_document;
+    uint64_t        _handle_id = 0;
+    uint64_t        _version = 0;
     decode_state    _decode_state;
     volatile bool   _options_changed;
     volatile bool   _no_memory;

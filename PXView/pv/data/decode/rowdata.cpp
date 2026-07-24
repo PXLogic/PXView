@@ -106,6 +106,8 @@ uint64_t RowData::get_annotation_index(uint64_t start_sample) {
 }
 
 bool RowData::push_annotation(Annotation *a) {
+  if (!a)
+    return false;
   assert(a);
 
   std::unique_lock<std::shared_mutex> lock(_visitor_mutex);
@@ -132,6 +134,8 @@ bool RowData::push_annotation(Annotation *a) {
 }
 
 bool RowData::get_annotation(Annotation *ann, uint64_t index) {
+  if (!ann)
+    return false;
   assert(ann);
 
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);

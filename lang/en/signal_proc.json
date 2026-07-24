@@ -70,5 +70,121 @@
     {
         "id": "IDS_FILTER_ACTIVE",
         "text": "Filtered"
+    },
+    {
+        "id": "IDS_FILTER_GLITCHES",
+        "text": "Filter Glitches..."
+    },
+    {
+        "id": "IDS_TOGGLE_SIGNAL_INVERT",
+        "text": "Invert Signal"
+    },
+    {
+        "id": "IDS_CLEAR_CHANNEL_FILTER",
+        "text": "Clear Channel Filter"
+    },
+    {
+        "id": "IDS_CLEAR_ALL_FILTER",
+        "text": "Clear All Filters"
+    },
+    {
+        "id": "IDS_CHANGE_COLOR",
+        "text": "Change Color"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_PULSE_DIST",
+        "text": "Pulse Width Distribution"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_WILL_REMOVE",
+        "text": "Will filter: "
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_PULSES_UNIT",
+        "text": " pulses"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_REMAINING",
+        "text": "Remaining valid pulses: "
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_TYPE",
+        "text": "Type"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_BOTH",
+        "text": "Both (glitches both directions)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_HIGH",
+        "text": "High (low glitches on high level)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_LOW",
+        "text": "Low (high glitches on low level)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_THRESHOLD",
+        "text": "Threshold"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CYCLES",
+        "text": "cycles"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MAX",
+        "text": "Max"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MAX_HINT",
+        "text": "(Stats range, beyond excluded, max 500)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_AUTO_APPLY",
+        "text": "Auto apply after capture"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_SHOW_OVERLAY",
+        "text": "Show filter overlay"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_ONE",
+        "text": "Apply to this channel"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_ALL",
+        "text": "Apply to all logic channels ->"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_BATCH",
+        "text": "Apply to sub-channels"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CANCEL",
+        "text": "Cancel"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CHANNEL_FALLBACK",
+        "text": "Channel"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_BATCH_FALLBACK",
+        "text": "Batch"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_TITLE_SUFFIX",
+        "text": " Glitch Filter"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_BATCH_TITLE_SUFFIX",
+        "text": " Batch Glitch Filter"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_RECOMMENDED",
+        "text": "Rec"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CURRENT",
+        "text": "Cur"
     }
 ]

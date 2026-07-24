@@ -37,13 +37,13 @@ namespace pv {
 class SigSession;
 
 namespace view {
-class DsoSignal;
 class dslDial;
 }
 
 namespace data {
 
 class DsoSnapshot;
+class SignalModel;
 
 class MathStack : public QObject, public SignalData
 {
@@ -102,8 +102,8 @@ private:
 
 public:
     MathStack(pv::SigSession *_session,
-              view::DsoSignal *dsoSig1,
-              view::DsoSignal *dsoSig2, MathType type);
+              int ch1_index,
+              int ch2_index, MathType type);
     virtual ~MathStack();
     void clear();
     void init();
@@ -112,6 +112,9 @@ public:
 
     MathType get_type();
     uint64_t get_sample_num();
+
+    int ch1_index() const { return _ch1_index; }
+    int ch2_index() const { return _ch2_index; }
 
     void enable_envelope(bool enable);
 
@@ -134,8 +137,8 @@ signals:
 
 private:
     pv::SigSession  *_session;
-    view::DsoSignal *_dsoSig1;
-    view::DsoSignal *_dsoSig2;
+    int              _ch1_index;
+    int              _ch2_index;
 
     MathType _type;
     uint64_t _sample_num;

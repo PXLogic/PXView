@@ -26,6 +26,7 @@
 
 #include <QString>
 #include <QDateTime>
+#include <cstddef>
 #include <stdint.h>
 
 namespace pv {
@@ -38,6 +39,10 @@ namespace data {
 class SessionDocument;
 }
 
+namespace core {
+class DocumentRegistry;
+}
+
 class SigSession;
 
 class TabContext
@@ -48,7 +53,12 @@ public:
         HISTORICAL
     };
 
-    TabContext(view::View *view, SigSession *session, data::SessionDocument *doc);
+    // modernize-core-layer-radical phase 2: TabContext now holds a WEAK
+    // reference to the document (doc) plus its owning index and registry.
+    // The document is owned by DocumentRegistry; TabContext::~TabContext
+    // calls registry->release_document(doc_index) instead of delete.
+    TabContext(view::View *view, SigSession *session, data::SessionDocument *doc,
+               size_t doc_index, core::DocumentRegistry *registry);
     ~TabContext();
 
     inline view::View* view() { return _view; }
@@ -74,7 +84,9 @@ public:
 private:
     view::View              *_view;
     SigSession              *_session;
-    data::SessionDocument   *_document;
+    data::SessionDocument   *_document;   // weak reference (owned by DocumentRegistry)
+    size_t                  _doc_index;   // owning index in DocumentRegistry
+    core::DocumentRegistry  *_doc_registry; // owner of the document
     QString                 _title;
     QString                 _file_path;
     State                   _state;

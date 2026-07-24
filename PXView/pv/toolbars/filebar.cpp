@@ -238,7 +238,12 @@ void FileBar::on_actionStore_triggered()
             app.SaveHistory();
         }
 
-        _session->broadcast_msg(DSV_MSG_STORE_CONF_PREV);
+        // modernize-core-layer-radical Task 11: pre-broadcast synchronously
+        // so MainWindow commits sampling-bar settings BEFORE sig_store_session
+        // reads them. The legacy async int-message path is removed.
+        // Caller (on_actionStore_triggered) is on the main thread
+        // (user-initiated save action).
+        _session->broadcast_sync<interface::StoreConfPrev>({});
          
         sig_store_session(file_name);
     }

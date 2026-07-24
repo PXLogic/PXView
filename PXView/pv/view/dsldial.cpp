@@ -170,6 +170,7 @@ uint64_t dslDial::get_value()
 {    
     if (_sel >= (uint64_t)_value.count()){
         assert(false);
+        return 0;
     }
 
     return _value[_sel];

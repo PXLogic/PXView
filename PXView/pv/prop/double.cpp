@@ -82,6 +82,8 @@ QWidget* Double::get_widget(QWidget *parent, bool auto_commit)
 
 void Double::commit()
 {
+	if (!_setter)
+		return;
 	assert(_setter);
 
 	if (!_spin_box)

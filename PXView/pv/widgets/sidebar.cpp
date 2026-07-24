@@ -414,6 +414,14 @@ void SideBar::setItemVisible(int index, bool visible) {
   }
 }
 
+bool SideBar::isItemVisible(int index) const {
+  for (const auto &item : _items) {
+    if (item.index == index)
+      return item.button->isVisible();
+  }
+  return false;
+}
+
 void SideBar::setItemEnabled(int index, bool enabled) {
   for (auto &item : _items) {
     if (item.index == index) {

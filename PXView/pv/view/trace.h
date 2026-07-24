@@ -93,7 +93,7 @@ public:
 	/**
 	 * Set the colour of the signal.
 	 */
-	inline void set_colour(QColor colour){
+	virtual void set_colour(QColor colour){
         _colour = colour;
     }
 
@@ -192,7 +192,12 @@ public:
     virtual int get_zero_vpos();
 
 	/**
-	 * Returns true if the trace is visible and enabled.
+	 * Returns true if this trace is hardware-enabled (Core-owned, mirrors
+	 * SignalModel::_enabled / sr_channel->enabled). This is independent of
+	 * UI visibility — use visible() to query whether the trace is shown on
+	 * screen. The two concepts must not be conflated: a hardware-disabled
+	 * channel may still be visible in the UI, and a hidden channel may
+	 * still be hardware-enabled.
 	 */
     virtual bool enabled() = 0;
 

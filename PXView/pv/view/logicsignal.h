@@ -27,13 +27,18 @@
 
 #include "signal.h"
 
-#include <vector> 
+#include <vector>
+#include <memory>
 
 namespace pv {
 
+class SigSession;
+
 namespace data {
     class LogicSnapshot;
-} 
+    class SignalModel;
+    class DataSource;
+}
 
 namespace view {
 
@@ -63,9 +68,14 @@ public:
     };
 
 public:
-    LogicSignal(data::LogicSnapshot *data, sr_channel *probe);
+    LogicSignal(data::LogicSnapshot *data,
+                std::shared_ptr<data::SignalModel> model,
+                data::DataSource *data_source);
 
-    LogicSignal(view::LogicSignal*s, data::LogicSnapshot *data, sr_channel *probe);
+    LogicSignal(view::LogicSignal *s,
+                data::LogicSnapshot *data,
+                std::shared_ptr<data::SignalModel> model,
+                data::DataSource *data_source);
 
 	virtual ~LogicSignal();
 

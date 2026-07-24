@@ -131,8 +131,9 @@ int Trace::get_index()
 {
     if(_index_list.size() == 0){
         assert(false);
+        return 0;
     }
-    
+
     return _index_list.front();
 }
 
@@ -140,6 +141,7 @@ void Trace::set_index_list(const std::list<int> &index_list)
 {
     if (index_list.size() == 0){
         assert(false);
+        return;
     }
 
     _index_list = index_list;
@@ -212,8 +214,7 @@ void Trace::paint_label(QPainter &p, int right, const QPoint pt, QColor fore)
         return;
 
     if (_type == SR_CHANNEL_DSO) {
-        pxv_info("[DEBUG-DSO] paint_label: name=%s, y=%d, right=%d, enabled=%d, visible=%d",
-                 _name.toUtf8().data(), get_y(), right, enabled(), visible());
+        // Hot path debug logging removed for performance
     }
 
     compute_text_size(p);
@@ -285,7 +286,14 @@ void Trace::paint_label(QPainter &p, int right, const QPoint pt, QColor fore)
             _type == SR_CHANNEL_FFT ||
             _type == SR_CHANNEL_ANALOG ||
             _type == SR_CHANNEL_MATH) {
-            p.setBrush(_colour);
+            // fallback 与色块按钮/LOGIC 三角一致:_colour 无效时(如加载
+            // 默认配置 colour="default" → QColor("default") invalid)用
+            // @logic-channel-N 主题色,避免 invalid QColor 渲染成黑色
+            QColor color = AppConfig::Instance().GetThemeColor(
+                QString("@logic-channel-%1").arg(*_index_list.begin() % 8));
+            if (!color.isValid())
+                color = PROBE_COLORS[*_index_list.begin() % countof(PROBE_COLORS)];
+            p.setBrush(enabled() ? (_colour.isValid() ? _colour : color) : foreBack);
             p.drawPolygon(points, countof(points));
         } else {
             QColor color = AppConfig::Instance().GetThemeColor(

@@ -39,7 +39,7 @@ const QString RegionOptions::RegionStart = QT_TR_NOOP("Start");
 const QString RegionOptions::RegionEnd = QT_TR_NOOP("End");
 
 RegionOptions::RegionOptions(view::View *view, SigSession *session, QWidget *parent) :
-    DSDialog(parent),
+    PxDialog(parent),
     _session(session),
     _view(view),
     _button_box(QDialogButtonBox::Ok,

@@ -53,6 +53,10 @@ public:
         return _unit_bytes;
     }
 
+    // 上游 libsigrok analog 数据可能是 float 格式（encoding->is_float）。
+    // AnalogSignal::paint_trace 需据此选择读取方式。
+    inline bool is_float() const { return _is_float; }
+
     inline bool memory_failed(){
         return _memory_failed;
     }
@@ -108,6 +112,8 @@ protected:
     bool        _memory_failed;
     bool        _last_ended;
     double      _samplerate;
+protected:
+    bool        _is_float = false;  // 上游 encoding->is_float：paint_trace 需用 reinterpret_cast<float*>
 };
 
 } // namespace data

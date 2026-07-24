@@ -29,6 +29,7 @@
 #include <math.h>
 
 #include "../sigsession.h"
+#include "../data/lissajousmodel.h"
 #include "../view/view.h"
 #include "../view/lissajoustrace.h"
 #include "../ui/langresource.h"
@@ -44,7 +45,7 @@ namespace pv {
 namespace dialogs {
 
 LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
-    DSDialog(parent),
+    PxDialog(parent),
     _session(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
@@ -80,15 +81,14 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     xlayout->setContentsMargins(5, 15, 5, 5);
     ylayout->setContentsMargins(5, 15, 5, 5);
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-            QString index_str = QString::number(dsoSig->get_index());
+    for(auto m : _session->get_signal_models()) {
+        if (m->type() == SR_CHANNEL_DSO) {
+            QString index_str = QString::number(m->index());
             QRadioButton *xradio = new QRadioButton(index_str, _x_group);
-            xradio->setProperty("index", dsoSig->get_index());
+            xradio->setProperty("index", m->index());
             xlayout->addWidget(xradio);
             QRadioButton *yradio = new QRadioButton(index_str, _y_group);
-            yradio->setProperty("index", dsoSig->get_index());
+            yradio->setProperty("index", m->index());
             ylayout->addWidget(yradio);
             _x_radio.append(xradio);
             _y_radio.append(yradio);
@@ -98,20 +98,20 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     _y_group->setLayout(ylayout);
 
 
-    auto lissajous = _session->get_lissajous_trace();
+    auto lissajous = _session->get_lissajous_model();
     if (lissajous) {
         _enable->setChecked(lissajous->enabled());
         _percent->setValue(lissajous->percent());
         for (QVector<QRadioButton *>::const_iterator i = _x_radio.begin();
             i != _x_radio.end(); i++) {
-            if ((*i)->property("index").toInt() == lissajous->xIndex()) {
+            if ((*i)->property("index").toInt() == lissajous->x_index()) {
                (*i)->setChecked(true);
                 break;
             }
         }
         for (QVector<QRadioButton *>::const_iterator i = _y_radio.begin();
             i != _y_radio.end(); i++) {
-            if ((*i)->property("index").toInt() == lissajous->yIndex()) {
+            if ((*i)->property("index").toInt() == lissajous->y_index()) {
                (*i)->setChecked(true);
                 break;
             }
@@ -185,16 +185,13 @@ void LissajousOptions::accept()
     bool enable = (xindex != -1 && yindex != -1 && _enable->isChecked());
     _session->lissajous_rebuild(enable, xindex, yindex, _percent->value());
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-            dsoSig->set_show(!enable);
-        }
-    }
-    auto mathTrace = _session->get_math_trace();
-    if (mathTrace && mathTrace->enabled()) {
-        mathTrace->set_show(!enable);
-    }
+    // TODO: adapt — toggling DsoSignal visibility (set_show) was a UI-side
+    // effect previously performed by this dialog when enabling Lissajous.
+    // The dialog no longer has access to view::DsoSignal (no View pointer)
+    // and view::MathTrace/MathStack has no set_show accessor. The View layer
+    // should observe the LissajousModel enabled state and toggle trace
+    // visibility itself. Skip the call for now.
+    (void)enable;
 }
 
 void LissajousOptions::reject()

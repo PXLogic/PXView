@@ -59,7 +59,6 @@ namespace pv
     namespace dialogs
     {
         class deviceoptions;
-        class Calibration;
     }
 
     namespace toolbars

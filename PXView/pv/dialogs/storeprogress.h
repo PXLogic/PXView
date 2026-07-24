@@ -26,7 +26,7 @@
 #include <QProgressBar>
 #include <QTimer>
 #include "../storesession.h"
-#include "../dialogs/dsdialog.h" 
+#include "../dialogs/pxdialog.h" 
 #include "../interface/icallbacks.h"
 
 class QTextEdit;
@@ -48,7 +48,7 @@ class SigSession;
 
 namespace dialogs {
 
-class StoreProgress : public DSDialog
+class StoreProgress : public PxDialog
 {
 	Q_OBJECT
 

@@ -32,8 +32,9 @@
 #include <QRadioButton>
 #include <QSlider>
 #include "../view/dsosignal.h"
+#include "../dsvdef.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include "../ui/uimanager.h"
 
 
@@ -47,7 +48,7 @@ class View;
 
 namespace dialogs {
 
-class LissajousOptions : public DSDialog, public IUiWindow
+class LissajousOptions : public PxDialog, public IUiWindow
 {
 	Q_OBJECT
 

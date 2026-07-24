@@ -23,13 +23,20 @@ Decoder::~Decoder()
 	}
 }
   
-void Decoder::set_probes(std::map<const srd_channel*, int> probes)
-{
-    _probes = probes;
+void Decoder::set_probes(std::map<const srd_channel *, int> probes) {
+  pxv_info("Decoder::set_probes called with map size: %d", (int)probes.size());
+  for(auto it = probes.begin(); it != probes.end(); it++) {
+     pxv_info("Decoder::set_probes probe '%s' -> %d", (*it).first->id, (*it).second);
+  }
+  _probes = probes;
 }
   
 void Decoder::set_option(const char *id, GVariant *value)
 {
+	if (!value) {
+		pxv_warn("%s", "Decoder::set_option: value is NULL");
+		return;
+	}
 	assert(value);
     if (_options[id]) {
         g_variant_unref(_options[id]);

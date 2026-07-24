@@ -73,5 +73,65 @@
     {
         "id": "Edge",
         "text": "双沿"
+    },
+    {
+        "id": "Use 32 Channels (Max 250MHz)",
+        "text": "使用32通道 (最高250MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 250MHz)",
+        "text": "使用16通道 (最高250MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 500MHz)",
+        "text": "使用16通道 (最高500MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max 1000MHz)",
+        "text": "使用8通道 (最高1000MHz)"
+    },
+    {
+        "id": "Use 32 Channels (Max50MHz)",
+        "text": "使用32通道 (最高50MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max 125MHz)",
+        "text": "使用16通道 (最高125MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max 250MHz)",
+        "text": "使用8通道 (最高250MHz)"
+    },
+    {
+        "id": "Use 4 Channels (Max 500MHz)",
+        "text": "使用4通道 (最高500MHz)"
+    },
+    {
+        "id": "Use 2 Channels (Max 1000MHz)",
+        "text": "使用2通道 (最高1000MHz)"
+    },
+    {
+        "id": "Use 1 Channels (Max200MHz)",
+        "text": "使用1通道 (最高200MHz)"
+    },
+    {
+        "id": "Use 2 Channels (Max100MHz)",
+        "text": "使用2通道 (最高100MHz)"
+    },
+    {
+        "id": "Use 4 Channels (Max50MHz)",
+        "text": "使用4通道 (最高50MHz)"
+    },
+    {
+        "id": "Use 8 Channels (Max25MHz)",
+        "text": "使用8通道 (最高25MHz)"
+    },
+    {
+        "id": "Use 16 Channels (Max10MHz)",
+        "text": "使用16通道 (最高10MHz)"
+    },
+    {
+        "id": "Use 32 Channels (Max5MHz)",
+        "text": "使用32通道 (最高5MHz)"
     }
 ]

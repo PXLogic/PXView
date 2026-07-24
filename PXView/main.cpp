@@ -24,28 +24,60 @@
 #include <stdint.h>
 #include <getopt.h>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
-#include <QStyle> 
+#include <QStyle>
 #include <QGuiApplication>
 #include <QAccessible>
 #include <QScreen>
 #include "application.h"
-#include "mystyle.h" 
+#include "mystyle.h"
 #include "pv/mainframe.h"
+#include "pv/mainwindow.h"
 #include "pv/config/appconfig.h"
-#include "config.h"
+#include "PXView/config.h"
 #include "pv/appcontrol.h"
-#include "pv/log.h" 
+#include "pv/api/iapp_service.h"
+#include "pv/api/isession_service.h"
+#include "pv/log.h"
 #include "pv/ui/langresource.h"
 #include <QDateTime>
 #include <string>
 #include <ds_types.h>
 #include <QFontDatabase>
 #include <QFont>
+#include <QTimer>
 
 #ifdef _WIN32
 #include <windows.h>
-#endif 
+#include <stdio.h>
+
+void myMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+{
+    const char *msg_str = msg.toUtf8().constData();
+    fprintf(stderr, "QtMsg: %s (file: %s, line: %d, function: %s)\n", 
+            msg_str ? msg_str : "", 
+            context.file ? context.file : "", 
+            context.line, 
+            context.function ? context.function : "");
+    fflush(stderr);
+
+    if (type == QtFatalMsg || (msg_str && strstr(msg_str, "ASSERT failure"))) {
+        fprintf(stderr, "=== FATAL/ASSERT BACKTRACE ===\n");
+        fprintf(stderr, "Base of PXView.exe: %p\n", GetModuleHandleW(NULL));
+        fprintf(stderr, "Base of Qt6Core.dll: %p\n", GetModuleHandleA("Qt6Core.dll"));
+        
+        void* backtrace[64];
+        USHORT frames = CaptureStackBackTrace(0, 64, backtrace, NULL);
+        for (USHORT i = 0; i < frames; ++i) {
+            fprintf(stderr, "  #%d: %p\n", i, backtrace[i]);
+        }
+        fprintf(stderr, "==============================\n");
+        fflush(stderr);
+    }
+}
+#endif
+
 
 void usage()
 {
@@ -58,12 +90,16 @@ void usage()
 		"  -v, -V, --version               Show release version\n"
 		"  -s, --storelog                  Save log to locale file\n"
 		"  -h, -?, --help                  Show help option\n"
+		"\n"
+		"Application Options:\n"
+		"      --headless                  Run in headless mode (no GUI, MCP/WS API only)\n"
 		"\n", DS_BIN_NAME, DS_DESCRIPTION);
 }
 
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
+    qInstallMessageHandler(myMessageHandler);
     // Disable Qt Accessibility to prevent UIAutomation from stalling the main thread during high-frequency data updates
     qputenv("QT_ACCESSIBILITY", "0");
 	    // Force FreeType font engine instead of DirectWrite/GDI.
@@ -74,10 +110,11 @@ int main(int argc, char *argv[])
 
 #endif
 
-	int ret = 0; 
+	int ret = 0;
 	const char *open_file = NULL;
 	int logLevel = -1;
 	bool bStoreLog = false;
+	bool bHeadless = false;
 
 	//----------------------rebuild command param
 #ifdef _WIN32
@@ -117,6 +154,7 @@ int main(int argc, char *argv[])
 			{"version", no_argument, 0, 'v'},
 			{"storelog", no_argument, 0, 's'},
 			{"help", no_argument, 0, 'h'},
+			{"headless", no_argument, 0, 1000},
 			{0, 0, 0, 0}
 		};
 
@@ -135,11 +173,15 @@ int main(int argc, char *argv[])
 			bStoreLog = true;
 			break;
 
+		case 1000: // headless mode
+			bHeadless = true;
+			break;
+
 		case 'V': // version
 		case 'v':
 			printf("%s %s\n", DS_TITLE, DS_VERSION_STRING);
 			return 0;
- 
+
 		case 'h': // get help
 		case '?':
 			usage();
@@ -156,6 +198,78 @@ int main(int argc, char *argv[])
 	}
 
 	//----------------------init app
+	//
+	// In headless mode we create a plain QCoreApplication (no GUI) so that
+	// the MCP / WebSocket API layer can be driven by external clients
+	// (LLM agents, web UIs, automation scripts) without instantiating any
+	// QWidget or pulling in the Qt Widgets module at runtime.
+	//
+	if (bHeadless) {
+		// Headless mode: no GUI, no fonts, no style, no accessibility.
+		// QCoreApplication drives the event loop for the API transports.
+		static QCoreApplication a(argcFinal, argvFinal);
+		QCoreApplication::setApplicationVersion(DS_VERSION_STRING);
+		QCoreApplication::setApplicationName(DS_TITLE);
+		QCoreApplication::setOrganizationName("PXlogicV20");
+		QCoreApplication::setOrganizationDomain("www.marrychip.com");
+
+		//----------------------init log
+		pxv_log_init();
+
+		if (bStoreLog && logLevel < XLOG_LEVEL_DBG) {
+			logLevel = XLOG_LEVEL_DBG;
+		}
+		if (logLevel != -1) {
+			pxv_log_level(logLevel);
+		}
+
+		if (bStoreLog) {
+			pxv_log_enalbe_logfile(true);
+		}
+
+		AppControl *control = AppControl::Instance();
+		AppConfig &app = AppConfig::Instance();
+		app.LoadAll();
+
+		if (app.appOptions.ableSaveLog) {
+			pxv_log_enalbe_logfile(app.appOptions.appendLogMode);
+			if (app.appOptions.logLevel >= logLevel) {
+				pxv_log_level(app.appOptions.logLevel);
+			}
+		}
+
+		pxv_info("----------------- version: %s (headless)-----------------", DS_VERSION_STRING);
+		pxv_info("Qt:%s", QT_VERSION_STR);
+
+		int bit_width = sizeof(u64_t);
+		if (bit_width != 8) {
+			pxv_err("Can only run on 64 bit systems");
+			return 0;
+		}
+
+		// init core
+		if (!control->Init()) {
+			pxv_err("init error!");
+			return 1;
+		}
+
+		// Start API services (MCP :10110, WS :10430)
+		control->Start();
+
+		pxv_info("Headless mode started. MCP port 10110, WS port 10430.");
+
+		ret = a.exec();
+
+		control->Stop();
+		control->UnInit();
+		control->Destroy();
+
+		pxv_info("Headless mode stopped.");
+		pxv_log_uninit();
+		return ret;
+	}
+
+	//----------------------GUI mode
     Application a(argcFinal, argvFinal);
 #ifdef _WIN32
     QAccessible::setActive(false);
@@ -171,7 +285,7 @@ int main(int argc, char *argv[])
             // Use PreferNoHinting with FreeType to ensure smooth grayscale antialiasing.
             // PreferVerticalHinting can cause FreeType to aggressively snap and disable antialiasing for some font sizes.
             font.setHintingPreference(QFont::PreferVerticalHinting);
-            font.setStyleStrategy(QFont::PreferAntialias);            
+            font.setStyleStrategy(QFont::PreferAntialias);
 			font.setFamily(fontFamilies.at(0));
             font.setPixelSize(12); // ATK uses exactly 12px for its global base (like MenuBar)
             a.setFont(font);
@@ -189,6 +303,7 @@ int main(int argc, char *argv[])
 
 	//----------------------init log
 	pxv_log_init(); // Don't call before QApplication be inited
+
 
 	if (bStoreLog && logLevel < XLOG_LEVEL_DBG){
 		logLevel = XLOG_LEVEL_DBG;
@@ -247,13 +362,42 @@ int main(int argc, char *argv[])
 	}	
 
 	try
-	{   
+	{
 		pv::MainFrame w;
 		control->Start();
-		w.ShowFormInit();  
+
+		// Register MainWindow as an IServiceEventListener so that View
+		// operation broadcasts (show_region, zoom_fit, zoom_in/out, cursors)
+		// from SessionService are routed to the active View in GUI mode.
+		{
+			auto *app_svc = control->GetAppService();
+			if (app_svc) {
+				auto *session_svc = app_svc->get_active_session();
+				if (session_svc) {
+					auto *mw = static_cast<pv::MainWindow *>(w.GetMainWindow());
+					session_svc->add_event_listener(mw);
+				}
+			}
+		}
+
+		w.ShowFormInit();
 		w.ShowHelpDocAsync();  //to show the dailog for open help document
-		
+
+
 		ret = a.exec(); //Run the application
+
+		// Unregister MainWindow before stopping
+		{
+			auto *app_svc = control->GetAppService();
+			if (app_svc) {
+				auto *session_svc = app_svc->get_active_session();
+				if (session_svc) {
+					auto *mw = static_cast<pv::MainWindow *>(w.GetMainWindow());
+					session_svc->remove_event_listener(mw);
+				}
+			}
+		}
+
 		control->Stop();
 
 		pxv_info("Main window closed.");

@@ -495,6 +495,10 @@ LRESULT WinNativeWidget::hitTest(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 RECT WinNativeWidget::GetMonitorArea(HMONITOR hMonitor, bool isPhysics)
 {
+    if (!hMonitor) {
+        pxv_warn("%s", "WinNativeWidget::GetMonitorArea: hMonitor is NULL");
+        return RECT{};
+    }
     assert(hMonitor);
 
     MONITORINFO monitorInfo;
@@ -635,7 +639,11 @@ void WinNativeWidget::UpdateChildDpi()
 }
 
 QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
-{  
+{
+    if (!_hWnd) {
+        pxv_warn("%s", "WinNativeWidget::screenFromCurrentMonitorHandle: _hWnd is NULL");
+        return nullptr;
+    }
     assert(_hWnd);
 
     HMONITOR hMonitor = _hCurrentMonitor;
@@ -763,7 +771,11 @@ void WinNativeWidget::hideBorder()
 }
 
 bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_version, DWORD *build_number)
-{  
+{
+    if (!major_version || !minor_version || !build_number) {
+        pxv_warn("%s", "WinNativeWidget::getWinSysVersion: version pointer is NULL");
+        return false;
+    }
     assert(major_version);
     assert(minor_version);
     assert(build_number);

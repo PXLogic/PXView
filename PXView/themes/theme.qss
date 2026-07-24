@@ -515,6 +515,14 @@ QGroupBox
     font-size: @dock-font-content;
 }
 
+QPushButton#dock_content:checked,
+QPushButton#dock_content:checked:hover
+{
+    background-color: @bg-base;
+    border: 1px solid @accent;
+    color: @fg-base;
+}
+
 QScrollBar:horizontal
 {
     height: 8px;

@@ -69,6 +69,10 @@ public:
     QJsonObject get_session();
     void set_session(QJsonObject ses);
 
+    // Task 6: 纯 UI 刷新——从 Core TriggerConfig 重新填充所有触发控件。
+    // 不读取任何 JSON，View 层不再参与 .pxc trigger 段反序列化。
+    void refresh_ui_from_core();
+
     void device_updated();
 
     void try_commit_trigger();

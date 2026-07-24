@@ -20,10 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "storeprogress.h" 
+#include "storeprogress.h"
 #include "../sigsession.h"
+#include <QCloseEvent>
 #include <QGridLayout>
 #include <QDialogButtonBox>
+#include <QKeyEvent>
 #include <QTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
@@ -42,7 +44,7 @@ namespace pv {
 namespace dialogs {
 
 StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
-    DSDialog(parent)
+    PxDialog(parent)
 {
     _fileLab = NULL;
     _ckOrigin = NULL;
@@ -123,7 +125,7 @@ void StoreProgress::closeEvent(QCloseEvent* event)
     }
    
     _store_session->session()->set_saving(false);
-    _store_session->session()->broadcast_msg(DSV_MSG_SAVE_COMPLETE);
+    _store_session->session()->broadcast_async<interface::SaveComplete>({});
 
     delete this;
 }
@@ -181,14 +183,22 @@ void StoreProgress::accept()
         int dex2 = _end_cursor->currentIndex();
 
         if (dex1 > 0)
-        {   
+        {
             auto c = _view->get_cursor_by_index(dex1-1);
+            if (!c) {
+                pxv_warn("%s", "StoreProgress::accept: start cursor is NULL");
+                return;
+            }
             assert(c);
             start_index = c->get_index();
         }
 
         if (dex2 > 0){
             auto c = _view->get_cursor_by_index(dex2-1);
+            if (!c) {
+                pxv_warn("%s", "StoreProgress::accept: end cursor is NULL");
+                return;
+            }
             assert(c);
             end_index = c->get_index();
         }

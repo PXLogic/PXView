@@ -32,7 +32,7 @@
 
 #include "../sigsession.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
  
 namespace pv {
 namespace dialogs {
@@ -46,7 +46,7 @@ protected:
     void focusInEvent(QFocusEvent *e) override;
 };
 
-class Search : public DSDialog
+class Search : public PxDialog
 {
     Q_OBJECT
 

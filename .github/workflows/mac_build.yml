@@ -1,0 +1,156 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 默认使用 GitHub 官方免费版提供的最新、最强 Apple Silicon 机器。
+    # 如果你的账号是企业/付费团队版，想用最高配(如 M2 Pro 12核)，可以改为: runs-on: macos-latest-xlarge
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        # 递归拉取子模块。libsigrok / libsigrokdecode 是 haikumuse 名下的公开 fork；
+        # sigrok-firmware / sigrok-firmware-fx2lafw / sigrok-util 走 sigrok.org 公开 git:// 协议。
+        submodules: recursive
+
+    - name: Install dependencies via Homebrew
+      run: |
+        brew update
+        # libzip / nettle: libsigrok 必需（CMakeLists.txt:170 FATAL_ERROR + :190 无条件 -lnettle）
+        # libftdi1: libsigrok FTDI 驱动依赖（缺失仅 WARNING，4-5 个驱动禁用，可选）
+        # sdcc: 编译 fx2lafw 固件（Cypress FX2 USB 芯片，老款逻辑分析仪用）
+        brew install cmake ninja gettext glib libusb zlib boost fftw python3 qt pkg-config libzip nettle libftdi sdcc
+
+    - name: Setup Node.js (for Web UI)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Build fx2lafw firmware
+      run: |
+        # 编译 15 个 fx2lafw-*.fw 固件文件（Cypress FX2 USB 芯片）。
+        # 不装 sdcc 的话 CMake 会在 install 阶段跳过这些固件，导致使用 FX2 芯片
+        # 的老款逻辑分析仪（Saleae Logic、Bitbang Cyclone 等）无法识别。
+        # 脚本会自动检测 sdcc/sdas8051/sdar/makebin，失败只警告不阻断构建。
+        bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
+
+    - name: Configure CMake
+      run: |
+        # 仓库历史里误把 Windows 编译产物 build/CMakeCache.txt 等强加进了 git，
+        # checkout 后会残留 Windows 路径的 cache，必须先清空避免 macOS 配置失败
+        rm -rf build
+        mkdir -p build
+        cd build
+        # gettext 是 keg-only：glib-2.0.pc 通过 pkg-config 传递 -lintl，
+        # 但 linker 默认搜索不到 libintl.dylib，需显式指向 gettext 的 lib。
+        # 同时设 PKG_CONFIG_PATH 让 pkg-config 找到 gettext 的 .pc 文件。
+        export LDFLAGS="-L$(brew --prefix gettext)/lib"
+        export CPPFLAGS="-I$(brew --prefix gettext)/include"
+        export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
+        # 确保 CMake 能够找到 Homebrew 安装的 Qt
+        cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DCMAKE_INSTALL_PREFIX=../install.dir
+
+    - name: Build and Package Web UI
+      run: |
+        cd build
+        ninja
+        ninja install-webui
+
+    - name: Install
+      run: |
+        cd build
+        ninja install
+      
+    - name: Create DMG using macdeployqt
+      run: |
+        # 查找 homebrew 下的 macdeployqt 工具
+        MACDEPLOYQT="$(brew --prefix qt)/bin/macdeployqt"
+
+        # 1) Python framework 路径修正：Homebrew python@3.x 把 framework 放在
+        #    <prefix>/Frameworks/Python.framework，但 macdeployqt 期望在
+        #    <prefix>/lib/Python.framework。先建好 lib/ 目录再 symlink。
+        PY_PREFIX="$(brew --prefix python@3.14)"
+        mkdir -p "$PY_PREFIX/lib"
+        if [ ! -e "$PY_PREFIX/lib/Python.framework" ] && [ -e "$PY_PREFIX/Frameworks/Python.framework" ]; then
+          ln -s "$PY_PREFIX/Frameworks/Python.framework" "$PY_PREFIX/lib/Python.framework"
+        fi
+
+        # 2) macdeployqt 先做依赖收集，不带 -codesign=-。
+        #    旧版用 -codesign=- 只签了主二进制和 Qt 框架，但 macdeployqt 自己
+        #    复制进 Frameworks 的非 Qt 传递依赖（libbrotlicommon/libsharpyuv/
+        #    libwebp，来自 Qt WebEngine/Pdf 的 rpath，PXView 没直接用）未被签名
+        #    → codesign --verify 整个 .app 失败 → Gatekeeper 报"已损坏"。
+        #    这里不传 -codesign，让 macdeployqt 只负责依赖收集，签名由后续步骤
+        #    显式控制。不带 -dmg，dmg 由最后 hdiutil 生成（保证签后内容一致）。
+        $MACDEPLOYQT install.dir/PXView.app \
+          -always-overwrite \
+          -verbose=1 \
+          || true   # macdeployqt 对找不到的 rpath 会返回非零，但已复制大部分依赖
+
+        # 3) 预先从 Homebrew 复制 macdeployqt 报错说找不到的三个 dylib。
+        #    这三个是 Qt WebEngine/Pdf 的传递依赖，PXView 没直接用，
+        #    但 macdeployqt 递归扫描 rpath 时会尝试复制它们。
+        #    问题：macdeployqt 复制版本化 dylib 时可能只复制符号链接，
+        #    导致 install_name_tool 修改后签名失效。
+        #    解决：从 Homebrew lib 直接复制实际文件 + 建立正确的符号链接。
+        BREW_LIB="$(brew --prefix)/lib"
+        mkdir -p install.dir/PXView.app/Contents/Frameworks
+        for dep in libbrotlicommon.1.dylib libsharpyuv.0.dylib libwebp.7.dylib; do
+          # 找到实际文件（解决符号链接链）
+          real_path="$(readlink -f "$BREW_LIB/$dep" 2>/dev/null || echo "$BREW_LIB/$dep")"
+          if [ -f "$real_path" ]; then
+            # 复制实际文件（用实际文件名，如 libbrotlicommon.1.2.0.dylib）
+            real_name="$(basename "$real_path")"
+            cp -f "$real_path" install.dir/PXView.app/Contents/Frameworks/"$real_name"
+            # 建立版本符号链接：libbrotlicommon.1.dylib → libbrotlicommon.1.2.0.dylib
+            if [ "$real_name" != "$dep" ]; then
+              rm -f install.dir/PXView.app/Contents/Frameworks/"$dep"
+              ln -s "$real_name" install.dir/PXView.app/Contents/Frameworks/"$dep"
+            fi
+            # 修正 install id 为 @rpath/<原名>
+            install_name_tool -id "@rpath/$dep" install.dir/PXView.app/Contents/Frameworks/"$real_name"
+          fi
+        done
+
+        # 4) 清除 Homebrew/缓存下载的库可能带的隔离标记，
+        #    避免签进 .app 后被 Gatekeeper 二次检查。
+        xattr -cr install.dir/PXView.app
+
+        # 5) 用 --deep 一次性递归签名整个 .app。
+        #    必须用 --deep：framework（如 Python.framework）的资源封印
+        #    必须由 framework 目录签名建立，单独签 framework 内二进制
+        #    会破坏资源封印 → "a sealed resource is missing or invalid"。
+        #    --deep 虽被 Apple 标记 deprecated（对分发签名而言），
+        #    但对 CI 的 ad-hoc 签名是正确工具：它按从内到外顺序递归签名，
+        #    自动处理 dylib → framework 二进制 → framework 目录 → .app 的顺序。
+        #    --force 覆盖所有可能失效的旧签名（Homebrew 的、macdeployqt 复制改 id 的）。
+        codesign --force --deep --sign - install.dir/PXView.app
+
+        # 6) 验证签名，失败则构建失败并打印诊断信息
+        if ! codesign --verify --deep --strict install.dir/PXView.app 2>&1; then
+          echo "ERROR: codesign verification failed"
+          echo "=== Diagnostic: libbrotlicommon.1.dylib ==="
+          ls -la install.dir/PXView.app/Contents/Frameworks/libbrotlicommon* 2>/dev/null || true
+          codesign -dvvv install.dir/PXView.app/Contents/Frameworks/libbrotlicommon.1.dylib 2>&1 || true
+          echo "=== All Frameworks ==="
+          ls -la install.dir/PXView.app/Contents/Frameworks/
+          exit 1
+        fi
+
+        # 7) 签名完成后生成 dmg
+        hdiutil create -volname PXView -srcfolder install.dir/PXView.app \
+          -ov -format UDZO install.dir/PXView.dmg
+
+        # 8) 列出最终产物
+        ls -la install.dir/*.dmg
+        
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PXView-macOS-ARM64
+        path: install.dir/*.dmg
+        if-no-files-found: error

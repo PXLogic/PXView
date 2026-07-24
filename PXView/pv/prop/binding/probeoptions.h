@@ -28,19 +28,22 @@
 #include <boost/optional.hpp>
 
 #include <QString>
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h> 
 #include "binding.h"
 
 class DeviceAgent;
 
 namespace pv {
+
+class SigSession;
+
 namespace prop {
 namespace binding {
 
 class ProbeOptions : public Binding
 {
 public:
-	ProbeOptions(struct sr_channel *probe);
+	ProbeOptions(SigSession *session, struct sr_channel *probe);
 
 private:
 
@@ -74,6 +77,7 @@ private:
 protected:
 	struct sr_channel *const _probe;
 	DeviceAgent *_device_agent;
+	static DeviceAgent *_static_device_agent;
 };
 
 } // binding

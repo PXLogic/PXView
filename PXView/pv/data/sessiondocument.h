@@ -12,152 +12,176 @@
 #ifndef PXVIEW_PV_DATA_SESSIONDOCUMENT_H
 #define PXVIEW_PV_DATA_SESSIONDOCUMENT_H
 
+#include "analogsnapshot.h"
+#include "datasource.h"
+#include "dsosnapshot.h"
+#include "lissajousmodel.h"
+#include "logicsnapshot.h"
+#include "signalconfigstore.h"
+#include "signalmodel.h"
+#include "triggerconfig.h"
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QString>
+#include <map>
+#include <memory>
 #include <stdint.h>
 #include <vector>
-#include <map>
-#include <QString>
-#include <QJsonObject>
-#include <QJsonArray>
-#include "datasource.h"
-#include "logicsnapshot.h"
-#include "analogsnapshot.h"
-#include "dsosnapshot.h"
-
-class DeviceAgent;
 
 namespace pv {
+
+class SigSession;
 class TabContext;
-namespace view { class Signal; }
-namespace view { class DecodeTrace; }
-namespace view { class SpectrumTrace; }
-namespace view { class LissajousTrace; }
-namespace view { class MathTrace; }
 
 namespace data {
 
 class DecoderStack;
-class DecoderModel;
+class SpectrumStack;
+class MathStack;
 
-struct ChannelConfig {
-    int index;
-    bool enabled;
-    uint64_t vdiv;
-    int coupling;
-    bool map_default;
-    uint16_t hw_offset;
-    uint16_t offset;
-    uint16_t zero_offset;
-
-    ChannelConfig() : index(0), enabled(false), vdiv(0), coupling(0),
-                      map_default(true), hw_offset(0), offset(0), zero_offset(0) {}
-};
-
-struct SignalConfig {
-    int work_mode;
-    int operation_mode;
-    int channel_mode;
-    bool is_demo;
-    QString demo_operation_mode;
-    std::vector<ChannelConfig> channels;
-    bool is_valid;
-
-    SignalConfig() : work_mode(0), operation_mode(0), channel_mode(0),
-                     is_demo(false), is_valid(false) {}
-};
-
-class SessionDocument : public DataSource
-{
+// SessionDocument is now a pure data container. Signal/pending config and
+// DeviceAgent interaction have been extracted to SignalConfigStore
+// (accessed via signal_config_store()). trigger_config remains here as a
+// SessionDocument-owned field. The SigSession* is injected so SignalConfigStore
+// can reach DeviceAgent via _session->get_device() without SessionDocument
+// itself depending on DeviceAgent.
+class SessionDocument : public DataSource {
 public:
-    SessionDocument();
-    ~SessionDocument();
+  explicit SessionDocument(SigSession *session);
+  ~SessionDocument();
 
-    LogicSnapshot* get_logic_snapshot() override;
-    AnalogSnapshot* get_analog_snapshot() override;
-    DsoSnapshot* get_dso_snapshot() override;
+  LogicSnapshot *get_logic_snapshot() override;
+  AnalogSnapshot *get_analog_snapshot() override;
+  DsoSnapshot *get_dso_snapshot() override;
 
-    LogicSnapshot* get_active_logic();
-    AnalogSnapshot* get_active_analog();
-    DsoSnapshot* get_active_dso();
-    void copy_from_logic(LogicSnapshot *src);
-    void copy_from_analog(AnalogSnapshot *src);
-    void copy_from_dso(DsoSnapshot *src);
+  LogicSnapshot *get_active_logic();
+  AnalogSnapshot *get_active_analog();
+  DsoSnapshot *get_active_dso();
+  void copy_from_logic(LogicSnapshot *src);
+  void copy_from_analog(AnalogSnapshot *src);
+  void copy_from_dso(DsoSnapshot *src);
 
-    void set_samplerate(uint64_t rate);
-    uint64_t get_samplerate() const;
+  void set_samplerate(uint64_t rate);
+  uint64_t get_samplerate() const;
 
-    void set_samplelimits(uint64_t limits);
-    uint64_t get_samplelimits() const;
+  void set_samplelimits(uint64_t limits);
+  uint64_t get_samplelimits() const;
 
-    void set_trigger_pos(uint64_t pos);
-    uint64_t get_trigger_pos() override;
+  void set_trigger_pos(uint64_t pos);
+  uint64_t get_trigger_pos() override;
 
-    double get_sampletime() const;
+  double get_sampletime() const;
 
-    bool has_data();
-    bool empty();
+  bool has_data();
+  bool empty();
 
-    void clear();
+  void clear();
 
-    std::vector<DecoderStack*>& get_decoder_stacks();
-    void add_decoder_stack(DecoderStack *stack);
-    void remove_decoder_stack(DecoderStack *stack);
-    DecoderModel* get_decoder_model() override;
-    void set_decoder_model(DecoderModel *model);
+  std::vector<std::shared_ptr<DecoderStack>> &
+  get_decoder_stacks(SessionDocument *doc = nullptr) override;
+  void add_decoder_stack(std::shared_ptr<DecoderStack> stack);
+  void remove_decoder_stack(std::shared_ptr<DecoderStack> stack);
+  // get_signal_models()/get_spectrum_stacks()/get_math_stack()/
+  // get_lissajous_model() below are DataSource overrides returning
+  // empty/null because SessionDocument never populated these fields (only
+  // SigSession holds the live copies). See view.cpp comment near line 2625.
+  // (purify-architecture-concepts Task 10) get_decoder_model() was removed
+  // from the DataSource interface entirely — DecoderModel now lives in the
+  // View layer (pv::view) and is owned by ProtocolDock.
 
-    std::vector<view::DecodeTrace*>& get_decode_traces();
-    void add_decode_trace(view::DecodeTrace *trace);
-    void remove_decode_trace(view::DecodeTrace *trace);
+  std::vector<std::shared_ptr<SignalModel>> &get_signal_models() override;
+  std::vector<std::shared_ptr<SpectrumStack>> &get_spectrum_stacks() override;
+  std::shared_ptr<MathStack> get_math_stack() override;
+  LissajousModel *get_lissajous_model() override;
+  uint64_t cur_snap_samplerate() override;
+  uint64_t cur_samplelimits() override;
+  double cur_sampletime() override;
+  double cur_snap_sampletime() override;
+  data::Snapshot *get_snapshot(int type) override;
 
-    std::vector<view::Signal*>& get_signals() override;
-    std::vector<view::DecodeTrace*>& get_decode_signals() override;
-    std::vector<view::SpectrumTrace*>& get_spectrum_traces() override;
-    view::LissajousTrace* get_lissajous_trace() override;
-    view::MathTrace* get_math_trace() override;
-    uint64_t cur_snap_samplerate() override;
-    uint64_t cur_samplelimits() override;
-    double cur_sampletime() override;
-    double cur_snap_sampletime() override;
-    data::Snapshot* get_snapshot(int type) override;
+  // Task D6: DataSource facade/business overrides — stubs returning
+  // defaults because SessionDocument does not own the live session state
+  // (SigSession is the single source of truth). Only SigSession performs
+  // real work for these; the View layer routes through DataSource so it
+  // does not reach into the SigSession facade directly.
+  double cur_view_time() override;
+  int get_map_zoom() override;
+  double get_logic_data_view_time() override;
+  bool is_repeating() override;
+  bool is_running_status() override;
+  bool is_instant() override;
+  bool have_view_data() override;
+  bool is_working() override;
+  bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus,
+                   std::list<decode::Decoder *> &sub_decoders,
+                   std::shared_ptr<DecoderStack> &out_stack,
+                   SessionDocument *doc = nullptr) override;
+  void remove_decoder_by_key_handel(void *handel,
+                                    SessionDocument *doc = nullptr) override;
+  void rst_decoder_by_key_handel(void *handel,
+                                 SessionDocument *doc = nullptr) override;
+  void clear_all_decoder(bool bUpdateView = true) override;
+  void start_all_decode_tasks() override;
+  void update_dso_data_scale() override;
 
-    uint64_t _dock_sample_rate;
-    uint64_t _dock_sample_limit;
-    int _dock_collect_mode;
-    std::map<uint16_t, QString> _dock_search_pattern;
-    bool _dock_measure_fen_enabled;
-    QJsonArray _dock_measure_dist_rows;
-    QJsonArray _dock_measure_edge_rows;
-    QJsonObject _dock_trigger_session;
-    QJsonObject _dock_dso_trigger_session;
-    QJsonObject _dock_device_options_session;
-    QJsonObject _dock_signal_processing_session;
-    QString _dock_protocol_search_text;
-    QJsonArray _dock_protocol_expanded_states;
+  // --- Signal config forwarding (delegated to SignalConfigStore) ---
+  // signal_config_to_json/from_json wrap the store's version and merge in
+  // triggerConfig from _trigger_config to keep .pxc format unchanged.
+  QJsonObject signal_config_to_json() const;
+  void signal_config_from_json(const QJsonObject &obj);
+  void save_signal_config(
+      const std::vector<std::shared_ptr<SignalModel>> &signal_models = {},
+      const std::map<int, ChannelLayoutState> &channel_layout = {},
+      const std::map<int, std::string> &channel_colours = {}) {
+    _signal_config_store->save_signal_config(signal_models, channel_layout,
+                                             channel_colours);
+  }
+  void apply_signal_config() { _signal_config_store->apply_signal_config(); }
+  void apply_pending_config() {
+    _signal_config_store->apply_pending_config();
+  }
+  bool has_signal_config() const {
+    return _signal_config_store->has_signal_config();
+  }
+  bool has_pending_config() const {
+    return _signal_config_store->has_pending_config();
+  }
+  const SignalConfig &get_signal_config() const {
+    return _signal_config_store->get_signal_config();
+  }
+  // For TabContext to restore trig_type after reload (replaces friend access).
+  const std::vector<ChannelConfig> &get_channels() const {
+    return _signal_config_store->get_channels();
+  }
+  // For TabContext to save pending config (replaces friend access).
+  void set_pending_config(const SignalConfig &cfg) {
+    _signal_config_store->set_pending_config(cfg);
+  }
+  SignalConfigStore *signal_config_store() {
+    return _signal_config_store.get();
+  }
 
-    QJsonObject signal_config_to_json() const;
-    void signal_config_from_json(const QJsonObject &obj);
-    void save_signal_config(DeviceAgent *agent);
-    void apply_signal_config(DeviceAgent *agent);
-    void apply_pending_config(DeviceAgent *agent);
-    bool has_signal_config() const;
-    bool has_pending_config() const;
-    const SignalConfig& get_signal_config() const { return _signal_config; }
+  inline const data::TriggerConfig &trigger_config() const override {
+    return _trigger_config;
+  }
+  inline data::TriggerConfig &trigger_config() { return _trigger_config; }
+  void set_trigger_config(const data::TriggerConfig &cfg);
 
 private:
-    LogicSnapshot   _logic;
-    AnalogSnapshot  _analog;
-    DsoSnapshot     _dso;
-    uint64_t        _samplerate;
-    uint64_t        _samplelimits;
-    uint64_t        _trigger_pos;
-    std::vector<DecoderStack*> _decoder_stacks;
-    DecoderModel    *_decoder_model;
-    std::vector<view::DecodeTrace*> _decode_traces;
-    std::vector<view::Signal*> _signals;
-    std::vector<view::SpectrumTrace*> _spectrum_traces;
-    SignalConfig _signal_config;
-    SignalConfig _pending_device_config;
-
-    friend class pv::TabContext;
+  LogicSnapshot _logic;
+  AnalogSnapshot _analog;
+  DsoSnapshot _dso;
+  uint64_t _samplerate;
+  uint64_t _samplelimits;
+  uint64_t _trigger_pos;
+  std::vector<std::shared_ptr<DecoderStack>> _decoder_stacks;
+  // Dead storage removed (purify-architecture-concepts Task 1):
+  // _decoder_model / _signal_models / _spectrum_stacks / _math_stack /
+  // _lissajous_model were never populated (only clear()-ed) and shadowed the
+  // live copies in SigSession. The DataSource get_* overrides above now return
+  // empty/null literals. set_decoder_model (zero callers) was deleted.
+  std::unique_ptr<SignalConfigStore> _signal_config_store;
+  data::TriggerConfig _trigger_config;
 };
 
 } // namespace data

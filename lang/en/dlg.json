@@ -59,6 +59,10 @@
         "id": "IDS_DLG_MCP_COPY_SYSTEM_PROMPT",
         "text": "Copy System Prompt"
     },
+    {
+        "id": "IDS_DLG_MCP_COPY",
+        "text": "Copy"
+    },
 
     {
         "id": "IDS_DLG_LOG_NO_FILE",
@@ -157,6 +161,14 @@
         "text": "Channel"
     },
     {
+        "id": "IDS_DLG_DIGITAL_CHANNEL",
+        "text": "Digital Channel"
+    },
+    {
+        "id": "IDS_DLG_ANALOG_CHANNEL",
+        "text": "Analog Channel"
+    },
+    {
         "id": "IDS_DLG_SAVE_CALIBRATION_RESULTS",
         "text": "Saving calibration results... Please wait a moment."
     },
@@ -185,12 +197,16 @@
         "text": "Decoding End Position"
     },
     {
-        "id": "IDS_DLG_DEVICE_OPTIONS",
-        "text": "Device Options"
+        "id": "IDS_DLG_START_CURSOR",
+        "text": "Start Cursor"
     },
     {
-        "id": "IDS_DLG_SIGNAL_PROCESSING",
-        "text": "Signal Processing"
+        "id": "IDS_DLG_END_CURSOR",
+        "text": "End Cursor"
+    },
+    {
+        "id": "IDS_DLG_DEVICE_OPTIONS",
+        "text": "Device Options"
     },
     {
         "id": "IDS_DLG_MODE",
@@ -343,6 +359,10 @@
     {
         "id": "IDS_DLG_PROTOCOL_LIST_VIEWER",
         "text": "Decoding Results"
+    },
+    {
+        "id": "IDS_DLG_FOLLOW_VIEWPORT",
+        "text": "List follows waveform visible range"
     },
     {
         "id": "IDS_DLG_REGION",
@@ -1815,5 +1835,49 @@
     {
         "id": "IDS_DLG_STYLE_DELETE_CONFIRM",
         "text": "Are you sure you want to delete this preset?"
+    },
+    {
+        "id": "IDS_DSO_CTR_EN",
+        "text": "EN"
+    },
+    {
+        "id": "IDS_DSO_CTR_DIS",
+        "text": "DIS"
+    },
+    {
+        "id": "IDS_DSO_CTR_GND",
+        "text": "GND"
+    },
+    {
+        "id": "IDS_DSO_CTR_DC",
+        "text": "DC"
+    },
+    {
+        "id": "IDS_DSO_CTR_AC",
+        "text": "AC"
+    },
+    {
+        "id": "IDS_DSO_CTR_AUTO",
+        "text": "AUTO"
+    },
+    {
+        "id": "IDS_DLG_COPY_THIS_CHANNEL",
+        "text": "Copy Channel Waveform Data"
+    },
+    {
+        "id": "IDS_DLG_COPY_DECODER_TRACK",
+        "text": "Copy Decoder Waveform Data"
+    },
+    {
+        "id": "IDS_DLG_COPY_DECODER_GROUP",
+        "text": "Copy Decoder Group Waveform Data"
+    },
+    {
+        "id": "IDS_DLG_COPY_ALL_CHANNELS",
+        "text": "Copy All Channels Waveform Data"
+    },
+    {
+        "id": "IDS_DLG_NO_DATA",
+        "text": "No data available"
     }
 ]

@@ -42,6 +42,8 @@ ZipMaker::~ZipMaker()
 
 bool ZipMaker::CreateNew(const char *fileName, bool bAppend)
 {
+     if (!fileName)
+         return false;
      assert(fileName);
 
      Release();
@@ -95,9 +97,11 @@ bool ZipMaker::Close(){
 
 bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, unsigned int buferSize)
 {
+    if (!buffer || !innerFile || !m_zDoc)
+        return false;
     assert(buffer);
     assert(innerFile);
-    assert(m_zDoc);   
+    assert(m_zDoc);
     int level = m_opt_compress_level;
 
     if (level < Z_DEFAULT_COMPRESSION  || level > Z_BEST_COMPRESSION){
@@ -118,6 +122,8 @@ bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, unsigned
 
 bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
 {
+    if (!localFile)
+        return false;
     assert(localFile);
 
     struct stat st;

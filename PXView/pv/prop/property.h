@@ -53,8 +53,27 @@ public:
 
     virtual ~Property();
 
+    /* Build the editor widget. Subclasses implement the actual widget creation.
+     * This is protected to prevent callers from using the ambiguous bool
+     * parameter directly — use get_widget_live() or get_widget_deferred()
+     * instead, which make the commit behavior explicit at the call site. */
+protected:
     virtual QWidget* get_widget(QWidget *parent,
-        bool auto_commit = false) = 0;
+        bool auto_commit) = 0;
+public:
+    /* Live widget: commits on every user interaction (e.g. dropdown change,
+     * spinbox valueChanged). Use for dock panels where each change should
+     * immediately write to the driver. */
+    QWidget* get_widget_live(QWidget *parent) {
+        return get_widget(parent, true);
+    }
+    /* Deferred widget: does NOT auto-commit. Caller must invoke commit()
+     * explicitly (e.g. dialog OK button). Use for modal dialogs that batch
+     * all changes on confirmation. */
+    QWidget* get_widget_deferred(QWidget *parent) {
+        return get_widget(parent, false);
+    }
+
 	virtual bool labeled_widget();
 
     virtual GVariant* get_value();

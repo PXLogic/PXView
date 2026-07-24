@@ -25,7 +25,8 @@
 #ifndef PXVIEW_PV_DATA_ANALOGSNAPSHOT_H
 #define PXVIEW_PV_DATA_ANALOGSNAPSHOT_H
 
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
+#include "../dsvdef.h"
 #include "snapshot.h"
 
 #include <utility>
@@ -43,8 +44,11 @@ class AnalogSnapshot : public Snapshot
 public:
 	struct EnvelopeSample
 	{
-        uint8_t min;
-        uint8_t max;
+        // 改为 float 以支持上游 libsigrok 的 float analog 数据。
+        // 旧 fork 仅支持 ADC 整数（0-255），用 uint8_t 足够；
+        // 上游 demo 驱动发送 float 电压值（-10 到 +10），uint8_t 会截断为 0-255。
+        float min;
+        float max;
 	};
 
 	struct EnvelopeSection
@@ -114,12 +118,24 @@ public:
 
     bool has_enabled_channel(int index);
 
+    // 上游 libsigrok analog 数据为 float 电压值时（encoding->is_float），
+    // 跟踪实际数据范围供 AnalogSignal 计算 float_scale。
+    // 参考 PulseView AnalogSegment::min_value_/max_value_ + perform_autoranging。
+    void get_float_min_max(float &min_v, float &max_v) const {
+        min_v = _float_min; max_v = _float_max;
+    }
+    bool has_float_range() const { return _float_range_valid; }
+
 private:
     void append_data(void *data, uint64_t samples, uint16_t pitch);
+    // 上游 libsigrok 部分通道数据写入（如 demo 单通道发送）
+    void append_data_partial(const sr_datafeed_analog &analog, uint32_t pkt_channels);
     void free_envelop();
 	void reallocate_envelope(Envelope &l);
 	void append_payload_to_envelope_levels();
     void free_data();
+    // 扫描 float 样本更新 _float_min/_float_max（仅 is_float 时调用）
+    void update_float_range(const float *data, uint64_t count);
 
 private:
     void *_data;
@@ -128,6 +144,14 @@ private:
     friend class SessionSnapshot;
     friend class SessionDocument;
     std::vector<int>        _enabled_channel_indexs;
+    // 每通道独立写入偏移（demo 逐通道发送时各通道从 0 开始写）
+    std::vector<uint64_t>  _per_ch_ring_offset;
+    // 每通道 envelope 已处理的样本数（避免对未到达的通道扫描到未初始化的 0）
+    std::vector<uint64_t>  _per_ch_env_prev;
+    // float 电压数据的实际范围（参考 PulseView AnalogSegment::min_value_/max_value_）
+    float   _float_min = 0.0f;
+    float   _float_max = 0.0f;
+    bool    _float_range_valid = false;
 };
 
 } // namespace data

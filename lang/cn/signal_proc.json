@@ -70,5 +70,121 @@
     {
         "id": "IDS_FILTER_ACTIVE",
         "text": "已滤波"
+    },
+    {
+        "id": "IDS_FILTER_GLITCHES",
+        "text": "滤除毛刺..."
+    },
+    {
+        "id": "IDS_TOGGLE_SIGNAL_INVERT",
+        "text": "信号取反"
+    },
+    {
+        "id": "IDS_CLEAR_CHANNEL_FILTER",
+        "text": "清除此通道滤波"
+    },
+    {
+        "id": "IDS_CLEAR_ALL_FILTER",
+        "text": "清除所有通道滤波"
+    },
+    {
+        "id": "IDS_CHANGE_COLOR",
+        "text": "更改颜色"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_PULSE_DIST",
+        "text": "脉冲宽度分布"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_WILL_REMOVE",
+        "text": "将滤除: "
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_PULSES_UNIT",
+        "text": " 个脉冲"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_REMAINING",
+        "text": "剩余有效脉冲: "
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_TYPE",
+        "text": "类型"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_BOTH",
+        "text": "Both (双向毛刺)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_HIGH",
+        "text": "High (仅高电平上的低毛刺)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MODE_LOW",
+        "text": "Low (仅低电平上的高毛刺)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_THRESHOLD",
+        "text": "阈值"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CYCLES",
+        "text": "cycles"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MAX",
+        "text": "上限"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_MAX_HINT",
+        "text": "(统计范围,超出不计入,上限为500)"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_AUTO_APPLY",
+        "text": "采集后自动应用滤波"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_SHOW_OVERLAY",
+        "text": "显示滤波提示"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_ONE",
+        "text": "应用到本通道"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_ALL",
+        "text": "应用到所有逻辑通道 →"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_APPLY_BATCH",
+        "text": "应用到子通道"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CANCEL",
+        "text": "取消"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CHANNEL_FALLBACK",
+        "text": "通道"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_BATCH_FALLBACK",
+        "text": "批量"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_TITLE_SUFFIX",
+        "text": " 毛刺滤波"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_BATCH_TITLE_SUFFIX",
+        "text": " 批量毛刺滤波"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_RECOMMENDED",
+        "text": "推荐"
+    },
+    {
+        "id": "IDS_GLITCH_POPUP_CURRENT",
+        "text": "当前"
     }
 ]

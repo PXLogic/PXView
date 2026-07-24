@@ -34,7 +34,7 @@ class QFormLayout;
 
 struct srd_channel;
 
-#include "dsdialog.h"
+#include "pxdialog.h"
 
 namespace pv {
     namespace data{
@@ -58,7 +58,7 @@ namespace pv {
 namespace dialogs {
  
 
-class DecoderOptionsDlg: public DSDialog
+class DecoderOptionsDlg: public PxDialog
 {
     Q_OBJECT
 
@@ -93,6 +93,14 @@ public:
     }
 
     void apply_setting();
+
+public slots:
+    int exec() override;
+    void accept() override;
+    void reject() override;
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     void load_options_view();

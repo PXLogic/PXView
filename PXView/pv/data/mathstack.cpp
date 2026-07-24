@@ -24,8 +24,10 @@
 #include <assert.h>
 
 #include  "dsosnapshot.h"
+#include  "signalmodel.h"
 #include  "../sigsession.h"
-#include  "../view/dsosignal.h"
+#include  "../deviceagent.h"
+#include "../view/dsldial.h"
 #include "../log.h"
 
 #define PI 3.1415
@@ -78,13 +80,28 @@ const QString MathStack::vDialDivUnit[MathStack::vDialUnitCount] = {
     "kV/V",
 };
 
+// Helper: look up a SignalModel by channel index via the SigSession.
+// Returns the matching DSO SignalModel, or nullptr if not found / not a DSO.
+static data::SignalModel *lookup_dso_model(pv::SigSession *session, int index)
+{
+    if (!session)
+        return nullptr;
+    for (auto m : session->get_signal_models()) {
+        if (m && m->index() == index &&
+            m->type() == SR_CHANNEL_DSO) {
+            return m.get();
+        }
+    }
+    return nullptr;
+}
+
 MathStack::MathStack(pv::SigSession *session,
-                     view::DsoSignal* dsoSig1,
-                     view::DsoSignal* dsoSig2,
+                     int ch1_index,
+                     int ch2_index,
                      MathType type) :
     _session(session),
-    _dsoSig1(dsoSig1),
-    _dsoSig2(dsoSig2),
+    _ch1_index(ch1_index),
+    _ch2_index(ch2_index),
     _type(type),
     _sample_num(0),
     _total_sample_num(0),
@@ -94,8 +111,13 @@ MathStack::MathStack(pv::SigSession *session,
 {
     memset(_envelope_level, 0, sizeof(_envelope_level));
 
-    if (dsoSig1 == NULL || dsoSig2 == NULL){
-        pxv_info("ERROR: MathStack::MathStack, dsoSig1 or dsoSig2 is null.");
+    // Resolve both channel indices against SignalModel so we fail fast if
+    // the caller passed a non-existent / non-DSO channel.
+    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    if (m1 == nullptr || m2 == nullptr){
+        pxv_info("ERROR: MathStack::MathStack, DSO SignalModel not found for "
+                 "ch1=%d or ch2=%d.", ch1_index, ch2_index);
         assert(false);
     }
 }
@@ -164,11 +186,17 @@ void MathStack::enable_envelope(bool enable)
 
 uint64_t MathStack::default_vDialValue()
 {
-    uint64_t value = 0; 
-    const uint64_t dial1_value = _dsoSig1->get_vDial()->get_value();
-    const uint64_t dial2_value = _dsoSig2->get_vDial()->get_value();
-    const uint64_t v1 = _dsoSig1->get_vDial()->get_factor() * dial1_value;
-    const uint64_t v2 = _dsoSig2->get_vDial()->get_factor() * dial2_value;
+    uint64_t value = 0;
+    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    assert(m1 && m2);
+
+    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
+    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv());
+    const uint64_t factor1 = static_cast<uint64_t>(m1->vfactor());
+    const uint64_t factor2 = static_cast<uint64_t>(m2->vfactor());
+    const uint64_t v1 = factor1 * dial1_value;
+    const uint64_t v2 = factor2 * dial2_value;
 
     switch(_type) {
     case MATH_ADD:
@@ -203,24 +231,30 @@ uint64_t MathStack::default_vDialValue()
 uint64_t MathStack::default_factor()
 {
     uint64_t value = 0;
-    const uint64_t factor1 = _dsoSig1->get_vDial()->get_factor();    
-    const uint64_t factor2 = _dsoSig2->get_vDial()->get_factor();
+    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    assert(m1 && m2);
+
+    const uint64_t factor1 = static_cast<uint64_t>(m1->vfactor());
+    const uint64_t factor2 = static_cast<uint64_t>(m2->vfactor());
     assert(factor1 > 0);
     assert(factor2 > 0);
-    const uint64_t v1 = _dsoSig1->get_vDial()->get_value() * factor1;
-    const uint64_t v2 = _dsoSig2->get_vDial()->get_value() * factor2;
+    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
+    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv());
+    const uint64_t v1 = dial1_value * factor1;
+    const uint64_t v2 = dial2_value * factor2;
 
     switch(_type) {
-        case MATH_ADD:
-        case MATH_SUB:
-            value = v1 > v2 ? factor1 : factor2;
-            break;
-        case MATH_MUL:
-            value = factor1 * factor2;
-            break;
-        case MATH_DIV:
-            value = factor1 / factor2;
-            break;
+    case MATH_ADD:
+    case MATH_SUB:
+        value = v1 > v2 ? factor1 : factor2;
+        break;
+    case MATH_MUL:
+        value = factor1 * factor2;
+        break;
+    case MATH_DIV:
+        value = factor1 / factor2;
+        break;
     }
 
     if (value == 0){
@@ -234,12 +268,18 @@ view::dslDial* MathStack::get_vDial()
 {
     QVector<uint64_t> vValue;
     QVector<QString> vUnit;
-    view::dslDial *dial1 = _dsoSig1->get_vDial();
-    view::dslDial *dial2 = _dsoSig2->get_vDial();
-    const uint64_t dial1_min = dial1->get_value(0);
-    const uint64_t dial1_max = dial1->get_value(dial1->get_count() - 1);
-    const uint64_t dial2_min = dial2->get_value(0);
-    const uint64_t dial2_max = dial2->get_value(dial2->get_count() - 1);
+
+    // SR_CONF_PROBE_VDIV fork DSO key deleted; DSO mode is deprecated and the
+    // vdiv list is no longer queried from the device. dial_values stays empty,
+    // so the math dial falls back to the full built-in vDialValue[] range.
+    QVector<uint64_t> dial_values;
+
+    uint64_t dial1_min = 0, dial1_max = 0;
+    uint64_t dial2_min = 0, dial2_max = 0;
+    if (!dial_values.isEmpty()) {
+        dial1_min = dial2_min = dial_values.first();
+        dial1_max = dial2_max = dial_values.last();
+    }
 
     switch(_type) {
     case MATH_ADD:
@@ -366,35 +406,47 @@ void MathStack::calc_math(uint64_t mathFactor)
 
     _math_state = Running;
 
-    const auto data = _dsoSig1->data();
-
-    if (data->empty() || _math.size() < _total_sample_num)
+    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    if (m1 == nullptr || m2 == nullptr)
         return;
 
-    if (!_dsoSig1->enabled() || !_dsoSig2->enabled())
+    if (!m1->enabled() || !m2->enabled())
+        return;
+
+    auto data = static_cast<DsoSnapshot*>(m1->snapshot());
+    if (data == nullptr || data->empty() || _math.size() < _total_sample_num)
         return;
 
     if (data->get_channel_num() < 2)
         return;
 
-    auto k1 = _dsoSig1->get_factor();
-    auto k2 = _dsoSig2->get_factor();
+    auto k1 = static_cast<uint64_t>(m1->vfactor());
+    auto k2 = static_cast<uint64_t>(m2->vfactor());
 
-    const double scale1 = _dsoSig1->get_vDialValue() / 1000.0 * k1 * DS_CONF_DSO_VDIVS *
-                          _dsoSig1->get_scale() / _dsoSig1->get_view_rect().height();
+    // The original view-based formula was:
+    //   scale = vdiv / 1000.0 * vfactor * DS_CONF_DSO_VDIVS
+    //           * (height / (ref_max - ref_min) * _stop_scale) / height
+    //         = vdiv / 1000.0 * vfactor * DS_CONF_DSO_VDIVS
+    //           * _stop_scale / (ref_max - ref_min)
+    // _stop_scale defaults to 1 and is only mutated during vDial navigation.
+    // In the Core layer (no View) we cannot read _stop_scale, so we use 1.0
+    // and follow the same 8-bit ADC assumption (255.0) as SpectrumStack.
+    const double scale1 = static_cast<double>(m1->vdiv()) / 1000.0 * k1 *
+                          DS_CONF_DSO_VDIVS / 255.0;
 
-    const double delta1 = _dsoSig1->get_hw_offset() * scale1;
+    const double delta1 = m1->hw_offset() * scale1;
 
-    const double scale2 = _dsoSig2->get_vDialValue() / 1000.0 * k2 * DS_CONF_DSO_VDIVS *
-                          _dsoSig2->get_scale() / _dsoSig2->get_view_rect().height();
+    const double scale2 = static_cast<double>(m2->vdiv()) / 1000.0 * k2 *
+                          DS_CONF_DSO_VDIVS / 255.0;
 
-    const double delta2 = _dsoSig2->get_hw_offset() * scale2;
+    const double delta2 = m2->hw_offset() * scale2;
 
     _sample_num = data->get_sample_count();
     assert(_sample_num <= _total_sample_num);
 
-    const int index1 = _dsoSig1->get_index();
-    const int index2 = _dsoSig2->get_index();
+    const int index1 = _ch1_index;
+    const int index2 = _ch2_index;
     const uint8_t* value_buffer1 = data->get_samples(0, 0, index1);
     const uint8_t* value_buffer2 = data->get_samples(0, 0, index2);
     double value1, value2;
@@ -403,7 +455,7 @@ void MathStack::calc_math(uint64_t mathFactor)
         value1 = *(value_buffer1 + sample);
         value2 = *(value_buffer2 + sample);
 
-        switch(_type) 
+        switch(_type)
         {
             case MATH_ADD:
                 _math[sample] = ((delta1 - scale1 * value1) + (delta2 - scale2 * value2)) / mathFactor;

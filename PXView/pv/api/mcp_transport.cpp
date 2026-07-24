@@ -2,13 +2,64 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../core/eventbus.h"
+#include <QCoreApplication>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
-#include <QCoreApplication>
+#include <QThread>
 #include <QTimer>
 
 using json = nlohmann::json;
+
+namespace {
+
+// Map ServiceEvent enum to a stable string identifier for JSON-RPC notifications.
+const char* service_event_to_string(pv::api::ServiceEvent event)
+{
+    switch (event) {
+    case pv::api::ServiceEvent::CaptureStateChanged:    return "CaptureStateChanged";
+    case pv::api::ServiceEvent::DataUpdated:            return "DataUpdated";
+    case pv::api::ServiceEvent::TriggerReceived:        return "TriggerReceived";
+    case pv::api::ServiceEvent::FrameBegan:             return "FrameBegan";
+    case pv::api::ServiceEvent::FrameEnded:             return "FrameEnded";
+    case pv::api::ServiceEvent::CaptureProgress:        return "CaptureProgress";
+    case pv::api::ServiceEvent::DeviceListUpdated:      return "DeviceListUpdated";
+    case pv::api::ServiceEvent::DeviceModeChanged:      return "DeviceModeChanged";
+    case pv::api::ServiceEvent::DeviceConfigChanged:    return "DeviceConfigChanged";
+    case pv::api::ServiceEvent::DeviceDetached:         return "DeviceDetached";
+    case pv::api::ServiceEvent::NewUsbDevice:           return "NewUsbDevice";
+    case pv::api::ServiceEvent::GlitchFilterStarted:    return "GlitchFilterStarted";
+    case pv::api::ServiceEvent::GlitchFilterProgress:   return "GlitchFilterProgress";
+    case pv::api::ServiceEvent::GlitchFilterCompleted:  return "GlitchFilterCompleted";
+    case pv::api::ServiceEvent::GlitchFilterCleared:    return "GlitchFilterCleared";
+    case pv::api::ServiceEvent::SignalInvertStarted:    return "SignalInvertStarted";
+    case pv::api::ServiceEvent::SignalInvertCompleted:  return "SignalInvertCompleted";
+    case pv::api::ServiceEvent::SignalInvertCleared:    return "SignalInvertCleared";
+    case pv::api::ServiceEvent::DecodeDone:             return "DecodeDone";
+    case pv::api::ServiceEvent::DecoderAdded:           return "DecoderAdded";
+    case pv::api::ServiceEvent::DecoderRemoved:         return "DecoderRemoved";
+    case pv::api::ServiceEvent::DecodeProgress:         return "DecodeProgress";
+    case pv::api::ServiceEvent::SampleConfigChanged:    return "SampleConfigChanged";
+    case pv::api::ServiceEvent::ChannelConfigChanged:   return "ChannelConfigChanged";
+    case pv::api::ServiceEvent::TriggerConfigChanged:   return "TriggerConfigChanged";
+    case pv::api::ServiceEvent::SaveComplete:           return "SaveComplete";
+    case pv::api::ServiceEvent::LoadComplete:           return "LoadComplete";
+    case pv::api::ServiceEvent::ExportComplete:         return "ExportComplete";
+    case pv::api::ServiceEvent::SignalsChanged:         return "SignalsChanged";
+    case pv::api::ServiceEvent::ViewShowRegion:         return "ViewShowRegion";
+    case pv::api::ServiceEvent::ViewZoomFit:            return "ViewZoomFit";
+    case pv::api::ServiceEvent::ViewZoomIn:             return "ViewZoomIn";
+    case pv::api::ServiceEvent::ViewZoomOut:            return "ViewZoomOut";
+    case pv::api::ServiceEvent::ViewCursorAdded:        return "ViewCursorAdded";
+    case pv::api::ServiceEvent::ViewCursorRemoved:      return "ViewCursorRemoved";
+    case pv::api::ServiceEvent::ViewCursorsCleared:     return "ViewCursorsCleared";
+    case pv::api::ServiceEvent::ErrorOccurred:          return "ErrorOccurred";
+    }
+    return "Unknown";
+}
+
+} // namespace
 
 namespace pv::api {
 
@@ -52,6 +103,55 @@ void McpTransport::stop()
 bool McpTransport::is_running() const
 {
     return _server && _server->isListening();
+}
+
+void McpTransport::on_service_event(const ServiceEventData& data)
+{
+    // MCP transport sockets live on the main thread. If invoked from a worker
+    // thread (e.g. SessionService::broadcast_event from a feed/device thread),
+    // re-post to the main thread so send_sse_event touches the socket on the
+    // correct thread.
+    //
+    // CRITICAL: Use EventBus::post_async_dispatch (QCoreApplication::postEvent)
+    // instead of QMetaObject::invokeMethod. invokeMethod internally calls
+    // QThread::currentThread() which creates a QThreadData on the worker thread
+    // → SIGSEGV on thread exit (LdrShutdownThread). postEvent only accesses
+    // the receiver's (qApp's) QThreadData — safe for worker threads.
+    if (!pv::core::EventBus::on_main_thread()) {
+        pv::core::EventBus::post_async_dispatch(
+            [this, data]() { on_service_event(data); });
+        return;
+    }
+
+    // Build a JSON-RPC notification payload.
+    json notification;
+    notification["jsonrpc"] = "2.0";
+    notification["method"] = "event";
+
+    json params;
+    params["type"] = service_event_to_string(data.event);
+
+    json params_map = json::object();
+    for (const auto& [key, value] : data.params) {
+        params_map[key] = value;
+    }
+    params["data"] = params_map;
+    notification["params"] = params;
+
+    const std::string payload = notification.dump();
+
+    // Push to every client currently holding an open SSE stream (e.g. a
+    // wait_capture in progress). The wait_capture QEventLoop processes Qt
+    // events, so this queued slot runs while the SSE stream is still open.
+    // HTTP MCP clients without an open SSE stream cannot be pushed to (HTTP
+    // is request/response); they will see the updated state on their next
+    // request.
+    std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+    for (auto* socket : _sse_clients) {
+        if (socket && socket->state() == QAbstractSocket::ConnectedState) {
+            send_sse_event(socket, "event", payload);
+        }
+    }
 }
 
 void McpTransport::on_new_connection()
@@ -437,6 +537,16 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
     // Send SSE headers immediately
     send_sse_headers(socket);
 
+    // Register this socket as an active SSE subscriber so that
+    // on_service_event can push JSON-RPC notifications (CaptureStateChanged,
+    // SampleConfigChanged, ...) to the client while wait_capture is running.
+    // The blocking handle_request below drives its own QEventLoop, so queued
+    // main-thread invocations (including on_service_event) are processed here.
+    {
+        std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+        _sse_clients.insert(socket);
+    }
+
     // Parse timeout from arguments
     double timeout_seconds = 300.0;
     try {
@@ -502,6 +612,13 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
             {"content", json::array({{{"type", "text"}, {"text", error_text}}})},
             {"isError", true}
         };
+    }
+
+    // Unregister before closing so on_service_event stops pushing to this
+    // socket (send_sse_done will disconnect the host).
+    {
+        std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+        _sse_clients.remove(socket);
     }
 
     // Send the final result as an SSE event and close

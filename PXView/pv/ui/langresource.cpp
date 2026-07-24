@@ -105,12 +105,29 @@ bool LangResource::Load(int lang)
     num = sizeof(lange_page_keys) / sizeof(lang_page_item);
 
     for (int i = 0; i < num; i++)
-    { 
+    {
         Lang_resource_page *p = new Lang_resource_page();
         p->_id = lange_page_keys[i].id;
         p->_source = lange_page_keys[i].source;
         p->_is_dynamic = lange_page_keys[i].is_dynamic;
         _pages.push_back(p);
+    }
+
+    // P0-1: Preload all non-dynamic pages on the main thread.
+    // LangResource::Load() is invoked at startup by MainWindow/AppControl on the
+    // main thread. load_page() constructs a QFile (a QObject subclass); QObject
+    // construction calls QThreadData::current() which creates a QThreadData on the
+    // calling thread. If a decode worker thread later triggers load_page() via the
+    // L_S macro -> get_lang_text() path, the QThreadData would be created on the
+    // worker thread, and LdrShutdownThread would destroy it on thread exit,
+    // causing SIGSEGV. Preloading here guarantees _current_page->_loaded is always
+    // true for non-dynamic pages, so the worker thread never enters load_page().
+    // Safe w.r.t. locking: Load() already holds _mutex and load_page() does not
+    // reacquire it.
+    for (Lang_resource_page *p : _pages)
+    {
+        if (!p->_is_dynamic)
+            load_page(*p);
     }
 
     return true;

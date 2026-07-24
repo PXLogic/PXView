@@ -26,10 +26,16 @@
 
 #include "signal.h"
 
+#include <memory>
+
 namespace pv {
+
+class SigSession;
 
 namespace data {
 class AnalogSnapshot;
+class SignalModel;
+class DataSource;
 }
 
 namespace view {
@@ -51,9 +57,13 @@ private:
 
 public:
     AnalogSignal(data::AnalogSnapshot *data,
-                 sr_channel *probe);
+                 std::shared_ptr<data::SignalModel> model,
+                 data::DataSource *data_source);
 
-    AnalogSignal(view::AnalogSignal* s, data::AnalogSnapshot *data,  sr_channel *probe);
+    AnalogSignal(view::AnalogSignal* s,
+                 data::AnalogSnapshot *data,
+                 std::shared_ptr<data::SignalModel> model,
+                 data::DataSource *data_source);
 
 	virtual ~AnalogSignal();
 
@@ -170,8 +180,14 @@ private:
 	pv::data::AnalogSnapshot *_data;
 
     QRectF *_rects;
+    // 性能修复: paint_trace 复用成员缓冲，避免每帧 new/delete QPointF[]。
+    // 与 _rects 同生命周期管理 (构造 NULL / 析构+resize 释放 / 按需扩容)。
+    QPointF *_points;
+    int64_t _points_cap;
 
 	float _scale;
+    // float 电压数据的缩放（参考 PulseView scale_ = div_height / resolution）。
+    // ADC 整数路径用 _scale + hw_offset；float 路径用 _float_scale 直接缩放电压值。
     double _zero_vrate;
     int _zero_offset;
     int _cached_hw_offset;
@@ -180,9 +196,10 @@ private:
     double _ref_max;
 
     bool _hover_en;
-    uint64_t _hover_index;
-    QPointF _hover_point;
-    float _hover_value;
+	uint64_t _hover_index;
+	QPointF _hover_point;
+	float _hover_value;
+	float _float_scale;
 };
 
 } // namespace view

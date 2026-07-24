@@ -91,6 +91,9 @@ QString Row::title_id() const
 
 bool Row::operator<(const Row &other) const
 {
+    if (!_decoder) {
+        return false;
+    }
     assert(_decoder);
 
     return (_decoder < other._decoder) ||

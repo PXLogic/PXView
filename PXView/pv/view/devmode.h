@@ -33,8 +33,9 @@
 #include <QVector> 
 #include <QLabel>
 #include <QIcon>
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h>
 
+#include "../dsvdef.h"
 #include "../interface/icallbacks.h"
 #include "../ui/xtoolbutton.h"
 #include "../ui/uimanager.h"
@@ -93,6 +94,10 @@ private slots:
 
 signals:
     void header_collapse_changed(bool collapsed);
+    void mode_change_requested(int mode);
+    void stop_capture_requested();
+    void save_session_requested();
+    void close_file_requested(ds_device_handle dev_handle);
 
 private:
     SigSession *_session;

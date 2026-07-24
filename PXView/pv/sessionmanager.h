@@ -1,12 +1,14 @@
 #ifndef PXVIEW_PV_SESSIONMANAGER_H
 #define PXVIEW_PV_SESSIONMANAGER_H
 
+#include <cstddef>
 #include <vector>
 
 namespace pv {
 
 namespace view { class View; }
 namespace data { class SessionDocument; }
+namespace core { class DocumentRegistry; }
 
 class SigSession;
 class TabContext;
@@ -16,7 +18,11 @@ class SessionManager
 public:
     static SessionManager* instance();
 
-    TabContext* create_context(view::View *view, SigSession *session, data::SessionDocument *doc);
+    // phase 2: doc_index + registry threaded through so TabContext can release
+    // its document slot on destruction (ownership is in DocumentRegistry).
+    TabContext* create_context(view::View *view, SigSession *session,
+                               data::SessionDocument *doc, size_t doc_index,
+                               core::DocumentRegistry *registry);
     void destroy_context(TabContext *ctx);
 
     void detach_context(TabContext *ctx);

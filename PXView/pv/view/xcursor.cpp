@@ -160,12 +160,13 @@ void XCursor::paint(QPainter &p, const QRect &rect, XCur_type highlight)
 {   
     // Attach the channel
     if (_dsoSig == NULL && _sig_index != -1){
-        auto sig = _view.session().get_signal_by_index(_sig_index);
-        if (sig != NULL){
-            _dsoSig = dynamic_cast<DsoSignal*>(sig);
-
-            if (_dsoSig != NULL){
-                connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
+        for (auto s : _view.get_own_signals()) {
+            if (s->signal_type() == SR_CHANNEL_DSO && s->get_index() == _sig_index) {
+                _dsoSig = dynamic_cast<DsoSignal*>(s);
+                if (_dsoSig != NULL){
+                    connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
+                }
+                break;
             }
         }
     }

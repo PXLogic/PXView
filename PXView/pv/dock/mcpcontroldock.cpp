@@ -30,8 +30,9 @@ namespace dock {
 
 static const int MCP_PORT = 10110;
 
-McpControlDock::McpControlDock(QWidget *parent)
+McpControlDock::McpControlDock(AppControl *app, QWidget *parent)
     : QWidget(parent)
+    , _app(app)
     , _status_label(nullptr)
     , _address_label(nullptr)
     , _btn_open_web(nullptr)
@@ -39,6 +40,12 @@ McpControlDock::McpControlDock(QWidget *parent)
 {
     setup_ui();
     refresh_status();
+    ADD_UI(this);
+}
+
+McpControlDock::~McpControlDock()
+{
+    REMOVE_UI(this);
 }
 
 void McpControlDock::setup_ui()
@@ -51,20 +58,16 @@ void McpControlDock::setup_ui()
     QFont content_font = dock_font_content();
 
     // --- Section 1: Web Console ---
-    QLabel *section1_title = new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_WEB_CONSOLE), "Web Console"), this);
-    section1_title->setFont(title_font);
-    layout->addWidget(section1_title);
+    _section1_title = new QLabel(this);
+    _section1_title->setFont(title_font);
+    layout->addWidget(_section1_title);
 
-    QLabel *section1_desc = new QLabel(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_WEB_CONSOLE_DESC),
-            "Open the visual diagnostic interface to control devices using natural language."),
-        this);
-    section1_desc->setWordWrap(true);
-    section1_desc->setFont(content_font);
-    layout->addWidget(section1_desc);
+    _section1_desc = new QLabel(this);
+    _section1_desc->setWordWrap(true);
+    _section1_desc->setFont(content_font);
+    layout->addWidget(_section1_desc);
 
-    _btn_open_web = new QPushButton(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_OPEN_WEB), "Open MCP Web Console"), this);
+    _btn_open_web = new QPushButton(this);
     _btn_open_web->setMinimumHeight(36);
     connect(_btn_open_web, &QPushButton::clicked, this, &McpControlDock::on_open_web_console);
     layout->addWidget(_btn_open_web);
@@ -72,9 +75,9 @@ void McpControlDock::setup_ui()
     layout->addSpacing(8);
 
     // --- Section 2: Connect AI Tool ---
-    QLabel *section2_title = new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_DEVELOPER), "Connect AI Tool"), this);
-    section2_title->setFont(title_font);
-    layout->addWidget(section2_title);
+    _section2_title = new QLabel(this);
+    _section2_title->setFont(title_font);
+    layout->addWidget(_section2_title);
 
     // Status row
     QHBoxLayout *status_layout = new QHBoxLayout();
@@ -87,13 +90,10 @@ void McpControlDock::setup_ui()
     status_layout->addWidget(_address_label);
     layout->addLayout(status_layout);
 
-    QLabel *section2_desc = new QLabel(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_DEVELOPER_DESC),
-            "Run the command below in your terminal to connect your AI tool to PXView."),
-        this);
-    section2_desc->setWordWrap(true);
-    section2_desc->setFont(content_font);
-    layout->addWidget(section2_desc);
+    _section2_desc = new QLabel(this);
+    _section2_desc->setWordWrap(true);
+    _section2_desc->setFont(content_font);
+    layout->addWidget(_section2_desc);
 
     // Command rows
     QString port_str = QString::number(MCP_PORT);
@@ -106,8 +106,7 @@ void McpControlDock::setup_ui()
 
     layout->addSpacing(8);
 
-    _btn_restart = new QPushButton(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_RESTART), "Restart MCP Service"), this);
+    _btn_restart = new QPushButton(this);
     _btn_restart->setMinimumHeight(36);
     connect(_btn_restart, &QPushButton::clicked, this, &McpControlDock::on_restart_mcp);
     layout->addWidget(_btn_restart);
@@ -115,19 +114,16 @@ void McpControlDock::setup_ui()
     layout->addSpacing(8);
 
     // --- Section 3: System Prompt ---
-    QLabel *section3_title = new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT), "System Prompt (for AI)"), this);
-    section3_title->setFont(title_font);
-    layout->addWidget(section3_title);
+    _section3_title = new QLabel(this);
+    _section3_title->setFont(title_font);
+    layout->addWidget(_section3_title);
 
-    QLabel *section3_desc = new QLabel(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT_DESC),
-            "Copy this text and give it to your AI tool to guide its behavior:"),
-        this);
-    section3_desc->setWordWrap(true);
-    section3_desc->setFont(content_font);
-    layout->addWidget(section3_desc);
+    _section3_desc = new QLabel(this);
+    _section3_desc->setWordWrap(true);
+    _section3_desc->setFont(content_font);
+    layout->addWidget(_section3_desc);
 
-    QString system_prompt = 
+    QString system_prompt =
         "You are an AI assistant that controls a PXView logic analyzer through MCP tools. You help users capture signals, decode protocols, and analyze data.\n\n"
         "## Recommended Workflow\n"
         "1. **get_devices** — Find connected devices first\n"
@@ -165,17 +161,18 @@ void McpControlDock::setup_ui()
     prompt_text->setStyleSheet("background: transparent;");
     prompt_layout->addWidget(prompt_text);
 
-    QPushButton *copy_prompt_btn = new QPushButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_SYSTEM_PROMPT), "Copy System Prompt"), this);
-    copy_prompt_btn->setMinimumHeight(24);
-    copy_prompt_btn->setFont(QFont("", 8));
-    copy_prompt_btn->setToolTip(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_TOOLTIP), "Copy to clipboard"));
-    copy_prompt_btn->setProperty("cmd_text", system_prompt);
-    connect(copy_prompt_btn, &QPushButton::clicked, this, &McpControlDock::on_copy_command);
-    prompt_layout->addWidget(copy_prompt_btn);
+    _copy_prompt_btn = new QPushButton(this);
+    _copy_prompt_btn->setMinimumHeight(24);
+    _copy_prompt_btn->setFont(QFont("", 8));
+    _copy_prompt_btn->setProperty("cmd_text", system_prompt);
+    connect(_copy_prompt_btn, &QPushButton::clicked, this, &McpControlDock::on_copy_command);
+    prompt_layout->addWidget(_copy_prompt_btn);
 
     layout->addWidget(prompt_frame);
 
     layout->addStretch();
+
+    retranslateUi();
 }
 
 void McpControlDock::add_command_row(QVBoxLayout *parent_layout, const QString &tool_name,
@@ -200,16 +197,44 @@ void McpControlDock::add_command_row(QVBoxLayout *parent_layout, const QString &
     cmd_label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     frame_layout->addWidget(cmd_label);
 
-    QPushButton *copy_btn = new QPushButton("Copy", this);
+    QPushButton *copy_btn = new QPushButton(this);
     copy_btn->setMinimumHeight(24);
     copy_btn->setFont(QFont("", 8));
-    copy_btn->setToolTip(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_TOOLTIP), "Copy to clipboard"));
     // Store command as property for the slot
     copy_btn->setProperty("cmd_text", command);
     connect(copy_btn, &QPushButton::clicked, this, &McpControlDock::on_copy_command);
     frame_layout->addWidget(copy_btn);
 
+    _command_copy_btns.append(copy_btn);
+
     parent_layout->addWidget(cmd_frame);
+}
+
+void McpControlDock::retranslateUi()
+{
+    _section1_title->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_WEB_CONSOLE), "Web Console"));
+    _section1_desc->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_WEB_CONSOLE_DESC),
+        "Open the visual diagnostic interface to control devices using natural language."));
+    _btn_open_web->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_OPEN_WEB), "Open MCP Web Console"));
+    _section2_title->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_DEVELOPER), "Connect AI Tool"));
+    _section2_desc->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_DEVELOPER_DESC),
+        "Run the command below in your terminal to connect your AI tool to PXView."));
+    _btn_restart->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_RESTART), "Restart MCP Service"));
+    _section3_title->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT), "System Prompt (for AI)"));
+    _section3_desc->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_SYSTEM_PROMPT_DESC),
+        "Copy this text and give it to your AI tool to guide its behavior:"));
+    _copy_prompt_btn->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_SYSTEM_PROMPT), "Copy System Prompt"));
+    _copy_prompt_btn->setToolTip(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_TOOLTIP), "Copy to clipboard"));
+
+    const QString copy_text = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY), "Copy");
+    const QString copy_tip = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_COPY_TOOLTIP), "Copy to clipboard");
+    for (QPushButton *btn : _command_copy_btns) {
+        btn->setText(copy_text);
+        btn->setToolTip(copy_tip);
+    }
+
+    // status label 在 refresh_status() 中通过 L_S 实时获取,这里触发一次刷新
+    refresh_status();
 }
 
 void McpControlDock::refresh_status()
@@ -260,11 +285,14 @@ void McpControlDock::on_restart_mcp()
 
 pv::api::McpTransport* McpControlDock::get_mcp_transport() const
 {
-    auto *app = ::AppControl::Instance();
-    if (!app)
+    if (!_app)
         return nullptr;
-    return app->get_mcp_transport();
+    return _app->get_mcp_transport();
 }
+
+void McpControlDock::UpdateLanguage() { retranslateUi(); }
+void McpControlDock::UpdateTheme() {}
+void McpControlDock::UpdateFont() {}
 
 } // namespace dock
 } // namespace pv

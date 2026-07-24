@@ -32,20 +32,16 @@
 #include "logicsnapshot.h"
 #include "analogsnapshot.h"
 #include "dsosnapshot.h"
+#include "signalmodel.h"
+#include "lissajousmodel.h"
 
 namespace pv {
 
-namespace view {
-class Signal;
-class DecodeTrace;
-class SpectrumTrace;
-class LissajousTrace;
-class MathTrace;
-}
-
 namespace data {
 
-class DecoderModel;
+class DecoderStack;
+class SpectrumStack;
+class MathStack;
 
 class SessionSnapshot : public DataSource
 {
@@ -53,11 +49,12 @@ public:
     SessionSnapshot();
     ~SessionSnapshot();
 
-    std::vector<view::Signal*>& get_signals() override;
-    std::vector<view::DecodeTrace*>& get_decode_signals() override;
-    std::vector<view::SpectrumTrace*>& get_spectrum_traces() override;
-    view::LissajousTrace* get_lissajous_trace() override;
-    view::MathTrace* get_math_trace() override;
+    std::vector<std::shared_ptr<SignalModel>>& get_signal_models() override;
+    std::vector<std::shared_ptr<DecoderStack>>& get_decoder_stacks(
+        SessionDocument *doc = nullptr) override;
+    std::vector<std::shared_ptr<SpectrumStack>>& get_spectrum_stacks() override;
+    std::shared_ptr<MathStack> get_math_stack() override;
+    LissajousModel* get_lissajous_model() override;
     uint64_t cur_snap_samplerate() override;
     uint64_t cur_samplelimits() override;
     double cur_sampletime() override;
@@ -66,8 +63,31 @@ public:
     data::AnalogSnapshot* get_analog_snapshot() override;
     data::DsoSnapshot* get_dso_snapshot() override;
     data::Snapshot* get_snapshot(int type) override;
-    data::DecoderModel* get_decoder_model() override;
     uint64_t get_trigger_pos() override;
+
+    // Task D6: DataSource facade/business overrides — stubs returning
+    // defaults because SessionSnapshot is a frozen data snapshot, not the
+    // live session. Only SigSession performs real work for these.
+    double cur_view_time() override;
+    int get_map_zoom() override;
+    double get_logic_data_view_time() override;
+    const TriggerConfig& trigger_config() const override;
+    bool is_repeating() override;
+    bool is_running_status() override;
+    bool is_instant() override;
+    bool have_view_data() override;
+    bool is_working() override;
+    bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus,
+                     std::list<decode::Decoder *> &sub_decoders,
+                     std::shared_ptr<DecoderStack> &out_stack,
+                     SessionDocument *doc = nullptr) override;
+    void remove_decoder_by_key_handel(void *handel,
+                                      SessionDocument *doc = nullptr) override;
+    void rst_decoder_by_key_handel(void *handel,
+                                   SessionDocument *doc = nullptr) override;
+    void clear_all_decoder(bool bUpdateView = true) override;
+    void start_all_decode_tasks() override;
+    void update_dso_data_scale() override;
 
     void set_samplerate(uint64_t rate);
     void set_samplelimits(uint64_t limits);
@@ -98,12 +118,11 @@ private:
     AnalogSnapshot _analog;
     DsoSnapshot _dso;
 
-    std::vector<view::Signal*> _signals;
-    std::vector<view::DecodeTrace*> _decode_traces;
-    std::vector<view::SpectrumTrace*> _spectrum_traces;
-    view::LissajousTrace *_lissajous_trace;
-    view::MathTrace *_math_trace;
-    DecoderModel *_decoder_model;
+    std::vector<std::shared_ptr<SignalModel>> _signal_models;
+    std::vector<std::shared_ptr<DecoderStack>> _decoder_stacks;
+    std::vector<std::shared_ptr<SpectrumStack>> _spectrum_stacks;
+    std::shared_ptr<MathStack> _math_stack = nullptr;
+    LissajousModel *_lissajous_model = nullptr;
 
     QDateTime _timestamp;
     QString _file_path;

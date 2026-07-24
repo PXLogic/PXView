@@ -136,19 +136,22 @@ void SpectrumStack::calc_fft()
     _spectrum_state = Running;
     // Get the dso data
     pv::data::DsoSnapshot *data = NULL;
-    pv::view::DsoSignal *dsoSig = NULL;
+    std::shared_ptr<pv::data::SignalModel> model;
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            dsoSig = (view::DsoSignal*)s;
-            if (dsoSig->get_index() == _index && dsoSig->enabled()) {
-                data = dsoSig->data();
+    for(auto m : _session->get_signal_models()) {
+        if (m->type() == SR_CHANNEL_DSO) {
+            if (m->index() == _index && m->enabled()) {
+                data = (pv::data::DsoSnapshot*)m->snapshot();
+                model = m;
                 break;
             }
         }
     }
 
-    if (data == NULL || data->empty())
+    if (data == NULL || model == NULL)
+        return;
+
+    if (data->empty())
         return;
 
     if (data->get_sample_count() < _sample_num * _sample_interval)
@@ -159,9 +162,10 @@ void SpectrumStack::calc_fft()
     if (_samplerate == 0.0)
         _samplerate = 1.0;
 
-    // prepare _xn data
-    const int offset = dsoSig->get_hw_offset();
-    const double vscale = dsoSig->get_vDialValue() * dsoSig->get_factor() * DS_CONF_DSO_VDIVS / (1000*255.0);
+    // prepare _xn data — read hardware offset / vdiv / vfactor from the
+    // SignalModel (pure data layer, no view::DsoSignal dependency).
+    const int offset = model->hw_offset();
+    const double vscale = model->vdiv() * model->vfactor() * DS_CONF_DSO_VDIVS / (1000*255.0);
     const uint16_t step = _sample_interval;
     const uint8_t *const samples = data->get_samples(0, _sample_num*_sample_interval-1, _index);
     double wsum = 0;

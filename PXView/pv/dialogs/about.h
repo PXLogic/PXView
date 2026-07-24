@@ -26,13 +26,13 @@
 #define PXVIEW_PV_ABOUT_H
 
 #include <QLabel>
-#include "dsdialog.h"
+#include "pxdialog.h"
 
   
 namespace pv {
 namespace dialogs {
 
-class About : public DSDialog
+class About : public PxDialog
 {
 	Q_OBJECT
 

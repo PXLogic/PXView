@@ -26,7 +26,9 @@
 #define PXVIEW_PV_VIEW_RULER_H
 
 #include <QWidget>
+#include <QColor>
 #include <stdint.h>
+#include "../ui/uimanager.h"
 
 #define CURSOR_HSB_COLOR_TABLE_LENGTH   22
 
@@ -38,7 +40,7 @@ class View;
 
 //the rule panel on the top
 //created by View
-class Ruler : public QWidget
+class Ruler : public QWidget, public IUiWindow
 {
 	Q_OBJECT
 
@@ -60,6 +62,7 @@ public:
 
 public:
 	Ruler(View &parent);
+    ~Ruler();
 
     static QString format_time(double t, int prefix,
         unsigned precision = pricision);
@@ -81,6 +84,11 @@ private:
     void mousePressEvent(QMouseEvent *event);
     void mouseReleaseEvent(QMouseEvent *event);
     void leaveEvent(QEvent *);
+
+    //IUiWindow
+    void UpdateLanguage() override;
+    void UpdateTheme() override;
+    void UpdateFont() override;
 
 private:
     void draw_logic_tick_mark(QPainter &p);
@@ -113,6 +121,11 @@ private:
     unsigned int _cur_prefix;
     bool _hitCursor;
     bool _curs_moved;
+
+    // 主动缓存的标尺前景色,避免依赖 Qt 的 stylesheet→palette 传播
+    // (与 Header 同理:启动时序、父级自带 stylesheet、事件顺序均会导致
+    // palette 拿到默认黑色,在暗色主题下刻度文字/悬停箭头变黑不可见)
+    QColor  _foreColor;
 };
 
 } // namespace view

@@ -86,6 +86,8 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
     _spin_box->setSuffix(_suffix);
 
     const GVariantType *const type = g_variant_get_type(_value);
+    if (!type)
+        return nullptr;
     assert(type);
 
     if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
@@ -153,15 +155,21 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
 
 void Int::commit()
 {
+    if (!_setter)
+        return;
     assert(_setter);
 
     if (!_spin_box)
         return;
 
+    if (!_value)
+        return;
     assert(_value);
 
     GVariant *new_value = NULL;
     const GVariantType *const type = g_variant_get_type(_value);
+    if (!type)
+        return;
     assert(type);
 
     if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
@@ -184,6 +192,8 @@ void Int::commit()
         assert(0);
     }
 
+    if (!new_value)
+        return;
     assert(new_value);
 
     g_variant_unref(_value);

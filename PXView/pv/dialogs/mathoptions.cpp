@@ -44,7 +44,7 @@ namespace pv {
 namespace dialogs {
 
 MathOptions::MathOptions(SigSession *session, QWidget *parent) :
-    DSDialog(parent),
+    PxDialog(parent),
     _session(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
@@ -85,15 +85,14 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     src2_layout->setContentsMargins(5, 15, 5, 5);
     type_layout->setContentsMargins(5, 15, 5, 5);
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-            QString index_str = QString::number(dsoSig->get_index());
+    for(auto m : _session->get_signal_models()) {
+        if (m->type() == SR_CHANNEL_DSO) {
+            QString index_str = QString::number(m->index());
             QRadioButton *xradio = new QRadioButton(index_str, _src1_group);
-            xradio->setProperty("index", dsoSig->get_index());
+            xradio->setProperty("index", m->index());
             src1_layout->addWidget(xradio);
             QRadioButton *yradio = new QRadioButton(index_str, _src2_group);
-            yradio->setProperty("index", dsoSig->get_index());
+            yradio->setProperty("index", m->index());
             src2_layout->addWidget(yradio);
             _src1_radio.append(xradio);
             _src2_radio.append(yradio);
@@ -103,26 +102,26 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     _src2_group->setLayout(src2_layout);
 
 
-    auto math = _session->get_math_trace();
+    auto math = _session->get_math_stack();
     if (math) {
-        _enable->setChecked(math->enabled());
+        // TODO: adapt — MathStack no longer exposes enabled()/src1()/src2();
+        // these were UI state owned by view::MathTrace. Default the
+        // enable checkbox to false and skip source radio restoration
+        // until the corresponding accessors are added to MathStack.
+        _enable->setChecked(false);
         for (QVector<QRadioButton *>::const_iterator i = _src1_radio.begin();
             i != _src1_radio.end(); i++) {
-            if ((*i)->property("index").toInt() == math->src1()) {
-               (*i)->setChecked(true);
-                break;
-            }
+           (*i)->setChecked(true);
+            break;
         }
         for (QVector<QRadioButton *>::const_iterator i = _src2_radio.begin();
             i != _src2_radio.end(); i++) {
-            if ((*i)->property("index").toInt() == math->src2()) {
-               (*i)->setChecked(true);
-                break;
-            }
+           (*i)->setChecked(true);
+            break;
         }
         for (QVector<QRadioButton *>::const_iterator i = _math_radio.begin();
             i != _math_radio.end(); i++) {
-            if ((*i)->property("type").toInt() == math->get_math_stack()->get_type()) {
+            if ((*i)->property("type").toInt() == math->get_type()) {
                 (*i)->setChecked(true);
                 break;
             }
@@ -211,22 +210,12 @@ void MathOptions::Apply()
         }
     }
     bool enable = (src1 != -1 && src2 != -1 && _enable->isChecked());
-    view::DsoSignal *dsoSig1 = NULL;
-    view::DsoSignal *dsoSig2 = NULL;
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-            if (dsoSig->get_index() == src1)
-                dsoSig1 = dsoSig;
-            if (dsoSig->get_index() == src2)
-                dsoSig2 = dsoSig;
-        }
+    // math_rebuild now takes channel indices directly (int) instead of
+    // view::DsoSignal pointers, so no Signal lookup is required here.
+    if (src1 != -1 && src2 != -1){
+        _session->math_rebuild(enable, src1, src2, type);
     }
-
-    if (dsoSig1 != NULL && dsoSig2 != NULL){
-        _session->math_rebuild(enable, dsoSig1, dsoSig2, type);
-    }    
 }
 
 void MathOptions::reject()

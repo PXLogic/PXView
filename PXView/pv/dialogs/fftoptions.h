@@ -31,7 +31,7 @@
 #include <QCheckBox> 
  
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include "../ui/dscombobox.h"
 
 namespace pv {
@@ -40,7 +40,7 @@ class SigSession;
 
 namespace dialogs {
 
-class FftOptions : public DSDialog
+class FftOptions : public PxDialog
 {
     Q_OBJECT
 

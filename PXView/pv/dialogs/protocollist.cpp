@@ -21,7 +21,7 @@
  */
 
 #include "protocollist.h"
- 
+
 
 #include <QFormLayout>
 #include <QListWidget>
@@ -30,7 +30,7 @@
 #include "../data/decoderstack.h"
 #include "../data/decode/row.h"
 #include "../view/decodetrace.h"
-#include "../data/decodermodel.h"
+#include "../view/decodermodel.h"
 #include "../eventobject.h"
 
 #include "../ui/langresource.h"
@@ -41,14 +41,13 @@ using namespace std;
 namespace pv {
 namespace dialogs {
 
-ProtocolList::ProtocolList(QWidget *parent, SigSession *session) :
-    DSDialog(parent),
+ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::DecoderModel *decoder_model) :
+    PxDialog(parent),
     _session(session),
+    _decoder_model(decoder_model),
     _button_box(QDialogButtonBox::Ok,
         Qt::Horizontal, this)
 {
-    pv::data::DecoderModel* decoder_model = _session->get_decoder_model();
-
     _map_zoom_combobox = new DsComboBox(this);
     _map_zoom_combobox->addItem(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_FIT_TO_WINDOW), "Fit to Window"));
     _map_zoom_combobox->addItem(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_FIXED), "Fixed"));
@@ -62,12 +61,14 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session) :
     connect(_map_zoom_combobox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ProtocolList::on_set_map_zoom);
 
     _protocol_combobox = new DsComboBox(this);
-    auto &decode_sigs = _session->get_decode_signals();
+    auto &decode_sigs = _session->get_decoder_stacks();
     int index = 0;
 
     for(auto d : decode_sigs) {
-        _protocol_combobox->addItem(d->get_name());
-        if (decoder_model->getDecoderStack() == d->decoder())
+        // TODO: adapt — DecoderStack no longer exposes a UI label; use the
+        // root decoder id as the display name.
+        _protocol_combobox->addItem(QString::fromUtf8(d->get_root_decoder_id()));
+        if (decoder_model->getDecoderStack() == d.get())
             _protocol_combobox->setCurrentIndex(index);
         index++;
     }
@@ -132,23 +133,23 @@ void ProtocolList::set_protocol(int index)
     _show_label_list.clear();
 
     pv::data::DecoderStack *decoder_stack = NULL;
-    const auto &decode_sigs = _session->get_decode_signals();
+    const auto &decode_sigs = _session->get_decoder_stacks();
     int cur_index = 0;
 
     for(auto d : decode_sigs) {
         if (index == cur_index) {
-            decoder_stack = d->decoder();
+            decoder_stack = d.get();
             break;
         }
         cur_index++;
     }
 
     if (!decoder_stack){
-        _session->get_decoder_model()->setDecoderStack(NULL);
+        _decoder_model->setDecoderStack(NULL);
         return;
     }
 
-    _session->get_decoder_model()->setDecoderStack(decoder_stack);
+    _decoder_model->setDecoderStack(decoder_stack);
     int row_index = 0;
     const auto rows = decoder_stack->get_rows_lshow();
 
@@ -174,12 +175,12 @@ void ProtocolList::on_row_check(bool show)
     int index = id.toInt();
 
     pv::data::DecoderStack *decoder_stack = NULL;
-    const auto &decode_sigs = _session->get_decode_signals();
+    const auto &decode_sigs = _session->get_decoder_stacks();
     int cur_index = 0;
 
     for(auto d : decode_sigs) {
         if (cur_index == _protocol_combobox->currentIndex()) {
-            decoder_stack = d->decoder();
+            decoder_stack = d.get();
             break;
         }
         cur_index++;
@@ -197,7 +198,7 @@ void ProtocolList::on_row_check(bool show)
         }
     }
 
-    _session->get_decoder_model()->setDecoderStack(decoder_stack);
+    _decoder_model->setDecoderStack(decoder_stack);
 }
 
  void ProtocolList::on_set_map_zoom(int index)

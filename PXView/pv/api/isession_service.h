@@ -6,6 +6,61 @@ namespace pv::api {
 
 using json = nlohmann::json;
 
+// ---- Batch B result structs ----
+// Defined in the interface header so the MCP layer (rpc_dispatcher) and the
+// WS layer can both use them without pulling in SessionService internals.
+
+// Mirrors SigSession::SESSION_ERROR_STATUS (No_err/Hw_err/Malloc_err/
+// Test_timeout_err/Pkt_data_err/Data_overflow). error_pattern is a bitmask
+// of error conditions accumulated since last clear.
+struct ErrorState {
+    bool        has_error     = false;
+    int         error_code    = 0;   // SESSION_ERROR_STATUS value (0=No_err)
+    uint64_t    error_pattern = 0;   // Bitmask of error conditions
+    std::string error_message;      // Human-readable description
+};
+
+// Math trace computation result. samples is empty when no data has been
+// computed yet (MathStack::get_sample_num() == 0).
+struct MathResult {
+    bool                is_enabled = false;
+    int                 ch1_index  = -1;
+    int                 ch2_index  = -1;
+    int                 math_type  = 0;   // 0=ADD, 1=SUB, 2=MUL, 3=DIV
+    uint64_t            sample_num = 0;
+    std::vector<double> samples;
+};
+
+// FFT spectrum computation result. spectrum is empty when no data has been
+// computed yet (SpectrumStack::get_sample_num() == 0).
+struct SpectrumResult {
+    bool                is_enabled      = false;
+    int                 channel_index   = -1;
+    uint64_t            sample_num      = 0;
+    int                 windows_index   = 0;
+    bool                dc_ignored      = false;
+    int                 sample_interval = 0;
+    std::vector<double> spectrum;
+};
+
+// Lissajous trace configuration. LissajousModel is a pure config model —
+// the actual XY sample rendering is a View-layer concern (LissajousTrace),
+// so this struct exposes only the configuration, not rendered samples.
+struct LissajousResult {
+    bool is_enabled = false;
+    int  x_index    = -1;
+    int  y_index    = -1;
+    int  percent    = 0;
+};
+
+// Annotation class descriptor. class_id is the index into the decoder's
+// annotations GSList; class_name is the human-readable description string
+// declared by the decoder's __annotations__ metadata.
+struct DecoderClassInfo {
+    int         class_id   = 0;
+    std::string class_name;
+};
+
 class ISessionService {
 public:
     virtual ~ISessionService() = default;
@@ -58,6 +113,9 @@ public:
     virtual DeviceInfo get_device_info() const = 0;
     virtual WorkMode get_work_mode() const = 0;
     virtual Result<std::vector<WorkMode>> get_supported_work_modes() const = 0;
+    // Trigger a hot-plug rescan of all drivers and return the updated device
+    // list. Mirrors SigSession::refresh_device_list() + get_device_list().
+    virtual Result<std::vector<DeviceInfo>> refresh_device_list() = 0;
 
     // 4. Channel management
     virtual std::vector<ChannelInfo> get_channels() const = 0;
@@ -74,6 +132,10 @@ public:
     virtual Result<void> set_repeat_interval(double seconds) = 0;
     virtual Result<uint64_t> get_actual_sample_rate() const = 0;
     virtual Result<uint64_t> get_actual_sample_count() const = 0;
+    // Set the save range (in samples) used by export/save operations.
+    // Mirrors SigSession::set_save_start() + set_save_end().
+    virtual Result<void> set_save_range(uint64_t start_sample,
+                                        uint64_t end_sample) = 0;
 
     // 6. Trigger config
     virtual LogicTriggerConfig get_logic_trigger_config() const = 0;
@@ -142,6 +204,19 @@ public:
         const std::string& stack_on_analyzer_id = "") = 0;
     virtual Result<void> remove_decoder(const std::string& instance_id) = 0;
     virtual Result<void> clear_all_decoders() = 0;
+    // Reconfigure an existing decoder's options and channel_map in place
+    // (no remove + re-add). Triggers a re-decode of the affected stack.
+    // Mirrors SigSession::rst_decoder_by_key_handel() after applying the
+    // new options/probes to the root Decoder.
+    virtual Result<void> reconfigure_decoder(
+        const std::string& instance_id,
+        const std::map<std::string, std::string>& options,
+        const std::map<std::string, int>& channel_map) = 0;
+    // Return the annotation class names declared by a decoder (the
+    // __annotations__ metadata). class_id is the index into the decoder's
+    // annotations GSList and matches the ann_class field of DecoderAnnotation.
+    virtual Result<std::vector<DecoderClassInfo>> get_decoder_class_names(
+        const std::string& decoder_id) = 0;
 
     // 13. Decoder results
     virtual Result<std::vector<DecoderAnnotation>> get_decoder_annotations(
@@ -149,6 +224,10 @@ public:
         uint64_t start_sample = 0,
         uint64_t end_sample = UINT64_MAX,
         int max_count = 1000) = 0;
+    // Read a decoder's binary output stream. output_id selects which binary
+    // output class to read (matches srd_decoder_binary::bin_class).
+    virtual Result<std::vector<uint8_t>> get_decoder_binary_output(
+        const std::string& instance_id, int output_id) = 0;
 
     // 14. Measurements
     virtual std::vector<MeasurementValue> get_measurements() const = 0;
@@ -209,10 +288,20 @@ public:
     virtual Result<void> enable_lissajous(int16_t x_channel, int16_t y_channel, double percent) = 0;
     virtual Result<void> disable_lissajous() = 0;
     virtual Result<void> enable_math(int16_t ch1, int16_t ch2, int math_type) = 0;
+    // Read computed results from the Math/Spectrum/Lissajous stacks.
+    // is_enabled=false when the corresponding trace has not been enabled.
+    virtual Result<MathResult> get_math_results() = 0;
+    virtual Result<SpectrumResult> get_spectrum_results() = 0;
+    virtual Result<LissajousResult> get_lissajous_results() = 0;
 
     // 21. Event subscription
     virtual void add_event_listener(IServiceEventListener* listener) = 0;
     virtual void remove_event_listener(IServiceEventListener* listener) = 0;
+
+    // 22. Error state (Batch B)
+    // Mirrors SigSession::get_error()/get_error_pattern()/clear_error().
+    virtual Result<ErrorState> get_error_state() = 0;
+    virtual Result<void> clear_error_state() = 0;
 };
 
 } // namespace pv::api

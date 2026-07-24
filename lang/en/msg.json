@@ -356,6 +356,14 @@
         "text": "The device is busy, switch failed!"
     },
     {
+        "id": "IDS_MSG_DEVICE_OPEN_FAILED",
+        "text": "Failed to open device"
+    },
+    {
+        "id": "IDS_MSG_DEVICE_OPEN_FAILED_REASON",
+        "text": "The device could not be opened. Check USB connection, driver, and that no other program is using it."
+    },
+    {
         "id": "IDS_MSG_NO_ENABLED_CHANNEL",
         "text": "No channels enabled!"
     },

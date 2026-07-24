@@ -24,6 +24,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <QString>
 #include <QByteArray>
 #include <QColor>
@@ -88,7 +89,6 @@ struct AppOptions
   bool        measureDock;
   bool        searchDock;
   bool        deviceOptionsDock;
-  bool        signalProcessingDock;
   bool        logDock;
 };
 
@@ -141,6 +141,22 @@ struct FontOptions
   FontParam other;
 };
 
+// App-layer device settings that need to persist across application restarts.
+// These are global preferences (not per-device), stored in QSettings "Device" group.
+struct DeviceOptions
+{
+    double  streamMemBuff = 16.0;       // GB, in-memory ring buffer size
+    double  streamBuff = 16.0;          // GB, disk cache total depth
+    bool    diskCacheEnable = false;    // enable disk cache for stream mode
+    QString diskCachePath;              // disk cache storage path
+    QString lastDeviceDriver;           // driver name of last used device
+    QString lastDeviceConnId;           // connection ID of last used device (stable across reboots)
+    // 毛刺滤波面板配置持久化（跨会话默认值，per-channel 阈值随 .pxl 保存）
+    bool    glitchAutoApply = false;    // 采集后自动重新应用滤波
+    int     glitchDefaultThreshold = 3; // 默认滤波阈值（周期数）
+    bool    glitchShowOverlay = true;   // 显示波形轨道红色滤波提示叠加层
+};
+
 struct ShortcutItem {
     int     actionId;
     QString keySequence;
@@ -175,7 +191,8 @@ public:
   void SaveFrame();
   void SaveShortcuts();
   void SaveStyle();
-  
+  void SaveDevice();
+
   void flushPendingSaves();
   
   void SetProtocolFormat(const std::string &protocolName, const std::string &value);
@@ -196,6 +213,14 @@ public:
   QColor GetThemeColor(const QString &tokenName) const;
   QString GetThemeTokenValue(const QString &tokenName) const;
 
+  // limit_samples 应用层 fallback：当驱动返回 0（上游约定"不限制"）时使用此默认值
+  // 默认 1000000 = SR_MHZ(1)（1M 采样点）
+  uint64_t default_sample_limit() const { return default_sample_limit_; }
+  void set_default_sample_limit(uint64_t v) { default_sample_limit_ = v; }
+
+  // App-layer device settings (stream buffer sizes, disk cache, last device)
+  DeviceOptions deviceOptions;
+
 public:
   AppOptions    appOptions;
   UserHistory   userHistory;
@@ -206,15 +231,19 @@ public:
 private:
   QHash<QString, QString> _themeTokens;
 
+  uint64_t default_sample_limit_ = 1000000ULL;  // SR_MHZ(1)
+
   QTimer *_saveFrameTimer;
   QTimer *_saveAppTimer;
   QTimer *_saveHistoryTimer;
   QTimer *_saveShortcutsTimer;
   QTimer *_saveStyleTimer;
+  QTimer *_saveDeviceTimer;
 
   void doSaveFrame();
   void doSaveApp();
   void doSaveHistory();
   void doSaveShortcuts();
   void doSaveStyle();
+  void doSaveDevice();
 };

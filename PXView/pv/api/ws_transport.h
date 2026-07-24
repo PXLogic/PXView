@@ -32,6 +32,11 @@ private slots:
     void on_client_disconnected();
 
 private:
+    // Marshal-aware broadcast: if invoked off the main thread, re-posts itself
+    // to the main thread via Qt::QueuedConnection before touching QWebSocket
+    // (QWebSocket::sendTextMessage is not thread-safe).
+    void send_to_clients(const QString& msg);
+
     IJsonRpcHandler* _handler;
     int _port;
     QWebSocketServer* _server = nullptr;
