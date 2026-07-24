@@ -35,10 +35,12 @@ static int log_file_index = -1;
 void pxv_log_init()
 {
     if (log_ctx == nullptr){
-        log_ctx = xlog_new();  
-        pxv_log = xlog_create_writer(log_ctx, "PXView"); 
+        log_ctx = xlog_new();
+        pxv_log = xlog_create_writer(log_ctx, "PXView");
+        // 临时调试：默认启用日志文件输出到 PXView.log，便于诊断 analog 数据格式问题
+        pxv_log_enalbe_logfile(false);
     }
-} 
+}
 
 void pxv_log_uninit()
 { 

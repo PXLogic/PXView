@@ -21,47 +21,86 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-  
-#include <math.h> 
 #include "signal.h"
-#include "view.h" 
+#include "../data/datasource.h"
+#include "../data/signalmodel.h"
 #include "../dsvdef.h"
-#include "../appcontrol.h"
 #include "../sigsession.h"
+#include "view.h"
+#include <math.h>
 
 namespace pv {
 namespace view {
 
-Signal::Signal(sr_channel *probe) :
-    Trace(probe->name, probe->index, probe->type),
-    _probe(probe)
-{
-    session = AppControl::Instance()->GetSession();
+Signal::Signal(std::shared_ptr<data::SignalModel> model, data::DataSource *data_source)
+    : Trace(QString::fromStdString(model ? model->name() : std::string()),
+            static_cast<uint16_t>(model ? model->index() : 0),
+            model ? model->type() : SR_CHANNEL_LOGIC),
+      _model(model), _data_source(data_source) {
+  // Establish Qt signal connections directly from _model — no need to
+  // query the session for the model by index (the model is injected).
+  if (_model) {
+    connect(_model.get(), &data::SignalModel::appearance_changed, this,
+            &Signal::on_appearance_changed);
+    connect(_model.get(), &data::SignalModel::visibility_changed, this,
+            &Signal::on_visibility_changed);
+  }
 }
 
-Signal::Signal(const Signal &s, sr_channel *probe) :
-    Trace((const Trace &)s), 
-    _probe(probe),
-    _local_enabled(s._local_enabled)
-{   
-    session = AppControl::Instance()->GetSession();
+Signal::Signal(const Signal &s, std::shared_ptr<data::SignalModel> model,
+               data::DataSource *data_source)
+    : Trace((const Trace &)s), _model(model), _data_source(data_source),
+      _local_enabled(s._local_enabled) {
+  if (_model) {
+    connect(_model.get(), &data::SignalModel::appearance_changed, this,
+            &Signal::on_appearance_changed);
+    connect(_model.get(), &data::SignalModel::visibility_changed, this,
+            &Signal::on_visibility_changed);
+  }
 }
 
-bool Signal::enabled()
-{
-    return _local_enabled;
+bool Signal::enabled() { return _local_enabled; }
+
+void Signal::set_enabled(bool en) {
+  _local_enabled = en;
+  // R2: 实时写回 Core (sr_channel->enabled)，让 SigSession::reload() 重建
+  // SignalModel 时能读到正确的 enabled 状态。
+  // 不在此处广播 DeviceOptionsUpdated: MainWindow::on_event 收到该
+  // 消息会调 rebuild_signals() -> apply_model_properties() -> set_enabled()，
+  // 形成无限循环。广播由用户交互入口负责（如 DeviceOptionsDock 已有广播）。
+  // Task 6.1: 同步写回 Core SignalModel->enabled，保证 headless API
+  // 读取到最新状态。 不广播：由调用方（用户交互入口）负责广播，避免 rebuild
+  // 循环。 SignalModel::set_enabled() handles the write-back to
+  // sr_channel->enabled and to libsigrok via DeviceAgent.
+  if (_model)
+    _model->set_enabled(en);
 }
 
-void Signal::set_enabled(bool en)
-{
-    _local_enabled = en;
+void Signal::set_name(QString name) {
+  Trace::set_name(name);
+  // Phase 2: delegate to the Core SignalModel setter, which handles writing
+  // back to sr_channel->name (g_free/g_strdup) and emitting appearance_changed.
+  if (_model)
+    _model->set_name(name.toStdString());
 }
 
-void Signal::set_name(QString name)
-{
-    Trace::set_name(name);
-    g_free(_probe->name);
-    _probe->name = g_strdup(name.toUtf8().data());
+void Signal::set_colour(QColor colour) {
+  Trace::set_colour(colour);
+  if (_model)
+    _model->set_color(colour.name().toStdString());
 }
+
+void Signal::on_appearance_changed() {
+  if (_view) {
+    _view->update();
+    _view->header_updated();
+  }
+}
+
+void Signal::on_visibility_changed() {
+  if (_view)
+    _view->signals_changed(this);
+}
+
 } // namespace view
 } // namespace pv

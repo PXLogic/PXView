@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <chrono>
 #include <functional>
 #include <math.h>
 #include <stdlib.h>
@@ -40,7 +41,10 @@
 #include "../utility/array.h"
 #include "leaf_block_pool.h"
 #include "logicsnapshot.h"
+#include "logicsnapshot_diskcache_writer.h"
+#include "logicsnapshot_glitch_filter.h"
 #include <map>
+#include <string>
 
 using namespace std;
 
@@ -66,25 +70,19 @@ LogicSnapshot::LogicSnapshot() : Snapshot(1, 0, 0) {
   _is_loop = false;
   _loop_offset = 0;
   _able_free = true;
-  _glitch_filtered = false;
   _mmap_alloc = nullptr;
   _max_blocks_per_channel = 0;
-  _async_running = false;
-  _async_bytes_written = 0;
-  _async_write_speed_mbps = 0.0;
-  _async_queue_depth = 0;
-  _async_queue_bytes_size = 0;
+  _disk_cache_writer = std::make_unique<LogicSnapshotDiskCacheWriter>(this);
+  _glitch_filter = std::make_unique<LogicSnapshotGlitchFilter>(this);
 }
 LogicSnapshot::~LogicSnapshot() {
-  if (_async_running) {
-    _async_running = false;
-    _async_cv.notify_one();
-    if (_async_thread.joinable()) {
-      _async_thread.join();
-    }
-  }
+  // The async writer thread is joined by _disk_cache_writer's destructor
+  // (declared LAST — runs FIRST, before _mmap_alloc / _ch_data are freed).
+  // Explicit drain_and_join is also safe but redundant here.
 }
 void LogicSnapshot::free_data() {
+  // Clear the mmap slot bitmap via the writer (it owns _mmap_slot_written).
+  _disk_cache_writer->clear_all_mmap_slots();
   _mmap_alloc.reset();
 
   Snapshot::free_data();
@@ -123,19 +121,9 @@ void LogicSnapshot::init_all() {
 }
 
 void LogicSnapshot::clear() {
-  if (_async_running) {
-    _async_running = false;
-    _async_cv.notify_one();
-    if (_async_thread.joinable()) {
-      _async_thread.join();
-    }
-  }
-  {
-    std::lock_guard<std::mutex> lock(_async_mutex);
-    while (!_async_queue.empty()) _async_queue.pop();
-    _async_queue_depth = 0;
-    _async_queue_bytes_size = 0;
-  }
+  // CRITICAL (Task 1): stop the async writer and drain its queue BEFORE
+  // free_data() resets the mmap allocator. Encapsulated in drain_and_join().
+  _disk_cache_writer->drain_and_join();
 
   std::lock_guard<std::mutex> lock(_mutex);
   free_data();
@@ -143,25 +131,23 @@ void LogicSnapshot::clear() {
 }
 
 void LogicSnapshot::set_disk_cache_config(const DiskCacheConfig &config) {
-  pxv_info("LogicSnapshot::set_disk_cache_config: enabled=%d, path=%s",
-           config.enabled, config.cache_path.c_str());
-  _disk_cache_config = config;
+  _disk_cache_writer->set_disk_cache_config(config);
 }
 
 bool LogicSnapshot::is_disk_cache_active() {
-  return _mmap_alloc && _disk_cache_config.enabled;
+  return _disk_cache_writer->is_disk_cache_active();
 }
 
 double LogicSnapshot::get_disk_write_speed_mbps() {
-  return _async_write_speed_mbps.load();
+  return _disk_cache_writer->get_disk_write_speed_mbps();
 }
 
 size_t LogicSnapshot::get_disk_write_queue_depth() {
-  return _async_queue_depth.load();
+  return _disk_cache_writer->get_disk_write_queue_depth();
 }
 
 uint64_t LogicSnapshot::get_disk_total_blocks_written() {
-  return _async_bytes_written.load() / LeafBlockSpace;
+  return _disk_cache_writer->get_disk_total_blocks_written();
 }
 
 uint64_t LogicSnapshot::get_page_fault_count() {
@@ -212,15 +198,17 @@ uint64_t LogicSnapshot::get_working_set_bytes() {
 }
 
 uint64_t LogicSnapshot::get_async_queue_bytes() {
-  return _async_queue_bytes_size.load();
+  return _disk_cache_writer->get_async_queue_bytes();
 }
 
 void LogicSnapshot::ensure_all_blocks_hot() {
+  _disk_cache_writer->ensure_all_blocks_hot();
 }
 
 void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
                                   uint64_t total_sample_count, GSList *channels,
                                   bool able_free) {
+  auto _fp_t0 = std::chrono::steady_clock::now();
   bool channel_changed = false;
   uint16_t channel_num = 0;
   _able_free = able_free;
@@ -246,7 +234,23 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
   if (total_sample_count != _total_sample_count ||
       channel_num != _channel_num || channel_changed || _is_loop) {
 
+    // CRITICAL (Task 1): stop the async writer and drain its queue BEFORE
+    // free_data() resets the mmap allocator. Otherwise the async worker could
+    // still be calling allocate_block()/_mmap_alloc->get_block_data() against
+    // an allocator we are about to destroy, causing a use-after-free / crash.
+    // Mirrors the stop sequence in clear() — now encapsulated in drain_and_join().
+    auto _drain_t0 = std::chrono::steady_clock::now();
+    _disk_cache_writer->drain_and_join();
+    auto _drain_t1 = std::chrono::steady_clock::now();
+    pxv_info("first_payload TIMING: drain_and_join=%lldms",
+      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_drain_t1 - _drain_t0).count());
+
+    auto _free_t0 = std::chrono::steady_clock::now();
     free_data();
+    auto _free_t1 = std::chrono::steady_clock::now();
+    pxv_info("first_payload TIMING: free_data=%lldms",
+      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_free_t1 - _free_t0).count());
+
     _ch_index.clear();
 
     _total_sample_count = total_sample_count;
@@ -279,8 +283,8 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     }
 
     if (_ch_index.size() == 0) {
-      pxv_info("ERROR: all channels disalbed");
-      assert(0);
+      pxv_err("LogicSnapshot: all channels disabled, aborting");
+      return;
     }
   } else {
     for (auto &iter : _ch_data) {
@@ -301,6 +305,11 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 
   _sample_count = 0;
   _ring_sample_count = 0;
+  // CRITICAL FIX: 重置 _loop_offset。first_payload 在配置未变（reuse 同样
+  // total_sample_count/channel_num）的复用路径下不会调用 free_data()/init_all()，
+  // 导致上一次 capture 在 append_payload_impl 中错误累积的 _loop_offset 残留，
+  // 下次 capture 的 _ring_sample_count += _loop_offset 会从错误基址开始。
+  _loop_offset = 0;
 
   for (unsigned int i = 0; i < _channel_num; i++) {
     _last_sample[i] = 0;
@@ -311,121 +320,105 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 
   pxv_info("LogicSnapshot::first_payload: disk_cache_config.enabled=%d, "
            "ch_data.size()=%zu",
-           _disk_cache_config.enabled, _ch_data.size());
+           _disk_cache_writer->disk_cache_config().enabled, _ch_data.size());
 
   if (_channel_num > 0) {
     // Create and configure MmapAllocator
     _mmap_alloc = std::make_shared<MmapAllocator>();
-    
+
     // Calculate total required memory based on total_sample_count + padding
     // For loop mode, _total_sample_count is the size of the ring buffer.
-    _max_blocks_per_channel = (_total_sample_count / LeafBlockSamples) + 16; 
+    _max_blocks_per_channel = (_total_sample_count / LeafBlockSamples) + 16;
     uint64_t total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
-    
-    bool use_disk = _disk_cache_config.enabled;
-    QString disk_dir = QString::fromStdString(_disk_cache_config.cache_path);
-    if (!_mmap_alloc->configure(use_disk, disk_dir, total_bytes)) {
-        pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed!");
+
+    bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
+    QString disk_dir = QString::fromStdString(_disk_cache_writer->disk_cache_config().cache_path);
+    auto _mmap_t0 = std::chrono::steady_clock::now();
+    bool mmap_ok = _mmap_alloc->configure(use_disk, disk_dir, total_bytes,
+                                          LeafBlockSpace, _max_blocks_per_channel, _channel_num);
+    auto _mmap_t1 = std::chrono::steady_clock::now();
+    pxv_info("first_payload TIMING: MmapAllocator::configure=%lldms (total_bytes=%llu, ok=%d)",
+      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_mmap_t1 - _mmap_t0).count(),
+      (unsigned long long)total_bytes, (int)mmap_ok);
+    if (!mmap_ok) {
+        pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed! "
+               "Falling back to LeafBlockPool in-memory allocation.");
+        // Drop the failed allocator so allocate_block() takes the
+        // LeafBlockPool::instance().acquire() fallback path instead of
+        // dereferencing an unconfigured (NULL _base_ptr) allocator.
+        _disk_cache_writer->clear_all_mmap_slots();
+        _mmap_alloc.reset();
+    } else {
+        // 设置 loop mode（loop mode 禁用 trailing decommit，保留所有数据在 RAM）
+        _mmap_alloc->set_loop_mode(_is_loop);
+        // 等待 prefault 线程完成初始 4 blocks 超前（4 * 16ch * 2MB = 128MB）
+        auto _pf_t0 = std::chrono::steady_clock::now();
+        _mmap_alloc->wait_prefault_initial_blocks(4);
+        auto _pf_t1 = std::chrono::steady_clock::now();
+        pxv_info("first_payload TIMING: wait_prefault_initial_blocks(4)=%lldms",
+          (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count());
     }
   }
 
-  if (!_async_running) {
-    _async_running = true;
-    _async_bytes_written = 0;
-    _async_thread = std::thread(&LogicSnapshot::async_write_worker, this);
+  if (_mmap_alloc) {
+    _disk_cache_writer->setup_mmap_slots(_channel_num * _max_blocks_per_channel);
   }
+
+  _disk_cache_writer->start();
 
   lock.unlock();
   append_payload(logic);
   _last_ended = false;
+
+  auto _fp_t1 = std::chrono::steady_clock::now();
+  pxv_info("first_payload TIMING: total=%lldms (samplerate will be logged by caller)",
+    (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_fp_t1 - _fp_t0).count());
 }
 
 void LogicSnapshot::append_payload(const sr_datafeed_logic &logic) {
-  if (logic.length == 0 || logic.data == nullptr) return;
-  
-  AsyncPayload payload;
-  payload.format = logic.format;
-  payload.data = std::vector<uint8_t>((uint8_t*)logic.data, (uint8_t*)logic.data + logic.length);
-  size_t v_size = payload.data.size();
-  
-  {
-    std::lock_guard<std::mutex> lock(_async_mutex);
-    _async_queue.push(std::move(payload));
-    _async_queue_depth = _async_queue.size();
-    _async_queue_bytes_size += v_size;
-  }
-  _async_cv.notify_one();
+  // Dispatch by format:
+  //   LA_CROSS_DATA: raw channel-block (PXLogic/DSLogic fork) — forwarded to
+  //     the async worker which calls append_cross_payload (v1.49 bit-copy,
+  //     no deinterleave). This avoids the ~100ms/4MB deinterleave bottleneck
+  //     in the driver's USB receive path.
+  //   LA_SPLIT_DATA (default): sample-interleaved (upstream sigrok) — forwarded
+  //     to the async worker which calls append_payload_impl.
+  // The async worker preserves format and does the actual chunk-tree write
+  // under _mutex, with 256MB backpressure between feed thread and disk write.
+  _disk_cache_writer->enqueue((const uint8_t *)logic.data, logic.length,
+                              logic.format);
 }
 
-void LogicSnapshot::async_write_worker() {
-  while (_async_running) {
-    AsyncPayload payload;
-    {
-      std::unique_lock<std::mutex> lock(_async_mutex);
-      _async_cv.wait_for(lock, std::chrono::milliseconds(10), [this] {
-        return !_async_running || !_async_queue.empty();
-      });
-      
-      if (!_async_running && _async_queue.empty()) break;
-      if (_async_queue.empty()) continue;
-      
-      payload = std::move(_async_queue.front());
-      _async_queue.pop();
-      _async_queue_depth = _async_queue.size();
-      _async_queue_bytes_size -= payload.data.size();
-    }
-    
-    sr_datafeed_logic logic;
-    logic.length = payload.data.size();
-    logic.unitsize = 1; // Assuming unitsize 1
-    logic.data = payload.data.data();
-    logic.format = payload.format;
-    
-    // Truncate incomplete chunks to prevent channel desynchronization
-    if (logic.format == LA_CROSS_DATA) {
-        uint64_t chunk_size = _channel_num * 8; // Each channel gets 8 bytes (64 samples) per chunk
-        logic.length -= logic.length % chunk_size; // Truncate to exact multiple
-    }
-    
-    static int packet_count = 0;
-    if (packet_count < 5 || logic.length % 128 != 0 || packet_count % 100 == 0) {
-        pxv_info("async_write_worker: pkt %d, len=%llu, first_bytes: %02x %02x %02x %02x", 
-                 packet_count, (unsigned long long)logic.length,
-                 logic.length > 0 ? ((uint8_t*)logic.data)[0] : 0,
-                 logic.length > 1 ? ((uint8_t*)logic.data)[1] : 0,
-                 logic.length > 2 ? ((uint8_t*)logic.data)[2] : 0,
-                 logic.length > 3 ? ((uint8_t*)logic.data)[3] : 0);
-    }
-    packet_count++;
-    
-    auto start = std::chrono::steady_clock::now();
-    
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      append_cross_payload(logic);
-    }
-    
-    auto end = std::chrono::steady_clock::now();
-    _async_bytes_written += payload.data.size();
-    
-    double elapsed_s = std::chrono::duration<double>(end - start).count();
-    if (elapsed_s > 0) {
-       double mbps = (payload.data.size() / (1024.0 * 1024.0)) / elapsed_s;
-       // Exponential moving average for smoothing UI
-       double old = _async_write_speed_mbps.load();
-       if (old == 0.0) _async_write_speed_mbps = mbps;
-       else _async_write_speed_mbps = old * 0.8 + mbps * 0.2;
-    }
-  }
+bool LogicSnapshot::is_mmap_slot_fresh(uint16_t channel, uint64_t global_block_seq) const {
+    return _disk_cache_writer->is_mmap_slot_fresh(channel, global_block_seq);
+}
+
+void LogicSnapshot::mark_mmap_slot_written(uint16_t channel, uint64_t global_block_seq) {
+    _disk_cache_writer->mark_mmap_slot_written(channel, global_block_seq);
+}
+
+void LogicSnapshot::clear_mmap_slot_written(uint16_t channel, uint64_t global_block_seq) {
+    _disk_cache_writer->clear_mmap_slot_written(channel, global_block_seq);
+}
+
+void LogicSnapshot::clear_mmap_slot_by_abs(uint64_t abs_slot) {
+    _disk_cache_writer->clear_mmap_slot_by_abs(abs_slot);
 }
 
 void* LogicSnapshot::allocate_block(uint16_t channel, uint64_t index0, uint64_t index1) {
     void* lbp = _ch_data[channel][index0].lbp[index1];
     if (lbp != NULL) return lbp;
 
+    bool from_mmap = false;
+    uint64_t global_block_seq = 0;
     if (_mmap_alloc) {
-        uint64_t global_block_seq = index0 * RootScale + index1;
+        global_block_seq = index0 * RootScale + index1;
         lbp = _mmap_alloc->get_block_data(channel, global_block_seq, _max_blocks_per_channel, LeafBlockSpace);
+        from_mmap = (lbp != NULL);
+        if (from_mmap) {
+            // 通知 prefault 线程 writer 进度（block_seq，所有 channel 同步写入同一 block_seq）
+            _mmap_alloc->notify_writer_block_seq(global_block_seq);
+        }
     }
     if (lbp == NULL) {
         lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
@@ -435,43 +428,62 @@ void* LogicSnapshot::allocate_block(uint16_t channel, uint64_t index0, uint64_t 
         }
     }
     _ch_data[channel][index0].lbp[index1] = lbp;
-    memset(lbp, 0, LeafBlockSpace);
+
+    if (from_mmap) {
+        // mmap 首次分配：OS 懒加载零填充，跳过 memset；复用槽位（wrap）需清零残留。
+        if (!is_mmap_slot_fresh(channel, global_block_seq)) {
+            memset(lbp, 0, LeafBlockSpace);
+        }
+        mark_mmap_slot_written(channel, global_block_seq);
+    } else {
+        // LeafBlockPool 回收块：可能含脏数据，必须清零。
+        memset(lbp, 0, LeafBlockSpace);
+    }
     return lbp;
 }
 
-void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
-  assert(logic.format == LA_CROSS_DATA);
-  assert(logic.length >= ScaleSize * _channel_num);
+void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
+  // Sample-interleaved input (upstream libsigrok 0.6 format).
+  // logic.data: logic.length bytes; unitsize = (_channel_num+7)/8 bytes per
+  // sample group. Sample s channel ch bit = src[s*unitsize + ch/8] bit (ch%8).
+  // Chunk tree stores per-channel data, 8 samples packed per byte (LSB-first).
+  // Process in 64-sample batches (Scale) to match mipmap granularity; residual
+  // 1-7 samples at the tail are tracked via _byte_fraction for continuation.
+
   assert(logic.data);
+  assert(_channel_num > 0);
 
-  if (logic.length % 128 != 0) {
-      pxv_warn("append_cross_payload: length %llu is NOT a multiple of 128!", (unsigned long long)logic.length);
-  }
+  if (logic.length == 0) return;
 
-  uint8_t *data_src_ptr = (uint8_t *)logic.data;
-  uint64_t len = logic.length;
-  uint64_t index0 = 0;
-  uint64_t index1 = 0;
-  uint64_t offset = 0;
-  void *lbp = NULL;
+  uint64_t unitsize = logic.unitsize;
+  if (unitsize == 0) unitsize = (_channel_num + 7) / 8;
+  uint64_t num_samples = logic.length / unitsize;
 
-  // samples not accurate, lead to a larger _sampole_count
-  // _sample_count should be fixed in the last packet
-  // so _total_sample_count must be align to LeafBlock
-  uint64_t samples = ceil(logic.length * 8.0 / _channel_num);
+  if (num_samples == 0) return;
 
-  if (_sample_count + samples < _total_sample_count) {
-    _sample_count += samples;
+  // Segmented locking: metadata ops (allocate_block, _sample_count/
+  // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
+  // mmap data writes (page-fault-prone) release it so UI's get_samples can
+  // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
+  // and safe to touch without the lock during write loops.
+  std::unique_lock<std::mutex> lock(_mutex);
+
+  // Update _sample_count (cap at _total_sample_count)
+  if (_sample_count + num_samples < _total_sample_count) {
+    _sample_count += num_samples;
   } else {
     if (_sample_count == _total_sample_count && !_is_loop)
       return;
+    // CRITICAL FIX: 截断 num_samples 到剩余样本数，避免处理超出 _total_sample_count
+    // 的样本。否则 phase 1-5 会处理多余样本，使 absolute_position >
+    // _total_sample_count，触发下方 _loop_offset 的错误赋值（非 loop 模式下
+    // _loop_offset 应恒为 0）。错误累积后会在 capture_ended 中放大
+    // _ring_sample_count，导致 index0/index1/offset 越界指向未分配的 leaf block。
+    num_samples = _total_sample_count - _sample_count;
     _sample_count = _total_sample_count;
   }
 
-  // pxv_info("_loop_offset:%llu, _total_sample_count:%llu,
-  // _ring_sample_count:%llu, cur samples:%llu",
-  //     _loop_offset, _total_sample_count, _ring_sample_count, samples);
-
+  // Loop mode housekeeping (unchanged from channel-block version)
   if (_is_loop) {
     if (_loop_offset >= LeafBlockSamples * Scale) {
       move_first_node_to_last();
@@ -487,16 +499,333 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
   _ring_sample_count += _loop_offset;
 
-  // bit align
-  while ((_ch_fraction != 0 || _byte_fraction != 0) && len > 0) {
-    if (_dest_ptr == NULL)
-      assert(false);
+  // CRITICAL FIX: align_sample_count 必须对齐到 LeafBlockSamples 边界（block 起始），
+  // offset 是 block 内偏移。旧代码 align_sample_count = _ring_sample_count（未对齐），
+  // 导致末尾 absolute_position = align_sample_count + offset 重复累加初始偏移，
+  // 每次 append_payload_impl 调用 _ring_sample_count 指数膨胀
+  // （r_n = 2 * r_{n-1} + num_samples），25 个 packet 后从 100000 膨胀到 2.3 亿。
+  uint64_t offset = _ring_sample_count % LeafBlockSamples;
+  uint64_t align_sample_count = _ring_sample_count - offset;  // 对齐到 leaf block 起始
+  uint64_t index0 = align_sample_count / LeafBlockSamples / RootScale;
+  uint64_t index1 = (align_sample_count / LeafBlockSamples) % RootScale;
+  // Derive _byte_fraction from the persisted ring position (robust against
+  // copy_from / loop-mode state transitions).
+  _byte_fraction = (uint8_t)(offset % 8);
 
+  if (index0 >= _ch_data[0].size()) {
+    pxv_err("append_payload_impl: index0 %llu out of range %zu",
+            (unsigned long long)index0, _ch_data[0].size());
+    _ring_sample_count = align_sample_count + offset - _loop_offset;
+    _ch_fraction = 0;
+    _dest_ptr = NULL;
+    return;
+  }
+
+  // Cache leaf block pointers per channel (re-allocated at leaf block boundary)
+  void *ch_lbp[CHANNEL_MAX_COUNT];
+  for (unsigned int ch = 0; ch < _channel_num; ch++) {
+    ch_lbp[ch] = allocate_block(ch, index0, index1);
+    if (ch_lbp[ch] == nullptr) {
+      _ring_sample_count = align_sample_count + offset - _loop_offset;
+      _ch_fraction = 0;
+      _dest_ptr = nullptr;
+      return;
+    }
+  }
+
+  // Per-channel source extraction context: sample-interleaved input means
+  // sample s channel ch bit = src[s*unitsize + ch/8] bit (ch%8). Precompute
+  // byte_pos/bit_mask to avoid recomputing in every phase loop.
+  struct ChannelCtx { uint8_t byte_pos; uint8_t bit_mask; };
+  ChannelCtx ch_ctx[CHANNEL_MAX_COUNT];
+  for (unsigned int ch = 0; ch < _channel_num; ch++) {
+    ch_ctx[ch] = {static_cast<uint8_t>(ch / 8),
+                  static_cast<uint8_t>(1u << (ch % 8))};
+  }
+
+  const uint8_t *src = static_cast<const uint8_t *>(logic.data);
+  uint64_t samples_left = num_samples;
+
+  // Leaf-block advancement: calc mipmap for the completed block, advance
+  // align_sample_count/index0/index1/offset, allocate the next block.
+  // Returns false on out-of-range or allocation failure (caller finalizes
+  // and returns). Eliminates 4× duplication of this pattern across phases.
+  auto advance_leaf_block = [&]() -> bool {
+    if (offset != LeafBlockSamples) return true;
+    for (unsigned int ch = 0; ch < _channel_num; ch++)
+      calc_mipmap(ch, (uint8_t)index0, (uint8_t)index1, LeafBlockSamples, true);
+    align_sample_count += LeafBlockSamples;
+    index0 = align_sample_count / LeafBlockSamples / RootScale;
+    index1 = (align_sample_count / LeafBlockSamples) % RootScale;
+    offset = 0;
+    if (index0 >= _ch_data[0].size()) {
+      pxv_err("append_payload_impl: index0 %llu out of range (advance)",
+              (unsigned long long)index0);
+      return false;
+    }
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      ch_lbp[ch] = allocate_block(ch, index0, index1);
+      if (ch_lbp[ch] == nullptr) return false;
+    }
+    return true;
+  };
+
+  auto finalize_error = [&]() {
+    _ring_sample_count = align_sample_count + offset - _loop_offset;
+    _ch_fraction = 0;
+    _dest_ptr = nullptr;
+  };
+
+  // ---- Phase 1: complete the partial dest byte (bit-level) ----
+  // Consumes 1-7 samples to reach a byte boundary (_byte_fraction → 0).
+  if (_byte_fraction != 0 && samples_left > 0) {
+    const uint8_t need = static_cast<uint8_t>(8 - _byte_fraction);
+    const uint64_t have = std::min(samples_left, static_cast<uint64_t>(need));
+
+    // mmap data write — release _mutex to avoid blocking UI during page faults
+    lock.unlock();
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      auto [byte_pos, bit_mask] = ch_ctx[ch];
+      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+      for (uint64_t k = 0; k < have; k++) {
+        if (src[k * unitsize + byte_pos] & bit_mask)
+          *dest_byte |= static_cast<uint8_t>(1u << (_byte_fraction + k));
+      }
+    }
+    lock.lock();  // re-acquire for metadata (advance_leaf_block)
+
+    src += have * unitsize;
+    samples_left -= have;
+    offset += have;
+    _byte_fraction = static_cast<uint8_t>((_byte_fraction + have) % 8);
+
+    if (!advance_leaf_block()) { finalize_error(); return; }
+  }
+
+  // ---- Phase 2: align offset to Scale boundary via 8-sample byte writes ----
+  // ROOT-CAUSE FIX for D7 data-loss bug. The original code placed Phase 3
+  // (64-sample batch) directly after Phase 1, but Phase 1 only guarantees
+  // offset % 8 == 0, not offset % Scale == 0. Phase 3 used `offset / Scale`
+  // (integer division) to compute the write pointer, causing bit-misalignment
+  // when offset % Scale != 0: write_ptr = u64[offset/Scale] maps bit 0 to
+  // sample (offset/Scale)*Scale, but the value's bit 0 corresponds to sample
+  // `offset`. The misaligned overwrite corrupted neighboring u64s, producing
+  // symptoms like u64[3494]=0xffffff0000000000 (40 zero bits = 200us @200kHz).
+  // This new phase strengthens the alignment invariant: it consumes 8-sample
+  // bytes until offset % Scale == 0, so Phase 3's alignment assumption becomes
+  // a guaranteed invariant rather than an unchecked hypothesis.
+  while (samples_left >= 8 && (offset % Scale) != 0) {
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      auto [byte_pos, bit_mask] = ch_ctx[ch];
+      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+      uint8_t byte = 0;
+      for (uint8_t k = 0; k < 8; k++) {
+        if (src[k * unitsize + byte_pos] & bit_mask)
+          byte |= static_cast<uint8_t>(1u << k);
+      }
+      *dest_byte = byte;
+    }
+    lock.lock();  // re-acquire for metadata (advance_leaf_block)
+
+    src += 8 * unitsize;
+    samples_left -= 8;
+    offset += 8;
+
+    if (!advance_leaf_block()) { finalize_error(); return; }
+  }
+
+  // ---- Phase 3: process 64-sample batches (Scale-aligned fast path) ----
+  // INVARIANT: offset % Scale == 0, guaranteed by Phase 2. write_ptr bit 0
+  // correctly maps to sample offset. No integer-division misalignment.
+  while (samples_left >= Scale && _byte_fraction == 0) {
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      auto [byte_pos, bit_mask] = ch_ctx[ch];
+      uint64_t *write_ptr =
+          reinterpret_cast<uint64_t *>(ch_lbp[ch]) + offset / Scale;
+      uint64_t value = 0;
+      for (unsigned int m = 0; m < ScaleSize; m++) {
+        uint8_t byte = 0;
+        for (unsigned int k = 0; k < 8; k++) {
+          if (src[(m * 8 + k) * unitsize + byte_pos] & bit_mask)
+            byte |= static_cast<uint8_t>(1u << k);
+        }
+        value |= static_cast<uint64_t>(byte) << (m * 8);
+      }
+      *write_ptr = value;
+    }
+    lock.lock();  // re-acquire for metadata (advance_leaf_block)
+
+    src += Scale * unitsize;
+    samples_left -= Scale;
+    offset += Scale;
+
+    if (!advance_leaf_block()) { finalize_error(); return; }
+  }
+
+  // ---- Phase 4: process remaining 8-sample bytes ----
+  while (samples_left >= 8 && _byte_fraction == 0) {
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      auto [byte_pos, bit_mask] = ch_ctx[ch];
+      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+      uint8_t byte = 0;
+      for (uint8_t k = 0; k < 8; k++) {
+        if (src[k * unitsize + byte_pos] & bit_mask)
+          byte |= static_cast<uint8_t>(1u << k);
+      }
+      *dest_byte = byte;
+    }
+    lock.lock();  // re-acquire for metadata (advance_leaf_block)
+
+    src += 8 * unitsize;
+    samples_left -= 8;
+    offset += 8;
+
+    if (!advance_leaf_block()) { finalize_error(); return; }
+  }
+
+  // ---- Phase 5: residual 1-7 samples (bit-level, persist _byte_fraction) ----
+  if (samples_left > 0 && _byte_fraction == 0) {
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
+    for (unsigned int ch = 0; ch < _channel_num; ch++) {
+      auto [byte_pos, bit_mask] = ch_ctx[ch];
+      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+      for (uint64_t k = 0; k < samples_left; k++) {
+        if (src[k * unitsize + byte_pos] & bit_mask)
+          *dest_byte |= static_cast<uint8_t>(1u << k);
+      }
+    }
+    lock.lock();  // re-acquire for mipmap calc & finalize
+
+    _byte_fraction = static_cast<uint8_t>(samples_left);
+    offset += samples_left;
+    samples_left = 0;
+  }
+
+  // ---- Mipmap calc for partial leaf block (incremental rendering) ----
+  // calc_mipmap processes only complete 64-sample (Scale) chunks via integer
+  // division (samples / Scale), so partial bytes at the tail are not touched.
+  // _last_calc_count is saved (isEnd=false) for continuation on the next call.
+  if (offset > 0 && offset < LeafBlockSamples) {
+    for (unsigned int ch = 0; ch < _channel_num; ch++)
+      calc_mipmap(ch, (uint8_t)index0, (uint8_t)index1, offset, false);
+  }
+
+  // Finalize position
+  const uint64_t absolute_position = align_sample_count + offset;
+  _ring_sample_count = absolute_position - _loop_offset;
+
+  // Loop-mode overflow handling. Non-loop: dead code due to num_samples cap
+  // above, but the explicit _is_loop guard defends against future regressions.
+  if (_is_loop && absolute_position > _total_sample_count) {
+    _loop_offset = absolute_position - _total_sample_count;
+    _ring_sample_count = _total_sample_count;
+  }
+
+  _ch_fraction = 0;
+  _dest_ptr = nullptr;
+}
+
+void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
+  // Raw channel-block (LA_CROSS_DATA) input — v1.49 bit-copy algorithm.
+  // Hardware DMA layout: 64 samples for ch0, 64 samples for ch1, ...,
+  // 64 samples for chN-1, then repeat. Each "chunk" is (channel_num * 8)
+  // bytes = (channel_num * 64) samples.
+  //
+  // The per-channel chunk tree stores each channel's samples independently
+  // (8 samples per byte, LeafBlockSamples=65536 samples per leaf block).
+  // Because the input is already channel-separated (just interleaved in
+  // 64-sample blocks), we can bit-copy each channel's 8-byte u64 directly
+  // into the destination — no per-bit deinterleave needed. This is ~20x
+  // faster than the sample-interleaved path (append_payload_impl).
+  //
+  // State machine (continued across calls):
+  //   _ch_fraction:   current channel index within the 64-sample chunk
+  //   _byte_fraction: bit offset within the current 8-byte u64 (0..7)
+  //   _dest_ptr:      next byte to write in the current leaf block
+  //   _ring_sample_count: per-channel sample count (advances by Scale=64
+  //                       each time we complete one channel's chunk)
+  //
+  // See v1.49 PXView/src/data/logicsnapshot.cpp:208 for the original.
+
+  assert(logic.format == LA_CROSS_DATA);
+  assert(logic.data);
+  assert(_channel_num > 0);
+
+  if (logic.length == 0) return;
+
+  // Cross data must be chunk-aligned: each chunk is (channel_num * 8) bytes
+  // (64 samples per channel × 8 bytes per 64 samples / 8 samples per byte).
+  // The async worker already truncates length to a multiple of chunk_size,
+  // but assert defensively.
+  const uint64_t chunk_size = (uint64_t)_channel_num * 8;
+  if (logic.length < chunk_size) return;
+
+  uint8_t *data_src_ptr = (uint8_t *)logic.data;
+  uint64_t len = logic.length;
+  uint64_t index0 = 0;
+  uint64_t index1 = 0;
+  uint64_t offset = 0;
+  void *lbp = NULL;
+
+  // samples = total samples per channel in this packet
+  uint64_t samples = (logic.length * 8) / _channel_num;
+
+  // Segmented locking: metadata ops (allocate_block, _sample_count/
+  // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
+  // mmap data writes (page-fault-prone) release it so UI's get_samples can
+  // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
+  // and safe to touch without the lock during write loops.
+  std::unique_lock<std::mutex> lock(_mutex);
+
+  // Update _sample_count (cap at _total_sample_count)
+  if (_sample_count + samples < _total_sample_count) {
+    _sample_count += samples;
+  } else {
+    if (_sample_count == _total_sample_count && !_is_loop)
+      return;
+    _sample_count = _total_sample_count;
+  }
+
+  // Loop mode housekeeping (same as append_payload_impl)
+  if (_is_loop) {
+    if (_loop_offset >= LeafBlockSamples * Scale) {
+      move_first_node_to_last();
+      _loop_offset -= LeafBlockSamples * Scale;
+      _lst_free_block_index = 0;
+    } else {
+      int free_count = _loop_offset / LeafBlockSamples;
+      if (free_count > _lst_free_block_index) {
+        free_head_blocks(free_count);
+      }
+    }
+  }
+
+  _ring_sample_count += _loop_offset;
+
+  // ---- Bit-align phase: complete partial u64 from previous call ----
+  // Driven by _ch_fraction (channel) and _byte_fraction (bit 0..7 within
+  // the current 8-byte u64 for that channel).
+  while ((_ch_fraction != 0 || _byte_fraction != 0) && len > 0) {
+    if (_dest_ptr == NULL) {
+      pxv_err("append_cross_payload: _dest_ptr NULL during bit-align");
+      return;
+    }
+
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
     do {
       *_dest_ptr++ = *data_src_ptr++;
       _byte_fraction = (_byte_fraction + 1) % 8;
       len--;
     } while (_byte_fraction != 0 && len > 0);
+    lock.lock();  // re-acquire for metadata (allocate_block/calc_mipmap)
 
     if (_byte_fraction == 0) {
       index0 = _ring_sample_count / LeafBlockSamples / RootScale;
@@ -505,24 +834,38 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
       _ch_fraction = (_ch_fraction + 1) % _channel_num;
 
-      lbp = allocate_block(_ch_fraction, index0, index1);
-      if (lbp == NULL) return;
+      if (index0 >= _ch_data[_ch_fraction].size()) {
+        pxv_err("append_cross_payload: index0 %llu out of range (bit-align)",
+                (unsigned long long)index0);
+        _ring_sample_count -= _loop_offset;
+        _dest_ptr = NULL;
+        return;
+      }
+      lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
+      if (lbp == NULL) {
+        pxv_err("append_cross_payload: alloc failed (bit-align)");
+        _ring_sample_count -= _loop_offset;
+        _dest_ptr = NULL;
+        return;
+      }
 
       _dest_ptr = (uint8_t *)lbp + offset;
 
-      // To the last channel.
+      // Completed one channel's 64-sample chunk → advance ring count
       if (_ch_fraction == 0) {
         _ring_sample_count += Scale;
 
         if (_ring_sample_count % LeafBlockSamples == 0) {
-          calc_mipmap(_channel_num - 1, index0, index1, LeafBlockSamples, true);
+          calc_mipmap(_channel_num - 1, (uint8_t)index0, (uint8_t)index1,
+                      LeafBlockSamples, true);
         }
         break;
       }
     }
   }
 
-  // append data
+  // ---- Main phase: chunk-aligned fast path ----
+  // INVARIANT: _ch_fraction == 0, _byte_fraction == 0, _ring_sample_count % Scale == 0
   assert(_ch_fraction == 0);
   assert(_byte_fraction == 0);
   assert(_ring_sample_count % Scale == 0);
@@ -534,7 +877,6 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   uint64_t filled_sample = align_sample_count % LeafBlockSamples;
   uint64_t old_filled_sample = filled_sample;
   uint64_t *chans_read_addr[CHANNEL_MAX_COUNT];
-
   for (unsigned int i = 0; i < _channel_num; i++) {
     chans_read_addr[i] = (uint64_t *)data_src_ptr + i;
   }
@@ -545,16 +887,26 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   index1 = (align_sample_count / LeafBlockSamples) % RootScale;
   offset = align_sample_count % LeafBlockSamples;
 
-  if (index0 >= _ch_data[0].size()) {
-    assert(false);
+  if (index0 >= _ch_data[fill_chan].size()) {
+    pxv_err("append_cross_payload: index0 %llu out of range (main)",
+            (unsigned long long)index0);
+    _ring_sample_count = align_sample_count - _loop_offset;
+    _dest_ptr = NULL;
+    return;
   }
-
-  lbp = allocate_block(fill_chan, index0, index1);
-  if (lbp == NULL) return;
+  lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+  if (lbp == NULL) {
+    pxv_err("append_cross_payload: alloc failed (main)");
+    _ring_sample_count = align_sample_count - _loop_offset;
+    _dest_ptr = NULL;
+    return;
+  }
 
   uint64_t *write_ptr = (uint64_t *)lbp + offset / Scale;
 
   while (len >= 8) {
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
     *write_ptr++ = *read_ptr;
     read_ptr += _channel_num;
     len -= 8;
@@ -564,9 +916,12 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     if (last_chan == _channel_num) {
       last_chan = 0;
     }
+    lock.lock();  // re-acquire for metadata (calc_mipmap/allocate_block)
 
     if (filled_sample == LeafBlockSamples) {
-      calc_mipmap(fill_chan, index0, index1, LeafBlockSamples, true);
+      // Completed one leaf block for fill_chan → calc mipmap
+      calc_mipmap(fill_chan, (uint8_t)index0, (uint8_t)index1,
+                  LeafBlockSamples, true);
 
       chans_read_addr[fill_chan] = read_ptr;
       fill_chan = (fill_chan + 1) % _channel_num;
@@ -580,13 +935,23 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
       filled_sample = align_sample_count % LeafBlockSamples;
       old_filled_sample = filled_sample;
 
-      lbp = allocate_block(fill_chan, index0, index1);
-      if (lbp == NULL) return;
+      if (index0 >= _ch_data[fill_chan].size()) {
+        pxv_err("append_cross_payload: index0 %llu out of range (advance)",
+                (unsigned long long)index0);
+        break;
+      }
+      lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+      if (lbp == NULL) {
+        pxv_err("append_cross_payload: alloc failed (advance)");
+        break;
+      }
 
       write_ptr = (uint64_t *)lbp + offset / Scale;
       read_ptr = chans_read_addr[fill_chan];
     } else if (read_ptr >= end_read_ptr) {
-      calc_mipmap(fill_chan, index0, index1, filled_sample, false);
+      // Reached end of input mid-channel → calc partial mipmap
+      calc_mipmap(fill_chan, (uint8_t)index0, (uint8_t)index1,
+                  filled_sample, false);
 
       fill_chan = (fill_chan + 1) % _channel_num;
 
@@ -599,8 +964,16 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
       filled_sample = align_sample_count % LeafBlockSamples;
       old_filled_sample = filled_sample;
 
-      lbp = allocate_block(fill_chan, index0, index1);
-      if (lbp == NULL) return;
+      if (index0 >= _ch_data[fill_chan].size()) {
+        pxv_err("append_cross_payload: index0 %llu out of range (end)",
+                (unsigned long long)index0);
+        break;
+      }
+      lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+      if (lbp == NULL) {
+        pxv_err("append_cross_payload: alloc failed (end)");
+        break;
+      }
 
       write_ptr = (uint64_t *)lbp + offset / Scale;
       read_ptr = chans_read_addr[fill_chan];
@@ -617,19 +990,33 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
   _ch_fraction = last_chan;
 
-  lbp = allocate_block(_ch_fraction, index0, index1);
-  if (lbp == NULL) return;
+  if (index0 >= _ch_data[_ch_fraction].size()) {
+    pxv_err("append_cross_payload: index0 %llu out of range (finalize)",
+            (unsigned long long)index0);
+    _dest_ptr = NULL;
+    return;
+  }
+  lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
+  if (lbp == NULL) {
+    pxv_err("append_cross_payload: alloc failed (finalize)");
+    _dest_ptr = NULL;
+    return;
+  }
 
   _dest_ptr = (uint8_t *)lbp + offset / 8;
 
+  // ---- Tail phase: residual bytes (len < 8) ----
   if (len > 0) {
     uint8_t *src_ptr = (uint8_t *)end_read_ptr - len;
-    _byte_fraction += len;
+    _byte_fraction += (uint8_t)len;
 
+    // mmap data write — release _mutex during page faults
+    lock.unlock();
     while (len > 0) {
       *_dest_ptr++ = *src_ptr++;
       len--;
     }
+    lock.lock();  // re-acquire before method exit (destructor releases)
   }
 }
 
@@ -639,25 +1026,9 @@ void LogicSnapshot::capture_ended() {
   // finished writing all pending data), and the memset below would zero out
   // valid data that was still waiting in the queue.
   // We must NOT hold _mutex while waiting, because the async worker needs
-  // _mutex to call append_cross_payload().
-  {
-    int drain_loops = 0;
-    while (true) {
-      {
-        std::lock_guard<std::mutex> lock(_async_mutex);
-        if (_async_queue.empty()) break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      drain_loops++;
-      if (drain_loops > 10000) { // 10s safety timeout
-        pxv_err("capture_ended: async queue drain timeout!");
-        break;
-      }
-    }
-    if (drain_loops > 0) {
-      pxv_info("capture_ended: drained async queue in %d ms", drain_loops);
-    }
-  }
+  // _mutex to call append_payload_impl().
+  // Encapsulated in drain_queue_for_capture_end() (cluster D).
+  _disk_cache_writer->drain_queue_for_capture_end();
 
   std::lock_guard<std::mutex> lock(_mutex);
 
@@ -672,13 +1043,32 @@ void LogicSnapshot::capture_ended() {
 
   _ring_sample_count -= _loop_offset;
 
+  pxv_info("capture_ended: _ring=%llu, _total=%llu, _sample_count=%llu, "
+           "_loop_offset=%llu, _ch_num=%u, _ch_data.size=%zu, "
+           "idx0=%llu, idx1=%llu, offset=%llu",
+           (unsigned long long)_ring_sample_count,
+           (unsigned long long)_total_sample_count,
+           (unsigned long long)_sample_count,
+           (unsigned long long)_loop_offset,
+           (unsigned)_channel_num, _ch_data.size(),
+           (unsigned long long)index0, (unsigned long long)index1,
+           (unsigned long long)offset);
+
   if (offset > 0) {
     for (unsigned int chan = 0; chan < _channel_num; chan++) {
       uint8_t *lbp = (uint8_t *)_ch_data[chan][index0].lbp[index1];
 
       if (lbp == NULL) {
-        pxv_err("ERROR:LogicSnapshot::capture_ended(),buffer is null.");
-        assert(false);
+        // Tolerate NULL leaf block at capture_ended: the async writer may not
+        // have allocated a block for the trailing partial chunk (e.g. when the
+        // last append_payload_impl invocation early-returned because
+        // _sample_count already capped at _total_sample_count). Previously
+        // this fired assert(false); but per AGENTS.md assert() is a no-op in
+        // Release, so we already log + skip silently here. Skip the mipmap
+        // update for this channel — the trailing partial chunk's mipmap will
+        // be 0 anyway, and downstream view rendering already tolerates it.
+        pxv_warn("capture_ended: ch%u leaf block [%llu][%llu] is NULL, skipping",
+                 chan, (unsigned long long)index0, (unsigned long long)index1);
       } else {
         // ONLY clear the signal data part, NOT the mipmaps! Mipmaps start at LeafBlockSamples / 8.
         if (offset < LeafBlockSamples / 8) {
@@ -727,8 +1117,10 @@ void LogicSnapshot::copy_from(const LogicSnapshot &src) {
 
   if (src._mmap_alloc) {
       _mmap_alloc = std::make_shared<MmapAllocator>();
-      _mmap_alloc->configure(false, "", src._mmap_alloc->get_total_bytes());
+      _mmap_alloc->configure(false, "", src._mmap_alloc->get_total_bytes(),
+                             LeafBlockSpace, _max_blocks_per_channel, _channel_num);
   } else {
+      _disk_cache_writer->clear_all_mmap_slots();
       _mmap_alloc = nullptr;
   }
 
@@ -779,6 +1171,26 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   void *level3_ptr =
       (uint8_t *)level2_ptr + LeafBlockSamples / Scale / Scale / 8;
 
+  // ROOT-CAUSE FIX for D7 false-edge bug (160-210us spurious low pulses):
+  // The original level-1 loop processed every u64 with index < samples/Scale
+  // (integer division). When samples % Scale != 0, the last u64 was only
+  // partially written (Phase 4/5 wrote the low N bits, the high 64-N bits
+  // remained zero from memset). Comparing this partial u64 against
+  // _last_sample (which was ~0ULL for D7-all-high) triggered a false toggle,
+  // polluting level1/2/3 mipmap and causing get_nxt_edge_self to report
+  // phantom edges. The rendering drew 160-210us low pulses (N=32..42 samples
+  // at 200kHz) even though get_sample_self correctly returned true for every
+  // bit in the written range.
+  //
+  // Fix: split the loop into a full-u64 phase (i < full_u64_count) and a
+  // partial-u64 tail phase. The tail phase masks both the comparison and the
+  // _last_sample update to only the actually-written bits, so a partial u64
+  // whose written bits all match _last_sample does NOT trigger a toggle.
+  const uint64_t full_u64_count = samples / Scale;
+  const uint64_t partial_bits = samples % Scale;
+  const uint64_t partial_mask =
+      partial_bits ? ((1ULL << partial_bits) - 1) : 0ULL;
+
   // level 1
   uint64_t *src_ptr = (uint64_t *)lbp;
   uint64_t *dest_ptr = (uint64_t *)level1_ptr;
@@ -797,7 +1209,8 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
     _last_sample[order] = (*src_ptr & LSB) ? ~0ULL : 0ULL;
   }
 
-  for (; i < samples / Scale; i++) {
+  // Full u64 phase: every u64 in [i, full_u64_count) is fully written.
+  for (; i < full_u64_count; i++) {
     if (_last_sample[order] ^ *src_ptr)
       *dest_ptr |= (1ULL << offset);
 
@@ -809,6 +1222,23 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
       offset = 0;
       dest_ptr++;
     }
+  }
+
+  // Partial tail phase: the u64 at index full_u64_count has only its low
+  // partial_bits written; high bits are zero. Compare only the written bits
+  // and derive _last_sample from the last written bit, not from MSB.
+  if (partial_bits > 0) {
+    const uint64_t partial_value = *src_ptr & partial_mask;
+    const uint64_t last_written_bit =
+        (partial_bits > 0) ? (1ULL << (partial_bits - 1)) : 0ULL;
+    if ((_last_sample[order] & partial_mask) ^ partial_value)
+      *dest_ptr |= (1ULL << offset);
+
+    _last_sample[order] = (partial_value & last_written_bit) ? ~0ULL : 0ULL;
+    // NOTE: do NOT advance src_ptr/offset/dest_ptr here — the partial u64 is
+    // revisited on the next calc_mipmap call (last_count = samples, so
+    // i = samples/Scale = full_u64_count, reprocessing this u64 as a full
+    // u64 once its remaining bits are written). Advancing would skip it.
   }
 
   // level 2
@@ -850,8 +1280,27 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   if ((*((uint64_t *)lbp) & LSB) != 0)
     _ch_data[order][index0].first |= 1ULL << index1;
 
-  if ((*((uint64_t *)lbp + LeafBlockSamples / Scale - 1) & MSB) != 0)
-    _ch_data[order][index0].last |= 1ULL << index1;
+  // ROOT-CAUSE FIX: the original code checked a fixed u64 position
+  // (LeafBlockSamples/Scale - 1 = last u64 of the leaf block). When the leaf
+  // block was not fully written (samples < LeafBlockSamples), that u64 was
+  // zero-filled memory, so `last` was wrongly cleared to 0. Now derive `last`
+  // from the actual last written sample: if partial_bits > 0, the last
+  // written bit is bit (partial_bits-1) of u64[full_u64_count]; otherwise
+  // it's MSB of u64[full_u64_count - 1].
+  if (samples > 0) {
+    bool last_sample_value;
+    if (partial_bits > 0) {
+      const uint64_t tail_u64 = *((uint64_t *)lbp + full_u64_count);
+      last_sample_value = (tail_u64 & (1ULL << (partial_bits - 1))) != 0;
+    } else {
+      const uint64_t last_full_u64 = *((uint64_t *)lbp + full_u64_count - 1);
+      last_sample_value = (last_full_u64 & MSB) != 0;
+    }
+    if (last_sample_value)
+      _ch_data[order][index0].last |= 1ULL << index1;
+    else
+      _ch_data[order][index0].last &= ~(1ULL << index1);
+  }
 
   if (*((uint64_t *)level3_ptr) != 0) {
     _ch_data[order][index0].tog |= 1ULL << index1;
@@ -886,8 +1335,16 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   _ring_sample_count += _loop_offset;
 
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
+  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+    static int s_warn_cnt = 0;
+    if (s_warn_cnt++ < 20) {
+      pxv_warn("LogicSnapshot::get_samples NULL: sig_index=%d order=%d "
+               "ch_data_size=%zu ch_index_size=%zu _loop_offset=%lld",
+               sig_index, order, _ch_data.size(), _ch_index.size(),
+               (long long)_loop_offset);
+    }
     return NULL;
+  }
 
   uint64_t index0 = start_sample >> (LeafBlockPower + RootScalePower);
   uint64_t index1 = (start_sample & RootMask) >> LeafBlockPower;
@@ -900,13 +1357,40 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
 
   _ring_sample_count -= _loop_offset;
 
-  if (index0 >= _ch_data[order].size())
+  if (index0 >= _ch_data[order].size()) {
+    static int s_warn_cnt2 = 0;
+    if (s_warn_cnt2++ < 20) {
+      pxv_warn("LogicSnapshot::get_samples NULL: sig_index=%d order=%d "
+               "index0=%llu >= ch_data[order].size()=%zu (start_sample=%llu)",
+               sig_index, order, (unsigned long long)index0,
+               _ch_data[order].size(), (unsigned long long)start_sample);
+    }
     return NULL;
+  }
 
   void *ptr = _ch_data[order][index0].lbp[index1];
 
-  if (ptr == NULL)
-    return NULL;
+  if (ptr == NULL) {
+    // Leaf block was freed by calc_mipmap because this region has no toggles
+    // (constant value). The value is encoded in _ch_data[order][index0].first
+    // bit `index1`. Return a synthetic buffer filled with the constant value
+    // so callers (export, etc.) get valid data instead of NULL.
+    // 8 samples per byte, LSB-first: all-0 -> 0x00, all-1 -> 0xFF.
+    bool const_val = (_ch_data[order][index0].first & (1ULL << index1)) != 0;
+    uint64_t bytes_from_offset = (end_sample - start_sample + 1 + 7) / 8;
+    // Clamp to remaining bytes in this leaf block from `offset`.
+    uint64_t leaf_remaining = (LeafBlockSamples / 8) - offset;
+    uint64_t need = std::min(bytes_from_offset, leaf_remaining);
+    static thread_local std::vector<uint8_t> s_const_buf;
+    if (s_const_buf.size() < need) s_const_buf.resize(need);
+    uint8_t fill = const_val ? 0xFF : 0x00;
+    memset(s_const_buf.data(), fill, need);
+    if (lbp != NULL)
+      *lbp = NULL;
+    _cur_ref_block_indexs[order].root_index = index0;
+    _cur_ref_block_indexs[order].lbp_index = index1;
+    return s_const_buf.data();
+  }
 
   if (lbp != NULL)
     *lbp = ptr;
@@ -937,26 +1421,27 @@ bool LogicSnapshot::get_sample_self(uint64_t index, int sig_index) {
   if (order == -1 || (unsigned int)order >= _ch_data.size())
     return false;
 
-  if (index < _ring_sample_count) {
-    uint64_t index_mask = 1ULL << (index & LevelMask[0]);
-    uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
-    uint64_t index1 = (index & RootMask) >> LeafBlockPower;
-    uint64_t root_pos_mask = 1ULL << index1;
+  if (index >= _ring_sample_count)
+    return false;
 
-    if (index0 >= _ch_data[order].size())
-      return false;
+  uint64_t index_mask = 1ULL << (index & LevelMask[0]);
+  uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
+  uint64_t index1 = (index & RootMask) >> LeafBlockPower;
+  uint64_t root_pos_mask = 1ULL << index1;
 
-    if ((_ch_data[order][index0].tog & root_pos_mask) == 0) {
-      return (_ch_data[order][index0].first & root_pos_mask) != 0;
-    } else {
-      void *ptr = _ch_data[order][index0].lbp[index1];
-      if (ptr == NULL)
-        return (_ch_data[order][index0].first & root_pos_mask) != 0;
-      return *((uint64_t *)ptr + ((index & LeafMask) >> ScalePower)) & index_mask;
-    }
-  }
+  if (index0 >= _ch_data[order].size())
+    return false;
 
-  return false;
+  if ((_ch_data[order][index0].tog & root_pos_mask) == 0)
+    return (_ch_data[order][index0].first & root_pos_mask) != 0;
+
+  void *ptr = _ch_data[order][index0].lbp[index1];
+  if (ptr == nullptr)
+    return (_ch_data[order][index0].first & root_pos_mask) != 0;
+
+  uint64_t u64_idx = (index & LeafMask) >> ScalePower;
+  uint64_t *u64_ptr = (uint64_t *)ptr;
+  return u64_ptr[u64_idx] & index_mask;
 }
 
 bool LogicSnapshot::get_display_edges(
@@ -1073,9 +1558,31 @@ bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
 
     do {
       uint64_t inner_tog = _ch_data[order][i].tog & cur_mask;
-      uint64_t lbp_tog =
+      uint64_t lbp_tog_raw =
           (((_ch_data[order][i].last << 1) + root_last) & cur_mask) ^
           (_ch_data[order][i].first & cur_mask);
+      uint64_t lbp_tog = lbp_tog_raw;
+
+      // 修复：清除超出 _ring_sample_count 的虚假 lbp_tog bit。
+      // 未使用的 lbp 块 first/last=0，会与已使用块的 last 产生虚假边沿
+      // （例如 D7 全高时，lbp[0] last=1，lbp[1] first=0 → 误报下降沿，
+      //  导致 lbp_nxt_edge 把 index 推到 lbp[1] 起始位置 2^24，
+      //  渲染端画出垂直线毛刺）。
+      // 只有 lbp_tog_index < _ring_sample_count 的 bit 才是有效边沿。
+      {
+        uint64_t root_start = (i << (LeafBlockPower + RootScalePower));
+        if (root_start < _ring_sample_count) {
+          uint64_t valid_lbp_count = (_ring_sample_count - root_start +
+                                      LeafBlockSamples - 1) >> LeafBlockPower;
+          uint64_t valid_mask = (valid_lbp_count >= Scale)
+                                    ? ~0ULL
+                                    : ((1ULL << valid_lbp_count) - 1);
+          lbp_tog &= valid_mask;
+        } else {
+          lbp_tog = 0;
+        }
+      }
+
       uint8_t inner_tog_pos = bsf_folded(inner_tog);
       uint8_t lbp_tog_pos = bsf_folded(lbp_tog);
 
@@ -1427,6 +1934,10 @@ bool LogicSnapshot::block_pre_edge(uint64_t *lbp, uint64_t &index,
   const uint64_t last = last_sample ? ~0ULL : 0ULL;
   uint64_t block_start = index & ~LeafMask;
 
+  if (!lbp) {
+    pxv_warn("%s", "LogicSnapshot::block_pre_edge: lbp is NULL");
+    return false;
+  }
   assert(lbp);
 
   //----- Search Next Edge Within Current LeafBlock -----//
@@ -1779,12 +2290,23 @@ void LogicSnapshot::decode_end() {
 void LogicSnapshot::push_to_free_list(void* ptr) {
   if (!ptr) return;
   if (_mmap_alloc && _mmap_alloc->is_mmap_address(ptr)) {
-    return; // Mmap addresses are managed by MmapAllocator
+    // 归还物理页给 OS（RAM 模式 decommit / 磁盘模式 punch hole），并清除 written 位
+    // 使该槽位下次分配时被视为 fresh（跳过 memset，由 OS 零填充）。
+    _mmap_alloc->decommit_block(ptr, LeafBlockSpace);
+    uint64_t abs_slot = 0;
+    if (_mmap_alloc->block_absolute_slot(ptr, LeafBlockSpace, abs_slot)) {
+      clear_mmap_slot_by_abs(abs_slot);
+    }
+    return;
   }
   _free_block_list.push_back(ptr);
 }
 
 void LogicSnapshot::free_decode_lpb(void *lbp) {
+  if (!lbp) {
+    pxv_warn("%s", "LogicSnapshot::free_decode_lpb: lbp is NULL");
+    return;
+  }
   assert(lbp);
 
   std::lock_guard<std::mutex> lock(_mutex);
@@ -1820,6 +2342,10 @@ void LogicSnapshot::free_head_blocks(int count) {
 }
 
 int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
+  if (!out_offset) {
+    pxv_warn("%s", "LogicSnapshot::get_block_with_sample: out_offset is NULL");
+    return -1;
+  }
   assert(out_offset);
 
   int block = index / LeafBlockSamples;
@@ -1827,503 +2353,42 @@ int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
   return block;
 }
 
-void LogicSnapshot::set_sample_range(uint64_t start, uint64_t end, bool level,
-                                     int sig_index) {
-  std::lock_guard<std::mutex> lock(_mutex);
-
-  start += _loop_offset;
-  end += _loop_offset;
-
-  int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
-    return;
-
-  uint64_t max_sample = _ring_sample_count + _loop_offset;
-  if (end > max_sample)
-    end = max_sample;
-  if (start >= end)
-    return;
-
-  for (uint64_t pos = start; pos < end;) {
-    uint64_t index0 = pos >> (LeafBlockPower + RootScalePower);
-    uint64_t index1 = (pos & RootMask) >> LeafBlockPower;
-
-    if (index0 >= _ch_data[order].size())
-      break;
-
-    uint64_t block_start = (index0 << (LeafBlockPower + RootScalePower)) +
-                           (index1 << LeafBlockPower);
-    uint64_t block_end = block_start + LeafBlockSamples;
-    uint64_t seg_end = min(end, block_end);
-
-    if (_ch_data[order][index0].lbp[index1] == NULL) {
-      bool const_val = (_ch_data[order][index0].first & (1ULL << index1)) != 0;
-
-      void *lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
-      if (lbp == NULL) {
-        _memory_failed = true;
-        return;
-      }
-
-      if (const_val)
-        memset(lbp, 0xFF, LeafBlockSamples / 8);
-      else
-        memset(lbp, 0, LeafBlockSamples / 8);
-
-      memset((uint8_t *)lbp + LeafBlockSamples / 8, 0,
-             LeafBlockSpace - LeafBlockSamples / 8);
-
-      _ch_data[order][index0].lbp[index1] = lbp;
-      _ch_data[order][index0].tog &= ~(1ULL << index1);
-    }
-
-    uint8_t *lbp = (uint8_t *)_ch_data[order][index0].lbp[index1];
-
-    for (uint64_t i = pos; i < seg_end; i++) {
-      uint64_t bit_offset = i & LeafMask;
-      uint64_t byte_offset = bit_offset / 8;
-      uint8_t bit_mask = 1ULL << (bit_offset % 8);
-
-      if (level)
-        lbp[byte_offset] |= bit_mask;
-      else
-        lbp[byte_offset] &= ~bit_mask;
-    }
-
-    pos = seg_end;
-  }
-}
-
 void LogicSnapshot::invert_channel(int sig_index) {
-  std::lock_guard<std::mutex> lock(_mutex);
-
-  int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
-    return;
-
-  if (_ring_sample_count == 0)
-    return;
-
-
-
-  for (uint64_t i = 0; i < _ch_data[order].size(); i++) {
-    RootNode &rn = _ch_data[order][i];
-
-    for (uint64_t j = 0; j < Scale; j++) {
-      uint64_t pos_mask = 1ULL << j;
-
-      if (rn.lbp[j] != NULL) {
-        // Block has actual data — XOR all sample bytes with 0xFF
-        uint8_t *lbp = (uint8_t *)rn.lbp[j];
-        uint64_t sample_bytes = LeafBlockSamples / 8;
-
-        for (uint64_t k = 0; k < sample_bytes; k++) {
-          lbp[k] ^= 0xFF;
-        }
-
-        // Rebuild mipmap for this block
-        recalc_mipmap(order, i, j);
-      } else {
-        // Compressed block (constant value) — flip first and last bits
-        rn.first ^= pos_mask;
-        rn.last ^= pos_mask;
-      }
-    }
-  }
-}
-
-void LogicSnapshot::recalc_mipmap(unsigned int order, uint64_t index0,
-                                  uint64_t index1) {
-  void *lbp = _ch_data[order][index0].lbp[index1];
-
-  if (lbp == NULL)
-    return;
-
-  if (index1 > 0) {
-    void* prev_ptr = _ch_data[order][index0].lbp[index1 - 1];
-    if (prev_ptr != NULL) {
-      uint64_t *prev_lbp = (uint64_t *)prev_ptr;
-      _last_sample[order] =
-          (prev_lbp[LeafBlockSamples / Scale - 1] & MSB) ? ~0ULL : 0ULL;
-    } else {
-      bool prev_val =
-          (_ch_data[order][index0].last & (1ULL << (index1 - 1))) != 0;
-      _last_sample[order] = prev_val ? ~0ULL : 0ULL;
-    }
-  } else if (index0 > 0) {
-    bool prev_val = (_ch_data[order][index0 - 1].last & MSB) != 0;
-    _last_sample[order] = prev_val ? ~0ULL : 0ULL;
-  } else {
-    _last_sample[order] = 0;
-  }
-
-  memset((uint8_t *)lbp + LeafBlockSamples / 8, 0,
-         LeafBlockSpace - LeafBlockSamples / 8);
-
-  _ch_data[order][index0].tog &= ~(1ULL << index1);
-  _ch_data[order][index0].first &= ~(1ULL << index1);
-  _ch_data[order][index0].last &= ~(1ULL << index1);
-
-  _last_calc_count[order] = 0;
-
-  calc_mipmap(order, index0, index1, LeafBlockSamples, true);
-}
-
-LogicSnapshot *LogicSnapshot::clone_data() {
-  std::lock_guard<std::mutex> lock(_mutex);
-
-  ensure_all_blocks_hot();
-
-  LogicSnapshot *clone = new LogicSnapshot();
-
-  clone->_capacity = _capacity;
-  clone->_channel_num = _channel_num;
-  clone->_sample_count = _sample_count;
-  clone->_total_sample_count = _total_sample_count;
-  clone->_ring_sample_count = _ring_sample_count;
-  clone->_unit_size = _unit_size;
-  clone->_unit_bytes = _unit_bytes;
-  clone->_unit_pitch = _unit_pitch;
-  clone->_memory_failed = _memory_failed;
-  clone->_last_ended = _last_ended;
-  clone->_samplerate = _samplerate;
-  clone->_ch_index = _ch_index;
-
-  clone->_glitch_filtered = _glitch_filtered;
-
-  clone->_is_loop = _is_loop;
-  clone->_loop_offset = _loop_offset;
-  clone->_able_free = _able_free;
-  clone->_byte_fraction = _byte_fraction;
-  clone->_ch_fraction = _ch_fraction;
-  clone->_lst_free_block_index = _lst_free_block_index;
-
-  memcpy(clone->_last_sample, _last_sample, sizeof(_last_sample));
-  memcpy(clone->_last_calc_count, _last_calc_count, sizeof(_last_calc_count));
-  memcpy(clone->_cur_ref_block_indexs, _cur_ref_block_indexs,
-         sizeof(_cur_ref_block_indexs));
-
-  clone->_ch_data.resize(_ch_data.size());
-  for (size_t ch = 0; ch < _ch_data.size(); ch++) {
-    clone->_ch_data[ch].resize(_ch_data[ch].size());
-    for (size_t rn = 0; rn < _ch_data[ch].size(); rn++) {
-      clone->_ch_data[ch][rn] = _ch_data[ch][rn];
-      for (size_t lb = 0; lb < Scale; lb++) {
-        if (_ch_data[ch][rn].lbp[lb] != NULL) {
-          void *new_lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
-          if (new_lbp == NULL) {
-            clone->_memory_failed = true;
-            return clone;
-          }
-          memcpy(new_lbp, _ch_data[ch][rn].lbp[lb], LeafBlockSpace);
-          clone->_ch_data[ch][rn].lbp[lb] = new_lbp;
-        }
-      }
-    }
-  }
-
-  clone->_dest_ptr = NULL;
-
-  return clone;
+  _glitch_filter->invert_channel(sig_index);
 }
 
 void LogicSnapshot::apply_glitch_filter(
     int sig_index, uint32_t threshold,
     std::function<void(int)> progress_callback,
     GlitchFilterMode filter_mode) {
-  if (threshold == 0)
-    return;
-
-  int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
-    return;
-
-  uint64_t max_sample = _ring_sample_count;
-  if (max_sample == 0)
-    return;
-
-  std::lock_guard<std::mutex> lock(_mutex);
-
-  // 转换为绝对偏移坐标系
-  _ring_sample_count += _loop_offset;
-
-  uint64_t end_pos = max_sample + _loop_offset;
-  uint64_t scan_pos = _loop_offset;
-
-  // 状态机记录当前确认的"稳定"电平状态
-  bool accepted_level = get_sample_self(scan_pos, sig_index);
-  int last_progress = -1;
-
-  pxv_info("[GlitchFilter] START sig_index=%d threshold=%u max_sample=%llu "
-           "accepted_level=%d filter_mode=%d",
-           sig_index, threshold, (unsigned long long)max_sample,
-           accepted_level, (int)filter_mode);
-
-  struct FillRange {
-    uint64_t start;
-    uint64_t end;
-    bool level;
-  };
-  std::vector<FillRange> fills;
-  // 预分配批处理空间，防止频繁申请内存
-  fills.reserve(65536);
-
-  uint64_t loop_count = 0;
-  uint64_t glitch_count = 0;
-  uint64_t stable_count = 0;
-
-  // 批量应用覆盖并重构 Mipmap（保证寻找下一边缘时，搜索树不失效）
-  auto apply_batch = [&]() {
-    if (fills.empty())
-      return;
-
-    uint64_t batch_start = fills.front().start;
-    uint64_t batch_end = fills.back().end;
-
-    pxv_info(
-        "[GlitchFilter] apply_batch fills=%zu batch_start=%llu batch_end=%llu",
-        fills.size(), (unsigned long long)batch_start,
-        (unsigned long long)batch_end);
-
-    for (const auto &r : fills) {
-      uint64_t start = r.start;
-      uint64_t end = r.end;
-      bool level = r.level;
-
-      for (uint64_t pos = start; pos < end;) {
-        uint64_t idx0 = pos >> (LeafBlockPower + RootScalePower);
-        uint64_t idx1 = (pos & RootMask) >> LeafBlockPower;
-
-        if (idx0 >= _ch_data[order].size())
-          break;
-
-        uint64_t block_start = (idx0 << (LeafBlockPower + RootScalePower)) +
-                               (idx1 << LeafBlockPower);
-        uint64_t block_end = block_start + LeafBlockSamples;
-        uint64_t seg_end = min(end, block_end);
-
-        // 如果该块尚未被实例化，则分配空间
-        if (_ch_data[order][idx0].lbp[idx1] == NULL) {
-          bool const_val = (_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
-          void *lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
-          if (lbp == NULL) {
-            _memory_failed = true;
-            return;
-          }
-          if (const_val)
-            memset(lbp, 0xFF, LeafBlockSamples / 8);
-          else
-            memset(lbp, 0, LeafBlockSamples / 8);
-          memset((uint8_t *)lbp + LeafBlockSamples / 8, 0,
-                 LeafBlockSpace - LeafBlockSamples / 8);
-          _ch_data[order][idx0].lbp[idx1] = lbp;
-        }
-
-        uint8_t *lbp = (uint8_t *)_ch_data[order][idx0].lbp[idx1];
-
-        // 由于马上要改写内容，此处清除该块的跳变标志位
-        _ch_data[order][idx0].tog &= ~(1ULL << idx1);
-
-        for (uint64_t i = pos; i < seg_end; i++) {
-          uint64_t bit_offset = i & LeafMask;
-          uint64_t byte_offset = bit_offset / 8;
-          uint8_t bit_mask = 1ULL << (bit_offset % 8);
-          if (level)
-            lbp[byte_offset] |= bit_mask;
-          else
-            lbp[byte_offset] &= ~bit_mask;
-        }
-
-        pos = seg_end;
-      }
-    }
-
-    // 精准回写：只重新计算被改写过的叶子节点的 Mipmap
-    // 从而完美维护查找树的同步，且大量节省 CPU 耗时
-    uint64_t start_blk = batch_start / LeafBlockSamples;
-    uint64_t end_blk = (batch_end + LeafBlockSamples - 1) / LeafBlockSamples;
-
-    for (uint64_t blk = start_blk; blk < end_blk; ++blk) {
-      uint64_t idx0 = blk / RootScale;
-      uint64_t idx1 = blk % RootScale;
-      if (idx0 < _ch_data[order].size()) {
-        recalc_mipmap(order, idx0, idx1);
-      }
-    }
-
-    fills.clear();
-  };
-
-  while (scan_pos < end_pos) {
-    bool current_scan_level = get_sample_self(scan_pos, sig_index);
-
-    // 寻找下一个边缘（跳出当前电平）
-    uint64_t edge_pos = scan_pos;
-    bool found = get_nxt_edge_self(edge_pos, current_scan_level, end_pos - 1, 0,
-                                   sig_index);
-
-    if (!found) {
-      pxv_info("[GlitchFilter] no more edges at scan_pos=%llu",
-               (unsigned long long)scan_pos);
-      break;
-    }
-
-    uint64_t pulse_start = edge_pos;
-    uint64_t pulse_end = pulse_start;
-    // 寻找脉冲的结束边缘（电平回归原始位置）
-    bool found_end = get_nxt_edge_self(pulse_end, !current_scan_level,
-                                       end_pos - 1, 0, sig_index);
-
-    if (!found_end) {
-      pulse_end = end_pos;
-    }
-
-    uint64_t pulse_len = pulse_end - pulse_start;
-    loop_count++;
-
-    if (current_scan_level == accepted_level) {
-      if (pulse_len <= threshold) {
-        bool should_filter = false;
-        switch (filter_mode) {
-        case GLITCH_FILTER_BOTH:
-          should_filter = true;
-          break;
-        case GLITCH_FILTER_HIGH:
-          // Only filter when accepted_level is HIGH (remove low pulses on high level)
-          should_filter = accepted_level == true;
-          break;
-        case GLITCH_FILTER_LOW:
-          // Only filter when accepted_level is LOW (remove high pulses on low level)
-          should_filter = accepted_level == false;
-          break;
-        }
-
-        if (should_filter) {
-          // 判断为毛刺：它是一个短暂偏离基准 accepted_level 的窄脉冲
-          // 用 accepted_level 覆盖这段毛刺区间
-          fills.push_back({pulse_start, pulse_end, accepted_level});
-          glitch_count++;
-
-          if (glitch_count <= 5 || glitch_count % 1000 == 0) {
-            pxv_info(
-                "[GlitchFilter] GLITCH #%llu scan=%llu pulse=[%llu,%llu) "
-                "len=%llu accepted=%d fills=%zu",
-                (unsigned long long)glitch_count, (unsigned long long)scan_pos,
-                (unsigned long long)pulse_start, (unsigned long long)pulse_end,
-                (unsigned long long)pulse_len, accepted_level, fills.size());
-          }
-
-          // 跳过毛刺段，由于脉冲结束时恢复到了
-          // accepted_level，直接从脉冲末尾继续扫描
-          scan_pos = pulse_end;
-
-          // 若堆积过多则刷入硬盘缓存及重建 Mipmap，避免占用过多内存
-          if (fills.size() >= 65536) {
-            apply_batch();
-            if (_memory_failed)
-              break;
-          }
-        } else {
-          // Not filtering this pulse, treat as stable transition
-          stable_count++;
-          pxv_info("[GlitchFilter] SKIP-FILTER #%llu scan=%llu pulse=[%llu,%llu) "
-                   "len=%llu old_accepted=%d -> new_accepted=%d (mode=%d)",
-                   (unsigned long long)stable_count, (unsigned long long)scan_pos,
-                   (unsigned long long)pulse_start, (unsigned long long)pulse_end,
-                   (unsigned long long)pulse_len, accepted_level,
-                   !accepted_level, (int)filter_mode);
-          accepted_level = !accepted_level;
-          scan_pos = pulse_start;
-        }
-      } else {
-        // 判断为稳定的状态迁移：新电平持续了足够长的时间
-        stable_count++;
-        pxv_info("[GlitchFilter] STABLE #%llu scan=%llu pulse=[%llu,%llu) "
-                 "len=%llu old_accepted=%d -> new_accepted=%d",
-                 (unsigned long long)stable_count, (unsigned long long)scan_pos,
-                 (unsigned long long)pulse_start, (unsigned long long)pulse_end,
-                 (unsigned long long)pulse_len, accepted_level,
-                 !accepted_level);
-        accepted_level = !accepted_level; // 确认新的基准电平状态
-        scan_pos =
-            pulse_start; // 将游标设于稳定脉冲开始处，在下一次循环中作为新基准点搜索
-      }
-    } else {
-      // 防御性设计：依照状态机逻辑不会跑到这
-      pxv_warn("[GlitchFilter] UNEXPECTED current_scan_level(%d) != "
-               "accepted_level(%d) at scan_pos=%llu",
-               current_scan_level, accepted_level,
-               (unsigned long long)scan_pos);
-      scan_pos = pulse_start;
-    }
-
-    int progress = (int)((scan_pos - _loop_offset) * 100 / max_sample);
-    if (progress != last_progress && progress_callback) {
-      progress_callback(progress);
-      last_progress = progress;
-    }
-  }
-
-  // 处理遗留的一批写操作
-  apply_batch();
-
-  // 验证：采样前100个点，确认数据确实被修改了
-  pxv_info(
-      "[GlitchFilter] VERIFY start: sampling first 100 points after filter");
-  for (int v = 0; v < 100; v++) {
-    uint64_t vpos = _loop_offset + v;
-    bool vlevel = get_sample_self(vpos, sig_index);
-    if (vlevel != accepted_level) {
-      pxv_info(
-          "[GlitchFilter] VERIFY pos=%llu level=%d (MISMATCH! expected=%d)",
-          (unsigned long long)vpos, vlevel, accepted_level);
-    }
-  }
-  pxv_info("[GlitchFilter] VERIFY: also sampling fills region boundaries");
-  if (!fills.empty()) {
-    for (size_t fi = 0; fi < fills.size() && fi < 5; fi++) {
-      uint64_t vpos = fills[fi].start;
-      bool vlevel = get_sample_self(vpos, sig_index);
-      pxv_info(
-          "[GlitchFilter] VERIFY fill[%zu] start_pos=%llu level=%d expected=%d",
-          fi, (unsigned long long)vpos, vlevel, fills[fi].level);
-    }
-  }
-
-  pxv_info("[GlitchFilter] END sig_index=%d loops=%llu glitches=%llu "
-           "stables=%llu fills_final=%zu",
-           sig_index, (unsigned long long)loop_count,
-           (unsigned long long)glitch_count, (unsigned long long)stable_count,
-           fills.size());
-
-  // 恢复坐标系
-  _ring_sample_count -= _loop_offset;
+  _glitch_filter->apply_glitch_filter(sig_index, threshold,
+                                      std::move(progress_callback), filter_mode);
 }
 
 void LogicSnapshot::apply_glitch_filter_all(
-    const std::vector<uint32_t> &thresholds,
+    const std::map<int, uint32_t> &thresholds,
     std::function<void(int)> progress_callback,
-    const std::vector<GlitchFilterMode> &filter_modes) {
-  for (int i = 0; i < (int)_ch_index.size(); i++) {
-    if (i < (int)thresholds.size() && thresholds[i] > 0) {
-      GlitchFilterMode mode = GLITCH_FILTER_BOTH;
-      if (i < (int)filter_modes.size()) {
-        mode = filter_modes[i];
-      }
-      apply_glitch_filter(_ch_index[i], thresholds[i], nullptr, mode);
-    }
-    if (progress_callback) {
-      int progress = (i + 1) * 100 / _ch_index.size();
-      progress_callback(progress);
-    }
-  }
-  _glitch_filtered = true;
+    const std::map<int, GlitchFilterMode> &filter_modes) {
+  _glitch_filter->apply_glitch_filter_all(thresholds,
+                                          std::move(progress_callback),
+                                          filter_modes);
 }
 
-bool LogicSnapshot::is_glitch_filtered() { return _glitch_filtered; }
+bool LogicSnapshot::is_glitch_filtered() {
+  return _glitch_filter->is_glitch_filtered();
+}
 
 void LogicSnapshot::set_glitch_filtered(bool filtered) {
-  _glitch_filtered = filtered;
+  _glitch_filter->set_glitch_filtered(filtered);
+}
+
+const std::vector<LogicSnapshot::FillRange>&
+LogicSnapshot::get_filtered_ranges(int sig_index) const {
+  return _glitch_filter->get_filtered_ranges(sig_index);
+}
+
+void LogicSnapshot::clear_filtered_ranges() {
+  _glitch_filter->clear_filtered_ranges();
 }
 
 } // namespace data

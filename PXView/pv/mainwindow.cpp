@@ -51,6 +51,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -58,6 +59,7 @@
 #include <algorithm>
 #include <functional>
 #include <libusb-1.0/libusb.h>
+#include <stdexcept>
 
 #include "log.h"
 #include "mainwindow.h"
@@ -70,7 +72,6 @@
 #include "dialogs/deviceoptions.h"
 #include "dialogs/regionoptions.h"
 #include "dialogs/storeprogress.h"
-#include "dialogs/waitingdialog.h"
 
 #include "toolbars/filebar.h"
 #include "toolbars/logobar.h"
@@ -79,16 +80,18 @@
 #include "toolbars/trigbar.h"
 
 #include "dock/deviceoptionsdock.h"
-#include "dock/dsotriggerdock.h"
 #include "dock/logdock.h"
+#include "dock/mcpcontroldock.h"
 #include "dock/measuredock.h"
 #include "dock/protocoldock.h"
 #include "dock/searchdock.h"
-#include "dock/signalprocessingdock.h"
+#include "dock/dsotriggerdock.h"
 #include "dock/triggerdock.h"
-#include "dock/mcpcontroldock.h"
 
+
+#include "data/decoderstack.h"
 #include "data/sessiondocument.h"
+#include "core/documentregistry.h"
 #include "interface/icontextaware.h"
 #include "sessionmanager.h"
 #include "tabcontext.h"
@@ -99,11 +102,13 @@
 #include "view/signal.h"
 #include "view/trace.h"
 #include "view/view.h"
+#include "view/viewstatus.h"
+#include "view/viewport.h"
 
 /* __STDC_FORMAT_MACROS is required for PRIu64 and friends (in C++). */
 #include "ZipMaker.h"
-#include "appcontrol.h"
 #include "api/app_service.h"
+#include "appcontrol.h"
 #include "config/appconfig.h"
 #include "config/shortcutdefs.h"
 #include "deviceagent.h"
@@ -123,6 +128,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <thread>
+
 #ifdef ENABLE_DEBUG_HELPER
 #include "ui/widgetinspector.h"
 #endif
@@ -133,12 +139,59 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QTabBar>
+#include <map>
+
+// The Windows SDK (pulled in transitively via mainframe.h -> wintaskbarprogress.h
+// -> shobjidl.h, included below mainwindow.h) defines `interface` as a
+// preprocessor macro. events.h (included via mainwindow.h) clears it, but only
+// if it was defined at that point — in this TU mainframe.h is included AFTER
+// mainwindow.h, so the macro is defined after events.h's #undef runs. Clear it
+// again here so `pv::interface::` qualified names in the code below parse
+// correctly. PXView does not use the `interface` COM macro anywhere.
+#ifdef interface
+#  undef interface
+#endif
 
 namespace pv {
 
 namespace {
 QString tmp_file;
+
+/** Build a channel-index → ChannelLayoutState map from the View's signal list.
+ * Task 7 (unify-signal-layout-state): persists per-signal UI layout so the
+ * session can restore view_index / v_offset / own_height after reload. */
+std::map<int, pv::data::ChannelLayoutState>
+build_channel_layout(pv::view::View *view) {
+  std::map<int, pv::data::ChannelLayoutState> layout;
+  if (view) {
+    for (auto *sig : view->get_own_signals()) {
+      pv::data::ChannelLayoutState s;
+      s.view_index = sig->get_view_index();
+      s.v_offset = sig->get_v_offset();
+      s.own_height = sig->get_own_height();
+      layout[sig->get_index()] = s;
+    }
+  }
+  return layout;
 }
+
+/** Build a channel-index → colour-string map from the View's signal list.
+ * Task 3 (purify-architecture-concepts): collects per-signal colour so
+ * SignalConfigStore can serialize it as the single .pxc channel config path
+ * (replaces the old MainWindow::gen_config_json direct view::Signal access).
+ * Returns QColor::name() (hex "#RRGGBB") or "default" when invalid. */
+std::map<int, std::string>
+build_channel_colours(pv::view::View *view) {
+  std::map<int, std::string> colours;
+  if (view) {
+    for (auto *sig : view->get_own_signals()) {
+      QColor c = sig->get_colour();
+      colours[sig->get_index()] = c.isValid() ? c.name().toStdString() : "default";
+    }
+  }
+  return colours;
+}
+} // namespace
 
 void MainWindow::MainWindowRibbonHelper() {
   _category_file_index = _title_bar->addCategory(
@@ -174,9 +227,6 @@ void MainWindow::setupSideBar() {
                      widgets::SideBar::DockItem);
   _side_bar->addItem("sliders.svg", S_ID(IDS_TOOLBAR_DEVICE_OPTION), "Options",
                      widgets::SideBar::DockItem, _drawer_page_device_options);
-  _side_bar->addItem("audio-waveform.svg", S_ID(IDS_TOOLBAR_SIGNAL_PROCESSING),
-                     "Filter", widgets::SideBar::DockItem,
-                     _drawer_page_signal_processing);
   _side_bar->addItem("workflow.svg", S_ID(IDS_TOOLBAR_MCP), "MCP",
                      widgets::SideBar::DockItem, _drawer_page_mcp);
   _side_bar->addItem("scroll-text.svg", S_ID(IDS_TOOLBAR_LOG), "Log",
@@ -212,11 +262,11 @@ void MainWindow::setupFileCategory() {
 
 void MainWindow::setupDisplayCategory() {
   _title_bar->addAction(_category_display_index, _logo_bar->_action_cn);
-  _title_bar->addAction(_category_display_index, _logo_bar->_action_traditional);
+  _title_bar->addAction(_category_display_index,
+                        _logo_bar->_action_traditional);
   _title_bar->addAction(_category_display_index, _logo_bar->_action_en);
 
   _title_bar->addSeparator(_category_display_index);
-
 
   _title_bar->addAction(_category_display_index,
                         _trig_bar->_action_dispalyOptions);
@@ -252,6 +302,14 @@ MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
   _category_display_index = -1;
   _category_help_index = -1;
 
+  if (!title_bar) {
+    pxv_warn("%s", "MainWindow::MainWindow: title_bar is NULL");
+    throw std::invalid_argument("MainWindow: title_bar is NULL");
+  }
+  if (!_frame) {
+    pxv_warn("%s", "MainWindow::MainWindow: _frame is NULL");
+    throw std::invalid_argument("MainWindow: _frame is NULL");
+  }
   assert(title_bar);
   assert(_frame);
 
@@ -260,7 +318,8 @@ MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
   _session = ::AppControl::Instance()->GetSession();
   _session->add_callback(this);
   _device_agent = _session->get_device();
-  _session->add_msg_listener(this);
+  // Register as a typed event listener for all notification events.
+  _session->add_event_listener(this);
 
   _is_auto_switch_device = false;
   _is_save_confirm_msg = false;
@@ -277,21 +336,26 @@ MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
   _key_vaild = false;
   _last_key_press_time = high_resolution_clock::now();
 
-    update_title_bar_text();
+  update_title_bar_text();
 
-    // Register new-tab callback with AppService so MCP API can create tabs
-    auto* app_svc = ::AppControl::Instance()->GetAppService();
-    if (app_svc) {
-        auto* concrete = dynamic_cast<pv::api::AppService*>(app_svc);
-        if (concrete) {
-            concrete->set_new_tab_callback([this]() {
-                on_new_tab_requested();
-            });
-        }
+  // Register new-tab callback with AppService so MCP API can create tabs
+  auto *app_svc = ::AppControl::Instance()->GetAppService();
+  if (app_svc) {
+    auto *concrete = dynamic_cast<pv::api::AppService *>(app_svc);
+    if (concrete) {
+      concrete->set_new_tab_callback([this]() { on_new_tab_requested(); });
     }
+  }
 }
 
 MainWindow::~MainWindow() {
+  // B1.2: unregister the typed event listener before destruction. The
+  // SigSession outlives this MainWindow (it is owned by AppControl), so
+  // failing to unregister would leave a dangling pointer in the listener
+  // vector.
+  if (_session) {
+    _session->remove_event_listener(this);
+  }
 }
 
 void MainWindow::setup_ui() {
@@ -351,10 +415,15 @@ void MainWindow::setup_ui() {
 
   pv::view::View *initial_view =
       new pv::view::View(_session, _sampling_bar, this);
-  pv::data::SessionDocument *initial_doc = new pv::data::SessionDocument();
+  // phase 2: document ownership moved into DocumentRegistry. take_document
+  // returns a stable index; get_document_by_index yields a weak pointer.
+  size_t initial_doc_idx = _session->document_registry()->take_document(
+      std::make_unique<pv::data::SessionDocument>(_session));
+  pv::data::SessionDocument *initial_doc =
+      _session->document_registry()->get_document_by_index(initial_doc_idx);
 
   if (_device_agent && _device_agent->have_instance()) {
-    initial_doc->save_signal_config(_device_agent);
+    initial_doc->save_signal_config(_session->get_signal_models(), {});
     pxv_info("MainWindow::setup_ui() saved initial signal config, mode=%d "
              "ch_count=%d",
              initial_doc->get_signal_config().work_mode,
@@ -362,8 +431,8 @@ void MainWindow::setup_ui() {
   }
 
   pv::TabContext *initial_ctx = SessionManager::instance()->create_context(
-      initial_view, _session, initial_doc);
-  _session->register_document(initial_doc);
+      initial_view, _session, initial_doc, initial_doc_idx,
+      _session->document_registry());
   initial_ctx->set_title(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "File"));
   _tab_contexts.append(initial_ctx);
   qDebug() << "MainWindow::setup_ui() before addTab, initial_doc="
@@ -478,32 +547,8 @@ void MainWindow::setup_ui() {
   _log_widget = new dock::LogDock(_log_dock);
   _log_dock->setWidget(_log_widget);
 
-  // signal processing dock
-  _signal_processing_widget = new dock::SignalProcessingDock(this, _session);
-  _signal_processing_dock = new QDockWidget(this);
-  _signal_processing_dock->setWidget(_signal_processing_widget);
-
-  // Wrap SignalProcessingDock in a SmoothScrollArea (same pattern as
-  // DeviceOptionsDock)
-  QWidget *sp_container = new QWidget();
-  QVBoxLayout *sp_lay = new QVBoxLayout(sp_container);
-  sp_lay->setContentsMargins(0, 0, 0, 0);
-  sp_lay->setSpacing(0);
-  sp_lay->setSizeConstraint(QLayout::SetMinimumSize);
-  sp_lay->addWidget(_signal_processing_widget);
-
-  pv::widgets::SmoothScrollArea *sp_scroll =
-      new pv::widgets::SmoothScrollArea();
-  sp_scroll->setWidgetResizable(true);
-  sp_scroll->setFrameShape(QFrame::NoFrame);
-  sp_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  sp_scroll->setWidget(sp_container);
-  _signal_processing_dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
-  _signal_processing_dock->setTitleBarWidget(new QWidget());
-  _signal_processing_dock->setVisible(false);
-
   // MCP control dock
-  _mcp_control_widget = new dock::McpControlDock(this);
+  _mcp_control_widget = new dock::McpControlDock(AppControl::Instance(), this);
 
   // Do NOT add dock widgets to the main window layout.
   // They are hidden containers; content is shown via SlidingDrawer instead.
@@ -513,7 +558,6 @@ void MainWindow::setup_ui() {
   _measure_dock->setVisible(false);
   _search_dock->setVisible(false);
   _device_options_dock->setVisible(false);
-  _signal_processing_dock->setVisible(false);
   _log_dock->setVisible(false);
 
   // --- Create SlidingDrawer (overlay child of _central_widget, push via
@@ -560,12 +604,6 @@ void MainWindow::setup_ui() {
       dock_scroll,
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DEVICE_OPTIONS), "Device Options"));
 
-  // Signal Processing
-  _signal_processing_dock->setWidget(nullptr);
-  _drawer_page_signal_processing = _sliding_drawer->addPage(
-      sp_scroll,
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SIGNAL_PROCESSING), "Signal Processing"));
-
   // Log
   _log_dock->setWidget(nullptr);
   _drawer_page_log = _sliding_drawer->addPage(
@@ -593,7 +631,6 @@ void MainWindow::setup_ui() {
               opt->measureDock = false;
               opt->searchDock = false;
               opt->deviceOptionsDock = false;
-              opt->signalProcessingDock = false;
               AppConfig::Instance().SaveFrame();
             }
             current_view()->setFocus();
@@ -649,7 +686,6 @@ void MainWindow::setup_ui() {
   _measure_dock->installEventFilter(this);
   _search_dock->installEventFilter(this);
   _device_options_dock->installEventFilter(this);
-  _signal_processing_dock->installEventFilter(this);
   _sliding_drawer->installEventFilter(this);
 
   // defaut language
@@ -676,14 +712,25 @@ void MainWindow::setup_ui() {
           Qt::QueuedConnection);
   connect(&_event, &EventObject::decode_done, this,
           &MainWindow::on_decode_done);
+  // C5 fix: on_data_updated is the no-arg Qt slot connected to
+  // EventObject::data_updated. Use QOverload<>::of to select it.
   connect(&_event, &EventObject::data_updated, this,
-          &MainWindow::on_data_updated);
+          QOverload<>::of(&MainWindow::on_data_updated));
   connect(&_event, &EventObject::cur_snap_samplerate_changed, this,
           &MainWindow::on_cur_snap_samplerate_changed);
   connect(&_event, &EventObject::receive_data_len, this,
           &MainWindow::on_receive_data_len);
-  connect(&_event, &EventObject::trigger_message, this,
-          &MainWindow::on_trigger_message);
+  // Task 1.3: ICaptureCallback signals are emitted from Core capture thread;
+  // route through Qt::QueuedConnection so the on_* slots touch View on GUI
+  // thread.
+  connect(&_event, &EventObject::update_capture_sig, this,
+          &MainWindow::on_update_capture, Qt::QueuedConnection);
+  connect(&_event, &EventObject::show_region_sig, this,
+          &MainWindow::on_show_region, Qt::QueuedConnection);
+  connect(&_event, &EventObject::show_wait_trigger_sig, this,
+          &MainWindow::on_show_wait_trigger, Qt::QueuedConnection);
+  connect(&_event, &EventObject::repeat_hold_sig, this,
+          &MainWindow::on_repeat_hold, Qt::QueuedConnection);
 
   // view
   connect(initial_view, &view::View::prgRate, this, &MainWindow::prgRate);
@@ -735,7 +782,6 @@ void MainWindow::setup_ui() {
   _search_widget->bind_context(initial_ctx);
   _protocol_widget->bind_context(initial_ctx);
   _device_options_widget->bind_context(initial_ctx);
-  _signal_processing_widget->bind_context(initial_ctx);
   _log_widget->bind_context(initial_ctx);
   _trigger_widget->bind_context(initial_ctx);
   _dso_trigger_widget->bind_context(initial_ctx);
@@ -781,12 +827,15 @@ void MainWindow::setup_ui() {
                   }
                 }
                 if (!existing_ctx) {
+                  // phase 2: document owned by DocumentRegistry.
+                  size_t doc_idx = _session->document_registry()->take_document(
+                      std::make_unique<pv::data::SessionDocument>(_session));
                   pv::data::SessionDocument *doc =
-                      new pv::data::SessionDocument();
+                      _session->document_registry()->get_document_by_index(doc_idx);
                   pv::TabContext *ctx =
                       SessionManager::instance()->create_context(view, _session,
-                                                                 doc);
-                  _session->register_document(doc);
+                                                                 doc, doc_idx,
+                                                                 _session->document_registry());
                   ctx->set_title(title);
                   _tab_contexts.append(ctx);
                 }
@@ -891,10 +940,6 @@ void MainWindow::retranslateUi() {
     _sliding_drawer->setPageTitle(
         _drawer_page_device_options,
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DEVICE_OPTIONS), "Device Options"));
-    _sliding_drawer->setPageTitle(_drawer_page_signal_processing,
-                                  L_S(STR_PAGE_DLG,
-                                      S_ID(IDS_DLG_SIGNAL_PROCESSING),
-                                      "Signal Processing"));
     _sliding_drawer->setPageTitle(
         _drawer_page_log,
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LOG_DOCK_TITLE), "Log"));
@@ -905,10 +950,15 @@ void MainWindow::retranslateUi() {
 
 void MainWindow::on_load_file(QString file_name) {
   pv::view::View *new_view = new pv::view::View(_session, _sampling_bar, this);
-  pv::data::SessionDocument *new_doc = new pv::data::SessionDocument();
+  // phase 2: document owned by DocumentRegistry.
+  size_t new_doc_idx = _session->document_registry()->take_document(
+      std::make_unique<pv::data::SessionDocument>(_session));
+  pv::data::SessionDocument *new_doc =
+      _session->document_registry()->get_document_by_index(new_doc_idx);
   pv::TabContext *ctx =
-      SessionManager::instance()->create_context(new_view, _session, new_doc);
-  _session->register_document(new_doc);
+      SessionManager::instance()->create_context(new_view, _session, new_doc,
+                                                 new_doc_idx,
+                                                 _session->document_registry());
 
   QFileInfo fi(file_name);
   ctx->set_title(fi.baseName());
@@ -921,7 +971,19 @@ void MainWindow::on_load_file(QString file_name) {
       save_config();
     }
 
-    _session->set_file(file_name);
+    // 架构修复：检查 set_file 返回值，失败时不创建空白 tab
+    if (!_session->set_file(file_name)) {
+      QString strMsg(
+          L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
+      strMsg += file_name;
+      MsgBox::Show(strMsg);
+      // 回滚已创建的 tab
+      int idx = _tab_contexts.indexOf(ctx);
+      if (idx >= 0)
+        remove_tab(idx);
+      _session->set_default_device();
+      return;
+    }
     ctx->make_live();
     ctx->activate();
     update_tab_style(_tab_contexts.indexOf(ctx));
@@ -995,6 +1057,7 @@ void MainWindow::on_session_error() {
 }
 
 void MainWindow::save_config() {
+  pxv_info("save_config: ENTER, have_instance=%d, is_hardware=%d", _device_agent->have_instance(), _device_agent->is_hardware());
   if (_device_agent->have_instance() == false) {
     pxv_info("There is no need to save the configuration");
     return;
@@ -1002,9 +1065,36 @@ void MainWindow::save_config() {
 
   AppConfig &app = AppConfig::Instance();
 
+  // Always persist the last-used device driver name so the next launch
+  // can prefer this device. Without this, switching to demo and exiting
+  // would leave lastDeviceDriver stale (still pointing to the hardware
+  // device), causing the app to jump back to hardware on restart.
+  app.deviceOptions.lastDeviceDriver = _device_agent->driver_name();
+  app.SaveDevice();
+
   if (_device_agent->is_hardware()) {
+    // Persist connection ID for hardware devices to distinguish multiple
+    // devices of the same model.
+    struct sr_dev_inst *sdi = _device_agent->inst();
+    if (sdi) {
+      const char *cid = sr_dev_inst_connid_get(sdi);
+      if (cid)
+        app.deviceOptions.lastDeviceConnId = QString::fromLocal8Bit(cid);
+    }
+
     QString sessionFile = gen_config_file_path(true);
     save_config_to_file(sessionFile);
+  } else if (_device_agent->is_demo()) {
+    // Demo device: save channel/trigger/decoder config to its own .pxc file
+    // so demo setups (channel enable, trigger, decoders) persist across restarts.
+    QDir dir(GetFirmwareDir());
+    if (dir.exists()) {
+      QString ses_name = dir.absolutePath() + "/" +
+                         _device_agent->driver_name() +
+                         QString::number(_device_agent->get_work_mode()) +
+                         ".pxc";
+      save_config_to_file(ses_name);
+    }
   }
 
   app.frameOptions.windowState = saveState();
@@ -1033,6 +1123,11 @@ QString MainWindow::gen_config_file_path(bool isNewFormat) {
 }
 
 bool MainWindow::able_to_close() {
+  // Only commit UI settings to device when the device has no prior capture
+  // data. If the device has data, the settings were already committed during
+  // capture setup. Calling commit_settings() unconditionally would overwrite
+  // device values (e.g., sample limit loaded from .pxc) with UI dropdown
+  // values, which may not have the exact same option (e.g., 200M vs 1G).
   if (_device_agent->is_hardware() && _session->have_hardware_data() == false) {
     _sampling_bar->commit_settings();
   }
@@ -1062,7 +1157,6 @@ void MainWindow::on_side_bar_dock_clicked(int index) {
       opt->measureDock = false;
       opt->searchDock = false;
       opt->deviceOptionsDock = false;
-      opt->signalProcessingDock = false;
       opt->logDock = false;
       AppConfig::Instance().SaveFrame();
     }
@@ -1103,10 +1197,6 @@ void MainWindow::on_side_bar_dock_clicked(int index) {
     _device_options_widget->update_view();
     drawerPage = _drawer_page_device_options;
     break;
-  case SIDEBAR_SIGNAL_PROCESSING:
-    _signal_processing_widget->update_view();
-    drawerPage = _drawer_page_signal_processing;
-    break;
   case SIDEBAR_MCP:
     _mcp_control_widget->refresh_status();
     drawerPage = _drawer_page_mcp;
@@ -1130,7 +1220,6 @@ void MainWindow::on_side_bar_dock_clicked(int index) {
     opt->measureDock = (index == SIDEBAR_MEASURE);
     opt->searchDock = (index == SIDEBAR_SEARCH);
     opt->deviceOptionsDock = (index == SIDEBAR_OPTIONS);
-    opt->signalProcessingDock = (index == SIDEBAR_SIGNAL_PROCESSING);
     opt->logDock = (index == SIDEBAR_LOG);
     AppConfig::Instance().SaveFrame();
   }
@@ -1297,14 +1386,9 @@ bool MainWindow::load_config_from_file(QString file) {
 bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
   AppConfig &app = AppConfig::Instance();
 
-  GVariant *gvar_opts;
-  GVariant *gvar;
-  gsize num_opts;
-
   QString title = QApplication::applicationName() + " v" +
                   QApplication::applicationVersion();
 
-  QJsonArray channelVar;
   sessionVar["Version"] = QJsonValue::fromVariant(SESSION_FORMAT_VERSION);
   sessionVar["Device"] = QJsonValue::fromVariant(_device_agent->driver_name());
   sessionVar["DeviceMode"] =
@@ -1316,98 +1400,181 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
     sessionVar["CollectMode"] = _session->get_collect_mode();
   }
 
-  gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_SESSIONS);
-  if (gvar_opts == NULL) {
-    pxv_warn("Device config list is empty. id:SR_CONF_DEVICE_SESSIONS");
-    /* Driver supports no device instance sessions. */
-    return false;
-  }
+  // --- Device instance session config (sample rate, limit_samples, operation_mode, etc.) ---
+  GVariant *gvar_opts =
+      _device_agent->get_config_list(NULL, SR_CONF_DEVICE_SESSIONS);
+  GVariant *gvar;
+  gsize num_opts;
 
-  const int *const options = (const int32_t *)g_variant_get_fixed_array(
-      gvar_opts, &num_opts, sizeof(int32_t));
+  pxv_info("gen_config_json: querying SR_CONF_DEVICE_SESSIONS, gvar_opts=%p", gvar_opts);
 
-  for (unsigned int i = 0; i < num_opts; i++) {
-    const struct sr_config_info *const info =
-        _device_agent->get_config_info(options[i]);
-    gvar = _device_agent->get_config(info->key);
-    if (gvar != NULL) {
-      if (info->datatype == SR_T_BOOL)
-        sessionVar[info->name] =
-            QJsonValue::fromVariant(g_variant_get_boolean(gvar));
-      else if (info->datatype == SR_T_UINT64)
-        sessionVar[info->name] = QJsonValue::fromVariant(
-            QString::number(g_variant_get_uint64(gvar)));
-      else if (info->datatype == SR_T_UINT8)
-        sessionVar[info->name] =
-            QJsonValue::fromVariant(g_variant_get_byte(gvar));
-      else if (info->datatype == SR_T_INT16)
-        sessionVar[info->name] =
-            QJsonValue::fromVariant(g_variant_get_int16(gvar));
-      else if (info->datatype == SR_T_FLOAT) // save as string format
-        sessionVar[info->name] = QJsonValue::fromVariant(
-            QString::number(g_variant_get_double(gvar)));
-      else if (info->datatype == SR_T_CHAR)
-        sessionVar[info->name] =
-            QJsonValue::fromVariant(g_variant_get_string(gvar, NULL));
-      else if (info->datatype == SR_T_LIST)
-        sessionVar[info->name] =
-            QJsonValue::fromVariant(g_variant_get_int16(gvar));
-      else {
-        pxv_err("Unkown config info type:%d", info->datatype);
-        assert(false);
+  if (gvar_opts != NULL) {
+    /* Driver implements SR_CONF_DEVICE_SESSIONS with an int32[] array
+     * (e.g., fork's std::opts_config_list). The array contains bare keys like
+     * SR_CONF_SAMPLERATE, NOT packed with flags. */
+    const int *const options = (const int32_t *)g_variant_get_fixed_array(
+        gvar_opts, &num_opts, sizeof(int32_t));
+
+    for (unsigned int i = 0; i < num_opts; i++) {
+      const struct sr_config_info *const info =
+          _device_agent->get_config_info(options[i]);
+      if (!info || !info->name)
+        continue;
+      gvar = _device_agent->get_config(info->key);
+      if (gvar != NULL) {
+        if (info->datatype == SR_T_BOOL)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_boolean(gvar));
+        else if (info->datatype == SR_T_UINT64)
+          sessionVar[info->name] = QJsonValue::fromVariant(
+              QString::number(g_variant_get_uint64(gvar)));
+        else if (info->datatype == SR_T_UINT8)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_byte(gvar));
+        else if (info->datatype == SR_T_INT16)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_int16(gvar));
+        else if (info->datatype == SR_T_FLOAT)
+          sessionVar[info->name] = QJsonValue::fromVariant(
+              QString::number(g_variant_get_double(gvar)));
+        else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_string(gvar, NULL));
+        else if (info->datatype == SR_T_INT32)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_int32(gvar));
+        else if (info->datatype == SR_T_UINT32)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant((uint32_t)g_variant_get_uint32(gvar));
+        else if (info->datatype == SR_T_LIST)
+          sessionVar[info->name] =
+              QJsonValue::fromVariant(g_variant_get_int16(gvar));
+        else {
+          pxv_err("Unkown config info type:%d", info->datatype);
+          assert(false);
+        }
+        g_variant_unref(gvar);
       }
-      g_variant_unref(gvar);
+    }
+    g_variant_unref(gvar_opts);
+  } else if (_device_agent->is_hardware()) {
+    /* Driver does not implement SR_CONF_DEVICE_SESSIONS. Use SR_CONF_DEVICE_OPTIONS (uint32_t
+     * packed entries with capability flags like SR_CONF_SAMPLERATE | SR_CONF_GET).
+     * DeviceAgent::get_config_list(NULL, SR_CONF_DEVICE_OPTIONS) returns a uint32_t array
+     * (see pxlogic.h devopts[] declaration), each element is key|flags.
+     * We mask with 0x1fffffff to extract the bare key for sr_key_info_get(),
+     * and iterate the list to save ALL device options, not just a hardcoded subset. */
+    pxv_info("gen_config_json: falling back to SR_CONF_DEVICE_OPTIONS");
+    gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+
+    if (!gvar_opts) {
+      pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config section.");
+    } else {
+      const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
+          gvar_opts, &num_opts, sizeof(uint32_t));
+
+      for (unsigned int i = 0; i < num_opts; i++) {
+        /* Mask off capability bits (SR_CONF_GET/SET/LIST, top 3 bits)
+         * to get the bare config key. sr_key_info_get only recognizes bare keys.
+         * SR_CONF_MASK = 0x1fffffff (libsigrok-internal.h, not public). */
+        const int key = (int)(options[i] & 0x1fffffff);
+
+        const struct sr_config_info *const info =
+            _device_agent->get_config_info(key);
+        if (!info || !info->name)
+          continue;
+
+        gvar = _device_agent->get_config(info->key);
+        if (gvar != NULL) {
+          if (info->datatype == SR_T_BOOL)
+            sessionVar[info->name] =
+                QJsonValue::fromVariant(g_variant_get_boolean(gvar));
+          else if (info->datatype == SR_T_UINT64)
+            sessionVar[info->name] = QJsonValue::fromVariant(
+                QString::number(g_variant_get_uint64(gvar)));
+          else if (info->datatype == SR_T_UINT8)
+            sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_byte(gvar));
+          else if (info->datatype == SR_T_INT16)
+            sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int16(gvar));
+          else if (info->datatype == SR_T_FLOAT)
+            sessionVar[info->name] = QJsonValue::fromVariant(
+                QString::number(g_variant_get_double(gvar)));
+          else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING)
+            sessionVar[info->name] =
+                QJsonValue::fromVariant(g_variant_get_string(gvar, NULL));
+          else if (info->datatype == SR_T_INT32)
+            sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int32(gvar));
+          else if (info->datatype == SR_T_UINT32)
+            sessionVar[info->name] = QJsonValue::fromVariant((uint32_t)g_variant_get_uint32(gvar));
+          else if (info->datatype == SR_T_LIST)
+            sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int16(gvar));
+          else {
+            pxv_err("Unkown config info type:%d", info->datatype);
+            assert(false);
+          }
+          g_variant_unref(gvar);
+        }
+      }
+      g_variant_unref(gvar_opts);
     }
   }
 
-  for (auto s : _session->get_signals()) {
-    QJsonObject s_obj;
-    s_obj["index"] = s->get_index();
-    s_obj["view_index"] = s->get_view_index();
-    s_obj["type"] = s->get_type();
-    s_obj["enabled"] = s->enabled();
-    s_obj["name"] = s->get_name();
-
-    if (s->get_colour().isValid())
-      s_obj["colour"] = QJsonValue::fromVariant(s->get_colour());
-    else
-      s_obj["colour"] = QJsonValue::fromVariant("default");
-
-    view::LogicSignal *logicSig = NULL;
-    if ((logicSig = dynamic_cast<view::LogicSignal *>(s))) {
-      s_obj["strigger"] = logicSig->get_trig();
-    }
-
-    if (s->signal_type() == SR_CHANNEL_DSO) {
-      view::DsoSignal *dsoSig = (view::DsoSignal *)s;
-      s_obj["vdiv"] = QJsonValue::fromVariant(
-          static_cast<qulonglong>(dsoSig->get_vDialValue()));
-      s_obj["vfactor"] = QJsonValue::fromVariant(
-          static_cast<qulonglong>(dsoSig->get_factor()));
-      s_obj["coupling"] = dsoSig->get_acCoupling();
-      s_obj["trigValue"] = dsoSig->get_trig_vrate();
-      s_obj["zeroPos"] = dsoSig->get_zero_ratio();
-    }
-
-    if (s->signal_type() == SR_CHANNEL_ANALOG) {
-      view::AnalogSignal *analogSig = (view::AnalogSignal *)s;
-      s_obj["vdiv"] = QJsonValue::fromVariant(
-          static_cast<qulonglong>(analogSig->get_vdiv()));
-      s_obj["vfactor"] = QJsonValue::fromVariant(
-          static_cast<qulonglong>(analogSig->get_factor()));
-      s_obj["coupling"] = analogSig->get_acCoupling();
-      s_obj["zeroPos"] = analogSig->get_zero_ratio();
-      s_obj["mapUnit"] = analogSig->get_mapUnit();
-      s_obj["mapMin"] = analogSig->get_mapMin();
-      s_obj["mapMax"] = analogSig->get_mapMax();
-      s_obj["mapDefault"] = analogSig->get_mapDefault();
-    }
-    channelVar.append(s_obj);
+  // Task 3 (purify-architecture-concepts): channel 段改为通过 SignalConfigStore
+  // 序列化（单一序列化路径），不再直访 view::Signal。先调用 save_signal_config
+  // 从当前 device + View 状态填充 _signal_config，再 signal_config_to_json 产出
+  // channels[] 数组。顶层 key 仍为 "channel"（单数）以保持 .pxc 外层结构不变；
+  // 数组内字段统一使用 ChannelConfig 字段名（不保留 strigger/trigValue/zeroPos/
+  // mapUnit/mapMin/mapMax/mapDefault/colour/type/name/vfactor 等 MainWindow 旧 key）。
+  pv::TabContext *ctx = current_context();
+  pv::data::SessionDocument *doc = ctx ? ctx->document() : nullptr;
+  if (doc) {
+    doc->save_signal_config(_session->get_signal_models(),
+                            build_channel_layout(current_view()),
+                            build_channel_colours(current_view()));
+    QJsonObject sig_cfg = doc->signal_config_to_json();
+    sessionVar["channel"] = sig_cfg["channels"].toArray();
+  } else {
+    pxv_warn("MainWindow::gen_config_json: no active document, writing empty "
+             "channel array");
+    sessionVar["channel"] = QJsonArray();
   }
-  sessionVar["channel"] = channelVar;
 
   if (_device_agent->get_work_mode() == LOGIC) {
-    sessionVar["trigger"] = _trigger_widget->get_session();
+    // Task 6 (purify-architecture-concepts): trigger 序列化改走 Core
+    // TriggerConfig（唯一真相源），不再调用 _trigger_widget->get_session()
+    // 经 View 层产出旧 JSON key。to_json() 写入 mode/trigger_pos/stage_count/
+    // stages[]/adv_enabled/adv_tab_index/serial_* 新结构。
+    sessionVar["trigger"] = _session->trigger_config().to_json();
+  }
+
+  // 毛刺滤波配置持久化：保存阈值/模式/auto_apply 到 .pxl/.pxc 文件，
+  // 重新打开时恢复，避免面板关闭后配置丢失导致光标位置改变。
+  if (_session->is_glitch_filter_active() ||
+      _session->glitch_filter_auto_apply() ||
+      !_session->glitch_filter_thresholds().empty()) {
+    QJsonObject glitchObj;
+    glitchObj["auto_apply"] = _session->glitch_filter_auto_apply();
+    glitchObj["show_overlay"] = _session->show_glitch_filter_overlay();
+    glitchObj["active"] = _session->is_glitch_filter_active();
+    QJsonArray thrArray;
+    QJsonArray modeArray;
+    const auto &thresholds = _session->glitch_filter_thresholds();
+    const auto &modes = _session->glitch_filter_modes();
+    for (const auto &kv : thresholds) {
+      QJsonObject entry;
+      entry["ch"] = kv.first;
+      entry["threshold"] = (int)kv.second;
+      thrArray.append(entry);
+    }
+    for (const auto &kv : modes) {
+      QJsonObject entry;
+      entry["ch"] = kv.first;
+      entry["mode"] = (int)kv.second;
+      modeArray.append(entry);
+    }
+    glitchObj["thresholds"] = thrArray;
+    glitchObj["modes"] = modeArray;
+    sessionVar["glitch_filter"] = glitchObj;
   }
 
   StoreSession ss(_session);
@@ -1419,14 +1586,19 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
     sessionVar["measure"] = current_view()->get_viewstatus()->get_session();
   }
 
-  if (gvar_opts != NULL)
-    g_variant_unref(gvar_opts);
-
   return true;
 }
 
 bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
   haveDecoder = false;
+
+  // DeviceConfigChanged broadcasts are now ASYNC (queued on qApp via
+  // Qt::QueuedConnection by EventBus), so the previous
+  // SuppressConfigBroadcastGuard (which prevented nested reload ->
+  // signals_changed -> View AllReplaced deleting the DsoSignal mid-method) is
+  // no longer needed: the caller's stack frame completes before any listener
+  // processes the message. Device config is still written; reload() at the
+  // end rebuilds from it.
 
   QJsonObject sessionObj = doc.object();
 
@@ -1472,12 +1644,18 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
   gsize num_opts;
 
   if (gvar_opts != NULL) {
+    /* Driver implements SR_CONF_DEVICE_SESSIONS with an int32[] array
+     * (e.g., fork's std::opts_config_list). The array contains bare keys like
+     * SR_CONF_SAMPLERATE, NOT packed with flags. */
     const int *const options = (const int32_t *)g_variant_get_fixed_array(
         gvar_opts, &num_opts, sizeof(int32_t));
 
     for (unsigned int i = 0; i < num_opts; i++) {
       const struct sr_config_info *info =
           _device_agent->get_config_info(options[i]);
+
+      if (!info || !info->name)
+        continue;
 
       if (!sessionObj.contains(info->name))
         continue;
@@ -1504,9 +1682,13 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
               sessionObj[info->name].toString().toDouble());
         else
           gvar = g_variant_new_double(sessionObj[info->name].toDouble());
-      } else if (info->datatype == SR_T_CHAR) {
+      } else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING) {
         gvar = g_variant_new_string(
             sessionObj[info->name].toString().toLocal8Bit().data());
+      } else if (info->datatype == SR_T_INT32) {
+        gvar = g_variant_new_int32(sessionObj[info->name].toInt());
+      } else if (info->datatype == SR_T_UINT32) {
+        gvar = g_variant_new_uint32(sessionObj[info->name].toInt());
       } else if (info->datatype == SR_T_LIST) {
         id = 0;
 
@@ -1516,7 +1698,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
         } else {
           const char *fd_key =
               sessionObj[info->name].toString().toLocal8Bit().data();
-          id = ds_dsl_option_value_to_code(conf_dev_mode, info->key, fd_key);
+          id = _device_agent->option_value_to_code(conf_dev_mode, info->key, fd_key);
           if (id == -1) {
             pxv_err("Convert failed, key:\"%s\", value:\"%s\"", info->name,
                     fd_key);
@@ -1540,88 +1722,197 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
                 id);
       }
     }
+    g_variant_unref(gvar_opts);
+  } else if (_device_agent->is_hardware()) {
+    /* Driver does not implement SR_CONF_DEVICE_SESSIONS. Fall back to SR_CONF_DEVICE_OPTIONS
+     * (uint32_t packed entries with capability flags). Mirrors the save-side fallback
+     * in gen_config_json(). */
+    gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+
+    if (!gvar_opts) {
+      pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config load.");
+    } else {
+      const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
+          gvar_opts, &num_opts, sizeof(uint32_t));
+
+      for (unsigned int i = 0; i < num_opts; i++) {
+        /* Mask off capability bits — see gen_config_json() for details. */
+        const int key = (int)(options[i] & 0x1fffffff);
+        const struct sr_config_info *info =
+            _device_agent->get_config_info(key);
+
+        if (!info || !info->name)
+          continue;
+
+        if (!sessionObj.contains(info->name))
+          continue;
+
+        GVariant *gvar = NULL;
+        int id = 0;
+
+        if (info->datatype == SR_T_BOOL) {
+          gvar = g_variant_new_boolean(sessionObj[info->name].toInt());
+        } else if (info->datatype == SR_T_UINT64) {
+          // from string text.
+          gvar = g_variant_new_uint64(
+              sessionObj[info->name].toString().toULongLong());
+        } else if (info->datatype == SR_T_UINT8) {
+          if (sessionObj[info->name].toString() != "")
+            gvar = g_variant_new_byte(sessionObj[info->name].toString().toUInt());
+          else
+            gvar = g_variant_new_byte(sessionObj[info->name].toInt());
+        } else if (info->datatype == SR_T_INT16) {
+          gvar = g_variant_new_int16(sessionObj[info->name].toInt());
+        } else if (info->datatype == SR_T_FLOAT) {
+          if (sessionObj[info->name].toString() != "")
+            gvar = g_variant_new_double(
+                sessionObj[info->name].toString().toDouble());
+          else
+            gvar = g_variant_new_double(sessionObj[info->name].toDouble());
+        } else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING) {
+          gvar = g_variant_new_string(
+              sessionObj[info->name].toString().toLocal8Bit().data());
+        } else if (info->datatype == SR_T_INT32) {
+          gvar = g_variant_new_int32(sessionObj[info->name].toInt());
+        } else if (info->datatype == SR_T_UINT32) {
+          gvar = g_variant_new_uint32(sessionObj[info->name].toInt());
+        } else if (info->datatype == SR_T_LIST) {
+          id = 0;
+
+          if (format_ver > 2) {
+            // Is new version format.
+            id = sessionObj[info->name].toInt();
+          } else {
+            const char *fd_key =
+                sessionObj[info->name].toString().toLocal8Bit().data();
+            id = _device_agent->option_value_to_code(conf_dev_mode, info->key, fd_key);
+            if (id == -1) {
+              pxv_err("Convert failed, key:\"%s\", value:\"%s\"", info->name,
+                      fd_key);
+              id = 0; // set default value.
+            } else {
+              pxv_info("Convert success, key:\"%s\", value:\"%s\", get code:%d",
+                       info->name, fd_key, id);
+            }
+          }
+          gvar = g_variant_new_int16(id);
+        }
+
+        if (gvar == NULL) {
+          pxv_warn("Warning: Profile failed to parse key:'%s'", info->name);
+          continue;
+        }
+
+        bool bFlag = _device_agent->set_config(info->key, gvar);
+        if (!bFlag) {
+          pxv_err("Set device config option failed, id:%d, code:%d", info->key,
+                  id);
+        }
+      }
+      g_variant_unref(gvar_opts);
+    }
   }
 
   // load channel settings
-  if (mode == DSO) {
-    for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
-      assert(probe);
-
-      for (const QJsonValue &value : sessionObj["channel"].toArray()) {
-        QJsonObject obj = value.toObject();
-        if (QString(probe->name) == obj["name"].toString() &&
-            probe->type == obj["type"].toDouble()) {
-          probe->vdiv = obj["vdiv"].toDouble();
-          probe->coupling = obj["coupling"].toDouble();
-          probe->vfactor = obj["vfactor"].toDouble();
-          probe->trig_value = obj["trigValue"].toDouble();
-          probe->map_unit =
-              g_strdup(obj["mapUnit"].toString().toStdString().c_str());
-          probe->map_min = obj["mapMin"].toDouble();
-          probe->map_max = obj["mapMax"].toDouble();
-          probe->enabled = obj["enabled"].toBool();
-          break;
-        }
+  // Task 3 (purify-architecture-concepts): channel 段改走 SignalConfigStore 单一
+  // 路径。原代码按 DSO/非 DSO 两分支直改 sr_channel->vdiv/coupling/vfactor/
+  // trig_value/map_*/enabled/name，现统一为：signal_config_from_json 解析
+  // channels[] 数组到 _signal_config，apply_signal_config 应用到 sr_channel。
+  // 顶层 key 仍是 "channel"（单数），此处包成 {"channels": [...]} 喂给 store。
+  // work_mode/operation_mode/channel_mode/is_demo 取当前 device 已应用的值，
+  // 避免 apply_signal_config 误改 device mode（device settings 循环已设置）。
+  if (sessionObj.contains("channel")) {
+    pv::TabContext *ctx = current_context();
+    pv::data::SessionDocument *doc = ctx ? ctx->document() : nullptr;
+    if (doc) {
+      QJsonObject sig_obj;
+      sig_obj["channels"] = sessionObj["channel"].toArray();
+      doc->signal_config_from_json(sig_obj);
+      // 用当前 device 已应用的 mode/op_mode/ch_mode/is_demo 覆盖，保证
+      // apply_signal_config 不会改变 device mode（仅应用 per-channel 字段）。
+      auto &cfg = doc->signal_config_store()->get_signal_config();
+      cfg.work_mode = _device_agent->get_work_mode();
+      // OPERATION_MODE/CHANNEL_MODE are PXLogic fork keys — only DSL/PXLogic
+      // devices implement them. Task 10/Phase 3: read as strings.
+      if (_device_agent->is_dsl_device()) {
+        _device_agent->get_config_string(SR_CONF_OPERATION_MODE, cfg.operation_mode);
+        _device_agent->get_config_string(SR_CONF_CHANNEL_MODE, cfg.channel_mode);
       }
-    }
-  } else {
-    for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
-      assert(probe);
-      bool isEnabled = false;
-
-      for (const QJsonValue &value : sessionObj["channel"].toArray()) {
-        QJsonObject obj = value.toObject();
-
-        if ((probe->index == obj["index"].toInt()) &&
-            (probe->type == obj["type"].toInt())) {
-          isEnabled = true;
-          QString chan_name = obj["name"].toString().trimmed();
-          if (chan_name == "") {
-            chan_name = QString::number(probe->index);
-          }
-
-          probe->enabled = obj["enabled"].toBool();
-          probe->name = g_strdup(chan_name.toStdString().c_str());
-          probe->vdiv = obj["vdiv"].toDouble();
-          probe->coupling = obj["coupling"].toDouble();
-          probe->vfactor = obj["vfactor"].toDouble();
-          probe->trig_value = obj["trigValue"].toDouble();
-          probe->map_unit =
-              g_strdup(obj["mapUnit"].toString().toStdString().c_str());
-          probe->map_min = obj["mapMin"].toDouble();
-          probe->map_max = obj["mapMax"].toDouble();
-
-          if (obj.contains("mapDefault")) {
-            probe->map_default = obj["mapDefault"].toBool();
-          }
-
-          break;
-        }
-      }
-      if (!isEnabled)
-        probe->enabled = false;
+      cfg.is_demo = _device_agent->is_demo();
+      doc->apply_signal_config();
+    } else {
+      pxv_warn("MainWindow::load_config_from_json: no active document, "
+               "skipping channel apply");
     }
   }
 
+  // reload() rebuilds SignalModels from the (just-updated) sr_channel state
+  // (probe->enabled/name/vdiv/coupling/vfactor set above). The DSO loop below
+  // then operates on the NEW DsoSignal + NEW _model. Note: set_zero_ratio etc.
+  // now use a local shared_ptr copy of _model (see dsosignal.cpp), so even if
+  // set_config_* triggers a synchronous nested broadcast that deletes this
+  // DsoSignal mid-method, the local copy keeps the SignalModel alive.
   _session->reload();
 
+  // 毛刺滤波配置恢复：从 .pxl/.pxc 文件恢复阈值/模式/auto_apply。
+  // 在 reload() 之后恢复，因为 reload 重建了 SignalModel，但滤波配置
+  // 存储在 SessionData 中（不受 reload 影响）。
+  // 实际滤波应用延迟到采集完成（auto_apply 路径）或用户打开面板时。
+  if (sessionObj.contains("glitch_filter")) {
+    QJsonObject glitchObj = sessionObj["glitch_filter"].toObject();
+    _session->set_glitch_filter_auto_apply(glitchObj["auto_apply"].toBool(false));
+    _session->set_show_glitch_filter_overlay(glitchObj["show_overlay"].toBool(true));
+
+    // 恢复阈值/模式到 SessionData（不立即应用，等采集后 auto-apply 或用户手动应用）
+    if (glitchObj["active"].toBool(false)) {
+      std::map<int, uint32_t> thresholds;
+      std::map<int, GlitchFilterMode> modes;
+      QJsonArray thrArray = glitchObj["thresholds"].toArray();
+      QJsonArray modeArray = glitchObj["modes"].toArray();
+      for (const QJsonValue &v : thrArray) {
+        QJsonObject e = v.toObject();
+        thresholds[e["ch"].toInt()] = (uint32_t)e["threshold"].toInt();
+      }
+      for (const QJsonValue &v : modeArray) {
+        QJsonObject e = v.toObject();
+        modes[e["ch"].toInt()] = (GlitchFilterMode)e["mode"].toInt();
+      }
+      // 写入 SessionData 但不触发实际滤波（数据可能还没加载）
+      // FilterProcessor 会读取这些值在 auto-apply 时使用
+      _session->restore_glitch_filter_config(thresholds, modes);
+    }
+  }
+
   // load signal setting
+  // Task 3: set_colour/set_trig(set_trig_type)/set_zero_ratio/set_trig_ratio
+  // 等 view::Signal 调用予以保留（Task 13 进一步改走 SignalModel）。仅将 JSON
+  // key 从 MainWindow 旧名（strigger/zeroPos/trigValue）改为 ChannelConfig 字段
+  // 名（trig_type/zero_offset/trig_value）。其中 zero_offset/trig_value 在新格式
+  // 下存的是 sr_channel 原始值（uint16_t/uint8_t），而 set_zero_ratio/
+  // set_trig_ratio 期望 [0,1] 比例；apply_signal_config + load_settings 已从
+  // probe 原始值恢复 _zero_offset/_trig_value，故仅当值落在 (0,1) 区间（旧比例
+  // 格式）时才调用 set_*/set_trig_ratio，避免把原始值当比例写入导致错乱。
   if (mode == DSO) {
-    for (auto s : _session->get_signals()) {
+    for (auto s : current_view()->get_own_signals()) {
       for (const QJsonValue &value : sessionObj["channel"].toArray()) {
         QJsonObject obj = value.toObject();
 
         if (s->get_name() == obj["name"].toString() &&
             s->get_type() == obj["type"].toDouble()) {
-          s->set_colour(QColor(obj["colour"].toString()));
+          QString colourStr = obj["colour"].toString();
+          // "default" 表示使用主题色板,不覆盖构造函数的颜色
+          if (colourStr != "default")
+            s->set_colour(QColor(colourStr));
 
           if (s->signal_type() == SR_CHANNEL_DSO) {
             view::DsoSignal *dsoSig = (view::DsoSignal *)s;
             dsoSig->load_settings();
-            dsoSig->set_zero_ratio(obj["zeroPos"].toDouble());
-            dsoSig->set_trig_ratio(obj["trigValue"].toDouble());
+            double zr = obj["zero_offset"].toDouble();
+            if (zr > 0.0 && zr < 1.0)
+              dsoSig->set_zero_ratio(zr);
+            double tr = obj["trig_value"].toDouble();
+            if (tr > 0.0 && tr < 1.0)
+              dsoSig->set_trig_ratio(tr);
             dsoSig->commit_settings();
           }
           break;
@@ -1629,7 +1920,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
       }
     }
   } else {
-    for (auto s : _session->get_signals()) {
+    for (auto s : current_view()->get_own_signals()) {
       for (const QJsonValue &value : sessionObj["channel"].toArray()) {
         QJsonObject obj = value.toObject();
         if ((s->get_index() == obj["index"].toInt()) &&
@@ -1639,25 +1930,42 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
             chan_name = QString::number(s->get_index());
           }
 
-          s->set_colour(QColor(obj["colour"].toString()));
+          QString colourStr = obj["colour"].toString();
+          // "default" 表示使用主题色板,不覆盖构造函数的颜色
+          if (colourStr != "default")
+            s->set_colour(QColor(colourStr));
           s->set_name(chan_name);
 
           view::LogicSignal *logicSig = NULL;
           if ((logicSig = dynamic_cast<view::LogicSignal *>(s))) {
-            logicSig->set_trig(obj["strigger"].toDouble());
+            // strigger → trig_type（ChannelConfig 字段名，int）
+            logicSig->set_trig(obj["trig_type"].toInt());
           }
 
           if (s->signal_type() == SR_CHANNEL_DSO) {
             view::DsoSignal *dsoSig = (view::DsoSignal *)s;
             dsoSig->load_settings();
-            dsoSig->set_zero_ratio(obj["zeroPos"].toDouble());
-            dsoSig->set_trig_ratio(obj["trigValue"].toDouble());
+            double zr = obj["zero_offset"].toDouble();
+            if (zr > 0.0 && zr < 1.0)
+              dsoSig->set_zero_ratio(zr);
+            double tr = obj["trig_value"].toDouble();
+            if (tr > 0.0 && tr < 1.0)
+              dsoSig->set_trig_ratio(tr);
             dsoSig->commit_settings();
           }
 
           if (s->signal_type() == SR_CHANNEL_ANALOG) {
             view::AnalogSignal *analogSig = (view::AnalogSignal *)s;
-            analogSig->set_zero_ratio(obj["zeroPos"].toDouble());
+            // AnalogSignal 无 load_settings()，且构造函数读 model->vertical_offset
+            // (reload 未从 probe->zero_offset 填充)，故 _zero_offset 不会由
+            // apply_signal_config + reload 自动恢复。这里把存为原始 uint16_t 的
+            // zero_offset 经 value2ratio 转成比例后用 set_zero_ratio 还原。
+            // 若值落在 (0,1)（旧比例格式）则直接当比例用（无兼容性要求，仅稳健）。
+            double zv = obj["zero_offset"].toDouble();
+            double ratio_z = (zv > 0.0 && zv < 1.0)
+                                 ? zv
+                                 : analogSig->value2ratio((int)zv);
+            analogSig->set_zero_ratio(ratio_z);
             analogSig->commit_settings();
           }
 
@@ -1673,8 +1981,14 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
   current_view()->header_updated();
 
   // load trigger settings
+  // Task 6: trigger 反序列化改走 Core TriggerConfig（唯一真相源）。
+  // from_json() 读 to_json() 写入的新结构；set_trigger_config() broadcasts
+  // TriggerConfigChanged；随后 refresh_ui_from_core() 把 Core
+  // 状态映射到 TriggerDock 控件（View 层不再解析 trigger JSON）。
   if (sessionObj.contains("trigger")) {
-    _trigger_widget->set_session(sessionObj["trigger"].toObject());
+    _session->set_trigger_config(
+        data::TriggerConfig::from_json(sessionObj["trigger"].toObject()));
+    _trigger_widget->refresh_ui_from_core();
   }
 
   // load decoders
@@ -1694,41 +2008,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
     bottom_bar->load_session(sessionObj["measure"].toArray(), format_ver);
   }
 
-  if (gvar_opts != NULL)
-    g_variant_unref(gvar_opts);
-
-  load_channel_view_indexs(doc);
-
   return true;
-}
-
-void MainWindow::load_channel_view_indexs(QJsonDocument &doc) {
-  QJsonObject sessionObj = doc.object();
-
-  int mode = _device_agent->get_work_mode();
-  if (mode != LOGIC)
-    return;
-
-  std::vector<int> view_indexs;
-
-  for (const QJsonValue &value : sessionObj["channel"].toArray()) {
-    QJsonObject obj = value.toObject();
-
-    if (obj.contains("view_index")) {
-      view_indexs.push_back(obj["view_index"].toInt());
-    }
-  }
-
-  if (view_indexs.size()) {
-    int i = 0;
-
-    for (auto s : _session->get_signals()) {
-      s->set_view_index(view_indexs[i]);
-      i++;
-    }
-
-    current_view()->update_all_trace_postion();
-  }
 }
 
 bool MainWindow::on_store_session(QString name) {
@@ -1825,11 +2105,6 @@ void MainWindow::restore_dock() {
       _device_options_widget->update_view();
       _sliding_drawer->open(_drawer_page_device_options);
       _drawer_current_page = _drawer_page_device_options;
-    } else if (opt->signalProcessingDock) {
-      _side_bar->setItemChecked(SIDEBAR_SIGNAL_PROCESSING, true);
-      _signal_processing_widget->update_view();
-      _sliding_drawer->open(_drawer_page_signal_processing);
-      _drawer_current_page = _drawer_page_signal_processing;
     } else if (opt->logDock) {
       _side_bar->setItemChecked(SIDEBAR_LOG, true);
       _sliding_drawer->open(_drawer_page_log);
@@ -1998,9 +2273,22 @@ bool MainWindow::eventFilter(QObject *object, QEvent *event) {
       return true;
     }
 
-    const auto &sigs = _session->get_signals();
+    const auto &sigs = current_view()->get_own_signals();
 
     int modifier = ke->modifiers();
+
+    // Ctrl+Z — undo the most recent glitch filter application (Task 9).
+    // Handled here before the generic shortcut resolver because the
+    // configurable shortcut system does not define an Undo action; the
+    // generic path below would otherwise consume Ctrl+Z (returns true for
+    // unrecognized Ctrl combos) and swallow the keystroke.
+    if ((modifier & Qt::ControlModifier) && ke->key() == Qt::Key_Z) {
+      pv::view::View *view = current_view();
+      if (view && view->can_undo_filter()) {
+        view->undo_filter();
+        return true;
+      }
+    }
 
     int action = resolveShortcutAction(ke->key(), (int)modifier);
     if (action == 0) {
@@ -2225,7 +2513,8 @@ void MainWindow::switchTheme(QString style) {
     jsonFile.close();
   } else {
     // Fallback: parse from QSS if JSON is missing
-    QRegularExpression tokenRe("@([\\w-]+):\\s*([^\\r\\n]+?)\\s*(?:\\*/|\\r|\\n)");
+    QRegularExpression tokenRe(
+        "@([\\w-]+):\\s*([^\\r\\n]+?)\\s*(?:\\*/|\\r|\\n)");
     QRegularExpressionMatchIterator it = tokenRe.globalMatch(qssContent);
     while (it.hasNext()) {
       QRegularExpressionMatch match = it.next();
@@ -2250,8 +2539,9 @@ void MainWindow::switchTheme(QString style) {
   }
 
   // Process SVG files that contain token placeholders (e.g. @accent)
-  QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) +
-                    "/pxview_themed_svgs";
+  QString tempDir =
+      QStandardPaths::writableLocation(QStandardPaths::TempLocation) +
+      "/pxview_themed_svgs";
   QDir().mkpath(tempDir);
 
   QRegularExpression svgRe("image:\\s*url\\((:[^)]+\\.svg)\\)");
@@ -2328,7 +2618,9 @@ void MainWindow::openDoc() {
                                  QString::number(lan) + ".pdf"));
 }
 
-void MainWindow::update_capture() { current_view()->update_hori_res(); }
+void MainWindow::update_capture() { _event.update_capture_sig(); }
+
+void MainWindow::on_update_capture() { current_view()->update_hori_res(); }
 
 void MainWindow::cur_snap_samplerate_changed() {
   _event.cur_snap_samplerate_changed(); // safe call
@@ -2345,7 +2637,14 @@ void MainWindow::signals_changed() {
   _event.signals_changed(); // safe call
 }
 
-void MainWindow::on_signals_changed() { current_view()->signals_changed(NULL); }
+void MainWindow::on_signals_changed() {
+  // Rebuild View signals from current SignalModels
+  // (SignalFactory::update_signals with AllReplaced preserves UI state), then
+  // refresh layout. This ensures LogicSignals pick up new SignalModel pointers
+  // and Qt signal/slot connections are re-established after
+  // init_signals()/reload() recreates models.
+  current_view()->on_signals_changed();
+}
 
 void MainWindow::receive_trigger(quint64 trigger_pos) {
   _event.receive_trigger(trigger_pos); // save call
@@ -2360,25 +2659,40 @@ void MainWindow::frame_ended() {
 }
 
 void MainWindow::on_frame_ended() {
-  pxv_info("MainWindow::on_frame_ended()");
+  pxv_info("MainWindow::on_frame_ended() [UI-only: Core handles copy+decode+guard]");
   _acq_count++;
   _side_bar->setItemRunning(SIDEBAR_RUNSTOP, false);
   _side_bar->setItemRunning(SIDEBAR_INSTANT, false);
+
+  // CRITICAL FIX (fork 迁移遗漏): 采集结束时更新 toolbar/sidebar 按钮的 enabled
+  // 状态。is_working() 此时已为 false（action_stop_capture 或 SR_DF_END 路径设置），
+  // update_toolbar_view_status() 会据此启用 TRIGGER/DECODE/MEASURE/SEARCH/
+  // FUNCTION/OPTIONS 等按钮。
+  //
+  // 之前的问题：single 模式手动停止时，EndCollectWork 不被广播（只在 repeat
+  // 模式广播，见 capturemanager.cpp:496-498），而 on_event(EndCollectWorkPrev)
+  // 在 GUI 模式下是空操作。所以 update_toolbar_view_status() 永远不会被调用，
+  // 上述按钮保持禁用状态（灰色无法点击）。用户看到的现象是"停止后按钮仍然灰"。
+  //
+  // 在 on_frame_ended() 中调用 update_toolbar_view_status() 是幂等的：
+  // - single 模式正常结束：on_frame_ended() 调用 → 更新按钮
+  // - single 模式手动停止：on_frame_ended() 调用 → 更新按钮
+  // - repeat 模式：on_frame_ended() + EndCollectWork 都调用，幂等无副作用
+  update_toolbar_view_status();
+
   pv::TabContext *ctx = current_context();
   if (ctx && ctx->document()) {
-    // Copy data to document so activate() can bind signal data from it.
-    // - If document is not the active document, always copy.
-    // - If document is the active document and no background copy is in
-    //   progress (LOGIC+decoders case), also copy here synchronously.
-    // - If a background copy is already running, skip to avoid double copy;
-    //   DSV_MSG_COPY_TO_DOC_DONE will handle reactivation later.
-    if (_session->get_active_document() != ctx->document()) {
-      _session->copy_data_to_document(ctx->document());
-    } else if (!_session->is_copy_in_progress()) {
-      _session->copy_data_to_document(ctx->document());
-    }
-    ctx->document()->save_signal_config(_session->get_device());
-    ctx->activate();
+    // CRITICAL FIX: copy_data_to_document + start_all_decode_tasks are now
+    // handled exclusively by Core layer:
+    //   LOGIC mode: SigSession::on_event(RevEndPacket) → bg copy thread →
+    //               CopyToDocDone handler (or ELSE branch: direct decode +
+    //               guard release for stream mode).
+    //   non-LOGIC mode: DataFeedParser SR_DF_END else branch.
+    // MainWindow previously did a DUPLICATE synchronous copy here, which raced
+    // with the background copy thread and never released the CaptureOwnerGuard,
+    // causing wait_capture_complete to time out forever.
+    ctx->document()->save_signal_config(
+        _session->get_signal_models(), build_channel_layout(current_view()));
   }
   current_view()->receive_end();
 }
@@ -2398,7 +2712,12 @@ void MainWindow::on_frame_began() {
     ctx->make_live();
     if (ctx->document()) {
       ctx->document()->clear();
-      _session->set_active_document(ctx->document());
+      // Task 11.3 (R6 对称): is_working 时跳过 set_active_document，
+      // 避免覆盖 capture owner——后台采集进行中切换 active 会造成数据归属错乱。
+      // END_COLLECT_WORK 时会显式恢复当前 tab 的 active_document 归属。
+      if (!_session->is_working()) {
+        _session->set_active_document(ctx->document());
+      }
     }
     current_view()->set_signal_data_from_source(_session);
   }
@@ -2406,12 +2725,20 @@ void MainWindow::on_frame_began() {
 }
 
 void MainWindow::show_region(uint64_t start, uint64_t end, bool keep) {
-  current_view()->show_region(start, end, keep);
+  _event.show_region_sig((quint64)start, (quint64)end, keep);
 }
 
-void MainWindow::show_wait_trigger() { current_view()->show_wait_trigger(); }
+void MainWindow::on_show_region(quint64 start, quint64 end, bool keep) {
+  current_view()->show_region((uint64_t)start, (uint64_t)end, keep);
+}
 
-void MainWindow::repeat_hold(int percent) {
+void MainWindow::show_wait_trigger() { _event.show_wait_trigger_sig(); }
+
+void MainWindow::on_show_wait_trigger() { current_view()->show_wait_trigger(); }
+
+void MainWindow::repeat_hold(int percent) { _event.repeat_hold_sig(percent); }
+
+void MainWindow::on_repeat_hold(int percent) {
   (void)percent;
   current_view()->repeat_show();
 }
@@ -2435,44 +2762,34 @@ void MainWindow::receive_header() {}
 void MainWindow::check_usb_device_speed() {
   // USB device speed check
   if (_device_agent->is_hardware()) {
-    int usb_speed = LIBUSB_SPEED_HIGH;
-    _device_agent->get_config_int32(SR_CONF_USB_SPEED, usb_speed);
-
-    bool usb30_support = false;
-
-    if (_device_agent->get_config_bool(SR_CONF_USB30_SUPPORT, usb30_support)) {
-      pxv_info("The device's USB module version: %d.0", usb30_support ? 3 : 2);
-
-      int cable_ver = 1;
-      if (usb_speed == LIBUSB_SPEED_HIGH)
-        cable_ver = 2;
-      else if (usb_speed == LIBUSB_SPEED_SUPER)
-        cable_ver = 3;
-
-      pxv_info("The cable's USB port version: %d.0", cable_ver);
-
-      if (usb30_support && usb_speed == LIBUSB_SPEED_HIGH) {
-        QString str_err(
-            L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHECK_USB_SPEED_ERROR),
-                "Plug the device into a USB 2.0 port will seriously affect its "
-                "performance.\nPlease replug it into a USB 3.0 port."));
-        delay_prop_msg(str_err);
-      }
+    // SR_CONF_USB_SPEED/USB30_SUPPORT fork keys were deleted from pxlogic.c.
+    // The link speed is now read directly from libusb via the typed wrapper
+    // DeviceAgent::get_usb_speed() (calls sr_dev_inst_usb_speed_get).
+    int usb_speed = _device_agent->get_usb_speed();
+    if (usb_speed == LIBUSB_SPEED_UNKNOWN) {
+      // Non-USB or speed undeterminable — nothing to check.
+      return;
     }
-  }
-}
 
-void MainWindow::trigger_message(int msg) { _event.trigger_message(msg); }
+    // is_usb30() returns true only for SUPER/SUPER_PLUS. For UNKNOWN we
+    // conservatively treat as USB 2.0 (no warning shown).
+    bool usb30_support = _device_agent->is_usb30();
+    pxv_info("The device's USB module version: %d.0", usb30_support ? 3 : 2);
 
-void MainWindow::on_trigger_message(int msg) {
-  _session->broadcast_msg(msg);
+    int cable_ver = 1;
+    if (usb_speed == LIBUSB_SPEED_HIGH)
+      cable_ver = 2;
+    else if (usb_speed == LIBUSB_SPEED_SUPER)
+      cable_ver = 3;
 
-  // After background copy_data_to_document completes, rebind signal data
-  // from session to document so waveforms use the document's own data copy.
-  if (msg == DSV_MSG_COPY_TO_DOC_DONE) {
-    pv::TabContext *ctx = current_context();
-    if (ctx && ctx->document() && ctx->document()->has_data()) {
-      current_view()->set_data_document(ctx->document());
+    pxv_info("The cable's USB port version: %d.0", cable_ver);
+
+    if (usb30_support && usb_speed == LIBUSB_SPEED_HIGH) {
+      QString str_err(
+          L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHECK_USB_SPEED_ERROR),
+              "Plug the device into a USB 2.0 port will seriously affect its "
+              "performance.\nPlease replug it into a USB 3.0 port."));
+      delay_prop_msg(str_err);
     }
   }
 }
@@ -2487,8 +2804,9 @@ void MainWindow::reset_all_view() {
   _trig_bar->reload();
   _dso_trigger_widget->update_view();
   _measure_widget->reload();
-  _device_options_widget->update_view();
-  _signal_processing_widget->update_view();
+  // DeviceOptionsDock refresh is handled by the caller:
+  //   - DeviceModeChanged  → on_mode_changed() (lightweight, preserves scaffolding)
+  //   - CurrentDeviceChanged → update_view() (full rebuild, called explicitly at line ~3160)
   // if (_sliding_drawer->isOpen())
   //   _sliding_drawer->close();
   // _side_bar->clearAllChecked();
@@ -2721,418 +3039,728 @@ void MainWindow::update_toolbar_view_status() {
     _side_bar->setItemVisible(SIDEBAR_RUNSTOP, true);
     _side_bar->setItemVisible(SIDEBAR_INSTANT, true);
   }
+
+  /* If the currently-open drawer page belongs to a sidebar item that is
+   * now invisible (e.g. switching DSO→ANALOG hides SIDEBAR_TRIGGER while
+   * the DsoTriggerDock drawer is still open), close the drawer so the user
+   * doesn't see stale content from the previous mode. Without this, the
+   * drawer remains open but the sidebar button to close it is invisible. */
+  if (_sliding_drawer && _sliding_drawer->isOpen()) {
+    int cp = _drawer_current_page;
+    bool should_close = false;
+    if (cp == _drawer_page_trigger || cp == _drawer_page_dso_trigger)
+      should_close = !_side_bar->isItemVisible(SIDEBAR_TRIGGER);
+    else if (cp == _drawer_page_protocol)
+      should_close = !_side_bar->isItemVisible(SIDEBAR_DECODE);
+    else if (cp == _drawer_page_search)
+      should_close = !_side_bar->isItemVisible(SIDEBAR_SEARCH);
+    if (should_close) {
+      _sliding_drawer->close();
+      _side_bar->clearAllChecked();
+      _drawer_current_page = -1;
+    }
+  }
 }
 
-void MainWindow::OnMessage(int msg) {
-  switch (msg) {
-  case DSV_MSG_DEVICE_LIST_UPDATED: {
-    _sampling_bar->update_device_list();
-    break;
+// ---------------------------------------------------------------------------
+// IEventListener::on_event overrides (Task 12 — fully typed event dispatch).
+//
+// Each override corresponds to one of the 41 event structs in events.h and
+// contains its handler body directly (no int dispatch, no switch). The former
+// per-responsibility (int,int) helpers and the legacy IMessageListener /
+// DSV_MSG_* / broadcast_msg / trigger_message infrastructure have been
+// removed. broadcast<T>() / broadcast_sync<T>() / broadcast_async<T>() are
+// the only dispatch paths: broadcast<T>() is synchronous and is invoked from
+// within the async-dispatched handler, so these overrides already run on
+// qApp's thread (main thread) — no GUI-thread marshal is needed.
+//
+// Empty-body overrides:
+//   * CaptureOwnerChanged — uses ev.new_owner directly (no int param race).
+//   * CopyToDocDone / DecodeDone / SignalsChanged / DataUpdated /
+//     DeviceConfigUpdated — these events have no GUI work to do in
+//     MainWindow.
+// ---------------------------------------------------------------------------
+
+// --- Capture state group ---
+void MainWindow::on_event(const pv::interface::CaptureStateChanged &) {
+  update_toolbar_view_status();
+  _device_options_widget->update_widgets_status();
+}
+void MainWindow::on_event(const pv::interface::StartCollectWork &) {
+  update_toolbar_view_status();
+  // CRITICAL FIX (fork 迁移遗漏): 旧版在 frame_began() 时设置 sidebar 按钮为
+  // running 状态,但 frame_began() 只在收到第一个 logic 数据包时才被调用。
+  // 等待触发时(无数据) frame_began() 不会被调用,sidebar 按钮保持 "Start",
+  // 用户无法直观看到"正在采集中"的状态。在 StartCollectWork 事件中立即设置
+  // sidebar 按钮为 running(Stop),让用户在采集开始的瞬间就看到状态变化。
+  // setItemRunning 是幂等的,后续 frame_began() 会再次设置(无副作用)。
+  if (_session->is_instant()) {
+    _side_bar->setItemRunning(SIDEBAR_INSTANT, true);
+  } else {
+    _side_bar->setItemRunning(SIDEBAR_RUNSTOP, true);
   }
-  case DSV_MSG_SIMPLE_TRIGGER_CHANGED: {
-    if (_trigger_widget) {
-      _trigger_widget->select_simple_trigger();
+  current_view()->on_state_changed(false);
+  _protocol_widget->update_view_status();
+  _device_options_widget->update_widgets_status();
+}
+void MainWindow::on_event(const pv::interface::CollectStart &) {
+  // 状态栏提示"采集中"
+  statusBar()->showMessage(tr("采集中..."), 3000);
+}
+void MainWindow::on_event(const pv::interface::CollectEnd &) {
+  prgRate(0);
+  current_view()->repeat_unshow();
+  current_view()->on_state_changed(true);
+}
+void MainWindow::on_event(const pv::interface::EndCollectWork &) {
+  update_toolbar_view_status();
+  _protocol_widget->update_view_status();
+
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document() && ctx->document()->has_pending_config()) {
+    ctx->document()->apply_pending_config();
+    // Task 2.6 (R2): apply_pending_config 触发 reload 重建 SignalModel，
+    // 从 _signal_config 回写 trig_type 到新建的 SignalModel（参考
+    // tabcontext.cpp:86-95）。
+    for (const auto &ch : ctx->document()->get_signal_config().channels) {
+      auto m = _session->get_signal_by_index(ch.index);
+      if (m)
+        m->set_trig_type(ch.trig_type);
     }
-    break;
-  }
-  case DSV_MSG_START_COLLECT_WORK_PREV: {
-    if (_device_agent->get_work_mode() == LOGIC)
-      _trigger_widget->try_commit_trigger();
-    else if (_device_agent->get_work_mode() == DSO)
-      _dso_trigger_widget->check_setting();
-
-    current_view()->capture_init();
-    current_view()->on_state_changed(false);
-    break;
-  }
-  case DSV_MSG_START_COLLECT_WORK: {
-    update_toolbar_view_status();
-    current_view()->on_state_changed(false);
-    _protocol_widget->update_view_status();
+    _device_options_widget->update_view();
+  } else {
     _device_options_widget->update_widgets_status();
-    _signal_processing_widget->update_widgets_status();
-    break;
   }
-  case DSV_MSG_CAPTURE_STATE_CHANGED: {
-    update_toolbar_view_status();
-    _device_options_widget->update_widgets_status();
-    _signal_processing_widget->update_widgets_status();
-    break;
+  // R6: activate 在 working 时跳过了 set_active_document，工作结束后
+  // 显式恢复当前 tab 的 active_document 归属。
+  if (ctx) {
+    _session->set_active_document(ctx->document());
   }
-  case DSV_MSG_COLLECT_END: {
-    prgRate(0);
-    current_view()->repeat_unshow();
-    current_view()->on_state_changed(true);
-    break;
-  }
-  case DSV_MSG_END_COLLECT_WORK: {
-    update_toolbar_view_status();
-    _protocol_widget->update_view_status();
+}
+void MainWindow::on_event(const pv::interface::TrigNextCollect &) {
+  // 状态栏提示"等待下一次采集"
+  statusBar()->showMessage(tr("等待下一次采集..."), 3000);
+}
 
+// --- Device management group ---
+void MainWindow::on_event(const pv::interface::DeviceListUpdated &) {
+  _sampling_bar->update_device_list();
+}
+void MainWindow::on_event(const pv::interface::CurrentDeviceChanged &) {
+  reset_all_view();
+  load_device_config();
+  update_title_bar_text();
+  _sampling_bar->update_device_list();
+
+  // After load_device_config() restored device settings (including
+  // operation_mode / stream mode), reload the SamplingBar and DeviceOptions
+  // panel so the stream mode button, sample count list, loop mode toggle,
+  // and all device option controls reflect the persisted configuration.
+  // Without this, the UI shows the auto-detected defaults (Buffer mode)
+  // instead of the restored Stream mode.
+  _sampling_bar->reload();
+  _device_options_widget->update_view();
+
+  _logo_bar->dsl_connected(_session->get_device()->is_hardware());
+  update_toolbar_view_status();
+  _session->device_event_object()->device_updated();
+
+  // Save signal config for current tab and rebuild signals
+  {
     pv::TabContext *ctx = current_context();
-    if (ctx && ctx->document() && ctx->document()->has_pending_config()) {
-      ctx->document()->apply_pending_config(_session->get_device());
-      _device_options_widget->update_view();
-      _signal_processing_widget->update_view();
-    } else {
-      _device_options_widget->update_widgets_status();
-      _signal_processing_widget->update_widgets_status();
+    if (ctx && ctx->document()) {
+      ctx->document()->save_signal_config(
+          _session->get_signal_models(),
+          build_channel_layout(current_view()));
+      current_view()->rebuild_signals();
+      pxv_info("CurrentDeviceChanged: saved config and rebuilt "
+               "signals for current tab");
     }
-    break;
   }
-  case DSV_MSG_CURRENT_DEVICE_CHANGE_PREV: {
-    if (_msg != NULL) {
-      _msg->close();
-      _msg = NULL;
-    }
-    current_view()->hide_calibration();
 
-    _protocol_widget->del_all_protocol();
-    current_view()->reload();
-    break;
+  if (_device_agent->is_hardware()) {
+    _session->on_load_config_end();
   }
-  case DSV_MSG_CURRENT_DEVICE_CHANGED: {
-    reset_all_view();
-    load_device_config();
-    update_title_bar_text();
-    _sampling_bar->update_device_list();
 
-    _logo_bar->dsl_connected(_session->get_device()->is_hardware());
-    update_toolbar_view_status();
-    _session->device_event_object()->device_updated();
+  if (_device_agent->get_work_mode() == LOGIC &&
+      _device_agent->is_file() == false)
+    current_view()->auto_set_max_scale();
 
-    // Save signal config for current tab and rebuild signals
-    {
-      pv::TabContext *ctx = current_context();
-      if (ctx && ctx->document()) {
-        ctx->document()->save_signal_config(_session->get_device());
-        current_view()->rebuild_signals();
-        pxv_info("DSV_MSG_CURRENT_DEVICE_CHANGED: saved config and rebuilt "
-                 "signals for current tab");
-      }
+  if (_device_agent->is_file()) {
+    check_config_file_version();
+
+    bool bDoneDecoder = false;
+    bool bLoadSuccess = false;
+    QJsonDocument doc =
+        get_config_json_from_data_file(_device_agent->path(), bLoadSuccess);
+
+    if (bLoadSuccess) {
+      load_config_from_json(doc, bDoneDecoder);
     }
 
-    if (_device_agent->is_hardware()) {
-      _session->on_load_config_end();
-    }
-
-    if (_device_agent->get_work_mode() == LOGIC &&
-        _device_agent->is_file() == false)
-      current_view()->auto_set_max_scale();
-
-    if (_device_agent->is_file()) {
-      check_config_file_version();
-
-      bool bDoneDecoder = false;
-      bool bLoadSuccess = false;
-      QJsonDocument doc =
-          get_config_json_from_data_file(_device_agent->path(), bLoadSuccess);
+    if (!bDoneDecoder && _device_agent->get_work_mode() == LOGIC) {
+      QJsonArray deArray = get_decoder_json_from_data_file(
+          _device_agent->path(), bLoadSuccess);
 
       if (bLoadSuccess) {
-        load_config_from_json(doc, bDoneDecoder);
-      }
-
-      if (!bDoneDecoder && _device_agent->get_work_mode() == LOGIC) {
-        QJsonArray deArray = get_decoder_json_from_data_file(
-            _device_agent->path(), bLoadSuccess);
-
-        if (bLoadSuccess) {
-          StoreSession ss(_session);
-          ss.load_decoders(_protocol_widget, deArray);
-        }
-      }
-
-      current_view()->update_all_trace_postion();
-      QTimer::singleShot(100, this,
-                         [this]() { _session->start_capture(true); });
-    } else if (_device_agent->is_demo()) {
-      if (_device_agent->get_work_mode() == LOGIC) {
-        _pattern_mode = _device_agent->get_demo_operation_mode();
-        _protocol_widget->del_all_protocol();
-        current_view()->auto_set_max_scale();
-
-        if (_pattern_mode != "random") {
-          load_demo_decoder_config(_pattern_mode);
-        }
+        StoreSession ss(_session);
+        ss.load_decoders(_protocol_widget, deArray);
       }
     }
 
-    calc_min_height();
-
-    if (_device_agent->is_hardware() && _device_agent->is_new_device()) {
-      check_usb_device_speed();
-    }
-
-    break;
-  }
-  case DSV_MSG_DEVICE_OPTIONS_UPDATED: {
-    _trigger_widget->device_updated();
-    _device_options_widget->device_updated();
-    _signal_processing_widget->device_updated();
-    _measure_widget->reload();
-    current_view()->check_calibration();
-
-    pv::TabContext *ctx = current_context();
-    if (ctx && ctx->document()) {
-      ctx->document()->save_signal_config(_session->get_device());
-    }
-
-    current_view()->rebuild_signals();
-    current_view()->signals_changed(NULL);
-    break;
-  }
-  case DSV_MSG_DEVICE_DURATION_UPDATED: {
-    _trigger_widget->device_updated();
-    current_view()->timebase_changed();
-    break;
-  }
-  case DSV_MSG_SAMPLE_COUNT_UPDATED: {
-    _sampling_bar->update_sample_count_selector();
-    break;
-  }
-  case DSV_MSG_DEVICE_MODE_CHANGED: {
-    current_view()->mode_changed();
-    reset_all_view();
-    load_device_config();
-    update_title_bar_text();
-    current_view()->hide_calibration();
-
-    update_toolbar_view_status();
-    _sampling_bar->update_sample_rate_list();
-
-    // Save signal config for current tab and rebuild signals
-    {
-      pv::TabContext *ctx = current_context();
-      if (ctx && ctx->document()) {
-        ctx->document()->save_signal_config(_session->get_device());
-        current_view()->rebuild_signals();
-        pxv_info("DSV_MSG_DEVICE_MODE_CHANGED: saved config and rebuilt "
-                 "signals for current tab");
-      }
-    }
-
-    if (_device_agent->is_hardware())
-      _session->on_load_config_end();
-
-    if (_device_agent->get_work_mode() == LOGIC)
-      current_view()->auto_set_max_scale();
-
-    if (_device_agent->is_demo()) {
+    current_view()->update_all_trace_postion();
+    QTimer::singleShot(100, this,
+                       [this]() { _session->start_capture(true); });
+  } else if (_device_agent->is_demo()) {
+    if (_device_agent->get_work_mode() == LOGIC) {
       _pattern_mode = _device_agent->get_demo_operation_mode();
       _protocol_widget->del_all_protocol();
+      current_view()->auto_set_max_scale();
 
-      if (_device_agent->get_work_mode() == LOGIC) {
-        if (_pattern_mode != "random") {
-          _device_agent->update();
-          load_demo_decoder_config(_pattern_mode);
-        }
+      if (_pattern_mode != "random") {
+        load_demo_decoder_config(_pattern_mode);
       }
     }
-
-    calc_min_height();
-    break;
   }
-  case DSV_MSG_NEW_USB_DEVICE: {
-    if (_msg != NULL) {
-      _msg->close();
+
+  calc_min_height();
+
+  if (_device_agent->is_hardware() && _device_agent->is_new_device()) {
+    check_usb_device_speed();
+  }
+}
+void MainWindow::on_event(const pv::interface::UsbDeviceArrived &) {
+  if (_msg != NULL) {
+    _msg->close();
+    _msg = NULL;
+  }
+
+  _sampling_bar->update_device_list();
+
+  // If the current device is working, do not remind to switch new device.
+  if (_session->get_device()->is_hardware() && _session->is_working()) {
+    return;
+  }
+
+  // If a saving task is running, not need to remind to switch device,
+  // when the task end, the new device will be selected.
+  if (_session->get_device()->is_demo() == false && !_is_save_confirm_msg) {
+    QString msgText = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_TO_SWITCH_DEVICE),
+                          "To switch the new device?");
+
+    if (MsgBox::Confirm(msgText, "", &_msg, NULL) == false) {
       _msg = NULL;
-    }
-
-    _sampling_bar->update_device_list();
-
-    // If the current device is working, do not remind to switch new device.
-    if (_session->get_device()->is_hardware() && _session->is_working()) {
       return;
     }
-
-    // If a saving task is running, not need to remind to switch device,
-    // when the task end, the new device will be selected.
-    if (_session->get_device()->is_demo() == false && !_is_save_confirm_msg) {
-      QString msgText = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_TO_SWITCH_DEVICE),
-                            "To switch the new device?");
-
-      if (MsgBox::Confirm(msgText, "", &_msg, NULL) == false) {
-        _msg = NULL;
-        return;
-      }
-      _msg = NULL;
-    }
-
-    // The store confirm is not processed.
-    if (_is_save_confirm_msg) {
-      pxv_info("New device attached:Waitting for the confirm box be closed.");
-      _is_auto_switch_device = true;
-      return;
-    }
-
-    if (_session->is_saving()) {
-      pxv_info("New device attached:Waitting for store the data. and will "
-               "switch to new device.");
-      _is_auto_switch_device = true;
-      return;
-    }
-
-    int mode = _device_agent->get_work_mode();
-
-    if (mode != DSO && confirm_to_store_data()) {
-      _is_auto_switch_device = true;
-
-      if (_session->is_working())
-        _session->stop_capture();
-
-      on_save();
-    } else {
-      if (_session->is_working())
-        _session->stop_capture();
-
-      _session->set_default_device();
-    }
-
-    break;
+    _msg = NULL;
   }
-  case DSV_MSG_CURRENT_DEVICE_DETACHED: {
-    if (_msg != NULL) {
-      _msg->close();
-      _msg = NULL;
-    }
 
-    // Save current config, and switch to the last device.
-    _session->device_event_object()->device_updated();
-    save_config();
-    current_view()->hide_calibration();
+  // The store confirm is not processed.
+  if (_is_save_confirm_msg) {
+    pxv_info("New device attached:Waitting for the confirm box be closed.");
+    _is_auto_switch_device = true;
+    return;
+  }
 
-    if (_session->is_saving()) {
-      pxv_info("Device detached:Waitting for store the data. and will switch "
-               "to new device.");
-      _is_auto_switch_device = true;
-      return;
-    }
+  if (_session->is_saving()) {
+    pxv_info("New device attached:Waitting for store the data. and will "
+             "switch to new device.");
+    _is_auto_switch_device = true;
+    return;
+  }
 
-    if (confirm_to_store_data()) {
-      _is_auto_switch_device = true;
-      on_save();
-    } else {
-      _session->set_default_device();
-    }
-    break;
-  }
-  case DSV_MSG_SAVE_COMPLETE: {
-    _session->clear_store_confirm_flag();
+  int mode = _device_agent->get_work_mode();
 
-    if (_is_auto_switch_device) {
-      _is_auto_switch_device = false;
-      _session->set_default_device();
-    } else {
-      ds_device_handle devh = _sampling_bar->get_next_device_handle();
-      if (devh != NULL_HANDLE) {
-        pxv_info("Auto switch to the selected device.");
-        _session->set_device(devh);
-      }
-    }
-    break;
-  }
-  case DSV_MSG_CLEAR_DECODE_DATA: {
-    if (_device_agent->get_work_mode() == LOGIC)
-      _protocol_widget->reset_view();
-    break;
-  }
-  case DSV_MSG_STORE_CONF_PREV: {
-    if (_device_agent->is_hardware() &&
-        _session->have_hardware_data() == false) {
-      _sampling_bar->commit_settings();
-    }
-    break;
-  }
-  case DSV_MSG_BEGIN_DEVICE_OPTIONS:
-  case DSV_MSG_COLLECT_MODE_CHANGED: {
-    if (_device_agent->is_demo()) {
-      _pattern_mode = _device_agent->get_demo_operation_mode();
-    }
-    if (msg == DSV_MSG_COLLECT_MODE_CHANGED) {
-      _trigger_widget->device_updated();
-      current_view()->update();
-    }
-    break;
-  }
-  case DSV_MSG_END_DEVICE_OPTIONS:
-  case DSV_MSG_DEMO_OPERATION_MODE_CHNAGED: {
-    if (_device_agent->is_demo() && _device_agent->get_work_mode() == LOGIC) {
-      QString pattern_mode = _device_agent->get_demo_operation_mode();
+  if (mode != DSO && confirm_to_store_data()) {
+    _is_auto_switch_device = true;
 
-      if (pattern_mode != _pattern_mode) {
-        _pattern_mode = pattern_mode;
+    if (_session->is_working())
+      _session->stop_capture();
 
-        _device_agent->update();
-        _session->clear_view_data();
-        _session->init_signals();
-        update_toolbar_view_status();
-        _sampling_bar->update_sample_rate_list();
-        _protocol_widget->del_all_protocol();
+    on_save();
+  } else {
+    if (_session->is_working())
+      _session->stop_capture();
 
-        if (_pattern_mode != "random") {
-          _session->set_collect_mode(COLLECT_SINGLE);
-          load_demo_decoder_config(_pattern_mode);
+    _session->set_default_device();
+  }
+}
+void MainWindow::on_event(const pv::interface::DeviceDetached &) {
+  if (_msg != NULL) {
+    _msg->close();
+    _msg = NULL;
+  }
 
-          if (msg == DSV_MSG_END_DEVICE_OPTIONS)
-            _session->start_capture(false); // Auto load data.
-        }
-      }
-    }
-    calc_min_height();
-    break;
+  // Save current config, and switch to the last device.
+  _session->device_event_object()->device_updated();
+  save_config();
+  // Calibration dialog removed; nothing to hide.
+
+  if (_session->is_saving()) {
+    pxv_info("Device detached:Waitting for store the data. and will switch "
+             "to new device.");
+    _is_auto_switch_device = true;
+    return;
   }
-  case DSV_MSG_APP_OPTIONS_CHANGED: {
-    update_title_bar_text();
-    break;
+
+  if (confirm_to_store_data()) {
+    _is_auto_switch_device = true;
+    on_save();
+  } else {
+    _session->set_default_device();
   }
-  case DSV_MSG_FONT_OPTIONS_CHANGED: {
-    UiManager::Instance()->Update(UI_UPDATE_ACTION_FONT);
-    break;
+}
+
+void MainWindow::on_event(const pv::interface::DeviceOpenFailed &evt) {
+  // set_device() failed to open the new device via sr_dev_open. The old device
+  // was already released, so the UI is now blank. Show a user-facing message
+  // with the driver name and error reason so the user knows the device failed
+  // to open (e.g. USB interface claimed by another driver, firmware version
+  // mismatch, libusb permission issue) instead of staring at an empty window.
+  QString driver = QString::fromStdString(evt.driver_name);
+  QString err = QString::fromStdString(evt.error_message);
+  QString title = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DEVICE_OPEN_FAILED),
+                       "Failed to open device");
+  QString text;
+  if (err.isEmpty()) {
+    text = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DEVICE_OPEN_FAILED_REASON),
+               "The device could not be opened. Check USB connection, "
+               "driver, and that no other program is using it.");
+  } else {
+    text = err;
   }
-  case DSV_MSG_SHORTCUT_CHANGED: {
-    break;
+  if (!driver.isEmpty()) {
+    text = QString("[%1] %2").arg(driver, text);
   }
-  case DSV_MSG_STYLE_CHANGED: {
-    UiManager::Instance()->Update(UI_UPDATE_ACTION_THEME);
-    for(QWidget *w : qApp->topLevelWidgets()) {
-      w->update();
-    }
-    break;
+  pxv_err("DeviceOpenFailed: driver=%s reason=%s",
+          driver.toUtf8().constData(), err.toUtf8().constData());
+  MsgBox::Show(title, text, this);
+}
+
+// --- Device options group ---
+void MainWindow::on_event(const pv::interface::DeviceOptionsUpdated &) {
+  _trigger_widget->device_updated();
+  _device_options_widget->device_updated();
+  _measure_widget->reload();
+  // Calibration dialog check removed (SR_CONF_CALI key deleted).
+
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document()) {
+    ctx->document()->save_signal_config(
+        _session->get_signal_models(), build_channel_layout(current_view()));
   }
-  case DSV_MSG_DATA_POOL_CHANGED: {
-    current_view()->check_measure();
-    // Auto-apply signal processing settings on new data
-    if (_signal_processing_widget) {
-      _signal_processing_widget->auto_apply_settings();
-    }
-    break;
+
+  current_view()->rebuild_signals();
+  current_view()->signals_changed(NULL);
+}
+void MainWindow::on_event(const pv::interface::DsoViewOptionChanged &) {
+  // DSO header interaction (vDial/factor/acCoupling). The DsoSignal setters
+  // already synced driver + Core model + View state; we only need to refresh
+  // dock panels and persist config. reload()/rebuild_signals() are explicitly
+  // avoided here because they drop View-only state (_stop_scale resets to 1
+  // in path-B full rebuild → waveform no longer scales with vdiv).
+  _trigger_widget->device_updated();
+  _device_options_widget->device_updated();
+  _measure_widget->reload();
+
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document()) {
+    ctx->document()->save_signal_config(
+        _session->get_signal_models(), build_channel_layout(current_view()));
   }
-  case DSV_MSG_GLITCH_FILTER_COMPLETED:
-  case DSV_MSG_GLITCH_FILTER_CLEARED: {
+}
+void MainWindow::on_event(const pv::interface::SampleRateChanged &) {
+  _trigger_widget->device_updated();
+  current_view()->timebase_changed();
+}
+void MainWindow::on_event(const pv::interface::SampleCountUpdated &) {
+  _sampling_bar->update_sample_count_selector();
+}
+void MainWindow::on_event(const pv::interface::DeviceModeChanged &) {
+  // switch_work_mode() broadcasts DeviceModeChanged via broadcast_async,
+  // which is queued on qApp via Qt::QueuedConnection by EventBus, so this
+  // handler runs AFTER the View has finished its signals_changed rebuild
+  // (which rebinds view::Signal::_model to the new SignalModels via
+  // compute_change_event pointer-identity check). No manual
+  // rebuild_signals() is needed here.
+  current_view()->mode_changed();
+  reset_all_view();
+  load_device_config();
+  update_title_bar_text();
+  // Lightweight refresh of DeviceOptionsDock: only rebuild the dynamic panel
+  // (channel area) and Mode section, preserving scaffolding (separators,
+  // minWid, stretch, sampling widget). Avoids the full nuke-and-rebuild of
+  // update_view() which caused UI jumping on mode switch.
+  _device_options_widget->on_mode_changed();
+  // Calibration dialog removed; nothing to hide.
+
+  update_toolbar_view_status();
+  _sampling_bar->update_sample_rate_list();
+  _sampling_bar->reload();
+
+  // Save signal config for current tab and rebuild signals
+  {
     pv::TabContext *ctx = current_context();
     if (ctx && ctx->document()) {
-      _session->copy_data_to_document(ctx->document());
+      ctx->document()->save_signal_config(
+          _session->get_signal_models(),
+          build_channel_layout(current_view()));
+      current_view()->rebuild_signals();
+      pxv_info("DeviceModeChanged: saved config and rebuilt "
+               "signals for current tab");
     }
-    if (_signal_processing_widget) {
-      _signal_processing_widget->update_glitch_filter_state();
+  }
+
+  if (_device_agent->is_hardware())
+    _session->on_load_config_end();
+
+  if (_device_agent->get_work_mode() == LOGIC)
+    current_view()->auto_set_max_scale();
+
+  if (_device_agent->is_demo()) {
+    _pattern_mode = _device_agent->get_demo_operation_mode();
+    _protocol_widget->del_all_protocol();
+
+    if (_device_agent->get_work_mode() == LOGIC) {
+      if (_pattern_mode != "random") {
+        _device_agent->update();
+        load_demo_decoder_config(_pattern_mode);
+      }
     }
-    // Restart decoders after data change
-    _session->restart_decoders();
+  }
+
+  calc_min_height();
+}
+void MainWindow::on_event(const pv::interface::CollectModeChanged &) {
+  if (_device_agent->is_demo()) {
+    _pattern_mode = _device_agent->get_demo_operation_mode();
+  }
+  _trigger_widget->device_updated();
+  current_view()->update();
+}
+void MainWindow::on_event(const pv::interface::EndDeviceOptions &) {
+  if (_device_agent->is_demo() && _device_agent->get_work_mode() == LOGIC) {
+    QString pattern_mode = _device_agent->get_demo_operation_mode();
+
+    if (pattern_mode != _pattern_mode) {
+      _pattern_mode = pattern_mode;
+
+      _device_agent->update();
+      _session->clear_view_data();
+      _session->init_signals();
+      update_toolbar_view_status();
+      _sampling_bar->update_sample_rate_list();
+      _protocol_widget->del_all_protocol();
+
+      if (_pattern_mode != "random") {
+        _session->set_collect_mode(COLLECT_SINGLE);
+        load_demo_decoder_config(_pattern_mode);
+
+        _session->start_capture(false); // Auto load data.
+      }
+    }
+  }
+  calc_min_height();
+}
+void MainWindow::on_event(const pv::interface::DemoModeChanged &) {
+  if (_device_agent->is_demo() && _device_agent->get_work_mode() == LOGIC) {
+    QString pattern_mode = _device_agent->get_demo_operation_mode();
+
+    if (pattern_mode != _pattern_mode) {
+      _pattern_mode = pattern_mode;
+
+      _device_agent->update();
+      _session->clear_view_data();
+      _session->init_signals();
+      update_toolbar_view_status();
+      _sampling_bar->update_sample_rate_list();
+      _protocol_widget->del_all_protocol();
+
+      if (_pattern_mode != "random") {
+        _session->set_collect_mode(COLLECT_SINGLE);
+        load_demo_decoder_config(_pattern_mode);
+      }
+    }
+  }
+  calc_min_height();
+}
+
+// --- UI options group ---
+void MainWindow::on_event(const pv::interface::AppOptionsChanged &) {
+  update_title_bar_text();
+}
+void MainWindow::on_event(const pv::interface::FontOptionsChanged &) {
+  UiManager::Instance()->Update(UI_UPDATE_ACTION_FONT);
+}
+void MainWindow::on_event(const pv::interface::ShortcutChanged &) {
+}
+void MainWindow::on_event(const pv::interface::StyleChanged &) {
+  UiManager::Instance()->Update(UI_UPDATE_ACTION_THEME);
+  for (QWidget *w : qApp->topLevelWidgets()) {
+    w->update();
+  }
+}
+
+// --- Data group ---
+void MainWindow::on_event(const pv::interface::DataPoolChanged &) {
+  current_view()->check_measure();
+}
+void MainWindow::on_event(const pv::interface::CopyInProgressChanged &) {
+  // 显示后台 copy 指示器；完成后由其它消息刷新
+  if (_disk_cache_status_label)
+    _disk_cache_status_label->setText(tr("后台数据拷贝中..."));
+}
+void MainWindow::on_event(const pv::interface::ActiveDocumentChanged &) {
+  // 活动文档已切换，更新标题栏与 dock 状态
+  update_title_bar_text();
+}
+void MainWindow::on_event(const pv::interface::SaveComplete &) {
+  _session->clear_store_confirm_flag();
+
+  if (_is_auto_switch_device) {
+    _is_auto_switch_device = false;
+    _session->set_default_device();
+  } else {
+    ds_device_handle devh = _sampling_bar->get_next_device_handle();
+    if (devh != NULL_HANDLE) {
+      pxv_info("Auto switch to the selected device.");
+      _session->set_device(devh);
+    }
+  }
+}
+void MainWindow::on_event(const pv::interface::ClearDecodeData &) {
+  if (_device_agent->get_work_mode() == LOGIC)
+    _protocol_widget->reset_view();
+}
+
+// --- Filter / invert group ---
+void MainWindow::on_event(const pv::interface::GlitchFilterStarted &) {
+  // 复用磁盘缓存状态标签显示毛刺滤波处理中指示
+  if (_disk_cache_status_label)
+    _disk_cache_status_label->setText(tr("毛刺滤波处理中..."));
+}
+void MainWindow::on_event(const pv::interface::GlitchFilterProgress &e) {
+  // FilterProcessor emits broadcast_async<GlitchFilterProgress> carrying
+  // the 0-100 progress percent. The typed event is dispatched to all
+  // IEventListener consumers on the main thread.
+  int p = e.progress;
+  if (p < 0)
+    p = 0;
+  if (p > 100)
+    p = 100;
+  statusBar()->showMessage(
+      tr("毛刺滤波进行中... %1%").arg(p), 2000);
+}
+void MainWindow::on_event(const pv::interface::GlitchFilterCompleted &) {
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document()) {
+    _session->copy_data_to_document(ctx->document());
+  }
+  // Restart decoders after data change
+  _session->restart_decoders();
+
+  // 若 GlitchFilterPopup 已打开,刷新其直方图与默认值(底层
+  // LogicSnapshot 数据已变化,直方图应反映滤波后的脉冲分布)。
+  if (auto *v = current_view()) {
+    v->on_glitch_filter_completed();
+  }
+}
+void MainWindow::on_event(const pv::interface::GlitchFilterCleared &) {
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document()) {
+    _session->copy_data_to_document(ctx->document());
+  }
+  // Restart decoders after data change
+  _session->restart_decoders();
+
+  // 若 GlitchFilterPopup 已打开,刷新其直方图与默认值(底层
+  // LogicSnapshot 数据已变化,直方图应反映滤波后的脉冲分布)。
+  if (auto *v = current_view()) {
+    v->on_glitch_filter_cleared();
+  }
+}
+void MainWindow::on_event(const pv::interface::SignalInvertStarted &) {
+  if (_disk_cache_status_label)
+    _disk_cache_status_label->setText(tr("信号反相处理中..."));
+}
+void MainWindow::on_event(const pv::interface::SignalInvertCompleted &) {
+  pv::TabContext *ctx2 = current_context();
+  if (ctx2 && ctx2->document()) {
+    _session->copy_data_to_document(ctx2->document());
+  }
+  // Restart decoders after data change
+  _session->restart_decoders();
+}
+void MainWindow::on_event(const pv::interface::SignalInvertCleared &) {
+  pv::TabContext *ctx2 = current_context();
+  if (ctx2 && ctx2->document()) {
+    _session->copy_data_to_document(ctx2->document());
+  }
+  // Restart decoders after data change
+  _session->restart_decoders();
+}
+
+// --- Trigger group ---
+void MainWindow::on_event(const pv::interface::SimpleTriggerChanged &) {
+  if (_trigger_widget) {
+    _trigger_widget->select_simple_trigger();
+  }
+}
+void MainWindow::on_event(const pv::interface::TriggerConfigChanged &) {
+  // Task 8.8: TriggerConfig 变化，刷新 TriggerDock UI。
+  if (_trigger_widget)
+    _trigger_widget->update_view();
+}
+
+// --- Empty-body / pre-broadcast overrides ---
+void MainWindow::on_event(const pv::interface::CaptureOwnerChanged &) {
+  // Capture owner 改变。原本在此处调用了 activate() 导致采集结束瞬间
+  // 误触 reload()，从而把后台刚刚启动的离线解码任务强制杀掉。
+  // 现在将其移除，仅在必要时（如 Tab 切换）才去调 activate()。
+}
+void MainWindow::on_event(const pv::interface::CopyToDocDone &) {
+  // After background copy_data_to_document completes, rebind signal data
+  // from session to document so waveforms use the document's own data copy.
+  pv::TabContext *ctx = current_context();
+  if (ctx && ctx->document() && ctx->document()->has_data()) {
+    current_view()->set_data_document(ctx->document());
+  }
+}
+void MainWindow::on_event(const pv::interface::DecodeDone &) {
+  // 离线解码完成（或所有解码任务结束）时，主动通知 View 刷新界面，
+  // 将刚刚生成的 Annotation 渲染出来，并更新右侧协议列表。
+  on_data_updated();
+  if (current_view()) {
+    current_view()->update();
+    current_view()->viewport_update();
+  }
+  on_decode_done();
+}
+void MainWindow::on_event(const pv::interface::SignalsChanged &) {}
+void MainWindow::on_event(const pv::interface::DataUpdated &) {
+  // modernize-core-layer-radical Task 13: DataUpdated is now emitted by
+  // DataFeedParser::feed_in_* via broadcast_async. Route to the existing
+  // on_data_updated() handler (measure reCalc + view data_updated).
+  on_data_updated();
+}
+void MainWindow::on_event(const pv::interface::DeviceConfigUpdated &) {}
+
+void MainWindow::on_event(const pv::interface::StoreConfPrev &) {
+  // modernize-core-layer-radical Task 10: StoreConfPrev pre-broadcast hook.
+  // Commit sampling-bar settings before the config store mutation lands,
+  // but only for hardware devices without captured data.
+  if (_device_agent && _device_agent->is_hardware() &&
+      _session && !_session->have_hardware_data()) {
+    _sampling_bar->commit_settings();
+  }
+}
+
+void MainWindow::on_event(const pv::interface::CurrentDeviceChangePrev &) {
+  // modernize-core-layer-radical Task 11: CurrentDeviceChangePrev pre-broadcast
+  // hook. Close any modal message, hide calibration, delete all protocols,
+  // reload the view BEFORE SigSession releases the old device.
+  if (_msg != NULL) {
+    _msg->close();
+    _msg = NULL;
+  }
+  // Calibration dialog removed; nothing to hide.
+
+  _protocol_widget->del_all_protocol();
+  current_view()->reload();
+}
+
+void MainWindow::on_event(const pv::interface::StartCollectWorkPrev &) {
+  // modernize-core-layer-radical Task 11: StartCollectWorkPrev pre-broadcast
+  // hook. Commit trigger settings + capture_init + on_state_changed(false)
+  // BEFORE CaptureManager::exec_capture() starts the device.
+  if (_device_agent->get_work_mode() == LOGIC)
+    _trigger_widget->try_commit_trigger();
+  else if (_device_agent->get_work_mode() == DSO)
+    _dso_trigger_widget->check_setting();
+
+  current_view()->capture_init();
+  current_view()->on_state_changed(false);
+}
+
+void MainWindow::on_event(const pv::interface::EndCollectWorkPrev &) {
+  // modernize-core-layer-radical Task 11: EndCollectWorkPrev is a no-op in
+  // GUI mode; SessionService is the sole consumer. Empty override satisfies
+  // the IEventListener virtual dispatch.
+}
+
+// ---------------------------------------------------------------------------
+// IServiceEventListener — route View operation broadcasts from SessionService
+// (MCP/WS API) to the active View. In Headless mode there is no MainWindow,
+// so these events are simply not consumed.
+// ---------------------------------------------------------------------------
+void MainWindow::on_service_event(const pv::api::ServiceEventData &data) {
+  pv::view::View *view = current_view();
+  if (!view)
+    return;
+
+  const auto &params = data.params;
+
+  switch (data.event) {
+  case pv::api::ServiceEvent::ViewShowRegion: {
+    auto it_start = params.find("start");
+    auto it_end = params.find("end");
+    if (it_start != params.end() && it_end != params.end()) {
+      uint64_t start = std::stoull(it_start->second);
+      uint64_t end = std::stoull(it_end->second);
+      view->show_region(start, end, true);
+    }
     break;
   }
-  case DSV_MSG_SIGNAL_INVERT_COMPLETED:
-  case DSV_MSG_SIGNAL_INVERT_CLEARED: {
-    pv::TabContext *ctx2 = current_context();
-    if (ctx2 && ctx2->document()) {
-      _session->copy_data_to_document(ctx2->document());
-    }
-    if (_signal_processing_widget) {
-      _signal_processing_widget->update_invert_state();
-    }
-    // Restart decoders after data change
-    _session->restart_decoders();
+  case pv::api::ServiceEvent::ViewZoomFit: {
+    // TODO: View has no zoom_fit() method yet; approximate with zoom out.
+    // A proper fit-to-screen implementation should be added to View.
+    view->zoom(-1.0);
     break;
   }
+  case pv::api::ServiceEvent::ViewZoomIn: {
+    view->zoom(1.0);
+    break;
+  }
+  case pv::api::ServiceEvent::ViewZoomOut: {
+    view->zoom(-1.0);
+    break;
+  }
+  case pv::api::ServiceEvent::ViewCursorAdded: {
+    auto it = params.find("sample_pos");
+    if (it != params.end()) {
+      uint64_t sample_pos = std::stoull(it->second);
+      view->add_cursor(sample_pos);
+    }
+    break;
+  }
+  case pv::api::ServiceEvent::ViewCursorRemoved: {
+    // Cursor removal by index is handled by View internally;
+    // no direct public API to remove by index from outside.
+    // TODO: Add View::remove_cursor(int index) if needed.
+    break;
+  }
+  case pv::api::ServiceEvent::ViewCursorsCleared: {
+    view->clear_cursors();
+    break;
+  }
+  case pv::api::ServiceEvent::DecoderAdded:
+  case pv::api::ServiceEvent::DecoderRemoved:
+  case pv::api::ServiceEvent::SignalsChanged: {
+    // Core data changed via MCP/API (decoder added/removed or signals
+    // changed). Trigger lazy sync so View creates/removes the
+    // corresponding DecodeTrace by Core Stack identity comparison.
+    // signals_changed(NULL) internally calls mark_derived_traces_dirty()
+    // then get_traces() -> get_own_decode_traces() -> sync_derived_traces(),
+    // which performs the Stack-pointer-identity-based reconciliation.
+    // The explicit mark_derived_traces_dirty() is kept for clarity and
+    // defensive purposes (idempotent).
+    view->mark_derived_traces_dirty();
+    view->signals_changed(NULL);
+    break;
+  }
+  default:
+    // Not a View event; ignore.
+    break;
   }
 }
 
@@ -3198,11 +3826,6 @@ void MainWindow::load_demo_decoder_config(QString optname) {
     ss.load_decoders(_protocol_widget, deArray);
   }
 
-  QJsonDocument doc = get_config_json_from_data_file(file, bLoadSurccess);
-  if (bLoadSurccess) {
-    load_channel_view_indexs(doc);
-  }
-
   current_view()->update_all_trace_postion();
 }
 
@@ -3250,7 +3873,35 @@ void MainWindow::remove_tab(int index) {
   disconnect(_tab_widget, &pv::ui::DraggableTabWidget::currentChanged, this,
              &MainWindow::on_tab_changed);
   _tab_widget->removeTab(index);
-  _session->unregister_document(ctx->document());
+  // Task 4.3: capture owner cleanup is now RAII-managed by CaptureOwnerGuard.
+  // clear_capture_owner_document() resets the guard, whose destructor joins the
+  // copy thread + clears owner + broadcasts. No need for manual join_copy_thread.
+  _session->clear_capture_owner_document(ctx->document());
+
+  // A2 fix: stop decoder threads working on this document's stacks before the
+  // document is destroyed. Without this, a running decode thread would access
+  // freed DecoderStack memory. We stop each stack individually rather than
+  // calling clear_all_documents_decoders() (which would stop ALL tabs' decoders).
+  auto doc = ctx->document();
+  if (doc) {
+    for (auto &stack : doc->get_decoder_stacks()) {
+      if (stack && stack->IsRunning()) {
+        stack->stop_decode_work();
+      }
+    }
+  }
+
+  // phase 2: unregister_document() removed — document ownership is now held by
+  // DocumentRegistry. The document is released (marked deletion) inside
+  // TabContext::~TabContext (called by destroy_context below) via
+  // registry->release_document(doc_index). No explicit release here.
+
+  // A2 fix: detach View→Document pointer BEFORE deleteLater(). deleteLater is
+  // async — the View may receive paint events before actual deletion. Without
+  // this detach, those paint events would dereference the soon-to-be-destroyed
+  // document pointer (use-after-free).
+  ctx->view()->set_data_document(nullptr);
+
   ctx->view()->deleteLater();
   SessionManager::instance()->destroy_context(ctx);
 
@@ -3270,7 +3921,6 @@ void MainWindow::remove_tab(int index) {
   _search_widget->bind_context(new_ctx);
   _protocol_widget->bind_context(new_ctx);
   _device_options_widget->bind_context(new_ctx);
-  _signal_processing_widget->bind_context(new_ctx);
   _log_widget->bind_context(new_ctx);
   _trigger_widget->bind_context(new_ctx);
   _dso_trigger_widget->bind_context(new_ctx);
@@ -3325,7 +3975,6 @@ void MainWindow::on_tab_changed(int index) {
       _search_widget->unbind_context();
       _protocol_widget->unbind_context();
       _device_options_widget->unbind_context();
-      _signal_processing_widget->unbind_context();
       _log_widget->unbind_context();
       _trigger_widget->unbind_context();
       _dso_trigger_widget->unbind_context();
@@ -3337,7 +3986,6 @@ void MainWindow::on_tab_changed(int index) {
     _search_widget->bind_context(new_ctx);
     _protocol_widget->bind_context(new_ctx);
     _device_options_widget->bind_context(new_ctx);
-    _signal_processing_widget->bind_context(new_ctx);
     _log_widget->bind_context(new_ctx);
     _trigger_widget->bind_context(new_ctx);
     _dso_trigger_widget->bind_context(new_ctx);
@@ -3350,7 +3998,8 @@ void MainWindow::on_tab_changed(int index) {
 }
 
 void MainWindow::on_tab_moved(int from, int to) {
-  if (from < 0 || from >= _tab_contexts.size() || to < 0 || to >= _tab_contexts.size())
+  if (from < 0 || from >= _tab_contexts.size() || to < 0 ||
+      to >= _tab_contexts.size())
     return;
   if (from == to)
     return;
@@ -3417,10 +4066,14 @@ void MainWindow::on_tab_attached(QWidget *widget, const QString &title) {
 
 void MainWindow::on_new_tab_requested() {
   pv::view::View *new_view = new pv::view::View(_session, _sampling_bar, this);
-  pv::data::SessionDocument *new_doc = new pv::data::SessionDocument();
+  // phase 2: document owned by DocumentRegistry.
+  size_t new_doc_idx = _session->document_registry()->take_document(
+      std::make_unique<pv::data::SessionDocument>(_session));
+  pv::data::SessionDocument *new_doc =
+      _session->document_registry()->get_document_by_index(new_doc_idx);
 
   if (_device_agent && _device_agent->have_instance()) {
-    new_doc->save_signal_config(_device_agent);
+    new_doc->save_signal_config(_session->get_signal_models(), {});
     pxv_info("MainWindow::on_new_tab_requested() saved signal config, mode=%d "
              "ch_count=%d",
              new_doc->get_signal_config().work_mode,
@@ -3428,9 +4081,12 @@ void MainWindow::on_new_tab_requested() {
   }
 
   pv::TabContext *new_ctx =
-      SessionManager::instance()->create_context(new_view, _session, new_doc);
-  _session->register_document(new_doc);
-  new_ctx->set_title(QString::fromUtf8(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1")).arg(_tab_contexts.size() + 1));
+      SessionManager::instance()->create_context(new_view, _session, new_doc,
+                                                 new_doc_idx,
+                                                 _session->document_registry());
+  new_ctx->set_title(
+      QString::fromUtf8(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1"))
+          .arg(_tab_contexts.size() + 1));
   add_tab(new_ctx);
 }
 
@@ -3454,7 +4110,11 @@ void MainWindow::update_disk_cache_status() {
   }
 
   bool cache_enabled = false;
-  _device_agent->get_config_bool(SR_CONF_DISK_CACHE_ENABLE, cache_enabled);
+  // DISK_CACHE_ENABLE is a PXLogic fork key — only DSL/PXLogic devices
+  // implement it. demo/file/compat devices would otherwise log "Option not
+  // available" every 500ms via _disk_cache_status_timer.
+  if (_device_agent->is_dsl_device())
+    _device_agent->get_config_bool(SR_CONF_DISK_CACHE_ENABLE, cache_enabled);
 
   if (!cache_enabled) {
     _disk_cache_status_label->hide();

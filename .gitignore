@@ -1,0 +1,156 @@
+# Build directories
+build/
+build-qt6/
+build.dir/
+install.dir/
+install-qt6.dir/
+package/
+PXView-build/
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# Qt generated files
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+*.qrc.depends
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor
+.vscode/
+.idea/
+.trae/
+*.swp
+*.swo
+*~
+*.kate-swp
+*.kdev4
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+* - 副本.*
+* - 副本
+
+# Autotools
+/configure
+/configure.lineno
+/autom4te.cache/
+/aclocal.m4
+/Makefile.in
+/INSTALL
+/libtool
+/stamp-h?
+.deps/
+.dirstamp
+.libs/
+
+# Test logs
+/test-suite.log
+*.log
+*.trs
+
+# =============================================================================
+# 私有内容(开发仓库独有,不推送到开源仓库)
+# 文件保留在工作区原位置,仅从 git 跟踪移除
+# =============================================================================
+Reference/
+
+# 开发规范文档
+AGENTS.md
+CLAUDE.md
+
+# 私有文档(顶部)
+PXLogic使用文档.docx
+
+# 开发脚本(顶部)
+build_full.cmd
+build_incremental.cmd
+build_incremental.sh
+build_window
+build_window_noall
+build_mac.sh
+build_mac_icon.sh
+build_fx2lafw.sh
+build_linux
+build_deb_package
+clean
+cmake_clear
+
+# 同步/迁移脚本
+sync_to_repo.cmd
+sync_to_repo.ps1
+sync_opensource.ps1
+migrate_to_worktree.ps1
+
+# 开发文档目录(含分析报告、临时 cpp、分析脚本等)
+devdoc/
+
+# 补丁文件目录
+_diffs/
+
+# Windows 打包资源目录
+window/
+
+# 私有文档(doc/ 和 docs/ 下的私有文件,精确排除)
+doc/PXLogic使用文档v1.5.0.pdf
+docs/研究报告-pxlogic-dslogic数据格式转换分析.md
+
+# 逆向工程参考目录(指向旧包软链接)
+BFA_Reference/
+
+# 私有逆向解码器源码与文档
+libsigrokdecode/c_decoders_private/
+doc/private_protocols/

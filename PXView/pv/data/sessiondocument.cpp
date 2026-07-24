@@ -10,22 +10,23 @@
  */
 
 #include "sessiondocument.h"
-#include "../deviceagent.h"
 #include "../log.h"
-#include "../view/decodetrace.h"
+#include "../sigsession.h"
+#include "lissajousmodel.h"
+#include "mathstack.h"
+#include "signalmodel.h"
+#include "spectrumstack.h"
 #include <QDebug>
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
 
 namespace pv {
 namespace data {
 
 class DecoderStack;
-class DecoderModel;
 
-SessionDocument::SessionDocument()
-    : _dock_sample_rate(0), _dock_sample_limit(0), _dock_collect_mode(0),
-      _dock_measure_fen_enabled(false), _samplerate(0), _samplelimits(0),
-      _trigger_pos(0), _decoder_model(nullptr) {}
+SessionDocument::SessionDocument(SigSession *session)
+    : _samplerate(0), _samplelimits(0), _trigger_pos(0),
+      _signal_config_store(std::make_unique<SignalConfigStore>(session)) {}
 
 SessionDocument::~SessionDocument() {}
 
@@ -99,68 +100,48 @@ void SessionDocument::clear() {
   _samplerate = 0;
   _samplelimits = 0;
   _trigger_pos = 0;
+  // Dead storage (_signal_models / _spectrum_stacks / _math_stack /
+  // _lissajous_model / _decoder_model) has been removed; the empty clear
+  // loops and null resets that used to live here are no longer needed.
 }
 
-std::vector<DecoderStack *> &SessionDocument::get_decoder_stacks() {
+std::vector<std::shared_ptr<DecoderStack>> &
+SessionDocument::get_decoder_stacks(SessionDocument *doc) {
+  (void)doc; // A SessionDocument always returns its own stacks.
   return _decoder_stacks;
 }
 
-void SessionDocument::add_decoder_stack(DecoderStack *stack) {
+void SessionDocument::add_decoder_stack(std::shared_ptr<DecoderStack> stack) {
   if (stack)
     _decoder_stacks.push_back(stack);
 }
 
-void SessionDocument::remove_decoder_stack(DecoderStack *stack) {
+void SessionDocument::remove_decoder_stack(std::shared_ptr<DecoderStack> stack) {
   auto it = std::find(_decoder_stacks.begin(), _decoder_stacks.end(), stack);
   if (it != _decoder_stacks.end())
     _decoder_stacks.erase(it);
 }
 
-DecoderModel *SessionDocument::get_decoder_model() { return _decoder_model; }
+// DataSource pure-virtual overrides. SessionDocument does NOT own live copies
+// of these — SigSession holds the single source of truth. These always return
+// empty/null (matching the prior behavior when the dead fields existed but were
+// never populated). See view.cpp comment near line 2625.
+// (purify-architecture-concepts Task 10) get_decoder_model() was removed from
+// the DataSource interface — DecoderModel now lives in pv::view.
 
-void SessionDocument::set_decoder_model(DecoderModel *model) {
-  _decoder_model = model;
+std::vector<std::shared_ptr<SignalModel>> &SessionDocument::get_signal_models() {
+  static std::vector<std::shared_ptr<SignalModel>> empty;
+  return empty;
 }
 
-std::vector<view::DecodeTrace *> &SessionDocument::get_decode_traces() {
-  return _decode_traces;
+std::vector<std::shared_ptr<SpectrumStack>> &SessionDocument::get_spectrum_stacks() {
+  static std::vector<std::shared_ptr<SpectrumStack>> empty;
+  return empty;
 }
 
-void SessionDocument::add_decode_trace(view::DecodeTrace *trace) {
-  if (trace) {
-    _decode_traces.push_back(trace);
-    if (trace->decoder()) {
-      _decoder_stacks.push_back(trace->decoder());
-    }
-  }
-}
+std::shared_ptr<MathStack> SessionDocument::get_math_stack() { return nullptr; }
 
-void SessionDocument::remove_decode_trace(view::DecodeTrace *trace) {
-  auto it = std::find(_decode_traces.begin(), _decode_traces.end(), trace);
-  if (it != _decode_traces.end()) {
-    if (trace->decoder()) {
-      auto sit = std::find(_decoder_stacks.begin(), _decoder_stacks.end(),
-                           trace->decoder());
-      if (sit != _decoder_stacks.end())
-        _decoder_stacks.erase(sit);
-    }
-    _decode_traces.erase(it);
-  }
-}
-
-std::vector<view::Signal *> &SessionDocument::get_signals() { return _signals; }
-
-std::vector<view::DecodeTrace *> &SessionDocument::get_decode_signals() {
-  return _decode_traces;
-}
-
-std::vector<view::SpectrumTrace *> &SessionDocument::get_spectrum_traces() {
-  return _spectrum_traces;
-}
-
-view::LissajousTrace *SessionDocument::get_lissajous_trace() { return nullptr; }
-
-view::MathTrace *SessionDocument::get_math_trace() { return nullptr; }
+LissajousModel *SessionDocument::get_lissajous_model() { return nullptr; }
 
 uint64_t SessionDocument::cur_snap_samplerate() { return _samplerate; }
 
@@ -185,192 +166,65 @@ data::Snapshot *SessionDocument::get_snapshot(int type) {
     return nullptr;
 }
 
+// Task D6: DataSource facade/business stubs. SessionDocument is a pure data
+// container — it does not own the live session state or decoder lifecycle.
+// These return sensible defaults; only SigSession performs real work. The
+// View layer calls these through DataSource* so it never reaches into the
+// SigSession facade for data/business operations.
+
+double SessionDocument::cur_view_time() { return cur_sampletime(); }
+
+int SessionDocument::get_map_zoom() { return 0; }
+
+double SessionDocument::get_logic_data_view_time() { return 0.0; }
+
+bool SessionDocument::is_repeating() { return false; }
+
+bool SessionDocument::is_running_status() { return false; }
+
+bool SessionDocument::is_instant() { return false; }
+
+bool SessionDocument::have_view_data() { return has_data(); }
+
+bool SessionDocument::is_working() { return false; }
+
+bool SessionDocument::add_decoder(srd_decoder *const, bool, DecoderStatus *,
+                                  std::list<decode::Decoder *> &,
+                                  std::shared_ptr<DecoderStack> &,
+                                  SessionDocument *) {
+  return false;
+}
+
+void SessionDocument::remove_decoder_by_key_handel(void *, SessionDocument *) {}
+
+void SessionDocument::rst_decoder_by_key_handel(void *, SessionDocument *) {}
+
+void SessionDocument::clear_all_decoder(bool) {}
+
+void SessionDocument::start_all_decode_tasks() {}
+
+void SessionDocument::update_dso_data_scale() {}
+
+// Wrap SignalConfigStore's serialization and merge in triggerConfig from
+// _trigger_config to keep .pxc format unchanged (trigger_config remains a
+// SessionDocument-owned field).
 QJsonObject SessionDocument::signal_config_to_json() const {
-  QJsonObject obj;
-  obj["work_mode"] = _signal_config.work_mode;
-  obj["operation_mode"] = _signal_config.operation_mode;
-  obj["channel_mode"] = _signal_config.channel_mode;
-  obj["is_demo"] = _signal_config.is_demo;
-  obj["demo_operation_mode"] = _signal_config.demo_operation_mode;
-
-  QJsonArray ch_array;
-  for (const auto &ch : _signal_config.channels) {
-    QJsonObject ch_obj;
-    ch_obj["index"] = ch.index;
-    ch_obj["enabled"] = ch.enabled;
-    ch_obj["vdiv"] = (qint64)ch.vdiv;
-    ch_obj["coupling"] = ch.coupling;
-    ch_obj["map_default"] = ch.map_default;
-    ch_obj["hw_offset"] = ch.hw_offset;
-    ch_obj["offset"] = ch.offset;
-    ch_obj["zero_offset"] = ch.zero_offset;
-    ch_array.append(ch_obj);
-  }
-  obj["channels"] = ch_array;
-
+  QJsonObject obj = _signal_config_store->signal_config_to_json();
+  obj["triggerConfig"] = _trigger_config.to_json();
   return obj;
 }
 
 void SessionDocument::signal_config_from_json(const QJsonObject &obj) {
-  _signal_config.work_mode = obj["work_mode"].toInt();
-  _signal_config.operation_mode = obj["operation_mode"].toInt();
-  _signal_config.channel_mode = obj["channel_mode"].toInt();
-  _signal_config.is_demo = obj["is_demo"].toBool();
-  _signal_config.demo_operation_mode = obj["demo_operation_mode"].toString();
-
-  _signal_config.channels.clear();
-  if (obj.contains("channels")) {
-    QJsonArray ch_array = obj["channels"].toArray();
-    for (const auto &ch_val : ch_array) {
-      QJsonObject ch_obj = ch_val.toObject();
-      ChannelConfig cfg;
-      cfg.index = ch_obj["index"].toInt();
-      cfg.enabled = ch_obj["enabled"].toBool();
-      cfg.vdiv = (uint64_t)ch_obj["vdiv"].toVariant().toULongLong();
-      cfg.coupling = ch_obj["coupling"].toInt();
-      cfg.map_default = ch_obj["map_default"].toBool();
-      cfg.hw_offset = (uint16_t)ch_obj["hw_offset"].toInt();
-      cfg.offset = (uint16_t)ch_obj["offset"].toInt();
-      cfg.zero_offset = (uint16_t)ch_obj["zero_offset"].toInt();
-      _signal_config.channels.push_back(cfg);
-    }
-  }
-
-  _signal_config.is_valid = true;
-  pxv_info(
-      "SessionDocument::save_signal_config() done, work_mode=%d ch_count=%d",
-      _signal_config.work_mode, (int)_signal_config.channels.size());
-}
-
-void SessionDocument::save_signal_config(DeviceAgent *agent) {
-  if (!agent || !agent->have_instance()) {
-    pxv_info(
-        "SessionDocument::save_signal_config() skip, agent=%p have_instance=%d",
-        agent, agent ? agent->have_instance() : 0);
-    return;
-  }
-
-  _signal_config.work_mode = agent->get_work_mode();
-
-  int opt_mode;
-  if (agent->get_config_int16(SR_CONF_OPERATION_MODE, opt_mode))
-    _signal_config.operation_mode = opt_mode;
-
-  int ch_mode;
-  if (agent->get_config_int16(SR_CONF_CHANNEL_MODE, ch_mode))
-    _signal_config.channel_mode = ch_mode;
-
-  _signal_config.is_demo = agent->is_demo();
-
-  if (_signal_config.is_demo)
-    _signal_config.demo_operation_mode = agent->get_demo_operation_mode();
-
-  _signal_config.channels.clear();
-  int mode = _signal_config.work_mode;
-  for (const GSList *l = agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
-    ChannelConfig cfg;
-    cfg.index = (int)probe->index;
-    cfg.enabled = probe->enabled;
-    cfg.vdiv = 0;
-    cfg.coupling = 0;
-    cfg.map_default = true;
-
-    if (mode == ANALOG || mode == DSO) {
-      uint64_t vdiv;
-      if (agent->get_config_uint64(SR_CONF_PROBE_VDIV, vdiv, probe, NULL))
-        cfg.vdiv = vdiv;
-
-      int coupling;
-      if (agent->get_config_int16(SR_CONF_PROBE_COUPLING, coupling, probe,
-                                  NULL))
-        cfg.coupling = coupling;
-
-      bool map_default = true;
-      agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default, probe,
-                             NULL);
-      cfg.map_default = map_default;
-
-      cfg.hw_offset = probe->hw_offset;
-      cfg.offset = probe->offset;
-      cfg.zero_offset = probe->zero_offset;
-    }
-
-    _signal_config.channels.push_back(cfg);
-  }
-
-  _signal_config.is_valid = true;
-}
-
-void SessionDocument::apply_signal_config(DeviceAgent *agent) {
-  qDebug() << "SessionDocument::apply_signal_config() START is_valid="
-           << _signal_config.is_valid
-           << "have_instance=" << (agent ? agent->have_instance() : 0);
-  if (!agent || !agent->have_instance() || !_signal_config.is_valid) {
-    pxv_info("SessionDocument::apply_signal_config() skip, agent=%p "
-             "have_instance=%d is_valid=%d",
-             agent, agent ? agent->have_instance() : 0,
-             _signal_config.is_valid);
-    return;
-  }
-
-  pxv_info("SessionDocument::apply_signal_config() work_mode=%d op_mode=%d "
-           "ch_mode=%d",
-           _signal_config.work_mode, _signal_config.operation_mode,
-           _signal_config.channel_mode);
-
-  int cur_mode = agent->get_work_mode();
-  if (_signal_config.work_mode != cur_mode) {
-    agent->set_config_int16(SR_CONF_DEVICE_MODE, _signal_config.work_mode);
-  }
-
-  agent->set_config_int16(SR_CONF_OPERATION_MODE,
-                          _signal_config.operation_mode);
-  agent->set_config_int16(SR_CONF_CHANNEL_MODE, _signal_config.channel_mode);
-
-  if (_signal_config.is_demo && !_signal_config.demo_operation_mode.isEmpty()) {
-    agent->set_config_string(
-        SR_CONF_PATTERN_MODE,
-        _signal_config.demo_operation_mode.toLocal8Bit().data());
-  }
-
-  int mode = _signal_config.work_mode;
-  int idx = 0;
-  for (const GSList *l = agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
-    if (idx < (int)_signal_config.channels.size()) {
-      const ChannelConfig &cfg = _signal_config.channels[idx];
-      agent->enable_probe(probe, cfg.enabled);
-
-      if (mode == ANALOG || mode == DSO) {
-        agent->set_config_uint64(SR_CONF_PROBE_VDIV, cfg.vdiv, probe, NULL);
-        agent->set_config_int16(SR_CONF_PROBE_COUPLING, cfg.coupling, probe,
-                                NULL);
-        agent->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, cfg.map_default,
-                               probe, NULL);
-        probe->hw_offset = cfg.hw_offset;
-        probe->offset = cfg.offset;
-        probe->zero_offset = cfg.zero_offset;
-      }
-    }
-    idx++;
+  _signal_config_store->signal_config_from_json(obj);
+  if (obj.contains("triggerConfig")) {
+    // Task 6: from_json 改为静态工厂（返回新对象），用赋值替代原成员调用。
+    _trigger_config = data::TriggerConfig::from_json(
+        obj["triggerConfig"].toObject());
   }
 }
 
-void SessionDocument::apply_pending_config(DeviceAgent *agent) {
-  if (_pending_device_config.is_valid) {
-    _signal_config = _pending_device_config;
-    apply_signal_config(agent);
-    _pending_device_config = SignalConfig();
-  }
-}
-
-bool SessionDocument::has_signal_config() const {
-  return _signal_config.is_valid;
-}
-
-bool SessionDocument::has_pending_config() const {
-  return _pending_device_config.is_valid;
+void SessionDocument::set_trigger_config(const data::TriggerConfig &cfg) {
+  _trigger_config = cfg;
 }
 
 } // namespace data

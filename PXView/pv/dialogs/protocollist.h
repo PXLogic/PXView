@@ -32,21 +32,25 @@
 
 #include "../prop/binding/deviceoptions.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include "../ui/dscombobox.h"
 
 namespace pv {
 
 class SigSession;
 
+namespace view {
+class DecoderModel;
+}
+
 namespace dialogs {
 
-class ProtocolList : public DSDialog
+class ProtocolList : public PxDialog
 {
     Q_OBJECT
 
 public:
-    ProtocolList(QWidget *parent, SigSession *session);
+    ProtocolList(QWidget *parent, SigSession *session, pv::view::DecoderModel *decoder_model);
 
 protected:
     void accept();
@@ -59,6 +63,10 @@ private slots:
 
 private:
     SigSession *_session;
+    // View-owned DecoderModel passed in from ProtocolDock (Task 10): the
+    // dialog reads/sets the decoder stack on the same instance the dock
+    // uses for its QTableView.
+    pv::view::DecoderModel *_decoder_model;
 
     toolbars::TitleBar *_titlebar;
     DsComboBox *_map_zoom_combobox;

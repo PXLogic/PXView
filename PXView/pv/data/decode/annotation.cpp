@@ -24,6 +24,7 @@
 
 #include <vector>
 #include <assert.h>
+#include <stdexcept>
 
 #include "annotation.h"
 #include "annotationrestable.h"
@@ -43,10 +44,19 @@ namespace decode {
  
 Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 {
+	if (!pdata) {
+		throw std::invalid_argument("Annotation: pdata is NULL");
+	}
 	assert(pdata);
 	const srd_proto_data_annotation *const pda =
 		(const srd_proto_data_annotation*)pdata->data;
+	if (!pda) {
+		throw std::invalid_argument("Annotation: pda is NULL");
+	}
 	assert(pda);
+	if (!status) {
+		throw std::invalid_argument("Annotation: status is NULL");
+	}
 	assert(status);
 
 	_start_sample =	pdata->start_sample;
@@ -101,7 +111,6 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 
 		_status->m_bNumeric |= resItem->is_numeric;
 	}
-	_cached_rect_width = -1.0;
 }
 
 Annotation::Annotation()
@@ -109,7 +118,6 @@ Annotation::Annotation()
     _start_sample = 0;
     _end_sample = 0;
 	_resIndex = -1;
-	_cached_rect_width = -1.0;
 }
  
 Annotation::~Annotation()
@@ -118,7 +126,11 @@ Annotation::~Annotation()
   
 const std::vector<QString>& Annotation::annotations() const
 {  
-	 AnnotationSourceItem *pobj = _status->m_resTable.GetItem(_resIndex);	 
+	 AnnotationSourceItem *pobj = _status->m_resTable.GetItem(_resIndex);
+	 if (!pobj) {
+		 static const std::vector<QString> empty_vec;
+		 return empty_vec;
+	 }
 	 assert(pobj);
 	
      AnnotationSourceItem &resItem = *pobj;
@@ -155,14 +167,16 @@ const std::vector<QString>& Annotation::annotations() const
 				 assert(textlen > 0);
 
 				 if (textlen >= text_format_buf_len)
-				 {
-					if (text_format_buf)
-						free(text_format_buf);
-					text_format_buf = (char*)malloc(textlen + 8);
-					text_format_buf_len = textlen + 8;
+					{
+						if (text_format_buf)
+							free(text_format_buf);
+						text_format_buf = (char*)malloc(textlen + 8);
+						text_format_buf_len = textlen + 8;
 
-					assert(text_format_buf);
-				 }
+						if (!text_format_buf)
+							break;
+						assert(text_format_buf);
+					}
 				 
 				 sprintf(text_format_buf, src_str, num_str);
 				 resItem.cvt_lines.push_back(QString(text_format_buf));
@@ -185,41 +199,6 @@ bool Annotation::is_numberic()
 {
     AnnotationSourceItem *resItem = _status->m_resTable.GetItem(_resIndex);
 	return resItem->is_numeric;
-}
-
-QString Annotation::get_cached_best_annotation(double rect_width, const QFont &font, const QFontMetrics &fm) const
-{
-    if (_cached_rect_width == rect_width && _cached_width_font == font) {
-        return _cached_best_annotation;
-    }
-
-    _cached_rect_width = rect_width;
-    _cached_width_font = font;
-
-    const std::vector<QString> &ann_list = annotations();
-    if (ann_list.empty()) {
-        _cached_best_annotation = "";
-        return _cached_best_annotation;
-    }
-
-    // Try to find an annotation that will fit
-    QString best_annotation;
-    int best_width = 0;
-
-    for (auto &a : ann_list) {
-        const int w = fm.boundingRect(QRect(), 0, a).width();
-        if (w <= rect_width && w > best_width) {
-            best_annotation = a;
-            best_width = w;
-        }
-    }
-
-    if (best_annotation.isEmpty()) {
-        best_annotation = ann_list.back();
-    }
-
-    _cached_best_annotation = best_annotation;
-    return _cached_best_annotation;
 }
 
 } // namespace decode

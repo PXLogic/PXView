@@ -26,19 +26,41 @@
 
 #include "signal.h"
 #include "../dstimer.h"
-  
+#include <libsigrok/libsigrok.h>
+#include "../dsvdef.h"
+#include <memory>
+
 namespace pv {
+
+class SigSession;
+
 namespace data {
 class DsoSnapshot;
+class SignalModel;
+class DataSource;
 }
 
 namespace view {
 
+class DsoTriggerConfig;
+class DsoMeasure;
+
 //when device is oscilloscope model,to draw trace
 //created by SigSession
+//
+// Phase G (modernize-view-layer-v2): DsoSignal is now a thin paint + facade
+// class. Hardware config / trigger / measure logic is delegated to
+// DsoTriggerConfig / DsoMeasure respectively (DsoHardwareConfig was removed
+// when DSO mode was deprecated; the DSO-key backed methods are now no-op
+// stubs returning defaults). The public API is preserved via forwarding
+// methods; the delegates are friends and access DsoSignal private state
+// through their _signal pointer.
 class DsoSignal : public Signal
 {
     Q_OBJECT
+
+    friend class DsoTriggerConfig;
+    friend class DsoMeasure;
 
 public:
     static const int UpMargin = 30;
@@ -84,9 +106,13 @@ private:
 
 public:
     DsoSignal(pv::data::DsoSnapshot *data,
-              sr_channel *probe);
+              std::shared_ptr<data::SignalModel> model,
+              data::DataSource *data_source);
 
-    DsoSignal(DsoSignal *s, pv::data::DsoSnapshot *data, sr_channel *probe);
+    DsoSignal(DsoSignal *s,
+              pv::data::DsoSnapshot *data,
+              std::shared_ptr<data::SignalModel> model,
+              data::DataSource *data_source);
 
     virtual ~DsoSignal();
 
@@ -266,10 +292,21 @@ private:
         const double pixels_offset, const double samples_per_pixel,
         uint64_t num_channels);
 
+    // New LDO path: per-pixel min/max. For each screen pixel, computes the
+    // min and max of all samples falling into that pixel's sample-range,
+    // then draws a 1px-wide rectangle. Time-accurate (each pixel independent)
+    // and seamless (1px rects tile perfectly). Used for spp >= TraceThreshold.
+    // Replaces the old mipmap paint_envelope path which was time-inaccurate
+    // for spp in [4, 255] (mipmap scale=256 caused 64px-wide rects at spp=4).
+    void paint_per_pixel(QPainter &p,
+        const pv::data::DsoSnapshot *snapshot,
+        int zeroY, int left, int right, const int64_t start, const int64_t end,
+        int hw_offset, const double pixels_offset,
+        const double samples_per_pixel, uint64_t num_channels);
+
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
     void auto_set();
-
-    void call_auto_end();
+    void init_vDial(DsoSignal *src = nullptr);
 
 private:
     pv::data::DsoSnapshot *_data;
@@ -315,6 +352,12 @@ private:
     QPointF _hover_point;
     float _hover_value;
     DsTimer _end_timer;
+
+    // Phase G delegate handles. Declared as unique_ptr with forward-declared
+    // types; the destructor is defined in dsosignal.cpp where the complete
+    // types are available, so the unique_ptr deleters can run.
+    std::unique_ptr<DsoTriggerConfig> _trig_config;
+    std::unique_ptr<DsoMeasure> _measure;
 };
 
 } // namespace view

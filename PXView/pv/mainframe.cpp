@@ -24,7 +24,7 @@
 
 #include "toolbars/titlebar.h"
 #include "dialogs/dsmessagebox.h"
-#include "dialogs/dsdialog.h"
+#include "dialogs/pxdialog.h"
 #include "mainwindow.h"
 
 #include <QVBoxLayout>
@@ -56,7 +56,7 @@
 #include "appcontrol.h"
 #include "ui/langresource.h"
 #include "log.h"
-#include "dialogs/dsdialog.h"
+#include "dialogs/pxdialog.h"
 #include "ui/popupdlglist.h"
 
 
@@ -1066,7 +1066,7 @@ void MainFrame::show_doc()
      int lan = app.frameOptions.language;
       
     if (app.userHistory.showDocuments) {
-        dialogs::DSDialog dlg(this, true);
+        dialogs::PxDialog dlg(this, true);
         dlg.setTitle(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DOCUMENT), "Document"));
 
         QString path = GetAppDataDir() + "/showDoc" + QString::number(lan)+ ".png";

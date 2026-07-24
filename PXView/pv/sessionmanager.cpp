@@ -20,9 +20,11 @@ SessionManager* SessionManager::instance()
     return _instance;
 }
 
-TabContext* SessionManager::create_context(view::View *view, SigSession *session, data::SessionDocument *doc)
+TabContext* SessionManager::create_context(view::View *view, SigSession *session,
+                                           data::SessionDocument *doc, size_t doc_index,
+                                           core::DocumentRegistry *registry)
 {
-    TabContext *ctx = new TabContext(view, session, doc);
+    TabContext *ctx = new TabContext(view, session, doc, doc_index, registry);
     _contexts.push_back(ctx);
     if (!_active_context)
         _active_context = ctx;

@@ -25,7 +25,7 @@
 #ifndef PXVIEW_PV_DATA_LOGICSNAPSHOT_H
 #define PXVIEW_PV_DATA_LOGICSNAPSHOT_H
 
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
 #include "snapshot.h"
 #include "mmap_allocator.h"
 #include "disk_cache_config.h"
@@ -42,13 +42,10 @@
 #include <atomic>
 #define CHANNEL_MAX_COUNT 64
 
-namespace LogicSnapshotTest {
-class Pow2;
-class Basic;
-class LargeData;
-class Pulses;
-class LongPulses;
-}
+// Extracted disk-cache/async-writer subsystem (cluster D). Defined in
+// logicsnapshot_diskcache_writer.h/.cpp. Forward-declared here to avoid a
+// circular include; LogicSnapshot holds it via unique_ptr.
+class LogicSnapshotDiskCacheWriter;
 
 enum GlitchFilterMode {
     GLITCH_FILTER_BOTH = 0,
@@ -58,6 +55,13 @@ enum GlitchFilterMode {
 
 namespace pv {
 namespace data {
+
+// Extracted glitch-filter subsystem (cluster C). Defined in
+// logicsnapshot_glitch_filter.h/.cpp. Forward-declared here; LogicSnapshot
+// holds it via unique_ptr and forwards the public methods. Note: the
+// glitch-filter header includes this file (one-way) because its API references
+// the nested FillRange type.
+class LogicSnapshotGlitchFilter;
 
 class LogicSnapshot : public Snapshot
 {
@@ -101,6 +105,13 @@ private:
 public:
     typedef std::pair<uint64_t, bool> EdgePair;
 
+    // 持久化的滤波区间信息（apply_glitch_filter 滤除的区间），供 View 层渲染 overlay
+    struct FillRange {
+        uint64_t start;
+        uint64_t end;
+        bool level;
+    };
+
 private:
     void init_all();
 
@@ -139,15 +150,17 @@ public:
     bool get_pre_edge(uint64_t &index, bool last_sample,
                       double min_length, int sig_index);
 
-    void set_sample_range(uint64_t start, uint64_t end, bool level, int sig_index);
     void invert_channel(int sig_index);
-    LogicSnapshot* clone_data();
     void apply_glitch_filter(int sig_index, uint32_t threshold, std::function<void(int)> progress_callback,
         GlitchFilterMode filter_mode = GLITCH_FILTER_BOTH);
-    void apply_glitch_filter_all(const std::vector<uint32_t> &thresholds, std::function<void(int)> progress_callback,
-        const std::vector<GlitchFilterMode> &filter_modes = {});
+    void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds, std::function<void(int)> progress_callback,
+        const std::map<int, GlitchFilterMode> &filter_modes = {});
     bool is_glitch_filtered();
     void set_glitch_filtered(bool filtered);
+
+    // 持久化访问 apply_glitch_filter 滤除的区间列表，供 View 层渲染 overlay
+    const std::vector<FillRange>& get_filtered_ranges(int sig_index) const;
+    void clear_filtered_ranges();
 
     void set_disk_cache_config(const DiskCacheConfig &config);
     bool is_disk_cache_active();
@@ -208,8 +221,13 @@ private:
     int get_ch_order(int sig_index);
 
     void calc_mipmap(unsigned int order, uint8_t index0, uint8_t index1, uint64_t samples, bool isEnd);
-    void recalc_mipmap(unsigned int order, uint64_t index0, uint64_t index1);
 
+    void append_payload_impl(const sr_datafeed_logic &logic);
+
+    /** Append raw channel-block (LA_CROSS_DATA) payload. v1.49 algorithm:
+     *  bit-copy raw bytes directly into per-channel chunk tree, no
+     *  deinterleave. Called by DiskCacheWriter async worker when
+     *  logic.format == LA_CROSS_DATA. */
     void append_cross_payload(const sr_datafeed_logic &logic);
 
     bool lbp_nxt_edge(uint64_t &index, uint64_t root_index, uint64_t lbp_tog, uint8_t lbp_tog_pos,
@@ -282,6 +300,11 @@ private:
     void push_to_free_list(void* ptr);
     void* allocate_block(uint16_t channel, uint64_t index0, uint64_t index1);
 
+    bool is_mmap_slot_fresh(uint16_t channel, uint64_t global_block_seq) const;
+    void mark_mmap_slot_written(uint16_t channel, uint64_t global_block_seq);
+    void clear_mmap_slot_written(uint16_t channel, uint64_t global_block_seq);
+    void clear_mmap_slot_by_abs(uint64_t abs_slot);
+
 private:
     std::vector<std::vector<struct RootNode>> _ch_data;
     uint8_t     _byte_fraction;
@@ -296,37 +319,30 @@ private:
     std::vector<void*> _free_block_list;
     struct BlockIndex _cur_ref_block_indexs[CHANNEL_MAX_COUNT];
     int         _lst_free_block_index;
-    bool        _glitch_filtered;
 
-    DiskCacheConfig _disk_cache_config;
+    // mmap-backed chunk allocator state (cluster A — heavily used by
+    // allocate_block / copy_from / push_to_free_list / free_data / first_payload).
+    // _disk_cache_config + _mmap_slot_written moved to LogicSnapshotDiskCacheWriter.
     std::shared_ptr<MmapAllocator> _mmap_alloc;
     uint64_t _max_blocks_per_channel;
 
-
-    struct AsyncPayload {
-        int format;
-        std::vector<uint8_t> data;
-    };
-    std::queue<AsyncPayload> _async_queue;
-    std::mutex _async_mutex;
-    std::condition_variable _async_cv;
-    std::thread _async_thread;
-    std::atomic<bool> _async_running;
-    void async_write_worker();
-
-    std::atomic<uint64_t> _async_bytes_written;
-    std::atomic<double> _async_write_speed_mbps;
-    std::atomic<size_t> _async_queue_depth;
-    std::atomic<uint64_t> _async_queue_bytes_size;
-    
     std::atomic<uint64_t> _last_pf_count{0};
     std::atomic<int64_t> _last_pf_time{0};
     std::atomic<uint64_t> _pf_per_sec{0};
-	friend class LogicSnapshotTest::Pow2;
-	friend class LogicSnapshotTest::Basic;
-	friend class LogicSnapshotTest::LargeData;
-	friend class LogicSnapshotTest::Pulses;
-	friend class LogicSnapshotTest::LongPulses;
+
+    // Extracted disk-cache/async-writer subsystem (cluster D). Declared LAST so
+    // its destructor (which joins the async writer thread) runs FIRST — before
+    // _mmap_alloc / _ch_data are destroyed. mutable so const forwarders can
+    // call non-const writer methods.
+    mutable std::unique_ptr<LogicSnapshotDiskCacheWriter> _disk_cache_writer;
+
+    // Extracted glitch-filter subsystem (cluster C). mutable so const
+    // forwarders (e.g. is_glitch_filtered / get_filtered_ranges) can call
+    // non-const methods on the helper.
+    mutable std::unique_ptr<LogicSnapshotGlitchFilter> _glitch_filter;
+
+    friend class ::LogicSnapshotDiskCacheWriter;
+    friend class LogicSnapshotGlitchFilter;
 };
 
 } // namespace data

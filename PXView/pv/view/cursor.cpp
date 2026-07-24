@@ -21,6 +21,27 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+/*
+ * Task C2 (plan-core-view-split-and-mcp-coverage): cursor *position state*
+ * has been migrated to the Core layer. The authoritative store is now
+ * pv::core::CursorRegistry, owned by SessionStateContext. The View and
+ * MCP API both read/write positions through the DataSource interface
+ * (get_cursors / add_cursor / remove_cursor / set_cursor_position /
+ * clear_cursors), which SigSession overrides to forward to the registry.
+ *
+ * view::Cursor remains a pure rendering object — it holds the QPainter
+ * geometry, label text, colour (via Ruler::GetColorByCursorOrder), and
+ * the close-button hit-test. Its sample position is inherited from
+ * TimeMarker::_index, which is kept in sync with the Core CursorEntry
+ * via ViewCursors::sync_cursor_position_to_core() on drag-release, and
+ * via ViewCursors::sync_cursors_from_core() on data-source binding
+ * (covers the headless -> GUI transition where MCP added cursors before
+ * the View existed).
+ *
+ * Visual-only fields (_order, _text_size, colour) are NOT mirrored in
+ * Core — they are presentation details with no MCP/API relevance.
+ */
+
 #include "cursor.h"
 
 #include "ruler.h"
@@ -34,6 +55,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include "../dsvdef.h"
+#include "../sigsession.h"
 #include "ruler.h"
 
 namespace pv {

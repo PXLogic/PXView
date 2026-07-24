@@ -31,7 +31,6 @@
 #include "../int.h"
 #include "../../config/appconfig.h"
 #include "../../log.h"
-#include "../../appcontrol.h"
 #include "../../sigsession.h"
 #include "../../ui/langresource.h"
 
@@ -41,26 +40,48 @@ namespace pv {
 namespace prop {
 namespace binding {
 
-ProbeOptions::ProbeOptions(struct sr_channel *probe) :
-    Binding(), 
+DeviceAgent* ProbeOptions::_static_device_agent = nullptr;
+
+ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
+    Binding(),
 	_probe(probe)
-{ 
-	GVariant *gvar_opts;
-	gsize num_opts;
-
-    SigSession *session = AppControl::Instance()->GetSession();
+{
     _device_agent = session->get_device();
+    _static_device_agent = _device_agent;
 
-    gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_PROBE_CONFIGS);
+    /* Pre-check: only query SR_CONF_PROBE_CONFIGS if the device actually
+     * advertises it in SR_CONF_DEVICE_OPTIONS. PXLogic and most upstream
+     * drivers don't support this key (only demo does); querying it directly
+     * floods the log with "Option 'probe_configs' not available" per
+     * channel. */
+    GVariant *gvar_devopts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+    bool has_probe_configs = false;
+    if (gvar_devopts) {
+        gsize num_devopts;
+        const uint32_t *devopts = (const uint32_t *)g_variant_get_fixed_array(
+            gvar_devopts, &num_devopts, sizeof(uint32_t));
+        for (gsize i = 0; i < num_devopts; i++) {
+            if ((devopts[i] & 0x1fffffff) == SR_CONF_PROBE_CONFIGS) {
+                has_probe_configs = true;
+                break;
+            }
+        }
+        g_variant_unref(gvar_devopts);
+    }
+    if (!has_probe_configs)
+        return;
+
+    GVariant *gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_PROBE_CONFIGS);
     if (gvar_opts == NULL){
 		/* Driver supports no device instance options. */
-		return;
+        return;
     }
 
+	gsize num_opts;
 	const int *const options = (const int32_t *)g_variant_get_fixed_array(
 		gvar_opts, &num_opts, sizeof(int32_t));
 
-	for (unsigned int i = 0; i < num_opts; i++) 
+	for (unsigned int i = 0; i < num_opts; i++)
     {
 		const struct sr_config_info *const info =
 			_device_agent->get_config_info(options[i]);
@@ -73,23 +94,23 @@ ProbeOptions::ProbeOptions(struct sr_channel *probe) :
         GVariant *gvar_list = _device_agent->get_config_list(NULL, key);
 
         const QString name(info->name);
-        const char *label_char =  LangResource::Instance()->get_lang_text(STR_PAGE_DSL, info->name, info->name);       
+        const char *label_char =  LangResource::Instance()->get_lang_text(STR_PAGE_DSL, info->name, info->name);
         const QString label(label_char);
 
 		switch(key)
 		{
         case SR_CONF_PROBE_VDIV:
             bind_vdiv(name, label, gvar_list);
-			break;
+            break;
+
+        case SR_CONF_PROBE_COUPLING:
+            bind_coupling(name, label, gvar_list);
+            break;
 
         case SR_CONF_PROBE_MAP_MIN:
         case SR_CONF_PROBE_MAP_MAX:
             bind_double(name, label, key, "",
                         pair<double, double>(-999999.99, 999999.99), 2, 0.01);
-            break;
-
-        case SR_CONF_PROBE_COUPLING:
-            bind_coupling(name, label, gvar_list);
             break;
 
         case SR_CONF_PROBE_MAP_UNIT:
@@ -108,17 +129,15 @@ ProbeOptions::ProbeOptions(struct sr_channel *probe) :
 }
 
 GVariant* ProbeOptions::config_getter(const struct sr_channel *probe, int key)
-{ 
-    SigSession *session = AppControl::Instance()->GetSession();
-    DeviceAgent *_device_agent = session->get_device();
-    return _device_agent->get_config(key, probe, NULL);
+{
+    if (!_static_device_agent)
+        return nullptr;
+    return _static_device_agent->get_config(key, probe, NULL);
 }
 
 void ProbeOptions::config_setter(struct sr_channel *probe, int key, GVariant* value)
 {
-    SigSession *session = AppControl::Instance()->GetSession();
-    DeviceAgent *_device_agent = session->get_device();
-    _device_agent->set_config(key, value, probe, NULL);
+    _static_device_agent->set_config(key, value, probe, NULL);
 }
 
 void ProbeOptions::bind_bool(const QString &name, const QString label, int key)
@@ -135,6 +154,10 @@ void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
 	GVariantIter iter;
 	std::vector< pair<GVariant*, QString> > values;
 
+	if (!gvar_list) {
+		pxv_warn("%s", "ProbeOptions::bind_enum: gvar_list is NULL");
+		return;
+	}
 	assert(gvar_list);
 
 	g_variant_iter_init (&iter, gvar_list);
@@ -171,15 +194,30 @@ void ProbeOptions::bind_vdiv(const QString &name, const QString label,
 {
     GVariant *gvar_list_vdivs;
 
-	assert(gvar_list);
+    if (!gvar_list) {
+        pxv_warn("%s", "ProbeOptions::bind_vdiv: gvar_list is NULL");
+        return;
+    }
 
+    /* Driver returns a dict {"vdivs": [uint64...]} (a{sv}). */
     if ((gvar_list_vdivs = g_variant_lookup_value(gvar_list,
             "vdivs", G_VARIANT_TYPE("at"))))
-	{
+    {
         bind_enum(name, label, SR_CONF_PROBE_VDIV,
             gvar_list_vdivs, print_vdiv);
         g_variant_unref(gvar_list_vdivs);
-	}
+    } else {
+        /* g_variant_lookup_value returned NULL — either the dict is missing
+         * the "vdivs" key or its value type is not "at". Without this branch
+         * the vdiv control would silently disappear from the DeviceOptions
+         * dialog in ANALOG mode, leaving the user with no way to change
+         * probe attenuation. Log enough context to diagnose the driver. */
+        pxv_warn("ProbeOptions::bind_vdiv: key 'vdivs' not found in "
+                 "gvar_list (probe index=%d name='%s') — vdiv control "
+                 "will not be created",
+                 _probe ? _probe->index : -1,
+                 (_probe && _probe->name) ? _probe->name : "(null)");
+    }
 }
 
 void ProbeOptions::bind_coupling(const QString &name, const QString label,
@@ -187,14 +225,30 @@ void ProbeOptions::bind_coupling(const QString &name, const QString label,
 {
     GVariant *gvar_list_coupling;
 
-    assert(gvar_list);
+    if (!gvar_list) {
+        pxv_warn("%s", "ProbeOptions::bind_coupling: gvar_list is NULL");
+        return;
+    }
 
+    /* Driver returns a dict {"coupling": [int32...]} (a{sv}). int32 matches
+     * sr_key_info_config SR_T_INT32 so SET passes sr_variant_type_check. */
     if ((gvar_list_coupling = g_variant_lookup_value(gvar_list,
-            "coupling", G_VARIANT_TYPE("ay"))))
+            "coupling", G_VARIANT_TYPE("ai"))))
     {
         bind_enum(name, label, SR_CONF_PROBE_COUPLING,
             gvar_list_coupling, print_coupling);
         g_variant_unref(gvar_list_coupling);
+    } else {
+        /* g_variant_lookup_value returned NULL — either the dict is missing
+         * the "coupling" key or its value type is not "ai". Without this
+         * branch the coupling control would silently disappear from the
+         * DeviceOptions dialog in ANALOG mode. Log enough context to
+         * diagnose the driver. */
+        pxv_warn("ProbeOptions::bind_coupling: key 'coupling' not found in "
+                 "gvar_list (probe index=%d name='%s') — coupling control "
+                 "will not be created",
+                 _probe ? _probe->index : -1,
+                 (_probe && _probe->name) ? _probe->name : "(null)");
     }
 }
 
@@ -229,8 +283,11 @@ QString ProbeOptions::print_vdiv(GVariant *const gvar)
 
 QString ProbeOptions::print_coupling(GVariant *const gvar)
 {
-    uint8_t coupling;
-    g_variant_get(gvar, "y", &coupling);
+    /* Driver LIST now returns int32 ("i") to match sr_key_info_config
+     * SR_T_INT32. Old code used "y" (byte) which caused SET to be rejected
+     * by sr_variant_type_check. */
+    int32_t coupling;
+    g_variant_get(gvar, "i", &coupling);
     if (coupling == SR_DC_COUPLING) {
         return QString("DC");
     } else if (coupling == SR_AC_COUPLING) {

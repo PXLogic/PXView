@@ -228,6 +228,10 @@ const char* AnnotationResTable::format_to_string(const char *hex_str, int fmt)
 
 const char* AnnotationResTable::format_numberic(const char *hex_str, int fmt)
 {
+	 if (!hex_str) {
+		 pxv_warn("%s", "AnnotationResTable::format_numberic: hex_str is NULL");
+		 return nullptr;
+	 }
 	 assert(hex_str);
 
 	 if (hex_str[0] == 0 || fmt == DecoderDataFormat::hex){
@@ -345,6 +349,10 @@ void AnnotationResTable::reset()
 
 int AnnotationResTable::hexToDecimal(char * hex)
 {
+	if (!hex) {
+		pxv_warn("%s", "AnnotationResTable::hexToDecimal: hex is NULL");
+		return 0;
+	}
 	assert(hex);
     int len = strlen(hex);
 
@@ -370,6 +378,10 @@ void AnnotationResTable::decimalToBinString(unsigned long long num, int bitSize,
 {
     (void)buffer_size;
 
+	if (!buffer) {
+		pxv_warn("%s", "AnnotationResTable::decimalToBinString: buffer is NULL");
+		return;
+	}
 	assert(buffer);
 	assert(buffer_size);
 	 

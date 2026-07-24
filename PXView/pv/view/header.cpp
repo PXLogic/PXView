@@ -27,19 +27,23 @@
 #include <QColorDialog>
 #include <QFont>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRect>
 #include <QScrollBar>
+#include <QScreen>
 #include <QStyleOption>
+#include <QGuiApplication>
 #include <algorithm>
 #include <assert.h>
 #include <set>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
+#include "../data/sessiondocument.h"
 #include "../dsvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
@@ -49,8 +53,8 @@
 #include "analogsignal.h"
 #include "decodetrace.h"
 #include "dsosignal.h"
-#include "groupsignal.h"
 #include "logicsignal.h"
+#include "mathtrace.h"
 #include "trace.h"
 #include "view.h"
 
@@ -70,6 +74,7 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
   _resize_upper_height = 0;
   _resize_lower_height = 0;
   _mouse_is_down = false;
+  _foreColor = QColor();  // 无效色,UpdateTheme 会填充
 
   nameEdit = new PopupLineEdit(this);
   nameEdit->setFixedWidth(100);
@@ -121,19 +126,11 @@ void Header::paintEvent(QPaintEvent *) {
   std::vector<Trace *> traces;
   _view.get_traces(ALL_VIEW, traces);
 
-  int dso_count = 0;
-  for (auto t : traces) {
-    if (t->signal_type() == SR_CHANNEL_DSO) {
-      dso_count++;
-      pxv_info("[DEBUG-DSO] Header trace: name=%s, y=%d, enabled=%d, visible=%d, totalH=%d",
-               t->get_name().toUtf8().data(), t->get_y(), t->enabled(), t->visible(), t->get_totalHeight());
-    }
-  }
-  pxv_info("[DEBUG-DSO] Header::paintEvent: traces=%d, dso_count=%d, work_mode=%d, vOffset=%d, header_h=%d, header_w=%d",
-           (int)traces.size(), dso_count, _view.get_work_mode(), _view.get_vOffset(), height(), width());
-
   const bool dragging = !_drag_traces.empty();
-  QColor fore(QWidget::palette().color(QWidget::foregroundRole()));
+  // 优先用 UpdateTheme() 缓存的主题色;主题未加载时回退 palette
+  QColor fore = _foreColor.isValid()
+                    ? _foreColor
+                    : QWidget::palette().color(QWidget::foregroundRole());
   fore.setAlpha(View::ForeAlpha);
 
   QFont font = theme_font_trace_label();
@@ -141,13 +138,11 @@ void Header::paintEvent(QPaintEvent *) {
   painter.setRenderHint(QPainter::TextAntialiasing, false);
 
   painter.save();
-  pxv_info("[DEBUG-DSO] Header::paintEvent: work_mode=%d, vOffset=%d, header_h=%d",
-           _view.get_work_mode(), _view.get_vOffset(), height());
   if (_view.get_work_mode() != DSO) {
     painter.translate(0, -_view.get_vOffset());
   }
 
-  if (_view.get_work_mode() == LOGIC) {
+  if (_view.is_logic_rendering_mode()) {
     const auto &groups = _view.get_signal_groups();
     if (!groups.empty()) {
       std::vector<size_t> group_indices(groups.size());
@@ -222,7 +217,7 @@ void Header::paintEvent(QPaintEvent *) {
   }
 
   std::set<Trace *> lastInGroup;
-  if (_view.get_work_mode() == LOGIC) {
+  if (_view.is_logic_rendering_mode()) {
     const auto &groups = _view.get_signal_groups();
     for (const auto &group : groups) {
       if (group.traces.empty())
@@ -274,7 +269,7 @@ void Header::mouseDoubleClickEvent(QMouseEvent *event) {
 
   _view.get_traces(ALL_VIEW, traces);
 
-  if (_view.get_work_mode() == LOGIC) {
+  if (_view.is_logic_rendering_mode()) {
     int mouseY = event->position().toPoint().y() + _view.get_vOffset();
     const int HitBorderMargin = 5;
 
@@ -335,12 +330,24 @@ void Header::mousePressEvent(QMouseEvent *event) {
   _view.get_traces(ALL_VIEW, traces);
   int action;
 
+  // DSO 模式下 vDial/ACDC/EN 等控件在采集运行时也需要可调节
+  // (旧逻辑在 instant+running 时直接 return 阻止所有 Header 鼠标交互，
+  //  导致 DSO 模式下 vDial 不能转动)。仅对 LOGIC/MSO 模式保留此守卫。
   const bool instant = _view.session().is_instant();
-  if (instant && _view.session().is_running_status()) {
+  const bool is_dso_mode = (_view.get_work_mode() == DSO);
+  const bool is_running = _view.session().is_running_status();
+  if (instant && is_running && !is_dso_mode) {
+    pxv_info("Header::mousePressEvent: blocked by instant+running guard "
+             "(instant=%d, running=%d, dso=%d)", instant, is_running, is_dso_mode);
     return;
   }
+  pxv_info("Header::mousePressEvent: passed guard (instant=%d, running=%d, dso=%d, "
+           "traces=%d, button=%d, pos=(%d,%d))",
+           instant, is_running, is_dso_mode, (int)traces.size(),
+           (int)event->button(), event->position().toPoint().x(),
+           event->position().toPoint().y());
 
-  if (_view.get_work_mode() == LOGIC) {
+  if (_view.is_logic_rendering_mode()) {
     std::vector<Trace *> traces;
     _view.get_traces(ALL_VIEW, traces);
     int mouseY = event->position().toPoint().y() + _view.get_vOffset();
@@ -395,6 +402,49 @@ void Header::mousePressEvent(QMouseEvent *event) {
     // Select the Trace if it has been clicked
     const auto mTrace = get_mTrace(action, event->position().toPoint());
     if (action == Trace::COLOR && mTrace) {
+      // 解码通道:单击 COLOR 区打开解码器设置对话框(与 ProtocolDock 齿轮入口一致)
+      if (auto *dt = dynamic_cast<DecodeTrace *>(mTrace)) {
+        _context_trace = mTrace;
+        // 模态对话框(QDialog::exec)会捕获鼠标,导致后续 mouseReleaseEvent 不会被调用,
+        // 必须在此重置按下态/拖拽缓存,否则 header_is_draging() 恒为 true,
+        // 进而阻断 viewport 的 wheelEvent 缩放。
+        _mouse_is_down = false;
+        _drag_traces.clear();
+        // 锚点定位(与毛刺滤波浮窗相同的弹出逻辑):基于 DecodeTrace 位置计算,
+        // 映射到全局坐标并按屏幕边界钳制,避免 QDialog 默认居中。
+        int name_right = width() - dt->get_rightWidth();
+        int anchor_x = name_right + 8;
+        int anchor_y = dt->get_y() - dt->get_totalHeight() / 2;
+        QPoint anchor = mapToGlobal(QPoint(anchor_x, anchor_y));
+        QScreen *screen = QGuiApplication::screenAt(anchor);
+        if (screen) {
+          QRect geo = screen->availableGeometry();
+          if (anchor.x() + 420 > geo.right())
+            anchor.setX(geo.right() - 420);
+          if (anchor.y() + 500 > geo.bottom())
+            anchor.setY(geo.bottom() - 500);
+          if (anchor.x() < geo.left())
+            anchor.setX(geo.left());
+          if (anchor.y() < geo.top())
+            anchor.setY(geo.top());
+        }
+        _view.rst_decoder_by_key_handel(dt->get_key_handel(), anchor);
+        return;
+      }
+      // LOGIC 模式:单击 COLOR 区直接打开滤波浮窗(对齐 HTML 原型交互)
+      // ANALOG/DSO 模式:保留原选色流程(主题菜单的 token 改色只覆盖
+      // LOGIC 全局色板,模拟/DSO 单通道颜色仍需此入口)
+      if (_view.is_logic_rendering_mode()) {
+        auto *sig = dynamic_cast<LogicSignal *>(mTrace);
+        if (sig) {
+          _context_trace = mTrace;
+          // 同上:弹窗捕获鼠标,需重置按下态,避免滚轮缩放被锁死。
+          _mouse_is_down = false;
+          _drag_traces.clear();
+          emit show_glitch_filter_popup(sig);
+          return;
+        }
+      }
       _colorFlag = true;
     } else if (action == Trace::NAME && mTrace) {
       _nameFlag = true;
@@ -443,6 +493,31 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   _mouse_is_down = false;
 
   if (_resize_trace_upper || _resize_trace_lower) {
+    // Height adjustment completed - persist the new layout to SessionDocument
+    pxv_info("Header::mouseReleaseEvent: HEIGHT ADJUSTMENT completed, persisting layout");
+    auto &session = _view.session();
+    auto *dev = _view.data_source()->device();
+    auto *doc = session.get_active_document();
+    if (doc && dev && dev->have_instance()) {
+      std::map<int, pv::data::ChannelLayoutState> channel_layout;
+      for (auto *sig : _view.get_own_signals()) {
+        pv::data::ChannelLayoutState layout;
+        layout.view_index = sig->get_view_index();
+        layout.v_offset = sig->get_v_offset();
+        layout.own_height = sig->get_own_height();
+        channel_layout[sig->get_index()] = layout;
+        pxv_info("  sig index=%d, view_index=%d, v_offset=%d, own_height=%d",
+                 sig->get_index(), layout.view_index, layout.v_offset,
+                 layout.own_height);
+      }
+      doc->save_signal_config(session.get_signal_models(), channel_layout);
+      pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
+               (int)channel_layout.size());
+    } else {
+      pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
+               doc, dev,
+               dev ? dev->have_instance() : 0);
+    }
     _resize_trace_upper = NULL;
     _resize_trace_lower = NULL;
     return;
@@ -464,13 +539,12 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   }
 
   // Make view index by Y value;
-  int mode = _view.get_work_mode();
-  if (_moveFlag && mode == LOGIC) {
+  if (_moveFlag && _view.is_logic_rendering_mode()) {
     const auto &groups = _view.get_signal_groups();
 
     if (groups.size() <= 1) {
       std::vector<Trace *> traces;
-      for (auto s : _view.effective_data_source()->get_decode_signals()) {
+      for (auto s : _view.get_own_decode_traces()) {
         traces.push_back(s);
       }
       for (auto s : _view.get_own_signals()) {
@@ -525,6 +599,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   }
 
   if (_moveFlag) {
+    pxv_info("Header::mouseReleaseEvent: MOVE FLAG set, persisting layout");
     _drag_traces.clear();
     _view.signals_changed(mTrace);
     _view.set_all_update(true);
@@ -534,6 +609,34 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
 
     for (auto t : traces) {
       t->select(false);
+    }
+
+    // Persist channel layout (view_index/v_offset/own_height) to
+    // SessionDocument so that subsequent capture-triggered rebuilds can
+    // restore the user's custom layout. Without this, every reload() wipes
+    // the layout state and resets to default.
+    auto &session = _view.session();
+    auto *dev = _view.data_source()->device();
+    auto *doc = session.get_active_document();
+    if (doc && dev && dev->have_instance()) {
+      std::map<int, pv::data::ChannelLayoutState> channel_layout;
+      for (auto *sig : _view.get_own_signals()) {
+        pv::data::ChannelLayoutState layout;
+        layout.view_index = sig->get_view_index();
+        layout.v_offset = sig->get_v_offset();
+        layout.own_height = sig->get_own_height();
+        channel_layout[sig->get_index()] = layout;
+        pxv_info("  sig index=%d, view_index=%d, v_offset=%d, own_height=%d",
+                 sig->get_index(), layout.view_index, layout.v_offset,
+                 layout.own_height);
+      }
+      doc->save_signal_config(session.get_signal_models(), channel_layout);
+      pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
+               (int)channel_layout.size());
+    } else {
+      pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
+               doc, dev,
+               dev ? dev->have_instance() : 0);
     }
   } else if (!_drag_traces.empty()) {
     _drag_traces.clear();
@@ -652,7 +755,7 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
   assert(event);
 
   if (_view.session().is_working() &&
-      _view.get_work_mode() == LOGIC) {
+      _view.is_logic_rendering_mode()) {
     // Disable the hover status of trig button on left pannel.
     return;
   }
@@ -664,14 +767,14 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
     int newUpperHeight = _resize_upper_height + deltaY;
 
     if (newUpperHeight >= View::MinSignalHeight &&
-        _view.get_work_mode() == LOGIC) {
+        _view.is_logic_rendering_mode()) {
       _resize_trace_upper->set_own_height(newUpperHeight);
       _view.signals_changed(NULL);
     }
     return;
   }
 
-  if (_view.get_work_mode() == LOGIC) {
+  if (_view.is_logic_rendering_mode()) {
     std::vector<Trace *> traces;
     _view.get_traces(ALL_VIEW, traces);
     int mouseY = event->position().toPoint().y() + _view.get_vOffset();
@@ -785,45 +888,235 @@ QMenu *Header::create_height_submenu(bool is_batch) {
   return menu;
 }
 
+void Header::keyPressEvent(QKeyEvent *event) {
+  // F/I shortcuts (Task 4.6): only when no popup is currently open, and
+  // only when a LogicSignal is selected as the context trace. The Glitch
+  // Filter popup itself grabs keyboard focus while open, so these shortcuts
+  // are naturally disabled while it is visible; the activePopupWidget check
+  // is an extra guard against any other modal popup (QMenu, QInputDialog,
+  // QColorDialog, etc.) that may be open.
+  if (QApplication::activePopupWidget() == nullptr && _context_trace) {
+    auto *sig = dynamic_cast<LogicSignal *>(_context_trace);
+    if (sig) {
+      if (event->key() == Qt::Key_F) {
+        emit show_glitch_filter_popup(sig);
+        event->accept();
+        return;
+      }
+      if (event->key() == Qt::Key_I) {
+        emit toggle_signal_invert_requested(sig);
+        event->accept();
+        return;
+      }
+    }
+  }
+  QWidget::keyPressEvent(event);
+}
+
 void Header::contextMenuEvent(QContextMenuEvent *event) {
-  (void)event;
+  // 统一菜单样式:背景/文字/选中态/边框全部跟随主题 token,
+  // Zone A 滤波菜单与 Zone B 行高菜单(含子菜单)共用同一外观。
+  auto apply_menu_style = [](QMenu *m) {
+    if (!m)
+      return;
+    const auto token = [](const char *name) {
+      return AppConfig::Instance().GetThemeTokenValue(name);
+    };
+    const QString bg = token("@bg-overlay");
+    const QString fg = token("@fg-base");
+    const QString fgMuted = token("@fg-muted");
+    const QString border = token("@border-strong");
+    QString accent = token("@accent");
+    if (accent.isEmpty())
+      accent = token("@toolbtn-hover");
+    if (bg.isEmpty() || fg.isEmpty())
+      return;  // 主题未加载,回退系统默认外观
+    QString sheet =
+        QString(
+            "QMenu { background: %1; color: %2; border: 1px solid %3; }"
+            "QMenu::item { padding: 4px 18px; background: transparent; }"
+            "QMenu::item:selected { background: %4; color: %2; }"
+            "QMenu::item:disabled { color: %5; }"
+            "QMenu::separator { height: 1px; background: %3; margin: 4px 8px; }")
+            .arg(bg, fg, border, accent, fgMuted.isEmpty() ? fg : fgMuted);
+    m->setStyleSheet(sheet);
+  };
 
-  if (_view.get_work_mode() != LOGIC)
+  const QPoint pt = event->pos() + QPoint(0, _view.get_vOffset());
+  int action = 0;
+  const auto t = get_mTrace(action, pt);
+
+  // 解码通道:任何模式下都弹"更改颜色"菜单(左键改色已删除,统一右键入口)
+  if (t && dynamic_cast<DecodeTrace *>(t)) {
+    _context_trace = t;
+    QMenu menu(this);
+    menu.addAction(
+        L_S(STR_PAGE_SIGNAL_PROC, "IDS_CHANGE_COLOR", "Change Color"),
+        this, &Header::on_change_color_triggered);
+    apply_menu_style(&menu);
+    menu.exec(event->globalPos());
+    return;
+  }
+
+  // 非 LOGIC 模式的波形通道(ANALOG/DSO):右键改色菜单
+  // (LOGIC 模式波形通道走 Zone A 滤波菜单,内含改色项)
+  if (!_view.is_logic_rendering_mode()) {
+    if (!t)
+      return;
+    _context_trace = t;
+    QMenu menu(this);
+    menu.addAction(
+        L_S(STR_PAGE_SIGNAL_PROC, "IDS_CHANGE_COLOR", "Change Color"),
+        this, &Header::on_change_color_triggered);
+    apply_menu_style(&menu);
+    menu.exec(event->globalPos());
+    return;
+  }
+
+  // 两段区域分别弹不同菜单:
+  //  - LABEL (右侧边缘小方块):行高菜单(还原原始行为)
+  //  - NAME/COLOR 或行内其他位置 (D0 名称区域):滤波菜单
+  // pt_in_rect 的 NAME 矩形较小可能漏判,action==0 时用 y 坐标兜底
+  // 判定为名称区域(滤波菜单)。
+  Trace *target = t;
+  if (!target || action == 0) {
+    const int clickY = event->pos().y() + _view.get_vOffset();
+    std::vector<Trace *> traces;
+    _view.get_traces(ALL_VIEW, traces);
+    for (auto tr : traces) {
+      const int y = tr->get_v_offset();
+      const int halfH = tr->get_totalHeight() / 2 + View::SignalMargin;
+      if (clickY >= y - halfH && clickY <= y + halfH) {
+        target = tr;
+        action = Trace::NAME;  // 兜底归为名称区域
+        break;
+      }
+    }
+    if (!target)
+      return;
+  }
+
+  _context_trace = target;
+
+  // ===== Zone B: 右侧 LABEL 区域 → 行高菜单(原始行为) =====
+  if (action == Trace::LABEL) {
+    QMenu menu(this);
+    menu.addAction(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ROW_HEIGHT), "Reset Row Height"),
+        this, &Header::on_reset_row_height);
+    menu.addAction(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ALL_ROW_HEIGHT),
+            "Reset All Row Heights"),
+        this, &Header::on_reset_all_row_height);
+    menu.addSeparator();
+
+    QMenu *channelMenu = create_height_submenu(false);
+    channelMenu->setTitle(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SET_CHANNEL_HEIGHT),
+            "Set Channel Height"));
+    menu.addMenu(channelMenu);
+
+    QMenu *batchMenu = create_height_submenu(true);
+    batchMenu->setTitle(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_BATCH_SET_HEIGHT), "Batch Set"));
+    menu.addMenu(batchMenu);
+
+    apply_menu_style(&menu);
+    apply_menu_style(channelMenu);
+    apply_menu_style(batchMenu);
+    menu.exec(event->globalPos());
+    return;
+  }
+
+  // ===== Zone A: D0 名称区域 → 滤波菜单 =====
+  auto *logic_sig = dynamic_cast<LogicSignal *>(target);
+  if (!logic_sig)
     return;
 
-  int action;
-  const auto t = get_mTrace(action, _mouse_point);
-
-  if (!t || action != Trace::LABEL)
-    return;
-
-  _context_trace = t;
+  auto &session = _view.session();
+  const bool any_filtered = session.is_glitch_filter_active();
 
   QMenu menu(this);
-
   menu.addAction(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ROW_HEIGHT), "Reset Row Height"),
-      this, &Header::on_reset_row_height);
-
+      L_S(STR_PAGE_SIGNAL_PROC, "IDS_FILTER_GLITCHES",
+          "Filter Glitches..."),
+      this, &Header::on_filter_glitches_triggered);
   menu.addAction(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ALL_ROW_HEIGHT),
-          "Reset All Row Heights"),
-      this, &Header::on_reset_all_row_height);
+      L_S(STR_PAGE_SIGNAL_PROC, "IDS_TOGGLE_SIGNAL_INVERT",
+          "Invert Signal"),
+      this, &Header::on_toggle_invert_triggered);
+
+  auto *clear_act = menu.addAction(
+      L_S(STR_PAGE_SIGNAL_PROC, "IDS_CLEAR_CHANNEL_FILTER",
+          "Clear Channel Filter"),
+      this, &Header::on_clear_channel_filter_triggered);
+  const bool channel_filtered = [&logic_sig]() {
+    if (!logic_sig || !logic_sig->data())
+      return false;
+    const auto model = logic_sig->model();
+    if (!model)
+      return false;
+    const int sig_index = model->index();
+    return !logic_sig->data()->get_filtered_ranges(sig_index).empty();
+  }();
+  clear_act->setEnabled(channel_filtered);
+
+  auto *clear_all_act = menu.addAction(
+      L_S(STR_PAGE_SIGNAL_PROC, "IDS_CLEAR_ALL_FILTER",
+          "Clear All Filters"),
+      this, &Header::on_clear_all_filter_triggered);
+  clear_all_act->setEnabled(any_filtered);
 
   menu.addSeparator();
+  menu.addAction(
+      L_S(STR_PAGE_SIGNAL_PROC, "IDS_CHANGE_COLOR", "Change Color"),
+      this, &Header::on_change_color_triggered);
 
-  QMenu *channelMenu = create_height_submenu(false);
-  channelMenu->setTitle(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SET_CHANNEL_HEIGHT),
-          "Set Channel Height"));
-  menu.addMenu(channelMenu);
-
-  QMenu *batchMenu = create_height_submenu(true);
-  batchMenu->setTitle(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_BATCH_SET_HEIGHT), "Batch Set"));
-  menu.addMenu(batchMenu);
-
+  apply_menu_style(&menu);
   menu.exec(event->globalPos());
+}
+
+void Header::on_filter_glitches_triggered() {
+  if (!_context_trace)
+    return;
+  auto *sig = dynamic_cast<LogicSignal *>(_context_trace);
+  if (!sig)
+    return;
+  emit show_glitch_filter_popup(sig);
+}
+
+void Header::on_clear_channel_filter_triggered() {
+  if (!_context_trace)
+    return;
+  emit clear_glitch_filter_requested(false);
+}
+
+void Header::on_clear_all_filter_triggered() {
+  emit clear_glitch_filter_requested(true);
+}
+
+void Header::on_toggle_invert_triggered() {
+  if (!_context_trace)
+    return;
+  auto *sig = dynamic_cast<LogicSignal *>(_context_trace);
+  if (!sig)
+    return;
+  emit toggle_signal_invert_requested(sig);
+}
+
+void Header::on_change_color_triggered() {
+  // 解码通道右键"更改颜色":复用 changeColor 的 QColorDialog 流程,
+  // 但不依赖 QMouseEvent(右键菜单触发,无 mouse event 参数)
+  if (!_context_trace)
+    return;
+  const QColor new_color = QColorDialog::getColor(
+      _context_trace->get_colour(), this,
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SET_CHANNEL_COLOUR),
+          "Set Channel Colour"));
+  if (new_color.isValid()) {
+    _context_trace->set_colour(new_color);
+    _view.set_all_update(true);
+  }
 }
 
 void Header::on_reset_row_height() {
@@ -900,7 +1193,16 @@ void Header::on_action_set_name_triggered() {
     if (v == "")
       v = QString::number(context_Trace->get_index());
 
-    _view.session().set_trace_name(context_Trace, v);
+    // Update Core layer (SignalModel + sr_channel) via SigSession.
+    auto model = _view.session().get_signal_by_index(context_Trace->get_index());
+    if (model)
+      _view.session().set_trace_name(model, v);
+
+    // Also update View layer (Trace::_name) so that gen_config_json()
+    // saves the correct name and the header repaints with the new name.
+    // Without this, only the Core model is updated but Trace::_name
+    // remains stale — the saved config file contains the old name.
+    context_Trace->set_name(v);
   }
 
   nameEdit->hide();
@@ -917,7 +1219,17 @@ void Header::header_resize() {
 
 void Header::UpdateLanguage() { retranslateUi(); }
 
-void Header::UpdateTheme() { retranslateUi(); }
+void Header::UpdateTheme() {
+  // 主动从主题 token 读取前景色,不再被动依赖 QWidget::palette()。
+  // QSS 的 color 属性 → palette 传播在以下场景不可靠:
+  //  1) Header 在 switchTheme() 之前构造,palette 仍是默认黑色;
+  //  2) 父级 View 自带 setStyleSheet,阻断 qApp 级 palette 传播;
+  //  3) setStyleSheet 与 update() 都 post 事件,处理顺序不确定。
+  // 一旦 palette 拿到黑色,logicsignal.cpp 的触发图标(用 fore 画)
+  // 在暗色背景上就是黑字,且改主题走同一路径仍会失败。
+  _foreColor = AppConfig::Instance().GetThemeColor("@fg-base");
+  retranslateUi();
+}
 
 void Header::UpdateFont() {}
 

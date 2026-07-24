@@ -30,7 +30,7 @@ namespace pv {
 namespace dialogs {
 
 Interval::Interval(QWidget *parent) :
-    DSDialog(parent),
+    PxDialog(parent),
     _button_box(QDialogButtonBox::Ok,
         Qt::Horizontal, this)
 {

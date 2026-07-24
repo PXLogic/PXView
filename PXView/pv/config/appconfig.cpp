@@ -178,7 +178,6 @@ static void _loadDockOptions(DockOptions &o, QSettings &st, const char *group)
     getFiled("measureDoc", st, o.measureDock, false);
     getFiled("searchDoc", st, o.searchDock, false);
     getFiled("deviceOptionsDoc", st, o.deviceOptionsDock, false);
-    getFiled("signalProcessingDoc", st, o.signalProcessingDock, false);
     getFiled("logDoc", st, o.logDock, false);
     st.endGroup();
 }
@@ -191,7 +190,6 @@ static void _saveDockOptions(DockOptions &o, QSettings &st, const char *group)
     setFiled("measureDoc", st, o.measureDock);
     setFiled("searchDoc", st, o.searchDock);
     setFiled("deviceOptionsDoc", st, o.deviceOptionsDock);
-    setFiled("signalProcessingDoc", st, o.signalProcessingDock);
     setFiled("logDoc", st, o.logDock);
     st.endGroup();
 }
@@ -391,6 +389,7 @@ AppConfig::AppConfig()
     , _saveHistoryTimer(nullptr)
     , _saveShortcutsTimer(nullptr)
     , _saveStyleTimer(nullptr)
+    , _saveDeviceTimer(nullptr)
 {
     QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
                      [](){ AppConfig::Instance().flushPendingSaves(); });
@@ -423,6 +422,19 @@ void AppConfig::LoadAll()
     _loadShortcuts(shortcutOptions, st);
     _loadStyle(styleOptions, st);
 
+    st.beginGroup("Device");
+    default_sample_limit_ = st.value("defaultSampleLimit", 1000000ULL).toULongLong();
+    deviceOptions.streamMemBuff = st.value("streamMemBuff", 16.0).toDouble();
+    deviceOptions.streamBuff = st.value("streamBuff", 16.0).toDouble();
+    deviceOptions.diskCacheEnable = st.value("diskCacheEnable", false).toBool();
+    deviceOptions.diskCachePath = st.value("diskCachePath", "").toString();
+    deviceOptions.lastDeviceDriver = st.value("lastDeviceDriver", "").toString();
+    deviceOptions.lastDeviceConnId = st.value("lastDeviceConnId", "").toString();
+    deviceOptions.glitchAutoApply = st.value("glitchAutoApply", false).toBool();
+    deviceOptions.glitchDefaultThreshold = st.value("glitchDefaultThreshold", 3).toInt();
+    deviceOptions.glitchShowOverlay = st.value("glitchShowOverlay", true).toBool();
+    st.endGroup();
+
     //pxv_dbg("Config file path:\"%s\"", st.fileName().toUtf8().data());
 }
 
@@ -440,6 +452,36 @@ void AppConfig::doSaveApp()
 {
     QSettings st(QApplication::organizationName(), QApplication::applicationName());
     _saveApp(appOptions, st);
+
+    st.beginGroup("Device");
+    st.setValue("defaultSampleLimit", (qulonglong)default_sample_limit_);
+    st.endGroup();
+}
+
+void AppConfig::SaveDevice()
+{
+    if (!_saveDeviceTimer) {
+        _saveDeviceTimer = new QTimer();
+        _saveDeviceTimer->setSingleShot(true);
+        QObject::connect(_saveDeviceTimer, &QTimer::timeout, [this](){ doSaveDevice(); });
+    }
+    _saveDeviceTimer->start(2000);
+}
+
+void AppConfig::doSaveDevice()
+{
+    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    st.beginGroup("Device");
+    st.setValue("streamMemBuff", deviceOptions.streamMemBuff);
+    st.setValue("streamBuff", deviceOptions.streamBuff);
+    st.setValue("diskCacheEnable", deviceOptions.diskCacheEnable);
+    st.setValue("diskCachePath", deviceOptions.diskCachePath);
+    st.setValue("lastDeviceDriver", deviceOptions.lastDeviceDriver);
+    st.setValue("lastDeviceConnId", deviceOptions.lastDeviceConnId);
+    st.setValue("glitchAutoApply", deviceOptions.glitchAutoApply);
+    st.setValue("glitchDefaultThreshold", deviceOptions.glitchDefaultThreshold);
+    st.setValue("glitchShowOverlay", deviceOptions.glitchShowOverlay);
+    st.endGroup();
 }
 
 void AppConfig::SaveHistory()
@@ -528,6 +570,10 @@ void AppConfig::flushPendingSaves()
         _saveStyleTimer->stop();
         doSaveStyle();
     }
+    if (_saveDeviceTimer && _saveDeviceTimer->isActive()) {
+        _saveDeviceTimer->stop();
+        doSaveDevice();
+    }
 }
 
 void AppConfig::SetProtocolFormat(const std::string &protocolName, const std::string &value)
@@ -571,6 +617,10 @@ std::string AppConfig::GetProtocolFormat(const std::string &protocolName)
 
 void AppConfig::GetFontSizeRange(float *minSize, float *maxSize)
 {
+    if (!minSize || !maxSize) {
+        pxv_warn("%s", "AppConfig::GetFontSizeRange: minSize or maxSize is NULL");
+        return;
+    }
     assert(minSize);
     assert(maxSize);
 

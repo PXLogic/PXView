@@ -23,17 +23,22 @@
 #include "isession_service.h"
 #include <QtGlobal>
 #include <QString>
+#include <cstddef>
+#include <cstdint>
 #include "../interface/icallbacks.h"
+#include "../interface/events.h"
 
+#include <condition_variable>
 #include <mutex>
 #include <vector>
 
 namespace pv {
 
 class SigSession;
-namespace view {
-class View;
-}
+
+namespace data {
+class SessionDocument;
+} // namespace data
 
 } // namespace pv
 
@@ -43,8 +48,11 @@ namespace pv {
 namespace api {
 
 class SessionService : public ISessionService,
-                       public ISessionCallback,
-                       public IMessageListener {
+                       public IDataCallback,
+                       public ICaptureCallback,
+                       public ITriggerCallback,
+                       public ISessionStateCallback,
+                       public pv::interface::IEventListener {
 public:
     explicit SessionService(SigSession *session, DeviceAgent *device);
     ~SessionService() override;
@@ -53,8 +61,15 @@ public:
     SessionService(const SessionService &) = delete;
     SessionService &operator=(const SessionService &) = delete;
 
-    // View binding for cursor/measure/zoom operations
-    void set_view(view::View *view);
+    // ---- MCP document injection ----
+    // Injects the dedicated document (by owning index in DocumentRegistry)
+    // used as the stable target container for MCP operations. Decouples MCP
+    // from the UI's _active_document cursor so the same target is available
+    // in both headless and GUI modes.
+    // phase 2: the document is owned by DocumentRegistry; SessionService holds
+    // only the index. set_api_document() releases the previously-injected
+    // index (if any) before storing the new one.
+    void set_api_document(size_t doc_index);
 
     // ---- ISessionService: 1. Capture control ----
     Result<void> start_capture(bool instant = false) override;
@@ -104,6 +119,7 @@ public:
     DeviceInfo get_device_info() const override;
     WorkMode get_work_mode() const override;
     Result<std::vector<WorkMode>> get_supported_work_modes() const override;
+    Result<std::vector<DeviceInfo>> refresh_device_list() override;
 
     // ---- ISessionService: 4. Channel management ----
     std::vector<ChannelInfo> get_channels() const override;
@@ -120,6 +136,8 @@ public:
     Result<void> set_repeat_interval(double seconds) override;
     Result<uint64_t> get_actual_sample_rate() const override;
     Result<uint64_t> get_actual_sample_count() const override;
+    Result<void> set_save_range(uint64_t start_sample,
+                                uint64_t end_sample) override;
 
     // ---- ISessionService: 6. Trigger config ----
     LogicTriggerConfig get_logic_trigger_config() const override;
@@ -187,6 +205,12 @@ public:
         const std::string &stack_on_analyzer_id = "") override;
     Result<void> remove_decoder(const std::string &instance_id) override;
     Result<void> clear_all_decoders() override;
+    Result<void> reconfigure_decoder(
+        const std::string &instance_id,
+        const std::map<std::string, std::string> &options,
+        const std::map<std::string, int> &channel_map) override;
+    Result<std::vector<DecoderClassInfo>> get_decoder_class_names(
+        const std::string &decoder_id) override;
 
     // ---- ISessionService: 13. Decoder results ----
     Result<std::vector<DecoderAnnotation>> get_decoder_annotations(
@@ -194,6 +218,8 @@ public:
         uint64_t start_sample = 0,
         uint64_t end_sample = UINT64_MAX,
         int max_count = 1000) override;
+    Result<std::vector<uint8_t>> get_decoder_binary_output(
+        const std::string &instance_id, int output_id) override;
 
     // ---- ISessionService: 14. Measurements ----
     std::vector<MeasurementValue> get_measurements() const override;
@@ -255,10 +281,17 @@ public:
                                   double percent) override;
     Result<void> disable_lissajous() override;
     Result<void> enable_math(int16_t ch1, int16_t ch2, int math_type) override;
+    Result<MathResult> get_math_results() override;
+    Result<SpectrumResult> get_spectrum_results() override;
+    Result<LissajousResult> get_lissajous_results() override;
 
     // ---- ISessionService: 21. Event subscription ----
     void add_event_listener(IServiceEventListener *listener) override;
     void remove_event_listener(IServiceEventListener *listener) override;
+
+    // ---- ISessionService: 22. Error state (Batch B) ----
+    Result<ErrorState> get_error_state() override;
+    Result<void> clear_error_state() override;
 
     // ---- ISessionCallback ----
     void session_error() override;
@@ -276,25 +309,81 @@ public:
     void decode_done() override;
     void receive_data_len(quint64 len) override;
     void receive_header() override;
-    void trigger_message(int msg) override;
     void delay_prop_msg(QString strMsg) override;
 
-    // ---- IMessageListener ----
-    void OnMessage(int msg) override;
+    // ---- IEventListener ----
+    // Full migration: all notification events are wired to on_event handlers
+    // that re-broadcast as ServiceEvent for MCP/WS clients. The legacy
+    // int-message dispatch path is removed.
+    void on_event(const pv::interface::StoreConfPrev &) override;
+    void on_event(const pv::interface::CurrentDeviceChangePrev &) override;
+    void on_event(const pv::interface::StartCollectWorkPrev &) override;
+    void on_event(const pv::interface::EndCollectWorkPrev &) override;
+    void on_event(const pv::interface::StartCollectWork &) override;
+    void on_event(const pv::interface::CollectStart &) override;
+    void on_event(const pv::interface::CollectEnd &) override;
+    void on_event(const pv::interface::EndCollectWork &) override;
+    void on_event(const pv::interface::RevEndPacket &) override;
+    void on_event(const pv::interface::CaptureStateChanged &) override;
+    void on_event(const pv::interface::DeviceListUpdated &) override;
+    void on_event(const pv::interface::DeviceModeChanged &) override;
+    void on_event(const pv::interface::DeviceConfigUpdated &) override;
+    void on_event(const pv::interface::DeviceDetached &) override;
+    void on_event(const pv::interface::UsbDeviceArrived &) override;
+    void on_event(const pv::interface::CurrentDeviceChanged &) override;
+    void on_event(const pv::interface::DeviceOptionsUpdated &) override;
+    void on_event(const pv::interface::DsoViewOptionChanged &) override;
+    void on_event(const pv::interface::SampleRateChanged &) override;
+    void on_event(const pv::interface::CollectModeChanged &) override;
+    void on_event(const pv::interface::DataPoolChanged &) override;
+    void on_event(const pv::interface::SimpleTriggerChanged &) override;
+    void on_event(const pv::interface::GlitchFilterStarted &) override;
+    void on_event(const pv::interface::GlitchFilterProgress &) override;
+    void on_event(const pv::interface::GlitchFilterCompleted &) override;
+    void on_event(const pv::interface::GlitchFilterCleared &) override;
+    void on_event(const pv::interface::SignalInvertStarted &) override;
+    void on_event(const pv::interface::SignalInvertCompleted &) override;
+    void on_event(const pv::interface::SignalInvertCleared &) override;
+    void on_event(const pv::interface::CopyToDocDone &) override;
+    void on_event(const pv::interface::SampleCountUpdated &) override;
+    void on_event(const pv::interface::ActiveDocumentChanged &) override;
+    void on_event(const pv::interface::CopyInProgressChanged &) override;
+    void on_event(const pv::interface::CaptureOwnerChanged &) override;
+    void on_event(const pv::interface::TrigNextCollect &) override;
+    void on_event(const pv::interface::SaveComplete &) override;
+    void on_event(const pv::interface::ClearDecodeData &) override;
 
 private:
     void broadcast_event(ServiceEvent event,
-                         const std::map<std::string, std::string> &params = {});
+                         const std::map<std::string, std::string> &params = {}) const;
     ChannelType sr_channel_type_to_api(int sr_type) const;
+    // Returns true when running inside the GUI (QApplication), false when
+    // running headless (QCoreApplication only). In headless mode View-related
+    // operations are no-ops and QEventLoop-based waits fall back to a plain
+    // condition_variable + mutex.
+    static bool is_gui_mode();
+    // phase 2: resolve the MCP-dedicated document weak pointer from the owning
+    // index in DocumentRegistry. Returns nullptr if no document is injected
+    // or the slot has been released.
+    pv::data::SessionDocument *api_document() const;
 
 private:
     SigSession *_session;
     DeviceAgent *_device;
-    view::View *_view;
     std::vector<IServiceEventListener *> _listeners;
     mutable std::mutex _listeners_mutex;
     int _capture_id;
     bool _wait_capture_stop_flag;
+
+    // Wait-state used by wait_capture_complete() in headless mode.
+    mutable std::mutex _wait_mutex;
+    std::condition_variable _wait_cv;
+
+    // MCP-dedicated document. phase 2: ownership is held by DocumentRegistry;
+    // SessionService stores only the owning index (SIZE_MAX == none). Created
+    // via DocumentRegistry::create_api_document() (called from AppService) and
+    // released in the destructor via release_document().
+    size_t _api_doc_index = SIZE_MAX;
 };
 
 } // namespace api

@@ -52,7 +52,7 @@ class DsoTriggerDock : public pv::widgets::SmoothScrollArea, public IUiWindow, p
 public:
     DsoTriggerDock(QWidget *parent, SigSession *session);
     ~DsoTriggerDock();
- 
+
     void device_change();
     void update_view();
     void check_setting();

@@ -188,7 +188,7 @@ PopupLineEditInput::PopupLineEditInput(QWidget *parent) : QDialog(parent) {
   QFont font = dock_font_content();
   _textInput->setFont(font);
 
-  connect(_textInput, &QLineEdit::returnPressed, [=]() { InputRelease(); });
+  connect(_textInput, &QLineEdit::returnPressed, this, [this]() { InputRelease(); });
 }
 
 void PopupLineEditInput::changeEvent(QEvent *event) {
@@ -229,6 +229,10 @@ void PopupLineEditInput::onCheckPositionTimeout() {
 }
 
 void PopupLineEditInput::Popup(QWidget *editline) {
+  if (!editline) {
+    pxv_warn("%s", "PopupLineEditInput::Popup: editline is NULL");
+    return;
+  }
   assert(editline);
   _line = editline;
 

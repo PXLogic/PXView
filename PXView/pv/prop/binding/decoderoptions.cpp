@@ -28,12 +28,14 @@
 
 #include "../../data/decoderstack.h"
 #include "../../data/decode/decoder.h"
+#include "../../log.h"
 #include "../double.h"
 #include "../enum.h"
 #include "../int.h"
 #include "../string.h"
 #include "../../ui/langresource.h"
 #include "../../config/appconfig.h"
+#include <stdexcept>
 
 using namespace boost;
 using namespace std;
@@ -42,14 +44,22 @@ namespace pv {
 namespace prop {
 namespace binding {
 
-DecoderOptions::DecoderOptions(pv::data::DecoderStack* decoder_stack, data::decode::Decoder *decoder) :
+DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_stack, data::decode::Decoder *decoder) :
 	Binding(),
 	_decoder(decoder)
 {
+	if (!_decoder) {
+		pxv_warn("%s", "DecoderOptions: _decoder is NULL");
+		throw std::invalid_argument("DecoderOptions: _decoder is NULL");
+	}
 	assert(_decoder);
 	(void)decoder_stack;
 
 	const srd_decoder *const dec = _decoder->decoder();
+	if (!dec) {
+		pxv_warn("%s", "DecoderOptions: dec is NULL");
+		throw std::invalid_argument("DecoderOptions: dec is NULL");
+	}
 	assert(dec);
 
 	bool bLang = AppConfig::Instance().appOptions.transDecoderDlg;
@@ -108,6 +118,10 @@ Property* DecoderOptions::bind_enum(
     std::vector<std::pair<GVariant*, QString> > values;
 	for (GSList *l = option->values; l; l = l->next) {
 		GVariant *const var = (GVariant*)l->data;
+		if (!var) {
+			pxv_warn("%s", "DecoderOptions::bind_enum: var is NULL, skipping");
+			continue;
+		}
 		assert(var);
 		values.push_back(make_pair(var, print_gvariant(var)));
 	}
@@ -119,6 +133,10 @@ GVariant* DecoderOptions::getter(const char *id)
 {
 	GVariant *val = NULL;
 
+	if (!_decoder) {
+		pxv_warn("%s", "DecoderOptions::getter: _decoder is NULL");
+		return nullptr;
+	}
 	assert(_decoder);
 
 	// Get the value from the hash table if it is already present
@@ -151,6 +169,10 @@ GVariant* DecoderOptions::getter(const char *id)
 
 void DecoderOptions::setter(const char *id, GVariant *value)
 {
+	if (!_decoder) {
+		pxv_warn("%s", "DecoderOptions::setter: _decoder is NULL");
+		return;
+	}
 	assert(_decoder);
 	_decoder->set_option(id, value);
 }

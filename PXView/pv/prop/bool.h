@@ -40,7 +40,9 @@ public:
 
 	virtual ~Bool();
 
-    QWidget* get_widget(QWidget *parent, bool auto_commit);
+protected:
+    QWidget* get_widget(QWidget *parent, bool auto_commit) override;
+public:
 	bool labeled_widget();
 
     GVariant* get_value();

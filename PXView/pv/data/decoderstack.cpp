@@ -35,11 +35,25 @@
 #include "decoderstack.h"
 #include "logicsnapshot.h"
 #include "sessiondocument.h"
+#include "signalmodel.h"
 #include <ds_types.h>
 
 using namespace pv::data::decode;
 using namespace std;
 using namespace boost;
+
+namespace {
+// Static error message constants for decode worker thread.
+// These avoid accessing LangResource (which may trigger page loading)
+// from non-main threads. C++11 magic statics guarantee thread-safe
+// initialization on first access.
+const std::string s_kRequiredChannelsMissing =
+    "One or more required channels have not been specified";
+const std::string s_kChannelsNotEnabled =
+    "At least one of selected channels are not enabled.";
+const std::string s_kCreateDecoderInstanceFailed =
+    "Failed to create decoder instance";
+}  // namespace
 
 namespace pv {
 namespace data {
@@ -53,6 +67,18 @@ DecoderStack::DecoderStack(pv::SigSession *session,
                            const srd_decoder *const dec,
                            DecoderStatus *decoder_status)
     : _session(session) {
+  if (!session) {
+    pxv_warn("%s", "DecoderStack::DecoderStack: session is NULL");
+    throw std::invalid_argument("DecoderStack: session is NULL");
+  }
+  if (!dec) {
+    pxv_warn("%s", "DecoderStack::DecoderStack: dec is NULL");
+    throw std::invalid_argument("DecoderStack: dec is NULL");
+  }
+  if (!decoder_status) {
+    pxv_warn("%s", "DecoderStack::DecoderStack: decoder_status is NULL");
+    throw std::invalid_argument("DecoderStack: decoder_status is NULL");
+  }
   assert(session);
   assert(dec);
   assert(decoder_status);
@@ -100,6 +126,10 @@ DecoderStack::~DecoderStack() {
 }
 
 void DecoderStack::add_sub_decoder(decode::Decoder *decoder) {
+  if (!decoder) {
+    pxv_warn("%s", "DecoderStack::add_sub_decoder: decoder is NULL");
+    return;
+  }
   assert(decoder);
   _stack.push_back(decoder);
   build_row();
@@ -175,6 +205,10 @@ void DecoderStack::build_row() {
     for (const GSList *l = decc->annotation_rows; l; l = l->next) {
       const srd_decoder_annotation_row *const ann_row =
           (srd_decoder_annotation_row *)l->data;
+      if (!ann_row) {
+        pxv_warn("%s", "DecoderStack::build_row: ann_row is NULL, skipping");
+        continue;
+      }
       assert(ann_row);
 
       const Row row(decc, ann_row, order);
@@ -232,6 +266,16 @@ uint64_t DecoderStack::get_annotation_index(const Row &row,
     index = (*iter).second->get_annotation_index(start_sample);
 
   return index;
+}
+
+std::pair<size_t, size_t> DecoderStack::get_visible_range(
+    const Row &row, uint64_t start_sample, uint64_t end_sample) {
+  std::pair<size_t, size_t> range{0, 0};
+  auto iter = _rows.find(row);
+  if (iter != _rows.end())
+    range = (*iter).second->get_visible_range(start_sample, end_sample);
+
+  return range;
 }
 
 uint64_t DecoderStack::get_max_annotation(const Row &row) {
@@ -376,7 +420,14 @@ void DecoderStack::stop_decode_work() {
 }
 
 void DecoderStack::begin_decode_work() {
-  assert(_decode_state == Stopped);
+  // 防御性检查:若已有解码线程在运行(RevEndPacket 与 CopyToDocDone 竞态,
+  // 或 add_decode_task 重复添加遗漏),直接返回避免状态被覆盖。
+  // assert 在 Release 下是空操作,必须显式 if 检查 + early return。
+  if (_decode_state != Stopped) {
+    pxv_warn("DecoderStack::begin_decode_work: _decode_state != Stopped "
+             "(already running), skip");
+    return;
+  }
 
   _error_message = "";
   _decode_state = Running;
@@ -414,34 +465,58 @@ void DecoderStack::do_decode_work() {
 
   _snapshot = NULL;
 
+  pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
+
   if (!check_required_probes()) {
     _error_message =
-        L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODERSTACK_DECODE_WORK_ERROR),
-            "One or more required channels have not been specified");
+        QString::fromStdString(s_kRequiredChannelsMissing);
     pxv_err("ERROR:%s", _error_message.toStdString().c_str());
+    // Diagnostic: log which decoder has missing required probes
+    for (auto dec : _stack) {
+      if (!dec->have_required_probes()) {
+        pxv_err("ERROR:Decoder %p is missing required probes", dec);
+      }
+    }
     return;
   }
 
+  pxv_info("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
+           _session->get_signal_models().size());
+
   for (auto dec : _stack) {
     if (dec->have_probes()) {
-      for (auto s : _session->get_signals()) {
-        if (s->get_index() == dec->first_probe_index() &&
-            s->signal_type() == SR_CHANNEL_LOGIC) {
-          _snapshot = ((pv::view::LogicSignal *)s)->data();
+      int probe_idx = dec->first_probe_index();
+      pxv_info("DecoderStack::do_decode_work: decoder %p has probes, first_probe_index=%d, checking %zu signal_models",
+               dec, probe_idx, _session->get_signal_models().size());
+
+      for (auto m : _session->get_signal_models()) {
+        bool index_match = (m->index() == probe_idx);
+        bool type_match = (m->type() == SR_CHANNEL_LOGIC);
+        bool snapshot_ok = (m->snapshot() != NULL);
+
+        pxv_info("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
+                 m->index(), (int)m->type(), (int)SR_CHANNEL_LOGIC,
+                 m->snapshot(), index_match, type_match, snapshot_ok);
+
+        if (index_match && type_match) {
+          _snapshot = (pv::data::LogicSnapshot*)m->snapshot();
+          pxv_info("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot);
           if (_snapshot != NULL)
             break;
         }
       }
       if (_snapshot != NULL)
         break;
+    } else {
+      pxv_info("DecoderStack::do_decode_work: decoder %p has no probes, skipping", dec);
     }
   }
 
   if (_snapshot == NULL) {
     _error_message =
-        L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODERSTACK_DECODE_WORK_ERROR),
-            "One or more required channels have not been specified");
+        QString::fromStdString(s_kRequiredChannelsMissing);
     pxv_err("ERROR:%s", _error_message.toStdString().c_str());
+    pxv_err("ERROR:Failed to find matching LogicSnapshot for any decoder probe");
     return;
   }
 
@@ -492,6 +567,10 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     }
   }
 
+  if (!logic_di) {
+    pxv_warn("%s", "DecoderStack::decode_data: logic_di is NULL");
+    return;
+  }
   assert(logic_di);
 
   uint64_t entry_cnt = 0;
@@ -529,10 +608,12 @@ void DecoderStack::decode_data(const uint64_t decode_start,
       if (!bCheckEnd) {
         bCheckEnd = true;
 
-        uint64_t align_sample_count = _snapshot->get_ring_sample_count();
+        uint64_t align_sample_count = _snapshot->get_sample_count();
+        pxv_info("DecoderStack debug: bCheckEnd triggered. get_sample_count() = %llu, end_index = %llu",
+                 (unsigned long long)align_sample_count, (unsigned long long)end_index);
 
         if (end_index >= align_sample_count) {
-          end_index = align_sample_count - 1;
+          end_index = align_sample_count > 0 ? align_sample_count - 1 : 0;
           pxv_info("Reset the decode end sample, new:%llu, old:%llu",
                    (u64_t)end_index, (u64_t)decode_end);
         }
@@ -542,13 +623,13 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           break;
         }
       }
-    } else if (i >= _snapshot->get_ring_sample_count()) {
+    } else if (i >= _snapshot->get_sample_count()) {
       // Wait the data is ready.
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
 
-    if (_is_capture_end && i == _snapshot->get_ring_sample_count()) {
+    if (_is_capture_end && i >= _snapshot->get_sample_count()) {
       break;
     }
 
@@ -577,8 +658,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           }
         } else {
           _error_message =
-              L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODERSTACK_DECODE_DATA_ERROR),
-                  "At least one of selected channels are not enabled.");
+              QString::fromStdString(s_kChannelsNotEnabled);
           return;
         }
       }
@@ -618,7 +698,13 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
     if ((i - last_cnt) > notify_cnt) {
       last_cnt = i;
-      new_decode_data();
+      // CRITICAL: Must NOT emit new_decode_data() signal directly here — this
+      // runs on the decode worker thread. Qt AutoConnection cross-thread
+      // signal emission calls QThread::currentThread() → creates QThreadData
+      // on the worker thread → SIGSEGV on thread exit (LdrShutdownThread).
+      // Post the emit to the main thread via postEvent so AutoConnection
+      // resolves to DirectConnection (same thread) — no QThreadData created.
+      _session->event_bus_post([this]() { new_decode_data(); });
     }
 
     entry_cnt++;
@@ -627,7 +713,8 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   _progress = 100;
   _is_decoding = false;
 
-  new_decode_data();
+  // Final progress notification via postEvent (not direct signal emit) — see above.
+  _session->event_bus_post([this]() { new_decode_data(); });
 
   // the task is normal ends,so all samples was processed;
   if (!bError && bEndTime) {
@@ -639,13 +726,18 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     }
   }
 
+  pxv_info("decode_data loop ended! i=%llu, end_index=%llu, _no_memory=%d, _bStop=%d, bError=%d, bEndTime=%d",
+           (unsigned long long)i, (unsigned long long)end_index,
+           (int)_no_memory, (int)status->_bStop, (int)bError, (int)bEndTime);
+           
   pxv_info("%s%llu", "send to decoder times: ", (u64_t)entry_cnt);
 
   if (error != NULL)
     g_free(error);
 
   if (!_session->is_closed())
-    decode_done();
+    // Post to main thread — see new_decode_data comment above.
+    _session->event_bus_post([this]() { decode_done(); });
 }
 
 void DecoderStack::execute_decode_stack() {
@@ -654,6 +746,10 @@ void DecoderStack::execute_decode_stack() {
   uint64_t decode_start = 0;
   uint64_t decode_end = 0;
 
+  if (!_snapshot) {
+    pxv_warn("%s", "DecoderStack::execute_decode_stack: _snapshot is NULL");
+    return;
+  }
   assert(_snapshot);
 
   // Create the session
@@ -667,7 +763,7 @@ void DecoderStack::execute_decode_stack() {
   }
 
   // Get the intial sample count
-  _sample_count = _snapshot->get_ring_sample_count();
+  _sample_count = _snapshot->get_sample_count();
 
   // Create the decoders
   for (auto dec : _stack) {
@@ -675,8 +771,7 @@ void DecoderStack::execute_decode_stack() {
 
     if (!di) {
       _error_message =
-          L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODERSTACK_DECODE_STACK_ERROR),
-              "Failed to create decoder instance");
+          QString::fromStdString(s_kCreateDecoderInstanceFailed);
       srd_session_destroy(session);
       return;
     }
@@ -695,7 +790,17 @@ void DecoderStack::execute_decode_stack() {
         dec_end = _sample_count - 1;
       decode_end = min(dec_end, _sample_count - 1);
     } else {
-      decode_end = max(dec->decode_end(), decode_end);
+      // In realtime refresh mode (stream/single mode, e.g. demo/file devices),
+      // data arrives incrementally. If decode_end is 0 (meaning "decode to end"),
+      // use UINT64_MAX so the decode loop waits for data and is bounded by
+      // _is_capture_end check in decode_data() (which sets end_index to
+      // align_sample_count - 1 when capture ends).
+      // Without this, decode_end stays 0 and the decode loop never executes,
+      // causing "send to decoder times: 0" and no decode results.
+      uint64_t dec_end = dec->decode_end();
+      if (dec_end == 0)
+        dec_end = UINT64_MAX;
+      decode_end = max(dec_end, decode_end);
     }
   }
 
@@ -739,12 +844,24 @@ uint64_t DecoderStack::sample_rate() { return _samplerate; }
 
 // the decode callback, annotation object will be create
 void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
+  if (!pdata) {
+    pxv_warn("%s", "DecoderStack::annotation_callback: pdata is NULL");
+    return;
+  }
+  if (!self) {
+    pxv_warn("%s", "DecoderStack::annotation_callback: self is NULL");
+    return;
+  }
   assert(pdata);
   assert(self);
 
   struct decode_task_status *st = (decode_task_status *)self;
 
   DecoderStack *const d = st->_decoder;
+  if (!d) {
+    pxv_warn("%s", "DecoderStack::annotation_callback: d is NULL");
+    return;
+  }
   assert(d);
 
   if (st->_bStop) {
@@ -770,6 +887,10 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   assert(pdata->pdo);
   assert(pdata->pdo->di);
   const srd_decoder *const decc = pdata->pdo->di->decoder;
+  if (!decc) {
+    pxv_warn("%s", "DecoderStack::annotation_callback: decc is NULL");
+    return;
+  }
   assert(decc);
 
   auto row_iter = d->_rows.end();
@@ -797,7 +918,35 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     d->_no_memory = true;
 }
 
-void DecoderStack::frame_ended() { _options_changed = true; }
+void DecoderStack::frame_ended() {
+  _options_changed = true;
+
+  if (_session) {
+    const uint64_t limit = _session->get_ring_sample_count();
+    const uint64_t last_samples = limit > 0 ? limit - 1 : 0;
+
+    for (auto dec : _stack) {
+      uint64_t start = dec->decode_start();
+      uint64_t end = dec->decode_end();
+
+      if (start > last_samples) {
+        start = 0;
+      }
+
+      // end == 0 is a sentinel meaning "decode to the actual data end".
+      // Do NOT replace it with last_samples (ring buffer capacity) here,
+      // because that would permanently overwrite the sentinel in the
+      // decoder's stored config. execute_decode_stack() resolves 0 to the
+      // real _sample_count at decode time, adapting to varying capture
+      // lengths. Only clamp non-zero values that exceed the buffer.
+      if (end != 0 && end > last_samples) {
+        end = last_samples;
+      }
+
+      dec->set_decode_region(start, end);
+    }
+  }
+}
 
 int DecoderStack::list_rows_size() {
   int rows_size = 0;

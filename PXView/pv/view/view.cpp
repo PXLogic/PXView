@@ -24,38 +24,47 @@
 #include <assert.h>
 #include <cmath>
 #include <limits.h>
+#include <memory>
 #include <string.h>
 
+#include <QCursor>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QScreen>
 #include <QScrollBar>
+#include <QSizeF>
 #include <QtGlobal>
 #include <algorithm>
 
-#include "../data/decode/decoder.h"
-#include "../data/decoderstack.h"
-#include "analogsignal.h"
+#include "../api/types.h"
 #include "decodetrace.h"
 #include "devmode.h"
-#include "dsosignal.h"
-#include "groupsignal.h"
+#include "glitchfilterpopup.h"
 #include "header.h"
 #include "lissajoustrace.h"
-#include "logicsignal.h"
+#include "mathtrace.h"
 #include "ruler.h"
 #include "signal.h"
 #include "spectrumtrace.h"
 #include "trace.h"
 #include "view.h"
+#include "view_cursors.h"
+#include "view_data_sync.h"
+#include "view_derived_traces.h"
+#include "view_glitch_filter.h"
+#include "view_layout.h"
+#include "view_signal_sync.h"
+#include "viewstatus.h"
 #include "viewport.h"
+#include "../toolbars/samplingbar.h"
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../data/logicsnapshot.h"
 #include "../data/sessiondocument.h"
-#include "../dialogs/calibration.h"
+#include "../data/spectrumstack.h"
 #include "../dialogs/lissajousoptions.h"
 #include "../dsvdef.h"
 #include "../log.h"
@@ -83,75 +92,44 @@ const QColor View::CursorAreaColour(220, 231, 243);
 const QSizeF View::LabelPadding(4, 4);
 const QString View::Unknown_Str = "########";
 
-QColor View::Red =
-    AppConfig::Instance().GetThemeColor("@signal-red").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-red")
-        : QColor(213, 15, 37, 255);
-QColor View::Orange =
-    AppConfig::Instance().GetThemeColor("@signal-orange").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-orange")
-        : QColor(238, 178, 17, 255);
-QColor View::Blue =
-    AppConfig::Instance().GetThemeColor("@signal-blue").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-blue")
-        : QColor(17, 133, 209, 255);
-QColor View::Green =
-    AppConfig::Instance().GetThemeColor("@signal-green").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-green")
-        : QColor(0, 153, 37, 255);
-QColor View::Purple =
-    AppConfig::Instance().GetThemeColor("@signal-purple").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-purple")
-        : QColor(109, 50, 156, 255);
-QColor View::LightBlue =
-    AppConfig::Instance().GetThemeColor("@signal-light-blue").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-light-blue")
-        : QColor(17, 133, 209, 200);
-QColor View::LightRed =
-    AppConfig::Instance().GetThemeColor("@signal-light-red").isValid()
-        ? AppConfig::Instance().GetThemeColor("@signal-light-red")
-        : QColor(213, 15, 37, 200);
-
-void View::refreshSignalColors() {
-    Red = AppConfig::Instance().GetThemeColor("@signal-red").isValid()
-              ? AppConfig::Instance().GetThemeColor("@signal-red")
-              : QColor(213, 15, 37, 255);
-    Orange = AppConfig::Instance().GetThemeColor("@signal-orange").isValid()
-                 ? AppConfig::Instance().GetThemeColor("@signal-orange")
-                 : QColor(238, 178, 17, 255);
-    Blue = AppConfig::Instance().GetThemeColor("@signal-blue").isValid()
-               ? AppConfig::Instance().GetThemeColor("@signal-blue")
-               : QColor(17, 133, 209, 255);
-    Green = AppConfig::Instance().GetThemeColor("@signal-green").isValid()
-                ? AppConfig::Instance().GetThemeColor("@signal-green")
-                : QColor(0, 153, 37, 255);
-    Purple = AppConfig::Instance().GetThemeColor("@signal-purple").isValid()
-                 ? AppConfig::Instance().GetThemeColor("@signal-purple")
-                 : QColor(109, 50, 156, 255);
-    LightBlue = AppConfig::Instance().GetThemeColor("@signal-light-blue").isValid()
-                    ? AppConfig::Instance().GetThemeColor("@signal-light-blue")
-                    : QColor(17, 133, 209, 200);
-    LightRed = AppConfig::Instance().GetThemeColor("@signal-light-red").isValid()
-                   ? AppConfig::Instance().GetThemeColor("@signal-light-red")
-                   : QColor(213, 15, 37, 200);
-}
-
 View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
            QWidget *parent)
     : QScrollArea(parent), _sampling_bar(sampling_bar), _scale(10),
       _preScale(1e-6), _maxscale(1e9), _minscale(1e-15), _offset(0),
       _preOffset(0), _vOffset(0), _signalHeightScale(MaxHeightUnit),
-      _lastWidth(-1), _updating_scroll(false), _trig_hoff(0), _show_cursors(false),
-      _search_hit(false), _show_xcursors(false), _hover_point(-1, -1),
-      _dso_auto(true), _show_lissajous(false), _back_ready(false) {
+      _lastWidth(-1), _updating_scroll(false), _trig_hoff(0),
+      _show_cursors(false), _search_hit(false), _show_xcursors(false),
+      _hover_point(-1, -1), _dso_auto(true), _show_lissajous(false),
+      _back_ready(false) {
   _trig_cursor = NULL;
   _search_cursor = NULL;
-  _cali = NULL;
 
   _session = session;
   _data_source = session;
   _document = nullptr;
-  _device_agent = session->get_device();
+  _device_agent = session->device();
+
+  // Phase E: initialise the three delegate classes. Must happen before any
+  // call that forwards through the inline facades (e.g. headerWidth() →
+  // get_traces() → get_own_decode_traces() → sync_derived_traces()).
+  _layout = std::make_unique<ViewLayout>(this);
+  _cursors = std::make_unique<ViewCursors>(this);
+  _derived = std::make_unique<ViewDerivedTraces>(this);
+  // Phase J: initialise the three new delegate classes (signal-sync /
+  // glitch-filter / data-sync). Must happen before any call that forwards
+  // through the inline facades (e.g. signals_changed → _signal_sync).
+  _signal_sync = std::make_unique<ViewSignalSync>(this);
+  _glitch_filter = std::make_unique<ViewGlitchFilter>(this);
+  _data_sync = std::make_unique<ViewDataSync>(this);
+
+  // Visible-range debounce timer: coalesce bursts of scale/offset/resize
+  // changes into a single visible_range_changed() emission so listeners
+  // (e.g. ProtocolDock) don't reset their model on every pixel of a drag.
+  _viewport_change_timer = new QTimer(this);
+  _viewport_change_timer->setSingleShot(true);
+  _viewport_change_timer->setInterval(100);
+  connect(_viewport_change_timer, &QTimer::timeout, this,
+          [this]() { emit visible_range_changed(); });
 
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   setStyleSheet(
@@ -257,8 +235,37 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
 
   connect(_header, &Header::traces_moved, this, &View::on_traces_moved);
   connect(_header, &Header::header_updated, this, &View::header_updated);
+  connect(_header, &Header::show_glitch_filter_popup, this,
+          &View::on_show_glitch_filter_popup);
+  connect(_header, &Header::clear_glitch_filter_requested, this,
+          &View::on_clear_glitch_filter_requested);
+  connect(_header, &Header::toggle_signal_invert_requested, this,
+          &View::on_toggle_invert_requested);
   connect(_devmode, &DevMode::header_collapse_changed, this,
           &View::on_header_collapse_changed);
+  connect(_devmode, &DevMode::mode_change_requested, this,
+          [this](int mode) { _data_source->switch_work_mode(mode); });
+  connect(_devmode, &DevMode::stop_capture_requested, this,
+          [this]() { _data_source->stop_capture(); });
+  connect(_devmode, &DevMode::save_session_requested, this,
+          [this]() { _data_source->session_save(); });
+  connect(_devmode, &DevMode::close_file_requested, this,
+          [this](ds_device_handle dev_handle) { _data_source->close_file(dev_handle); });
+
+  // Glitch filter popup (View-owned). Created up-front and reused via
+  // open_for_signal() so the histogram cache persists across open/close.
+  _glitch_filter_popup = new GlitchFilterPopup(*this, this);
+  _glitch_filter_popup->hide();
+  connect(_glitch_filter_popup, &GlitchFilterPopup::preview_changed, this,
+          &View::on_glitch_preview_changed);
+  connect(_glitch_filter_popup, &GlitchFilterPopup::apply_requested, this,
+          &View::on_glitch_apply_requested);
+  connect(_glitch_filter_popup, &GlitchFilterPopup::closed, this,
+          &View::on_glitch_popup_closed);
+  connect(_glitch_filter_popup, &GlitchFilterPopup::apply_batch_requested, this,
+          &View::on_apply_batch_requested);
+  connect(_glitch_filter_popup, &GlitchFilterPopup::preview_batch_changed, this,
+          &View::on_preview_batch_changed);
 
   ADD_UI(this);
 }
@@ -270,6 +277,9 @@ View::~View() {
   // to prevent callbacks on partially-destroyed View
   disconnect(_header, nullptr, this, nullptr);
   disconnect(_devmode, nullptr, this, nullptr);
+  if (_glitch_filter_popup) {
+    disconnect(_glitch_filter_popup, nullptr, this, nullptr);
+  }
   _header->removeEventFilter(this);
   _ruler->removeEventFilter(this);
   _devmode->removeEventFilter(this);
@@ -279,13 +289,36 @@ View::~View() {
   for (auto sig : _own_signals)
     delete sig;
   _own_signals.clear();
+  // Drop preview-range cache keys (LogicSignal pointers now dangling).
+  _preview_ranges.clear();
 
-  for (auto p : _config_probes) {
-    g_free(p->name);
-    g_free(p->trigger);
-    delete p;
+  // Clean up View-owned wrapper traces (these wrap Core layer Stack/Model
+  // objects and are owned by the View, not by the data source).
+  for (auto dt : _own_decode_traces)
+    delete dt;
+  _own_decode_traces.clear();
+
+  for (auto st : _own_spectrum_traces)
+    delete st;
+  _own_spectrum_traces.clear();
+
+  if (_own_math_trace) {
+    delete _own_math_trace;
+    _own_math_trace = nullptr;
   }
-  _config_probes.clear();
+
+  if (_own_lissajous_trace) {
+    delete _own_lissajous_trace;
+    _own_lissajous_trace = nullptr;
+  }
+
+  // Destroy the glitch filter popup (View-owned QWidget). Qt would also
+  // delete it as a child widget, but explicit deletion here guarantees the
+  // closed() signal cannot fire mid-destruction.
+  if (_glitch_filter_popup) {
+    delete _glitch_filter_popup;
+    _glitch_filter_popup = nullptr;
+  }
 
   DESTROY_OBJECT(_trig_cursor);
   DESTROY_OBJECT(_search_cursor);
@@ -293,187 +326,37 @@ View::~View() {
 }
 
 void View::set_data_source(pv::data::DataSource *source) {
-  _data_source = source;
-  rebuild_signals();
-
-  if (_time_viewport) {
-    _time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  if (_fft_viewport) {
-    _fft_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  update();
+  _data_sync->set_data_source(source);
+  // Task C2.7: reconcile the View's rendering cursor list with the Core
+  // CursorRegistry. This handles the headless -> GUI transition where MCP
+  // added cursors to Core before the View existed. Safe to call on every
+  // data-source binding (idempotent — only adds cursors that are missing).
+  sync_cursors_from_core();
 }
 
-void View::clear_signal_data() {
-  for (auto sig : _own_signals) {
-    int type = sig->signal_type();
-    switch (type) {
-    case SR_CHANNEL_LOGIC: {
-      view::LogicSignal *s = static_cast<view::LogicSignal *>(sig);
-      s->set_data(nullptr);
-      break;
-    }
-    case SR_CHANNEL_ANALOG: {
-      view::AnalogSignal *s = static_cast<view::AnalogSignal *>(sig);
-      s->set_data(nullptr);
-      break;
-    }
-    case SR_CHANNEL_DSO: {
-      view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
-      s->set_data(nullptr);
-      break;
-    }
-    }
-  }
-
-  if (_time_viewport) {
-    _time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  if (_fft_viewport) {
-    _fft_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  update();
-}
+void View::clear_signal_data() { _data_sync->clear_signal_data(); }
 
 void View::set_signal_data_from_source(pv::data::DataSource *source) {
-  for (auto sig : _own_signals) {
-    int type = sig->signal_type();
-    switch (type) {
-    case SR_CHANNEL_LOGIC: {
-      view::LogicSignal *s = static_cast<view::LogicSignal *>(sig);
-      s->set_data(source->get_logic_snapshot());
-      break;
-    }
-    case SR_CHANNEL_ANALOG: {
-      view::AnalogSignal *s = static_cast<view::AnalogSignal *>(sig);
-      s->set_data(source->get_analog_snapshot());
-      break;
-    }
-    case SR_CHANNEL_DSO: {
-      view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
-      s->set_data(source->get_dso_snapshot());
-      break;
-    }
-    }
-  }
-
-  if (_time_viewport) {
-    _time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  if (_fft_viewport) {
-    _fft_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  update();
+  _data_sync->set_signal_data_from_source(source);
 }
 
 void View::set_data_document(pv::data::SessionDocument *doc) {
-  if (!doc)
-    return;
-
-  _document = doc;
-
-  if (!doc->has_data())
-    return;
-
-  if (_own_signals.empty()) {
-    auto &shared_sigs = _data_source->get_signals();
-    for (auto sig : shared_sigs) {
-      auto cloned = sig->clone();
-      cloned->set_view_index(sig->get_view_index());
-      _own_signals.push_back(cloned);
-    }
-  }
-
-  for (auto sig : _own_signals) {
-    int type = sig->signal_type();
-    switch (type) {
-    case SR_CHANNEL_LOGIC: {
-      view::LogicSignal *s = static_cast<view::LogicSignal *>(sig);
-      s->set_data(doc->get_active_logic());
-      break;
-    }
-    case SR_CHANNEL_ANALOG: {
-      view::AnalogSignal *s = static_cast<view::AnalogSignal *>(sig);
-      s->set_data(doc->get_active_analog());
-      break;
-    }
-    case SR_CHANNEL_DSO: {
-      view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
-      s->set_data(doc->get_active_dso());
-      break;
-    }
-    }
-  }
-
-  if (_time_viewport) {
-    _time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  if (_fft_viewport) {
-    _fft_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  }
-  update();
+  _data_sync->set_data_document(doc);
 }
 
 void View::clone_signals_for_document(pv::data::SessionDocument *doc) {
-  if (!doc)
-    return;
-
-  _own_signals.clear();
-
-  auto &shared_sigs = _data_source->get_signals();
-  for (auto sig : shared_sigs) {
-    auto cloned = sig->clone();
-    cloned->set_view_index(sig->get_view_index());
-    _own_signals.push_back(cloned);
-  }
-
-  set_data_document(doc);
+  _data_sync->clone_signals_for_document(doc);
 }
 
-data::DataSource *View::effective_data_source() {
-  if (_document && _document->has_data())
-    return _document;
-  return _data_source;
+data::DataSource *View::document_snapshot_source() {
+  return _data_sync->document_snapshot_source();
 }
 
 void View::show_wait_trigger() { _time_viewport->show_wait_trigger(); }
 
 void View::set_device() { _devmode->set_device(); }
 
-void View::capture_init() {
-  int width = get_view_width();
-  if (width == 0) {
-    return;
-  }
-
-  int mode = get_work_mode();
-
-  if (mode == DSO)
-    show_trig_cursor(true);
-  else if (!_session->is_repeating())
-    show_trig_cursor(false);
-
-  double sampletime = effective_data_source()->cur_sampletime();
-  if (sampletime > 0) {
-    _maxscale = sampletime / (width * MaxViewRate);
-
-    if (mode == ANALOG) {
-      set_scale_offset(_maxscale, 0);
-    }
-  }
-
-  status_clear();
-
-  _trig_hoff = 0;
-}
-
-void View::zoom(double steps) {
-  int width = get_view_width();
-  if (width > 0) {
-    zoom(steps, width / 2);
-  }
-}
+void View::capture_init() { _data_sync->capture_init(); }
 
 void View::set_update(Viewport *viewport, bool need_update) {
   viewport->set_need_update(need_update);
@@ -492,423 +375,50 @@ void View::update_hori_res() {
   }
 }
 
-bool View::zoom(double steps, int offset) {
-  int width = get_view_width();
-  if (width == 0) {
-    return false;
-  }
+void View::zoom_vertical(double steps) { _signal_sync->zoom_vertical(steps); }
 
-  bool ret = true;
-  _preScale = _scale;
-  _preOffset = _offset;
-
-  if (get_work_mode() != DSO) {
-    _scale *= std::pow(3.0 / 2.0, -steps);
-    _scale = max(min(_scale, _maxscale), _minscale);
-  } else {
-    if (_session->is_running_status() && _session->is_instant()) {
-      return ret;
-    }
-
-    double hori_res = -1;
-    if (steps > 0.5)
-      hori_res = _sampling_bar->hori_knob(-1);
-    else if (steps < -0.5)
-      hori_res = _sampling_bar->hori_knob(1);
-
-    if (hori_res > 0) {
-      const double scale = _session->cur_view_time() / width;
-      _scale = max(min(scale, _maxscale), _minscale);
-    } else {
-      ret = false;
-    }
-  }
-
-  _offset = floor((_offset + offset) * (_preScale / _scale) - offset);
-  _offset = max(min(_offset, get_max_offset()), get_min_offset());
-
-  if (_scale != _preScale || _offset != _preOffset) {
-    _header->update();
-    _ruler->update();
-    viewport_update();
-    update_scroll();
-  }
-
-  return ret;
-}
-
-void View::zoom_vertical(double steps) {
-  int step = 10;
-  int oldHeight = _signalHeightScale;
-  if (steps > 0)
-    _signalHeightScale += step;
-  else
-    _signalHeightScale -= step;
-  _signalHeightScale =
-      max(MinSignalHeight, min(_signalHeightScale, MaxSignalHeight));
-  if (_signalHeightScale != oldHeight) {
-    double scale = (double)_signalHeightScale / oldHeight;
-    std::vector<Trace *> traces;
-    get_traces(ALL_VIEW, traces);
-    for (auto t : traces) {
-      if (t->get_own_height() > 0) {
-        t->set_own_height(
-            max(MinSignalHeight, (int)(t->get_own_height() * scale)));
-      }
-    }
-    signals_changed(NULL);
-    update_scroll();
-    viewport_update();
-  }
-}
-
-void View::compute_signal_groups() {
-  _signal_groups.clear();
-
-  if (get_work_mode() != LOGIC) {
-    return;
-  }
-
-  std::vector<Trace *> all_traces;
-  get_traces(ALL_VIEW, all_traces);
-
-  std::vector<Trace *> decode_traces;
-  std::vector<Trace *> logic_traces;
-
-  for (auto t : all_traces) {
-    if (t->get_type() == SR_CHANNEL_DECODER && t->enabled())
-      decode_traces.push_back(t);
-    else if (t->get_type() == SR_CHANNEL_LOGIC && t->enabled())
-      logic_traces.push_back(t);
-  }
-
-  // 按 view_index 排序，确保分组顺序与布局顺序一致
-  sort(decode_traces.begin(), decode_traces.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
-  });
-  sort(logic_traces.begin(), logic_traces.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
-  });
-
-  std::set<int> assigned_signals;
-  int group_id = 0;
-
-  // 第一阶段：收集每个解码通道绑定的逻辑通道索引集合
-  struct DecodeBinding {
-    DecodeTrace *trace;
-    std::set<int> bound_logic_indices;
-  };
-  std::vector<DecodeBinding> decode_bindings;
-
-  for (auto dt : decode_traces) {
-    DecodeTrace *dtrace = dynamic_cast<DecodeTrace *>(dt);
-    if (!dtrace)
-      continue;
-
-    DecodeBinding binding;
-    binding.trace = dtrace;
-
-    pv::data::DecoderStack *decoder_stack = dtrace->decoder();
-    if (decoder_stack) {
-      for (auto decoder : decoder_stack->stack()) {
-        auto probe_list = decoder->binded_probe_list();
-        for (auto probe : probe_list) {
-          int binded_index = decoder->binded_probe_index(probe);
-          binding.bound_logic_indices.insert(binded_index);
-        }
-      }
-    }
-
-    decode_bindings.push_back(binding);
-  }
-
-  // 第二阶段：将绑定到相同逻辑通道的解码通道合并到同一组
-  std::vector<bool> grouped(decode_bindings.size(), false);
-
-  for (size_t i = 0; i < decode_bindings.size(); i++) {
-    if (grouped[i])
-      continue;
-
-    SignalGroup group;
-    group.group_id = group_id++;
-    group.traces.push_back(decode_bindings[i].trace);
-    grouped[i] = true;
-
-    // 收集该组的所有逻辑通道
-    std::set<int> group_logic_indices = decode_bindings[i].bound_logic_indices;
-
-    // 查找其他绑定到相同逻辑通道的解码通道并合并
-    for (size_t j = i + 1; j < decode_bindings.size(); j++) {
-      if (grouped[j])
-        continue;
-
-      // 检查是否有共同的逻辑通道绑定
-      bool shares_logic = false;
-      for (int logic_idx : decode_bindings[j].bound_logic_indices) {
-        if (group_logic_indices.find(logic_idx) != group_logic_indices.end()) {
-          shares_logic = true;
-          break;
-        }
-      }
-
-      if (shares_logic) {
-        group.traces.push_back(decode_bindings[j].trace);
-        grouped[j] = true;
-        // 合并逻辑通道集合
-        group_logic_indices.insert(
-            decode_bindings[j].bound_logic_indices.begin(),
-            decode_bindings[j].bound_logic_indices.end());
-      }
-    }
-
-    // 将逻辑通道加入组（按原始顺序）
-    for (auto lt : logic_traces) {
-      int logic_index = lt->get_index();
-      if (group_logic_indices.find(logic_index) != group_logic_indices.end() &&
-          assigned_signals.find(logic_index) == assigned_signals.end()) {
-        group.traces.push_back(lt);
-        assigned_signals.insert(logic_index);
-      }
-    }
-
-    _signal_groups.push_back(group);
-  }
-
-  std::vector<Trace *> unassigned;
-  for (auto lt : logic_traces) {
-    if (assigned_signals.find(lt->get_index()) == assigned_signals.end()) {
-      unassigned.push_back(lt);
-    }
-  }
-  sort(unassigned.begin(), unassigned.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
-  });
-  // 连续的未分配逻辑通道合并成一个组，不连续的单独成组
-  if (!unassigned.empty()) {
-    SignalGroup group;
-    group.group_id = group_id++;
-    group.traces.push_back(unassigned[0]);
-    for (size_t i = 1; i < unassigned.size(); i++) {
-      // 检查是否连续（view_index 相差1）
-      if (unassigned[i]->get_view_index() ==
-          unassigned[i - 1]->get_view_index() + 1) {
-        group.traces.push_back(unassigned[i]);
-      } else {
-        // 不连续，创建新组
-        _signal_groups.push_back(group);
-        group = SignalGroup();
-        group.group_id = group_id++;
-        group.traces.push_back(unassigned[i]);
-      }
-    }
-    _signal_groups.push_back(group);
-  }
-
-  for (auto &group : _signal_groups) {
-    sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      return a->get_v_offset() < b->get_v_offset();
-    });
-  }
-}
+void View::compute_signal_groups() { _signal_sync->compute_signal_groups(); }
 
 QColor View::get_group_card_color() {
-  QColor c = AppConfig::Instance().GetThemeColor("@group-card-bg");
-  if (c.isValid())
-    return c;
-  AppConfig &app = AppConfig::Instance();
-  if (app.IsDarkStyle())
-    return QColor(0x1a, 0x1a, 0x1a);
-  else
-    return QColor(0xfa, 0xfa, 0xfa);
+  return _signal_sync->get_group_card_color();
 }
 
 bool View::is_colored_card_mode() {
-  QString val = AppConfig::Instance().GetThemeTokenValue("@group-card-colored");
-  return val == "true";
+  return _signal_sync->is_colored_card_mode();
 }
 
 QColor View::get_group_card_color(int group_index) {
-  if (is_colored_card_mode()) {
-    const auto &groups = get_signal_groups();
-    if (group_index >= 0 && group_index < (int)groups.size()) {
-      const auto &group = groups[group_index];
-      if (!group.traces.empty()) {
-        auto *trace = group.traces[0];
-        return get_trace_card_color(trace);
-      }
-    }
-  }
-  return get_group_card_color();
+  return _signal_sync->get_group_card_color(group_index);
 }
 
 QColor View::get_trace_card_color(Trace *trace) {
-  if (is_colored_card_mode() && trace) {
-    auto index_list = trace->get_index_list();
-    if (!index_list.empty()) {
-      int idx = *index_list.begin() % 8;
-      QString token = QString("@logic-channel-%1").arg(idx);
-      QColor signalColor = AppConfig::Instance().GetThemeColor(token);
-      if (!signalColor.isValid())
-        signalColor = Trace::PROBE_COLORS[idx];
-      // PulseView style: signal color + 8% alpha
-      QColor bgColor = signalColor;
-      bgColor.setAlpha(8 * 255 / 100);
-      return bgColor;
-    }
-  }
-  return get_group_card_color();
+  return _signal_sync->get_trace_card_color(trace);
 }
 
-void View::timebase_changed() {
-  int width = get_view_width();
-  if (width == 0) {
-    return;
-  }
-
-  if (get_work_mode() != DSO) {
-    return;
-  }
-
-  double scale = this->scale();
-  double hori_res = _sampling_bar->get_hori_res();
-
-  if (hori_res > 0) {
-    scale = _session->cur_view_time() / width;
-  }
-
-  set_scale_offset(scale, this->offset());
-}
-
-void View::set_scale_offset(double scale, int64_t offset) {
-  _preScale = _scale;
-  _preOffset = _offset;
-
-  _scale = max(scale, _minscale);
-  _offset = floor(max(offset, get_min_offset()));
-
-  if (_scale != _preScale || _offset != _preOffset) {
-    update_scroll();
-    _header->update();
-    _ruler->update();
-    viewport_update();
-  }
-}
-
-void View::limit_scale_offset() {
-  if (get_work_mode() != DSO) {
-    int width = get_view_width();
-    double sampletime = effective_data_source()->cur_sampletime();
-    uint64_t samplerate = effective_data_source()->cur_snap_samplerate();
-    if (sampletime > 0 && samplerate > 0 && width > 0) {
-      _maxscale = sampletime / (width * MaxViewRate);
-      _minscale = (1.0 / samplerate) / MaxPixelsPerSample;
-    }
-    _scale = max(min(_scale, _maxscale), _minscale);
-    _offset = max(min(_offset, get_max_offset()), get_min_offset());
-    update_scroll();
-    _ruler->update();
-    viewport_update();
-  }
-}
+void View::timebase_changed() { _data_sync->timebase_changed(); }
 
 void View::set_preScale_preOffset() { set_scale_offset(_preScale, _preOffset); }
 
+void View::schedule_visible_range_notify() {
+  if (_viewport_change_timer) {
+    _viewport_change_timer->start();
+  }
+}
+
 void View::get_traces(int type, std::vector<Trace *> &traces) {
-  assert(_session);
-
-  auto &sigs = _own_signals;
-
-  const auto &decode_sigs = effective_data_source()->get_decode_signals();
-
-  const auto &spectrums = effective_data_source()->get_spectrum_traces();
-
-  for (auto t : sigs) {
-    if (type == ALL_VIEW || _trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
-  }
-
-  for (auto t : decode_sigs) {
-    if (type == ALL_VIEW || _trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
-  }
-
-  for (auto t : spectrums) {
-    if (type == ALL_VIEW || _trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
-  }
-
-  auto lissajous = effective_data_source()->get_lissajous_trace();
-  if (lissajous && lissajous->enabled() &&
-      (type == ALL_VIEW || _trace_view_map[lissajous->get_type()] == type)) {
-    traces.push_back(lissajous);
-  }
-
-  auto math = effective_data_source()->get_math_trace();
-  if (math && math->enabled() &&
-      (type == ALL_VIEW || _trace_view_map[math->get_type()] == type)) {
-    traces.push_back(math);
-  }
-
-  sort(traces.begin(), traces.end(), compare_trace_v_offsets);
+  _signal_sync->get_traces(type, traces);
 }
 
 bool View::compare_trace_v_offsets(const Trace *a, const Trace *b) {
-  assert(a);
-  assert(b);
-
-  Trace *a1 = const_cast<Trace *>(a);
-  Trace *b1 = const_cast<Trace *>(b);
-  int v1 = 0;
-  int v2 = 0;
-
-  if (a1->get_type() != b1->get_type()) {
-    v1 = a1->get_type();
-    v2 = b1->get_type();
-  } else if (a1->get_type() == SR_CHANNEL_DSO ||
-             a1->get_type() == SR_CHANNEL_ANALOG) {
-    v1 = a1->get_index();
-    v2 = b1->get_index();
-  } else {
-    v1 = a1->get_v_offset();
-    v2 = b1->get_v_offset();
-  }
-  return v1 < v2;
+  return ViewSignalSync::compare_trace_v_offsets(a, b);
 }
 
 bool View::compare_trace_view_index(const Trace *a, const Trace *b) {
-  assert(a);
-  assert(b);
-
-  Trace *a1 = const_cast<Trace *>(a);
-  Trace *b1 = const_cast<Trace *>(b);
-  return a1->get_view_index() < b1->get_view_index();
+  return ViewSignalSync::compare_trace_view_index(a, b);
 }
 
 bool View::compare_trace_y(const Trace *a, const Trace *b) {
-  assert(a);
-  assert(b);
-
-  Trace *a1 = const_cast<Trace *>(a);
-  Trace *b1 = const_cast<Trace *>(b);
-  return a1->get_v_offset() < b1->get_v_offset();
-}
-
-void View::show_cursors(bool show) {
-  _show_cursors = show;
-  _ruler->update();
-  viewport_update();
-}
-
-void View::show_trig_cursor(bool show) {
-  _show_trig_cursor = show;
-  _ruler->update();
-  viewport_update();
-}
-
-void View::show_search_cursor(bool show) {
-  _show_search_cursor = show;
-  _ruler->update();
-  viewport_update();
+  return ViewSignalSync::compare_trace_y(a, b);
 }
 
 void View::status_clear() {
@@ -919,452 +429,32 @@ void View::status_clear() {
 
 void View::repeat_unshow() { _viewbottom->repeat_unshow(); }
 
-void View::frame_began() {
-  _search_hit = false;
-  _search_pos = 0;
-  set_search_pos(_search_pos, _search_hit);
-}
+void View::frame_began() { _data_sync->frame_began(); }
 
-void View::receive_end() {
-  if (get_work_mode() == LOGIC) {
-    bool rle = false;
-    uint64_t actual_samples;
-    bool ret;
-
-    ret = _device_agent->get_config_bool(SR_CONF_RLE, rle);
-
-    if (ret && rle) {
-      ret = _device_agent->get_config_uint64(SR_CONF_ACTUAL_SAMPLES,
-                                             actual_samples);
-      if (ret) {
-        if (actual_samples != effective_data_source()->cur_samplelimits()) {
-          _viewbottom->set_rle_depth(actual_samples);
-        }
-      }
-    }
-  }
-  _time_viewport->unshow_wait_trigger();
-
-  limit_scale_offset();
-}
+void View::receive_end() { _data_sync->receive_end(); }
 
 void View::receive_trigger(quint64 trig_pos1) {
-  (void)trig_pos1;
-  uint64_t trig_pos = effective_data_source()->get_trigger_pos();
-  set_trig_cursor_posistion(trig_pos);
-}
-
-void View::set_trig_cursor_posistion(uint64_t trig_pos) {
-  const double time =
-      trig_pos * 1.0 / effective_data_source()->cur_snap_samplerate();
-  _trig_cursor->set_index(trig_pos);
-
-  int width = get_view_width();
-  assert(width > 0);
-
-  if (ds_trigger_get_en() || _device_agent->is_virtual() ||
-      get_work_mode() == DSO) {
-    _show_trig_cursor = true;
-
-    AppConfig &app = AppConfig::Instance();
-    if (app.appOptions.trigPosDisplayInMid) {
-      set_scale_offset(_scale, (time / _scale) - (width / 2));
-    }
-  }
-
-  _ruler->update();
-  viewport_update();
+  _data_sync->receive_trigger(trig_pos1);
 }
 
 void View::set_trig_pos(int percent) {
-  uint64_t index = effective_data_source()->cur_samplelimits() * percent / 100;
+  uint64_t index = document_snapshot_source()->cur_samplelimits() * percent / 100;
 
-  if (_session->have_view_data() == false || _session->is_working()) {
+  if (_data_source->have_view_data() == false || _data_source->is_working()) {
     set_trig_cursor_posistion(index);
   }
 }
 
-void View::set_search_pos(uint64_t search_pos, bool hit) {
-  QColor fore(QWidget::palette().color(QWidget::foregroundRole()));
-  fore.setAlpha(View::BackAlpha);
+void View::normalize_layout() { _signal_sync->normalize_layout(); }
 
-  const double time =
-      search_pos * 1.0 / effective_data_source()->cur_snap_samplerate();
-  _search_pos = search_pos;
-  _search_hit = hit;
-  _search_cursor->set_index(search_pos);
-  _search_cursor->set_colour(hit ? View::Blue : fore);
-
-  int width = get_view_width();
-  assert(width);
-
-  if (hit) {
-    set_scale_offset(_scale, (time / _scale) - (width / 2));
-    _ruler->update();
-    viewport_update();
-  }
-}
-
-void View::normalize_layout() {
-  int v_min = INT_MAX;
-  std::vector<Trace *> traces;
-  get_traces(ALL_VIEW, traces);
-
-  for (auto t : traces) {
-    v_min = min(t->get_v_offset(), v_min);
-  }
-
-  const int delta = -min(v_min, 0);
-
-  for (auto t : traces) {
-    t->set_v_offset(t->get_v_offset() + delta);
-  }
-
-  _vOffset = 0;
-  verticalScrollBar()->setSliderPosition(0);
-  v_scroll_value_changed(0);
-}
-
-void View::get_scroll_layout(int64_t &length, int64_t &offset) {
-  length = ceil(effective_data_source()->cur_snap_sampletime() / _scale);
-  offset = _offset;
-}
-
-void View::update_scroll() {
-  assert(_viewcenter);
-
-  int width = get_view_width();
-  if (width == 0) {
-    return;
-  }
-
-  const QSize areaSize = QSize(width, get_view_height());
-
-  // Set the horizontal scroll bar
-  int64_t length = 0;
-  int64_t offset = 0;
-  get_scroll_layout(length, offset);
-  length = max(length - areaSize.width(), (int64_t)0);
-
-  horizontalScrollBar()->setPageStep(areaSize.width() / 2);
-
-  _updating_scroll = true;
-
-  if (length < MaxScrollValue) {
-    horizontalScrollBar()->setRange(0, length);
-    horizontalScrollBar()->setSliderPosition(offset);
-  } else {
-    horizontalScrollBar()->setRange(0, MaxScrollValue);
-    horizontalScrollBar()->setSliderPosition(_offset * 1.0 / length *
-                                             MaxScrollValue);
-  }
-
-  _updating_scroll = false;
-
-  // Set the vertical scrollbar
-  int totalContentHeight = 0;
-  if (_time_viewport)
-    totalContentHeight = _time_viewport->get_total_height();
-  int vRange = max(0, totalContentHeight - areaSize.height());
-  if (vRange > 0)
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-  else
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  verticalScrollBar()->setPageStep(areaSize.height());
-  verticalScrollBar()->setRange(0, vRange);
-  verticalScrollBar()->setSliderPosition(_vOffset);
-}
-
-void View::update_scale_offset() {
-  int width = get_view_width();
-  if (width == 0) {
-    return;
-  }
-
-  if (get_work_mode() != DSO) {
-    double sampletime = effective_data_source()->cur_sampletime();
-    uint64_t samplerate = effective_data_source()->cur_snap_samplerate();
-    if (sampletime > 0 && samplerate > 0) {
-      _maxscale = sampletime / (width * MaxViewRate);
-      _minscale = (1.0 / samplerate) / MaxPixelsPerSample;
-    } else {
-      _maxscale = 1e9;
-      _minscale = 1e-15;
-    }
-    _scale = max(_scale, _minscale);
-  } else {
-    _scale = _session->cur_view_time() / width;
-    _maxscale = 1e9;
-    _minscale = 1e-15;
-    _scale = max(_scale, _minscale);
-  }
-
-  _offset = max(_offset, get_min_offset());
-
-  _preScale = _scale;
-  _preOffset = _offset;
-
-  _ruler->update();
-  viewport_update();
-}
-
-void View::mode_changed() {
-  if (_device_agent->is_virtual()) {
-    uint64_t samplerate = effective_data_source()->cur_snap_samplerate();
-    if (samplerate > 0)
-      _scale = WellSamplesPerPixel * 1.0 / samplerate;
-  }
-  _scale = max(min(_scale, _maxscale), _minscale);
-}
+void View::mode_changed() { _data_sync->mode_changed(); }
 
 void View::signals_changed(const Trace *eventTrace) {
-  double actualMargin = SignalMargin;
-  int total_rows = 0;
-  int label_size = 0;
-  std::vector<Trace *> time_traces;
-  std::vector<Trace *> fft_traces;
-  std::vector<Trace *> traces;
-  std::vector<Trace *> logic_traces;
-  std::vector<Trace *> decoder_traces;
-
-  (void)eventTrace;
-
-  compute_signal_groups();
-
-  if (get_work_mode() == LOGIC && !_signal_groups.empty()) {
-    std::vector<size_t> group_order(_signal_groups.size());
-    for (size_t i = 0; i < _signal_groups.size(); i++)
-      group_order[i] = i;
-    sort(group_order.begin(), group_order.end(), [this](size_t a, size_t b) {
-      int minA = INT_MAX, minB = INT_MAX;
-      for (auto gt : _signal_groups[a].traces) {
-        if (gt->get_view_index() >= 0)
-          minA = min(minA, gt->get_view_index());
-      }
-      for (auto gt : _signal_groups[b].traces) {
-        if (gt->get_view_index() >= 0)
-          minB = min(minB, gt->get_view_index());
-      }
-      return minA < minB;
-    });
-
-    int new_index = 0;
-    for (size_t gi : group_order) {
-      sort(_signal_groups[gi].traces.begin(), _signal_groups[gi].traces.end(),
-           [](Trace *a, Trace *b) {
-             return a->get_view_index() < b->get_view_index();
-           });
-      for (auto gt : _signal_groups[gi].traces) {
-        gt->set_view_index(new_index++);
-      }
-    }
-  }
-
-  get_traces(ALL_VIEW, traces);
-
-  for (auto t : traces) {
-    if (_trace_view_map[t->get_type()] == TIME_VIEW) {
-      time_traces.push_back(t);
-    } else if (_trace_view_map[t->get_type()] == FFT_VIEW) {
-      if (t->enabled())
-        fft_traces.push_back(t);
-    }
-
-    if (t->get_type() == SR_CHANNEL_LOGIC)
-      logic_traces.push_back(t);
-    else if (t->get_type() == SR_CHANNEL_DECODER)
-      decoder_traces.push_back(t);
-  }
-
-  if (!fft_traces.empty()) {
-    if (!_fft_viewport->isVisible()) {
-      _fft_viewport->setVisible(true);
-      _fft_viewport->clear_measure();
-      _viewport_list.push_back(_fft_viewport);
-      _vsplitter->refresh();
-    }
-
-    for (auto t : fft_traces) {
-      t->set_view(this);
-      t->set_viewport(_fft_viewport);
-      t->set_totalHeight(_fft_viewport->height());
-      t->set_v_offset(_fft_viewport->geometry().bottom());
-    }
-  } else {
-    _fft_viewport->setVisible(false);
-    _vsplitter->refresh();
-
-    // Find the _fft_viewport in the stack
-    std::list<QWidget *>::iterator iter = _viewport_list.begin();
-
-    for (unsigned int i = 0; i < _viewport_list.size(); i++, iter++) {
-      if ((*iter) == _fft_viewport)
-        break;
-    }
-
-    // Delete the element
-    if (iter != _viewport_list.end())
-      _viewport_list.erase(iter);
-  }
-
-  if (!time_traces.empty() && _time_viewport) {
-    for (auto t : time_traces) {
-      if (dynamic_cast<DsoSignal *>(t) || t->visible())
-        total_rows += t->rows_size();
-      if (t->rows_size() != 0)
-        label_size++;
-    }
-
-    const double height =
-        (_time_viewport->height() - 2 * actualMargin * label_size) * 1.0 /
-        total_rows;
-
-    if (_device_agent->have_instance() == false) {
-      assert(false);
-    }
-
-    int mode = get_work_mode();
-
-    if (mode == LOGIC) {
-      _signalHeight = _signalHeightScale;
-    } else if (get_work_mode() == DSO) {
-      // PXView's _viewbottom is hidden and overlaid on viewport,
-      // so _header->height() is ~DsoStatusHeight larger than original DSView.
-      // Subtract DsoStatusHeight to match the original signal height.
-      _signalHeight = (_header->height() - DsoStatusHeight -
-                       horizontalScrollBar()->height() -
-                       2 * actualMargin * label_size) *
-                      1.0 / total_rows;
-    } else {
-      _signalHeight = (int)((height <= 0) ? 1 : height);
-    }
-
-    _spanY = _signalHeight + 2 * actualMargin;
-    double next_v_offset = actualMargin;
-
-    if (mode == LOGIC) {
-      time_traces.clear();
-
-      std::vector<Trace *> all_traces;
-
-      for (auto t : logic_traces) {
-        all_traces.push_back(t);
-      }
-
-      for (auto t : decoder_traces) {
-        if (t->get_view_index() != -1)
-          all_traces.push_back(t);
-        else
-          time_traces.push_back(t);
-      }
-
-      sort(all_traces.begin(), all_traces.end(), compare_trace_view_index);
-
-      for (auto t : all_traces) {
-        time_traces.push_back(t);
-      }
-    }
-
-    int current_group_id = -1;
-
-    for (auto t : time_traces) {
-      t->set_view(this);
-      t->set_viewport(_time_viewport);
-
-      if (t->rows_size() == 0)
-        continue;
-
-      if (!dynamic_cast<DsoSignal *>(t) && !t->visible())
-        continue;
-
-      int trace_group_id = -1;
-      for (auto &group : _signal_groups) {
-        for (auto gt : group.traces) {
-          if (gt == t) {
-            trace_group_id = group.group_id;
-            break;
-          }
-        }
-        if (trace_group_id != -1)
-          break;
-      }
-
-      if (current_group_id != -1 && trace_group_id != current_group_id) {
-        next_v_offset += GroupGap + 5;
-      }
-      current_group_id = trace_group_id;
-
-      double traceHeight;
-      if (t->get_own_height() > 0) {
-        traceHeight = t->get_own_height();
-      } else {
-        traceHeight = _signalHeight * t->rows_size();
-      }
-      t->set_totalHeight((int)traceHeight);
-      t->set_v_offset(qRound(next_v_offset + 0.5 * traceHeight + actualMargin));
-      next_v_offset += traceHeight + 2 * actualMargin;
-
-      if (t->signal_type() == SR_CHANNEL_DSO) {
-        auto sig = dynamic_cast<view::DsoSignal *>(t);
-        // PXView's _viewbottom is hidden and overlaid on viewport,
-        // so viewport height is ~DsoStatusHeight larger than original DSView.
-        // Subtract DsoStatusHeight to match the original scale.
-        const int scale_height = sig->get_view_rect().height() - DsoStatusHeight;
-        sig->set_scale(scale_height > 0 ? scale_height : sig->get_view_rect().height());
-      } else if (t->signal_type() == SR_CHANNEL_ANALOG) {
-        auto sig = dynamic_cast<view::AnalogSignal *>(t);
-        sig->set_scale(sig->get_totalHeight());
-      }
-    }
-    _time_viewport->clear_measure();
-    _session->update_dso_data_scale();
-  }
-
-  normalize_layout();
-
-  for (auto &group : _signal_groups) {
-    sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      return a->get_v_offset() < b->get_v_offset();
-    });
-  }
-
-  header_updated();
-  update_scale_offset();
-  data_updated();
+  _signal_sync->signals_changed(eventTrace);
 }
 
 bool View::eventFilter(QObject *object, QEvent *event) {
-  if (_destroying)
-    return QObject::eventFilter(object, event);
-
-  const QEvent::Type type = event->type();
-  if (type == QEvent::MouseMove) {
-    const QMouseEvent *const mouse_event = (QMouseEvent *)event;
-    if (object == _ruler || object == _time_viewport ||
-        object == _fft_viewport) {
-      //_hover_point = QPoint(mouse_event->x(), 0);
-      double cur_periods = (mouse_event->position().toPoint().x() + _offset) *
-                           _scale / _ruler->get_min_period();
-      int integer_x =
-          round(cur_periods) * _ruler->get_min_period() / _scale - _offset;
-      double cur_deviate_x =
-          qAbs(mouse_event->position().toPoint().x() - integer_x);
-      if (get_work_mode() == LOGIC && cur_deviate_x < 10)
-        _hover_point = QPoint(integer_x, mouse_event->position().toPoint().y());
-      else
-        _hover_point = mouse_event->position().toPoint();
-    } else if (object == _header)
-      _hover_point = QPoint(0, (int)mouse_event->position().y());
-    else
-      _hover_point = QPoint(-1, -1);
-
-    hover_point_changed();
-  } else if (type == QEvent::Leave) {
-    _hover_point = QPoint(-1, -1);
-    hover_point_changed();
-  }
-
-  return QObject::eventFilter(object, event);
+  return _data_sync->eventFilter(object, event);
 }
 
 bool View::viewportEvent(QEvent *e) {
@@ -1383,29 +473,7 @@ bool View::viewportEvent(QEvent *e) {
   }
 }
 
-int View::headerWidth() {
-  if (_header_collapsed) {
-    int w = Trace::SquareWidth + 2 * Trace::Margin + 10;
-    setViewportMargins(w, RulerHeight, 0, 0);
-    return w;
-  }
-
-  int headerWidth = _header->get_nameEditWidth();
-
-  std::vector<Trace *> traces;
-  get_traces(ALL_VIEW, traces);
-
-  if (!traces.empty()) {
-    for (auto t : traces) {
-      int w = t->get_name_width() + t->get_leftWidth() + t->get_rightWidth();
-      headerWidth = max(w, headerWidth);
-    }
-  }
-
-  setViewportMargins(headerWidth, RulerHeight, 0, 0);
-
-  return headerWidth;
-}
+int View::headerWidth() { return _signal_sync->headerWidth(); }
 
 void View::paintEvent(QPaintEvent *event) { QScrollArea::paintEvent(event); }
 
@@ -1415,75 +483,7 @@ void View::scrollContentsBy(int dx, int dy) {
 }
 
 void View::resizeEvent(QResizeEvent *event) {
-  (void)event;
-  int width = get_view_width();
-
-  if (width == 0) {
-    return;
-  }
-
-  // 优化：如果只是高度变化（如 TitleBar Ribbon 展开/折叠），且宽度不变，
-  // 则跳过大部分重计算，因为 viewport 只是被平移，内容没有变化
-  bool widthChanged = (_lastWidth != width);
-  _lastWidth = width;
-
-  if (!widthChanged && get_work_mode() != DSO) {
-    setViewportMargins(headerWidth(), RulerHeight, 0, 0);
-    _header->header_resize();
-    update_scroll();
-    viewport_update();
-    return;
-  }
-
-  reconstruct();
-  setViewportMargins(headerWidth(), RulerHeight, 0, 0);
-  update_margins();
-  update_scroll();
-  signals_changed(NULL);
-
-  if (get_work_mode() == DSO) {
-    _scale = _session->cur_view_time() / width;
-  }
-
-  if (get_work_mode() != DSO) {
-    _maxscale =
-        effective_data_source()->cur_sampletime() / (width * MaxViewRate);
-    if (_scale > _maxscale) {
-      _scale = _maxscale;
-    }
-  } else {
-    _maxscale = 1e9;
-  }
-
-  _ruler->update();
-  _header->header_resize();
-  set_update(_time_viewport, true);
-  set_update(_fft_viewport, true);
-  resize();
-}
-
-void View::h_scroll_value_changed(int value) {
-  if (_updating_scroll)
-    return;
-
-  _preOffset = _offset;
-
-  const int range = horizontalScrollBar()->maximum();
-  if (range < MaxScrollValue)
-    _offset = value;
-  else {
-    int64_t length = 0;
-    int64_t offset = 0;
-    get_scroll_layout(length, offset);
-    _offset = floor(value * 1.0 / MaxScrollValue * length);
-  }
-
-  _offset = max(min(_offset, get_max_offset()), get_min_offset());
-
-  if (_offset != _preOffset) {
-    _ruler->update();
-    viewport_update();
-  }
+  _data_sync->resizeEvent(event);
 }
 
 void View::v_scroll_value_changed(int value) {
@@ -1492,45 +492,7 @@ void View::v_scroll_value_changed(int value) {
   viewport_update();
 }
 
-void View::data_updated() {
-  // Deduplicate rapid calls: if called within 16ms of the last execution,
-  // only mark viewports dirty without doing full update cycle
-  if (_data_updated_timer.isValid() && _data_updated_timer.elapsed() < 16) {
-    set_update(_time_viewport, true);
-    set_update(_fft_viewport, true);
-    return;
-  }
-
-  setViewportMargins(headerWidth(), RulerHeight, 0, 0);
-  update_margins();
-
-  // Update the scroll bars
-  update_scroll();
-
-  // update scale & offset
-  update_scale_offset();
-
-  // Repaint the view
-  _time_viewport->unshow_wait_trigger();
-  set_update(_time_viewport, true);
-  set_update(_fft_viewport, true);
-  viewport_update();
-  _ruler->update();
-
-  _data_updated_timer.start();
-}
-
-void View::update_margins() {
-  int width = get_view_width();
-
-  if (width > 0) {
-    _ruler->setGeometry(_viewcenter->x(), 0, this->width() - _viewcenter->x(),
-                        _viewcenter->y());
-    _header->setGeometry(0, _viewcenter->y(), _viewcenter->x(),
-                         _viewcenter->height());
-    _devmode->setGeometry(0, 0, _viewcenter->x(), _viewcenter->y());
-  }
-}
+void View::data_updated() { _data_sync->data_updated(); }
 
 void View::header_updated() {
   headerWidth();
@@ -1553,101 +515,10 @@ void View::on_header_collapse_changed(bool collapsed) {
   _ruler->update();
 }
 
-void View::marker_time_changed() {
-  _ruler->update();
-  viewport_update();
-}
-
 void View::on_traces_moved() {
   update_scroll();
   set_update(_time_viewport, true);
   viewport_update();
-}
-
-void View::make_cursors_order() {
-  int dex = 1;
-
-  for (auto cursor : get_cursorList()) {
-    cursor->set_order(dex++);
-  }
-
-  dex = 1;
-  for (auto cursor : get_xcursorList()) {
-    cursor->set_order(dex++);
-  }
-}
-
-void View::add_cursor(QColor color, uint64_t sampleIndex) {
-  (void)color;
-  Cursor *newCursor = new Cursor(*this, -1, sampleIndex);
-  get_cursorList().push_back(newCursor);
-  make_cursors_order();
-  cursor_update();
-}
-
-void View::add_cursor(uint64_t sampleIndex) {
-  static int lastOrder = 1;
-  Cursor *newCursor = new Cursor(*this, lastOrder++, sampleIndex);
-  get_cursorList().push_back(newCursor);
-  make_cursors_order();
-  cursor_update();
-}
-
-void View::del_cursor(Cursor *cursor) {
-  assert(cursor);
-
-  get_cursorList().remove(cursor);
-  delete cursor;
-  make_cursors_order();
-
-  cursor_update();
-}
-
-void View::clear_cursors() {
-  auto &lst = get_cursorList();
-  for (auto c : lst) {
-    delete c;
-  }
-
-  lst.clear();
-}
-
-void View::add_xcursor(double value0, double value1) {
-  static int lastXCursorOrder = 1;
-  XCursor *newXCursor = new XCursor(*this, lastXCursorOrder++, value0, value1);
-  _xcursorList.push_back(newXCursor);
-  make_cursors_order();
-  xcursor_update();
-}
-
-void View::del_xcursor(XCursor *xcursor) {
-  assert(xcursor);
-
-  _xcursorList.remove(xcursor);
-  delete xcursor;
-  make_cursors_order();
-  xcursor_update();
-}
-
-void View::set_cursor_middle(int index) {
-  auto &lst = get_cursorList();
-  int size = lst.size();
-  (void)size;
-  assert(index < size);
-
-  int width = get_view_width();
-  // if (width > 0);
-
-  auto i = lst.begin();
-
-  while (index-- != 0) {
-    i++;
-  }
-
-  set_scale_offset(
-      _scale, (*i)->index() / (effective_data_source()->cur_snap_samplerate() *
-                               _scale) -
-                  (width / 2));
 }
 
 void View::on_measure_updated() {
@@ -1662,46 +533,8 @@ QString View::get_measure(QString option) {
   return Unknown_Str;
 }
 
-QString View::get_cm_time(int index) {
-  uint64_t sampleIndex = get_cursor_samples(index);
-  uint64_t sampleRate = effective_data_source()->cur_snap_samplerate();
-  return _ruler->format_real_time(sampleIndex, sampleRate);
-}
-
-QString View::get_cm_delta(int index1, int index2) {
-  if (index1 == index2)
-    return "0";
-
-  uint64_t samples1 = get_cursor_samples(index1);
-  uint64_t samples2 = get_cursor_samples(index2);
-  uint64_t delta_sample =
-      (samples1 > samples2) ? samples1 - samples2 : samples2 - samples1;
-  return _ruler->format_real_time(
-      delta_sample, effective_data_source()->cur_snap_samplerate());
-}
-
 QString View::get_index_delta(uint64_t start, uint64_t end) {
-  if (start == end)
-    return "0";
-
-  uint64_t delta_sample = (start > end) ? start - end : end - start;
-  return _ruler->format_real_time(
-      delta_sample, effective_data_source()->cur_snap_samplerate());
-}
-
-uint64_t View::get_cursor_samples(int index) {
-  auto &lst = get_cursorList();
-  assert(index < (int)lst.size());
-
-  uint64_t ret = 0;
-  int curIndex = 0;
-  for (list<Cursor *>::iterator i = lst.begin(); i != lst.end(); i++) {
-    if (index == curIndex) {
-      ret = (*i)->index();
-    }
-    curIndex++;
-  }
-  return ret;
+  return _data_sync->get_index_delta(start, end);
 }
 
 void View::set_measure_en(int enable) {
@@ -1717,16 +550,7 @@ void View::on_state_changed(bool stop) {
   update_scale_offset();
 }
 
-QRect View::get_view_rect() {
-  if (get_work_mode() == DSO) {
-    const auto &sigs = _own_signals;
-    if (sigs.size() > 0) {
-      return sigs[0]->get_view_rect();
-    }
-  }
-
-  return _viewcenter->rect();
-}
+QRect View::get_view_rect() { return _data_sync->get_view_rect(); }
 
 int View::get_work_mode() const {
   if (_document && _document->has_signal_config()) {
@@ -1735,106 +559,30 @@ int View::get_work_mode() const {
   return _device_agent->get_work_mode();
 }
 
-int View::get_view_width() {
-  int view_width = 0;
-  if (get_work_mode() == DSO) {
-    for (auto s : _own_signals) {
-      view_width = max(view_width, s->get_view_rect().width());
-    }
-  } else {
-    view_width = _viewcenter->width();
-  }
-
-  if (view_width == 0) {
-    view_width = 1;
-  }
-
-  return view_width;
+bool View::is_logic_rendering_mode() const {
+  // MSO (Mixed Signal Oscilloscope) = LOGIC + analog channels.
+  // Core 层 SigSession 已将 LOGIC 与 MSO 合并处理（sigsession.cpp:1605/1612），
+  // View 层所有原 `get_work_mode() == LOGIC` 的渲染/交互分支应统一改用本谓词，
+  // 让 MSO 模式继承 LOGIC 的全部行为（主题色板注入、滤波浮窗、信号分组等）。
+  const int mode = get_work_mode();
+  return mode == LOGIC || mode == MSO;
 }
 
-int View::get_view_height() {
-  int view_height = 0;
-  if (get_work_mode() == DSO) {
-    for (auto s : _own_signals) {
-      view_height = max(view_height, s->get_view_rect().height());
-    }
-  } else {
-    view_height = _time_viewport ? _time_viewport->height() : 0;
-  }
+int View::get_view_width() { return _data_sync->get_view_width(); }
 
-  return view_height;
-}
-
-int64_t View::get_min_offset() {
-  int width = get_view_width();
-  assert(width > 0);
-
-  if (MaxViewRate > 1)
-    return floor(width * (1 - MaxViewRate));
-  else
-    return 0;
-}
-
-int64_t View::get_max_offset() {
-  int width = get_view_width();
-  assert(width > 0);
-
-  return ceil((effective_data_source()->cur_snap_sampletime() / _scale) -
-              (width * MaxViewRate));
-}
+int View::get_view_height() { return _data_sync->get_view_height(); }
 
 int64_t View::get_logic_lst_data_offset() {
-  int width = get_view_width();
-  assert(width > 0);
-
-  return ceil((_session->get_logic_data_view_time() / _scale) -
-              (width * MaxViewRate));
+  return _data_sync->get_logic_lst_data_offset();
 }
 
 void View::scroll_to_logic_last_data_time() {
-  set_scale_offset(scale(), get_logic_lst_data_offset() + 10);
+  _data_sync->scroll_to_logic_last_data_time();
 }
 
-// -- calibration dialog
-void View::show_calibration() {
-  if (_cali != NULL) {
-    _cali->deleteLater();
-    _cali = NULL;
-  }
+void View::vDial_updated() { _data_sync->vDial_updated(); }
 
-  _cali = new pv::dialogs::Calibration(this);
-  connect(_cali, &pv::dialogs::Calibration::sig_closed, this,
-          &View::on_calibration_closed);
-  _cali->update_device_info();
-  _cali->show();
-}
-
-void View::on_calibration_closed() {
-  if (_cali != NULL) {
-    _cali->deleteLater();
-    _cali = NULL;
-  }
-}
-
-void View::hide_calibration() { on_calibration_closed(); }
-
-void View::vDial_updated() {
-  if (_cali != NULL) {
-    _cali->update_device_info();
-  }
-
-  auto math_trace = effective_data_source()->get_math_trace();
-  if (math_trace && math_trace->enabled()) {
-    math_trace->update_vDial();
-  }
-}
-
-void View::dso_factor_updated() {
-  auto math_trace = effective_data_source()->get_math_trace();
-  if (math_trace && math_trace->enabled()) {
-    math_trace->update_vDial();
-  }
-}
+void View::dso_factor_updated() { _data_sync->dso_factor_updated(); }
 
 // -- lissajous figure
 void View::show_lissajous(bool show) {
@@ -1843,34 +591,7 @@ void View::show_lissajous(bool show) {
 }
 
 void View::show_region(uint64_t start, uint64_t end, bool keep) {
-  assert(start <= end);
-
-  int width = get_view_width();
-  if (width == 0) {
-    return;
-  }
-
-  if (keep) {
-    set_all_update(true);
-    update();
-  } else if (_session->get_map_zoom() == 0) {
-    const double ideal_scale = (end - start) * 2.0 /
-                               effective_data_source()->cur_snap_samplerate() /
-                               width;
-    const double new_scale = max(min(ideal_scale, _maxscale), _minscale);
-    const double new_off =
-        (start + end) * 0.5 /
-            (effective_data_source()->cur_snap_samplerate() * new_scale) -
-        (width / 2);
-    set_scale_offset(new_scale, new_off);
-  } else {
-    const double new_scale = scale();
-    const double new_off =
-        (start + end) * 0.5 /
-            (effective_data_source()->cur_snap_samplerate() * new_scale) -
-        (width / 2);
-    set_scale_offset(new_scale, new_off);
-  }
+  _data_sync->show_region(start, end, keep);
 }
 
 void View::viewport_update() {
@@ -1904,7 +625,15 @@ void View::reload() {
 void View::clear() {
   show_trig_cursor(false);
 
-  if (get_work_mode() != DSO) {
+  // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能为 NULL，
+  // 此时 work_mode 查询会失败。用 document 配置或默认值（非 DSO）避免警告刷屏。
+  int mode = LOGIC;
+  if (_document && _document->has_signal_config()) {
+    mode = _document->get_signal_config().work_mode;
+  } else if (_device_agent && _device_agent->have_instance()) {
+    mode = _device_agent->get_work_mode();
+  }
+  if (mode != DSO) {
     show_xcursors(false);
   } else {
     if (!get_xcursorList().empty())
@@ -1913,7 +642,14 @@ void View::clear() {
 }
 
 void View::reconstruct() {
-  if (get_work_mode() == DSO)
+  // 同上：设备切换早期避免查询设备
+  int mode = LOGIC;
+  if (_document && _document->has_signal_config()) {
+    mode = _document->get_signal_config().work_mode;
+  } else if (_device_agent && _device_agent->have_instance()) {
+    mode = _device_agent->get_work_mode();
+  }
+  if (mode == DSO)
     _viewbottom->setFixedHeight(DsoStatusHeight);
   else
     _viewbottom->setFixedHeight(StatusHeight);
@@ -1932,297 +668,32 @@ void View::show_captured_progress(bool triggered, int progress) {
 bool View::get_dso_trig_moved() { return _time_viewport->get_dso_trig_moved(); }
 
 double View::index2pixel(uint64_t index, bool has_hoff) {
-  const uint64_t rateValue = effective_data_source()->cur_snap_samplerate();
-  const double scaleValue = scale();
-  const int64_t offsetValue = offset();
-  const double hoffValue = trig_hoff();
-
-  double pixels = 0;
-
-  const double samples_per_pixel = rateValue * scaleValue;
-
-  if (has_hoff) {
-    pixels =
-        index / samples_per_pixel - offsetValue + hoffValue / samples_per_pixel;
-  } else {
-    pixels = index / samples_per_pixel - offsetValue;
-  }
-
-  /*
-  const double samples_per_pixel = _data_source->cur_snap_samplerate() *
-  scale(); double pixels; if (has_hoff) pixels = index/samples_per_pixel -
-  offset() + trig_hoff()/samples_per_pixel; else pixels =
-  index/samples_per_pixel - offset();
-      */
-
-  return pixels;
+  return _data_sync->index2pixel(index, has_hoff);
 }
 
 uint64_t View::pixel2index(double pixel) {
-  const uint64_t rateValue = effective_data_source()->cur_snap_samplerate();
-  const double scaleValue = scale();
-  const int64_t offsetValue = offset();
-  const double hoffValue = trig_hoff();
-
-  const double samples_per_pixel = rateValue * scaleValue;
-  const double index = (pixel + offsetValue) * samples_per_pixel - hoffValue;
-
-  const uint64_t sampleIndex = (uint64_t)std::round(index);
-
-  return sampleIndex;
-
-  // const double samples_per_pixel = session().cur_snap_samplerate() * scale();
-  // uint64_t index = (pixel + offset()) * samples_per_pixel - trig_hoff();
+  return _data_sync->pixel2index(pixel);
 }
 
-void View::set_receive_len(uint64_t len) {
-  if (_time_viewport)
-    _time_viewport->set_receive_len(len);
-
-  if (_fft_viewport && _session->get_device()->get_work_mode() == DSO)
-    _fft_viewport->set_receive_len(len);
-}
-
-int View::get_cursor_index_by_key(uint64_t key) {
-  auto &lst = get_cursorList();
-
-  int dex = 0;
-  for (auto c : lst) {
-    if (c->get_key() == key) {
-      return dex;
-    }
-    ++dex;
-  }
-  return -1;
-}
+void View::set_receive_len(uint64_t len) { _data_sync->set_receive_len(len); }
 
 void View::rebuild_signals_from_config(const data::SignalConfig &config) {
-  qDebug() << "View::rebuild_signals_from_config() work_mode="
-           << config.work_mode << "ch_count=" << config.channels.size()
-           << "is_valid=" << config.is_valid;
-
-  std::vector<Signal *> old_signals = _own_signals;
-  _own_signals.clear();
-
-  for (auto p : _config_probes) {
-    g_free(p->name);
-    g_free(p->trigger);
-    delete p;
-  }
-  _config_probes.clear();
-
-  int channel_type;
-  switch (config.work_mode) {
-  case LOGIC:
-    channel_type = SR_CHANNEL_LOGIC;
-    break;
-  case DSO:
-    channel_type = SR_CHANNEL_DSO;
-    break;
-  case ANALOG:
-    channel_type = SR_CHANNEL_ANALOG;
-    break;
-  default:
-    for (auto sig : old_signals)
-      delete sig;
-    signals_changed(NULL);
-    return;
-  }
-
-  int view_index = 0;
-  for (const auto &ch : config.channels) {
-    sr_channel *probe = new sr_channel;
-    memset(probe, 0, sizeof(sr_channel));
-    probe->index = ch.index;
-    probe->type = channel_type;
-    probe->enabled = ch.enabled;
-    probe->vdiv = ch.vdiv;
-    probe->coupling = ch.coupling;
-    probe->map_default = ch.map_default;
-    probe->hw_offset = ch.hw_offset;
-    probe->offset = ch.offset;
-    probe->zero_offset = ch.zero_offset;
-    probe->name = g_strdup(QString::number(ch.index).toUtf8().data());
-    probe->trigger = NULL;
-
-    _config_probes.push_back(probe);
-
-    Signal *old_signal = nullptr;
-    for (auto os : old_signals) {
-      if (os->get_index() == ch.index && os->signal_type() == channel_type) {
-        old_signal = os;
-        break;
-      }
-    }
-
-    Signal *signal = nullptr;
-    switch (config.work_mode) {
-    case LOGIC:
-      if (old_signal) {
-        signal = new LogicSignal(static_cast<LogicSignal *>(old_signal),
-                                 nullptr, probe);
-      } else {
-        signal = new LogicSignal(nullptr, probe);
-      }
-      break;
-    case DSO:
-      if (old_signal) {
-        signal =
-            new DsoSignal(static_cast<DsoSignal *>(old_signal), nullptr, probe);
-      } else {
-        signal = new DsoSignal(nullptr, probe);
-      }
-      break;
-    case ANALOG:
-      if (old_signal) {
-        signal = new AnalogSignal(static_cast<AnalogSignal *>(old_signal),
-                                  nullptr, probe);
-      } else {
-        signal = new AnalogSignal(nullptr, probe);
-      }
-      break;
-    }
-
-    if (signal) {
-      signal->set_enabled(ch.enabled);
-      signal->set_visible(ch.enabled);
-      // DSO/Analog signals use auto-calculated height, reset _ownHeight
-      // to avoid inheriting a fixed height from Logic mode or zoom_vertical
-      if (config.work_mode == DSO || config.work_mode == ANALOG) {
-        signal->set_own_height(-1);
-      }
-      if (ch.enabled) {
-        signal->set_view_index(view_index++);
-      } else {
-        signal->set_view_index(-1);
-      }
-      _own_signals.push_back(signal);
-    }
-  }
-
-  for (auto sig : old_signals)
-    delete sig;
-
-  if (_document && _document->has_data()) {
-    for (auto sig : _own_signals) {
-      int type = sig->signal_type();
-      switch (type) {
-      case SR_CHANNEL_LOGIC: {
-        view::LogicSignal *s = static_cast<view::LogicSignal *>(sig);
-        s->set_data(_document->get_active_logic());
-        break;
-      }
-      case SR_CHANNEL_ANALOG: {
-        view::AnalogSignal *s = static_cast<view::AnalogSignal *>(sig);
-        s->set_data(_document->get_active_analog());
-        break;
-      }
-      case SR_CHANNEL_DSO: {
-        view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
-        s->set_data(_document->get_active_dso());
-        break;
-      }
-      }
-    }
-  }
-
-  signals_changed(NULL);
+  _signal_sync->rebuild_signals_from_config(config);
 }
 
-void View::rebuild_signals() {
-  
-  if (_data_source == _document && _document && _document->has_signal_config()) {
-    const auto &config = _document->get_signal_config();
-    // 检查配置的通道数是否与设备当前的通道数匹配
-    // 如果不匹配，说明通道模式已切换，需要从设备重新创建信号
-    int device_ch_count = 0;
-    for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      device_ch_count++;
-    }
-    if (config.channels.size() == (size_t)device_ch_count) {
-      rebuild_signals_from_config(config);
-      return;
-    }
-  }
+void View::rebuild_signals() { _signal_sync->rebuild_signals(); }
 
-  if (!_data_source)
-    return;
+void View::on_signals_changed() { _signal_sync->on_signals_changed(); }
 
-  auto &shared_sigs = _data_source->get_signals();
-  if (shared_sigs.empty())
-    return;
+void View::signals_added_layout() { _signal_sync->signals_added_layout(); }
 
-  for (auto sig : _own_signals)
-    delete sig;
-  _own_signals.clear();
+void View::signals_removed_layout() { _signal_sync->signals_removed_layout(); }
 
-  for (auto p : _config_probes) {
-    g_free(p->name);
-    g_free(p->trigger);
-    delete p;
-  }
-  _config_probes.clear();
-
-  for (auto sig : shared_sigs) {
-    auto cloned = sig->clone();
-    cloned->set_view_index(sig->get_view_index());
-    // DSO/Analog signals use auto-calculated height, reset _ownHeight
-    if (get_work_mode() == DSO || get_work_mode() == ANALOG) {
-      cloned->set_own_height(-1);
-    }
-    _own_signals.push_back(cloned);
-  }
-
-  for (auto sig : _own_signals) {
-    auto s = dynamic_cast<Signal *>(sig);
-    if (s) {
-      s->set_enabled(s->probe()->enabled);
-      sig->set_visible(s->probe()->enabled);
-    }
-  }
-
-  if (_document && _document->has_data()) {
-    set_data_document(_document);
-  }
-
-  signals_changed(NULL);
+void View::signals_modified_refresh() {
+  _signal_sync->signals_modified_refresh();
 }
 
-void View::check_calibration() {
-  if (get_work_mode() == DSO) {
-    bool cali = false;
-    _device_agent->get_config_bool(SR_CONF_CALI, cali);
-
-    if (cali) {
-      show_calibration();
-    }
-  }
-}
-
-void View::set_scale(double scale) {
-  if (scale < _minscale)
-    scale = _minscale;
-  if (scale > _maxscale)
-    scale = _maxscale;
-
-  if (_scale != scale) {
-    _scale = scale;
-    _header->update();
-    _ruler->update();
-    viewport_update();
-    update_scroll();
-  }
-}
-
-void View::auto_set_max_scale() {
-  const double limitTime = effective_data_source()->cur_sampletime();
-  const int width = get_view_width();
-
-  if (width > 0) {
-    _maxscale = limitTime / (width * MaxViewRate);
-    set_scale(_maxscale);
-  }
-}
+void View::auto_set_max_scale() { _data_sync->auto_set_max_scale(); }
 
 int View::get_body_width() {
   if (_time_viewport != NULL)
@@ -2248,54 +719,11 @@ void View::check_measure() {
   _time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
-std::list<Cursor *> &View::get_cursorList() {
-  if (_session->get_device()->get_work_mode() == LOGIC) {
-    return _logic_cursors;
-  } else {
-    return _dso_cursors;
-  }
-}
-
 bool View::header_is_draging() { return _header->mouse_is_down(); }
-
-Cursor *View::get_cursor_by_index(int index) {
-  int dex = 0;
-  auto &cursors = get_cursorList();
-
-  for (auto c : cursors) {
-    if (dex == index) {
-      return c;
-    }
-    dex++;
-  }
-  return NULL;
-}
 
 void View::UpdateLanguage() {}
 
-void View::UpdateTheme() { 
-  refreshSignalColors(); 
-
-  QString heightStr = AppConfig::Instance().GetThemeTokenValue("@logic-channel-height");
-  bool ok;
-  int h = heightStr.toInt(&ok);
-  if (ok && h > 0) {
-    _signalHeightScale = h;
-    _signalHeight = h;
-    
-    std::vector<Trace *> traces;
-    get_traces(ALL_VIEW, traces);
-    for (Trace *t : traces) {
-      if (t && (t->get_type() == SR_CHANNEL_LOGIC || t->get_type() == SR_CHANNEL_GROUP)) {
-        t->set_totalHeight(h);
-        t->set_own_height(h);
-      }
-    }
-    update_all_trace_postion();
-  }
-
-  viewport_update(); 
-}
+void View::UpdateTheme() { _signal_sync->UpdateTheme(); }
 
 void View::UpdateFont() { update_font(); }
 
@@ -2304,5 +732,111 @@ bool View::view_is_ready() {
   return w > 0;
 }
 
+
+// =============================================================================
+// Glitch filter popup handlers (Task 7 + 9)
+// =============================================================================
+
+void View::on_show_glitch_filter_popup(pv::view::LogicSignal *sig) {
+  _glitch_filter->on_show_glitch_filter_popup(sig);
+}
+
+void View::on_clear_glitch_filter_requested(bool all_channels) {
+  _glitch_filter->on_clear_glitch_filter_requested(all_channels);
+}
+
+void View::on_toggle_invert_requested(pv::view::LogicSignal *sig) {
+  _glitch_filter->on_toggle_invert_requested(sig);
+}
+
+void View::on_glitch_preview_changed(pv::view::LogicSignal *sig,
+                                     uint32_t threshold,
+                                     GlitchFilterMode mode) {
+  _glitch_filter->on_glitch_preview_changed(sig, threshold, mode);
+}
+
+void View::on_glitch_apply_requested(pv::view::LogicSignal *sig,
+                                     uint32_t threshold,
+                                     GlitchFilterMode mode,
+                                     bool all_channels) {
+  _glitch_filter->on_glitch_apply_requested(sig, threshold, mode,
+                                            all_channels);
+}
+
+void View::on_glitch_popup_closed() {
+  _glitch_filter->on_glitch_popup_closed();
+}
+
+void View::on_apply_batch_requested(const std::vector<pv::view::LogicSignal *> &sigs,
+                                    uint32_t threshold, GlitchFilterMode mode) {
+  _glitch_filter->on_apply_batch_requested(sigs, threshold, mode);
+}
+
+void View::on_preview_batch_changed(const std::vector<pv::view::LogicSignal *> &sigs,
+                                    uint32_t threshold, GlitchFilterMode mode) {
+  _glitch_filter->on_preview_batch_changed(sigs, threshold, mode);
+}
+
+const std::vector<pv::data::PulseAnalyzer::Pulse> *
+View::get_preview_ranges(LogicSignal *sig) const {
+  return _glitch_filter->get_preview_ranges(sig);
+}
+
+void View::undo_filter() { _glitch_filter->undo_filter(); }
+
+void View::on_glitch_filter_completed() {
+  _glitch_filter->on_glitch_filter_completed();
+}
+
+void View::on_glitch_filter_cleared() {
+  _glitch_filter->on_glitch_filter_cleared();
+}
+
+// Phase K: out-of-line forwarders extracted from view.h (delegate to Phase E/J helpers).
+int64_t View::get_min_offset() { return _layout->get_min_offset(); }
+int64_t View::get_max_offset() { return _layout->get_max_offset(); }
+void View::zoom(double steps) { _layout->zoom(steps); }
+bool View::zoom(double steps, int offset) { return _layout->zoom(steps, offset); }
+void View::set_scale_offset(double scale, int64_t offset) { _layout->set_scale_offset(scale, offset); }
+void View::limit_scale_offset() { _layout->limit_scale_offset(); }
+void View::get_scroll_layout(int64_t &length, int64_t &offset) { _layout->get_scroll_layout(length, offset); }
+void View::update_scroll() { _layout->update_scroll(); }
+void View::update_margins() { _layout->update_margins(); }
+void View::set_scale(double scale) { _layout->set_scale(scale); }
+void View::update_scale_offset() { _layout->update_scale_offset(); }
+void View::h_scroll_value_changed(int value) { _layout->h_scroll_value_changed(value); }
+void View::show_cursors(bool show) { _cursors->show_cursors(show); }
+void View::show_trig_cursor(bool show) { _cursors->show_trig_cursor(show); }
+void View::show_search_cursor(bool show) { _cursors->show_search_cursor(show); }
+std::list<Cursor *> &View::get_cursorList() { return _cursors->get_cursorList(); }
+void View::add_cursor(QColor color, uint64_t sampleIndex) { _cursors->add_cursor(color, sampleIndex); }
+void View::add_cursor(uint64_t sampleIndex) { _cursors->add_cursor(sampleIndex); }
+void View::del_cursor(Cursor *cursor) { _cursors->del_cursor(cursor); }
+void View::add_xcursor(double value0, double value1) { _cursors->add_xcursor(value0, value1); }
+void View::del_xcursor(XCursor *xcursor) { _cursors->del_xcursor(xcursor); }
+void View::clear_cursors() { _cursors->clear_cursors(); }
+void View::set_cursor_middle(int index) { _cursors->set_cursor_middle(index); }
+Cursor *View::get_cursor_by_index(int index) { return _cursors->get_cursor_by_index(index); }
+// Task C2.7: forward drag-position write-back and Core list reconciliation
+// to the ViewCursors delegate.
+void View::sync_cursor_position(Cursor *cursor) { _cursors->sync_cursor_position_to_core(cursor); }
+void View::sync_cursors_from_core() { _cursors->sync_cursors_from_core(); }
+void View::set_search_pos(uint64_t search_pos, bool hit) { _cursors->set_search_pos(search_pos, hit); }
+uint64_t View::get_cursor_samples(int index) { return _cursors->get_cursor_samples(index); }
+QString View::get_cm_time(int index) { return _cursors->get_cm_time(index); }
+QString View::get_cm_delta(int index1, int index2) { return _cursors->get_cm_delta(index1, index2); }
+int View::get_cursor_index_by_key(uint64_t key) { return _cursors->get_cursor_index_by_key(key); }
+void View::set_trig_cursor_posistion(uint64_t percent) { _cursors->set_trig_cursor_posistion(percent); }
+void View::make_cursors_order() { _cursors->make_cursors_order(); }
+bool View::add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus, std::list<pv::data::decode::Decoder *> &sub_decoders, std::shared_ptr<pv::data::DecoderStack> &out_stack) {
+  return _derived->add_decoder(dec, silent, dstatus, sub_decoders, out_stack);
+}
+void View::remove_decoder(DecodeTrace *trace) { _derived->remove_decoder(trace); }
+void View::remove_decoder(int index) { _derived->remove_decoder(index); }
+void View::remove_decoder_by_key_handel(void *key_handel) { _derived->remove_decoder_by_key_handel(key_handel); }
+void View::clear_all_decoders() { _derived->clear_all_decoders(); }
+bool View::rst_decoder_by_key_handel(void *handel, QPoint anchor) { return _derived->rst_decoder_by_key_handel(handel, anchor); }
+void View::sync_derived_traces() { _derived->sync_derived_traces(); }
+void View::mark_derived_traces_dirty() { _derived->mark_derived_traces_dirty(); }
 } // namespace view
 } // namespace pv

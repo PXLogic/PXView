@@ -7,14 +7,16 @@
 - make
 - cmake >= 3.16
 - ninja-build
-- Qt >= 6.11.0 (Core, Gui, Widgets, Svg, Concurrent)
+- Qt >= 6.11.0 (Core, Gui, Widgets, Svg, Concurrent, WebSockets)
 - libglib >= 2.32.0
 - zlib
 - libusb-1.0 >= 1.0.16
 - libboost >= 1.42
 - libfftw3 >= 3.3
+- libzip
 - python >= 3.8
 - pkg-config >= 0.22
+- nlohmann-json >= 3.2.0 (header-only; auto-downloaded from GitHub if not installed)
 
 ## Building and installing
 
@@ -23,7 +25,7 @@
 #### Ubuntu / Debian (e.g. Ubuntu 22.04 / 24.04):
 ```bash
 sudo apt update
-sudo apt install git gcc g++ make cmake ninja-build libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libboost-dev libfftw3-dev python3-dev libudev-dev pkg-config libgl1-mesa-dev libxkbcommon-dev libvulkan-dev python3-pip
+sudo apt install git gcc g++ make cmake ninja-build libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libboost-dev libfftw3-dev libzip-dev python3-dev libudev-dev pkg-config libgl1-mesa-dev libxkbcommon-dev libvulkan-dev python3-pip
 ```
 
 **How to install Qt 6.11 on Ubuntu:**
@@ -38,13 +40,13 @@ aqt install-qt linux desktop 6.11.0 linux_gcc_64 --outputdir ~/Qt
 
 #### Fedora:
 ```bash
-sudo dnf install git gcc gcc-c++ make cmake ninja-build libtool pkgconf glib2-devel zlib-devel libudev-devel libusb1-devel python3-devel boost-devel fftw-devel qt6-qtbase-devel qt6-qtsvg-devel
+sudo dnf install git gcc gcc-c++ make cmake ninja-build libtool pkgconf glib2-devel zlib-devel libudev-devel libusb1-devel python3-devel boost-devel fftw-devel libzip-devel qt6-qtbase-devel qt6-qtsvg-devel qt6-qtwebsockets-devel
 ```
 *(Fedora typically provides recent Qt6 versions in its standard repositories)*
 
 #### Arch Linux:
 ```bash
-sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-base qt6-svg fftw
+sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-base qt6-svg qt6-websockets fftw libzip
 ```
 
 #### macOS (Homebrew):
@@ -52,6 +54,27 @@ sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-bas
 brew install git cmake ninja gettext glib libusb zlib boost fftw python3 qt pkg-config
 ```
 *(Note: If the default `qt` brew formula is not 6.11.0 yet, or if it isn't automatically linked, you may need to find the brew Qt installation path, typically `/opt/homebrew/opt/qt`)*
+
+#### Optional dependencies (NOT required for PXLogic hardware)
+
+These are NOT required for PXLogic hardware. Only install if you need the specific legacy drivers:
+
+- **libftdi1** — FTDI-based drivers (asix-sigma, chronovu-la, ftdi-la, ikalogic-scanaplus, pipistrello-ols). Without it, a warning is printed and those drivers are disabled; the rest of libsigrok builds normally.
+- **nettle** — rdtech-tc driver (AES-256 firmware decryption). Without it, that single driver is disabled.
+
+```bash
+# Ubuntu / Debian:
+sudo apt install libftdi1-dev libnettle-dev
+
+# Fedora:
+sudo dnf install libftdi-devel nettle-devel
+
+# Arch Linux:
+sudo pacman -S libftdi nettle
+
+# macOS:
+brew install libftdi nettle
+```
 
 ### Step 2: Get the PXView source code
 ```bash

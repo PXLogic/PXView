@@ -51,6 +51,7 @@ namespace view {
 ViewStatus::ViewStatus(SigSession *session, View &parent) :
     QWidget(&parent),
     _session(session),
+    _data_source(static_cast<data::DataSource*>(session)),
     _view(parent),
     _hit_rect(-1),
     _last_sig_index(-1)
@@ -67,9 +68,9 @@ void ViewStatus::paintEvent(QPaintEvent *)
     QFont font = theme_font_cursor();
     p.setFont(font);
 
-    int mode = _session->get_device()->get_work_mode();
+    int mode = _data_source->device()->get_work_mode();
 
-    if (mode == LOGIC) {
+    if (_view.is_logic_rendering_mode()) {
         fore.setAlpha(View::ForeAlpha);
         p.setPen(fore);
         p.drawText(this->rect(), Qt::AlignLeft | Qt::AlignVCenter, _rle_depth);
@@ -77,7 +78,7 @@ void ViewStatus::paintEvent(QPaintEvent *)
         p.setPen(Qt::NoPen);
         p.setBrush(View::Blue);
         p.drawRect(this->rect().left(), this->rect().bottom() - 3,
-                   _session->get_repeat_hold() * this->rect().width() / 100, 3);
+                   _data_source->get_repeat_hold() * this->rect().width() / 100, 3);
 
         p.setPen(View::Blue);
         p.drawText(this->rect(), Qt::AlignCenter | Qt::AlignVCenter, _capture_status);
@@ -147,7 +148,7 @@ void ViewStatus::reload()
     const int ROW = 2;
     const int MARGIN = 3;
 
-    if (_session->get_device()->get_work_mode() == DSO)
+    if (_data_source->device()->get_work_mode() == DSO)
     {
         const double width = _view.get_view_width() * 1.0 / COLUMN;
         const int height = (this->height() - 2*MARGIN) / ROW;
@@ -204,8 +205,10 @@ void ViewStatus::mousePressEvent(QMouseEvent *event)
 {
     assert(event);
 
-    if (_session->get_device()->get_work_mode() != DSO)
+    if (_data_source->device()->get_work_mode() != DSO)
+    {
         return;
+    }
 
     if (event->button() == Qt::LeftButton) { 
         for(size_t i = 0; i < _mrects.size(); i++) {
@@ -252,7 +255,7 @@ QJsonArray ViewStatus::get_session()
 
 void ViewStatus::load_session(QJsonArray measure_array, int version)
 {
-    if (_session->get_device()->get_work_mode() != DSO){
+    if (_data_source->device()->get_work_mode() != DSO){
         return;
     }
 

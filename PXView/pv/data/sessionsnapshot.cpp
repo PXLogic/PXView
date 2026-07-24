@@ -22,14 +22,15 @@
  */
 
 #include "sessionsnapshot.h"
-#include "../view/signal.h"
 #include "analogsnapshot.h"
-#include "decodermodel.h"
 #include "dsosnapshot.h"
 #include "logicsnapshot.h"
 #include "snapshot.h"
+#include "signalmodel.h"
+#include "lissajousmodel.h"
+#include "triggerconfig.h"
 
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,35 +38,29 @@ namespace pv {
 namespace data {
 
 SessionSnapshot::SessionSnapshot()
-    : _samplerate(0), _samplelimits(0), _trig_pos(0), _lissajous_trace(NULL),
-      _math_trace(NULL), _decoder_model(NULL) {}
+    : _samplerate(0), _samplelimits(0), _trig_pos(0) {}
 
-SessionSnapshot::~SessionSnapshot() {
-  for (auto sig : _signals) {
-    // Only delete copied signals (Logic/Analog), not referenced ones (DSO)
-    int type = sig->signal_type();
-    if (type == SR_CHANNEL_LOGIC || type == SR_CHANNEL_ANALOG) {
-      delete sig;
-    }
-  }
-  _signals.clear();
+SessionSnapshot::~SessionSnapshot() {}
+
+std::vector<std::shared_ptr<SignalModel>> &SessionSnapshot::get_signal_models() {
+  return _signal_models;
 }
 
-std::vector<view::Signal *> &SessionSnapshot::get_signals() { return _signals; }
-
-std::vector<view::DecodeTrace *> &SessionSnapshot::get_decode_signals() {
-  return _decode_traces;
+std::vector<std::shared_ptr<DecoderStack>> &
+SessionSnapshot::get_decoder_stacks(SessionDocument *doc) {
+  (void)doc; // A SessionSnapshot always returns its own stacks.
+  return _decoder_stacks;
 }
 
-std::vector<view::SpectrumTrace *> &SessionSnapshot::get_spectrum_traces() {
-  return _spectrum_traces;
+std::vector<std::shared_ptr<SpectrumStack>> &SessionSnapshot::get_spectrum_stacks() {
+  return _spectrum_stacks;
 }
 
-view::LissajousTrace *SessionSnapshot::get_lissajous_trace() {
-  return _lissajous_trace;
-}
+std::shared_ptr<MathStack> SessionSnapshot::get_math_stack() { return _math_stack; }
 
-view::MathTrace *SessionSnapshot::get_math_trace() { return _math_trace; }
+LissajousModel *SessionSnapshot::get_lissajous_model() {
+  return _lissajous_model;
+}
 
 uint64_t SessionSnapshot::cur_snap_samplerate() {
   if (_samplerate == 0)
@@ -106,11 +101,49 @@ data::Snapshot *SessionSnapshot::get_snapshot(int type) {
     return NULL;
 }
 
-data::DecoderModel *SessionSnapshot::get_decoder_model() {
-  return _decoder_model;
+uint64_t SessionSnapshot::get_trigger_pos() { return _trig_pos; }
+
+// Task D6: DataSource facade/business stubs. SessionSnapshot is a frozen
+// data snapshot, not the live session — these return defaults. Only
+// SigSession performs real work for these operations.
+
+double SessionSnapshot::cur_view_time() { return cur_sampletime(); }
+
+int SessionSnapshot::get_map_zoom() { return 0; }
+
+double SessionSnapshot::get_logic_data_view_time() { return 0.0; }
+
+const TriggerConfig& SessionSnapshot::trigger_config() const {
+    static TriggerConfig default_cfg;
+    return default_cfg;
 }
 
-uint64_t SessionSnapshot::get_trigger_pos() { return _trig_pos; }
+bool SessionSnapshot::is_repeating() { return false; }
+
+bool SessionSnapshot::is_running_status() { return false; }
+
+bool SessionSnapshot::is_instant() { return false; }
+
+bool SessionSnapshot::have_view_data() { return true; }
+
+bool SessionSnapshot::is_working() { return false; }
+
+bool SessionSnapshot::add_decoder(srd_decoder *const, bool, DecoderStatus *,
+                                  std::list<decode::Decoder *> &,
+                                  std::shared_ptr<DecoderStack> &,
+                                  SessionDocument *) {
+    return false;
+}
+
+void SessionSnapshot::remove_decoder_by_key_handel(void *, SessionDocument *) {}
+
+void SessionSnapshot::rst_decoder_by_key_handel(void *, SessionDocument *) {}
+
+void SessionSnapshot::clear_all_decoder(bool) {}
+
+void SessionSnapshot::start_all_decode_tasks() {}
+
+void SessionSnapshot::update_dso_data_scale() {}
 
 void SessionSnapshot::set_samplerate(uint64_t rate) {
   _samplerate = rate;

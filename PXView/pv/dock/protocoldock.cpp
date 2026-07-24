@@ -21,12 +21,12 @@
  */
 
 #include "protocoldock.h"
-#include "../data/decodermodel.h"
 #include "../data/decoderstack.h"
 #include "../dialogs/protocolexp.h"
 #include "../dialogs/protocollist.h"
 #include "../sigsession.h"
 #include "../view/decodetrace.h"
+#include "../view/decodermodel.h"
 #include "../view/view.h"
 #include "../widgets/hoversplitter.h"
 #include "../widgets/smoothtablehelper.h"
@@ -78,6 +78,9 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _cur_search_index = -1;
   _search_edited = false;
   _pro_add_button = NULL;
+  // View-owned DecoderModel (Task 10): was previously a Core singleton
+  // owned by SigSession. Qt parent ownership (this) handles destruction.
+  _decoder_model = new pv::view::DecoderModel(this);
 
   //-----------------------------get protocol list
   GSList *l = const_cast<GSList *>(srd_decoder_list());
@@ -86,6 +89,10 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
 
   for (; l; l = l->next) {
     const srd_decoder *const d = (srd_decoder *)l->data;
+    if (!d) {
+      pxv_warn("%s", "ProtocolDock: decoder list item d is NULL, skipping");
+      continue;
+    }
     assert(d);
     (void)d;
 
@@ -164,6 +171,13 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _dn_nav_button = new QPushButton(bot_panel);
   _dn_nav_button->setObjectName("dock_content");
   _dn_nav_button->setFlat(true);
+  _follow_viewport_btn = new QPushButton(bot_panel);
+  _follow_viewport_btn->setObjectName("dock_content");
+  _follow_viewport_btn->setFlat(true);
+  _follow_viewport_btn->setCheckable(true);
+  _follow_viewport_btn->setChecked(true);
+  _follow_viewport_btn->setToolTip(L_S(STR_PAGE_DLG,
+      S_ID(IDS_DLG_FOLLOW_VIEWPORT), "List follows waveform visible range"));
   _bot_title_label = new QLabel(bot_panel);
   _bot_title_label->setObjectName("dock_label");
 
@@ -173,6 +187,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   bot_title_layout->addWidget(_bot_save_button);
   bot_title_layout->addWidget(_bot_title_label, 1);
   bot_title_layout->addWidget(_dn_nav_button);
+  bot_title_layout->addWidget(_follow_viewport_btn);
 
   _pre_button = new QPushButton(bot_panel);
   _pre_button->setObjectName("dock_content");
@@ -196,7 +211,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _ann_search_edit->setFixedHeight(_pre_button->sizeHint().height());
 
   _table_view = new QTableView(bot_panel);
-  _table_view->setModel(_session->get_decoder_model());
+  _table_view->setModel(_decoder_model);
   _table_view->setObjectName("dock_protocol_table_view");
   _table_view->setShowGrid(false);
   _table_view->horizontalHeader()->setStretchLastSection(true);
@@ -286,6 +301,9 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   connect(_ann_search_edit, &QLineEdit::editingFinished, this,
           &ProtocolDock::search_changed);
 
+  connect(_follow_viewport_btn, &QPushButton::toggled, this,
+          &ProtocolDock::on_follow_viewport_toggled);
+
   ADD_UI(this);
 }
 
@@ -306,22 +324,44 @@ ProtocolDock::~ProtocolDock() {
 void ProtocolDock::set_view(view::View *view) { _view = view; }
 
 void ProtocolDock::bind_context(TabContext *ctx) {
+  if (!ctx) {
+    pxv_warn("%s", "ProtocolDock::bind_context: ctx is NULL");
+    return;
+  }
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+  // Disconnect the previous View's visible-range signal before switching
+  // to the new tab's View (multi-tab scenario: the old View stays alive).
+  if (_view) {
+    disconnect(_view, &view::View::visible_range_changed, this,
+               &ProtocolDock::on_visible_range_changed);
+  }
   _view = ctx->view();
-  _table_view->setModel(_session->get_decoder_model());
-  _model_proxy.setSourceModel(_session->get_decoder_model());
+  _table_view->setModel(_decoder_model);
+  _model_proxy.setSourceModel(_decoder_model);
   rebuild_protocol_layers();
   update_view_status();
 
-  if (ctx->document()) {
-    auto doc = ctx->document();
-    if (!doc->_dock_protocol_search_text.isEmpty()) {
-      _ann_search_edit->setText(doc->_dock_protocol_search_text);
+  // Wire visible-range notifications from the View to the filter handler.
+  // on_visible_range_changed() checks _follow_viewport internally so the
+  // connection can stay alive across toggle changes.
+  if (_view) {
+    connect(_view, &view::View::visible_range_changed, this,
+            &ProtocolDock::on_visible_range_changed);
+    // Apply the current viewport state immediately on tab switch.
+    if (_follow_viewport) {
+      on_visible_range_changed();
+    }
+  }
+
+  if (ctx->view()) {
+    auto &ui = ctx->view()->dock_ui_state();
+    if (!ui.dock_protocol_search_text.isEmpty()) {
+      _ann_search_edit->setText(ui.dock_protocol_search_text);
       search_done();
     }
-    const QJsonArray &expanded_states = doc->_dock_protocol_expanded_states;
+    const QJsonArray &expanded_states = ui.dock_protocol_expanded_states;
     for (int i = 0;
          i < (int)_protocol_lay_items.size() && i < expanded_states.size();
          i++) {
@@ -331,14 +371,14 @@ void ProtocolDock::bind_context(TabContext *ctx) {
 }
 
 void ProtocolDock::unbind_context() {
-  if (_context && _context->document()) {
-    auto doc = _context->document();
-    doc->_dock_protocol_search_text = _ann_search_edit->text();
+  if (_context && _context->view()) {
+    auto &ui = _context->view()->dock_ui_state();
+    ui.dock_protocol_search_text = _ann_search_edit->text();
     QJsonArray expanded_states;
     for (auto layer : _protocol_lay_items) {
       expanded_states.append(layer->m_expanded);
     }
-    doc->_dock_protocol_expanded_states = expanded_states;
+    ui.dock_protocol_expanded_states = expanded_states;
   }
   _context = nullptr;
 }
@@ -351,6 +391,9 @@ void ProtocolDock::retranslateUi() {
   _bot_title_label->setText(L_S(STR_PAGE_DLG,
                                 S_ID(IDS_DLG_PROTOCOL_LIST_VIEWER),
                                 "Protocol List Viewer"));
+  _follow_viewport_btn->setToolTip(L_S(
+      STR_PAGE_DLG, S_ID(IDS_DLG_FOLLOW_VIEWPORT),
+      "List follows waveform visible range"));
   _pro_keyword_edit->ResetText();
 }
 
@@ -370,6 +413,8 @@ void ProtocolDock::reStyle() {
   _nxt_button->setIcon(IconCache::Instance().icon(iconPath + "/next.svg"));
   _ann_search_button->setIcon(
       IconCache::Instance().icon(iconPath + "/search.svg"));
+  _follow_viewport_btn->setIcon(
+      IconCache::Instance().icon(iconPath + "/display.svg"));
 
   for (auto item : _protocol_lay_items) {
     item->ResetStyle();
@@ -461,7 +506,8 @@ void ProtocolDock::on_add_protocol() {
 bool ProtocolDock::add_protocol_by_id(
     QString id, bool silent,
     std::list<pv::data::decode::Decoder *> &sub_decoders) {
-  if (_session->get_device()->get_work_mode() != LOGIC) {
+  int cur_mode = _session->get_device()->get_work_mode();
+  if (cur_mode != LOGIC && cur_mode != MSO) {
     pxv_info(
         "Protocol Analyzer\nProtocol Analyzer is only valid in Digital Mode!");
     return false;
@@ -488,12 +534,19 @@ bool ProtocolDock::add_protocol_by_id(
     protocolId = QString((*it)->decoder()->id);
   }
 
-  pv::view::Trace *trace = NULL;
+  std::shared_ptr<pv::data::DecoderStack> stack;
 
-  if (_session->add_decoder(decoder, silent, dstatus, sub_decoders, trace) ==
+  // Route through the View layer so the View can create its own DecodeTrace
+  // wrapper for the newly created DecoderStack. The View internally calls
+  // Core (SigSession::add_decoder) to create the stack, then creates the
+  pxv_info("ProtocolDock: calling _view->add_decoder for %s, silent=%d",
+           id.toUtf8().data(), silent);
+  if (_view->add_decoder(decoder, silent, dstatus, sub_decoders, stack) ==
       false) {
+    pxv_info("ProtocolDock: _view->add_decoder returned false");
     return false;
   }
+  pxv_info("ProtocolDock: _view->add_decoder returned true");
 
   // create item layer
   ProtocolItemLayer *layer =
@@ -502,7 +555,7 @@ bool ProtocolDock::add_protocol_by_id(
   _top_layout->insertLayout(_protocol_lay_items.size(), layer);
   layer->m_decoderStatus = dstatus;
   layer->m_protocolId = protocolId;
-  layer->_trace = trace;
+  layer->_trace = stack.get();
   layer->SetVisibilityState(true);
 
   // set current protocol format
@@ -514,10 +567,13 @@ bool ProtocolDock::add_protocol_by_id(
   }
 
   // progress connection
-  const auto &decode_sigs = _session->get_decode_signals();
   protocol_updated();
-  connect(decode_sigs.back(), &view::DecodeTrace::decoded_progress, this,
-          &ProtocolDock::decoded_progress);
+  if (stack) {
+    connect(stack.get(), &data::DecoderStack::new_decode_data, this,
+            &ProtocolDock::on_decoder_progress);
+    connect(stack.get(), &data::DecoderStack::decode_done, this,
+            &ProtocolDock::on_decoder_progress);
+  }
 
   adjustPannelSize();
 
@@ -527,18 +583,26 @@ bool ProtocolDock::add_protocol_by_id(
 void ProtocolDock::rebuild_protocol_layers() {
   for (auto layer : _protocol_lay_items) {
     if (layer->_trace) {
-      auto dt = static_cast<view::DecodeTrace *>(layer->_trace);
-      disconnect(dt, &view::DecodeTrace::decoded_progress, this,
-                 &ProtocolDock::decoded_progress);
+      auto stack = static_cast<data::DecoderStack *>(layer->_trace);
+      disconnect(stack, &data::DecoderStack::new_decode_data, this,
+                 &ProtocolDock::on_decoder_progress);
+      disconnect(stack, &data::DecoderStack::decode_done, this,
+                 &ProtocolDock::on_decoder_progress);
     }
     _top_layout->removeItem(layer);
     DESTROY_QT_LATER(layer);
   }
   _protocol_lay_items.clear();
 
-  const auto &decode_sigs = _session->get_decode_signals();
-  for (auto trace : decode_sigs) {
-    auto stack = trace->decoder();
+  // Read decoder traces from the View layer (View-owned DecodeTrace list)
+  // instead of querying Core's DecoderStack list directly. Each DecodeTrace
+  // wraps a Core-owned DecoderStack accessed via trace->decoder().
+  const auto &decode_traces = _view->get_own_decode_traces();
+  for (auto trace : decode_traces) {
+    auto stack = trace ? trace->decoder() : nullptr;
+    if (!stack)
+      continue;
+
     DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
 
     auto &decoders = stack->stack();
@@ -551,7 +615,7 @@ void ProtocolDock::rebuild_protocol_layers() {
     _top_layout->insertLayout(_protocol_lay_items.size(), layer);
     layer->m_decoderStatus = dstatus;
     layer->m_protocolId = protocolId;
-    layer->_trace = trace;
+    layer->_trace = stack.get();
     layer->SetVisibilityState(decoders.front()->shown());
 
     static const char *formatNames[] = {"hex", "dec", "oct", "bin", "ascii"};
@@ -560,7 +624,7 @@ void ProtocolDock::rebuild_protocol_layers() {
       layer->SetProtocolFormat(formatNames[fmt]);
     }
 
-    int pg = trace->get_progress();
+    int pg = stack->get_progress();
     QString err;
     if (stack->out_of_memory())
       err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY), "Out of Memory");
@@ -569,8 +633,10 @@ void ProtocolDock::rebuild_protocol_layers() {
       layer->enable_format(dstatus->m_bNumeric);
     }
 
-    connect(trace, &view::DecodeTrace::decoded_progress, this,
-            &ProtocolDock::decoded_progress);
+    connect(stack.get(), &data::DecoderStack::new_decode_data, this,
+            &ProtocolDock::on_decoder_progress);
+    connect(stack.get(), &data::DecoderStack::decode_done, this,
+            &ProtocolDock::on_decoder_progress);
   }
 
   protocol_updated();
@@ -595,7 +661,15 @@ void ProtocolDock::on_del_all_protocol() {
 
 void ProtocolDock::del_all_protocol() {
   if (_protocol_lay_items.size() > 0) {
-    _session->clear_all_decoder();
+    // Call View layer to delete all DecodeTrace, then View will notify Core
+    // to clear all DecoderStacks. Directly calling _session->clear_all_decoder()
+    // would bypass View and leave DecodeTrace objects orphaned, causing stale UI.
+    if (_view) {
+      _view->clear_all_decoders();
+    } else {
+      // Headless fallback: directly call Core if no View exists
+      _session->clear_all_decoder();
+    }
 
     for (auto it = _protocol_lay_items.begin(); it != _protocol_lay_items.end();
          it++) {
@@ -611,14 +685,14 @@ void ProtocolDock::del_all_protocol() {
 }
 
 void ProtocolDock::decoded_progress(int progress) {
-  const auto &decode_sigs = _session->get_decode_signals();
+  const auto &decode_sigs = _session->get_decoder_stacks();
   unsigned int index = 0;
 
   for (auto d : decode_sigs) {
     int pg = d->get_progress();
     QString err;
 
-    if (d->decoder()->out_of_memory())
+    if (d->out_of_memory())
       err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY), "Out of Memory");
 
     if (index < _protocol_lay_items.size()) {
@@ -645,48 +719,53 @@ void ProtocolDock::decoded_progress(int progress) {
   }
 }
 
+void ProtocolDock::on_decoder_progress() {
+  auto *stack = qobject_cast<data::DecoderStack *>(sender());
+  decoded_progress(stack ? stack->get_progress() : 0);
+}
+
 void ProtocolDock::set_model() {
   pv::dialogs::ProtocolList *protocollist_dlg =
-      new pv::dialogs::ProtocolList(this, _session);
+      new pv::dialogs::ProtocolList(this, _session, _decoder_model);
   protocollist_dlg->exec();
-  resize_table_view(_session->get_decoder_model());
-  _model_proxy.setSourceModel(_session->get_decoder_model());
+  resize_table_view(_decoder_model);
+  _model_proxy.setSourceModel(_decoder_model);
   search_done();
 
   // clear mark_index of all DecoderStacks
-  const auto &decode_sigs = _session->get_decode_signals();
+  const auto &decode_sigs = _session->get_decoder_stacks();
 
   for (auto d : decode_sigs) {
-    d->decoder()->set_mark_index(-1);
+    d->set_mark_index(-1);
   }
 }
 
 void ProtocolDock::update_model() {
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
-  const auto &decode_sigs = _session->get_decode_signals();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
+  const auto &decode_sigs = _session->get_decoder_stacks();
 
   if (decode_sigs.size() == 0)
     decoder_model->setDecoderStack(NULL);
   else if (!decoder_model->getDecoderStack())
-    decoder_model->setDecoderStack(decode_sigs.at(0)->decoder());
+    decoder_model->setDecoderStack(decode_sigs.at(0).get());
   else {
     unsigned int index = 0;
     for (auto d : decode_sigs) {
-      if (d->decoder() == decoder_model->getDecoderStack()) {
-        decoder_model->setDecoderStack(d->decoder());
+      if (d.get() == decoder_model->getDecoderStack()) {
+        decoder_model->setDecoderStack(d.get());
         break;
       }
       index++;
     }
     if (index >= decode_sigs.size())
-      decoder_model->setDecoderStack(decode_sigs.at(0)->decoder());
+      decoder_model->setDecoderStack(decode_sigs.at(0).get());
   }
   _model_proxy.setSourceModel(decoder_model);
   search_done();
   resize_table_view(decoder_model);
 }
 
-void ProtocolDock::resize_table_view(data::DecoderModel *decoder_model) {
+void ProtocolDock::resize_table_view(view::DecoderModel *decoder_model) {
   if (decoder_model->getDecoderStack()) {
     int column_count = decoder_model->columnCount(QModelIndex()) - 1;
     int row_count = decoder_model->rowCount(QModelIndex());
@@ -728,21 +807,34 @@ void ProtocolDock::resize_table_view(data::DecoderModel *decoder_model) {
 }
 
 void ProtocolDock::item_clicked(const QModelIndex &index) {
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
 
   auto decoder_stack = decoder_model->getDecoderStack();
 
   if (decoder_stack) {
+    // When visible-range slicing is active, index.row() is a sliced (0-based)
+    // row number. Map it back to the full-list row number before querying
+    // the DecoderStack.
+    uint64_t query_row = index.row();
+    if (decoder_model->visible_start_row() >= 0) {
+      query_row = (uint64_t)(decoder_model->visible_start_row() + index.row());
+    }
+
     pv::data::decode::Annotation ann;
-    if (decoder_stack->list_annotation(&ann, index.column(), index.row())) {
-      const auto &decode_sigs = _session->get_decode_signals();
+    if (decoder_stack->list_annotation(&ann, index.column(), query_row)) {
+      const auto &decode_sigs = _session->get_decoder_stacks();
 
       for (auto d : decode_sigs) {
-        d->decoder()->set_mark_index(-1);
+        d->set_mark_index(-1);
       }
 
       decoder_stack->set_mark_index((ann.start_sample() + ann.end_sample()) /
                                     2);
+
+      // Set the jump guard before show_region() so the async visible_range
+      // notification triggered by the view change preserves this row.
+      _jumping_to_row = true;
+      _jumping_target_row = (int64_t)query_row;
       _session->show_region(ann.start_sample(), ann.end_sample(), false);
     }
   }
@@ -793,7 +885,7 @@ void ProtocolDock::column_resize(int index, int old_size, int new_size) {
   (void)index;
   (void)old_size;
   (void)new_size;
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
   if (decoder_model->getDecoderStack()) {
     int top_row = _table_view->rowAt(0);
     int bom_row = _table_view->rowAt(_table_view->height());
@@ -806,13 +898,13 @@ void ProtocolDock::column_resize(int index, int old_size, int new_size) {
 
 void ProtocolDock::export_table_view() {
   pv::dialogs::ProtocolExp *protocolexp_dlg =
-      new pv::dialogs::ProtocolExp(this, _session);
+      new pv::dialogs::ProtocolExp(this, _session, _decoder_model);
   protocolexp_dlg->exec();
 }
 
 void ProtocolDock::nav_table_view() {
   uint64_t row_index = 0;
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
 
   auto decoder_stack = decoder_model->getDecoderStack();
   if (decoder_stack) {
@@ -840,10 +932,10 @@ void ProtocolDock::nav_table_view() {
         _table_view->scrollTo(index);
         _table_view->setCurrentIndex(index);
 
-        const auto &decode_sigs = _session->get_decode_signals();
+        const auto &decode_sigs = _session->get_decoder_stacks();
 
         for (auto d : decode_sigs) {
-          d->decoder()->set_mark_index(-1);
+          d->set_mark_index(-1);
         }
 
         decoder_stack->set_mark_index((ann.start_sample() + ann.end_sample()) /
@@ -869,7 +961,7 @@ void ProtocolDock::search_pre() {
   int i = 0;
   uint64_t rowCount = _model_proxy.rowCount();
   QModelIndex matchingIndex;
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
 
   auto decoder_stack = decoder_model->getDecoderStack();
   do {
@@ -934,7 +1026,7 @@ void ProtocolDock::search_nxt() {
   int i = 0;
   uint64_t rowCount = _model_proxy.rowCount();
   QModelIndex matchingIndex;
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
   auto decoder_stack = decoder_model->getDecoderStack();
 
   if (decoder_stack == NULL) {
@@ -1011,7 +1103,7 @@ void ProtocolDock::search_update() {
   if (!_search_edited)
     return;
 
-  pv::data::DecoderModel *decoder_model = _session->get_decoder_model();
+  pv::view::DecoderModel *decoder_model = _decoder_model;
 
   auto decoder_stack = decoder_model->getDecoderStack();
   if (!decoder_stack)
@@ -1050,7 +1142,13 @@ void ProtocolDock::OnProtocolSetting(void *handle) {
        it++) {
     if ((*it) == handle) {
       void *key_handel = (*it)->get_protocol_key_handel();
-      _session->rst_decoder_by_key_handel(key_handel);
+      // Route through the View layer so the DecoderOptionsDlg is shown
+      // (View owns the DecodeTrace; Core cannot show Qt dialogs). If the
+      // user cancels the dialog, no reset happens. Previously this called
+      // _session->rst_decoder_by_key_handel() directly, which never showed
+      // the dialog after de-view-ization (create_popup was moved out of
+      // Core but never re-added in the View layer).
+      _view->rst_decoder_by_key_handel(key_handel);
       protocol_updated();
       break;
     }
@@ -1072,7 +1170,15 @@ void ProtocolDock::OnProtocolDelete(void *handle) {
       void *key_handel = lay->get_protocol_key_handel();
       _protocol_lay_items.erase(it);
       DESTROY_QT_LATER(lay);
-      _session->remove_decoder_by_key_handel(key_handel);
+      // Call View layer to delete DecodeTrace, then View will notify Core
+      // to delete DecoderStack. Directly calling _session->remove_decoder_by_key_handel()
+      // would bypass View and leave the DecodeTrace orphaned, causing stale UI.
+      if (_view) {
+        _view->remove_decoder_by_key_handel(key_handel);
+      } else {
+        // Headless fallback: directly call Core if no View exists
+        _session->remove_decoder_by_key_handel(key_handel);
+      }
       protocol_updated();
       break;
     }
@@ -1082,19 +1188,31 @@ void ProtocolDock::OnProtocolDelete(void *handle) {
 }
 
 void ProtocolDock::OnProtocolVisibilityChanged(void *handle) {
-  for (auto it = _protocol_lay_items.begin(); it != _protocol_lay_items.end(); it++) {
+  for (auto it = _protocol_lay_items.begin(); it != _protocol_lay_items.end();
+       it++) {
     if ((*it) == handle) {
       auto lay = (*it);
-      auto trace = static_cast<pv::view::DecodeTrace*>(lay->_trace);
-      if (trace && trace->decoder()) {
-        auto dec_stack = trace->decoder();
-        if (!dec_stack->stack().empty()) {
-          auto root_dec = dec_stack->stack().front();
+      auto stack = static_cast<pv::data::DecoderStack *>(lay->_trace);
+      if (stack) {
+        if (!stack->stack().empty()) {
+          auto root_dec = stack->stack().front();
           bool current_shown = root_dec->shown();
-          root_dec->show(!current_shown);
-          lay->SetVisibilityState(!current_shown);
-          
+          bool new_shown = !current_shown;
+          root_dec->show(new_shown);
+          lay->SetVisibilityState(new_shown);
+
+          // Sync Trace::_visible so the View layer (layout, header) also
+          // hides/shows the decode track.  Without this, only Decoder::_shown
+          // is toggled, but signals_changed() / paint_label() check
+          // Trace::visible(), so the header and track space remain.
           if (_view) {
+            auto &traces = _view->get_own_decode_traces();
+            for (auto *dt : traces) {
+              if (dt && dt->decoder().get() == stack) {
+                dt->set_visible(new_shown);
+                break;
+              }
+            }
             _view->signals_changed(NULL);
           }
         }
@@ -1102,6 +1220,8 @@ void ProtocolDock::OnProtocolVisibilityChanged(void *handle) {
       break;
     }
   }
+
+  _session->broadcast_async<interface::DeviceOptionsUpdated>({});
 }
 
 void ProtocolDock::OnProtocolFormatChanged(QString format, void *handle) {
@@ -1261,9 +1381,7 @@ void ProtocolDock::update_deocder_item_name(void *trace_handel,
   }
 }
 
-void ProtocolDock::rebuild_layers() {
-  rebuild_protocol_layers();
-}
+void ProtocolDock::rebuild_layers() { rebuild_protocol_layers(); }
 
 void ProtocolDock::UpdateLanguage() { retranslateUi(); }
 
@@ -1324,6 +1442,117 @@ bool ProtocolDock::eventFilter(QObject *obj, QEvent *event) {
     }
   }
   return QScrollArea::eventFilter(obj, event);
+}
+
+void ProtocolDock::on_follow_viewport_toggled(bool checked) {
+  _follow_viewport = checked;
+  if (!checked) {
+    _decoder_model->clear_visible_range();
+  } else {
+    // Immediately apply current viewport state; subsequent scale/offset
+    // changes arrive via visible_range_changed.
+    on_visible_range_changed();
+  }
+}
+
+void ProtocolDock::on_visible_range_changed() {
+  if (!_follow_viewport || !_view || !_decoder_model) {
+    return;
+  }
+
+  auto decoder_stack = _decoder_model->getDecoderStack();
+  if (!decoder_stack) {
+    return;
+  }
+
+  uint64_t samplerate = decoder_stack->samplerate();
+  if (samplerate == 0) {
+    return;
+  }
+
+  int viewport_width = _view->viewport()->width();
+  if (viewport_width <= 0) {
+    return;
+  }
+
+  // Reuse nav_table_view's sample-range computation:
+  //   offset (pixels) * samplerate (samples/s) * scale (s/pixel) = samples
+  double scale = _view->scale();
+  int64_t offset = _view->offset();
+  double samples_per_pixel = (double)samplerate * scale;
+
+  double start_sample_d = (double)offset * samples_per_pixel;
+  double end_sample_d = (double)(offset + viewport_width) * samples_per_pixel;
+  if (start_sample_d < 0)
+    start_sample_d = 0;
+  if (end_sample_d < 0)
+    end_sample_d = 0;
+
+  uint64_t start_sample = (uint64_t)start_sample_d;
+  uint64_t end_sample = (uint64_t)end_sample_d;
+  if (end_sample <= start_sample) {
+    return;
+  }
+
+  // Locate the protocol row currently selected by the proxy's
+  // filterKeyColumn (same algorithm as nav_table_view).
+  std::map<const pv::data::decode::Row, bool> rows =
+      decoder_stack->get_rows_lshow();
+  int column = _model_proxy.filterKeyColumn();
+  bool found_row = false;
+  pv::data::decode::Row target_row;
+  for (auto it = rows.begin(); it != rows.end(); ++it) {
+    if (it->second && column-- == 0) {
+      target_row = it->first;
+      found_row = true;
+      break;
+    }
+  }
+  if (!found_row) {
+    return;
+  }
+
+  auto range = decoder_stack->get_visible_range(target_row, start_sample,
+                                                end_sample);
+  int64_t start_idx = (int64_t)range.first;
+  int64_t end_idx = (int64_t)range.second;
+
+  // mark_index exemption: keep the marked annotation row visible so the
+  // user doesn't lose their selection after a jump.
+  int64_t mark = decoder_stack->get_mark_index();
+  if (mark >= 0) {
+    uint64_t mark_row_u = decoder_stack->get_annotation_index(target_row, mark);
+    int64_t mark_row = (int64_t)mark_row_u;
+    if (mark_row >= end_idx) {
+      end_idx = mark_row + 1;
+    } else if (mark_row < start_idx) {
+      start_idx = mark_row;
+    }
+  }
+
+  _decoder_model->set_visible_range(start_idx, end_idx);
+
+  // If we're in the middle of an item_clicked → show_region jump, restore
+  // the selection that was lost when set_visible_range reset the model.
+  if (_jumping_to_row && _jumping_target_row >= start_idx &&
+      _jumping_target_row < end_idx) {
+    int sliced_row = (int)(_jumping_target_row - start_idx);
+    QModelIndex new_index = _decoder_model->index(
+        sliced_row, _model_proxy.filterKeyColumn());
+    if (new_index.isValid()) {
+      _table_view->blockSignals(true);
+      _table_view->setCurrentIndex(new_index);
+      _table_view->scrollTo(new_index);
+      _table_view->blockSignals(false);
+    }
+  }
+
+  // Clear the jump guard shortly after; the show_region → view change →
+  // visible_range_changed chain completes within ~100ms (debounce) + one
+  // event loop tick. 150ms covers it with margin.
+  if (_jumping_to_row) {
+    QTimer::singleShot(150, this, [this]() { _jumping_to_row = false; });
+  }
 }
 
 } // namespace dock

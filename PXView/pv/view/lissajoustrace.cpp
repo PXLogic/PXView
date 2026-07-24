@@ -29,6 +29,7 @@
 #include "lissajoustrace.h"
 #include "../data/dsosnapshot.h"
 #include "../sigsession.h"
+#include "viewport.h"
 
 #include "../ui/langresource.h"
  

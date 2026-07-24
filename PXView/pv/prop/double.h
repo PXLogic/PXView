@@ -50,7 +50,9 @@ public:
 
 	virtual ~Double();
 
-    QWidget* get_widget(QWidget *parent, bool auto_commit);
+protected:
+    QWidget* get_widget(QWidget *parent, bool auto_commit) override;
+public:
 
 	void commit();
 

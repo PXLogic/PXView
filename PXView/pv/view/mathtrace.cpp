@@ -30,13 +30,14 @@
 #include "../sigsession.h"
 #include "../view/dsosignal.h"
 #include "../dsvdef.h"
+#include "viewport.h"
   
 using namespace std;
 
 namespace pv {
 namespace view {
 
-MathTrace::MathTrace(bool enable,data::MathStack *math_stack,
+MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
                      view::DsoSignal *dsoSig1,
                      view::DsoSignal *dsoSig2):
     Trace("M", dsoSig1->get_index(), SR_CHANNEL_MATH),
@@ -62,7 +63,6 @@ MathTrace::MathTrace(bool enable,data::MathStack *math_stack,
 
 MathTrace::~MathTrace()
 {
-    DESTROY_OBJECT(_math_stack);
 }
 
 bool MathTrace::enabled()
@@ -334,6 +334,13 @@ void MathTrace::paint_envelope(QPainter &p,
     double top = get_view_rect().top();
     double bottom = get_view_rect().bottom();
 
+    // 矩形横向宽度: spp < e.scale 时每个 envelope 样本跨越 >1px，
+    // 固定 1.0f 宽 → 矩形间留白 → 缩放到 spp∈[threshold, e.scale] 区间
+    // 出现间断线条。改为 max(1, step) 使低密度时矩形横向铺满到下一个
+    // 样本位置 → 连续。与 DsoSignal/AnalogSignal 的 paint_envelope 一致。
+    const float scale_pixels_per_samples = e.scale / samples_per_pixel;
+    const float rect_w = max(1.0f, scale_pixels_per_samples);
+
     for(uint64_t sample = 0; sample < e.length-1; sample++) {
 		const float x = ((e.scale * sample + e.start) /
             samples_per_pixel - pixels_offset) + left + _view->trig_hoff()/samples_per_pixel;
@@ -351,7 +358,7 @@ void MathTrace::paint_envelope(QPainter &p,
 		if(h <= 0.0f && h >= -1.0f)
 			h = -1.0f;
 
-		*rect++ = QRectF(x, t, 1.0f, h);
+		*rect++ = QRectF(x, t, rect_w, h);
 	}
 
 	p.drawRects(rects, e.length);
@@ -533,7 +540,7 @@ QString MathTrace::get_time(double t)
     return str;
 }
 
-pv::data::MathStack* MathTrace::get_math_stack()
+std::shared_ptr<pv::data::MathStack> MathTrace::get_math_stack()
 {
    return _math_stack;
 }

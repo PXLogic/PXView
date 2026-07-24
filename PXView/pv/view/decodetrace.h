@@ -30,7 +30,7 @@
 #include <list>
 #include <map>
 
-#include "../dialogs/dsdialog.h"
+#include "../dialogs/pxdialog.h"
 #include "../prop/binding/decoderoptions.h"
 #include "trace.h"
 
@@ -45,6 +45,7 @@ class SigSession;
 
 namespace data {
 class DecoderStack;
+class DataSource;
 
 namespace decode {
 class Annotation;
@@ -85,7 +86,7 @@ public:
 
   static const int MaxAnnType = 100;
 
-  DecodeTrace(pv::SigSession *session, pv::data::DecoderStack *decoder_stack,
+  DecodeTrace(pv::SigSession *session, std::shared_ptr<pv::data::DecoderStack> decoder_stack,
               int index);
 
 public:
@@ -93,7 +94,7 @@ public:
 
   bool enabled();
 
-  inline pv::data::DecoderStack *decoder() { return _decoder_stack; }
+  inline std::shared_ptr<pv::data::DecoderStack> decoder() { return _decoder_stack; }
 
   void set_view(pv::view::View *view);
 
@@ -128,13 +129,11 @@ public:
   /**
    * decode region
    **/
-  void frame_ended();
-
   int get_progress();
 
   void *get_key_handel();
 
-  bool create_popup(bool isnew);
+  bool create_popup(bool isnew, QPoint anchor = QPoint());
 
 protected:
   void paint_type_options(QPainter &p, int right, const QPoint pt, QColor fore);
@@ -144,7 +143,7 @@ private:
                        QColor text_colour, int text_height, int left, int right,
                        double samples_per_pixel, double pixels_offset, int y,
                        size_t base_colour, double min_annWidth, QColor fore,
-                       QColor back, double &last_x);
+                       QColor back, double &last_x, double &last_drawn_start);
 
   void draw_nodetail(QPainter &p, int text_height, int left, int right, int y,
                      size_t base_colour, QColor fore, QColor back);
@@ -162,6 +161,14 @@ private:
   void draw_unshown_row(QPainter &p, int y, int h, int left, int right,
                         QString info, QColor fore, QColor back);
 
+  // View-layer helper: picks the best-fitting annotation text for the given
+  // rect width using the supplied font metrics. Moved here from
+  // pv::data::decode::Annotation so the Core Annotation class stays a pure
+  // data class free of QFont/QFontMetrics dependencies.
+  static QString best_annotation_text(
+      const pv::data::decode::Annotation &a, double rect_width,
+      const QFontMetrics &fm);
+
 signals:
   void decoded_progress(int progress);
 
@@ -174,12 +181,9 @@ public:
   volatile bool _delete_flag; // destroy it when deocde task end
 
 private:
-  pv::SigSession *_session;
-  pv::data::DecoderStack *_decoder_stack;
-
-  uint64_t _decode_start;
-  uint64_t _decode_end;
-
+  data::DataSource *_data_source = nullptr;
+  std::shared_ptr<pv::data::DecoderStack> _decoder_stack;
+  
   uint64_t _decode_cursor1; // the cursor key, sample start index
   uint64_t _decode_cursor2;
 

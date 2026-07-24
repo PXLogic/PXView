@@ -32,8 +32,8 @@ class DecoderStatus;
  
 namespace pv{
 
-namespace view{
-    class Trace;
+namespace data{
+    class DecoderStack;
 }
 
 namespace dock{
@@ -81,7 +81,7 @@ private slots:
 public:
     DecoderStatus *m_decoderStatus;
     QString        m_protocolId;
-    pv::view::Trace *_trace;
+    pv::data::DecoderStack *_trace;
     bool           m_expanded;
   
 private:

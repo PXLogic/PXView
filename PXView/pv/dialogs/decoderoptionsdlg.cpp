@@ -22,25 +22,28 @@
 
 #include "decoderoptionsdlg.h"
 #include <libsigrokdecode.h>
-#include <QScrollArea> 
+#include <QScrollArea>
 #include <QDialogButtonBox>
 #include <assert.h>
 #include <QVBoxLayout>
-#include <QLabel> 
+#include <QLabel>
 #include <QGridLayout>
 #include <QFormLayout>
-#include <QScrollArea> 
+#include <QScrollArea>
 #include <QVariant>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QCheckBox>
+#include <QEvent>
+#include <QMouseEvent>
+#include <QEventLoop>
+#include "../ui/popupdlglist.h"
 
 #include "../data/decoderstack.h"
 #include "../prop/binding/decoderoptions.h"
 #include "../data/decode/decoder.h"
 #include "../ui/dscombobox.h"
 #include "../view/logicsignal.h"
-#include "../appcontrol.h"
 #include "../sigsession.h"
 #include "../view/view.h"
 #include "../view/cursor.h"
@@ -57,13 +60,19 @@ namespace dialogs {
 
 
 DecoderOptionsDlg::DecoderOptionsDlg(QWidget *parent)
-:DSDialog(parent)
+:PxDialog(parent)
 {
     _cursor1 = 0;
     _cursor2 = 0;
     _contentHeight = 0;
     _is_reload_form = false;
     _content_width = 0;
+    // 用 Qt::Tool 替代 Qt::Dialog:Tool 窗口不走模态态路径,不 grabMouse,
+    // qApp 事件过滤器能正常收到外部点击事件。配合 show()+QEventLoop 实现
+    // "exec 语义但非模态",由事件过滤器检测外部点击调用 reject() 关闭。
+    // FramelessWindowHint 保留 PxDialog 的无边框样式。
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
+    setWindowModality(Qt::NonModal);
 }
 
 DecoderOptionsDlg::~DecoderOptionsDlg()
@@ -74,8 +83,66 @@ DecoderOptionsDlg::~DecoderOptionsDlg()
     _bindings.clear();
 }
 
+int DecoderOptionsDlg::exec()
+{
+    // 不调用 PxDialog::exec()(其内部 QDialog::exec() 会 grabMouse 进入模态态,
+    // 导致 qApp 事件过滤器收不到外部点击)。改用 show() + 本地 QEventLoop:
+    // Tool 窗口非模态,不 grabMouse,事件过滤器能正常检测外部点击,
+    // 由 finished 信号驱动 QEventLoop 退出,保持 exec() 同步返回语义。
+    update_font();
+    PopupDlgList::AddDlgTolist(this);
+    qApp->installEventFilter(this);
+    show();
+    raise();
+    activateWindow();
+    QEventLoop loop;
+    connect(this, &QDialog::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+    qApp->removeEventFilter(this);
+    return result();
+}
+
+bool DecoderOptionsDlg::eventFilter(QObject *obj, QEvent *event)
+{
+    // 全局事件过滤器(安装在 qApp 上):检测鼠标按下事件落在对话框几何范围外时
+    // 调用 reject() 关闭(与毛刺滤波浮窗 Qt::Popup 的行为一致)。
+    // Tool 窗口非模态不 grabMouse,外部 widget 的鼠标事件能正常到达 qApp 过滤器。
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        QPoint globalPos = me->globalPosition().toPoint();
+        if (!rect().contains(mapFromGlobal(globalPos))) {
+            // 点击在对话框 rect 外。但需排除对话框子控件(如 QComboBox
+            // 下拉列表可能延伸到 rect 之外):向上查找父链,若属于 this 则不关闭。
+            QWidget *w = qobject_cast<QWidget *>(obj);
+            bool is_child = false;
+            while (w) {
+                if (w == this) { is_child = true; break; }
+                w = w->parentWidget();
+            }
+            if (!is_child) {
+                reject();
+                return true;
+            }
+        }
+    }
+    return PxDialog::eventFilter(obj, event);
+}
+
+void DecoderOptionsDlg::accept()
+{
+    PxDialog::accept();
+}
+
+void DecoderOptionsDlg::reject()
+{
+    PxDialog::reject();
+}
+
 void DecoderOptionsDlg::load_options(view::DecodeTrace *trace)
 {
+    if (!trace) {
+        return;
+    }
     assert(trace);
     _trace = trace;
 
@@ -91,7 +158,7 @@ void DecoderOptionsDlg::load_options(view::DecodeTrace *trace)
 
 void DecoderOptionsDlg::load_options_view()
 {   
-    DSDialog *dlg = this;   
+    PxDialog *dlg = this;   
 
     dlg->setTitle(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DECODER_OPTIONS), "Decoder Options"));   
 
@@ -265,8 +332,9 @@ void DecoderOptionsDlg::load_options_view()
 
 void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 {
-	using pv::data::decode::Decoder; 
-	assert(container); 
+	using pv::data::decode::Decoder;
+	if (!container) return;
+	assert(container);
 
     int dex = 0;
  
@@ -290,29 +358,31 @@ DsComboBox* DecoderOptionsDlg::create_probe_selector(
     QWidget *parent, const data::decode::Decoder *dec,
 	const srd_channel *const pdch)
 {
+	if (!dec || !_trace) return nullptr;
 	assert(dec);
-    
-    const auto &sigs = AppControl::Instance()->GetSession()->get_signals();
+    assert(_trace);
+
+    const auto &sigs = _trace->get_view()->session().get_signal_models();
 
     data::decode::Decoder *decoder = const_cast<data::decode::Decoder*>(dec);
- 
+
 	DsComboBox *selector = new DsComboBox(parent);
     selector->addItem("-", QVariant::fromValue(-1));
-  
+
     int dex = 0;
     const int binded_index = decoder->binded_probe_index(pdch);
 
-	for(auto s : sigs) 
+	for(auto s : sigs)
     {
         dex++;
 
-        if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()){
-			selector->addItem(s->get_name(),QVariant::fromValue(s->get_index()));
-            
-            if (binded_index == s->get_index()){
+        if (s->type() == SR_CHANNEL_LOGIC && s->enabled()){
+			selector->addItem(QString::fromStdString(s->name()), QVariant::fromValue(s->index()));
+
+            if (binded_index == s->index()){
                 selector->setCurrentIndex(dex);
             }
-		} 
+		}
 	}
 
     if (binded_index == -1){
@@ -329,8 +399,10 @@ void DecoderOptionsDlg::on_region_set(int index)
 }
 
 void DecoderOptionsDlg::update_decode_range()
-{ 
-    const uint64_t last_samples = AppControl::Instance()->GetSession()->cur_samplelimits() - 1;
+{
+    if (!_trace) return;
+    assert(_trace);
+    const uint64_t last_samples = _trace->get_view()->session().cur_samplelimits() - 1;
     const int index1 = _start_comboBox->currentIndex();
     const int index2 = _end_comboBox->currentIndex();
     uint64_t decode_start, decode_end;
@@ -354,7 +426,7 @@ void DecoderOptionsDlg::update_decode_range()
     }
 
     if (index2 == 0) {
-        decode_end = last_samples;
+        decode_end = 0; // 0 is a special value meaning "to the end"
         _cursor2 = 0;
 
     } else {
@@ -364,17 +436,17 @@ void DecoderOptionsDlg::update_decode_range()
             decode_end = view->get_cursor_samples(cusrsor_index);
         }
         else{
-            decode_end = last_samples;
+            decode_end = 0;
             _cursor2 = 0;
         }       
     }
 
     if (decode_start > last_samples)
         decode_start = 0;
-    if (decode_end > last_samples)
+    if (decode_end != 0 && decode_end > last_samples)
         decode_end = last_samples;
 
-    if (decode_start > decode_end) {
+    if (decode_end != 0 && decode_start > decode_end) {
         uint64_t tmp = decode_start;
         decode_start = decode_end;
         decode_end = tmp;
@@ -392,8 +464,10 @@ void DecoderOptionsDlg::create_decoder_form(
 {
 	const GSList *l;
 
-    assert(dec);     
+    if (!dec) return;
+    assert(dec);
 	const srd_decoder *const decoder = dec->decoder();
+	if (!decoder) return;
 	assert(decoder);
 
     QFont font = theme_font_dialog();
@@ -471,7 +545,7 @@ void DecoderOptionsDlg::create_decoder_form(
     binding->add_properties_to_form(decoder_form, false, font);
 	_bindings.push_back(binding);
   
-    auto group = new pv::widgets::DecoderGroupBox(_trace->decoder(), 
+    auto group = new pv::widgets::DecoderGroupBox(_trace->decoder().get(), 
                             dec, 
                             decoder_form, 
                             parent, font);
@@ -492,10 +566,12 @@ void DecoderOptionsDlg::commit_probes()
 
 void DecoderOptionsDlg::commit_decoder_probes(data::decode::Decoder *dec)
 {
-	assert(dec); 
+	if (!dec || !_trace) return;
+	assert(dec);
+    assert(_trace);
 
     std::map<const srd_channel*, int> probe_map;
-    const auto &sigs = AppControl::Instance()->GetSession()->get_signals();
+    const auto &sigs = _trace->get_view()->session().get_signal_models();
 
     std::list<int> index_list;
 
@@ -507,7 +583,7 @@ void DecoderOptionsDlg::commit_decoder_probes(data::decode::Decoder *dec)
         const int selection = p._combo->itemData(p._combo->currentIndex()).value<int>();
 
         for(auto s : sigs){
-            if(s->get_index() == selection) {
+            if(s->index() == selection) {
                 probe_map[p._pdch] = selection;
                 index_list.push_back(selection);
 				break;
@@ -535,6 +611,7 @@ void DecoderOptionsDlg::on_accept()
 void DecoderOptionsDlg::on_trans_pramas()
 {
     QCheckBox *ck_box = dynamic_cast<QCheckBox*>(sender());
+    if (!ck_box) return;
     assert(ck_box);
 
     AppConfig::Instance().appOptions.transDecoderDlg = ck_box->isChecked();

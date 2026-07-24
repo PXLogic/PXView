@@ -31,7 +31,7 @@
 
 #include "../view/dsosignal.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 
 namespace pv {
 
@@ -43,7 +43,7 @@ class View;
 
 namespace dialogs {
 
-class DsoMeasure : public DSDialog
+class DsoMeasure : public PxDialog
 {
 	Q_OBJECT
 

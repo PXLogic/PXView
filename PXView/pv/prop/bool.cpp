@@ -80,6 +80,8 @@ GVariant* Bool::get_value()
 
 void Bool::commit()
 {
+	if (!_setter)
+		return;
 	assert(_setter);
 
 	if (!_check_box)

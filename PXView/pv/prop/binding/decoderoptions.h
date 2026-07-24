@@ -23,6 +23,7 @@
 #define PXVIEW_PV_PROP_BINDING_DECODEROPTIONS_H
 
 #include "binding.h"
+#include <memory>
 #include <QFont>
 
 #include "../property.h"
@@ -44,7 +45,7 @@ namespace binding {
 class DecoderOptions : public Binding
 {
 public:
-	DecoderOptions(pv::data::DecoderStack *decoder_stack,
+	DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_stack,
 		pv::data::decode::Decoder* decoder);
 
     GVariant* getter(const char *id);

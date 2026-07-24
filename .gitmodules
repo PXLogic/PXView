@@ -1,0 +1,21 @@
+[submodule "sigrok-firmware"]
+	path = sigrok-firmware
+	url = https://github.com/sigrokproject/sigrok-firmware.git
+[submodule "sigrok-firmware-fx2lafw"]
+	path = sigrok-firmware-fx2lafw
+	url = https://github.com/sigrokproject/sigrok-firmware-fx2lafw.git
+[submodule "sigrok-util"]
+	path = sigrok-util
+	url = https://github.com/sigrokproject/sigrok-util.git
+[submodule "libsigrok"]
+	path = libsigrok
+	url = https://github.com/haikumuse/libsigrok.git
+	branch = pxview-fork
+[submodule "libsigrokdecode"]
+	path = libsigrokdecode
+	url = https://github.com/haikumuse/libsigrokdecode.git
+	branch = pxview-fork
+[submodule "libusb"]
+	path = libusb
+	url = https://github.com/haikumuse/libusb.git
+	branch = event-abstraction-v4

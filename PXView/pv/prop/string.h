@@ -37,7 +37,9 @@ class String : public Property
 public:
     String(QString name, QString label, Getter getter, Setter setter);
 
-	QWidget* get_widget(QWidget *parent, bool auto_commit);
+protected:
+    QWidget* get_widget(QWidget *parent, bool auto_commit) override;
+public:
 
 	void commit();
 

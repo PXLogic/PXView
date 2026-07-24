@@ -12,6 +12,10 @@
         "text": "示波器"
     },
     {
+        "id": "IDS_DEVICE_MODE_MSO",
+        "text": "混合示波器"
+    },
+    {
         "id": "IDS_TOOLBAR_DEVICE_TYPE_DEMO",
         "text": "演示"
     },
@@ -22,10 +26,6 @@
     {
         "id": "IDS_TOOLBAR_DEVICE_OPTION",
         "text": "選項"
-    },
-    {
-        "id": "IDS_TOOLBAR_SIGNAL_PROCESSING",
-        "text": "濾波"
     },
     {
         "id": "IDS_TOOLBAR_CAPTURE_MODE",

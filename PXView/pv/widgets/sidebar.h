@@ -130,6 +130,7 @@ public:
   void addSeparator();
 
   void setItemVisible(int index, bool visible);
+  bool isItemVisible(int index) const;
   void setItemEnabled(int index, bool enabled);
   void setItemChecked(int index, bool checked);
   void setItemRunning(int index, bool running);

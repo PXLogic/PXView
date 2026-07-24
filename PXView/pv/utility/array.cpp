@@ -27,12 +27,14 @@ namespace pv
     namespace array
     {
         uint64_t find_min_uint64(uint64_t *arr, int size)
-        { 
+        {
+            if (!arr)
+                return 0;
             assert(arr);
             assert(size);
 
-            uint64_t *p = arr;            
-            uint64_t v = *p;            
+            uint64_t *p = arr;
+            uint64_t v = *p;
 
             for (int i=1; i<size; i++){
                 p++;
@@ -43,7 +45,9 @@ namespace pv
         }
 
         uint64_t find_max_uint64(uint64_t *arr, int size)
-        { 
+        {
+            if (!arr)
+                return 0;
             assert(arr);
             assert(size);
 

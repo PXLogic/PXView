@@ -51,11 +51,15 @@ void Binding::commit()
 
 void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit, QFont font)
 {
+    if (!layout)
+        return;
     assert(layout);
 
     for(auto p : _properties)
     {
-        QWidget *const widget = p->get_widget(layout->parentWidget(), auto_commit);
+        QWidget *const widget = auto_commit
+            ? p->get_widget_live(layout->parentWidget())
+            : p->get_widget_deferred(layout->parentWidget());
 
         if (p->labeled_widget()){
             layout->addRow(widget);

@@ -7,10 +7,11 @@
 #include <QTcpSocket>
 #include <QSet>
 #include <map>
+#include <mutex>
 
 namespace pv::api {
 
-class McpTransport : public QObject, public ITransport {
+class McpTransport : public QObject, public ITransport, public IServiceEventListener {
     Q_OBJECT
 public:
     McpTransport(IJsonRpcHandler* handler, int port = 10110);
@@ -19,6 +20,10 @@ public:
     bool start() override;
     void stop() override;
     bool is_running() const override;
+
+    // IServiceEventListener - push service events to MCP clients (via the
+    // active SSE streams opened by wait_capture, or as JSON-RPC notifications).
+    void on_service_event(const ServiceEventData& data) override;
 
     // SSE support
     void send_sse_headers(QTcpSocket* socket);
@@ -34,6 +39,12 @@ private:
     int _port;
     QTcpServer* _server = nullptr;
     QSet<QTcpSocket*> _pending_sockets;
+
+    // Sockets currently holding an open SSE stream (e.g. wait_capture in
+    // progress). Service events are pushed to these so MCP clients receive
+    // notifications without polling.
+    QSet<QTcpSocket*> _sse_clients;
+    mutable std::mutex _sse_clients_mutex;
 
     void try_handle_request(QTcpSocket* socket);
     void handle_http_request(QTcpSocket* socket, const QByteArray& data);

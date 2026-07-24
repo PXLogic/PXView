@@ -21,8 +21,9 @@
  */
 
 #include "applicationpardlg.h"
+#include <QPainter>
 #include "../ui/widgetinspector.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
@@ -1576,8 +1577,7 @@ void ApplicationParamDlg::saveDisplayOptions() {
 
   if (bAppChanged) {
     app.SaveApp();
-    AppControl::Instance()->GetSession()->broadcast_msg(
-        DSV_MSG_APP_OPTIONS_CHANGED);
+    AppControl::Instance()->GetSession()->broadcast_async<interface::AppOptionsChanged>({});
   }
 }
 
@@ -1597,7 +1597,7 @@ void ApplicationParamDlg::saveShortcutOptions() {
   app.shortcutOptions.items = newItems;
   app.SaveShortcuts();
   app.flushPendingSaves();
-  AppControl::Instance()->GetSession()->broadcast_msg(DSV_MSG_SHORTCUT_CHANGED);
+  AppControl::Instance()->GetSession()->broadcast_async<interface::ShortcutChanged>({});
 
   _shortcut_original_keys = _shortcut_keys;
   updateShortcutButtons();
@@ -1739,12 +1739,12 @@ void ApplicationParamDlg::saveStyleOptions() {
     }
 
     app.SaveStyle();
-    AppControl::Instance()->GetSession()->broadcast_msg(DSV_MSG_STYLE_CHANGED);
+    AppControl::Instance()->GetSession()->broadcast_async<interface::StyleChanged>({});
   }
 }
 
 bool ApplicationParamDlg::ShowDlg(QWidget *parent) {
-  DSDialog dlg(parent, true, false);
+  PxDialog dlg(parent, true, false);
   dlg.setTitle(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SETTINGS), "Settings"));
   dlg.setMinimumSize(520, 420);
 

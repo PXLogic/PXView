@@ -32,6 +32,7 @@
 #include <QTimer>
 #include <QWidget>
 #include <chrono>
+#include <memory>
 
 
 #include "../dsvdef.h"
@@ -39,6 +40,7 @@
 #include "../ui/uimanager.h"
 #include "../view/view.h"
 #include "edge_nav_button.h"
+#include "trace.h"
 
 
 class QPainter;
@@ -62,6 +64,30 @@ enum UpdateEventType {
 class Signal;
 class LogicSignal;
 class View;
+class ViewportPainter;
+class ViewportInteraction;
+class ViewportDrag;
+
+// Action / measure enumerators — promoted from Viewport's nested enums to
+// namespace scope during Phase F so that ViewportPainter / ViewportInteraction
+// / ViewportDrag (ported verbatim from viewport.cpp) can keep using bare
+// names like LOGIC_ZOOM / NO_ACTION / DSO_VALUE without C++20 `using enum`.
+enum ActionType {
+  NO_ACTION,
+  CURS_MOVE,
+  LOGIC_EDGE,
+  LOGIC_MOVE,
+  LOGIC_ZOOM,
+  LOGIC_JUMP,
+  RESIZE_SIGNAL,
+  DSO_XM_STEP0,
+  DSO_XM_STEP1,
+  DSO_XM_STEP2,
+  DSO_YM,
+  DSO_TRIG_MOVE
+};
+
+enum MeasureType { NO_MEASURE, LOGIC_FREQ, LOGIC_EDGE_CNT, DSO_VALUE };
 
 // main graph view port, in the middle region
 // draw the left and right rule scale
@@ -70,6 +96,11 @@ class Viewport : public QWidget, public IUiWindow {
   Q_OBJECT
   Q_PROPERTY(QColor panelBgColor READ panelBgColor WRITE setPanelBgColor)
   Q_PROPERTY(QColor panelTextColor READ panelTextColor WRITE setPanelTextColor)
+
+  // Delegates (Phase F1/F2/F3) access private state through friend access.
+  friend class ViewportPainter;
+  friend class ViewportInteraction;
+  friend class ViewportDrag;
 
 public:
   static const int HitCursorMargin = 10;
@@ -82,24 +113,6 @@ public:
   static const int SnapMinSpace = 10;
   static const int WaitLoopTime = 400;
   static const QColor PROBE_COLORS[8];
-  enum ActionType {
-    NO_ACTION,
-
-    CURS_MOVE,
-
-    LOGIC_EDGE,
-    LOGIC_MOVE,
-    LOGIC_ZOOM,
-    LOGIC_JUMP,
-    RESIZE_SIGNAL,
-    DSO_XM_STEP0,
-    DSO_XM_STEP1,
-    DSO_XM_STEP2,
-    DSO_YM,
-    DSO_TRIG_MOVE
-  };
-
-  enum MeasureType { NO_MEASURE, LOGIC_FREQ, LOGIC_EDGE_CNT, DSO_VALUE };
 
 public:
   explicit Viewport(View &parent, View_type type);
@@ -140,7 +153,7 @@ protected:
   void UpdateFont() override;
 
 private:
-  void doPaint(const QRect &dirtyRect = QRect());
+  // Qt event overrides are thin forwarders to the interaction delegate.
   void mousePressEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *event) override;
@@ -151,22 +164,10 @@ private:
   void keyPressEvent(QKeyEvent *event) override;
   bool gestureEvent(QNativeGestureEvent *event);
 
-  void paintSignals(QPainter &p, QColor fore, QColor back);
-  void paintProgress(QPainter &p, QColor fore, QColor back);
-  void paintMeasure(QPainter &p, QColor fore, QColor back);
-  void paintCursors(QPainter &p);
-
+  // State helpers retained on Viewport (called by delegates via back-pointer).
   void start_trigger_timer(int msec);
   void get_captured_progress(double &progress, int &progress100);
   void set_action(ActionType action);
-
-  void onLogicMouseRelease(QMouseEvent *event);
-  void onDsoMouseRelease(QMouseEvent *event);
-  void onAnalogMouseRelease(QMouseEvent *event);
-
-  void update_edge_nav_buttons();
-  void navigate_to_edge(EdgeNavButton::Direction dir);
-  LogicSignal* get_hovered_logic_signal(const QPoint &pos);
 
 private slots:
   void on_trigger_timer();
@@ -176,6 +177,11 @@ private slots:
   void show_contextmenu(const QPoint &pos);
   void add_cursor_x();
   void add_cursor_y();
+  void show_logic_contextmenu(const QPoint &pos);
+  void copy_waveform_this_channel();
+  void copy_waveform_decoder_track();
+  void copy_waveform_decoder_group();
+  void copy_waveform_all_channels();
 
 signals:
   void measure_updated();
@@ -263,6 +269,13 @@ private:
   QAction *_yAction;
   QAction *_xAction;
 
+  QMenu *_logic_cmenu;
+  QAction *_copy_this_channel_action;
+  QAction *_copy_decoder_track_action;
+  QAction *_copy_decoder_group_action;
+  QAction *_copy_all_channels_action;
+  QPoint _logic_menu_pos;
+
   QColor _panelBgColor;
   QColor _panelTextColor;
   int _max_frame_time;
@@ -282,6 +295,11 @@ private:
   EdgeNavButton *_prev_edge_btn;
   EdgeNavButton *_next_edge_btn;
   LogicSignal *_hover_logic_signal;
+
+  // Delegates (Phase F1/F2/F3). Owned by Viewport; constructed in the ctor.
+  std::unique_ptr<ViewportPainter> _painter;
+  std::unique_ptr<ViewportInteraction> _interaction;
+  std::unique_ptr<ViewportDrag> _drag;
 
 public:
   bool g_drag_active;

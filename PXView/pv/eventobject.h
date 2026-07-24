@@ -47,7 +47,10 @@ signals:
     void decode_done();
     void receive_data_len(quint64 len);
     void cur_snap_samplerate_changed();
-    void trigger_message(int msg);
+    void update_capture_sig();
+    void show_region_sig(quint64 start, quint64 end, bool keep);
+    void show_wait_trigger_sig();
+    void repeat_hold_sig(int percent);
 };
 
 

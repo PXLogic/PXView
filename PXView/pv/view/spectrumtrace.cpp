@@ -80,9 +80,9 @@ const int SpectrumTrace::HoverPointSize = 3;
 const double SpectrumTrace::VerticalRate = 1.0 / 2000.0;
 
 SpectrumTrace::SpectrumTrace(pv::SigSession *session,
-    pv::data::SpectrumStack *spectrum_stack, int index) :
+    std::shared_ptr<pv::data::SpectrumStack> spectrum_stack, int index) :
     Trace("FFT("+QString::number(index)+")", index, SR_CHANNEL_FFT),
-    _session(session), 
+    _data_source(session),
     _enable(false),
     _view_mode(0),
     _hover_en(false),
@@ -91,9 +91,9 @@ SpectrumTrace::SpectrumTrace(pv::SigSession *session,
 {
     _typeWidth = 0;
 
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO && index == s->get_index()){
-            _colour = s->get_colour();
+    for(auto m : _data_source->get_signal_models()) {
+        if (m->type() == SR_CHANNEL_DSO && index == m->index()){
+            _colour = QColor(QString::fromStdString(m->color()));
         }
     }
   
@@ -104,7 +104,6 @@ SpectrumTrace::SpectrumTrace(pv::SigSession *session,
 
 SpectrumTrace::~SpectrumTrace()
 {
-    DESTROY_OBJECT(_spectrum_stack);
 }
 
 bool SpectrumTrace::enabled()
@@ -137,7 +136,7 @@ std::vector<QString> SpectrumTrace::get_view_modes_support()
     return modes;
 }
 
-pv::data::SpectrumStack* SpectrumTrace::get_spectrum_stack()
+std::shared_ptr<pv::data::SpectrumStack> SpectrumTrace::get_spectrum_stack()
 {
     return _spectrum_stack;
 }
@@ -318,13 +317,15 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
         double vdiv = 0;
         double vfactor = 0;
         
-        for(auto s : _session->get_signals()) {
-            if (s->signal_type() == SR_CHANNEL_DSO) {
-                view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-                if(dsoSig->get_index() == _spectrum_stack->get_index()) {
-                    vdiv = dsoSig->get_vDialValue();
-                    vfactor = dsoSig->get_factor();
-                    break;
+        if (_view) {
+            for(auto s : _view->get_own_signals()) {
+                if (s->signal_type() == SR_CHANNEL_DSO) {
+                    view::DsoSignal *dsoSig = (view::DsoSignal*)s;
+                    if(dsoSig->get_index() == _spectrum_stack->get_index()) {
+                        vdiv = dsoSig->get_vDialValue();
+                        vfactor = dsoSig->get_factor();
+                        break;
+                    }
                 }
             }
         }
@@ -384,8 +385,8 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
     double blank_right = width;
 
     // horizontal ruler
-    const double NyFreq = _session->cur_snap_samplerate() / (2.0 * _spectrum_stack->get_sample_interval());
-    const double deltaFreq = _session->cur_snap_samplerate() * 1.0 /
+    const double NyFreq = _data_source->cur_snap_samplerate() / (2.0 * _spectrum_stack->get_sample_interval());
+    const double deltaFreq = _data_source->cur_snap_samplerate() * 1.0 /
                             (_spectrum_stack->get_sample_num() * _spectrum_stack->get_sample_interval());
     const double FreqRange = NyFreq * _scale;
     const double FreqOffset = NyFreq * _offset;

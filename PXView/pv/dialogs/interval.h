@@ -31,12 +31,12 @@
 
 #include "../sigsession.h"
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 
 namespace pv {
 namespace dialogs {
 
-class Interval : public DSDialog
+class Interval : public PxDialog
 {
 	Q_OBJECT
 

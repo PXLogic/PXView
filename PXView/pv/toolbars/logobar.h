@@ -27,7 +27,7 @@
 #include <QToolBar> 
 #include <QAction>
 #include <QMenu>
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h> 
 #include <QPushButton>
 
 #include "../sigsession.h"

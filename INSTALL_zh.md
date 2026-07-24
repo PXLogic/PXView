@@ -7,14 +7,16 @@
 - make
 - cmake >= 3.16
 - ninja-build
-- Qt >= 6.11.0 (Core, Gui, Widgets, Svg, Concurrent)
+- Qt >= 6.11.0 (Core, Gui, Widgets, Svg, Concurrent, WebSockets)
 - libglib >= 2.32.0
 - zlib
 - libusb-1.0 >= 1.0.16
 - libboost >= 1.42
 - libfftw3 >= 3.3
+- libzip
 - python >= 3.8
 - pkg-config >= 0.22
+- nlohmann-json >= 3.2.0（header-only，若未安装则自动从 GitHub 下载）
 
 ## 编译与安装
 
@@ -23,7 +25,7 @@
 #### Ubuntu / Debian（如 Ubuntu 22.04 / 24.04）：
 ```bash
 sudo apt update
-sudo apt install git gcc g++ make cmake ninja-build libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libboost-dev libfftw3-dev python3-dev libudev-dev pkg-config libgl1-mesa-dev libxkbcommon-dev libvulkan-dev python3-pip
+sudo apt install git gcc g++ make cmake ninja-build libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libboost-dev libfftw3-dev libzip-dev python3-dev libudev-dev pkg-config libgl1-mesa-dev libxkbcommon-dev libvulkan-dev python3-pip
 ```
 
 **在 Ubuntu 上安装 Qt 6.11：**
@@ -38,13 +40,13 @@ aqt install-qt linux desktop 6.11.0 linux_gcc_64 --outputdir ~/Qt
 
 #### Fedora：
 ```bash
-sudo dnf install git gcc gcc-c++ make cmake ninja-build libtool pkgconf glib2-devel zlib-devel libudev-devel libusb1-devel python3-devel boost-devel fftw-devel qt6-qtbase-devel qt6-qtsvg-devel
+sudo dnf install git gcc gcc-c++ make cmake ninja-build libtool pkgconf glib2-devel zlib-devel libudev-devel libusb1-devel python3-devel boost-devel fftw-devel libzip-devel qt6-qtbase-devel qt6-qtsvg-devel qt6-qtwebsockets-devel
 ```
 *（Fedora 通常在标准仓库中提供较新的 Qt6 版本）*
 
 #### Arch Linux：
 ```bash
-sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-base qt6-svg fftw
+sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-base qt6-svg qt6-websockets fftw libzip
 ```
 
 #### macOS（Homebrew）：
@@ -52,6 +54,27 @@ sudo pacman -S base-devel git cmake ninja glib2 zlib libusb python boost qt6-bas
 brew install git cmake ninja gettext glib libusb zlib boost fftw python3 qt pkg-config
 ```
 *（注意：如果默认的 `qt` brew formula 尚未更新到 6.11.0，或未自动链接，可能需要手动查找 brew Qt 安装路径，通常为 `/opt/homebrew/opt/qt`）*
+
+#### 可选依赖（非 PXLogic 硬件所需）
+
+以下依赖**不是** PXLogic 硬件所必需的，仅在需要特定旧型号驱动时安装：
+
+- **libftdi1** — FTDI 驱动（asix-sigma、chronovu-la、ftdi-la、ikalogic-scanaplus、pipistrello-ols）。未安装时仅打印警告并禁用这些驱动，libsigrok 其余部分正常编译。
+- **nettle** — rdtech-tc 驱动（AES-256 固件解密）。未安装时仅禁用该驱动。
+
+```bash
+# Ubuntu / Debian：
+sudo apt install libftdi1-dev libnettle-dev
+
+# Fedora：
+sudo dnf install libftdi-devel nettle-devel
+
+# Arch Linux：
+sudo pacman -S libftdi nettle
+
+# macOS：
+brew install libftdi nettle
+```
 
 ### 步骤 2：获取 PXView 源代码
 ```bash

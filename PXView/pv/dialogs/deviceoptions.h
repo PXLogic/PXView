@@ -25,7 +25,7 @@
 #ifndef PXVIEW_PV_DEVICEOPTIONS_H
 #define PXVIEW_PV_DEVICEOPTIONS_H
 
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h> 
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGroupBox>
@@ -42,7 +42,7 @@
 #include "../prop/binding/deviceoptions.h"
 #include "../prop/binding/probeoptions.h"
 #include "../toolbars/titlebar.h"
-#include "../dialogs/dsdialog.h"
+#include "../dialogs/pxdialog.h"
 #include "../ui/dscombobox.h"
 
 class QScrollArea;
@@ -53,12 +53,15 @@ public:
     virtual void ChannelChecked(int index, QObject *object)=0;
 };
 
-class ChannelLabel : public QWidget 
+class ChannelLabel : public QWidget
 {
 Q_OBJECT
 
 public:
-    ChannelLabel(IChannelCheck *check, QWidget *parent, int chanIndex);
+    enum ChannelType { Logic, Analog };
+
+    ChannelLabel(IChannelCheck *check, QWidget *parent, int chanIndex,
+                 ChannelType type = Logic);
 
     inline QCheckBox* getCheckBox(){
         return _box;
@@ -75,27 +78,30 @@ private:
     QCheckBox *_box;
     IChannelCheck *_checked;
     int     _index;
+    ChannelType _type;
     static const QColor PROBE_COLORS[8];
 };
 
 struct ChannelModePair
 {
     void *key;
-    int  value;
+    QString value;
 };
 
 class DeviceAgent;
 
 namespace pv {
 
+class SigSession;
+
 namespace dialogs {
 
-class DeviceOptions : public DSDialog, public IChannelCheck
+class DeviceOptions : public PxDialog, public IChannelCheck
 {
 	Q_OBJECT
 
 public:
-    DeviceOptions(QWidget *parent);
+    DeviceOptions(SigSession *session, QWidget *parent);
 
     ~DeviceOptions();
 
@@ -138,7 +144,8 @@ private:
     std::vector<QCheckBox *> _probes_checkBox_list;
 
     QTimer      _mode_check_timer;
-    int         _opt_mode;  
+    /* Task 10/Phase 3: OPERATION_MODE config_get returns a string now. */
+    QString     _opt_mode;  
     QWidget     *_scroll_panel;
     QScrollArea *_scroll;
     QWidget     *_container_panel;
@@ -148,6 +155,7 @@ private:
     int     _groupHeight1;
     int     _groupHeight2;
     volatile    bool _isBuilding;
+    SigSession *_session;
     DeviceAgent *_device_agent;
     int     _cur_analog_tag_index;
     QString _demo_operation_mode;

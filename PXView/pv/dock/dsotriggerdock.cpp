@@ -32,6 +32,7 @@
 #include "../ui/langresource.h"
 #include "../ui/msgbox.h"
 #include "../view/dsosignal.h"
+#include "../view/view.h"
 #include "keywordlineedit.h"
 #include <QEvent>
 #include <QHBoxLayout>
@@ -427,11 +428,10 @@ void DsoTriggerDock::update_view() {
              &DsoTriggerDock::channel_changed);
   _channel_comboBox->clear();
 
-  for (auto s : _session->get_signals()) {
-    if (s->signal_type() == SR_CHANNEL_DSO) {
-      view::DsoSignal *dsoSig = (view::DsoSignal *)s;
-      _channel_comboBox->addItem(dsoSig->get_name(),
-                                 QVariant::fromValue(dsoSig->get_index()));
+  for (auto s : _session->get_signal_models()) {
+    if (s->type() == SR_CHANNEL_DSO) {
+      _channel_comboBox->addItem(QString::fromStdString(s->name()),
+                                 QVariant::fromValue(s->index()));
     }
   }
   ret = _session->get_device()->get_config_byte(SR_CONF_TRIGGER_CHANNEL, src);
@@ -559,11 +559,15 @@ void DsoTriggerDock::set_session(QJsonObject &obj) {
 }
 
 void DsoTriggerDock::bind_context(TabContext *ctx) {
+  if (!ctx) {
+    pxv_warn("%s", "DsoTriggerDock::bind_context: ctx is NULL");
+    return;
+  }
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
-  if (ctx && ctx->document()) {
-    auto &saved = ctx->document()->_dock_dso_trigger_session;
+  if (ctx && ctx->view()) {
+    auto &saved = ctx->view()->dock_ui_state().dock_dso_trigger_session;
     if (!saved.isEmpty()) {
       set_session(saved);
     }
@@ -571,8 +575,8 @@ void DsoTriggerDock::bind_context(TabContext *ctx) {
 }
 
 void DsoTriggerDock::unbind_context() {
-  if (_context && _context->document()) {
-    _context->document()->_dock_dso_trigger_session = get_session();
+  if (_context && _context->view()) {
+    _context->view()->dock_ui_state().dock_dso_trigger_session = get_session();
   }
   _context = nullptr;
 }

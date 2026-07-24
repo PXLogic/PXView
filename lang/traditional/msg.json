@@ -355,6 +355,14 @@
         "text": "裝置被其它程式佔用，切換失敗!"
     },
     {
+        "id": "IDS_MSG_DEVICE_OPEN_FAILED",
+        "text": "開啟裝置失敗"
+    },
+    {
+        "id": "IDS_MSG_DEVICE_OPEN_FAILED_REASON",
+        "text": "無法開啟裝置。請檢查 USB 連接、驅動程式，以及裝置是否被其它程式佔用。"
+    },
+    {
         "id": "IDS_MSG_NO_ENABLED_CHANNEL",
         "text": "未啟用通道!"
     },

@@ -1,7 +1,7 @@
 /*
  * This file is part of the PulseView project.
  * PXView is based on PulseView.
- * 
+ *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
  * Copyright (C) 2016 DreamSourceLab <support@dreamsourcelab.com>
  *
@@ -23,65 +23,62 @@
 #ifndef PXVIEW_PV_WIDGETS_DECODERGROUPBOX_H
 #define PXVIEW_PV_WIDGETS_DECODERGROUPBOX_H
 
- 
-#include <QPushButton>
-#include <QGridLayout>
 #include <QFont>
+#include <QGridLayout>
+#include <QPushButton>
 #include <QWidget>
+
 
 namespace pv {
 
-namespace data{
+namespace data {
 class DecoderStack;
-namespace decode{
+namespace decode {
 class Decoder;
 }
-}
+} // namespace data
 
 namespace widgets {
 
-class DecoderGroupBox : public QWidget
-{
-	Q_OBJECT
+class DecoderGroupBox : public QWidget {
+  Q_OBJECT
 
 public:
-    DecoderGroupBox(pv::data::DecoderStack *decoder_stack,
-                    data::decode::Decoder *dec, QLayout *dec_layout,
-                    QWidget *parent, QFont font);
-    ~DecoderGroupBox();
-    bool eventFilter(QObject *o, QEvent *e);
+  DecoderGroupBox(pv::data::DecoderStack *decoder_stack,
+                  data::decode::Decoder *dec, QLayout *dec_layout,
+                  QWidget *parent, QFont font);
+  ~DecoderGroupBox();
+  bool eventFilter(QObject *o, QEvent *e);
 
-    inline int get_row_count(){
-        return _row_num;
-    }
+  inline int get_row_count() { return _row_num; }
 
 signals:
-	void show_hide_decoder();
-    void show_hide_row();
-    void del_stack(data::decode::Decoder *_dec);
+  void show_hide_decoder();
+  void show_hide_row();
+  void del_stack(data::decode::Decoder *_dec);
 
 private slots:
-    void tog_icon();
-    void on_del_stack();
+  void tog_icon();
+  void on_del_stack();
 
 private:
-    QWidget *_widget;
+  QWidget *_widget;
 
-    pv::data::DecoderStack  *_decoder_stack;
-    data::decode::Decoder   *_dec;
-    int _index;
+  pv::data::DecoderStack *_decoder_stack;
+  data::decode::Decoder *_dec;
+  int _index;
 
-    QGridLayout *_layout;
-    QPushButton *_del_button;
-    QPushButton *_show_button;
-    std::list <QPushButton *> _row_show_button;
-    int _row_num;
-    
+  QGridLayout *_layout;
+  QPushButton *_del_button;
+  QPushButton *_show_button;
+  std::list<QPushButton *> _row_show_button;
+  int _row_num;
+
 public:
-    int _content_width;
+  int _content_width;
 };
 
-} // widgets
-} // pv
+} // namespace widgets
+} // namespace pv
 
 #endif // PXVIEW_PV_WIDGETS_DECODERGROUPBOX_H

@@ -22,7 +22,7 @@
 
 #include "appcontrol.h"
 
-#include <libsigrok.h>
+#include <libsigrok/libsigrok.h>
 #include <libsigrokdecode.h>
 #include <QDir>
 #include <QCoreApplication>
@@ -82,12 +82,35 @@ bool AppControl::Init()
     qs = GetAppDataDir();
     cs = pv::path::ToUnicodePath(qs);
     pxv_info("GetAppDataDir:\"%s\"", cs.c_str());
+    // Fork libsigrok's ds_set_user_data_dir is gone. Upstream libsigrok uses
+    // sr_resource_set_hooks for resource path management. The pxlogic driver
+    // resolves firmware paths internally; no explicit set needed here.
     cs = pv::path::ConvertPath(qs);
-    ds_set_user_data_dir(cs.c_str());
 
     qs = GetFirmwareDir();
     cs = pv::path::ToUnicodePath(qs);
     pxv_info("GetFirmwareDir:\"%s\"", cs.c_str());
+
+    // Expose PXView/res as a libsigrok firmware search path. Upstream
+    // libsigrok's sr_resource_open() searches SIGROK_FIRMWARE_PATH (a
+    // path-separator-delimited list) plus the default sigrok-firmware dirs.
+    // The pxlogic driver uses sr_resource_open(SR_RESOURCE_FIRMWARE, name)
+    // with a bare filename (e.g. "SCI_LOGIC.bin"), so PXView's private
+    // firmware dir (install.dir/share/PXView/res) MUST be on the search
+    // path or FPGA/CPU firmware loading fails with "Firmware not found.",
+    // which previously caused the device to be reset (rst usb) and drop
+    // off the bus. Set the env var before _session->init() so the very
+    // first sr_resourcepaths_get() call (during scan/dev_open) sees it.
+    {
+        // Preserve any pre-existing SIGROK_FIRMWARE_PATH entries.
+        QString combined = QString::fromLocal8Bit(
+            g_getenv("SIGROK_FIRMWARE_PATH"));
+        if (!combined.isEmpty())
+            combined += QString::fromLatin1(G_SEARCHPATH_SEPARATOR_S);
+        combined += qs;
+        g_setenv("SIGROK_FIRMWARE_PATH",
+            combined.toUtf8().constData(), TRUE);
+    }
 
     qs = GetUserDataDir();
     cs = pv::path::ToUnicodePath(qs);
@@ -175,8 +198,16 @@ bool AppControl::Start()
     auto* active_session = _app_service->get_active_session();
     if (active_session) {
         _direct_transport = new pv::api::DirectTransport(active_session);
+        // Session-scoped events (CaptureStateChanged, SampleConfigChanged, ...).
         active_session->add_event_listener(_ws_transport);
+        active_session->add_event_listener(_mcp_transport);
     }
+
+    // App-scoped events (DeviceConfigChanged, DeviceDetached, ...).
+    // Without this, AppService::_event_listeners stays empty and
+    // AppService::notify_event never reaches any transport.
+    _app_service->add_event_listener(_ws_transport);
+    _app_service->add_event_listener(_mcp_transport);
 
     return true;
 }

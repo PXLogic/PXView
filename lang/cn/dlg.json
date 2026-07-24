@@ -59,6 +59,10 @@
         "id": "IDS_DLG_MCP_COPY_SYSTEM_PROMPT",
         "text": "复制系统提示词"
     },
+    {
+        "id": "IDS_DLG_MCP_COPY",
+        "text": "复制"
+    },
 
     {
         "id": "IDS_DLG_LOG_NO_FILE",
@@ -157,6 +161,14 @@
         "text": "通道"
     },
     {
+        "id": "IDS_DLG_DIGITAL_CHANNEL",
+        "text": "数字通道"
+    },
+    {
+        "id": "IDS_DLG_ANALOG_CHANNEL",
+        "text": "模拟通道"
+    },
+    {
         "id": "IDS_DLG_SAVE_CALIBRATION_RESULTS",
         "text": "正在保存校准结果...请稍候"
     },
@@ -185,12 +197,16 @@
         "text": "解码结束位置"
     },
     {
-        "id": "IDS_DLG_DEVICE_OPTIONS",
-        "text": "设备选项"
+        "id": "IDS_DLG_START_CURSOR",
+        "text": "起始游标"
     },
     {
-        "id": "IDS_DLG_SIGNAL_PROCESSING",
-        "text": "信号处理"
+        "id": "IDS_DLG_END_CURSOR",
+        "text": "结束游标"
+    },
+    {
+        "id": "IDS_DLG_DEVICE_OPTIONS",
+        "text": "设备选项"
     },
     {
         "id": "IDS_DLG_MODE",
@@ -343,6 +359,10 @@
     {
         "id": "IDS_DLG_PROTOCOL_LIST_VIEWER",
         "text": "解码结果"
+    },
+    {
+        "id": "IDS_DLG_FOLLOW_VIEWPORT",
+        "text": "列表跟随波形可视范围"
     },
     {
         "id": "IDS_DLG_REGION",
@@ -1819,5 +1839,49 @@
     {
         "id": "IDS_DLG_STYLE_DELETE_CONFIRM",
         "text": "确定要删除此预设吗？"
+    },
+    {
+        "id": "IDS_DSO_CTR_EN",
+        "text": "使能"
+    },
+    {
+        "id": "IDS_DSO_CTR_DIS",
+        "text": "禁用"
+    },
+    {
+        "id": "IDS_DSO_CTR_GND",
+        "text": "GND"
+    },
+    {
+        "id": "IDS_DSO_CTR_DC",
+        "text": "DC"
+    },
+    {
+        "id": "IDS_DSO_CTR_AC",
+        "text": "AC"
+    },
+    {
+        "id": "IDS_DSO_CTR_AUTO",
+        "text": "AUTO"
+    },
+    {
+        "id": "IDS_DLG_COPY_THIS_CHANNEL",
+        "text": "复制该通道波形数据"
+    },
+    {
+        "id": "IDS_DLG_COPY_DECODER_TRACK",
+        "text": "复制该解码器波形数据"
+    },
+    {
+        "id": "IDS_DLG_COPY_DECODER_GROUP",
+        "text": "复制此解码器组波形数据"
+    },
+    {
+        "id": "IDS_DLG_COPY_ALL_CHANNELS",
+        "text": "复制所有通道波形数据"
+    },
+    {
+        "id": "IDS_DLG_NO_DATA",
+        "text": "无可用数据"
     }
 ]

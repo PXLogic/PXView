@@ -46,7 +46,7 @@ void SearchEdgeFlagEdit::focusInEvent(QFocusEvent *e)
 }
 
 Search::Search(QWidget *parent, SigSession *session, std::map<uint16_t, QString> pattern) :
-    DSDialog(parent),
+    PxDialog(parent),
     _session(session)
 {
 
@@ -66,12 +66,11 @@ Search::Search(QWidget *parent, SigSession *session, std::map<uint16_t, QString>
 
     int index = 0;
 
-    for(auto s :  _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_LOGIC) {
-            view::LogicSignal *logicSig = (view::LogicSignal*)s;
+    for(auto s :  _session->get_signal_models()) {
+        if (s->type() == SR_CHANNEL_LOGIC) {
             QLineEdit *search_lineEdit = new SearchEdgeFlagEdit(this);
-            if (pattern.find(logicSig->get_index()) != pattern.end())
-                search_lineEdit->setText(pattern[logicSig->get_index()]);
+            if (pattern.find(s->index()) != pattern.end())
+                search_lineEdit->setText(pattern[s->index()]);
             else
                 search_lineEdit->setText("X");
             search_lineEdit->setValidator(value_validator);
@@ -80,8 +79,8 @@ Search::Search(QWidget *parent, SigSession *session, std::map<uint16_t, QString>
             search_lineEdit->setFont(font);
             _search_lineEdit_vec.push_back(search_lineEdit);
 
-            search_layout->addWidget(new QLabel(logicSig->get_name()+":"), index, 0, Qt::AlignRight);
-            search_layout->addWidget(new QLabel(QString::number(logicSig->get_index())), index, 1, Qt::AlignRight);
+            search_layout->addWidget(new QLabel(QString::fromStdString(s->name())+":"), index, 0, Qt::AlignRight);
+            search_layout->addWidget(new QLabel(QString::number(s->index())), index, 1, Qt::AlignRight);
             search_layout->addWidget(search_lineEdit, index, 2);
 
             connect(search_lineEdit, &QLineEdit::editingFinished, this, &Search::format);
@@ -126,10 +125,9 @@ std::map<uint16_t, QString> Search::get_pattern()
     std::map<uint16_t, QString> pattern;
 
     int index = 0;
-    for(auto s :_session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_LOGIC) {
-            view::LogicSignal *logicSig = (view::LogicSignal*)s;
-            pattern[logicSig->get_index()] = _search_lineEdit_vec[index]->text();
+    for(auto s :_session->get_signal_models()) {
+        if (s->type() == SR_CHANNEL_LOGIC) {
+            pattern[s->index()] = _search_lineEdit_vec[index]->text();
             index++;
         }
     }

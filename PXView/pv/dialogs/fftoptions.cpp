@@ -42,7 +42,7 @@ namespace pv {
 namespace dialogs {
 
 FftOptions::FftOptions(QWidget *parent, SigSession *session) :
-    DSDialog(parent),
+    PxDialog(parent),
     _session(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
@@ -70,38 +70,50 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     _dbv_combobox = new DsComboBox(this);
  
     // setup _ch_combobox
-    for(auto s : _session->get_signals()) {
-        if (s->signal_type() == SR_CHANNEL_DSO) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
-            _ch_combobox->addItem(dsoSig->get_name(), QVariant::fromValue(dsoSig->get_index()));
+    for(auto m : _session->get_signal_models()) {
+        if (m->type() == SR_CHANNEL_DSO) {
+            _ch_combobox->addItem(QString::fromStdString(m->name()), QVariant::fromValue(m->index()));
         }
     }
 
     // setup _window_combobox _len_combobox
-    _sample_limit = 0;
-    
-    if (_session->get_device()->get_config_uint64(SR_CONF_MAX_DSO_SAMPLELIMITS, _sample_limit)) {
-        _sample_limit = _sample_limit * 0.5;
-    }
-    else {
-        pxv_err("ERROR: config_get SR_CONF_MAX_DSO_SAMPLELIMITS failed.");
-    }
+    // SR_CONF_MAX_DSO_SAMPLELIMITS was a fork DSO stub key (deleted from
+    // dsvdef.h) with no driver backend. Default to a sensible upper bound
+    // (1 MSa) so the FFT length combo box still populates.
+    _sample_limit = SR_MHZ(1);
+    _sample_limit = _sample_limit * 0.5;
 
     std::vector<QString> windows;
     std::vector<uint64_t> length;
     std::vector<QString> view_modes;
     std::vector<int> dbv_ranges;
 
-    for(auto t : _session->get_spectrum_traces()) {
-        view::SpectrumTrace *spectrumTraces = NULL;
-        if ((spectrumTraces = dynamic_cast<view::SpectrumTrace*>(t))) {
-            windows = spectrumTraces->get_windows_support();
-            length = spectrumTraces->get_length_support();
-            view_modes = spectrumTraces->get_view_modes_support();
-            dbv_ranges = spectrumTraces->get_dbv_ranges();
-            break;
-        }
-    }
+    // TODO: adapt — SpectrumTrace::get_windows_support/get_length_support/
+    // get_view_modes_support/get_dbv_ranges are non-static instance methods
+    // that return file-scope constant data. They cannot be called without a
+    // SpectrumTrace instance, which the dialog no longer holds. Inline the
+    // constant values here so the dialog stays functional. Move these
+    // constants to a shared header (or make the accessors static) in a
+    // follow-up.
+    windows.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_WINDOW_RECTANGLE), "Rectangle"));
+    windows.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_WINDOW_HANN), "Hann"));
+    windows.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_WINDOW_HAMMING), "Hamming"));
+    windows.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_WINDOW_BLACKMAN), "Blackman"));
+    windows.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_WINDOW_FLATTOP), "Flat_top"));
+
+    length.push_back(1024);
+    length.push_back(2048);
+    length.push_back(4096);
+    length.push_back(8192);
+    length.push_back(16384);
+
+    view_modes.push_back(L_S(STR_PAGE_DLG, S_ID(IDS_FFT_MODE_LINEARRSM), "Linear RMS"));
+    view_modes.push_back("DBV RMS");
+
+    dbv_ranges.push_back(100);
+    dbv_ranges.push_back(120);
+    dbv_ranges.push_back(150);
+    dbv_ranges.push_back(200);
 
     assert(windows.size() > 0);
     assert(length.size() > 0);
@@ -146,47 +158,41 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     }
 
     // load current settings
-    for(auto t : _session->get_spectrum_traces()) {
-         view::SpectrumTrace *spectrumTraces = NULL;
-        if ((spectrumTraces = dynamic_cast<view::SpectrumTrace*>(t))) {
-            if (spectrumTraces->enabled()) {
-                _en_checkbox->setChecked(true);
-                for (int i = 0; i < _ch_combobox->count(); i++) {
-                    if (spectrumTraces->get_index() == _ch_combobox->itemData(i).toInt()) {
-                        _ch_combobox->setCurrentIndex(i);
-                        break;
-                    }
-                }
-                for (int i = 0; i < _len_combobox->count(); i++) {
-                    if (spectrumTraces->get_spectrum_stack()->get_sample_num() == _len_combobox->itemData(i).toULongLong()) {
-                        _len_combobox->setCurrentIndex(i);
-                        break;
-                    }
-                }
-                _interval_combobox->clear();
-                const int max_interval = _sample_limit/_len_combobox->currentData().toLongLong();
-                for (int i = 1; i <= max_interval; i*=2)
-                {
-                    _interval_combobox->addItem(QString::number(i),
-                        QVariant::fromValue(i));
-                }
-                for (int i = 0; i < _interval_combobox->count(); i++) {
-                    if (spectrumTraces->get_spectrum_stack()->get_sample_interval() == _interval_combobox->itemData(i).toInt()) {
-                        _interval_combobox->setCurrentIndex(i);
-                        break;
-                    }
-                }
-                for (int i = 0; i < _dbv_combobox->count(); i++) {
-                    if (spectrumTraces->dbv_range() == _dbv_combobox->itemData(i).toLongLong()) {
-                        _dbv_combobox->setCurrentIndex(i);
-                        break;
-                    }
-                }
-                _window_combobox->setCurrentIndex(spectrumTraces->get_spectrum_stack()->get_windows_index());
-                _dc_checkbox->setChecked(spectrumTraces->get_spectrum_stack()->dc_ignored());
-                _view_combobox->setCurrentIndex(spectrumTraces->view_mode());
+    for(auto stack : _session->get_spectrum_stacks()) {
+        // TODO: adapt — SpectrumStack no longer carries the enabled UI flag;
+        // assume the first stack is the active one. The view_mode and
+        // dbv_range UI state were owned by view::SpectrumTrace and are no
+        // longer accessible from Core; default them until the View layer
+        // exposes them through the model.
+        _en_checkbox->setChecked(true);
+        for (int i = 0; i < _ch_combobox->count(); i++) {
+            if (stack->get_index() == _ch_combobox->itemData(i).toInt()) {
+                _ch_combobox->setCurrentIndex(i);
+                break;
             }
         }
+        for (int i = 0; i < _len_combobox->count(); i++) {
+            if (stack->get_sample_num() == _len_combobox->itemData(i).toULongLong()) {
+                _len_combobox->setCurrentIndex(i);
+                break;
+            }
+        }
+        _interval_combobox->clear();
+        const int max_interval = _sample_limit/_len_combobox->currentData().toLongLong();
+        for (int i = 1; i <= max_interval; i*=2)
+        {
+            _interval_combobox->addItem(QString::number(i),
+                QVariant::fromValue(i));
+        }
+        for (int i = 0; i < _interval_combobox->count(); i++) {
+            if (stack->get_sample_interval() == _interval_combobox->itemData(i).toInt()) {
+                _interval_combobox->setCurrentIndex(i);
+                break;
+            }
+        }
+        _window_combobox->setCurrentIndex(stack->get_windows_index());
+        _dc_checkbox->setChecked(stack->dc_ignored());
+        break;
     }
 
     _hint_label = new QLabel(this);
@@ -240,24 +246,21 @@ void FftOptions::accept()
 
     QDialog::accept();
 
-   for(auto t : _session->get_spectrum_traces()) {
-        view::SpectrumTrace *spectrumTraces = NULL;
-        if ((spectrumTraces = dynamic_cast<view::SpectrumTrace*>(t))) {
-            spectrumTraces->set_enable(false);
-            if (spectrumTraces->get_index() == _ch_combobox->currentData().toInt()) {
-                spectrumTraces->get_spectrum_stack()->set_dc_ignore(_dc_checkbox->isChecked());
-                spectrumTraces->get_spectrum_stack()->set_sample_num(_len_combobox->currentData().toULongLong());
-                spectrumTraces->get_spectrum_stack()->set_sample_interval(_interval_combobox->currentData().toInt());
-                spectrumTraces->get_spectrum_stack()->set_windows_index(_window_combobox->currentData().toInt());
-                spectrumTraces->set_view_mode(_view_combobox->currentData().toUInt());
-                
-                spectrumTraces->set_dbv_range(_dbv_combobox->currentData().toInt());
-                spectrumTraces->set_enable(_en_checkbox->isChecked());
+   for(auto stack : _session->get_spectrum_stacks()) {
+        if (stack->get_index() == _ch_combobox->currentData().toInt()) {
+            stack->set_dc_ignore(_dc_checkbox->isChecked());
+            stack->set_sample_num(_len_combobox->currentData().toULongLong());
+            stack->set_sample_interval(_interval_combobox->currentData().toInt());
+            stack->set_windows_index(_window_combobox->currentData().toInt());
+            // TODO: adapt — view_mode/dbv_range are UI state owned by
+            // view::SpectrumTrace; SpectrumStack does not expose them.
+            // (void)_view_combobox->currentData().toUInt();
+            // (void)_dbv_combobox->currentData().toInt();
 
-                if (_session->is_stopped_status() && spectrumTraces->enabled()){
-                    spectrumTraces->get_spectrum_stack()->calc_fft();
-                }
+            if (_session->is_stopped_status() && _en_checkbox->isChecked()){
+                stack->calc_fft();
             }
+            break;
         }
     }
     _session->spectrum_rebuild();

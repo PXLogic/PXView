@@ -28,6 +28,7 @@
 #include <list>
 #include <utility>
 #include <QWidget>
+#include <QColor>
 #include "../ui/uimanager.h"
 #include "../dock/keywordlineedit.h"
 #include <QMenu>
@@ -37,6 +38,8 @@ namespace view {
 
 class Trace;
 class View;
+class LogicSignal;
+class DecodeTrace;
 
 //the left panel of main graph
 //created by View
@@ -65,6 +68,7 @@ private:
 	void leaveEvent(QEvent *event);
     void wheelEvent(QWheelEvent *event);
     void contextMenuEvent(QContextMenuEvent *event);
+    void keyPressEvent(QKeyEvent *event) override;
 
     void changeName(QMouseEvent *event);
     void changeColor(QMouseEvent *event);
@@ -90,6 +94,11 @@ private slots:
     void on_reset_all_row_height();
     void on_set_channel_height();
     void on_batch_set_height();
+    void on_filter_glitches_triggered();
+    void on_clear_channel_filter_triggered();
+    void on_clear_all_filter_triggered();
+    void on_toggle_invert_triggered();
+    void on_change_color_triggered();
 
 signals:
     void traces_moved();
@@ -97,6 +106,9 @@ signals:
     void vDial_changed(quint16);
     void acdc_changed(quint16);
     void ch_changed(quint16);
+    void show_glitch_filter_popup(pv::view::LogicSignal* sig);
+    void clear_glitch_filter_requested(bool all_channels);
+    void toggle_signal_invert_requested(pv::view::LogicSignal* sig);
 
 private:
 	View &_view;
@@ -115,6 +127,10 @@ private:
     int         _resize_upper_height;
     int         _resize_lower_height;
     bool    _mouse_is_down;
+
+    // 主动缓存的标题前景色,避免依赖 Qt 的 stylesheet→palette 传播
+    // (该传播在启动时序和父级自带 stylesheet 时不可靠,会导致图标变黑)
+    QColor  _foreColor;
 };
 
 } // namespace view

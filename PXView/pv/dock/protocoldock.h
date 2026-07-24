@@ -25,7 +25,6 @@
 
 #include <libsigrokdecode.h>
 
-#include "../data/decodermodel.h"
 #include "../interface/icallbacks.h"
 #include "../interface/icontextaware.h"
 #include "../ui/uimanager.h"
@@ -35,6 +34,7 @@
 #include "protocolitemlayer.h"
 #include "searchcombobox.h"
 #include "../ui/dscombobox.h"
+#include "../view/decodermodel.h"
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -57,7 +57,6 @@ namespace pv {
 class SigSession;
 
 namespace data {
-class DecoderModel;
 namespace decode {
 class Decoder;
 }
@@ -65,6 +64,7 @@ class Decoder;
 
 namespace view {
 class View;
+class DecoderModel;
 }
 
 namespace dock {
@@ -108,7 +108,7 @@ private:
   int get_output_protocol_by_id(QString id);
 
   static int decoder_name_cmp(const void *a, const void *b);
-  void resize_table_view(data::DecoderModel *decoder_model);
+  void resize_table_view(view::DecoderModel *decoder_model);
   static bool protocol_sort_callback(const DecoderInfoItem *o1,
                                      const DecoderInfoItem *o2);
 
@@ -146,6 +146,7 @@ private slots:
   void on_add_protocol();
   void on_del_all_protocol();
   void decoded_progress(int progress);
+  void on_decoder_progress();
   void set_model();
   void export_table_view();
   void nav_table_view();
@@ -158,12 +159,20 @@ private slots:
   void search_changed();
   void search_update();
   void show_protocol_select();
+  void on_follow_viewport_toggled(bool checked);
+  void on_visible_range_changed();
 
 private:
   SigSession *_session;
   view::View *_view;
   TabContext *_context;
   QSortFilterProxyModel _model_proxy;
+  // View-owned DecoderModel (purify-architecture-concepts Task 10): was
+  // previously a Core singleton exposed via SigSession::get_decoder_model().
+  // ProtocolDock now owns it as a QObject child (Qt parent ownership handles
+  // destruction). ProtocolList/ProtocolExp dialogs receive a raw pointer via
+  // their constructors so they can read/setDecoderStack on the same instance.
+  view::DecoderModel *_decoder_model;
   int _cur_search_index;
   QStringList _str_list;
 
@@ -186,6 +195,7 @@ private:
   QPushButton *_bot_save_button;
   QPushButton *_dn_nav_button;
   QPushButton *_ann_search_button;
+  QPushButton *_follow_viewport_btn;
   std::vector<DecoderInfoItem *> _decoderInfoList;
   KeywordLineEdit *_pro_keyword_edit;
   QString _selected_protocol_id;
@@ -193,6 +203,17 @@ private:
 
   mutable std::mutex _search_mutex;
   bool _search_edited;
+
+  // "List follows viewport" toggle state (default ON). When ON,
+  // on_visible_range_changed slices DecoderModel to the viewport's visible
+  // sample range. _jumping_to_row is set during item_clicked → show_region
+  // jumps so the handler can preserve the current selection.
+  // _jumping_target_row stores the full-list (un-sliced) row number of the
+  // clicked annotation so on_visible_range_changed can restore selection
+  // after the model reset.
+  bool _follow_viewport = true;
+  bool _jumping_to_row = false;
+  int64_t _jumping_target_row = -1;
 };
 
 } // namespace dock

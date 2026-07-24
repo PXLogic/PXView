@@ -2,7 +2,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../core/eventbus.h"
+#include <QCoreApplication>
 #include <QHostAddress>
+#include <QThread>
 
 namespace pv::api {
 
@@ -136,6 +139,26 @@ void WsTransport::on_client_disconnected()
     client->deleteLater();
 }
 
+void WsTransport::send_to_clients(const QString& msg)
+{
+    // QWebSocket::sendTextMessage is not thread-safe; on_service_event may be
+    // invoked from a worker thread (e.g. feed/device threads via
+    // SessionService::broadcast_event). Marshal to the GUI thread first.
+    //
+    // CRITICAL: Use EventBus::post_async_dispatch (QCoreApplication::postEvent)
+    // instead of QMetaObject::invokeMethod — see mcp_transport.cpp for details.
+    if (!pv::core::EventBus::on_main_thread()) {
+        pv::core::EventBus::post_async_dispatch(
+            [this, msg]() { send_to_clients(msg); });
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(_clients_mutex);
+    for (auto* client : _clients) {
+        client->sendTextMessage(msg);
+    }
+}
+
 void WsTransport::on_service_event(const ServiceEventData& data)
 {
     nlohmann::json notification;
@@ -183,6 +206,42 @@ void WsTransport::on_service_event(const ServiceEventData& data)
         break;
     }
 
+    case ServiceEvent::SampleConfigChanged:
+        notification["method"] = "on_sample_config_changed";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
+    case ServiceEvent::ChannelConfigChanged:
+        notification["method"] = "on_channel_config_changed";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
+    case ServiceEvent::TriggerConfigChanged:
+        notification["method"] = "on_trigger_config_changed";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
+    case ServiceEvent::LoadComplete:
+        notification["method"] = "on_load_complete";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
+    case ServiceEvent::SaveComplete:
+        notification["method"] = "on_save_complete";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
+    case ServiceEvent::ExportComplete:
+        notification["method"] = "on_export_complete";
+        params = params_map;
+        notification["params"] = params;
+        break;
+
     default:
         // Generic event notification
         notification["method"] = "on_event";
@@ -194,10 +253,8 @@ void WsTransport::on_service_event(const ServiceEventData& data)
 
     const auto msg = QString::fromStdString(notification.dump());
 
-    std::lock_guard<std::mutex> lock(_clients_mutex);
-    for (auto* client : _clients) {
-        client->sendTextMessage(msg);
-    }
+    // Marshal-aware broadcast (handles cross-thread invocation).
+    send_to_clients(msg);
 }
 
 } // namespace pv::api

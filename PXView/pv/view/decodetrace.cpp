@@ -21,7 +21,6 @@
  */
 
 #include "decodetrace.h"
-#include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../data/decode/annotation.h"
 #include "../data/decode/decoder.h"
@@ -34,10 +33,10 @@
 #include "../log.h"
 #include "../sigsession.h"
 #include "../toolbars/titlebar.h"
+#include "../ui/dockfonts.h"
 #include "../ui/dscombobox.h"
 #include "../ui/langresource.h"
 #include "../ui/msgbox.h"
-#include "../ui/dockfonts.h"
 #include "../view/cursor.h"
 #include "../view/logicsignal.h"
 #include "../view/view.h"
@@ -68,43 +67,48 @@ const int DecodeTrace::DrawPadding = 100;
 const int DecodeTrace::ControlRectWidth;
 
 QColor DecodeTrace::getChannelColor(int channelIndex) {
-    QColor c = AppConfig::Instance().GetThemeColor(QString("@decoder-channel-%1").arg(channelIndex));
-    if (c.isValid()) return c;
-    
-    // Fallback original Colours array
-    static const QColor defaultColours[16] = {
-        QColor(0xEF, 0x29, 0x29), QColor(0xF6, 0x6A, 0x32),
-        QColor(0xFC, 0xAE, 0x3E), QColor(0xFB, 0xCA, 0x47),
-        QColor(0xFC, 0xE9, 0x4F), QColor(0xCD, 0xF0, 0x40),
-        QColor(0x8A, 0xE2, 0x34), QColor(0x4E, 0xDC, 0x44),
-        QColor(0x55, 0xD7, 0x95), QColor(0x64, 0xD1, 0xD2),
-        QColor(0x72, 0x9F, 0xCF), QColor(0xD4, 0x76, 0xC4),
-        QColor(0x9D, 0x79, 0xB9), QColor(0xAD, 0x7F, 0xA8),
-        QColor(0xC2, 0x62, 0x9B), QColor(0xD7, 0x47, 0x6F)
-    };
-    return defaultColours[channelIndex % 16];
+  QColor c = AppConfig::Instance().GetThemeColor(
+      QString("@decoder-channel-%1").arg(channelIndex));
+  if (c.isValid())
+    return c;
+
+  // Fallback original Colours array
+  static const QColor defaultColours[16] = {
+      QColor(0xEF, 0x29, 0x29), QColor(0xF6, 0x6A, 0x32),
+      QColor(0xFC, 0xAE, 0x3E), QColor(0xFB, 0xCA, 0x47),
+      QColor(0xFC, 0xE9, 0x4F), QColor(0xCD, 0xF0, 0x40),
+      QColor(0x8A, 0xE2, 0x34), QColor(0x4E, 0xDC, 0x44),
+      QColor(0x55, 0xD7, 0x95), QColor(0x64, 0xD1, 0xD2),
+      QColor(0x72, 0x9F, 0xCF), QColor(0xD4, 0x76, 0xC4),
+      QColor(0x9D, 0x79, 0xB9), QColor(0xAD, 0x7F, 0xA8),
+      QColor(0xC2, 0x62, 0x9B), QColor(0xD7, 0x47, 0x6F)};
+  return defaultColours[channelIndex % 16];
 }
 
 QColor DecodeTrace::getErrorBgColor() {
-    QColor c = AppConfig::Instance().GetThemeColor("@decoder-error-bg");
-    return c.isValid() ? c : QColor(0xEF, 0x29, 0x29);
+  QColor c = AppConfig::Instance().GetThemeColor("@decoder-error-bg");
+  return c.isValid() ? c : QColor(0xEF, 0x29, 0x29);
 }
 
 QColor DecodeTrace::getNoDecodeColor() {
-    QColor c = AppConfig::Instance().GetThemeColor("@decoder-no-decode");
-    return c.isValid() ? c : QColor(0x88, 0x8A, 0x85);
+  QColor c = AppConfig::Instance().GetThemeColor("@decoder-no-decode");
+  return c.isValid() ? c : QColor(0x88, 0x8A, 0x85);
 }
 
 QColor DecodeTrace::getAnnColor(int channelIndex) {
-    QColor c = AppConfig::Instance().GetThemeColor(QString("@decoder-ann-%1").arg(channelIndex));
-    if (c.isValid()) return c;
-    return getChannelColor(channelIndex);
+  QColor c = AppConfig::Instance().GetThemeColor(
+      QString("@decoder-ann-%1").arg(channelIndex));
+  if (c.isValid())
+    return c;
+  return getChannelColor(channelIndex);
 }
 
 QColor DecodeTrace::getAnnOutlineColor(int channelIndex) {
-    QColor c = AppConfig::Instance().GetThemeColor(QString("@decoder-ann-outline-%1").arg(channelIndex));
-    if (c.isValid()) return c;
-    return OutlineColours[channelIndex % 16];
+  QColor c = AppConfig::Instance().GetThemeColor(
+      QString("@decoder-ann-outline-%1").arg(channelIndex));
+  if (c.isValid())
+    return c;
+  return OutlineColours[channelIndex % 16];
 }
 
 const QColor DecodeTrace::OutlineColours[16] = {
@@ -118,35 +122,42 @@ const QColor DecodeTrace::OutlineColours[16] = {
     QColor(0x61, 0x31, 0x4D), QColor(0x6B, 0x23, 0x37)};
 
 DecodeTrace::DecodeTrace(pv::SigSession *session,
-                         pv::data::DecoderStack *decoder_stack, int index)
+                         std::shared_ptr<pv::data::DecoderStack> decoder_stack,
+                         int index)
     : Trace(QString::fromUtf8(decoder_stack->stack().front()->decoder()->name),
             index, SR_CHANNEL_DECODER) {
   assert(decoder_stack);
 
   _colour = getChannelColor(index % 16);
 
-  _decode_start = 0;
-  _decode_end = INT64_MAX;
   _decoder_stack = decoder_stack;
-  _session = session;
+  _data_source = session;
   _delete_flag = false;
   _decode_cursor1 = 0;
   _decode_cursor2 = 0;
 
-  connect(_decoder_stack, &data::DecoderStack::new_decode_data, this,
+  connect(_decoder_stack.get(), &data::DecoderStack::new_decode_data, this,
           &DecodeTrace::on_new_decode_data);
 
-  connect(_decoder_stack, &data::DecoderStack::decode_done, this,
+  connect(_decoder_stack.get(), &data::DecoderStack::decode_done, this,
           &DecodeTrace::on_decode_done);
 }
 
 DecodeTrace::~DecodeTrace() {
   _cur_row_headings.clear();
 
-  DESTROY_OBJECT(_decoder_stack);
+  // NOTE: The DecoderStack is owned by the Core layer (SigSession /
+  // SessionDocument) and is deleted by SigSession::remove_decoder() /
+  // clear_all_decoder() / clear_all_documents_decoders(). The View only
+  // holds a non-owning pointer (_decoder_stack) for rendering purposes.
+  // Deleting it here would cause a double-free.
+  // The Qt signal/slot connections (new_decode_data / decode_done) are
+  // automatically disconnected by Qt when either sender or receiver is
+  // destroyed.
+  _decoder_stack = nullptr;
 }
 
-bool DecodeTrace::enabled() { return true; }
+bool DecodeTrace::enabled() { return visible(); }
 
 void DecodeTrace::set_view(pv::view::View *view) {
   assert(view);
@@ -167,14 +178,23 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
 
   // --draw decode region control
   uint64_t doc_samplerate = 0;
-  if (_session->get_active_document()) {
-    doc_samplerate = _session->get_active_document()->cur_snap_samplerate();
+  if (_data_source->get_active_document()) {
+    doc_samplerate = _data_source->get_active_document()->cur_snap_samplerate();
   }
   const double samples_per_pixel =
-      (doc_samplerate > 0 ? doc_samplerate : _session->cur_snap_samplerate()) *
+      (doc_samplerate > 0 ? doc_samplerate : _data_source->cur_snap_samplerate()) *
       _view->scale();
-  const double startX = _decode_start / samples_per_pixel - _view->offset();
-  const double endX = _decode_end / samples_per_pixel - _view->offset();
+
+  uint64_t d_start = 0;
+  uint64_t d_end = INT64_MAX;
+  if (!_decoder_stack->stack().empty()) {
+    d_start = _decoder_stack->stack().front()->decode_start();
+    d_end = _decoder_stack->stack().front()->decode_end();
+    if (d_end == 0) d_end = INT64_MAX;
+  }
+
+  const double startX = d_start / samples_per_pixel - _view->offset();
+  const double endX = d_end / samples_per_pixel - _view->offset();
   const double regionY = get_y() - _totalHeight * 0.5 - ControlRectWidth;
 
   p.setBrush(View::Blue);
@@ -200,7 +220,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
     p.setPen(QPen(Qt::NoPen));
     p.setBrush(QApplication::palette().brush(QPalette::WindowText));
 
-    const QRect r(left + ArrowSize * 2, y, right - left, row_height / 2);
+    const QRect r(left + ArrowSize * 2, y, right - left, row_height);
     const QString h(_cur_row_headings[i]);
     const int f = Qt::AlignLeft | Qt::AlignVCenter | Qt::TextDontClip;
     const QPointF points[] = {QPointF(left, r.center().y() - ArrowSize),
@@ -246,7 +266,9 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
   for (auto dec : _decoder_stack->stack()) {
     start_sample = max(dec->decode_start(), start_sample);
-    end_sample = min(dec->decode_end(), end_sample);
+    uint64_t d_end = dec->decode_end();
+    if (d_end == 0) d_end = UINT64_MAX;
+    end_sample = min(d_end, end_sample);
     break;
   }
 
@@ -319,6 +341,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
                 if (start_idx < end_idx) {
                   double last_x = -1;
+                  double last_drawn_start = -1;
                   for (size_t idx = start_idx; idx < end_idx; idx++) {
                     const Annotation *a = row_data->annotation_at(idx);
                     if (!a)
@@ -326,7 +349,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                     draw_annotation(*a, p, get_text_colour(), annotation_height,
                                     left, right, samples_per_pixel,
                                     pixels_offset, y, 0, min_annWidth, fore,
-                                    back, last_x);
+                                    back, last_x, last_drawn_start);
                   }
                 }
               }
@@ -363,14 +386,14 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                                   int left, int right, double samples_per_pixel,
                                   double pixels_offset, int y,
                                   size_t base_colour, double min_annWidth,
-                                  QColor fore, QColor back, double &last_x) {
+                                  QColor fore, QColor back, double &last_x,
+                                  double &last_drawn_start) {
   const double start =
       max(a.start_sample() / samples_per_pixel - pixels_offset, (double)left);
   const double end =
       min(a.end_sample() / samples_per_pixel - pixels_offset, (double)right);
 
-  const size_t colour =
-      ((base_colour + a.type()) % MaxAnnType) % 16;
+  const size_t colour = ((base_colour + a.type()) % MaxAnnType) % 16;
   const QColor fill = getAnnColor(colour);
   const QColor outline = getAnnOutlineColor(colour);
 
@@ -379,8 +402,11 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
   }
 
   // 完美无缝隙 LOD 防御：
-  // 1. 若当前标注完全被之前绘制的区域覆盖，则不可见，跳过
-  if (end <= last_x) {
+  // 1. 若当前标注完全被之前绘制的区域覆盖，则不可见，跳过。
+  //    同时检查 start 与 last_drawn_start：只有 [start, end] 都落在已绘制
+  //    区间内才跳过，避免对同一字节输出多个时间重叠/逆序标注的解码器
+  //    （如 I2C 地址字节的 R/W 标注 + 地址值标注）造成误杀。
+  if (end <= last_x && start >= last_drawn_start) {
     return;
   }
 
@@ -392,6 +418,7 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
     return;
   }
 
+  last_drawn_start = start;
   if (start + 2.0 > end) {
     last_x = start;
   } else {
@@ -436,13 +463,15 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                                  ? start
                                  : (int)mark_end;
 
-          for (auto s : _session->get_signals()) {
-            int binded_index = dec->binded_probe_index(probe);
-            if ((s->get_index() == binded_index) &&
-                s->signal_type() == SR_CHANNEL_LOGIC) {
-              view::LogicSignal *logicSig = (view::LogicSignal *)s;
-              logicSig->paint_mark(p, start, mark_end_int, type / 100);
-              break;
+          if (_view) {
+            for (auto s : _view->get_own_signals()) {
+              int binded_index = dec->binded_probe_index(probe);
+              if ((s->get_index() == binded_index) &&
+                  s->signal_type() == SR_CHANNEL_LOGIC) {
+                view::LogicSignal *logicSig = (view::LogicSignal *)s;
+                logicSig->paint_mark(p, start, mark_end_int, type / 100);
+                break;
+              }
             }
           }
         }
@@ -507,6 +536,31 @@ void DecodeTrace::draw_instant(const pv::data::decode::Annotation &a,
   }
 }
 
+QString DecodeTrace::best_annotation_text(
+    const pv::data::decode::Annotation &a, double rect_width,
+    const QFontMetrics &fm) {
+  const std::vector<QString> &ann_list = a.annotations();
+  if (ann_list.empty())
+    return QString();
+
+  // Try to find an annotation that will fit; pick the longest one that fits.
+  QString best_annotation;
+  int best_width = 0;
+
+  for (auto &txt : ann_list) {
+    const int w = fm.boundingRect(QRect(), 0, txt).width();
+    if (w <= rect_width && w > best_width) {
+      best_annotation = txt;
+      best_width = w;
+    }
+  }
+
+  if (best_annotation.isEmpty())
+    best_annotation = ann_list.back();
+
+  return best_annotation;
+}
+
 void DecodeTrace::draw_range(const pv::data::decode::Annotation &a, QPainter &p,
                              QColor fill, QColor outline, QColor text_color,
                              int h, double start, double end, int y,
@@ -552,9 +606,11 @@ void DecodeTrace::draw_range(const pv::data::decode::Annotation &a, QPainter &p,
   QFont dec_font = theme_font_decoder();
   p.setFont(dec_font);
 
-  // Get best annotation representation using the new high-performance cache
+  // Pick the best-fitting annotation text for this rect width. The width
+  // computation is a View-layer concern (uses QFontMetrics); the Core
+  // Annotation class is now a pure data class.
   const QString best_annotation =
-      a.get_cached_best_annotation(rect.width(), p.font(), p.fontMetrics());
+      best_annotation_text(a, rect.width(), p.fontMetrics());
 
   const QString elided =
       p.fontMetrics().elidedText(best_annotation, Qt::ElideRight, rect.width());
@@ -651,7 +707,7 @@ void DecodeTrace::on_new_decode_data() {
   // Do NOT call data_updated() which rebuilds headers, margins, scrollbars,
   // and marks the entire pixmap cache dirty. Decode data changes only affect
   // the decode trace rendering, not view layout or logic signal cache.
-  if (_view && _view->session().is_stopped_status()) {
+  if (_view && _data_source->is_stopped_status()) {
     _view->viewport_update();
   }
 }
@@ -678,11 +734,11 @@ void DecodeTrace::on_decode_done() {
     _view->signals_changed(NULL);
   }
 
-  if (_view && _view->session().is_stopped_status()) {
+  if (_view && _data_source->is_stopped_status()) {
     _view->viewport_update();
   }
 
-  _session->decode_done();
+  _data_source->decode_done();
 }
 
 int DecodeTrace::rows_size() {
@@ -746,44 +802,33 @@ QRectF DecodeTrace::get_rect(DecodeSetRegions type, int y, int right) {
     return QRectF(0, 0, 0, 0);
 }
 
-void DecodeTrace::frame_ended() {
-  const uint64_t last_samples = _session->cur_samplelimits() - 1;
-
-  if (_decode_start > last_samples) {
-    _decode_start = 0;
-    _decode_cursor1 = 0;
-  }
-
-  if (_decode_cursor2 == 0 || _decode_end > last_samples) {
-    _decode_end = last_samples;
-    _decode_cursor2 = 0;
-  }
-
-  decoder()->frame_ended();
-
-  for (auto dec : _decoder_stack->stack()) {
-    dec->set_decode_region(_decode_start, _decode_end);
-    dec->commit();
-  }
-}
-
 void *DecodeTrace::get_key_handel() { return _decoder_stack->get_key_handel(); }
 
 // to show decoder's property setting dialog
-bool DecodeTrace::create_popup(bool isnew) {
+bool DecodeTrace::create_popup(bool isnew, QPoint anchor) {
   (void)isnew;
 
   int ret = false; // setting have changed flag
   bool bOpenDlg = true;
 
+  pxv_info("DecodeTrace: enter create_popup");
   while (bOpenDlg) {
     bOpenDlg = false;
-    QWidget *top = AppControl::Instance()->GetTopWindow();
+    QWidget *top = _view ? _view->window() : nullptr;
+    pxv_info("DecodeTrace: GetTopWindow returned %p", top);
     dialogs::DecoderOptionsDlg dlg(top);
     dlg.set_cursor_range(_decode_cursor1, _decode_cursor2);
     dlg.load_options(this);
 
+    // 锚点定位(与毛刺滤波浮窗相同的弹出逻辑):若调用方提供了有效锚点,
+    // 在 exec() 前移动对话框,避免 QDialog 默认居中。
+    if (!anchor.isNull())
+      dlg.move(anchor);
+
+    pxv_info("DecodeTrace: before dlg.exec()");
     int dlg_ret = dlg.exec();
+    pxv_info("DecodeTrace: after dlg.exec(), ret=%d (Accepted=%d)", dlg_ret,
+             QDialog::Accepted);
 
     if (QDialog::Accepted == dlg_ret) {
       dlg.apply_setting();
@@ -791,8 +836,6 @@ bool DecodeTrace::create_popup(bool isnew) {
       for (auto dec : _decoder_stack->stack()) {
         if (dec->commit() || _decoder_stack->options_changed()) {
           _decoder_stack->set_options_changed(true);
-          _decode_start = dec->decode_start();
-          _decode_end = dec->decode_end();
           ret = true;
         }
       }
@@ -817,6 +860,7 @@ bool DecodeTrace::create_popup(bool isnew) {
     }
   }
 
+  pxv_info("DecodeTrace: exit create_popup, returning %d", ret);
   return ret;
 }
 

@@ -194,18 +194,24 @@ void LogoBar::dsl_connected(bool conn) {
 }
 
 void LogoBar::on_actionEn_triggered() {
+  if (!_mainForm)
+    return;
   assert(_mainForm);
   _mainForm->switchLanguage(LAN_EN);
   reStyle();
 }
 
 void LogoBar::on_actionCn_triggered() {
+  if (!_mainForm)
+    return;
   assert(_mainForm);
   _mainForm->switchLanguage(LAN_CN);
   reStyle();
 }
 
 void LogoBar::on_actionTraditional_triggered() {
+  if (!_mainForm)
+    return;
   assert(_mainForm);
   _mainForm->switchLanguage(LAN_TRADITIONAL);
   reStyle();

@@ -23,6 +23,7 @@
 
 
 #include "snapshot.h"
+#include "../log.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,7 +117,10 @@ void Snapshot::capture_ended()
 
 void Snapshot::set_samplerate(double samplerate)
 {
-    assert(samplerate > 0);
+    if (samplerate <= 0) {
+        pxv_err("Snapshot: samplerate<=0, aborting");
+        return;
+    }
     _samplerate = samplerate;
 }
 

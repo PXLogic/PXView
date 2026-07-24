@@ -31,7 +31,8 @@
 #include <QTranslator> 
 #include "dialogs/dsmessagebox.h"
 #include "interface/icallbacks.h"
-#include "eventobject.h" 
+#include "interface/events.h"
+#include "eventobject.h"
 #include <QJsonDocument>
 #include <chrono>
 #include <QTimer>
@@ -44,6 +45,7 @@
 #include "widgets/slidingdrawer.h"
 #include "widgets/sidebar.h"
 #include "config/appconfig.h"
+#include "api/types.h"
 
 class QAction;
 class QMenu;
@@ -61,7 +63,7 @@ using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
 namespace pv {
- 
+
 class SigSession;
 
 namespace toolbars {
@@ -80,7 +82,6 @@ class MeasureDock;
 class SearchDock;
 class DeviceOptionsDock;
 class LogDock;
-class SignalProcessingDock;
 class McpControlDock;
 }
 
@@ -92,12 +93,16 @@ class View;
 
 //The mainwindow,referenced by MainFrame
 //TODO: create graph view,toolbar,and show device list
-class MainWindow : 
+class MainWindow :
     public QMainWindow,
-    public ISessionCallback,
+    public IDataCallback,
+    public ICaptureCallback,
+    public ITriggerCallback,
+    public ISessionStateCallback,
     public IMainForm,
     public ISessionDataGetter,
-    public IMessageListener
+    public pv::api::IServiceEventListener,
+    public pv::interface::IEventListener
 {
 	Q_OBJECT
 
@@ -138,7 +143,6 @@ private slots:
     void on_decode_done();
     void on_receive_data_len(quint64 len);
     void on_cur_snap_samplerate_changed();
-    void on_trigger_message(int msg);
     void on_delay_prop_msg();
     void on_load_device_first();
     void on_tab_changed(int index);
@@ -146,6 +150,13 @@ private slots:
     void on_tab_detach(int index, QWidget *widget, const QString &title);
     void on_tab_attached(QWidget *widget, const QString &title);
     void on_new_tab_requested();
+
+    // Task 1.3: ICaptureCallback methods now emit EventObject signals (cross-
+    // thread safe); these on_* slots run on the GUI thread to touch the View.
+    void on_update_capture();
+    void on_show_region(quint64 start, quint64 end, bool keep);
+    void on_show_wait_trigger();
+    void on_repeat_hold(int percent);
   
 signals:
     void prgRate(int progress);
@@ -185,7 +196,6 @@ private:
     bool gen_config_json(QJsonObject &sessionVar);
     void save_config();
     bool save_config_to_file(QString file);
-    void load_channel_view_indexs(QJsonDocument &doc); 
     QJsonDocument get_config_json_from_data_file(QString file, bool &bSucesss);
     QJsonArray get_decoder_json_from_data_file(QString file, bool &bSucesss);
     void check_config_file_version(); 
@@ -193,30 +203,94 @@ private:
 
   
 private:
-    //ISessionCallback 
+    //IDataCallback
+    void data_updated() override;
+    void receive_data_len(quint64 len) override;
+    void receive_header() override;
+    void cur_snap_samplerate_changed() override;
+
+    //ICaptureCallback
+    void frame_began() override;
+    void frame_ended() override;
+    void update_capture() override;
+    void show_region(uint64_t start, uint64_t end, bool keep) override;
+    void repeat_hold(int percent) override;
+
+    //ITriggerCallback
+    void receive_trigger(quint64 trigger_pos) override;
+    void show_wait_trigger() override;
+
+    //ISessionStateCallback
     void session_error() override;
     void session_save() override;
-    void data_updated() override;
-    void update_capture() override;
-    void cur_snap_samplerate_changed() override;      
     void signals_changed() override;
-    void receive_trigger(quint64 trigger_pos) override;
-    void frame_ended() override;
-    void frame_began() override;
-    void show_region(uint64_t start, uint64_t end, bool keep) override;
-    void show_wait_trigger() override;
-    void repeat_hold(int percent) override;
     void decode_done() override;
-    void receive_data_len(quint64 len) override;
-    void receive_header() override;    
-    void trigger_message(int msg) override;   
-    void delay_prop_msg(QString strMsg) override; 
+    void delay_prop_msg(QString strMsg) override;
 
     //ISessionDataGetter
     bool genSessionData(std::string &str) override;
 
-    //IMessageListener
-    void OnMessage(int msg) override;
+    //IServiceEventListener — receive View operation broadcasts from SessionService
+    //(show_region, zoom_fit, zoom_in/out, cursor operations). In GUI mode these are
+    //routed to the active View; in Headless mode there is no MainWindow so these
+    //events are simply not consumed.
+    void on_service_event(const pv::api::ServiceEventData &data) override;
+
+    //IEventListener (Task 12) — typed event bus consumer. All 41 event structs
+    //have a typed override below. Each override contains its handler body
+    //directly (no int dispatch, no switch). The former per-responsibility
+    //(int,int) helpers and the legacy IMessageListener / DSV_MSG_* /
+    //broadcast_msg / trigger_message infrastructure have been removed.
+    //broadcast<T>() / broadcast_sync<T>() / broadcast_async<T>() are the only
+    //dispatch paths. Overrides for events with no GUI work (CopyToDocDone /
+    //DecodeDone / SignalsChanged / DataUpdated / DeviceConfigUpdated) are empty.
+    void on_event(const pv::interface::CaptureStateChanged &) override;
+    void on_event(const pv::interface::CaptureOwnerChanged &) override;
+    void on_event(const pv::interface::TriggerConfigChanged &) override;
+    void on_event(const pv::interface::SampleCountUpdated &) override;
+    void on_event(const pv::interface::DeviceOptionsUpdated &) override;
+    void on_event(const pv::interface::DsoViewOptionChanged &) override;
+    void on_event(const pv::interface::ActiveDocumentChanged &) override;
+    void on_event(const pv::interface::CopyToDocDone &) override;
+    void on_event(const pv::interface::DecodeDone &) override;
+    void on_event(const pv::interface::SignalsChanged &) override;
+    void on_event(const pv::interface::DataUpdated &) override;
+    void on_event(const pv::interface::DeviceModeChanged &) override;
+    void on_event(const pv::interface::CollectModeChanged &) override;
+    void on_event(const pv::interface::DeviceListUpdated &) override;
+    void on_event(const pv::interface::CurrentDeviceChanged &) override;
+    void on_event(const pv::interface::DeviceOpenFailed &) override;
+    void on_event(const pv::interface::UsbDeviceArrived &) override;
+    void on_event(const pv::interface::DeviceDetached &) override;
+    void on_event(const pv::interface::SampleRateChanged &) override;
+    void on_event(const pv::interface::SaveComplete &) override;
+    void on_event(const pv::interface::StartCollectWork &) override;
+    void on_event(const pv::interface::CollectStart &) override;
+    void on_event(const pv::interface::CollectEnd &) override;
+    void on_event(const pv::interface::EndCollectWork &) override;
+    void on_event(const pv::interface::EndDeviceOptions &) override;
+    void on_event(const pv::interface::DeviceConfigUpdated &) override;
+    void on_event(const pv::interface::DemoModeChanged &) override;
+    void on_event(const pv::interface::DataPoolChanged &) override;
+    void on_event(const pv::interface::SimpleTriggerChanged &) override;
+    void on_event(const pv::interface::GlitchFilterStarted &) override;
+    void on_event(const pv::interface::GlitchFilterProgress &) override;
+    void on_event(const pv::interface::GlitchFilterCompleted &) override;
+    void on_event(const pv::interface::GlitchFilterCleared &) override;
+    void on_event(const pv::interface::SignalInvertStarted &) override;
+    void on_event(const pv::interface::SignalInvertCompleted &) override;
+    void on_event(const pv::interface::SignalInvertCleared &) override;
+    void on_event(const pv::interface::CopyInProgressChanged &) override;
+    void on_event(const pv::interface::TrigNextCollect &) override;
+    void on_event(const pv::interface::ClearDecodeData &) override;
+    void on_event(const pv::interface::AppOptionsChanged &) override;
+    void on_event(const pv::interface::FontOptionsChanged &) override;
+    void on_event(const pv::interface::ShortcutChanged &) override;
+    void on_event(const pv::interface::StyleChanged &) override;
+    void on_event(const pv::interface::StoreConfPrev &) override;
+    void on_event(const pv::interface::CurrentDeviceChangePrev &) override;
+    void on_event(const pv::interface::StartCollectWorkPrev &) override;
+    void on_event(const pv::interface::EndCollectWorkPrev &) override;
 
 private: 
 	pv::ui::DraggableTabWidget *_tab_widget;
@@ -237,8 +311,8 @@ private:
     QDockWidget             *_protocol_dock;
     dock::ProtocolDock      *_protocol_widget;
     QDockWidget             *_trigger_dock;
-    QDockWidget             *_dso_trigger_dock;
     dock::TriggerDock       *_trigger_widget;
+    QDockWidget             *_dso_trigger_dock;
     dock::DsoTriggerDock    *_dso_trigger_widget;
     QDockWidget             *_measure_dock;
     dock::MeasureDock       *_measure_widget;
@@ -248,19 +322,16 @@ private:
     dock::DeviceOptionsDock *_device_options_widget;
     QDockWidget             *_log_dock;
     dock::LogDock           *_log_widget;
-    QDockWidget             *_signal_processing_dock;
-    dock::SignalProcessingDock *_signal_processing_widget;
     dock::McpControlDock       *_mcp_control_widget;
 
     // Sliding drawer panel
     widgets::SlidingDrawer  *_sliding_drawer;
     int _drawer_page_protocol;
     int _drawer_page_trigger;
-    int _drawer_page_dso_trigger;
+    int _drawer_page_dso_trigger = 0;
     int _drawer_page_measure;
     int _drawer_page_search;
     int _drawer_page_device_options;
-    int _drawer_page_signal_processing;
     int _drawer_page_log;
     int _drawer_page_mcp;
     int _drawer_current_page; // -1 = no page open
@@ -312,11 +383,10 @@ private:
         SIDEBAR_SEARCH = 3,
         SIDEBAR_FUNCTION = 4,
         SIDEBAR_OPTIONS = 5,
-        SIDEBAR_SIGNAL_PROCESSING = 6,
-        SIDEBAR_MCP = 7,
-        SIDEBAR_LOG = 8,
-        SIDEBAR_RUNSTOP = 9,
-        SIDEBAR_INSTANT = 10
+        SIDEBAR_MCP = 6,
+        SIDEBAR_LOG = 7,
+        SIDEBAR_RUNSTOP = 8,
+        SIDEBAR_INSTANT = 9
     };
 
     ::DockOptions* getDockOptions();

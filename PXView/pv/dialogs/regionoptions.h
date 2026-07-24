@@ -30,7 +30,7 @@
 #include <QLabel>
  
 #include "../toolbars/titlebar.h"
-#include "dsdialog.h"
+#include "pxdialog.h"
 #include "../ui/dscombobox.h"
 
 namespace pv {
@@ -43,7 +43,7 @@ class View;
 
 namespace dialogs {
 
-class RegionOptions : public DSDialog
+class RegionOptions : public PxDialog
 {
     Q_OBJECT
 private:

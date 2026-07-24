@@ -27,7 +27,7 @@
 #include <string>
 #include <thread>  
 #include <QObject>
-#include <libsigrok.h> 
+#include <libsigrok/libsigrok.h> 
 
 #include "interface/icallbacks.h"
 
@@ -87,6 +87,16 @@ public:
 
     inline void SetFileName(const QString &name){
         _file_name = name;
+        // Derive _suffix from the file extension so export_start() can
+        // locate the matching sr_output_module by id (e.g. "csv", "vcd").
+        // The GUI path sets _suffix via MakeExportFile()'s filter-string
+        // parsing; the MCP/API path uses SetFileName() directly and would
+        // otherwise leave _suffix empty, causing export_start() to fail
+        // with "Invalid export format" even though the file extension
+        // clearly indicates the format.
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && dot < name.size() - 1)
+            _suffix = name.mid(dot + 1).toLower();
     }
 
     bool IsLogicDataType();
