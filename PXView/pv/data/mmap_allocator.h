@@ -43,6 +43,10 @@ public:
     void wait_prefault_initial_blocks(uint64_t block_count);
     void notify_writer_block_seq(uint64_t block_seq);
 
+    // 停止 prefault 后台线程（用于 copy_from 等场景，防止竞态写零覆盖已复制的数据）。
+    // 线程 join 后返回，保证调用方可以安全地写入 mmap 区域。
+    void stop_prefault();
+
     void set_loop_mode(bool is_loop);
 
 private:
@@ -73,12 +77,16 @@ private:
     int _channel_num;
 
     static constexpr uint64_t PREFAULT_AHEAD_BLOCKS = 16;
-    static constexpr uint64_t PREFAULT_PAGE_SIZE = 4096;
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
+    static constexpr uint64_t PREFAULT_PAGE_SIZE = 16384; // Apple Silicon page size
+#else
+    static constexpr uint64_t PREFAULT_PAGE_SIZE = 4096;   // Linux / Windows / Intel macOS
+#endif
     static constexpr uint64_t TRAILING_DECHECK_BEHIND_BLOCKS = 16;
 
     void prefault_worker();
     void start_prefault();
-    void stop_prefault();
+    // stop_prefault() 已提升为 public，供 copy_from 等外部调用方使用
     void decommit_range(uint64_t start_bytes, uint64_t end_bytes);
     // 遍历所有 channel，对 block_seq 对应的 block 调用 decommit_range。
     void decommit_block_seq_all_channels(uint64_t block_seq);

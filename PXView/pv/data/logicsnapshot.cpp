@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <math.h>
@@ -287,6 +288,13 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
       return;
     }
   } else {
+    // FREE leaf blocks instead of zeroing in-place. The old in-place memset
+    // destroyed data that might still be read by a concurrent decoder (which
+    // shares the same LogicSnapshot object as capture_data when config is
+    // unchanged). By freeing (set lbp=NULL, return to pool), allocate_block
+    // will hand out fresh zeroed blocks for the new capture — and the old
+    // blocks remain valid in the pool until recycled, so any concurrent
+    // reader holding a reference to them via free_decode_lpb is safe.
     for (auto &iter : _ch_data) {
       for (auto &iter_rn : iter) {
         iter_rn.tog = 0;
@@ -294,8 +302,10 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
         iter_rn.last = 0;
 
         for (int j = 0; j < 64; j++) {
-          if (iter_rn.lbp[j] != NULL)
-            memset(iter_rn.lbp[j], 0, LeafBlockSpace);
+          if (iter_rn.lbp[j] != NULL) {
+            push_to_free_list(iter_rn.lbp[j]);
+            iter_rn.lbp[j] = NULL;
+          }
         }
       }
     }
@@ -1119,6 +1129,18 @@ void LogicSnapshot::copy_from(const LogicSnapshot &src) {
       _mmap_alloc = std::make_shared<MmapAllocator>();
       _mmap_alloc->configure(false, "", src._mmap_alloc->get_total_bytes(),
                              LeafBlockSpace, _max_blocks_per_channel, _channel_num);
+      // CRITICAL FIX: stop the prefault thread immediately after configure().
+      // configure() spawns a background thread that writes zero bytes to every
+      // page in the mmap region to pre-fault them into RAM.  That thread races
+      // with the memcpy loop below: if it reaches a page AFTER memcpy has
+      // already written real data there, it overwrites the first byte of that
+      // page with 0, silently corrupting both sample data and mipmap data.
+      // This was the root cause of "first ~2ms of both channels show phantom
+      // waveform after applying glitch filter to a second channel": the second
+      // filter call invokes copy_from() to restore from backup, the prefault
+      // thread corrupts the restored data, and the glitch filter then operates
+      // on corrupted data producing wrong results for BOTH channels.
+      _mmap_alloc->stop_prefault();
   } else {
       _disk_cache_writer->clear_all_mmap_slots();
       _mmap_alloc = nullptr;

@@ -144,6 +144,36 @@ bool AppControl::Init()
         srd_set_python_home(pyhome);
     }
 #endif
+#elif defined(__linux__)
+    // Linux/AppImage: 把 Python home 指向 AppImage 内打包的标准库所在的 prefix 目录
+    // Python 的 home(对应 PYTHONHOME) 应该是包含 lib/pythonX.Y 的目录(prefix),
+    // 而不是 lib/pythonX.Y 本身。设错会导致 PyConfig_Read 找不到 os.py/encodings
+    // 报 "memory allocation failed" 或 "ModuleNotFoundError: No module named 'encodings'"
+    //
+    // 注意 wchar_t 在 Linux 上是 4 字节(UTF-32),不能用 QString::utf16()(返回 char16_t*)
+    // reinterpret_cast 强转 —— 那只是把 2 字节数据当 4 字节读,会得到垃圾字符。
+    // 必须用 toWString() 做真正的编码转换。
+    {
+        QString appDir = QCoreApplication::applicationDirPath();
+        // AppImage: applicationDirPath() = /tmp/.mount_XXX/usr/bin
+        // Python stdlib 在 /tmp/.mount_XXX/usr/lib/python3.x
+        // Python home 应该是 /tmp/.mount_XXX/usr (prefix,lib 的父目录)
+        QDir libDir(appDir + "/../lib");
+        QStringList pyDirs = libDir.entryList(QStringList() << "python3.*", QDir::Dirs, QDir::Name);
+        if (!pyDirs.isEmpty()) {
+            // home = lib 目录的父目录 (即 usr/),Python 会自动找 <home>/lib/pythonX.Y
+            QString pyHome = libDir.absoluteFilePath(pyDirs.first() + "/../..");
+            QDir homeDir(pyHome);
+            pyHome = homeDir.absolutePath();
+            // toWString() 在 Linux 上返回 std::wstring(4 字节 wchar_t),与 Python 兼容
+            // .c_str() 返回的指针在临时对象销毁后失效,所以用 static 保持生命周期
+            static std::wstring pyHomeW = pyHome.toStdWString();
+            srd_set_python_home(pyHomeW.c_str());
+            pxv_info("Set Python home to: %s", pyHome.toUtf8().data());
+        } else {
+            pxv_info("Python stdlib not bundled, using system Python");
+        }
+    }
 #endif
     
     //the python script path of decoder

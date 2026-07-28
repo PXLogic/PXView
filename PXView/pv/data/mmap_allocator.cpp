@@ -296,6 +296,11 @@ void MmapAllocator::prefault_worker() {
         _prefault_block_seq.store(block_seq);
 
         // trailing decommit：落后 writer 16 blocks 回收旧页，控制工作集
+        // CRITICAL FIX: 禁用非 loop 模式下的 trailing decommit！
+        // madvise(MADV_DONTNEED) 会把 leaf block 数据清零，导致解码器读到全零数据。
+        // Windows 用 VirtualUnlock（可能不清零），Linux 用 madvise（直接清零），这就是跨平台差异的根因。
+        // 在非 loop 模式下，数据采集后需要保留在内存中供解码器读取，不应回收。
+        /*
         if (!_is_loop_mode.load()) {
             uint64_t writer_seq = _writer_block_seq.load();
             if (writer_seq > TRAILING_DECHECK_BEHIND_BLOCKS) {
@@ -308,9 +313,12 @@ void MmapAllocator::prefault_worker() {
                 }
             }
         }
+        */
     }
 
     // 末尾 decommit：prefault 到顶后，继续 decommit 直到全部回收
+    // CRITICAL FIX: 禁用非 loop 模式下的末尾 decommit！同上原因。
+    /*
     if (!_is_loop_mode.load()) {
         while (_prefault_running.load() && _decommitted_block_seq.load() < _max_blocks_per_channel) {
             uint64_t decommit_seq = _decommitted_block_seq.load();
@@ -320,6 +328,7 @@ void MmapAllocator::prefault_worker() {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
+    */
 
     _prefault_running.store(false);
     pxv_info("MmapAllocator: prefault thread finished, prefaulted %llu blocks",

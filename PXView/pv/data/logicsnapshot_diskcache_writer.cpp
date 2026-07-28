@@ -245,7 +245,7 @@ void LogicSnapshotDiskCacheWriter::drain_queue_for_capture_end()
     while (true) {
         {
             std::lock_guard<std::mutex> lock(_async_mutex);
-            if (_async_queue.empty()) break;
+            if (_async_queue.empty() && !_async_busy.load()) break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         drain_loops++;
@@ -314,6 +314,7 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             }
         }
 
+        _async_busy.store(true);
         sr_datafeed_logic logic;
         logic.length = payload.data.size();
         logic.data = payload.data.data();
@@ -340,17 +341,6 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             logic.unitsize = (uint16_t)((_owner->_channel_num + 7) / 8);
         }
 
-        static int packet_count = 0;
-        if (packet_count < 5 || logic.length % 128 != 0 || packet_count % 100 == 0) {
-            pxv_info("async_write_worker: pkt %d, fmt=%d, len=%llu, first_bytes: %02x %02x %02x %02x",
-                     packet_count, logic.format, (unsigned long long)logic.length,
-                     logic.length > 0 ? ((uint8_t *)logic.data)[0] : 0,
-                     logic.length > 1 ? ((uint8_t *)logic.data)[1] : 0,
-                     logic.length > 2 ? ((uint8_t *)logic.data)[2] : 0,
-                     logic.length > 3 ? ((uint8_t *)logic.data)[3] : 0);
-        }
-        packet_count++;
-
         auto start = std::chrono::steady_clock::now();
 
         // _mutex is now managed INSIDE append_payload_impl/append_cross_payload
@@ -373,5 +363,6 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             if (old == 0.0) _async_write_speed_mbps = mbps;
             else _async_write_speed_mbps = old * 0.8 + mbps * 0.2;
         }
+        _async_busy.store(false);
     }
 }
