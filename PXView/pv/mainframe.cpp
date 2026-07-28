@@ -143,33 +143,49 @@ MainFrame::MainFrame()
     _layout->setSpacing(0);
     _layout->setContentsMargins(0,0,0,0);
 
-    if (isWin32 && !_is_win32_parent_window)
+    if (!isWin32 || !_is_win32_parent_window)
     {
-        _top_left = new widgets::Border (TopLeft, this);
+        _top_left = new QWidget(this);
         _top_left->setFixedSize(Margin, Margin);
+        _top_left->setAttribute(Qt::WA_TranslucentBackground);
+        _top_left->setMouseTracking(true);
         _top_left->installEventFilter(this);
-        _top = new widgets::Border (Top, this);
+        _top = new QWidget(this);
         _top->setFixedHeight(Margin);
+        _top->setAttribute(Qt::WA_TranslucentBackground);
+        _top->setMouseTracking(true);
         _top->installEventFilter(this);
-        _top_right = new widgets::Border (TopRight, this);
+        _top_right = new QWidget(this);
         _top_right->setFixedSize(Margin, Margin);
+        _top_right->setAttribute(Qt::WA_TranslucentBackground);
+        _top_right->setMouseTracking(true);
         _top_right->installEventFilter(this);
 
-        _left = new widgets::Border (Left, this);
+        _left = new QWidget(this);
         _left->setFixedWidth(Margin);
+        _left->setAttribute(Qt::WA_TranslucentBackground);
+        _left->setMouseTracking(true);
         _left->installEventFilter(this);
-        _right = new widgets::Border (Right, this);
+        _right = new QWidget(this);
         _right->setFixedWidth(Margin);
+        _right->setAttribute(Qt::WA_TranslucentBackground);
+        _right->setMouseTracking(true);
         _right->installEventFilter(this);
 
-        _bottom_left = new widgets::Border (BottomLeft, this);
+        _bottom_left = new QWidget(this);
         _bottom_left->setFixedSize(Margin, Margin);
+        _bottom_left->setAttribute(Qt::WA_TranslucentBackground);
+        _bottom_left->setMouseTracking(true);
         _bottom_left->installEventFilter(this);
-        _bottom = new widgets::Border (Bottom, this);
+        _bottom = new QWidget(this);
         _bottom->setFixedHeight(Margin);
+        _bottom->setAttribute(Qt::WA_TranslucentBackground);
+        _bottom->setMouseTracking(true);
         _bottom->installEventFilter(this);
-        _bottom_right = new widgets::Border (BottomRight, this);
+        _bottom_right = new QWidget(this);
         _bottom_right->setFixedSize(Margin, Margin);
+        _bottom_right->setAttribute(Qt::WA_TranslucentBackground);
+        _bottom_right->setMouseTracking(true);
         _bottom_right->installEventFilter(this);
 
         _layout->addWidget(_top_left, 0, 0);

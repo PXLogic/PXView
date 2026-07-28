@@ -1279,7 +1279,36 @@ bool DeviceAgent::get_config_int32(int key, int &value, const sr_channel *ch, co
 {
     GVariant *gvar = get_config(key, ch, cg);
     if (gvar) {
-        value = g_variant_get_int32(gvar);
+        /* Type-safe extraction: drivers may return int16, uint16, int32,
+         * uint32, int64, or uint64 depending on the key (e.g. pxlogic.c
+         * returns SR_CONF_DEVICE_MODE as g_variant_new_int16). Blindly
+         * calling g_variant_get_int32 on a non-INT32 variant triggers
+         * "GLib-CRITICAL: g_variant_get_int32: assertion
+         * 'g_variant_is_of_type (value, G_VARIANT_TYPE_INT32)' failed".
+         * Dispatch by actual GVariant type, matching the pattern already
+         * used in prop/int.cpp and storesession.cpp. */
+        const GVariantType *type = g_variant_get_type(gvar);
+        if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
+            value = g_variant_get_int32(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
+            value = (int)g_variant_get_uint32(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
+            value = g_variant_get_int16(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
+            value = g_variant_get_uint16(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
+            value = (int)g_variant_get_int64(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
+            value = (int)g_variant_get_uint64(gvar);
+        else if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
+            value = g_variant_get_byte(gvar);
+        else {
+            pxv_warn("DeviceAgent::get_config_int32: key %d returned "
+                     "unexpected GVariant type '%s', value left unchanged", key,
+                     g_variant_type_peek_string(type));
+            g_variant_unref(gvar);
+            return false;
+        }
         g_variant_unref(gvar);
         return true;
     }

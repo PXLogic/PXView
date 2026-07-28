@@ -106,6 +106,7 @@ private:
     // the physical slot in the mmap region (matches MmapAllocator addressing).
     // _max_blocks_per_channel itself stays on LogicSnapshot (cluster A).
     std::vector<bool> _mmap_slot_written;
+    std::atomic<bool> _async_busy{false}; // true while writer is processing a dequeued payload
 
     struct AsyncPayload {
         std::vector<uint8_t> data;

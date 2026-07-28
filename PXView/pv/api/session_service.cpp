@@ -3060,9 +3060,20 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
     std::vector<DecoderAnnotation> result;
     int row_count = decoder_stack->list_rows_size();
 
+    // [PWMDBG] read-side diagnostics: how many annotations does the stack
+    // actually hold vs how many we return (decode-side vs read-side bug)
+    pxv_info("[PWMDBG] get_decoder_annotations: stack=%p, rows=%d, result_count=%llu, range=%llu..%llu, max_count=%d",
+             decoder_stack.get(), row_count,
+             (unsigned long long)decoder_stack->get_result_count(),
+             (unsigned long long)start_sample, (unsigned long long)end_sample,
+             max_count);
+
     for (int row = 0; row < row_count; row++) {
         uint64_t ann_count = decoder_stack->list_annotation_size(
             static_cast<uint16_t>(row));
+
+        pxv_info("[PWMDBG] get_decoder_annotations: row=%d ann_count=%llu",
+                 row, (unsigned long long)ann_count);
 
         for (uint64_t col = 0; col < ann_count && result.size() < static_cast<size_t>(max_count); col++) {
             decode::Annotation ann;
@@ -3086,6 +3097,9 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
             result.push_back(da);
         }
     }
+
+    pxv_info("[PWMDBG] get_decoder_annotations: returning %zu annotations",
+             result.size());
 
     return Result<std::vector<DecoderAnnotation>>::Success(result);
 }

@@ -154,14 +154,14 @@ private:
     MainWindow *_mainWindow;
 
     QGridLayout *_layout;
-    widgets::Border *_left;
-    widgets::Border *_right;
-    widgets::Border *_top;
-    widgets::Border *_bottom;
-    widgets::Border *_top_left;
-    widgets::Border *_top_right;
-    widgets::Border *_bottom_left;
-    widgets::Border *_bottom_right;
+    QWidget *_left;
+    QWidget *_right;
+    QWidget *_top;
+    QWidget *_bottom;
+    QWidget *_top_left;
+    QWidget *_top_right;
+    QWidget *_bottom_left;
+    QWidget *_bottom_right;
  
     bool    _bDraging;  
     int     _hit_border;

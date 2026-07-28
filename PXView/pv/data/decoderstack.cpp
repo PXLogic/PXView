@@ -403,6 +403,9 @@ void DecoderStack::init() {
   _no_memory = false;
   _snapshot = NULL;
   _result_count = 0;
+  _ann_dropped_stop = 0;
+  _ann_dropped_mem = 0;
+  _ann_dropped_row = 0;
 
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     (*i).second->clear();
@@ -423,12 +426,8 @@ void DecoderStack::begin_decode_work() {
   // 防御性检查:若已有解码线程在运行(RevEndPacket 与 CopyToDocDone 竞态,
   // 或 add_decode_task 重复添加遗漏),直接返回避免状态被覆盖。
   // assert 在 Release 下是空操作,必须显式 if 检查 + early return。
-  if (_decode_state != Stopped) {
-    pxv_warn("DecoderStack::begin_decode_work: _decode_state != Stopped "
-             "(already running), skip");
+  if (_decode_state != Stopped)
     return;
-  }
-
   _error_message = "";
   _decode_state = Running;
   do_decode_work();
@@ -456,7 +455,6 @@ void DecoderStack::do_decode_work() {
   _decoder_status->clear(); // clear old items
 
   if (!_options_changed) {
-    pxv_err("ERROR:Decoder options have not changed.");
     return;
   }
   _options_changed = false;
@@ -726,12 +724,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     }
   }
 
-  pxv_info("decode_data loop ended! i=%llu, end_index=%llu, _no_memory=%d, _bStop=%d, bError=%d, bEndTime=%d",
-           (unsigned long long)i, (unsigned long long)end_index,
-           (int)_no_memory, (int)status->_bStop, (int)bError, (int)bEndTime);
-           
-  pxv_info("%s%llu", "send to decoder times: ", (u64_t)entry_cnt);
-
   if (error != NULL)
     g_free(error);
 
@@ -804,10 +796,6 @@ void DecoderStack::execute_decode_stack() {
     }
   }
 
-  pxv_info("decoder start sample:%llu, end sample:%llu, count:%llu",
-           (u64_t)decode_start, (u64_t)decode_end,
-           (u64_t)(decode_end - decode_start + 1));
-
   // Start the session
   srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64((uint64_t)_samplerate));
@@ -865,6 +853,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   assert(d);
 
   if (st->_bStop) {
+    d->_ann_dropped_stop++;
     return;
   }
   if (d->_decoder_status == NULL) {
@@ -873,6 +862,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
 
   if (d->_no_memory) {
+    d->_ann_dropped_mem++;
     return;
   }
 
@@ -909,6 +899,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   if (row_iter == d->_rows.end()) {
     pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
             a->format());
+    d->_ann_dropped_row++;
     assert(0);
     return;
   }
@@ -928,6 +919,8 @@ void DecoderStack::frame_ended() {
     for (auto dec : _stack) {
       uint64_t start = dec->decode_start();
       uint64_t end = dec->decode_end();
+      const uint64_t raw_start = start;
+      const uint64_t raw_end = end;
 
       if (start > last_samples) {
         start = 0;

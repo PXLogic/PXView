@@ -252,6 +252,10 @@ private:
     int             _progress;
     bool            _is_decoding;
     uint64_t        _result_count;
+    // [PWMDBG] diagnostics: annotations dropped in annotation_callback()
+    uint64_t        _ann_dropped_stop = 0;
+    uint64_t        _ann_dropped_mem = 0;
+    uint64_t        _ann_dropped_row = 0;
 
 	friend class DecoderStackTest::TwoDecoderStack;
 };

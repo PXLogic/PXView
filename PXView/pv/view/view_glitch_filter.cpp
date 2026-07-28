@@ -192,6 +192,7 @@ void ViewGlitchFilter::on_glitch_apply_requested(
   std::map<int, GlitchFilterMode> modes;
 
   if (all_channels) {
+    // "应用到所有通道"：用新阈值替换全部，不合并已有状态
     for (auto s : _view->_own_signals) {
       if (s && s->signal_type() == SR_CHANNEL_LOGIC) {
         int ch_idx = s->model() ? s->model()->index() : -1;
@@ -202,6 +203,13 @@ void ViewGlitchFilter::on_glitch_apply_requested(
       }
     }
   } else {
+    // 单通道应用：先继承已有的 thresholds/modes，再覆盖目标通道
+    // 这样 Core 层从 backup 恢复后会重新对所有已滤波通道执行滤波，
+    // 避免新通道滤波导致旧通道滤波效果丢失
+    if (sess.is_glitch_filter_active()) {
+      thresholds = sess.glitch_filter_thresholds();
+      modes = sess.glitch_filter_modes();
+    }
     int ch_idx = sig->model() ? sig->model()->index() : -1;
     if (ch_idx >= 0) {
       thresholds[ch_idx] = threshold;
@@ -257,6 +265,13 @@ void ViewGlitchFilter::on_apply_batch_requested(
   // 架构修复：用 channel_index 作 key，与 _ch_index 中的位置无关
   std::map<int, uint32_t> thresholds;
   std::map<int, GlitchFilterMode> modes;
+
+  // 批处理应用：先继承已有的 thresholds/modes，再覆盖 batch 中的通道
+  // 避免 batch 中未包含的已滤波通道丢失滤波效果
+  if (sess.is_glitch_filter_active()) {
+    thresholds = sess.glitch_filter_thresholds();
+    modes = sess.glitch_filter_modes();
+  }
 
   // 对 batch 中每个 sig 设置对应 channel_index 的 threshold/mode
   for (auto *sig : sigs) {

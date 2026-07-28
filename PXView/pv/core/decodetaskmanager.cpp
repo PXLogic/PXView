@@ -63,6 +63,17 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
   // removes the need for callers to manually re-fire these callbacks.
   _state->data_updated();
   _state->signals_changed();
+
+  // [PWMDBG] confirm WHICH data buffer the models were attached to and how
+  // many samples it currently holds (race: decode before buffer swap?)
+  if (data->get_logic()) {
+    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=%p, sample_count=%llu, ring=%llu",
+             (void *)data, (void *)data->get_logic(),
+             (unsigned long long)data->get_logic()->get_sample_count(),
+             (unsigned long long)data->get_logic()->get_ring_sample_count());
+  } else {
+    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=NULL", (void *)data);
+  }
 }
 
 void DecodeTaskManager::add_decode_task(
@@ -200,6 +211,9 @@ void DecodeTaskManager::start_all_decode_tasks() {
   // (single attach instead of N attaches).
   attach_data_to_signal(_state->view_data());
 
+  pxv_info("[PWMDBG] start_all_decode_tasks: stacks=%zu, view_data=%p",
+           _state->decode_traces().size(), (void *)_state->view_data());
+
   for (auto stack : _state->decode_traces()) {
     stack->set_capture_end_flag(true);
     stack->frame_ended();
@@ -216,6 +230,9 @@ void DecodeTaskManager::rst_decoder(int index, data::SessionDocument *doc) {
   // already accepted new settings. Core then just clears the existing
   // decode task and re-adds it.
   auto stack = _state->get_decoder_trace(index, target);
+
+  pxv_info("[PWMDBG] rst_decoder: index=%d, stack=%p", index,
+           stack ? stack.get() : nullptr);
 
   if (stack) {
     remove_decode_task(stack); // remove old task
