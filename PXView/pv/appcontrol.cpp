@@ -26,6 +26,8 @@
 #include <libsigrokdecode.h>
 #include <QDir>
 #include <QCoreApplication>
+#include <QProcess>
+#include <QFile>
 #include <QWidget>
 #include <string>
 #include <assert.h>
@@ -124,6 +126,7 @@ bool AppControl::Init()
     _session->init();
 
     srd_log_set_context(pxv_log_context());
+    pxv_info("DBG: srd_log_set_context done");
 
 #if defined(_WIN32)
     // Set Python home to application directory for embedded Python
@@ -174,6 +177,92 @@ bool AppControl::Init()
             pxv_info("Python stdlib not bundled, using system Python");
         }
     }
+#elif defined(Q_OS_DARWIN)
+    // macOS: .app bundle 内的 Python.framework 由 macdeployqt 打包。
+    // Homebrew Python.framework 结构:
+    //   Python.framework/Versions/3.13/
+    //     Python               ← 共享库 (libpython3.13.dylib)
+    //     Resources/           ← Python.app + Info.plist (不是 stdlib!)
+    //     lib/python3.13/      ← stdlib (encodings/, os.py, ...)
+    // PYTHONHOME 应指向 Versions/Current (包含 lib/python3.X 的目录)。
+    // 设错(如指向 Resources)会导致 "Failed to import encodings module"。
+    // wchar_t 在 macOS 上是 4 字节(UTF-32),必须用 toStdWString()。
+    {
+        QString appDir = QCoreApplication::applicationDirPath();
+        // appDir = .../PXView.app/Contents/MacOS
+        // frameworkDir = .../PXView.app/Contents/Frameworks
+        QString frameworkDir = appDir + "/../Frameworks";
+        QDir fwDir(frameworkDir);
+
+        // 查找 Python.framework (macdeployqt 打包为 Python.framework)
+        if (fwDir.cd("Python.framework")) {
+            // Python home = .../Python.framework/Versions/Current
+            // (Current 是符号链接,指向如 3.13,包含 lib/python3.X/)
+            QString pyHome = fwDir.absolutePath() + "/Versions/Current";
+            QDir homeDir(pyHome);
+            pyHome = homeDir.absolutePath();
+
+            // 验证 stdlib 是否存在: lib/python3.X/encodings/
+            // 用 glob 匹配 python3.* (与 Linux 代码相同的方式)
+            QDir libCheck(pyHome + "/lib");
+            QStringList pyDirs = libCheck.entryList(
+                QStringList() << "python3.*", QDir::Dirs, QDir::Name);
+            if (!pyDirs.isEmpty()) {
+                if (QDir(pyHome + "/lib/" + pyDirs.first() + "/encodings").exists()) {
+                    static std::wstring pyHomeW = pyHome.toStdWString();
+                    srd_set_python_home(pyHomeW.c_str());
+                    pxv_info("Set Python home to: %s", pyHome.toUtf8().data());
+                } else {
+                    pxv_warn("Python.framework found, encodings module missing, using system Python");
+                }
+            } else {
+                // Current 符号链接可能不存在或已损坏,直接扫描 Versions/ 目录
+                QDir versionsDir(fwDir.absolutePath() + "/Versions");
+                QStringList verDirs = versionsDir.entryList(
+                    QStringList() << "3.*", QDir::Dirs, QDir::Name);
+                if (!verDirs.isEmpty()) {
+                    QString realHome = versionsDir.absoluteFilePath(verDirs.first());
+                    QDir realLibCheck(realHome + "/lib");
+                    QStringList realPyDirs = realLibCheck.entryList(
+                        QStringList() << "python3.*", QDir::Dirs, QDir::Name);
+                    if (!realPyDirs.isEmpty() &&
+                        QDir(realHome + "/lib/" + realPyDirs.first() + "/encodings").exists()) {
+                        static std::wstring pyHomeW = realHome.toStdWString();
+                        srd_set_python_home(pyHomeW.c_str());
+                        pxv_info("Set Python home (%s) to: %s",
+                                 verDirs.first().toUtf8().data(), realHome.toUtf8().data());
+                    } else {
+                        pxv_warn("Python.framework Versions/%s found but stdlib missing, using system Python",
+                                 verDirs.first().toUtf8().data());
+                    }
+                } else {
+                    pxv_warn("Python.framework found but no version dir with stdlib, using system Python");
+                }
+            }
+        } else {
+            // 开发模式: 没有 .app bundle,使用系统 Python (Homebrew)
+            // 查找 Homebrew Python 的 prefix
+            QString brewPython = "/opt/homebrew/bin/python3"; // Apple Silicon
+            if (!QFile::exists(brewPython)) {
+                brewPython = "/usr/local/bin/python3"; // Intel
+            }
+            if (QFile::exists(brewPython)) {
+                QProcess proc;
+                proc.start(brewPython, QStringList() << "-c"
+                    << "import sys; print(sys.prefix)");
+                if (proc.waitForFinished(5000)) {
+                    QString prefix = proc.readAllStandardOutput().trimmed();
+                    if (!prefix.isEmpty()) {
+                        static std::wstring pyHomeW = prefix.toStdWString();
+                        srd_set_python_home(pyHomeW.c_str());
+                        pxv_info("Set Python home (Homebrew) to: %s", prefix.toUtf8().data());
+                    }
+                }
+            } else {
+                pxv_info("No bundled Python.framework, no Homebrew Python, using system default");
+            }
+        }
+    }
 #endif
     
     //the python script path of decoder
@@ -182,11 +271,13 @@ bool AppControl::Init()
     strcpy(path, dir.toUtf8().data());
 
     // Initialise libsigrokdecode
+    pxv_info("DBG: before srd_init, path=%s", path);
     if (srd_init(path) != SRD_OK)
-    { 
+    {
         pxv_err("ERROR: libsigrokdecode init failed.");
         return false;
     }
+    pxv_info("DBG: srd_init done");
 
     // Add C decoder search paths
     {
@@ -200,11 +291,13 @@ bool AppControl::Init()
     }
 
     // Load the protocol decoders
+    pxv_info("DBG: before srd_decoder_load_all");
     if (srd_decoder_load_all() != SRD_OK)
     {
         pxv_err("ERROR: load the protocol decoders failed.");
         return false;
     }
+    pxv_info("DBG: srd_decoder_load_all done");
  
     return true;
 }

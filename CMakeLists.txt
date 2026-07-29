@@ -259,6 +259,11 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${DS_VERSION_STRING}
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac_appbundle_template.plist.in
         MACOSX_BUNDLE_ICON_FILE PXView.icns
+        # Ensure the binary can find Qt frameworks bundled inside the .app
+        # by macdeployqt. Without this, dyld fails with "Symbol not found"
+        # because @rpath/QtCore.framework/... cannot be resolved.
+        INSTALL_RPATH "@executable_path/../Frameworks"
+        BUILD_RPATH "@executable_path/../Frameworks"
     )
 endif()
 

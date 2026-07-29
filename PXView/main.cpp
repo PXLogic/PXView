@@ -352,19 +352,24 @@ int main(int argc, char *argv[])
 	}
  
 	//init core
-	if (!control->Init()){ 
-		pxv_err("init error!"); 
+	pxv_info("DBG: before control->Init()");
+	if (!control->Init()){
+		pxv_err("init error!");
 		return 1;
 	}
-	
+	pxv_info("DBG: control->Init() done");
+
 	if (open_file != NULL){
 		control->_open_file_name = open_file;
 	}	
 
 	try
 	{
+		pxv_info("DBG: before MainFrame construction");
 		pv::MainFrame w;
+		pxv_info("DBG: MainFrame constructed");
 		control->Start();
+		pxv_info("DBG: control->Start() done");
 
 		// Register MainWindow as an IServiceEventListener so that View
 		// operation broadcasts (show_region, zoom_fit, zoom_in/out, cursors)

@@ -247,6 +247,11 @@ void DraggableTabWidget::tabInserted(int index)
             emit tabCloseRequested(idx);
         }
     });
+    // On macOS, Qt's native style places the default close button on the
+    // LeftSide (following macOS UI conventions). setTabsClosable(true) creates
+    // that default button, so we must explicitly clear the LeftSide to avoid
+    // showing two close buttons (default on left + custom on right).
+    tabBar()->setTabButton(index, QTabBar::LeftSide, nullptr);
     tabBar()->setTabButton(index, QTabBar::RightSide, btn);
     
     QTimer::singleShot(0, this, [this]() { update_add_button_position(); });
