@@ -1093,9 +1093,15 @@ void MainFrame::show_doc()
         QLabel tipsLabel;
         QPixmap docPixmap(path);
         if (!docPixmap.isNull()) {
-            // Scale to match original dialog size (488px wide) to prevent
-            // oversized dialog when the source image has a larger resolution
-            tipsLabel.setPixmap(docPixmap.scaledToWidth(488, Qt::SmoothTransformation));
+            // Scale to match original dialog size (488 logical px wide).
+            // Multiply by devicePixelRatio and set it on the pixmap so the
+            // image stays crisp on high-DPI displays (e.g. macOS Retina 2x).
+            const int kTargetWidth = 488;
+            qreal dpr = devicePixelRatioF();
+            QPixmap scaled = docPixmap.scaledToWidth(
+                kTargetWidth * dpr, Qt::SmoothTransformation);
+            scaled.setDevicePixelRatio(dpr);
+            tipsLabel.setPixmap(scaled);
         }
 
         QMessageBox msg;
