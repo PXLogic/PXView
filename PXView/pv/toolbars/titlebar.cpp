@@ -75,6 +75,11 @@ static QEasingCurve makeTailwindCurve() {
 TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
                    bool hasClose, bool enableRibbon)
     : QMenuBar(parent) {
+  // On macOS, QMenuBar defaults to the native screen-top menu bar.
+  // Since TitleBar is a custom in-window widget (with ribbon, tabs, window
+  // buttons), force it to render inside the window on all platforms.
+  setNativeMenuBar(false);
+
   _minimizeButton = NULL;
   _maximizeButton = NULL;
   _closeButton = NULL;

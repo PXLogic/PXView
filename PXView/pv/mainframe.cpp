@@ -1091,7 +1091,12 @@ void MainFrame::show_doc()
         }
 
         QLabel tipsLabel;
-        tipsLabel.setPixmap(path);
+        QPixmap docPixmap(path);
+        if (!docPixmap.isNull()) {
+            // Scale to match original dialog size (488px wide) to prevent
+            // oversized dialog when the source image has a larger resolution
+            tipsLabel.setPixmap(docPixmap.scaledToWidth(488, Qt::SmoothTransformation));
+        }
 
         QMessageBox msg;
         msg.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
