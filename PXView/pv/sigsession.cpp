@@ -968,13 +968,20 @@ void SigSession::init_signals() {
         _state->device_agent().get_probe_map_default(map_default, probe);
         model->set_map_default(map_default);
 
+        // Only set model fields if the driver GET succeeded. If GET fails,
+        // the model keeps its default (0.0) and does NOT push 0 back to the
+        // device via set_config_uint16, which would overwrite the driver's
+        // default (e.g. DSO_DEFAULT_OFFSET=128) with 0 and cause the cursor
+        // to appear at the top of the screen.
         int hw_offset = 0;
-        _state->device_agent().get_probe_hw_offset(hw_offset, probe);
-        model->set_hw_offset(hw_offset);
+        bool hw_ok = _state->device_agent().get_probe_hw_offset(hw_offset, probe);
+        if (hw_ok)
+          model->set_hw_offset(hw_offset);
 
         int zero_offset = 0;
-        _state->device_agent().get_probe_offset(zero_offset, probe);
-        model->set_zero_offset(zero_offset);
+        bool zero_ok = _state->device_agent().get_probe_offset(zero_offset, probe);
+        if (zero_ok)
+          model->set_zero_offset(zero_offset);
       }
 
       models.push_back(model);
@@ -1108,13 +1115,17 @@ void SigSession::reload() {
         _state->device_agent().get_probe_map_default(map_default, probe);
         model->set_map_default(map_default);
 
+        // Only set model fields if the driver GET succeeded (same guard as
+        // build_signals path above — prevents overwriting driver defaults).
         int hw_offset = 0;
-        _state->device_agent().get_probe_hw_offset(hw_offset, probe);
-        model->set_hw_offset(hw_offset);
+        bool hw_ok = _state->device_agent().get_probe_hw_offset(hw_offset, probe);
+        if (hw_ok)
+          model->set_hw_offset(hw_offset);
 
         int zero_offset = 0;
-        _state->device_agent().get_probe_offset(zero_offset, probe);
-        model->set_zero_offset(zero_offset);
+        bool zero_ok = _state->device_agent().get_probe_offset(zero_offset, probe);
+        if (zero_ok)
+          model->set_zero_offset(zero_offset);
       }
 
       if (old_model) {

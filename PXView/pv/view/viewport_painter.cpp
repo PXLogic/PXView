@@ -58,6 +58,16 @@
 
 using namespace std;
 
+// ---------------------------------------------------------------------------
+// Runtime frame-timing instrumentation.
+// Enable by setting environment variable DSV_FRAME_TIMING=1 before launch.
+// Output goes to PXView.log via pxv_info so it works in Release builds.
+// ---------------------------------------------------------------------------
+static bool s_frame_timing = (qgetenv("DSV_FRAME_TIMING") == "1");
+
+// Thread-local DSO sub-timing (defined here, declared extern in viewport.h).
+thread_local DsoPaintTiming s_dso_timing;
+
 namespace pv {
 namespace view {
 
@@ -227,10 +237,9 @@ void ViewportPainter::paintEvent(QPaintEvent *event) {
 
 void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   using pv::view::Signal;
-#ifndef NDEBUG
-  QElapsedTimer timer;
-  timer.start();
-#endif
+
+  QElapsedTimer ft_total;
+  ft_total.start();
 
   QStyleOption o;
   o.initFrom(_viewport);
@@ -240,18 +249,12 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   QFont font = theme_font_cursor();
   p.setFont(font);
 
-#ifndef NDEBUG
-  qint64 t_init = timer.elapsed();
-#endif
+  qint64 ft_init = ft_total.elapsed();
 
-#ifndef NDEBUG
-  QElapsedTimer checkUpdateTimer;
-  checkUpdateTimer.start();
-#endif
+  QElapsedTimer ft_cu;
+  ft_cu.start();
   _viewport->_view.session().check_update();
-#ifndef NDEBUG
-  qint64 t_check_update = checkUpdateTimer.elapsed();
-#endif
+  qint64 ft_check_update = ft_cu.elapsed();
 
   QColor fore(_viewport->palette().color(_viewport->foregroundRole()));
   QColor back(_viewport->palette().color(_viewport->backgroundRole()));
@@ -260,22 +263,17 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
 
   std::vector<Trace *> traces;
   _viewport->_view.get_traces(_viewport->_type, traces);
-#ifndef NDEBUG
-  qint64 t_get_traces = timer.elapsed() - (t_init + t_check_update);
-#endif
+
+  qint64 ft_after_traces = ft_total.elapsed();
 
   p.save();
   p.translate(0, -_viewport->_view.get_vOffset());
 
-#ifndef NDEBUG
-  qint64 t_group_cards = 0;
-#endif
+  qint64 ft_group_cards = 0;
   if (_viewport->_type == TIME_VIEW &&
       _viewport->_view.is_logic_rendering_mode()) {
-#ifndef NDEBUG
     QElapsedTimer groupTimer;
     groupTimer.start();
-#endif
     const auto &groups = _viewport->_view.get_signal_groups();
     if (!groups.empty()) {
       std::vector<size_t> group_indices(groups.size());
@@ -347,16 +345,11 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
         }
       }
     }
-#ifndef NDEBUG
-    t_group_cards = groupTimer.elapsed();
-#endif
+    ft_group_cards = groupTimer.elapsed();
   }
 
-#ifndef NDEBUG
-  qint64 t_dividers = 0;
   QElapsedTimer dividerTimer;
   dividerTimer.start();
-#endif
   QColor dividerColor =
       AppConfig::Instance().GetThemeColor("@border-strong");
   if (!dividerColor.isValid()) {
@@ -405,15 +398,10 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     p.drawLine(0, traceBottom, _viewport->_view.get_view_width(),
                traceBottom);
   }
-#ifndef NDEBUG
-  t_dividers = dividerTimer.elapsed();
-#endif
+  qint64 ft_dividers = dividerTimer.elapsed();
 
-#ifndef NDEBUG
-  qint64 t_paint_back = 0;
   QElapsedTimer backTimer;
   backTimer.start();
-#endif
   for (auto t : traces) {
     if (!t->enabled() && !dynamic_cast<DsoSignal *>(t))
       continue;
@@ -421,17 +409,12 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (_viewport->_view.back_ready())
       break;
   }
-#ifndef NDEBUG
-  t_paint_back = backTimer.elapsed();
-#endif
+  qint64 ft_paint_back = backTimer.elapsed();
 
   p.restore();
 
-#ifndef NDEBUG
-  qint64 t_paint_signals = 0;
   QElapsedTimer signalsTimer;
   signalsTimer.start();
-#endif
   if (_viewport->_view.is_logic_rendering_mode() ||
       _viewport->_view.session().is_instant()) {
     if (_viewport->_view.session().is_init_status()) {
@@ -468,15 +451,10 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   } else {
     paintSignals(p, fore, back);
   }
-#ifndef NDEBUG
-  t_paint_signals = signalsTimer.elapsed();
-#endif
+  qint64 ft_paint_signals = signalsTimer.elapsed();
 
-#ifndef NDEBUG
-  qint64 t_paint_fore = 0;
   QElapsedTimer foreTimer;
   foreTimer.start();
-#endif
   p.save();
   p.translate(0, -_viewport->_view.get_vOffset());
   for (auto t : traces) {
@@ -484,14 +462,34 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
       t->paint_fore(p, 0, _viewport->_view.get_view_width(), fore, back);
   }
   p.restore();
-#ifndef NDEBUG
-  t_paint_fore = foreTimer.elapsed();
-#endif
+  qint64 ft_paint_fore = foreTimer.elapsed();
 
   if (_viewport->_view.get_signalHeight() != _viewport->_curSignalHeight)
     _viewport->_curSignalHeight = _viewport->_view.get_signalHeight();
 
   p.end();
+
+  // ---- Frame timing summary ----
+  if (s_frame_timing) {
+    qint64 ft_total_us = ft_total.elapsed();
+    qint64 ft_traces = ft_after_traces - ft_init - ft_check_update;
+    pxv_info("FRAME[%s] total=%lldms | init=%lld check_update=%lld traces=%lld "
+             "grp=%lld div=%lld back=%lld SIGNALS=%lld fore=%lld",
+             _viewport->_type == TIME_VIEW ? "T" : "F",
+             ft_total_us, ft_init, ft_check_update, ft_traces,
+             ft_group_cards, ft_dividers, ft_paint_back,
+             ft_paint_signals, ft_paint_fore);
+    if (s_dso_timing.active) {
+      pxv_info("  DSO: get_samples=%lldms paint_draw=%lldms hw_off=%lldms "
+               "spp=%.3f scount=%lld",
+              s_dso_timing.get_samples_ms,
+              s_dso_timing.paint_draw_ms,
+              s_dso_timing.hw_offset_ms,
+               s_dso_timing.samples_per_pixel,
+               (long long)s_dso_timing.sample_count);
+      s_dso_timing = DsoPaintTiming{}; // reset for next frame
+    }
+  }
 }
 
 void ViewportPainter::paintCursors(QPainter &p) {
@@ -516,12 +514,10 @@ void ViewportPainter::paintCursors(QPainter &p) {
 }
 
 void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
-#ifndef NDEBUG
-  QElapsedTimer timer;
-  timer.start();
-  qint64 t_rebuild = 0, t_blit = 0, t_decode = 0, t_cursor = 0, t_xcursor = 0,
-         t_marker = 0, t_measure = 0;
-#endif
+  QElapsedTimer sigTimer;
+  sigTimer.start();
+  qint64 ft_rebuild = 0, ft_blit = 0, ft_cursor = 0,
+         ft_xcursor = 0, ft_marker = 0, ft_measure = 0;
 
   std::vector<Trace *> traces;
   _viewport->_view.get_traces(_viewport->_type, traces);
@@ -547,18 +543,20 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     if (view_params_changed || _viewport->_need_update || pixmap_changed) {
       rebuilt = true;
       (void)rebuilt;
-#ifndef NDEBUG
       QElapsedTimer rebuildTimer;
       rebuildTimer.start();
-#endif
 
       _viewport->_curScale = _viewport->_view.scale();
       _viewport->_curOffset = _viewport->_view.offset();
       _viewport->_curSignalHeight = _viewport->_view.get_signalHeight();
       _viewport->_curVOffset = _viewport->_view.get_vOffset();
 
-      _viewport->_pixmap = QPixmap(pixmapSize);
-      _viewport->_pixmap.setDevicePixelRatio(dpr);
+      // Reuse the existing QPixmap when size & DPR match (avoids heap
+      // alloc/dealloc on every frame in realtime refresh mode).
+      if (pixmap_changed) {
+        _viewport->_pixmap = QPixmap(pixmapSize);
+        _viewport->_pixmap.setDevicePixelRatio(dpr);
+      }
       _viewport->_pixmap.fill(Qt::transparent);
 
       QPainter dbp(&_viewport->_pixmap);
@@ -592,20 +590,14 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
         }
       }
       _viewport->_need_update = false;
-#ifndef NDEBUG
-      t_rebuild = rebuildTimer.elapsed();
-#endif
+      ft_rebuild = rebuildTimer.elapsed();
     }
 
     // 1. Blit the cached logic signal pixmap (cheap: just a memcpy)
-#ifndef NDEBUG
     QElapsedTimer blitTimer;
     blitTimer.start();
-#endif
     p.drawPixmap(0, 0, _viewport->_pixmap);
-#ifndef NDEBUG
-    t_blit = blitTimer.elapsed();
-#endif
+    ft_blit = blitTimer.elapsed();
 
     // 2. Paint decode traces directly on the widget (not via QPixmap).
     //    Rendering text into a QPixmap forces grayscale antialiasing
@@ -644,18 +636,20 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
         _viewport->_need_update || pixmap_changed) {
 
       rebuilt = true;
-#ifndef NDEBUG
       QElapsedTimer rebuildTimer;
       rebuildTimer.start();
-#endif
 
       _viewport->_curScale = _viewport->_view.scale();
       _viewport->_curOffset = _viewport->_view.offset();
       _viewport->_curSignalHeight = _viewport->_view.get_signalHeight();
       _viewport->_curVOffset = _viewport->_view.get_vOffset();
 
-      _viewport->_pixmap = QPixmap(pixmapSize);
-      _viewport->_pixmap.setDevicePixelRatio(dpr);
+      // Reuse the existing QPixmap when size & DPR match (avoids heap
+      // alloc/dealloc on every frame in DSO continuous mode).
+      if (pixmap_changed) {
+        _viewport->_pixmap = QPixmap(pixmapSize);
+        _viewport->_pixmap.setDevicePixelRatio(dpr);
+      }
       _viewport->_pixmap.fill(Qt::transparent);
 
       QPainter dbp(&_viewport->_pixmap);
@@ -681,37 +675,25 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
         }
       }
       _viewport->_need_update = false;
-#ifndef NDEBUG
-      t_rebuild = rebuildTimer.elapsed();
-#endif
+      ft_rebuild = rebuildTimer.elapsed();
     }
-#ifndef NDEBUG
     QElapsedTimer blitTimer;
     blitTimer.start();
-#endif
     p.drawPixmap(0, 0, _viewport->_pixmap);
-#ifndef NDEBUG
-    t_blit = blitTimer.elapsed();
-#endif
+    ft_blit = blitTimer.elapsed();
   }
 
   // plot cursors
-#ifndef NDEBUG
   QElapsedTimer cursorTimer;
   cursorTimer.start();
-#endif
   paintCursors(p);
-#ifndef NDEBUG
-  t_cursor = cursorTimer.elapsed();
-#endif
+  ft_cursor = cursorTimer.elapsed();
 
   const QRect xrect = _viewport->_view.get_view_rect();
 
   if (_viewport->_view.xcursors_shown() && _viewport->_type == TIME_VIEW) {
-#ifndef NDEBUG
     QElapsedTimer xcursorTimer;
     xcursorTimer.start();
-#endif
     auto &xcursor_list = _viewport->_view.get_xcursorList();
     auto i = xcursor_list.begin();
     int index = 0;
@@ -757,16 +739,12 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
       i++;
       index++;
     }
-#ifndef NDEBUG
-    t_xcursor = xcursorTimer.elapsed();
-#endif
+    ft_xcursor = xcursorTimer.elapsed();
   }
 
   if (_viewport->_type == TIME_VIEW) {
-#ifndef NDEBUG
     QElapsedTimer markerTimer;
     markerTimer.start();
-#endif
     if (_viewport->_view.trig_cursor_shown()) {
       _viewport->_view.get_trig_cursor()->paint(p, xrect, 0, false);
     }
@@ -781,9 +759,7 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
       else
         _viewport->_view.get_search_cursor()->paint(p, xrect, 0, -1);
     }
-#ifndef NDEBUG
-    t_marker = markerTimer.elapsed();
-#endif
+    ft_marker = markerTimer.elapsed();
 
     // plot zoom rect
     if (_viewport->_action_type == LOGIC_ZOOM) {
@@ -794,14 +770,10 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     }
 
     // plot measure arrow
-#ifndef NDEBUG
     QElapsedTimer measureTimer;
     measureTimer.start();
-#endif
     paintMeasure(p, fore, back);
-#ifndef NDEBUG
-    t_measure = measureTimer.elapsed();
-#endif
+    ft_measure = measureTimer.elapsed();
 
     // plot trigger information
     auto *dev = _viewport->_view.data_source()->device();
@@ -887,6 +859,15 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
         }
       }
     }
+  }
+
+  // Sub-timing summary for paintSignals
+  if (s_frame_timing) {
+    qint64 sig_total = sigTimer.elapsed();
+    pxv_info("  SIGNALS total=%lldms | rebuild=%lld blit=%lld cursor=%lld "
+             "xcursor=%lld marker=%lld measure=%lld",
+             sig_total, ft_rebuild, ft_blit, ft_cursor,
+             ft_xcursor, ft_marker, ft_measure);
   }
 }
 

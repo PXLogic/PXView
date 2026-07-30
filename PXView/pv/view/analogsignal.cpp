@@ -414,7 +414,8 @@ double AnalogSignal::get_zero_ratio() {
   // 注意：采集前 _data 可能为 null 或 not is_float，但 _zero_offset=0 仍然
   // 不在 [_ref_min, _ref_max] 范围内，统一返回 0.5 使初始化时游标也居中。
   if (_zero_offset >= (int)_ref_min && _zero_offset <= (int)_ref_max) {
-    return (_zero_offset - _ref_min) / (_ref_max - _ref_min);
+    double r = (_zero_offset - _ref_min) / (_ref_max - _ref_min);
+    return r;
   }
   return 0.5;
 }

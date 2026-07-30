@@ -517,6 +517,21 @@ uint64_t DeviceAgent::get_sample_limit()
     return v;
 }
 
+uint64_t DeviceAgent::get_driver_sample_limit()
+{
+    if (!_dev_handle) {
+        pxv_warn("%s", "DeviceAgent::get_driver_sample_limit: _dev_handle is NULL");
+        return 0;
+    }
+    uint64_t v = 0;
+    GVariant *gvar = get_config(SR_CONF_LIMIT_SAMPLES, NULL, NULL);
+    if (gvar) {
+        v = g_variant_get_uint64(gvar);
+        g_variant_unref(gvar);
+    }
+    return v;
+}
+
 uint64_t DeviceAgent::get_ring_sample_count()
 {
     if (!_dev_handle) {
@@ -1040,7 +1055,7 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
         }
         if (!cg)
             cg = fallback_grp;
-        pxv_info("DeviceAgent::get_config: cg lookup for key=%d ch=%p -> cg=%p (name=%s)",
+        pxv_dbg("DeviceAgent::get_config: cg lookup for key=%d ch=%p -> cg=%p (name=%s)",
                  key, (void*)ch, (void*)cg,
                  cg ? (cg->name ? cg->name : "(null)") : "(none)");
     }

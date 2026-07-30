@@ -57,11 +57,14 @@ namespace core {
  * verbatim from the original DsoMeasure::get_measure(int type) switch
  * (dso_measure.cpp L47-L183). The raw value computation (max/min/rms/mean)
  * uses DsoSnapshot's existing Core-layer methods (get_max_min_value /
- * cal_vrms / cal_vmean). Level-dependent measurements (period/freq/duty/
- * rise/fall/high/low) were never computed in the original code (DsoSignal
- *::_mValid was never set to true, and the level-detection routine was
- * removed — see capturemanager.cpp:326 TODO), so they are reported with
- * valid=false, matching the original "--" behavior.
+ * cal_vrms / cal_vmean).
+ *
+ * Level-dependent measurements (period/freq/duty/rise/fall/high/low/pcount)
+ * are now fully implemented in compute() via a median-crossing and
+ * histogram-based level-detection algorithm (see compute_level_measurements).
+ * In the original code these were never computed (DsoSignal::_mValid was
+ * never set to true). Now they are computed from the raw DSO sample buffer
+ * and level_valid is set to true when at least one full period is detected.
  */
 class MeasureCalculator
 {
@@ -80,16 +83,16 @@ public:
         bool     level_valid = false; ///< level-dependent measurements valid
         uint8_t  max = 0;             ///< max ADC value
         uint8_t  min = 0;             ///< min ADC value
-        uint8_t  high = 0;            ///< high level (not computed — level_valid=false)
-        uint8_t  low = 0;             ///< low level (not computed — level_valid=false)
-        double   period = 0;          ///< period in ns (not computed)
+        uint8_t  high = 0;            ///< high level (larger ADC value = low voltage)
+        uint8_t  low = 0;             ///< low level (smaller ADC value = high voltage)
+        double   period = 0;          ///< period in ns
         double   rms = 0;             ///< RMS in ADC counts
         double   mean = 0;            ///< mean in ADC counts
-        double   rise_time = 0;       ///< rise time in ns (not computed)
-        double   fall_time = 0;       ///< fall time in ns (not computed)
-        double   high_time = 0;       ///< high pulse width in ns (not computed)
-        double   burst_time = 0;      ///< burst time in ns (not computed)
-        uint32_t pcount = 0;          ///< pulse count (not computed)
+        double   rise_time = 0;       ///< rise time in ns
+        double   fall_time = 0;       ///< fall time in ns
+        double   high_time = 0;       ///< high pulse width in ns
+        double   burst_time = 0;      ///< burst time in ns
+        uint32_t pcount = 0;          ///< pulse count
         int      hw_offset = 0;       ///< hardware zero offset (ADC counts)
     };
 
@@ -101,8 +104,9 @@ public:
      * For each channel: reads max/min via DsoSnapshot::get_max_min_value,
      * rms via DsoSnapshot::cal_vrms, mean via DsoSnapshot::cal_vmean, and
      * hw_offset via SignalModel. Sets mValid=true if max/min/rms/mean were
-     * computed. level_valid stays false (level detection not implemented —
-     * matches original behavior where _mValid was never set true).
+     * computed. Also performs level-detection (high/low/period/rise/fall/
+     * duty/pcount) via compute_level_measurements() and sets level_valid=true
+     * when at least one full period is detected in the waveform.
      *
      * @param data            SessionData (must outlive the call); its
      *                        DsoSnapshot is read under the snapshot's mutex.
@@ -198,6 +202,43 @@ public:
      */
     static constexpr int DefaultViewRectHeight = 256;
     static constexpr int DefaultPixelsPerDiv = 32;
+
+private:
+    /**
+     * Compute level-dependent measurements (high/low/period/rise_time/
+     * fall_time/high_time/burst_time/pcount) from the raw DSO sample buffer.
+     *
+     * Algorithm:
+     *  1. High/Low level detection: a histogram-based approach finds the two
+     *     most common ADC values (the steady-state levels). In the inverted
+     *     DSO ADC system (0=max voltage, 255=min voltage), `high` = the
+     *     larger ADC value (low-voltage steady-state), `low` = the smaller
+     *     ADC value (high-voltage steady-state).
+     *  2. Mid-threshold crossing: threshold = (high + low) / 2.
+     *  3. Period: distance between consecutive rising edges (crossing
+     *     threshold from above in ADC = rising voltage).
+     *  4. High pulse width: distance from rising to next falling edge.
+     *  5. Rise time: time for signal to go from 10% to 90% of the swing
+     *     on a rising edge.
+     *  6. Fall time: time for signal to go from 90% to 10% of the swing
+     *     on a falling edge.
+     *  7. Pulse count: number of complete periods.
+     *  8. Burst time: total time span of all detected edges.
+     *
+     * All time values are converted to nanoseconds using the snapshot's
+     * samplerate (1 sample = 1e9 / samplerate ns).
+     *
+     * @param samples        Raw sample buffer (uint8_t per sample).
+     * @param sample_count   Number of samples in the buffer.
+     * @param samplerate     Sample rate in Hz (from DsoSnapshot::samplerate()).
+     * @param r              [in,out] MeasurementResult to fill (high, low,
+     *                      period, rise_time, fall_time, high_time,
+     *                      burst_time, pcount, level_valid).
+     */
+    static void compute_level_measurements(const uint8_t *samples,
+                                           uint64_t sample_count,
+                                           double samplerate,
+                                           MeasurementResult &r);
 };
 
 } // namespace core

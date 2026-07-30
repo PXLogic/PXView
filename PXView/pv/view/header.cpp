@@ -101,6 +101,15 @@ int Header::get_nameEditWidth() {
 }
 
 pv::view::Trace *Header::get_mTrace(int &action, const QPoint &pt) {
+  // pt MUST be in absolute content coordinates (i.e. viewport-relative
+  // position + vertical scroll offset). Both get_y() and get_zero_vpos()
+  // (used by pt_in_rect for the color/name/label hit-test rects) return
+  // absolute coordinates. In DSO mode there is no vertical scroll, so
+  // absolute == viewport-relative.
+  //
+  // Callers:
+  // - mousePressEvent / mouseReleaseEvent: pass event->position() + vOffset
+  // - contextMenuEvent: already passes event->pos() + vOffset
   const int w = width();
   std::vector<Trace *> traces;
   _view.get_traces(ALL_VIEW, traces);
@@ -390,8 +399,12 @@ void Header::mousePressEvent(QMouseEvent *event) {
   }
 
   if (event->button() & Qt::LeftButton) {
-    _mouse_down_point =
-        event->position().toPoint() + QPoint(0, _view.get_vOffset());
+    // Store viewport-relative press position (NOT + vOffset). The delta in
+    // mouseMoveEvent is computed as (current_y - _mouse_down_point.y()),
+    // where current_y is also viewport-relative. Adding vOffset here would
+    // make the delta off by -vOffset, causing traces to jump or move in
+    // the wrong direction when vertically scrolled.
+    _mouse_down_point = event->position().toPoint();
 
     // Save the offsets of any Traces which will be dragged
     for (auto t : traces) {
@@ -399,8 +412,11 @@ void Header::mousePressEvent(QMouseEvent *event) {
         _drag_traces.push_back(make_pair(t, t->get_v_offset()));
     }
 
-    // Select the Trace if it has been clicked
-    const auto mTrace = get_mTrace(action, event->position().toPoint());
+    // Select the Trace if it has been clicked.
+    // get_mTrace requires absolute coordinates (pt + vOffset) because
+    // pt_in_rect uses get_y() and get_zero_vpos() which are absolute.
+    const int vOff_hit = (_view.get_work_mode() != DSO) ? _view.get_vOffset() : 0;
+    const auto mTrace = get_mTrace(action, event->position().toPoint() + QPoint(0, vOff_hit));
     if (action == Trace::COLOR && mTrace) {
       // 解码通道:单击 COLOR 区打开解码器设置对话框(与 ProtocolDock 齿轮入口一致)
       if (auto *dt = dynamic_cast<DecodeTrace *>(mTrace)) {
@@ -465,13 +481,20 @@ void Header::mousePressEvent(QMouseEvent *event) {
       mTrace->set_old_v_offset(mTrace->get_v_offset());
     }
 
+    // DsoSignal::mouse_press internally uses get_y() (absolute content
+    // coordinate) to build hit-test rects, but event->position() is
+    // viewport-widget-relative. In non-DSO modes with vertical scroll,
+    // convert pt to absolute so the rects match.
+    const int vOff_press = (_view.get_work_mode() != DSO) ? _view.get_vOffset() : 0;
+    const QPoint pt_abs = event->position().toPoint() + QPoint(0, vOff_press);
+
     for (auto t : traces) {
       if (t->signal_type() == SR_CHANNEL_LOGIC &&
           _view.session().is_working()) {
         // Disable set trigger from left pannel when capturing.
         continue;
       }
-      if (t->mouse_press(width(), event->position().toPoint()))
+      if (t->mouse_press(width(), pt_abs))
         break;
     }
 
@@ -524,8 +547,10 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   }
 
   // judge for color / name / trigger / move
+  // get_mTrace requires absolute coordinates (pt + vOffset).
   int action;
-  const auto mTrace = get_mTrace(action, event->position().toPoint());
+  const int vOff_rel = (_view.get_work_mode() != DSO) ? _view.get_vOffset() : 0;
+  const auto mTrace = get_mTrace(action, event->position().toPoint() + QPoint(0, vOff_rel));
 
   if (mTrace) {
     if (action == Trace::COLOR && _colorFlag) {
@@ -710,8 +735,13 @@ void Header::wheelEvent(QWheelEvent *event) {
     shift = delta / 80.0;
 #endif
 
+    // Same coordinate fix as mouse_press: DsoSignal::mouse_wheel uses
+    // get_y() (absolute) for hit-test rects, but pos is viewport-relative.
+    const int vOff_wheel = (_view.get_work_mode() != DSO) ? _view.get_vOffset() : 0;
+    const QPoint pos_abs = pos + QPoint(0, vOff_wheel);
+
     for (auto t : traces) {
-      if (t->mouse_wheel(width(), pos, shift))
+      if (t->mouse_wheel(width(), pos_abs, shift))
         break;
     }
 

@@ -77,7 +77,13 @@ QColor DsoSignal::getSignalColor(int index) {
 // At spp < 4, paint_trace draws < 4000 points (DSO frame = 20K samples,
 // visible = width * spp < 4000), which is < 2ms — smooth and continuous.
 // At spp >= 4, paint_per_pixel draws 1000 dense rects — no visual gaps.
-const float DsoSignal::EnvelopeThreshold = 4.0f;
+// Always use paint_per_pixel (drawRects) instead of paint_trace (drawPolyline).
+// drawPolyline with alpha=200 on a transparent QPixmap is extremely slow on
+// Windows raster engine: 502 points takes ~44ms per DSO channel, vs ~2ms
+// for paint_per_pixel with drawRects. The visual difference (stepped vs
+// smooth) is negligible for DSO waveforms. Setting threshold to 0 ensures
+// paint_per_pixel is always used regardless of zoom level.
+const float DsoSignal::EnvelopeThreshold = 0.0f;
 
 DsoSignal::DsoSignal(data::DsoSnapshot *data,
                      std::shared_ptr<data::SignalModel> model,
@@ -521,11 +527,19 @@ int DsoSignal::get_zero_vpos() { return ratio2pos(get_zero_ratio()); }
 double DsoSignal::get_zero_ratio() { return value2ratio(_zero_offset); }
 
 int DsoSignal::get_hw_offset() {
+  // In running mode, hw_offset doesn't change between frames (it only
+  // changes when the user adjusts probe offset). Refresh from driver
+  // at most once per second to avoid sr_config_get + log I/O on every
+  // paint cycle (was the #2 cause of DSO medium-zoom lag after
+  // paint_trace slowness).
   sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
   if (_data_source->is_running_status()) {
-    int hw_offset = _cached_hw_offset;
-    if (probe && _data_source->device()->get_probe_hw_offset(hw_offset, probe)) {
-      _cached_hw_offset = hw_offset;
+    if (probe && _hw_offset_timer.elapsed() >= 1000) {
+      int hw_offset = _cached_hw_offset;
+      if (_data_source->device()->get_probe_hw_offset(hw_offset, probe)) {
+        _cached_hw_offset = hw_offset;
+      }
+      _hw_offset_timer.restart();
     }
   }
   return _cached_hw_offset;
@@ -646,6 +660,16 @@ void DsoSignal::auto_start() { _measure->auto_start(); }
 
 QRect DsoSignal::get_view_rect() {
   assert(_viewport);
+  // In MSO/LOGIC mode, the DSO signal occupies a specific area determined
+  // by v_offset (center) and totalHeight, offset by the vertical scroll.
+  // Without this, ratio2pos()/pos2ratio() calculate trigger positions
+  // based on the full viewport, making the trigger cursor drawn at the
+  // wrong position and ungrabbable when scrolled or when other traces
+  // are above this DSO signal.
+  if (_view && _view->is_logic_rendering_mode()) {
+    int top = get_v_offset() - get_totalHeight() / 2 - _view->get_vOffset();
+    return QRect(0, top, _viewport->width() - RightMargin, get_totalHeight());
+  }
   return QRect(0, UpMargin, _viewport->width() - RightMargin,
                _viewport->height() - UpMargin - DownMargin);
 }
@@ -822,30 +846,26 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
         min(max((int64_t)floor(start), (int64_t)0), last_sample);
     const int64_t end_sample =
         min(max((int64_t)ceil(end) + 1, (int64_t)0), last_sample);
+
+    QElapsedTimer dso_ft;
+    dso_ft.start();
     const int hw_offset = get_hw_offset();
+    s_dso_timing.hw_offset_ms = dso_ft.elapsed();
 
-    // LDO (Low-Density Optimization) three-path dispatch:
-    //   spp < 1.0  → paint_trace (per-sample polyline, zoomed-in)
-    //   spp >= 1.0 → paint_per_pixel (per-pixel min/max, 1px rects)
-    if (samples_per_pixel < EnvelopeThreshold) {
-      paint_trace(p, _data, zeroY, left, start_sample, end_sample, hw_offset,
-                  pixels_offset, samples_per_pixel, enabled_channels);
-    } else {
-      paint_per_pixel(p, _data, zeroY, left, right, start_sample, end_sample,
-                      hw_offset, pixels_offset, samples_per_pixel,
-                      enabled_channels);
-    }
+    // Always use paint_per_pixel (drawRects — fast) regardless of spp.
+    // paint_trace (drawPolyline) is ~20x slower with alpha on transparent
+    // QPixmap on Windows raster engine.
+    qint64 dso_paint_start = dso_ft.elapsed();
+    s_dso_timing.get_samples_ms = 0; // reset before paint; accumulated inside
+    paint_per_pixel(p, _data, zeroY, left, right, start_sample, end_sample,
+                    hw_offset, pixels_offset, samples_per_pixel,
+                    enabled_channels);
+    s_dso_timing.paint_draw_ms = dso_ft.elapsed() - dso_paint_start;
+    s_dso_timing.active = true;
+    s_dso_timing.sample_count = end_sample - start_sample + 1;
+    s_dso_timing.samples_per_pixel = samples_per_pixel;
 
-    static thread_local int _dso_path_dbg = 0;
-    if ((++_dso_path_dbg % 20) == 0) {
-      pxv_info("[DSO-PATH] spp=%.4f thr=%.2f path=%s sample_count=%lld "
-               "start=%lld end=%lld width=%d offset=%lld trig_hoff=%.2f",
-               samples_per_pixel, EnvelopeThreshold,
-               samples_per_pixel < EnvelopeThreshold ? "trace" : "per_pixel",
-               (long long)(end_sample - start_sample + 1),
-               (long long)start_sample, (long long)end_sample, width,
-               (long long)offset, _view->trig_hoff());
-    }
+    // Hot-path debug logging removed for performance — was printing every 20 frames
   }
 }
 
@@ -935,8 +955,16 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
     if (_data_source->is_stopped_status())
       paint_hover_measure(p, fore, back);
 
-    // autoset
-    auto_set();
+    // autoset — throttled to every 10th frame (~3/sec at 30 FPS) to avoid
+    // cascading update() calls from zoom/go_vDial* inside auto_set().
+    // auto_set() calls _view->zoom(), _view->go_vDialNext/Pre() etc., each
+    // of which triggers _view->update(), creating a cascade of repaints
+    // when called on every single paint cycle.
+    static thread_local int _auto_set_frame_cnt = 0;
+    if (++_auto_set_frame_cnt >= 10) {
+      _auto_set_frame_cnt = 0;
+      auto_set();
+    }
   }
 }
 
@@ -961,8 +989,11 @@ void DsoSignal::paint_trace(QPainter &p, const pv::data::DsoSnapshot *snapshot,
   if (sample_count > 0) {
     pv::data::DsoSnapshot *pshot =
         const_cast<pv::data::DsoSnapshot *>(snapshot);
+    QElapsedTimer gs_timer;
+    gs_timer.start();
     const uint8_t *const samples_buffer =
         pshot->get_samples(start, end, get_index());
+    s_dso_timing.get_samples_ms += gs_timer.elapsed();
 
     if (!samples_buffer) {
       pxv_warn("[DSO] paint_trace: samples_buffer is NULL, skipping draw");
@@ -1095,8 +1126,11 @@ void DsoSignal::paint_per_pixel(QPainter &p,
 
   // Fetch the raw sample buffer for the visible range once.
   pv::data::DsoSnapshot *pshot = const_cast<pv::data::DsoSnapshot *>(snapshot);
+  QElapsedTimer gs_timer;
+  gs_timer.start();
   const uint8_t *const samples_buffer =
       pshot->get_samples(start, end, get_index());
+  s_dso_timing.get_samples_ms += gs_timer.elapsed();
   if (!samples_buffer)
     return;
 
@@ -1115,58 +1149,116 @@ void DsoSignal::paint_per_pixel(QPainter &p,
   const float bottom = get_view_rect().bottom();
   const double spp = samples_per_pixel;
 
-  // Sample i maps to screen x = i/spp - pixels_offset + left + trig_hoff/spp.
-  // Invert: pixel x (relative to left) → sample = (x + pixels_offset -
-  // trig_hoff/spp) * spp = x*spp + (pixels_offset*spp - trig_hoff).
-  // paint_mid computed: start = offset * spp - trig_hoff, and
-  // pixels_offset = offset, so pixels_offset*spp - trig_hoff = start.
-  // Thus sample(x) = start + x * spp, where x is pixel offset from left.
+  // sample(x) = start + x * spp, where x is pixel offset from left.
   const double base_sample = start;
 
-  for (int x = 0; x < width; x++) {
-    // Sample range covered by this pixel [x, x+1) in pixel space.
-    int64_t s_start = (int64_t)floor(base_sample + x * spp);
-    int64_t s_end = (int64_t)floor(base_sample + (x + 1) * spp);
+  if (spp < 1.0) {
+    // ---- Interpolation mode (zoomed in: spp < 1.0) ----
+    // Each sample spans multiple pixels. Linearly interpolate the sample
+    // value at each pixel position, then draw 1px-wide rects with height
+    // covering [y(x), y(x+1)] — this reproduces the visual result of
+    // drawPolyline (non-antialiased) but using the much faster drawRects.
+    static thread_local QVector<float> y_buf;
+    if (y_buf.size() < width + 1) y_buf.resize(width + 1);
 
-    // Clamp to visible data window.
-    if (s_start < start) s_start = start;
-    if (s_end > end) s_end = end;
-    if (s_end <= s_start)
-      s_end = s_start + 1;
-    if (s_end > end)
-      s_end = end;
-    if (s_start >= s_end)
-      continue;
+    // Pass 1: compute interpolated Y for each pixel.
+    for (int x = 0; x <= width; x++) {
+      double sample_pos = base_sample + x * spp;
+      int64_t s0 = (int64_t)floor(sample_pos);
+      double frac = sample_pos - s0;
 
-    // Compute min/max over the pixel's sample range. Buffer is indexed
-    // relative to `start`, so offset by (s_start - start).
-    const uint8_t *pmin_src = samples_buffer + (s_start - start);
-    const uint8_t *pmax_src = pmin_src;
-    const int64_t span = s_end - s_start;
-    uint8_t min_v = *pmin_src;
-    uint8_t max_v = *pmin_src;
-    for (int64_t i = 1; i < span; i++) {
-      const uint8_t v = pmin_src[i];
-      if (v < min_v) min_v = v;
-      if (v > max_v) max_v = v;
+      if (s0 < start) { s0 = start; frac = 0; }
+      if (s0 >= end) {
+        y_buf[x] = (x > 0) ? y_buf[x - 1] : zeroY;
+        continue;
+      }
+
+      int64_t s1 = s0 + 1;
+      if (s1 > end) s1 = end;
+      uint8_t v0 = samples_buffer[s0 - start];
+      uint8_t v1 = (s1 <= end && s1 > start) ? samples_buffer[s1 - start] : v0;
+      float v = v0 + (float)(v1 - v0) * frac;
+      y_buf[x] = min(max(top, zeroY + (v - hw_offset) * _scale), bottom);
     }
-    (void)pmax_src;
 
-    // Map to screen Y. min_v → top (smaller voltage), max_v → bottom.
-    float y_top = min(max(top, zeroY + (min_v - hw_offset) * _scale), bottom);
-    float y_bot = min(max(top, zeroY + (max_v - hw_offset) * _scale), bottom);
+    // Pass 2: draw 1px rects bridging adjacent pixel Y values.
+    for (int x = 0; x < width; x++) {
+      float y0 = y_buf[x];
+      float y1 = y_buf[x + 1];
+      float y_top = min(y0, y1);
+      float y_bot = max(y0, y1);
 
-    // Ensure minimum 1px height for visibility at flat segments.
-    float h = y_bot - y_top;
-    if (h >= 0.0f && h < 1.0f)
-      h = 1.0f;
-    else if (h <= 0.0f && h > -1.0f)
-      h = -1.0f;
+      // Ensure minimum 1px height for visibility.
+      if (y_bot - y_top < 1.0f)
+        y_bot = y_top + 1.0f;
 
-    r[x] = QRectF((float)(left + x), y_top, 1.0f, h);
+      r[x] = QRectF((float)(left + x), y_top, 1.0f, y_bot - y_top);
+    }
+    p.drawRects(r, width);
+  } else {
+    // ---- Min/max mode (zoomed out: spp >= 1.0) ----
+    // Multiple samples per pixel. Compute min/max over the pixel's sample
+    // range, then draw with vertical overlap to eliminate diagonal gaps.
+    static thread_local QVector<uint8_t> min_buf, max_buf;
+    if (min_buf.size() < width) { min_buf.resize(width); max_buf.resize(width); }
+
+    // Pass 1: compute min/max for each pixel column.
+    for (int x = 0; x < width; x++) {
+      int64_t s_start = (int64_t)floor(base_sample + x * spp);
+      int64_t s_end = (int64_t)floor(base_sample + (x + 1) * spp);
+
+      if (s_start < start) s_start = start;
+      if (s_end > end) s_end = end;
+      if (s_end <= s_start)
+        s_end = s_start + 1;
+      if (s_end > end)
+        s_end = end;
+      if (s_start >= s_end) {
+        if (x > 0) {
+          min_buf[x] = min_buf[x - 1];
+          max_buf[x] = max_buf[x - 1];
+        } else {
+          min_buf[x] = 128;
+          max_buf[x] = 128;
+        }
+        continue;
+      }
+
+      const uint8_t *psrc = samples_buffer + (s_start - start);
+      const int64_t span = s_end - s_start;
+      uint8_t min_v = *psrc;
+      uint8_t max_v = *psrc;
+      for (int64_t i = 1; i < span; i++) {
+        const uint8_t v = psrc[i];
+        if (v < min_v) min_v = v;
+        if (v > max_v) max_v = v;
+      }
+      min_buf[x] = min_v;
+      max_buf[x] = max_v;
+    }
+
+    // Pass 2: draw rectangles with vertical overlap to adjacent pixels.
+    for (int x = 0; x < width; x++) {
+      uint8_t draw_max = max_buf[x];
+      uint8_t draw_min = min_buf[x];
+      if (x + 1 < width) {
+        draw_max = max(draw_max, min_buf[x + 1]);
+        draw_min = min(draw_min, max_buf[x + 1]);
+      }
+
+      float y_top = min(max(top, zeroY + (draw_min - hw_offset) * _scale), bottom);
+      float y_bot = min(max(top, zeroY + (draw_max - hw_offset) * _scale), bottom);
+
+      float h = y_bot - y_top;
+      if (h >= 0.0f && h < 1.0f)
+        h = 1.0f;
+      else if (h <= 0.0f && h > -1.0f)
+        h = -1.0f;
+
+      r[x] = QRectF((float)(left + x), y_top, 1.0f, h);
+    }
+    p.drawRects(r, width);
   }
-
-  p.drawRects(r, width);
 }
 
 void DsoSignal::paint_type_options(QPainter &p, int right, const QPoint pt,

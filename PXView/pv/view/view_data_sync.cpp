@@ -293,6 +293,45 @@ void ViewDataSync::receive_trigger(quint64 trig_pos1) {
 }
 
 void ViewDataSync::data_updated() {
+  // Detect DSO continuous (running) mode for the fast-path below.
+  const bool is_dso_running =
+      (_view->get_work_mode() == DSO && _view->_data_source &&
+       _view->_data_source->is_running_status());
+
+  // --- DSO continuous fast path ---
+  // In DSO continuous mode the demo/hardware driver sends ~40 packets/sec.
+  // The original code did a full layout/margins/scroll rebuild every frame,
+  // which is unnecessary because viewport geometry doesn't change between
+  // frames. We throttle to ~30 FPS (33ms) and only update data pointers +
+  // paint_prepare, skipping layout/scroll rebuilds.
+  if (is_dso_running) {
+    if (_view->_data_updated_timer.isValid() &&
+        _view->_data_updated_timer.elapsed() < 33) {
+      _view->set_update(_view->_time_viewport, true);
+      return;
+    }
+
+    auto *source = _view->document_snapshot_source();
+    if (source) {
+      for (auto sig : _view->_own_signals) {
+        if (sig->signal_type() == SR_CHANNEL_DSO) {
+          auto *s = static_cast<view::DsoSignal *>(sig);
+          s->set_data(source->get_dso_snapshot());
+          s->paint_prepare();
+        }
+      }
+      if (_view->_own_lissajous_trace)
+        _view->_own_lissajous_trace->set_data(source->get_dso_snapshot());
+    }
+
+    _view->set_update(_view->_time_viewport, true);
+    _view->set_update(_view->_fft_viewport, true);
+    _view->viewport_update();
+    _view->_data_updated_timer.start();
+    return;
+  }
+
+  // --- General path (non-DSO or DSO stopped) ---
   // Deduplicate rapid calls: if called within 16ms of the last execution,
   // only mark viewports dirty without doing full update cycle
   if (_view->_data_updated_timer.isValid() &&
@@ -303,10 +342,6 @@ void ViewDataSync::data_updated() {
   }
 
   // Refresh data pointers in render objects (does NOT rebuild them).
-  // Signals hold raw snapshot pointers that may become stale when the
-  // active data source swaps its backing snapshots (e.g. after a capture,
-  // glitch filter, or document switch). Re-bind the latest snapshots from
-  // the effective data source.
   auto *source = _view->document_snapshot_source();
   if (source) {
     for (auto sig : _view->_own_signals) {
@@ -325,47 +360,30 @@ void ViewDataSync::data_updated() {
       case SR_CHANNEL_DSO: {
         view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
         s->set_data(source->get_dso_snapshot());
-        // Original DSView called DsoSignal::set_scale() + paint_prepare()
-        // from SigSession::feed_in_dso() on every DSO packet. Under the
-        // Core/View split, DataFeedParser (Core) cannot touch View objects,
-        // so we perform the equivalent work here when the DataUpdated event
-        // reaches the View layer.
-        const int scale_height =
-            s->get_view_rect().height() - View::DsoStatusHeight;
-        s->set_scale(scale_height > 0 ? scale_height
-                                      : s->get_view_rect().height());
+        if (_view->is_logic_rendering_mode()) {
+          s->set_scale(s->get_totalHeight());
+        } else {
+          const int scale_height =
+              s->get_view_rect().height() - View::DsoStatusHeight;
+          s->set_scale(scale_height > 0 ? scale_height
+                                        : s->get_view_rect().height());
+        }
         s->paint_prepare();
         break;
       }
       }
     }
 
-    // LissajousTrace holds a DsoSnapshot pointer directly.
     if (_view->_own_lissajous_trace) {
       _view->_own_lissajous_trace->set_data(source->get_dso_snapshot());
     }
-    // Note: DecodeTrace / SpectrumTrace / MathTrace wrap Core-owned
-    // Stack objects which manage their own snapshot pointers internally,
-    // so no explicit refresh is needed here.
   }
 
   _view->setViewportMargins(_view->headerWidth(), View::RulerHeight, 0, 0);
   _view->update_margins();
-
-  // update scale & offset FIRST, then refresh scroll bars.
-  // Order matters: update_scale_offset() recomputes _scale (in DSO mode
-  // it re-derives _scale = base_scale * _dso_zoom_factor). If update_scroll()
-  // runs before update_scale_offset(), it computes the scroll range with a
-  // stale _scale — in DSO mode that collapses the range to ~0 on every
-  // data frame (because the stale _scale fits the whole frame to the
-  // viewport width), which makes the horizontal scrollbar un-draggable
-  // even after the user zoomed in.
   _view->update_scale_offset();
-
-  // Update the scroll bars (now using the correct _scale)
   _view->update_scroll();
 
-  // Repaint the view
   _view->_time_viewport->unshow_wait_trigger();
   _view->set_update(_view->_time_viewport, true);
   _view->set_update(_view->_fft_viewport, true);

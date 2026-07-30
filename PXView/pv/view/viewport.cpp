@@ -116,6 +116,7 @@ Viewport::Viewport(View &parent, View_type type)
   _transfer_started = false;
   _timer_cnt = 0;
   _sample_received = 0;
+  _progress_displayed = 0.0;
   _is_checked_trig = false;
 
   _lst_wait_tigger_time = high_resolution_clock::now();
@@ -137,6 +138,13 @@ Viewport::Viewport(View &parent, View_type type)
 
   connect(&_trigger_timer, &QTimer::timeout, this, &Viewport::on_trigger_timer);
   connect(&_drag_timer, &QTimer::timeout, this, &Viewport::on_drag_timer);
+
+  // Smooth progress animation: 16ms ≈ 60 FPS. Lerps the displayed
+  // progress toward the actual _sample_received value so the progress
+  // circle animates fluidly instead of jumping in discrete steps at
+  // each data-packet arrival (which can be as slow as 10–25 FPS).
+  _progress_timer.setInterval(16);
+  connect(&_progress_timer, &QTimer::timeout, this, &Viewport::on_progress_timer);
   connect(yAction, &QAction::triggered, this, &Viewport::add_cursor_y);
   connect(xAction, &QAction::triggered, this, &Viewport::add_cursor_x);
   connect(this, &QWidget::customContextMenuRequested, this,
@@ -205,20 +213,42 @@ int Viewport::get_total_height() {
   if (_view.is_logic_rendering_mode() && _type == TIME_VIEW) {
     const auto &groups = _view.get_signal_groups();
     if (!groups.empty()) {
+      // Collect grouped traces so we can identify non-group traces below.
+      // signal_groups only contains LOGIC + DECODER traces (see
+      // compute_signal_groups). ANALOG/DSO/Math traces are NOT in any
+      // group but are still laid out vertically and occupy space.
+      // Without accounting for them here, get_total_height() only returns
+      // the height of logic/decoder traces — if those fill the viewport,
+      // the scrollbar range is 0 and the user cannot scroll to see the
+      // analog channels below.
+      std::vector<Trace *> grouped_traces;
       for (const auto &group : groups) {
         for (auto gt : group.traces) {
+          grouped_traces.push_back(gt);
           h += (int)(gt->get_totalHeight()) + 2 * View::SignalMargin;
         }
         h += View::GroupGap + 5;
+      }
+      // Add heights for non-group traces (ANALOG, DSO, Math, etc.)
+      for (auto t : traces) {
+        bool in_group = false;
+        for (auto gt : grouped_traces) {
+          if (gt == t) {
+            in_group = true;
+            break;
+          }
+        }
+        if (!in_group) {
+          h += (int)(t->get_totalHeight()) + 2 * View::SignalMargin;
+        }
       }
       return h;
     }
   }
 
   for (auto t : traces) {
-    h += (int)(t->get_totalHeight());
+    h += (int)(t->get_totalHeight()) + 2 * View::SignalMargin;
   }
-  h += 2 * View::SignalMargin;
 
   return h;
 }
@@ -274,9 +304,11 @@ void Viewport::on_drag_timer() { _drag->on_drag_timer(); }
 void Viewport::set_action(ActionType action) { _action_type = action; }
 
 void Viewport::get_captured_progress(double &progress, int &progress100) {
-  const uint64_t sample_limits = _view.session().cur_samplelimits();
-  progress = -(_sample_received * 1.0 / sample_limits * 360 * 16);
-  progress100 = ceil(progress / -3.6 / 16);
+  // Use the smoothly interpolated _progress_displayed (0.0–1.0) for
+  // fluid animation instead of the raw _sample_received which jumps
+  // in discrete steps at each data-packet arrival.
+  progress = -(_progress_displayed * 360 * 16);
+  progress100 = ceil(_progress_displayed * 100);
 }
 
 void Viewport::resizeEvent(QResizeEvent *e) {
@@ -292,6 +324,8 @@ void Viewport::resizeEvent(QResizeEvent *e) {
 void Viewport::set_receive_len(quint64 length) {
   if (length == 0) {
     _sample_received = 0;
+    _progress_displayed = 0.0;
+    _progress_timer.stop();
     start_trigger_timer(333);
     _tigger_wait_times = 0;
     _is_checked_trig = false;
@@ -302,6 +336,13 @@ void Viewport::set_receive_len(quint64 length) {
       _sample_received = _view.session().cur_samplelimits();
     else
       _sample_received += length;
+
+    // Start smooth-animation timer on first data arrival. It runs at
+    // 60 FPS and lerps _progress_displayed toward the actual
+    // _sample_received / sample_limits ratio, giving a fluid progress
+    // bar regardless of how often data packets arrive.
+    if (!_progress_timer.isActive())
+      _progress_timer.start();
   }
 
   if (_view.is_logic_rendering_mode()) {
@@ -346,6 +387,16 @@ void Viewport::set_receive_len(quint64 length) {
   if (_view.is_logic_rendering_mode() && _view.session().is_realtime_refresh()) {
     _need_update = true;
   }
+
+  // In DSO mode, the async DataUpdated event (broadcast_async from
+  // feed_in_dso) already drives ViewDataSync::data_updated() which calls
+  // viewport_update(). Calling update() here as well causes a redundant
+  // repaint on every data packet (~40/sec). Skip it for DSO running mode;
+  // the progress timer still fires for progress-bar animation.
+  if (_view.get_work_mode() == DSO && _view.session().is_running_status()) {
+    return;
+  }
+
   update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
@@ -544,6 +595,35 @@ void Viewport::on_trigger_timer() {
   if (_view.get_work_mode() == DSO) {
     update(UpdateEventType::UPDATE_EV_GENERIC);
   }
+}
+
+void Viewport::on_progress_timer() {
+  const uint64_t sample_limits = _view.session().cur_samplelimits();
+  if (sample_limits == 0) {
+    _progress_displayed = 0.0;
+    _progress_timer.stop();
+    return;
+  }
+
+  const double target =
+      static_cast<double>(_sample_received) / static_cast<double>(sample_limits);
+  const double diff = target - _progress_displayed;
+
+  if (qAbs(diff) < 0.0005) {
+    // Close enough — snap to target and stop the timer. It will be
+    // restarted by set_receive_len() when the next data packet arrives.
+    // This prevents the 60 FPS timer from running idle between packets.
+    _progress_displayed = target;
+    _progress_timer.stop();
+    update(UpdateEventType::UPDATE_EV_GENERIC);
+    return;
+  }
+
+  // Exponential lerp: 25% of remaining distance per frame.
+  // At 60 FPS this reaches 99% of target in ~15 frames (250ms),
+  // which feels smooth without noticeable lag.
+  _progress_displayed += diff * 0.25;
+  update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 void Viewport::set_need_update(bool update) { _need_update = update; }

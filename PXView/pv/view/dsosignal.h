@@ -28,6 +28,7 @@
 #include "../dstimer.h"
 #include <libsigrok/libsigrok.h>
 #include "../dsvdef.h"
+#include <QElapsedTimer>
 #include <memory>
 
 namespace pv {
@@ -326,6 +327,7 @@ private:
     double _trig_delta;
     int _zero_offset;
     int _cached_hw_offset;
+    QElapsedTimer _hw_offset_timer;
 
     bool _mValid;
     uint8_t _max;

@@ -1069,7 +1069,7 @@ void SamplingBar::commit_settings() {
            SAMPLES_ALIGN) &
           ~SAMPLES_ALIGN;
       if (sample_count != 0 &&
-          sample_count != _device_agent->get_sample_limit())
+          sample_count != _device_agent->get_driver_sample_limit())
         _device_agent->set_config_uint64(SR_CONF_LIMIT_SAMPLES, sample_count);
     }
     // R3: 采样率/采样数已修改，广播通知其他 GUI 组件刷新
@@ -1270,10 +1270,11 @@ void SamplingBar::on_mode_radio_clicked(int id) {
   switch (id) {
   case COLLECT_SINGLE:
     _session->set_collect_mode(COLLECT_SINGLE);
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "protocol");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: do NOT override PATTERN_MODE here. The pattern is controlled
+    // by the DeviceOptionsDock dropdown. The old code set "protocol"
+    // which is not a valid logic_pattern_str[] entry (config_set rejects
+    // it silently), and then update_view_status locked sample rate/depth
+    // because the resulting pattern != "random".
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
           (int)_session->get_collect_mode();
@@ -1294,10 +1295,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
         return;
       }
     }
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "random");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
           (int)_session->get_collect_mode();
@@ -1305,10 +1303,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
     break;
   case COLLECT_LOOP:
     _session->set_collect_mode(COLLECT_LOOP);
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "random");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
           (int)_session->get_collect_mode();
@@ -1323,11 +1318,7 @@ void SamplingBar::on_collect_mode() {
 
   if (act == _action_single) {
     _session->set_collect_mode(COLLECT_SINGLE);
-
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "protocol");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
   } else if (act == _action_repeat) {
     if (_device_agent->is_stream_mode() || _device_agent->is_demo()) {
       _session->set_repeat_intvl(0.1);
@@ -1344,17 +1335,10 @@ void SamplingBar::on_collect_mode() {
       }
     }
 
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "random");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
   } else if (act == _action_loop) {
     _session->set_collect_mode(COLLECT_LOOP);
-
-    if (_device_agent->is_demo()) {
-      _device_agent->set_config_string(SR_CONF_PATTERN_MODE, "random");
-      _session->broadcast_async<interface::DemoModeChanged>({});
-    }
+    // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
   }
 
   update_mode_icon();
@@ -1464,14 +1448,12 @@ void SamplingBar::update_view_status() {
 
   update_mode_icon();
 
-  if (_session->get_device()->is_demo() && bEnable) {
-    QString opt_mode = _device_agent->get_demo_operation_mode();
-
-    if (opt_mode != "random" && mode == LOGIC) {
-      _sample_rate->setEnabled(false);
-      _sample_count->setEnabled(false);
-    }
-  }
+  // Demo device: sample rate and sample depth are always adjustable.
+  // The old code locked these when pattern != "random", but all demo
+  // patterns (sigrok/random/incremental/graycode/...) are math-generated
+  // and respect cur_samplerate / limit_samples. Only .demo file replay
+  // (sample_generator != DEMO_GEN_RANDOM) would have fixed rates, but
+  // that is a driver-internal detail not exposed via PATTERN_MODE.
 }
 
 ds_device_handle SamplingBar::get_next_device_handle() {

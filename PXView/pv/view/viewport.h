@@ -48,6 +48,18 @@ class QPaintEvent;
 class SigSession;
 class QAction;
 
+// Frame timing: thread-local DSO paint sub-timing, written by
+// DsoSignal::paint_mid and read by ViewportPainter::doPaint summary.
+struct DsoPaintTiming {
+    bool active = false;
+    qint64 get_samples_ms = 0;
+    qint64 paint_draw_ms = 0;
+    qint64 hw_offset_ms = 0;
+    int64_t sample_count = 0;
+    double samples_per_pixel = 0;
+};
+extern thread_local DsoPaintTiming s_dso_timing;
+
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
@@ -173,6 +185,7 @@ private slots:
   void on_trigger_timer();
   void on_drag_timer();
   void applyDragFrame();
+  void on_progress_timer();
 
   void show_contextmenu(const QPoint &pos);
   void add_cursor_x();
@@ -195,6 +208,8 @@ private:
   QMenu *_cmenu;
 
   uint64_t _sample_received;
+  double _progress_displayed;  // Smoothly interpolated 0.0–1.0 for fluid progress bar
+  QTimer _progress_timer;      // 16ms timer (≈60 FPS) for smooth progress animation
   QPoint _mouse_point;
   QPoint _mouse_down_point;
   int64_t _mouse_down_offset;

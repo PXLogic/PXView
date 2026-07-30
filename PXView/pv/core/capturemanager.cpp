@@ -603,7 +603,13 @@ void CaptureManager::check_update() {
     return;
 
   if (_data_updated) {
-    if (_state->device_agent().get_work_mode() != LOGIC)
+    // DSO mode: skip data_updated() here — the async DataUpdated event
+    // (broadcast_async from feed_in_dso) already drives ViewDataSync::
+    // data_updated() on the GUI thread. Calling it again from paintEvent
+    // creates a feedback loop: paint → check_update → data_updated →
+    // update → paint, causing excessive repaints at 40+ FPS.
+    if (_state->device_agent().get_work_mode() != LOGIC &&
+        _state->device_agent().get_work_mode() != DSO)
       _state->data_updated();
 
     _data_updated = false;

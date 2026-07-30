@@ -409,11 +409,40 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
       // PXView's _viewbottom is hidden and overlaid on viewport,
       // so _header->height() is ~DsoStatusHeight larger than original DSView.
       // Subtract DsoStatusHeight to match the original signal height.
-      _view->_signalHeight =
-          (_view->_header->height() - View::DsoStatusHeight -
-           _view->horizontalScrollBar()->height() -
-           2 * actualMargin * label_size) *
-          1.0 / total_rows;
+      //
+      // ANALOG channels use a fixed height (48px default or own_height) rather
+      // than _signalHeight * rows_size(). Without subtracting their fixed
+      // height from the available space before dividing, DSO channels are
+      // compressed to make room for ANALOG channels, and the total content
+      // height collapses to ≈ viewport height — making the vertical scrollbar
+      // unable to account for ANALOG channel heights (range = 0).
+      int analog_fixed_height = 0;
+      int analog_rows = 0;
+      for (auto t : time_traces) {
+        if (t->signal_type() == SR_CHANNEL_ANALOG &&
+            t->visible() && t->rows_size() != 0) {
+          if (t->get_own_height() > 0)
+            analog_fixed_height += t->get_own_height();
+          else
+            analog_fixed_height += 48; // default analog height
+          analog_rows += t->rows_size();
+        }
+      }
+      int dso_rows = total_rows - analog_rows;
+      if (dso_rows > 0) {
+        _view->_signalHeight =
+            (_view->_header->height() - View::DsoStatusHeight -
+             _view->horizontalScrollBar()->height() -
+             2 * actualMargin * label_size -
+             analog_fixed_height) *
+            1.0 / dso_rows;
+      } else {
+        _view->_signalHeight =
+            (_view->_header->height() - View::DsoStatusHeight -
+             _view->horizontalScrollBar()->height() -
+             2 * actualMargin * label_size) *
+            1.0 / total_rows;
+      }
     } else {
       _view->_signalHeight = (int)((height <= 0) ? 1 : height);
     }
@@ -509,13 +538,21 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
 
       if (t->signal_type() == SR_CHANNEL_DSO) {
         auto sig = dynamic_cast<view::DsoSignal *>(t);
-        // PXView's _viewbottom is hidden and overlaid on viewport,
-        // so viewport height is ~DsoStatusHeight larger than original DSView.
-        // Subtract DsoStatusHeight to match the original scale.
-        const int scale_height =
-            sig->get_view_rect().height() - View::DsoStatusHeight;
-        sig->set_scale(scale_height > 0 ? scale_height
-                                        : sig->get_view_rect().height());
+        // In MSO/LOGIC mode, DSO signals have their own allocated area
+        // (get_view_rect() returns the signal's area, not the full viewport).
+        // DsoStatusHeight overlay only exists in pure DSO mode, so only
+        // subtract it there.
+        if (_view->is_logic_rendering_mode()) {
+          sig->set_scale(sig->get_totalHeight());
+        } else {
+          // PXView's _viewbottom is hidden and overlaid on viewport,
+          // so viewport height is ~DsoStatusHeight larger than original DSView.
+          // Subtract DsoStatusHeight to match the original scale.
+          const int scale_height =
+              sig->get_view_rect().height() - View::DsoStatusHeight;
+          sig->set_scale(scale_height > 0 ? scale_height
+                                          : sig->get_view_rect().height());
+        }
       } else if (t->signal_type() == SR_CHANNEL_ANALOG) {
         auto sig = dynamic_cast<view::AnalogSignal *>(t);
         sig->set_scale(sig->get_totalHeight());
@@ -1081,9 +1118,17 @@ void ViewSignalSync::normalize_layout() {
     t->set_v_offset(t->get_v_offset() + delta);
   }
 
-  _view->_vOffset = 0;
-  _view->verticalScrollBar()->setSliderPosition(0);
-  _view->v_scroll_value_changed(0);
+  // Compensate the vertical scroll offset for the layout shift so the
+  // viewport stays at the same visual position. When traces are shifted
+  // down by delta pixels, the scroll offset must increase by delta to
+  // keep the same content visible. Previously this unconditionally reset
+  // _vOffset to 0, causing the scrollbar to jump to the top on every
+  // signals_changed() call — including during waveform height dragging.
+  // The final scrollbar position is clamped to the valid range by
+  // update_scroll() which is called shortly after via header_updated().
+  _view->_vOffset = max(0, _view->_vOffset + delta);
+  _view->verticalScrollBar()->setSliderPosition(_view->_vOffset);
+  _view->v_scroll_value_changed(_view->_vOffset);
 }
 
 void ViewSignalSync::zoom_vertical(double steps) {
@@ -1096,16 +1141,35 @@ void ViewSignalSync::zoom_vertical(double steps) {
   _view->_signalHeightScale =
       max(View::MinSignalHeight,
           min(_view->_signalHeightScale, View::MaxSignalHeight));
-  if (_view->_signalHeightScale != oldHeight) {
-    double scale = (double)_view->_signalHeightScale / oldHeight;
-    std::vector<Trace *> traces;
-    _view->get_traces(ALL_VIEW, traces);
-    for (auto t : traces) {
-      if (t->get_own_height() > 0) {
-        t->set_own_height(
-            max(View::MinSignalHeight, (int)(t->get_own_height() * scale)));
+
+  bool heightScaleChanged = (_view->_signalHeightScale != oldHeight);
+  double scale = (oldHeight > 0)
+                     ? (double)_view->_signalHeightScale / oldHeight
+                     : 1.0;
+
+  // When _signalHeightScale is clamped at minimum (i.e. it didn't change),
+  // use a fixed shrink factor to continue shrinking traces that have
+  // own_height > MinSignalHeight. Without this, once _signalHeightScale
+  // hits MinSignalHeight, zoom_vertical returns early and traces with
+  // custom own_height can never be shrunk to the minimum.
+  if (!heightScaleChanged && steps < 0)
+    scale = 0.9;
+
+  std::vector<Trace *> traces;
+  _view->get_traces(ALL_VIEW, traces);
+  bool ownHeightChanged = false;
+  for (auto t : traces) {
+    if (t->get_own_height() > 0) {
+      int newH =
+          max(View::MinSignalHeight, (int)(t->get_own_height() * scale));
+      if (newH != t->get_own_height()) {
+        t->set_own_height(newH);
+        ownHeightChanged = true;
       }
     }
+  }
+
+  if (heightScaleChanged || ownHeightChanged) {
     _view->signals_changed(NULL);
     _view->update_scroll();
     _view->viewport_update();

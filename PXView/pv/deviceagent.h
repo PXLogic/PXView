@@ -165,6 +165,12 @@ public:
     // 在 stream 模式下若驱动 limit_samples=0（持续流），返回应用层默认值，
     // 不再返回 ring buffer 大小。
     uint64_t get_sample_limit();
+    // get_driver_sample_limit() 返回驱动 SR_CONF_LIMIT_SAMPLES 的原始值，
+    // 不应用 app 层 fallback。用于 commit_settings() 判断是否需要下发
+    // limit_samples：若用 get_sample_limit() 比较，当驱动值为 0 且
+    // fallback 恰好等于用户选择的 sample_count 时，会跳过 set_config，
+    // 导致驱动 limit_samples 始终为 0，采集永不停止。
+    uint64_t get_driver_sample_limit();
     // get_ring_sample_count() 返回 ring buffer 大小（用于 mmap 内存分配）。
     // stream 模式下基于 _app_stream_mem_buff(GB) 计算；非 stream 模式与
     // get_sample_limit() 等价。

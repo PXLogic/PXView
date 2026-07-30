@@ -16,7 +16,6 @@
 
 #include <QDateTime>
 #include <assert.h>
-#include <chrono>
 
 namespace pv {
 namespace core {
@@ -161,7 +160,15 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
     return;
   }
 
-  _state->set_receive_data_len(o.num_samples);
+  // Only track progress for ANALOG mode. In LOGIC/MSO mode the logic
+  // packet is the primary data source and already calls
+  // set_receive_data_len in feed_in_logic. Counting analog samples here
+  // too would multiply _sample_received by (1 + num_analog_channels),
+  // making the progress bar reach 100% long before the capture finishes.
+  const int mode = _state->device_agent().get_work_mode();
+  if (mode == ANALOG) {
+    _state->set_receive_data_len(o.num_samples);
+  }
   _state->capture_manager()->set_data_updated(true);
 
   // modernize-core-layer-radical Task 13: emit DataUpdated (async, worker thread).
@@ -169,8 +176,7 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
 }
 
 void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
-  pxv_info("[DEBUG-DSO] feed_in_dso: num_samples=%llu en_ch_num=%d sample_bits=%d trig_flag=%d",
-           (unsigned long long)o.num_samples, o.en_ch_num, o.sample_bits, o.trig_flag);
+  // Hot-path debug logging removed for performance — was printing 40+ lines/sec
   if (_state->capture_data()->get_dso()->memory_failed()) {
     pxv_err("Unexpected dso packet");
     return;
@@ -242,7 +248,14 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     _state->set_cur_snap_samplerate(cur_samplerate);
   }
 
-  _state->set_receive_data_len(o.num_samples);
+  // Only track progress for DSO mode. In other modes (LOGIC/MSO/ANALOG)
+  // the corresponding primary feed_in_* handler already calls
+  // set_receive_data_len. Counting DSO samples here in addition would
+  // inflate _sample_received and make the progress bar reach 100% early.
+  const int mode = _state->device_agent().get_work_mode();
+  if (mode == DSO) {
+    _state->set_receive_data_len(o.num_samples);
+  }
   _state->capture_manager()->set_data_updated(true);
 
   // modernize-core-layer-radical Task 13: emit DataUpdated (async, worker thread).
@@ -262,14 +275,9 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
   assert(sdi);
   assert(packet);
 
-  static int _df_count = 0;
-  _df_count++;
+  // Static packet counter removed — was only used by the removed timing log.
 
-  auto _df_t0 = std::chrono::steady_clock::now();
-  auto _lock_t0 = std::chrono::steady_clock::now();
   ds_lock_guard lock(_state->data_mutex());
-  auto _lock_t1 = std::chrono::steady_clock::now();
-  auto _lock_ms = std::chrono::duration_cast<std::chrono::milliseconds>(_lock_t1 - _lock_t0).count();
 
   if (_state->capture_manager()->is_data_lock() && packet->type != SR_DF_END)
     return;
@@ -361,12 +369,8 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
   }
   }
 
-  auto _df_t1 = std::chrono::steady_clock::now();
-  auto _df_ms = std::chrono::duration_cast<std::chrono::milliseconds>(_df_t1 - _df_t0).count();
-  if (_df_ms > 5 || _df_count <= 20) {
-    pxv_warn("data_feed_in[%d]: type=%d, lock_wait=%lldms, total=%lldms",
-             _df_count, (int)packet->type, (long long)_lock_ms, (long long)_df_ms);
-  }
+  // Hot-path timing logging removed for performance — was printing on every
+  // data feed packet (40+ lines/sec in DSO continuous mode).
 }
 
 void DataFeedParser::data_feed_callback_ex(const struct sr_dev_inst *sdi,

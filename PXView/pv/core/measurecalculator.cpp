@@ -22,8 +22,11 @@
 
 #include "measurecalculator.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <vector>
 
 #include "../data/dsosnapshot.h"
 #include "../data/sessiondata.h"
@@ -143,17 +146,273 @@ MeasureCalculator::compute(SessionData *data,
         }
 
         r.mValid = true;
-        // level_valid stays false: the level-detection algorithm (high/low
-        // threshold, period, rise/fall time) was never implemented in the
-        // current codebase (DsoSignal::_mValid was never set true). This
-        // matches the original behavior where all level-dependent
-        // measurements returned "--".
-        r.level_valid = false;
+
+        // ---- level-dependent measurements (high/low/period/rise/fall/...
+        // Now fully implemented via compute_level_measurements(). This
+        // replaces the original "never computed" behavior where level_valid
+        // was always false and all level-dependent measurements returned "--".
+        const double samplerate = dso->samplerate();
+        if (samplerate > 0.0 && sample_count >= 4) {
+            compute_level_measurements(samples, sample_count,
+                                       samplerate, r);
+        }
 
         results.push_back(r);
     }
 
     return results;
+}
+
+// ---------------------------------------------------------------------------
+// compute_level_measurements() — level-dependent measurement computation
+//
+// Implements high/low level detection, period/frequency, rise/fall time,
+// pulse width, duty cycle, burst time, and pulse count from the raw DSO
+// sample buffer. Uses a histogram-based approach for high/low level
+// detection and a mid-threshold crossing method for timing measurements.
+//
+// DSO ADC convention (inverted): ADC value 0 = max voltage, ADC value
+// 255 = min voltage. In this codebase's naming:
+//   - `high` = larger ADC value = low-voltage steady-state
+//   - `low`  = smaller ADC value = high-voltage steady-state
+// (this matches the original to_measurement_values formulas where
+//  VHIG = hw_offset - low, VLOW = hw_offset - high).
+// ---------------------------------------------------------------------------
+
+void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
+                                                   uint64_t sample_count,
+                                                   double samplerate,
+                                                   MeasurementResult &r)
+{
+    // Time per sample in nanoseconds.
+    const double ns_per_sample = 1.0e9 / samplerate;
+
+    // -- Step 1: High/Low level detection via histogram --
+    // Build a 256-bin histogram of ADC values and find the two most
+    // prominent peaks. The peak at smaller ADC values = high-voltage
+    // steady-state (= `low` field), the peak at larger ADC values =
+    // low-voltage steady-state (= `high` field).
+    uint32_t hist[256];
+    memset(hist, 0, sizeof(hist));
+    for (uint64_t i = 0; i < sample_count; i++) {
+        hist[samples[i]]++;
+    }
+
+    // Find the two histogram peaks by scanning left/right of the mid value.
+    // The mid value is approximated as (max + min) / 2.
+    const uint8_t mid_adc = (uint8_t)(((int)r.max + (int)r.min) / 2);
+
+    // Scan lower half (ADC values 0..mid_adc) for the most frequent value
+    // → this is the high-voltage steady-state → stored in `low`.
+    uint32_t best_lower_count = 0;
+    uint8_t  best_lower_val   = r.min;
+    for (int v = 0; v <= mid_adc; v++) {
+        if (hist[v] > best_lower_count) {
+            best_lower_count = hist[v];
+            best_lower_val   = (uint8_t)v;
+        }
+    }
+
+    // Scan upper half (ADC values mid_adc+1..255) for the most frequent value
+    // → this is the low-voltage steady-state → stored in `high`.
+    uint32_t best_upper_count = 0;
+    uint8_t  best_upper_val   = r.max;
+    for (int v = mid_adc + 1; v < 256; v++) {
+        if (hist[v] > best_upper_count) {
+            best_upper_count = hist[v];
+            best_upper_val   = (uint8_t)v;
+        }
+    }
+
+    // If no clear bimodal distribution is found (one half has no samples),
+    // fall back to using max/min as the steady-state levels.
+    if (best_lower_count == 0) {
+        best_lower_val = r.min;
+    }
+    if (best_upper_count == 0) {
+        best_upper_val = r.max;
+    }
+
+    r.high = best_upper_val;  // larger ADC value = low-voltage level
+    r.low  = best_lower_val;  // smaller ADC value = high-voltage level
+
+    // Guard: if high and low are the same (flat signal), no edges can be
+    // detected — leave level_valid=false so all time measurements report
+    // "--" (matches the original behavior for non-periodic signals).
+    if (r.high == r.low) {
+        return;
+    }
+
+    // -- Step 2: Mid-threshold and edge detection --
+    // Threshold is the midpoint of high and low ADC values.
+    const double threshold = ((double)r.high + (double)r.low) / 2.0;
+
+    // 10% and 90% levels for rise/fall time computation.
+    // In ADC space: 10% of swing from `low` (high-voltage) toward `high`
+    // (low-voltage). The 10% point is near `low` (high-voltage side),
+    // the 90% point is near `high` (low-voltage side).
+    const double swing = (double)r.high - (double)r.low;
+    const double v10 = (double)r.low + 0.1 * swing;  // 10% from high-voltage
+    const double v90 = (double)r.low + 0.9 * swing;  // 90% from high-voltage
+
+    // Scan for edges: a rising edge (voltage rising = ADC value falling)
+    // occurs when the signal crosses threshold from above. A falling edge
+    // (voltage falling = ADC value rising) occurs when the signal crosses
+    // threshold from below.
+    //
+    // In ADC space:
+    //   Rising voltage edge: sample[i-1] > threshold >= sample[i]
+    //     (ADC value decreases through threshold)
+    //   Falling voltage edge: sample[i-1] < threshold <= sample[i]
+    //     (ADC value increases through threshold)
+
+    struct Edge {
+        uint64_t index;  // sample index of the crossing
+        bool     rising;  // true = rising voltage edge
+    };
+
+    std::vector<Edge> edges;
+    // Pre-allocate generously: a 20K-sample DSO buffer typically has < 50
+    // edges. Reserve 256 to avoid reallocation in the common case.
+    edges.reserve(256);
+
+    bool was_above = (double)samples[0] > threshold;
+
+    for (uint64_t i = 1; i < sample_count; i++) {
+        const bool is_above = (double)samples[i] > threshold;
+        if (was_above && !is_above) {
+            // Crossing from above → ADC value decreased → voltage rising
+            edges.push_back({i, true});
+        } else if (!was_above && is_above) {
+            // Crossing from below → ADC value increased → voltage falling
+            edges.push_back({i, false});
+        }
+        was_above = is_above;
+    }
+
+    // Need at least 2 rising edges to compute a period.
+    if (edges.size() < 2) {
+        return;
+    }
+
+    // -- Step 3: Period and pulse width --
+    // Period: average distance between consecutive rising edges.
+    // High pulse width: average distance from rising edge to next falling edge.
+    double period_sum = 0.0;
+    double high_time_sum = 0.0;
+    uint32_t period_count = 0;
+    uint32_t high_time_count = 0;
+
+    for (size_t i = 0; i < edges.size(); i++) {
+        if (!edges[i].rising) continue;
+        // Find the next rising edge
+        for (size_t j = i + 1; j < edges.size(); j++) {
+            if (edges[j].rising) {
+                period_sum += (double)(edges[j].index - edges[i].index);
+                period_count++;
+                break;
+            }
+        }
+        // Find the next falling edge after this rising edge
+        for (size_t j = i + 1; j < edges.size(); j++) {
+            if (!edges[j].rising) {
+                high_time_sum += (double)(edges[j].index - edges[i].index);
+                high_time_count++;
+                break;
+            }
+        }
+    }
+
+    if (period_count == 0) {
+        return;
+    }
+
+    r.period     = (period_sum / period_count) * ns_per_sample;
+    r.high_time  = (high_time_count > 0)
+                       ? (high_time_sum / high_time_count) * ns_per_sample
+                       : 0.0;
+    r.pcount    = period_count;
+
+    // -- Step 4: Rise/Fall time --
+    // Rise time: on a rising voltage edge (ADC decreasing), find where the
+    // signal crosses v90 (near low-voltage side, larger ADC) then v10 (near
+    // high-voltage side, smaller ADC). Time = (v10_index - v90_index) * ns.
+    //
+    // Fall time: on a falling voltage edge (ADC increasing), find where the
+    // signal crosses v10 (near high-voltage side, smaller ADC) then v90
+    // (near low-voltage side, larger ADC). Time = (v90_index - v10_index) * ns.
+
+    double rise_sum = 0.0;
+    uint32_t rise_count = 0;
+    double fall_sum = 0.0;
+    uint32_t fall_count = 0;
+
+    for (size_t i = 0; i < edges.size(); i++) {
+        const Edge &e = edges[i];
+        // Search backward from the edge for the 10%/90% crossing points.
+        // We look in a window of at most `period_samples` samples before the
+        // edge to avoid scanning the entire buffer for each edge.
+        const double period_samples = period_sum / period_count;
+        const uint64_t window = (uint64_t)std::max(period_samples * 0.5, 2.0);
+        const uint64_t search_start = (e.index >= window) ? (e.index - window) : 0;
+
+        if (e.rising) {
+            // Rising voltage = ADC value decreasing.
+            // Signal goes from high-ADC (low voltage) → low-ADC (high voltage).
+            // Crosses v90 (larger ADC) first, then v10 (smaller ADC).
+            int64_t v90_idx = -1;
+            int64_t v10_idx = -1;
+            for (uint64_t j = e.index; j > search_start; j--) {
+                const double prev = (double)samples[j - 1];
+                const double curr = (double)samples[j];
+                if (v90_idx < 0 && prev >= v90 && curr < v90) {
+                    v90_idx = (int64_t)j;
+                }
+                if (v90_idx >= 0 && prev >= v10 && curr < v10) {
+                    v10_idx = (int64_t)j;
+                    break;
+                }
+            }
+            if (v90_idx >= 0 && v10_idx >= 0 && v10_idx > v90_idx) {
+                rise_sum += (double)(v10_idx - v90_idx) * ns_per_sample;
+                rise_count++;
+            }
+        } else {
+            // Falling voltage = ADC value increasing.
+            // Signal goes from low-ADC (high voltage) → high-ADC (low voltage).
+            // Crosses v10 (smaller ADC) first, then v90 (larger ADC).
+            int64_t v10_idx = -1;
+            int64_t v90_idx = -1;
+            for (uint64_t j = e.index; j > search_start; j--) {
+                const double prev = (double)samples[j - 1];
+                const double curr = (double)samples[j];
+                if (v10_idx < 0 && prev <= v10 && curr > v10) {
+                    v10_idx = (int64_t)j;
+                }
+                if (v10_idx >= 0 && prev <= v90 && curr > v90) {
+                    v90_idx = (int64_t)j;
+                    break;
+                }
+            }
+            if (v10_idx >= 0 && v90_idx >= 0 && v90_idx > v10_idx) {
+                fall_sum += (double)(v90_idx - v10_idx) * ns_per_sample;
+                fall_count++;
+            }
+        }
+    }
+
+    r.rise_time = (rise_count > 0) ? rise_sum / rise_count : 0.0;
+    r.fall_time = (fall_count > 0) ? fall_sum / fall_count : 0.0;
+
+    // -- Step 5: Burst time --
+    // Total time span from the first edge to the last edge.
+    if (edges.size() >= 2) {
+        r.burst_time = (double)(edges.back().index - edges.front().index)
+                       * ns_per_sample;
+    }
+
+    // Level detection succeeded — at least one full period was found.
+    r.level_valid = true;
 }
 
 // ---------------------------------------------------------------------------

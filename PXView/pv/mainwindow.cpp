@@ -1956,15 +1956,23 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
 
           if (s->signal_type() == SR_CHANNEL_ANALOG) {
             view::AnalogSignal *analogSig = (view::AnalogSignal *)s;
-            // AnalogSignal 无 load_settings()，且构造函数读 model->vertical_offset
-            // (reload 未从 probe->zero_offset 填充)，故 _zero_offset 不会由
+            // AnalogSignal 无 load_settings()，且构造函数读 model->zero_offset
+            // (reload 从 driver PROBE_OFFSET 填充)，故 _zero_offset 不会由
             // apply_signal_config + reload 自动恢复。这里把存为原始 uint16_t 的
             // zero_offset 经 value2ratio 转成比例后用 set_zero_ratio 还原。
             // 若值落在 (0,1)（旧比例格式）则直接当比例用（无兼容性要求，仅稳健）。
+            // 特殊情况：zv == 0 表示 ANALOG 通道无硬件偏移（demo 驱动返回 0），
+            // value2ratio(0) 会 clamp 到 0.0（顶部），导致游标在顶部而非中心。
+            // 此时用 0.5（中心）作为默认值。
             double zv = obj["zero_offset"].toDouble();
-            double ratio_z = (zv > 0.0 && zv < 1.0)
-                                 ? zv
-                                 : analogSig->value2ratio((int)zv);
+            double ratio_z;
+            if (zv > 0.0 && zv < 1.0) {
+              ratio_z = zv;
+            } else if (zv == 0.0) {
+              ratio_z = 0.5;
+            } else {
+              ratio_z = analogSig->value2ratio((int)zv);
+            }
             analogSig->set_zero_ratio(ratio_z);
             analogSig->commit_settings();
           }
