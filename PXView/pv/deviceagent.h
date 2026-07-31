@@ -128,20 +128,33 @@ public:
 
     inline bool is_file() const { return _dev_type == DEV_TYPE_FILELOG; }
     inline bool is_demo() const { return _dev_type == DEV_TYPE_DEMO; }
-    inline bool is_hardware() const { return _dev_type == DEV_TYPE_USB; }
+    /* Demo devices are treated as hardware to maximize real-device simulation.
+     * The demo driver implements the same config keys (OPERATION_MODE,
+     * CHANNEL_MODE, SAMPLERATE, etc.) as PXLogic, so routing it through the
+     * hardware code paths gives the most realistic behavior. is_demo() is
+     * still available for demo-specific concerns (pattern mode, .demo file
+     * replay, config-save path). */
+    inline bool is_hardware() const {
+        return _dev_type == DEV_TYPE_USB || _dev_type == DEV_TYPE_DEMO;
+    }
     inline bool is_virtual() const { return is_file() || is_demo(); }
 
     inline bool is_hardware_logic() const {
         return is_hardware() && (_driver_name == "DSLogic" ||
-                                 _driver_name.startsWith("px", Qt::CaseInsensitive));
+                                 _driver_name.startsWith("px", Qt::CaseInsensitive) ||
+                                 _driver_name == "demo");
     }
     inline bool is_hardware_dso() const {
         return is_hardware() && _driver_name == "DSCope";
     }
+    /* is_dsl_device() now includes the demo driver so fork-only config keys
+     * (60020-60088) are accessible without separate || is_demo() checks.
+     * Demo implements these keys in its api.c config_get/set/list. */
     inline bool is_dsl_device() const {
         return is_hardware() && (_driver_name == "DSLogic" ||
                                  _driver_name == "DSCope" ||
-                                 _driver_name.startsWith("px", Qt::CaseInsensitive));
+                                 _driver_name.startsWith("px", Qt::CaseInsensitive) ||
+                                 _driver_name == "demo");
     }
     inline bool is_compat_device() const {
         return is_hardware() && !is_dsl_device();

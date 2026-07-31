@@ -175,8 +175,7 @@ bool CaptureManager::action_start_capture(bool instant,
 
     if (_state->device_agent().is_hardware()) {
       _is_stream_mode = _state->device_agent().is_stream_mode();
-    } else if (_state->device_agent().is_demo() ||
-               _state->device_agent().is_file()) {
+    } else if (_state->device_agent().is_file()) {
       _is_stream_mode = true;
     }
 
@@ -191,8 +190,7 @@ bool CaptureManager::action_start_capture(bool instant,
       }
     }
 
-    if (_state->device_agent().is_hardware() ||
-        _state->device_agent().is_demo()) {
+    if (_state->device_agent().is_hardware()) {
       bool bv = is_loop_mode() && _is_stream_mode;
       _state->device_agent().set_config_bool(SR_CONF_LOOP_MODE, bv);
     }
@@ -500,6 +498,14 @@ bool CaptureManager::action_stop_capture() {
     // 停止按钮走 action_stop_capture → exit_capture 路径，不会触发
     // SR_DF_END，因此需要在此显式设置。
     _state->set_device_status(ST_STOPPED);
+
+    // CRITICAL FIX: 手动停止时也需要调用 frame_ended() 来触发
+    // MainWindow::on_frame_ended()，后者会调用 update_toolbar_view_status()
+    // 来更新按钮状态。正常采集结束时，LOGIC 模式通过
+    // SigSession::on_event(RevEndPacket) → frame_ended() 调用，
+    // 非 LOGIC 模式通过 DataFeedParser::SR_DF_END → _state->frame_ended() 调用。
+    // 手动停止时这两个路径都不会触发，导致按钮保持禁用状态（无法添加解码器）。
+    _state->frame_ended();
 
     data_unlock();
 

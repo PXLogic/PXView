@@ -167,6 +167,14 @@ private:
                      const double samples_per_pixel, const int order,
                      const float top, const float bottom, const int width);
 
+    void paint_per_pixel(QPainter &p,
+                         const pv::data::AnalogSnapshot *snapshot,
+                         int zeroY, const int left, const int right,
+                         const uint64_t start_index,
+                         const int64_t sample_count,
+                         const double samples_per_pixel, const int order,
+                         const float top, const float bottom, const int width);
+
     void paint_envelope(QPainter &p,
                         const pv::data::AnalogSnapshot *snapshot,
                         int zeroY, const int start_pixel,

@@ -1072,7 +1072,7 @@ void MainWindow::save_config() {
   app.deviceOptions.lastDeviceDriver = _device_agent->driver_name();
   app.SaveDevice();
 
-  if (_device_agent->is_hardware()) {
+  if (_device_agent->is_hardware() && !_device_agent->is_demo()) {
     // Persist connection ID for hardware devices to distinguish multiple
     // devices of the same model.
     struct sr_dev_inst *sdi = _device_agent->inst();
@@ -2672,21 +2672,18 @@ void MainWindow::on_frame_ended() {
   _side_bar->setItemRunning(SIDEBAR_RUNSTOP, false);
   _side_bar->setItemRunning(SIDEBAR_INSTANT, false);
 
-  // CRITICAL FIX (fork 迁移遗漏): 采集结束时更新 toolbar/sidebar 按钮的 enabled
-  // 状态。is_working() 此时已为 false（action_stop_capture 或 SR_DF_END 路径设置），
-  // update_toolbar_view_status() 会据此启用 TRIGGER/DECODE/MEASURE/SEARCH/
-  // FUNCTION/OPTIONS 等按钮。
+  // CRITICAL FIX (fork 迁移遗漏): 采集结束时更新所有 UI 组件的 enabled
+  // 状态。is_working() 此时已为 false（action_stop_capture 或 SR_DF_END 路径
+  // 设置），update_capture_ui_status() 会据此启用 toolbar/sidebar 按钮、
+  // protocol dock 和 device options dock。
   //
   // 之前的问题：single 模式手动停止时，EndCollectWork 不被广播（只在 repeat
   // 模式广播，见 capturemanager.cpp:496-498），而 on_event(EndCollectWorkPrev)
-  // 在 GUI 模式下是空操作。所以 update_toolbar_view_status() 永远不会被调用，
-  // 上述按钮保持禁用状态（灰色无法点击）。用户看到的现象是"停止后按钮仍然灰"。
+  // 在 GUI 模式下是空操作。所以 UI 状态永远不会被更新，按钮保持禁用状态。
   //
-  // 在 on_frame_ended() 中调用 update_toolbar_view_status() 是幂等的：
-  // - single 模式正常结束：on_frame_ended() 调用 → 更新按钮
-  // - single 模式手动停止：on_frame_ended() 调用 → 更新按钮
-  // - repeat 模式：on_frame_ended() + EndCollectWork 都调用，幂等无副作用
-  update_toolbar_view_status();
+  // 使用统一的 update_capture_ui_status() 而非单独调用各个 update 方法，
+  // 确保所有采集状态相关的 UI 组件同步更新，避免遗漏。
+  update_capture_ui_status();
 
   pv::TabContext *ctx = current_context();
   if (ctx && ctx->document()) {
@@ -2872,7 +2869,7 @@ void MainWindow::load_device_config() {
   int mode = _device_agent->get_work_mode();
   QString file;
 
-  if (_device_agent->is_hardware()) {
+  if (_device_agent->is_hardware() && !_device_agent->is_demo()) {
     QString ses_name = gen_config_file_path(true);
 
     bool bExist = false;
@@ -2990,6 +2987,12 @@ QJsonArray MainWindow::get_decoder_json_from_data_file(QString file,
   return dec_array;
 }
 
+void MainWindow::update_capture_ui_status() {
+  update_toolbar_view_status();
+  _protocol_widget->update_view_status();
+  _device_options_widget->update_widgets_status();
+}
+
 void MainWindow::update_toolbar_view_status() {
   _sampling_bar->update_view_status();
   _file_bar->update_view_status();
@@ -3091,11 +3094,10 @@ void MainWindow::update_toolbar_view_status() {
 
 // --- Capture state group ---
 void MainWindow::on_event(const pv::interface::CaptureStateChanged &) {
-  update_toolbar_view_status();
-  _device_options_widget->update_widgets_status();
+  update_capture_ui_status();
 }
 void MainWindow::on_event(const pv::interface::StartCollectWork &) {
-  update_toolbar_view_status();
+  update_capture_ui_status();
   // CRITICAL FIX (fork 迁移遗漏): 旧版在 frame_began() 时设置 sidebar 按钮为
   // running 状态,但 frame_began() 只在收到第一个 logic 数据包时才被调用。
   // 等待触发时(无数据) frame_began() 不会被调用,sidebar 按钮保持 "Start",
@@ -3108,8 +3110,6 @@ void MainWindow::on_event(const pv::interface::StartCollectWork &) {
     _side_bar->setItemRunning(SIDEBAR_RUNSTOP, true);
   }
   current_view()->on_state_changed(false);
-  _protocol_widget->update_view_status();
-  _device_options_widget->update_widgets_status();
 }
 void MainWindow::on_event(const pv::interface::CollectStart &) {
   // 状态栏提示"采集中"
@@ -3121,8 +3121,7 @@ void MainWindow::on_event(const pv::interface::CollectEnd &) {
   current_view()->on_state_changed(true);
 }
 void MainWindow::on_event(const pv::interface::EndCollectWork &) {
-  update_toolbar_view_status();
-  _protocol_widget->update_view_status();
+  update_capture_ui_status();
 
   pv::TabContext *ctx = current_context();
   if (ctx && ctx->document() && ctx->document()->has_pending_config()) {
@@ -3136,8 +3135,6 @@ void MainWindow::on_event(const pv::interface::EndCollectWork &) {
         m->set_trig_type(ch.trig_type);
     }
     _device_options_widget->update_view();
-  } else {
-    _device_options_widget->update_widgets_status();
   }
   // R6: activate 在 working 时跳过了 set_active_document，工作结束后
   // 显式恢复当前 tab 的 active_document 归属。

@@ -16,7 +16,6 @@
 
 #include "smoothscrollarea.h"
 
-#include <QLayout>
 #include <QScrollBar>
 #include <QWheelEvent>
 
@@ -135,26 +134,10 @@ void SmoothScrollArea::handleVWheel(int delta) {
   _v_anim->stop();
   curVal = vbar->value();
 
-  if (widget())
-    widget()->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-
   _v_anim->setStartValue(curVal);
   _v_anim->setEndValue(targetInt);
   _v_anim->setDuration(duration);
   _v_anim->setEasingCurve(easing);
-
-  disconnect(_v_anim, &QPropertyAnimation::finished, nullptr, nullptr);
-  connect(_v_anim, &QPropertyAnimation::finished, this, [this]() {
-    if (widget() && widget()->layout()) {
-      widget()->layout()->setEnabled(true);
-      widget()->layout()->activate();
-    }
-    if (widget())
-      widget()->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-  });
-
-  if (widget() && widget()->layout())
-    widget()->layout()->setEnabled(false);
 
   _v_anim->start();
 
@@ -219,26 +202,10 @@ void SmoothScrollArea::handleHWheel(int delta) {
   _h_anim->stop();
   curVal = hbar->value();
 
-  if (widget())
-    widget()->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-
   _h_anim->setStartValue(curVal);
   _h_anim->setEndValue(targetInt);
   _h_anim->setDuration(duration);
   _h_anim->setEasingCurve(easing);
-
-  disconnect(_h_anim, &QPropertyAnimation::finished, nullptr, nullptr);
-  connect(_h_anim, &QPropertyAnimation::finished, this, [this]() {
-    if (widget() && widget()->layout()) {
-      widget()->layout()->setEnabled(true);
-      widget()->layout()->activate();
-    }
-    if (widget())
-      widget()->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-  });
-
-  if (widget() && widget()->layout())
-    widget()->layout()->setEnabled(false);
 
   _h_anim->start();
 

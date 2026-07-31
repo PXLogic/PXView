@@ -129,9 +129,16 @@ QList<QString> StoreSession::getSuportedExportFormats(){
         // of direct field access (fork libsigrok exposed ->id / ->desc).
         const char *mod_id = sr_output_id_get(*supportedModules);
         const char *mod_desc = sr_output_description_get(*supportedModules);
+        // In non-LOGIC modes (DSO/ANALOG/MSO), only CSV is supported.
+        // Use 'continue' to skip non-CSV modules instead of 'break' which
+        // would abort the entire traversal before reaching the CSV module
+        // (CSV is the 4th entry in the output module list, after
+        // ascii/binary/bits).
         if (_session->get_device()->get_work_mode() != LOGIC &&
-            strcmp(mod_id, "csv"))
-            break;
+            strcmp(mod_id, "csv")) {
+            supportedModules++;
+            continue;
+        }
         QString format(mod_desc ? mod_desc : "");
         format.append(" (*.");
         format.append(mod_id ? mod_id : "");
@@ -724,20 +731,33 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     probecnt = 0;
     int analogcnt = 0;
 
+    // MSO 架构修复：meta_gen 传入的 snapshot 可能是 LogicSnapshot，
+    // 其 has_data() 对模拟通道返回 false，导致 analog0/analog1/... 键
+    // 从不被写入 header。加载时模拟通道因此保持未命名/未启用状态。
+    // 修复：对模拟通道检查 AnalogSnapshot 而非传入的 snapshot。
+    data::AnalogSnapshot *analog_snap_for_has_data = nullptr;
+    if (mode == MSO) {
+        auto snap_a = _session->get_snapshot(SR_CHANNEL_ANALOG);
+        if (snap_a && !snap_a->empty())
+            analog_snap_for_has_data = dynamic_cast<data::AnalogSnapshot*>(snap_a);
+    }
+
     for (l = _session->get_device()->get_channels(); l; l = l->next) {
         
         probe = (struct sr_channel *)l->data;
         
-        if (!snapshot->has_data(probe->index))
-            continue;
+        // MSO 模式：对模拟通道检查 AnalogSnapshot，而非传入的 LogicSnapshot
+        gboolean is_logic = (probe->type == SR_CHANNEL_LOGIC);
+        if (mode == MSO && !is_logic && analog_snap_for_has_data) {
+            if (!analog_snap_for_has_data->has_data(probe->index))
+                continue;
+        } else {
+            if (!snapshot->has_data(probe->index))
+                continue;
+        }
 
         if (mode == LOGIC && !probe->enabled)
             continue;
-
-        // MSO 架构修复：按通道类型写入不同的命名前缀。
-        // session_file.c 解析时：probe<N> → 给第 N 个 LOGIC 通道改名，
-        // analog<N> → 给第 N 个 ANALOG 通道改名。0-based 编号。
-        gboolean is_logic = (probe->type == SR_CHANNEL_LOGIC);
         if (probe->name)
         {
             if (is_logic) {

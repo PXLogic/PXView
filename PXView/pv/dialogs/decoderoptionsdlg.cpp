@@ -111,8 +111,21 @@ bool DecoderOptionsDlg::eventFilter(QObject *obj, QEvent *event)
         auto *me = static_cast<QMouseEvent *>(event);
         QPoint globalPos = me->globalPosition().toPoint();
         if (!rect().contains(mapFromGlobal(globalPos))) {
-            // 点击在对话框 rect 外。但需排除对话框子控件(如 QComboBox
-            // 下拉列表可能延伸到 rect 之外):向上查找父链,若属于 this 则不关闭。
+            // 点击在对话框 rect 外。但需排除对话框子控件(如 DsComboBox 的
+            // DsComboPopup 下拉列表——它是 Qt::Popup 类型的独立顶层窗口,
+            // 可能延伸到 rect 之外,且其 parent 链可能因 Qt 内部 viewport
+            // reparent 机制而无法遍历到 this)。
+            // 修复:先用 qApp->activePopupWidget() 检查是否有活跃 popup,
+            // 如果鼠标点击落在活跃 popup 的几何范围内,则不关闭对话框。
+            QWidget *popup = qApp->activePopupWidget();
+            if (popup && popup->isVisible()) {
+                QRect popupRect = popup->geometry();
+                if (popupRect.contains(globalPos)) {
+                    return PxDialog::eventFilter(obj, event);
+                }
+            }
+
+            // 向上查找父链,若属于 this 则不关闭。
             QWidget *w = qobject_cast<QWidget *>(obj);
             bool is_child = false;
             while (w) {
@@ -369,19 +382,18 @@ DsComboBox* DecoderOptionsDlg::create_probe_selector(
 	DsComboBox *selector = new DsComboBox(parent);
     selector->addItem("-", QVariant::fromValue(-1));
 
-    int dex = 0;
+    int dex = 1; // index 0 is the "-" placeholder item
     const int binded_index = decoder->binded_probe_index(pdch);
 
 	for(auto s : sigs)
     {
-        dex++;
-
         if (s->type() == SR_CHANNEL_LOGIC && s->enabled()){
 			selector->addItem(QString::fromStdString(s->name()), QVariant::fromValue(s->index()));
 
             if (binded_index == s->index()){
                 selector->setCurrentIndex(dex);
             }
+            dex++;
 		}
 	}
 

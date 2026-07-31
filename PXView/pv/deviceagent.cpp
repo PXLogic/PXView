@@ -240,6 +240,18 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
             _app_work_mode = MSO;
         } else if (_driver_name == "virtual-session" || _driver_name.contains("file")) {
             _dev_type = DEV_TYPE_FILELOG;
+            // Restore work mode from the session file header.
+            // session_file.c parses "device mode = N" and stores it via
+            // SR_CONF_DEVICE_MODE on the session_driver's vdev struct.
+            // Without this, _app_work_mode defaults to LOGIC (set by
+            // release()), causing MSO files to open in logic-only mode.
+            int file_mode = 0;
+            if (get_config_int32(SR_CONF_DEVICE_MODE, file_mode) && file_mode >= 0) {
+                _app_work_mode = file_mode;
+                pxv_info("open_by_handle: file device mode = %d", file_mode);
+            } else {
+                _app_work_mode = LOGIC;
+            }
         } else {
             _dev_type = DEV_TYPE_USB;
         }
@@ -770,17 +782,10 @@ bool DeviceAgent::is_stream_mode()
 
 bool DeviceAgent::detect_stream_mode()
 {
-    // DSL/PXLogic devices: query SR_CONF_OPERATION_MODE (fork-specific key).
-    // These drivers export "Buffer Mode"/"Stream Mode"/"Internal Test" strings.
+    // DSL/PXLogic/demo devices: query SR_CONF_OPERATION_MODE.
+    // Demo is now included in is_dsl_device() so it takes this path too.
+    // These drivers export "Buffer Mode"/"Stream Mode" strings.
     if (is_dsl_device())
-        return get_hardware_operation_mode() == LO_OP_STREAM;
-
-    // demo devices: query SR_CONF_OPERATION_MODE (added in demo api.c).
-    // demo driver exports the same "Buffer Mode"/"Stream Mode" strings as
-    // pxlogic, so get_hardware_operation_mode() works unchanged. Default is
-    // "Buffer Mode" (DEMO_OP_BUFFER). User switches via the samplingbar
-    // OPERATION_MODE dropdown.
-    if (is_demo())
         return get_hardware_operation_mode() == LO_OP_STREAM;
 
     // Upstream hardware drivers (fx2lafw, ...): check SR_CONF_CONTINUOUS
@@ -987,8 +992,7 @@ GVariant* DeviceAgent::get_config_list(const sr_channel_group *group, int key)
 
     const bool fork_only = is_fork_only_key(key);
     const bool dsl = is_dsl_device();
-    const bool demo = is_demo();
-    if (fork_only && !dsl && !demo)
+    if (fork_only && !dsl)
         return nullptr;
 
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(_di);
@@ -1089,7 +1093,7 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
         return g_variant_new_string(mode_str);
     }
 
-    if (is_fork_only_key(key) && !is_dsl_device() && !is_demo())
+    if (is_fork_only_key(key) && !is_dsl_device())
         return nullptr;
 
     /* Fork-only key 预检查：DSL/PXLogic/demo 设备的 devopts[] 必须声明该 key
@@ -1097,7 +1101,7 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
      * "Option 'xxx' not available for this device instance" 错误日志。
      * 典型场景：PROBE_CONFIGS(60062) 只有 demo 驱动声明，PXLogic 未声明，
      * 但某些代码路径仍尝试 get_config(PROBE_CONFIGS)。 */
-    if (is_fork_only_key(key) && (is_dsl_device() || is_demo())) {
+    if (is_fork_only_key(key) && is_dsl_device()) {
         GVariant *gvar_devopts = get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
         bool devopt_has_get = false;
         if (gvar_devopts) {
@@ -1212,7 +1216,7 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
     // driver via sr_config_set below (demo driver implements the key since
     // the OPERATION_MODE dropdown addition).
     if (key == SR_CONF_OPERATION_MODE &&
-        (is_hardware() || is_demo())) {
+        is_hardware()) {
         const gchar *mode_str = g_variant_get_string(data, NULL);
         if (mode_str) {
             // Accept both short ("Stream"/"Buffer") and full
@@ -1240,7 +1244,7 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
         // DSL/PXLogic/demo: fall through to sr_config_set below.
     }
 
-    if (is_fork_only_key(key) && !is_dsl_device() && !is_demo())
+    if (is_fork_only_key(key) && !is_dsl_device())
         return false;
 
     // Capture GVariant type string BEFORE sr_config_set(): sr_config_set()
@@ -1629,54 +1633,54 @@ bool DeviceAgent::is_roll_mode(bool &roll) {
 // query entirely. Callers (DsoSignal / AnalogSignal / MathTrace / capturemanager)
 // already handle a false return value gracefully (fall back to defaults).
 bool DeviceAgent::get_unit_bits(int &v) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_byte(SR_CONF_UNIT_BITS, v);
 }
 
 bool DeviceAgent::get_ref_min(uint32_t &v) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_uint32(SR_CONF_REF_MIN, v);
 }
 
 bool DeviceAgent::get_ref_max(uint32_t &v) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_uint32(SR_CONF_REF_MAX, v);
 }
 
 bool DeviceAgent::get_probe_vdiv(uint64_t &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) { v = 0; return false; }
+    if (!is_dsl_device()) { v = 0; return false; }
     return get_config_uint64(SR_CONF_PROBE_VDIV, v, probe, NULL);
 }
 
 bool DeviceAgent::get_probe_factor(uint64_t &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_uint64(SR_CONF_PROBE_FACTOR, v, probe, NULL);
 }
 
 bool DeviceAgent::get_probe_coupling(int &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) { v = 0; return false; }
+    if (!is_dsl_device()) { v = 0; return false; }
     /* demo 驱动 GET 返回 int32 ("i"), 匹配 sr_key_info_config SR_T_INT32。
      * (DSL 驱动 GET 返回 string, 此方法对 DSL 本就不工作 — DSL 硬件已 dropped) */
     return get_config_int32(SR_CONF_PROBE_COUPLING, v, probe, NULL);
 }
 
 bool DeviceAgent::get_probe_offset(int &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_uint16(SR_CONF_PROBE_OFFSET, v, probe, NULL);
 }
 
 bool DeviceAgent::get_probe_hw_offset(int &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_uint16(SR_CONF_PROBE_HW_OFFSET, v, probe, NULL);
 }
 
 bool DeviceAgent::get_probe_map_default(bool &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) return false;
+    if (!is_dsl_device()) return false;
     return get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, v, probe, NULL);
 }
 
 bool DeviceAgent::get_trigger_value(int &v, sr_channel *probe) {
-    if (!is_dsl_device() && !is_demo()) { v = 0; return false; }
+    if (!is_dsl_device()) { v = 0; return false; }
     return get_config_int32(SR_CONF_TRIGGER_VALUE, v, probe, NULL);
 }
 
@@ -1693,7 +1697,7 @@ uint64_t DeviceAgent::get_trigger_pos() const {
 }
 
 QVector<uint64_t> DeviceAgent::get_probe_vdiv_list() {
-    if (!is_dsl_device() && !is_demo())
+    if (!is_dsl_device())
         return {};
 
     /* SR_CONF_PROBE_VDIV is a per-channel-group key in the demo driver.

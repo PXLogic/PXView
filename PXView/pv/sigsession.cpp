@@ -1871,8 +1871,6 @@ bool SigSession::switch_work_mode(int mode) {
     if (mode == LOGIC || mode == MSO) {
       if (_state->device_agent().is_hardware()) {
         _capture_manager->set_is_stream_mode(_state->device_agent().is_stream_mode());
-      } else if (_state->device_agent().is_demo()) {
-        _capture_manager->set_is_stream_mode(true);
       }
     }
 

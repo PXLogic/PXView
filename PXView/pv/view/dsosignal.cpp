@@ -1153,23 +1153,29 @@ void DsoSignal::paint_per_pixel(QPainter &p,
   const double base_sample = start;
 
   if (spp < 1.0) {
-    // ---- Interpolation mode (zoomed in: spp < 1.0) ----
-    // Each sample spans multiple pixels. Linearly interpolate the sample
-    // value at each pixel position, then draw 1px-wide rects with height
-    // covering [y(x), y(x+1)] — this reproduces the visual result of
-    // drawPolyline (non-antialiased) but using the much faster drawRects.
-    static thread_local QVector<float> y_buf;
-    if (y_buf.size() < width + 1) y_buf.resize(width + 1);
+    // ---- Polyline mode (zoomed in: spp < 1.0) ----
+    // Use drawPolyline for smooth Bresenham diagonals on steep edges.
+    // Key performance fix: draw with OPAQUE color (alpha=255) to avoid
+    // per-pixel alpha blending on transparent QPixmap (was 44ms with
+    // alpha=200, should be <2ms with alpha=255 on Windows raster engine).
+    // The visual difference between alpha=200 and 255 is negligible for
+    // waveform display.
+    static thread_local QVector<QPointF> pts;
+    if (pts.size() < width) pts.resize(width);
 
-    // Pass 1: compute interpolated Y for each pixel.
-    for (int x = 0; x <= width; x++) {
+    // Opaque pen — bypasses alpha blending entirely.
+    p.setPen(QPen(_colour));
+    p.setBrush(Qt::NoBrush);
+
+    int pt_count = 0;
+    for (int x = 0; x < width; x++) {
       double sample_pos = base_sample + x * spp;
       int64_t s0 = (int64_t)floor(sample_pos);
       double frac = sample_pos - s0;
 
       if (s0 < start) { s0 = start; frac = 0; }
       if (s0 >= end) {
-        y_buf[x] = (x > 0) ? y_buf[x - 1] : zeroY;
+        if (pt_count > 0) break;
         continue;
       }
 
@@ -1178,23 +1184,10 @@ void DsoSignal::paint_per_pixel(QPainter &p,
       uint8_t v0 = samples_buffer[s0 - start];
       uint8_t v1 = (s1 <= end && s1 > start) ? samples_buffer[s1 - start] : v0;
       float v = v0 + (float)(v1 - v0) * frac;
-      y_buf[x] = min(max(top, zeroY + (v - hw_offset) * _scale), bottom);
+      float y = min(max(top, zeroY + (v - hw_offset) * _scale), bottom);
+      pts[pt_count++] = QPointF((float)(left + x), y);
     }
-
-    // Pass 2: draw 1px rects bridging adjacent pixel Y values.
-    for (int x = 0; x < width; x++) {
-      float y0 = y_buf[x];
-      float y1 = y_buf[x + 1];
-      float y_top = min(y0, y1);
-      float y_bot = max(y0, y1);
-
-      // Ensure minimum 1px height for visibility.
-      if (y_bot - y_top < 1.0f)
-        y_bot = y_top + 1.0f;
-
-      r[x] = QRectF((float)(left + x), y_top, 1.0f, y_bot - y_top);
-    }
-    p.drawRects(r, width);
+    p.drawPolyline(pts.data(), pt_count);
   } else {
     // ---- Min/max mode (zoomed out: spp >= 1.0) ----
     // Multiple samples per pixel. Compute min/max over the pixel's sample

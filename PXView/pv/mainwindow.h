@@ -176,6 +176,7 @@ private:
     void reset_all_view();
     bool confirm_to_store_data();
     void update_toolbar_view_status();
+    void update_capture_ui_status();
     void calc_min_height();    
     void update_title_bar_text();
     void update_disk_cache_status();
