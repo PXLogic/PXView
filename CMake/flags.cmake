@@ -37,7 +37,7 @@ endif()
 #= Release flags
 #-------------------------------------------------------------------------------
 if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+    string(APPEND CMAKE_CXX_FLAGS " -Wall -Wextra")
     # -g embeds DWARF debug info so gdb / MinGW binutils can symbolicate
     # stacks when debugging or inspecting core dumps.
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -g")
