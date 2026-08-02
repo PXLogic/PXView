@@ -37,6 +37,9 @@ jobs:
           submodules: false
           persist-credentials: false
 
+      - name: Init libsigrok submodule (required by audit script)
+        run: git submodule update --init libsigrok
+
       - name: Run config key type audit
         run: python3 tools/audit_config_types.py
 
