@@ -13,7 +13,7 @@
 #include <QTimer>
 #include <QApplication>
 
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "config/appconfig.h"
 #include "log.h"
 
@@ -29,21 +29,21 @@ SubMainFrame::SubMainFrame(QWidget *content, const QString &title, QWidget *pare
     _contentWidget(content),
     _title(title)
 {
-    _layout = NULL;
+    _layout = nullptr;
     _bDraging = false;
     _hit_border = 0;
-    _titleBar = NULL;
+    _titleBar = nullptr;
     _is_win32_parent_window = false;
-    _parentNativeWidget = NULL;
+    _parentNativeWidget = nullptr;
 
-    _left = NULL;
-    _right = NULL;
-    _top = NULL;
-    _bottom = NULL;
-    _top_left = NULL;
-    _top_right = NULL;
-    _bottom_left = NULL;
-    _bottom_right = NULL;
+    _left = nullptr;
+    _right = nullptr;
+    _top = nullptr;
+    _bottom = nullptr;
+    _top_left = nullptr;
+    _top_right = nullptr;
+    _bottom_left = nullptr;
+    _bottom_right = nullptr;
 
     bool isWin32 = false;
 
@@ -139,10 +139,10 @@ SubMainFrame::SubMainFrame(QWidget *content, const QString &title, QWidget *pare
 SubMainFrame::~SubMainFrame()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL) {
+    if (_parentNativeWidget != nullptr) {
         SetWindowLongPtr(_parentNativeWidget->Handle(), GWLP_USERDATA, 0);
         delete _parentNativeWidget;
-        _parentNativeWidget = NULL;
+        _parentNativeWidget = nullptr;
     }
 #endif
 }
@@ -167,7 +167,7 @@ void SubMainFrame::showAt(const QPoint &pos, const QSize &size)
 void SubMainFrame::AttachNativeWindow()
 {
 #ifdef _WIN32
-    assert(_parentNativeWidget == NULL);
+    assert(_parentNativeWidget == nullptr);
 
     int k = window()->devicePixelRatio();
     int x = pos().x() * k;
@@ -178,7 +178,7 @@ void SubMainFrame::AttachNativeWindow()
     QColor bkColor = AppConfig::Instance().GetStyleColor();
     WinNativeWidget *nativeWindow = new WinNativeWidget(x, y, w, h, bkColor);
 
-    if (nativeWindow->Handle() == NULL){
+    if (nativeWindow->Handle() == nullptr){
         pxv_info("ERROR: native window is invalid for sub window.");
         delete nativeWindow;
         return;
@@ -213,7 +213,7 @@ void SubMainFrame::AttachNativeWindow()
 void SubMainFrame::MoveWindow(int x, int y)
 {
 #ifdef _WIN32
-    assert(_parentNativeWidget == NULL);
+    assert(_parentNativeWidget == nullptr);
 #endif
     move(x, y);
 }
@@ -221,7 +221,7 @@ void SubMainFrame::MoveWindow(int x, int y)
 QPoint SubMainFrame::GetParentPos()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         RECT rc;
         int k = window()->devicePixelRatio();
         GetWindowRect(_parentNativeWidget->Handle(), &rc);
@@ -255,7 +255,7 @@ void SubMainFrame::OnParentNativeEvent(ParentNativeEvent msg)
 void SubMainFrame::close()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         _parentNativeWidget->SetClosing(true);
         ::ShowWindow(_parentNativeWidget->Handle(), SW_HIDE);
     }
@@ -266,15 +266,15 @@ void SubMainFrame::close()
 void SubMainFrame::closeEvent(QCloseEvent *event)
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
-        SetParent((HWND)winId(), NULL);
-        _parentNativeWidget->SetChildWidget(NULL);
+    if (_parentNativeWidget != nullptr){
+        SetParent((HWND)winId(), nullptr);
+        _parentNativeWidget->SetChildWidget(nullptr);
     }
 #endif
 
     QWidget *content = _contentWidget;
     if (content) {
-        content->setParent(NULL);
+        content->setParent(nullptr);
         content->hide();
     }
 
@@ -286,7 +286,7 @@ void SubMainFrame::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
-    if (_layout == NULL){
+    if (_layout == nullptr){
         return;
     }
 
@@ -343,7 +343,7 @@ void SubMainFrame::showMinimized()
 
 void SubMainFrame::hide_border()
 {
-    if (_top_left == NULL)
+    if (_top_left == nullptr)
         return;
 
     _top_left->setVisible(false);
@@ -358,7 +358,7 @@ void SubMainFrame::hide_border()
 
 void SubMainFrame::show_border()
 {
-    if (_top_left == NULL)
+    if (_top_left == nullptr)
         return;
 
     _top_left->setVisible(true);
@@ -374,7 +374,7 @@ void SubMainFrame::show_border()
 void SubMainFrame::SetFormRegion(int x, int y, int w, int h)
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         int k = _parentNativeWidget->GetDevicePixelRatio();
         x *= k;
         y *= k;
@@ -392,7 +392,7 @@ QRect SubMainFrame::GetFormRegion()
     QRect rc;
 
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         int k = _parentNativeWidget->GetDevicePixelRatio();
         RECT r;
         GetWindowRect(_parentNativeWidget->Handle(), &r);
@@ -415,7 +415,7 @@ QRect SubMainFrame::GetFormRegion()
 bool SubMainFrame::IsMaxsized()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return _parentNativeWidget->IsMaxsized();
     }
 #endif
@@ -425,7 +425,7 @@ bool SubMainFrame::IsMaxsized()
 bool SubMainFrame::IsNormalsized()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return _parentNativeWidget->IsNormalsized();
     }
 #endif
@@ -441,7 +441,7 @@ bool SubMainFrame::eventFilter(QObject *object, QEvent *event)
     const QMouseEvent *const mouse_event = (QMouseEvent*)event;
 
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return QMainWindow::eventFilter(object, event);
     }
 #endif
@@ -574,7 +574,7 @@ bool SubMainFrame::eventFilter(QObject *object, QEvent *event)
 bool SubMainFrame::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL)
+    if (_parentNativeWidget != nullptr)
     {
         MSG *msg = static_cast<MSG*>(message);
         HWND hwnd = _parentNativeWidget->Handle();

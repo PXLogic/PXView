@@ -29,7 +29,7 @@
 #include <QTimer>
 
 namespace {
-QTimer *move_timer = NULL;
+QTimer *move_timer = nullptr;
 }
 
 KeywordLineEdit::KeywordLineEdit(QWidget *parent, IKeywordActive *active)
@@ -40,7 +40,7 @@ KeywordLineEdit::KeywordLineEdit(QWidget *parent, IKeywordActive *active)
 }
 
 void KeywordLineEdit::mousePressEvent(QMouseEvent *e) {
-  if (e->button() == Qt::LeftButton && _active != NULL) {
+  if (e->button() == Qt::LeftButton && _active != nullptr) {
     _active->BeginEditKeyword();
   }
   QLineEdit::mousePressEvent(e);
@@ -169,7 +169,7 @@ void KeyLineEdit::set_number_mode(bool isNumberMode) {
     QIntValidator *validator = new QIntValidator();
     setValidator(validator);
   } else {
-    setValidator(NULL);
+    setValidator(nullptr);
   }
 }
 
@@ -177,7 +177,7 @@ void KeyLineEdit::set_number_mode(bool isNumberMode) {
 PopupLineEditInput::PopupLineEditInput(QWidget *parent) : QDialog(parent) {
   setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint |
                  Qt::WindowSystemMenuHint);
-  _line = NULL;
+  _line = nullptr;
 
   QHBoxLayout *lay = new QHBoxLayout();
   lay->setContentsMargins(0, 0, 0, 0);
@@ -207,15 +207,15 @@ void PopupLineEditInput::InputRelease() {
   this->close();
   this->deleteLater();
 
-  if (move_timer != NULL) {
+  if (move_timer != nullptr) {
     move_timer->stop();
     delete move_timer;
-    move_timer = NULL;
+    move_timer = nullptr;
   }
 }
 
 void PopupLineEditInput::onCheckPositionTimeout() {
-  if (_line != NULL) {
+  if (_line != nullptr) {
     QPoint p1 = _line->pos();
     QPoint p2 = _line->mapToGlobal(p1);
     int x = p2.x() - p1.x();
@@ -230,7 +230,7 @@ void PopupLineEditInput::onCheckPositionTimeout() {
 
 void PopupLineEditInput::Popup(QWidget *editline) {
   if (!editline) {
-    pxv_warn("%s", "PopupLineEditInput::Popup: editline is NULL");
+    pxv_warn("%s", "PopupLineEditInput::Popup: editline is nullptr");
     return;
   }
   assert(editline);
@@ -248,10 +248,10 @@ void PopupLineEditInput::Popup(QWidget *editline) {
   _textInput->setFocus();
   _textInput->setCursorPosition(_textInput->text().length());
 
-  if (move_timer != NULL) {
+  if (move_timer != nullptr) {
     move_timer->stop();
     delete move_timer;
-    move_timer = NULL;
+    move_timer = nullptr;
   }
   move_timer = new QTimer(this);
   move_timer->setInterval(100);
@@ -269,7 +269,7 @@ PopupLineEdit::PopupLineEdit(const QString &text, QWidget *parent)
     : KeyLineEdit(text, parent) {
   _is_number_mode = false;
   _is_instant = false;
-  _popup_input = NULL;
+  _popup_input = nullptr;
   _min = 0;
   _max = 0;
 }
@@ -300,7 +300,7 @@ void PopupLineEdit::showPupopInput() {
     }
   } else {
     auto regular = this->validator();
-    if (regular != NULL) {
+    if (regular != nullptr) {
       line->setValidator(regular);
     }
   }
@@ -321,7 +321,7 @@ void PopupLineEdit::showPupopInput() {
 }
 
 void PopupLineEdit::onPopupInputEditEnd(QString text) {
-  _popup_input = NULL;
+  _popup_input = nullptr;
 
   this->setText(text);
   this->setFocus();
@@ -354,9 +354,9 @@ void PopupLineEdit::show() {
 }
 
 void PopupLineEdit::hide() {
-  if (_popup_input != NULL) {
+  if (_popup_input != nullptr) {
     _popup_input->input_close();
-    _popup_input = NULL;
+    _popup_input = nullptr;
   }
 
   QLineEdit::hide();
@@ -365,7 +365,7 @@ void PopupLineEdit::hide() {
 void PopupLineEdit::setRange(int min, int max) {
   KeyLineEdit::setRange(min, max);
 
-  if (_popup_input != NULL) {
+  if (_popup_input != nullptr) {
     _popup_input->GetInput()->setRange(min, max);
   }
 }

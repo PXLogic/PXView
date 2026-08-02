@@ -27,7 +27,7 @@
 #include "signal.h"
 #include "../dstimer.h"
 #include <libsigrok/libsigrok.h>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include <QElapsedTimer>
 #include <memory>
 

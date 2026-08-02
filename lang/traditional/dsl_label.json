@@ -242,5 +242,9 @@
     {
         "id": "Disk Cache Path",
         "text": "快取路徑"
+    },
+    {
+        "id": "pattern",
+        "text": "波形"
     }
 ]

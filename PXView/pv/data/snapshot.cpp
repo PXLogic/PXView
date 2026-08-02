@@ -24,9 +24,9 @@
 
 #include "snapshot.h"
 #include "../log.h"
-#include <assert.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
  
 namespace pv {
 namespace data {

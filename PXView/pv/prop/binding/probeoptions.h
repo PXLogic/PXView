@@ -24,8 +24,7 @@
 #ifndef PXVIEW_PV_PROP_BINDING_PROBEOPTIONS_H
 #define PXVIEW_PV_PROP_BINDING_PROBEOPTIONS_H
 
-#include <boost/function.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 
 #include <QString>
 #include <libsigrok/libsigrok.h> 
@@ -56,13 +55,13 @@ private:
     void bind_bool(const QString &name, const QString label, int key);
     void bind_enum(const QString &name, const QString label, int key,
 		GVariant *const gvar_list,
-		boost::function<QString (GVariant*)> printer = print_gvariant);
+		std::function<QString (GVariant*)> printer = print_gvariant);
     void bind_int(const QString &name, const QString label, int key, QString suffix,
-		boost::optional< std::pair<int64_t, int64_t> > range);
+		std::optional< std::pair<int64_t, int64_t> > range);
 
     void bind_double(const QString &name, const QString label, int key, QString suffix,
-        boost::optional<std::pair<double, double> > range,
-        int decimals, boost::optional<double> step);
+        std::optional<std::pair<double, double> > range,
+        int decimals, std::optional<double> step);
 
 	static QString print_gvariant(GVariant *const gvar);
 
@@ -73,6 +72,7 @@ private:
 
 	static QString print_vdiv(GVariant *const gvar);
     static QString print_coupling(GVariant *const gvar);
+    static QString print_pattern(GVariant *const gvar);
 
 protected:
 	struct sr_channel *const _probe;

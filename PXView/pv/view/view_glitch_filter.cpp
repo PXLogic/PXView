@@ -46,7 +46,7 @@
 #include "../data/decode/decoder.h"
 #include "../data/decoderstack.h"
 #include "../data/pulse_analyzer.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../sigsession.h"
 #include "../ui/toast.h"
 

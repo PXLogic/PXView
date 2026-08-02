@@ -16,7 +16,7 @@
 #include <QString>
 #include <map>
 #include <memory>
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 
 class DeviceAgent;

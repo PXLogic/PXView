@@ -24,7 +24,7 @@
 #ifndef PXVIEW_PV_VIEW_VIEWPORT_H
 #define PXVIEW_PV_VIEW_VIEWPORT_H
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <QElapsedTimer>
 #include <QNativeGestureEvent>
@@ -35,7 +35,7 @@
 #include <memory>
 
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../interface/icallbacks.h"
 #include "../ui/uimanager.h"
 #include "../view/view.h"

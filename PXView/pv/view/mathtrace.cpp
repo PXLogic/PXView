@@ -21,7 +21,7 @@
  */
 
 
-#include <math.h>
+#include <cmath>
 #include <QTimer>
 #include "mathtrace.h"
 #include "../data/dsosnapshot.h"
@@ -29,7 +29,7 @@
 #include "view.h"
 #include "../sigsession.h"
 #include "../view/dsosignal.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "viewport.h"
   
 using namespace std;

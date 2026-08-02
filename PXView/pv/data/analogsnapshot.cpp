@@ -21,15 +21,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <assert.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
+#include <cassert>
+#include <cstring>
+#include <cstdlib>
+#include <cmath>
 #include <algorithm>
 #include <string>
  
 #include "analogsnapshot.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 
 using namespace std;
@@ -48,7 +48,7 @@ AnalogSnapshot::AnalogSnapshot() :
 {
 	memset(_envelope_levels, 0, sizeof(_envelope_levels));
     _unit_pitch = 0;
-    _data  = NULL; 
+    _data  = nullptr; 
 }
 
 AnalogSnapshot::~AnalogSnapshot()
@@ -117,9 +117,9 @@ void AnalogSnapshot::free_data()
 {
     Snapshot::free_data();
 
-    if (_data != NULL){
+    if (_data != nullptr){
         free(_data);
-        _data = NULL;
+        _data = nullptr;
     }
 }
 
@@ -162,9 +162,9 @@ void AnalogSnapshot::copy_from(const AnalogSnapshot &src)
             dst_env.ring_length = src_env.ring_length;
             dst_env.count = src_env.count;
             dst_env.data_length = src_env.data_length;
-            dst_env.samples = NULL;
-            dst_env.max = NULL;
-            dst_env.min = NULL;
+            dst_env.samples = nullptr;
+            dst_env.max = nullptr;
+            dst_env.min = nullptr;
 
             if (src_env.count > 0) {
                 dst_env.samples = (EnvelopeSample *)malloc(src_env.count * sizeof(EnvelopeSample));
@@ -367,7 +367,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
     // 不能用全局 _ring_sample_count（那会在 A1 写入时从 A0 的末尾继续）。
 
     if (!analog.meaning || !analog.meaning->channels || !analog.data) {
-        pxv_warn("AnalogSnapshot::append_data_partial: null meaning/channels/data");
+        pxv_warn("AnalogSnapshot::append_data_partial: nullptr meaning/channels/data");
         return;
     }
 

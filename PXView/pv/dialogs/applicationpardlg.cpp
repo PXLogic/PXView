@@ -234,7 +234,7 @@ namespace dialogs {
 ApplicationParamDlg::ApplicationParamDlg()
     : _nav_list(nullptr), _page_stack(nullptr), _ck_quickScroll(nullptr),
       _ck_trigInMid(nullptr), _ck_profileBar(nullptr), _ck_abortData(nullptr),
-      _ck_autoScrollLatestData(nullptr),
+      _ck_autoScrollLatestData(nullptr), _ck_promptSaveOnExit(nullptr),
       _shortcut_list(nullptr), _shortcut_selected_row(-1), _btn_accept(nullptr),
       _btn_restore(nullptr), _btn_reset_default(nullptr), _btn_delete(nullptr),
       _clash_warning_label(nullptr), _style_category_tree(nullptr),
@@ -270,6 +270,9 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
 
   _ck_autoScrollLatestData = new QCheckBox();
   _ck_autoScrollLatestData->setChecked(app.appOptions.autoScrollLatestData);
+
+  _ck_promptSaveOnExit = new QCheckBox();
+  _ck_promptSaveOnExit->setChecked(app.appOptions.promptSaveOnExit);
 
   QGroupBox *logicGroup =
       new QGroupBox(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_GROUP_LOGIC), "Logic"));
@@ -317,6 +320,11 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
                      "Profile in bar")),
       0, 0, Qt::AlignLeft);
   uiLay->addWidget(_ck_profileBar, 0, 1, Qt::AlignRight);
+  uiLay->addWidget(
+      new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PROMPT_SAVE_ON_EXIT),
+                     "Prompt to save data on exit")),
+      1, 0, Qt::AlignLeft);
+  uiLay->addWidget(_ck_promptSaveOnExit, 1, 1, Qt::AlignRight);
   lay->addWidget(uiGroup);
 
   lay->addStretch();
@@ -1572,6 +1580,10 @@ void ApplicationParamDlg::saveDisplayOptions() {
   if (app.appOptions.autoScrollLatestData !=
       _ck_autoScrollLatestData->isChecked()) {
     app.appOptions.autoScrollLatestData = _ck_autoScrollLatestData->isChecked();
+    bAppChanged = true;
+  }
+  if (app.appOptions.promptSaveOnExit != _ck_promptSaveOnExit->isChecked()) {
+    app.appOptions.promptSaveOnExit = _ck_promptSaveOnExit->isChecked();
     bAppChanged = true;
   }
 

@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <assert.h>
+#include <cassert>
 
 #include <QLineEdit>
 #include <QSpinBox>
@@ -36,8 +36,8 @@ namespace pv {
 namespace prop {
 
 String::String(QString name, QString label, Getter getter, Setter setter)
-    : Property(name, label, getter, setter), _line_edit(NULL),
-      _browse_btn(NULL), _container(NULL) {}
+    : Property(name, label, getter, setter), _line_edit(nullptr),
+      _browse_btn(nullptr), _container(nullptr) {}
 
 bool String::is_path_or_dir() {
   return name().contains("path", Qt::CaseInsensitive) ||
@@ -48,9 +48,9 @@ QWidget *String::get_widget(QWidget *parent, bool auto_commit) {
   if (_container)
     return _container;
 
-  GVariant *const value = _getter ? _getter() : NULL;
+  GVariant *const value = _getter ? _getter() : nullptr;
   if (!value)
-    return NULL;
+    return nullptr;
 
   _container = new QWidget(parent);
   QHBoxLayout *layout = new QHBoxLayout(_container);
@@ -75,7 +75,7 @@ QWidget *String::get_widget(QWidget *parent, bool auto_commit) {
   }
 
   _line_edit = new QLineEdit(_container);
-  _line_edit->setText(QString::fromUtf8(g_variant_get_string(value, NULL)));
+  _line_edit->setText(QString::fromUtf8(g_variant_get_string(value, nullptr)));
   g_variant_unref(value);
   layout->addWidget(_line_edit);
 

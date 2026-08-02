@@ -64,6 +64,7 @@ signals:
     void sig_load_file(QString); 
     void sig_save();
     void sig_export();
+    void sig_import_file(QString); //post import data file event message
     void sig_screenShot(); //post screen capture event message
     void sig_load_session(QString); //post load session event message
     void sig_store_session(QString); //post store session event message
@@ -73,6 +74,7 @@ private slots:
     void on_actionStore_triggered();
     void on_actionDefault_triggered();
     void on_actionOpen_triggered();
+    void on_actionImport_triggered();
     void on_actionCapture_triggered();
 
 public:
@@ -87,6 +89,7 @@ public:
     QAction *_action_open;
     QAction *_action_save;
     QAction *_action_export;
+    QAction *_action_import;
     QAction *_action_capture;
 };
 

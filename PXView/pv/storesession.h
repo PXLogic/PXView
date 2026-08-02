@@ -23,7 +23,7 @@
 #ifndef PXVIEW_PV_STORESESSION_H
 #define PXVIEW_PV_STORESESSION_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <thread>  
 #include <QObject>
@@ -156,11 +156,11 @@ private:
 	uint64_t        _unit_count;
     bool            _has_error;
 	QString         _error;
-    volatile bool   _canceled;
+    std::atomic<bool> _canceled{false};
     ZipMaker        m_zipDoc;  
     uint64_t        _start_index;
     uint64_t        _end_index;
-    volatile bool   _is_busy;
+    std::atomic<bool> _is_busy{false};
     uint64_t        _analog_downsample_ratio = 1;
     bool            _iso8601_timestamp = false;
     std::vector<int32_t> _export_channels;

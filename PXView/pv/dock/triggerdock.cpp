@@ -36,7 +36,7 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <libsigrok/libsigrok.h>
-#include <math.h>
+#include <cmath>
 
 
 #include <QRegularExpression>
@@ -85,9 +85,9 @@ TriggerDock::TriggerDock(QWidget *parent, SigSession *session)
     _session->get_device()->get_config_int16(SR_CONF_TOTAL_CH_NUM, _cur_ch_num);
   }
 
-  _serial_hex_label = NULL;
-  _serial_hex_lineEdit = NULL;
-  _serial_hex_ck_label = NULL;
+  _serial_hex_label = nullptr;
+  _serial_hex_lineEdit = nullptr;
+  _serial_hex_ck_label = nullptr;
   _is_serial_val_setting = false;
 
   _widget = new QWidget(this);
@@ -285,7 +285,7 @@ void TriggerDock::widget_enable(int index) {
 
 void TriggerDock::value_changed() {
   PopupLineEdit *sc = dynamic_cast<PopupLineEdit *>(sender());
-  if (sc != NULL) {
+  if (sc != nullptr) {
     for (int i = 0; i < TriggerProbes * 2 - 1; i++) {
       if ((i >= sc->text().size()) || (i % 2 == 0 && sc->text().at(i) == ' ')) {
         sc->setText(sc->text().insert(i, 'X'));
@@ -1252,7 +1252,7 @@ void TriggerDock::setup_adv_tab() {
 }
 
 void TriggerDock::lineEdit_highlight(PopupLineEdit *dst) {
-  if (dst == NULL)
+  if (dst == nullptr)
     return;
 
   QTextCharFormat fmt;
@@ -1402,7 +1402,7 @@ void TriggerDock::on_serial_hex_changed() {
     }
 
     const char *str = s.toLocal8Bit().data();
-    char *endptr = NULL;
+    char *endptr = nullptr;
     unsigned long val = strtoul(str, &endptr, 16);
     char buffer[18];
     AnnotationResTable::decimalToBinString(val, 16, buffer, sizeof(buffer));
@@ -1458,7 +1458,7 @@ void TriggerDock::UpdateFont() {
 
 void TriggerDock::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "TriggerDock::bind_context: ctx is NULL");
+    pxv_warn("%s", "TriggerDock::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);

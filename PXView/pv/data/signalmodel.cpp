@@ -120,7 +120,7 @@ void SignalModel::set_coupling(int coupling) {
             DeviceAgent *device = _session->get_device();
             if (device && device->have_instance()) {
                 device->set_config_int32(SR_CONF_PROBE_COUPLING, coupling,
-                                         _sr_channel, NULL);
+                                         _sr_channel, nullptr);
             }
         }
         emit appearance_changed();
@@ -135,7 +135,7 @@ void SignalModel::set_vfactor(double vfactor) {
             DeviceAgent *device = _session->get_device();
             if (device && device->have_instance()) {
                 device->set_config_uint64(SR_CONF_PROBE_FACTOR,
-                                          (uint64_t)vfactor, _sr_channel, NULL);
+                                          (uint64_t)vfactor, _sr_channel, nullptr);
             }
         }
         emit appearance_changed();
@@ -149,7 +149,7 @@ void SignalModel::set_map_default(bool map_default) {
             DeviceAgent *device = _session->get_device();
             if (device && device->have_instance()) {
                 device->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                        _sr_channel, NULL);
+                                        _sr_channel, nullptr);
             }
         }
         emit appearance_changed();
@@ -157,7 +157,7 @@ void SignalModel::set_map_default(bool map_default) {
 }
 
 // ---- Probe configuration (explicit sr_channel override) ----
-// Pattern: follow set_vdiv — use the explicit |probe| if non-null, else
+// Pattern: follow set_vdiv — use the explicit |probe| if non-nullptr, else
 // fall back to the model's _sr_channel. In headless mode (no sr_channel and
 // no session), only update the model field without touching libsigrok.
 
@@ -168,7 +168,7 @@ void SignalModel::set_probe_enabled(bool enabled, struct sr_channel *probe) {
         if (ch && _session) {
             DeviceAgent *device = _session->get_device();
             if (device && device->have_instance()) {
-                device->set_config_bool(SR_CONF_PROBE_EN, enabled, ch, NULL);
+                device->set_config_bool(SR_CONF_PROBE_EN, enabled, ch, nullptr);
             }
         }
         if (_sr_channel) {
@@ -184,7 +184,7 @@ void SignalModel::set_probe_offset(uint16_t offset, struct sr_channel *probe) {
         DeviceAgent *device = _session->get_device();
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
-                                      ch, NULL);
+                                      ch, nullptr);
         }
     }
     // Fork libsigrok's sr_channel had a `zero_offset` field; upstream
@@ -199,7 +199,7 @@ void SignalModel::set_probe_factor(uint64_t factor, struct sr_channel *probe) {
         DeviceAgent *device = _session->get_device();
         if (device && device->have_instance()) {
             device->set_config_uint64(SR_CONF_PROBE_FACTOR, factor,
-                                      ch, NULL);
+                                      ch, nullptr);
         }
     }
     // Fork libsigrok's sr_channel had a `vfactor` field; upstream
@@ -227,9 +227,17 @@ void SignalModel::set_trigger_value(double value, struct sr_channel *probe) {
     (void)probe;
     // Update the model field regardless of probe override.
     _trig_value = value;
-    // Fork libsigrok's sr_channel had a `trig_value` field; upstream
-    // libsigrok does not. Hardware sync above is sufficient — model state
-    // is tracked in _trig_value.
+    /* Send the trigger level to the driver so that trigger detection
+     * (e.g. demo_send_dso_packet edge crossing) uses the correct threshold.
+     * Without this, the driver keeps the default trigger value and the
+     * waveform does not respond to cursor movement. */
+    struct sr_channel *ch = probe ? probe : _sr_channel;
+    if (ch && _session) {
+        DeviceAgent *device = _session->get_device();
+        if (device && device->have_instance()) {
+            device->set_config_int32(SR_CONF_TRIGGER_VALUE, (int)value, ch, nullptr);
+        }
+    }
 }
 
 bool SignalModel::commit_trig()
@@ -259,7 +267,7 @@ void SignalModel::set_zero_offset(double offset) {
         DeviceAgent *device = _session->get_device();
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
-                                      _sr_channel, NULL);
+                                      _sr_channel, nullptr);
         }
     }
 }
@@ -273,7 +281,7 @@ void SignalModel::set_hw_offset(double offset) {
         DeviceAgent *device = _session->get_device();
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, (int)offset,
-                                      _sr_channel, NULL);
+                                      _sr_channel, nullptr);
         }
     }
 }
@@ -312,15 +320,15 @@ void SignalModel::commit_to_device()
     DeviceAgent *device = _session->get_device();
     if (device == nullptr || !device->have_instance()) return;
 
-    device->set_config_bool(SR_CONF_PROBE_EN, _enabled, _sr_channel, NULL);
+    device->set_config_bool(SR_CONF_PROBE_EN, _enabled, _sr_channel, nullptr);
     device->set_config_uint64(SR_CONF_PROBE_FACTOR, (uint64_t)_vfactor,
-                              _sr_channel, NULL);
+                              _sr_channel, nullptr);
     device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)_zero_offset,
-                              _sr_channel, NULL);
+                              _sr_channel, nullptr);
     device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, (int)_hw_offset,
-                              _sr_channel, NULL);
+                              _sr_channel, nullptr);
     device->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, _map_default,
-                            _sr_channel, NULL);
+                            _sr_channel, nullptr);
 }
 
 } // namespace data

@@ -49,6 +49,7 @@
         <file>icons/light/del.svg</file>
         <file>icons/light/display.svg</file>
         <file>icons/light/export.svg</file>
+        <file>icons/light/import.svg</file>
         <file>icons/light/fft.svg</file>
         <file>icons/light/file.svg</file>
         <file>icons/light/gear.svg</file>
@@ -84,6 +85,7 @@
         <file>icons/dark/del.svg</file>
         <file>icons/dark/display.svg</file>
         <file>icons/dark/export.svg</file>
+        <file>icons/dark/import.svg</file>
         <file>icons/dark/fft.svg</file>
         <file>icons/dark/file.svg</file>
         <file>icons/dark/gear.svg</file>

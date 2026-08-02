@@ -21,8 +21,8 @@
  */
 
 #include <algorithm>
-#include <assert.h>
-#include <math.h>
+#include <cassert>
+#include <cmath>
 #include <mutex>
 
 #include "rowdata.h"

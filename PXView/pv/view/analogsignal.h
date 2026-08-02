@@ -189,7 +189,7 @@ private:
 
     QRectF *_rects;
     // 性能修复: paint_trace 复用成员缓冲，避免每帧 new/delete QPointF[]。
-    // 与 _rects 同生命周期管理 (构造 NULL / 析构+resize 释放 / 按需扩容)。
+    // 与 _rects 同生命周期管理 (构造 nullptr / 析构+resize 释放 / 按需扩容)。
     QPointF *_points;
     int64_t _points_cap;
 

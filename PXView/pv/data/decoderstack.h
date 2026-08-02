@@ -25,7 +25,8 @@
 
 #include <libsigrokdecode.h>
 #include <list>
-#include <boost/optional.hpp>
+#include <atomic>
+#include <optional>
 #include <QObject>
 #include <QString>
 #include <mutex> 
@@ -61,8 +62,8 @@ class RowData;
 class DecoderStack;
 
 struct decode_task_status
-{  
-    volatile bool _bStop;
+{
+    std::atomic<bool> _bStop{false};
     DecoderStack *_decoder;
 };
 
@@ -211,7 +212,7 @@ public:
     // Set by callers (e.g. SigSession) to mark a stack for asynchronous
     // deletion by the decode thread. Mirrors the legacy
     // view::DecodeTrace::_delete_flag mechanism.
-    volatile bool _delete_flag = false;
+    std::atomic<bool> _delete_flag{false};
 
 private:
     void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
@@ -237,8 +238,8 @@ private:
     uint64_t        _handle_id = 0;
     uint64_t        _version = 0;
     decode_state    _decode_state;
-    volatile bool   _options_changed;
-    volatile bool   _no_memory;
+    std::atomic<bool> _options_changed{false};
+    std::atomic<bool> _no_memory{false};
     int64_t         _mark_index;
 
     DecoderStatus   *_decoder_status;

@@ -47,7 +47,7 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/deviceagent.cpp
     PXView/pv/dstimer.cpp
     PXView/pv/eventobject.cpp
-    PXView/pv/dsvdef.cpp
+    PXView/pv/pxvdef.cpp
     PXView/pv/ZipMaker.cpp
     PXView/pv/storesession.cpp
     PXView/pv/tabcontext.cpp

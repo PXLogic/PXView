@@ -23,19 +23,19 @@
 #include <libsigrokdecode.h>
 
 #include <vector>
-#include <assert.h>
+#include <cassert>
 #include <stdexcept>
 
 #include "annotation.h"
 #include "annotationrestable.h"
 #include <cstring>
-#include <assert.h>
-#include <string.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cstring>
+#include <cstdlib>
 
 #include "../../config/appconfig.h"
 #include "decoderstatus.h"
-#include "../../dsvdef.h"
+#include "../../pxvdef.h"
  
 
 namespace pv {
@@ -45,17 +45,17 @@ namespace decode {
 Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 {
 	if (!pdata) {
-		throw std::invalid_argument("Annotation: pdata is NULL");
+		throw std::invalid_argument("Annotation: pdata is nullptr");
 	}
 	assert(pdata);
 	const srd_proto_data_annotation *const pda =
 		(const srd_proto_data_annotation*)pdata->data;
 	if (!pda) {
-		throw std::invalid_argument("Annotation: pda is NULL");
+		throw std::invalid_argument("Annotation: pda is nullptr");
 	}
 	assert(pda);
 	if (!status) {
-		throw std::invalid_argument("Annotation: status is NULL");
+		throw std::invalid_argument("Annotation: status is nullptr");
 	}
 	assert(status);
 
@@ -82,11 +82,11 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 		key.append(pda->str_number_hex, strlen(pda->str_number_hex));
 	}
  
-	AnnotationSourceItem *resItem = NULL;
+	AnnotationSourceItem *resItem = nullptr;
     _resIndex = _status->m_resTable.MakeIndex(key, resItem);
      
      //is a new item
-	if (resItem != NULL){ 
+	if (resItem != nullptr){ 
         char **annotations = pda->ann_text;
     	while(annotations && *annotations) {
 			if ((*annotations)[0] != '\n'){
@@ -102,7 +102,7 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 			if (str_len <= DECODER_MAX_DATA_BLOCK_LEN){
 				resItem->str_number_hex = (char*)malloc(str_len + 1);
 			
-				if (resItem->str_number_hex != NULL){
+				if (resItem->str_number_hex != nullptr){
 					strcpy(resItem->str_number_hex, pda->str_number_hex);
 					resItem->is_numeric = true;
 				}
@@ -140,7 +140,7 @@ const std::vector<QString>& Annotation::annotations() const
         return resItem.src_lines;
      }
 
-	//resItem.str_number_hex must be not null
+	//resItem.str_number_hex must be not nullptr
 	if (resItem.str_number_hex[0] == 0){
 		assert(false);
 	}
@@ -152,7 +152,7 @@ const std::vector<QString>& Annotation::annotations() const
 		 if (resItem.src_lines.size() > 0)
 		 { 
 			 int 	text_format_buf_len = 0;
-			 char  *text_format_buf = NULL;
+			 char  *text_format_buf = nullptr;
 
 			 //have custom string
 			 for (QString &rd_src : resItem.src_lines)

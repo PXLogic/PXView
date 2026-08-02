@@ -45,37 +45,37 @@ public:
     uint64_t get_ring_start();
     uint64_t get_ring_end();
 
-    inline int unit_size(){
+    [[nodiscard]] inline int unit_size(){
         return _unit_size;
     }
 
-    inline uint8_t get_unit_bytes(){
+    [[nodiscard]] inline uint8_t get_unit_bytes(){
         return _unit_bytes;
     }
 
     // 上游 libsigrok analog 数据可能是 float 格式（encoding->is_float）。
     // AnalogSignal::paint_trace 需据此选择读取方式。
-    inline bool is_float() const { return _is_float; }
+    [[nodiscard]] inline bool is_float() const { return _is_float; }
 
-    inline bool memory_failed(){
+    [[nodiscard]] inline bool memory_failed(){
         return _memory_failed;
     }
 
     bool empty();
 
-    inline bool last_ended(){
+    [[nodiscard]] inline bool last_ended(){
         return _last_ended;
     }
 
-    inline unsigned int get_channel_num(){
+    [[nodiscard]] inline unsigned int get_channel_num(){
         return _channel_num;
     }
 
-    inline bool have_data(){
+    [[nodiscard]] inline bool have_data(){
         return !empty();
     }
 
-    inline double samplerate(){
+    [[nodiscard]] inline double samplerate(){
         return _samplerate; 
     }
 

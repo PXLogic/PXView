@@ -22,15 +22,15 @@
 #include "row.h"
 
 #include <libsigrokdecode.h>
-#include <assert.h>
+#include <cassert>
 
 namespace pv {
 namespace data {
 namespace decode {
 
 Row::Row() :
-	_decoder(NULL),
-    _row(NULL),
+	_decoder(nullptr),
+    _row(nullptr),
     _order(-1)
 {
 }

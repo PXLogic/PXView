@@ -21,7 +21,7 @@
  */
 
 #include "dstimer.h" 
-#include <assert.h>
+#include <cassert>
 
  
 DsTimer::DsTimer()
@@ -43,7 +43,7 @@ void DsTimer::TimeOut(int millsec, CALLBACL_FUNC f)
 
 void DsTimer::TimeOut(int millsec)
 {
-    if (_call == NULL){
+    if (_call == nullptr){
         assert(false);
     }
     QTimer::singleShot(millsec, this, &DsTimer::on_timeout);

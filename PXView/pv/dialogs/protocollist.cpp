@@ -35,7 +35,6 @@
 
 #include "../ui/langresource.h"
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -72,8 +71,8 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
             _protocol_combobox->setCurrentIndex(index);
         index++;
     }
-    _protocol_combobox->addItem("", QVariant::fromValue(NULL));
-    if (decoder_model->getDecoderStack() == NULL)
+    _protocol_combobox->addItem("", QVariant::fromValue(nullptr));
+    if (decoder_model->getDecoderStack() == nullptr)
         _protocol_combobox->setCurrentIndex(index);
 
     _flayout = new QFormLayout();
@@ -119,20 +118,20 @@ void ProtocolList::set_protocol(int index)
 
     for(std::list<QCheckBox *>::const_iterator i = _show_checkbox_list.begin();
         i != _show_checkbox_list.end(); i++) {
-        (*i)->setParent(NULL);
+        (*i)->setParent(nullptr);
         _flayout->removeWidget((*i));
         delete (*i);
     }
     _show_checkbox_list.clear();
     for(std::list<QLabel *>::const_iterator i = _show_label_list.begin();
         i != _show_label_list.end(); i++) {
-        (*i)->setParent(NULL);
+        (*i)->setParent(nullptr);
         _flayout->removeWidget((*i));
         delete (*i);
     }
     _show_label_list.clear();
 
-    pv::data::DecoderStack *decoder_stack = NULL;
+    pv::data::DecoderStack *decoder_stack = nullptr;
     const auto &decode_sigs = _session->get_decoder_stacks();
     int cur_index = 0;
 
@@ -145,7 +144,7 @@ void ProtocolList::set_protocol(int index)
     }
 
     if (!decoder_stack){
-        _decoder_model->setDecoderStack(NULL);
+        _decoder_model->setDecoderStack(nullptr);
         return;
     }
 
@@ -174,7 +173,7 @@ void ProtocolList::on_row_check(bool show)
     QVariant id = sc->property("index");
     int index = id.toInt();
 
-    pv::data::DecoderStack *decoder_stack = NULL;
+    pv::data::DecoderStack *decoder_stack = nullptr;
     const auto &decode_sigs = _session->get_decoder_stacks();
     int cur_index = 0;
 

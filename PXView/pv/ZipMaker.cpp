@@ -21,18 +21,18 @@
  */
 
 #include "ZipMaker.h" 
-#include <assert.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
 #include <sys/stat.h>
 #include <time.h>
   
 ZipMaker::ZipMaker() :
-    m_zDoc(NULL)
+    m_zDoc(nullptr)
 {
     m_error[0] = 0; 
     m_opt_compress_level = Z_BEST_SPEED;
-    m_zi = NULL;
+    m_zi = nullptr;
 }
 
 ZipMaker::~ZipMaker()
@@ -49,7 +49,7 @@ bool ZipMaker::CreateNew(const char *fileName, bool bAppend)
      Release();
  
      m_zDoc = zipOpen64(fileName, bAppend); 
-     if (m_zDoc == NULL) {
+     if (m_zDoc == nullptr) {
         strcpy(m_error, "zipOpen64 error");
     } 
 
@@ -71,25 +71,25 @@ bool ZipMaker::CreateNew(const char *fileName, bool bAppend)
     zi.tmz_date.tm_sec  = ti.tm_sec;
     zi.dosDate = 0;
       
-    return m_zDoc != NULL;
+    return m_zDoc != nullptr;
 }
 
 void ZipMaker::Release()
 {  
     if (m_zDoc){
-       zipClose((zipFile)m_zDoc, NULL);
-       m_zDoc = NULL;       
+       zipClose((zipFile)m_zDoc, nullptr);
+       m_zDoc = nullptr;       
    }
    if (m_zi){
        delete ((zip_fileinfo*)m_zi);
-       m_zi = NULL;
+       m_zi = nullptr;
    }
 }
 
 bool ZipMaker::Close(){
     if (m_zDoc){
-       zipClose((zipFile)m_zDoc, NULL);
-       m_zDoc = NULL;
+       zipClose((zipFile)m_zDoc, nullptr);
+       m_zDoc = nullptr;
        return true;
    }
    return false;     
@@ -109,7 +109,7 @@ bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, unsigned
     }
 
     zipOpenNewFileInZip((zipFile)m_zDoc,innerFile,(zip_fileinfo*)m_zi,
-                                NULL,0,NULL,0,NULL ,
+                                nullptr,0,nullptr,0,nullptr ,
                                 Z_DEFLATED,
                                 level);
 
@@ -128,10 +128,10 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
 
     struct stat st;
     FILE *fp;
-    char *data = NULL;
+    char *data = nullptr;
     long long size = 0;
 
-    if ((fp = fopen(localFile, "rb")) == NULL) {
+    if ((fp = fopen(localFile, "rb")) == nullptr) {
         strcpy(m_error, "fopen error");        
         return false;
     }
@@ -142,7 +142,7 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
         return -1;
     } 
 
-    if ((data = (char*)malloc((size_t)st.st_size)) == NULL) {
+    if ((data = (char*)malloc((size_t)st.st_size)) == nullptr) {
         strcpy(m_error, "can't malloc buffer");
         fclose(fp);
         return false;
@@ -166,7 +166,7 @@ const char *ZipMaker::GetError()
 {
     if (m_error[0])
         return m_error;
-    return NULL;
+    return nullptr;
 }
 
 //-----------------ZipReader
@@ -179,15 +179,15 @@ ZipInnerFileData::ZipInnerFileData(char *data, int size)
 
 ZipInnerFileData::~ZipInnerFileData()
 {
-    if (_data != NULL){
+    if (_data != nullptr){
         free(_data);
-        _data = NULL;
+        _data = nullptr;
     }
 }
 
 ZipReader::ZipReader(const char *filePath)
 {
-    m_archive = NULL;
+    m_archive = nullptr;
     m_archive = unzOpen64(filePath);
 }
 
@@ -198,36 +198,36 @@ ZipReader::~ZipReader()
 
 void ZipReader::Close()
 {
-    if (m_archive != NULL){
+    if (m_archive != nullptr){
         unzClose(m_archive);
-        m_archive = NULL;
+        m_archive = nullptr;
     }
 }
 
 ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
 {
-    char *metafile = NULL;
+    char *metafile = nullptr;
     char szFilePath[15];
     unz_file_info64 fileInfo;
    
-    if (m_archive == NULL){
-        return NULL;
+    if (m_archive == nullptr){
+        return nullptr;
     }
   
     // inner file not exists
     if (unzLocateFile(m_archive, innerFile, 0) != UNZ_OK){
-        return NULL;
+        return nullptr;
     }
 
     if (unzGetCurrentFileInfo64(m_archive, &fileInfo, szFilePath,
-                                sizeof(szFilePath), NULL, 0, NULL, 0) != UNZ_OK)
+                                sizeof(szFilePath), nullptr, 0, nullptr, 0) != UNZ_OK)
     {  
-        return NULL;
+        return nullptr;
     }
 
     if (unzOpenCurrentFile(m_archive) != UNZ_OK)
     { 
-        return NULL;
+        return nullptr;
     }
 
     if (fileInfo.uncompressed_size > 0 && (metafile = (char *)malloc(fileInfo.uncompressed_size)))
@@ -239,7 +239,7 @@ ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
          return data;
     } 
  
-    return NULL;
+    return nullptr;
 }
 
 void ZipReader::ReleaseInnerFileData(ZipInnerFileData *data)

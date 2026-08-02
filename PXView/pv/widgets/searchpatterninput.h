@@ -25,7 +25,7 @@
 
 #include <QWidget>
 #include <map>
-#include <stdint.h>
+#include <cstdint>
 #include <QVector>
 
 namespace pv {

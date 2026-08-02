@@ -25,11 +25,11 @@
 #include "../config/appconfig.h"
 #include "../data/analogsnapshot.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../view/view.h"
-#include <math.h>
+#include <cmath>
 #include <algorithm>
 
 using namespace std;
@@ -83,7 +83,7 @@ const float AnalogSignal::EnvelopeThreshold = 0.0f;
 AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
-    : Signal(model, data_source), _data(data), _rects(NULL), _points(NULL),
+    : Signal(model, data_source), _data(data), _rects(nullptr), _points(nullptr),
       _points_cap(0), _cached_hw_offset(model ? model->hw_offset() : 128), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(1.0f) {
@@ -126,7 +126,7 @@ AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
     _zero_offset = (int)_model->zero_offset();
   } else {
     ret = _data_source->device()->get_config_uint16(SR_CONF_PROBE_OFFSET,
-                                                    _zero_offset, NULL, NULL);
+                                                    _zero_offset, nullptr, nullptr);
     if (!ret) {
       pxv_err("ERROR: config_get SR_CONF_PROBE_OFFSET failed.");
     }
@@ -137,7 +137,7 @@ AnalogSignal::AnalogSignal(view::AnalogSignal *s,
                            pv::data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
-    : Signal(*s, model, data_source), _data(data), _rects(NULL), _points(NULL),
+    : Signal(*s, model, data_source), _data(data), _rects(nullptr), _points(nullptr),
       _points_cap(0), _cached_hw_offset(s->_cached_hw_offset), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(s->_float_scale) {
@@ -161,11 +161,11 @@ AnalogSignal *AnalogSignal::clone() const {
 AnalogSignal::~AnalogSignal() {
   if (_rects) {
     delete[] _rects;
-    _rects = NULL;
+    _rects = nullptr;
   }
   if (_points) {
     delete[] _points;
-    _points = NULL;
+    _points = nullptr;
     _points_cap = 0;
   }
 }
@@ -175,7 +175,7 @@ int AnalogSignal::get_hw_offset() {
     int hw_offset = _cached_hw_offset;
     sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
     if (probe && _data_source->device()->get_config_uint16(
-                     SR_CONF_PROBE_HW_OFFSET, hw_offset, probe, NULL)) {
+                     SR_CONF_PROBE_HW_OFFSET, hw_offset, probe, nullptr)) {
       _cached_hw_offset = hw_offset;
     }
   }
@@ -323,7 +323,7 @@ QString AnalogSignal::get_mapUnit() {
   }
   sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
   _data_source->device()->get_config_string(SR_CONF_PROBE_MAP_UNIT, unit, probe,
-                                            NULL);
+                                            nullptr);
   return unit;
 }
 
@@ -335,7 +335,7 @@ double AnalogSignal::get_mapMin() {
   }
   sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
   _data_source->device()->get_config_double(SR_CONF_PROBE_MAP_MIN, min, probe,
-                                            NULL);
+                                            nullptr);
   return min;
 }
 
@@ -347,7 +347,7 @@ double AnalogSignal::get_mapMax() {
   }
   sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
   _data_source->device()->get_config_double(SR_CONF_PROBE_MAP_MAX, max, probe,
-                                            NULL);
+                                            nullptr);
   return max;
 }
 
@@ -404,7 +404,7 @@ void AnalogSignal::set_zero_ratio(double ratio) {
     model->set_zero_offset((double)_zero_offset);
   } else {
     _data_source->device()->set_config_uint16(SR_CONF_PROBE_OFFSET,
-                                              _zero_offset, probe, NULL);
+                                              _zero_offset, probe, nullptr);
   }
 }
 
@@ -416,7 +416,7 @@ double AnalogSignal::get_zero_ratio() {
   // 不在范围内则返回中心 0.5，使波形上下对称填满显示区域。
   // 用户手动拖动游标后 _zero_offset 会被设置为 ratio2value(ratio)（落入
   // [_ref_min, _ref_max]），此时返回对应 ratio。
-  // 注意：采集前 _data 可能为 null 或 not is_float，但 _zero_offset=0 仍然
+  // 注意：采集前 _data 可能为 nullptr 或 not is_float，但 _zero_offset=0 仍然
   // 不在 [_ref_min, _ref_max] 范围内，统一返回 0.5 使初始化时游标也居中。
   if (_zero_offset >= (int)_ref_min && _zero_offset <= (int)_ref_max) {
     double r = (_zero_offset - _ref_min) / (_ref_max - _ref_min);
@@ -431,11 +431,11 @@ double AnalogSignal::get_zero_ratio() {
 void AnalogSignal::resize() {
   if (_rects) {
     delete[] _rects;
-    _rects = NULL;
+    _rects = nullptr;
   }
   if (_points) {
     delete[] _points;
-    _points = NULL;
+    _points = nullptr;
     _points_cap = 0;
   }
 }

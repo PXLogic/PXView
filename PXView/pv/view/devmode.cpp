@@ -25,7 +25,7 @@
 #include "trace.h"
 #include "../sigsession.h" 
 
-#include <assert.h>
+#include <cassert>
 #include <QHBoxLayout>
 #include <QMenu>
 #include <QMouseEvent>
@@ -148,7 +148,7 @@ void DevMode::set_device()
    //remove all action object
     for(std::map<QAction *, const sr_dev_mode *>::const_iterator i = _mode_list.begin();
         i != _mode_list.end(); i++) {
-        (*i).first->setParent(NULL);
+        (*i).first->setParent(nullptr);
         _pop_menu->removeAction((*i).first);
         delete (*i).first;
     }

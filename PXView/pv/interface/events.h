@@ -53,7 +53,7 @@
 #ifndef PXVIEW_PV_INTERFACE_EVENTS_H
 #define PXVIEW_PV_INTERFACE_EVENTS_H
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <memory>
 #include <QString>
@@ -190,8 +190,8 @@ struct CurrentDeviceChanged {};
 
 // DeviceOpenFailed — set_device() failed to open the new device via sr_dev_open.
 // The old device has already been released (CurrentDeviceChangePrev ran), so
-// _dev_handle is NULL. Carries the driver name and error string for UI feedback.
-// Without this event, the UI stays blank and 1000+ "_dev_handle is NULL"
+// _dev_handle is nullptr. Carries the driver name and error string for UI feedback.
+// Without this event, the UI stays blank and 1000+ "_dev_handle is nullptr"
 // warnings flood the log with no actionable message.
 struct DeviceOpenFailed {
     std::string driver_name;

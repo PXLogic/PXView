@@ -29,7 +29,7 @@
 #include "../data/logicsnapshot.h"
 #include "../data/sessiondocument.h"
 #include "../dialogs/decoderoptionsdlg.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../toolbars/titlebar.h"
@@ -51,10 +51,8 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollArea>
-#include <boost/functional/hash.hpp>
 #include <libsigrokdecode.h>
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -700,7 +698,7 @@ void DecodeTrace::on_new_decode_data() {
   // 2. Trigger geometry layout updates if height changed
   const int expectedHeight = rows_size() * _view->get_signalHeight();
   if (_totalHeight != expectedHeight) {
-    _view->signals_changed(NULL);
+    _view->signals_changed(nullptr);
   }
 
   // 3. Request lightweight viewport repaint only
@@ -731,7 +729,7 @@ void DecodeTrace::on_decode_done() {
   // Without this, the decode track appears empty until the user manually
   // triggers a layout recalculation (e.g. by re-capturing).
   if (_view) {
-    _view->signals_changed(NULL);
+    _view->signals_changed(nullptr);
   }
 
   if (_view && _data_source->is_stopped_status()) {

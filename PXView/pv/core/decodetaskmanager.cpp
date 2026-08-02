@@ -72,14 +72,14 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
              (unsigned long long)data->get_logic()->get_sample_count(),
              (unsigned long long)data->get_logic()->get_ring_sample_count());
   } else {
-    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=NULL", (void *)data);
+    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=nullptr", (void *)data);
   }
 }
 
 void DecodeTaskManager::add_decode_task(
     std::shared_ptr<data::DecoderStack> stack) {
   // Ensure SignalModels have valid snapshot pointers before the decode thread
-  // starts. SignalModels may have been recreated with NULL snapshots (e.g. by
+  // starts. SignalModels may have been recreated with nullptr snapshots (e.g. by
   // reload() during TabContext::activate()). Without this, decoders fail with
   // "没有设置需要解码哪些通道的数据". This matches the pattern in
   // start_all_decode_tasks() and rst_decoder().
@@ -203,7 +203,7 @@ void DecodeTaskManager::decode_single_task(
 
 void DecodeTaskManager::start_all_decode_tasks() {
   // SignalModels may have been recreated (e.g. by reload() during
-  // TabContext::activate()) with NULL snapshot pointers. Re-attach _view_data
+  // TabContext::activate()) with nullptr snapshot pointers. Re-attach _view_data
   // so do_decode_work() can find a valid snapshot via SignalModel::snapshot().
   // Without this, decoders fail with "没有设置需要解码哪些通道的数据".
   // Note: add_decode_task() also calls attach_data_to_signal internally for
@@ -238,7 +238,7 @@ void DecodeTaskManager::rst_decoder(int index, data::SessionDocument *doc) {
     remove_decode_task(stack); // remove old task
     stack->clear();
     // SignalModels may have been recreated by reload() (e.g. during
-    // TabContext::activate()) with NULL snapshot pointers. The
+    // TabContext::activate()) with nullptr snapshot pointers. The
     // add_decode_task() call below will ensure data attachment internally,
     // so do_decode_work() can find a valid snapshot via
     // SignalModel::snapshot().

@@ -33,7 +33,7 @@
 #include <QScrollBar>
   
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../utility/encoding.h"
 #include "../ui/langresource.h"
 

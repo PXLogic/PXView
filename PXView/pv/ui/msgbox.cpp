@@ -22,30 +22,30 @@
 
 #include "msgbox.h"
 #include "../dialogs/dsmessagebox.h"
-#include <assert.h>
+#include <cassert>
 #include <QMessageBox>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../appcontrol.h"
 #include "langresource.h"
 
-//QMessageBox::information(NULL, "Title", "Content",QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-//QMessageBox::information(NULL, "Title", "Content",QMessageBox::Yes|QMessageBox::No);
-//QMessageBox::information(NULL, "Title", "Content");
-//QMessageBox::information(NULL, "Title", "Content",QMessageBox::Yes|QMessageBox::No|QMessageBox::Abort);
+//QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+//QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes|QMessageBox::No);
+//QMessageBox::information(nullptr, "Title", "Content");
+//QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes|QMessageBox::No|QMessageBox::Abort);
 
 void MsgBox::Show(const QString text)
 {
-    MsgBox::Show("", text, "", NULL, NULL);
+    MsgBox::Show("", text, "", nullptr, nullptr);
 }
 
 void MsgBox::Show(const QString title, const QString text, QWidget *parent)
 {
-    MsgBox::Show(title, text, "", parent,NULL);
+    MsgBox::Show(title, text, "", parent,nullptr);
 }
 
 void Show(const QString title, const QString text, const QString infoText)
 {
-    MsgBox::Show(title, text, infoText, NULL, NULL);
+    MsgBox::Show(title, text, infoText, nullptr, nullptr);
 }
 
 void MsgBox::Show(const QString title, const QString text, 
@@ -63,13 +63,13 @@ void MsgBox::Show(const QString title, const QString text, const QString infoTex
     str.append("\n");
     str.append(text);
 
-    if (parent == NULL){
+    if (parent == nullptr){
         parent = AppControl::Instance()->GetTopWindow();
     }
 
     pv::dialogs::DSMessageBox msg(parent, title);
 
-    if (box != NULL){
+    if (box != nullptr){
         *box = &msg;
     }
 
@@ -86,7 +86,7 @@ void MsgBox::Show(const QString title, const QString text, const QString infoTex
 
 bool MsgBox::Confirm(const QString text, QWidget *parent)
 {
-    return MsgBox::Confirm(text, "", NULL, parent);
+    return MsgBox::Confirm(text, "", nullptr, parent);
 }
 
 bool MsgBox::Confirm(const QString text, const QString infoText, 
@@ -98,7 +98,7 @@ bool MsgBox::Confirm(const QString text, const QString infoText,
     str.append("\n");
     str.append(text);
 
-    if (parent == NULL){
+    if (parent == nullptr){
         parent = AppControl::Instance()->GetTopWindow();
     }
 
@@ -111,7 +111,7 @@ bool MsgBox::Confirm(const QString text, const QString infoText,
         msg.mBox()->setInformativeText(infoText);
     }
 
-    if (box != NULL){
+    if (box != nullptr){
         *box = &msg;
     }
 

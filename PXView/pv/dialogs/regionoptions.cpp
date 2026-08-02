@@ -29,7 +29,6 @@
 
 #include "../ui/langresource.h"
 
-using namespace boost;
 using namespace std;
 
 namespace pv {

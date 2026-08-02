@@ -24,7 +24,7 @@
 #include <libsigrokdecode.h>
 #include <QScrollArea>
 #include <QDialogButtonBox>
-#include <assert.h>
+#include <cassert>
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QGridLayout>
@@ -501,14 +501,14 @@ void DecoderOptionsDlg::create_decoder_form(
 		const struct srd_channel *const pdch = (struct srd_channel *)l->data;
 		DsComboBox *const combo = create_probe_selector(parent, dec, pdch);
 
-        const char *desc_str = NULL;
-        const char *lang_str = NULL;
+        const char *desc_str = nullptr;
+        const char *lang_str = nullptr;
 
-        if (pdch->idn != NULL && LangResource::Instance()->is_lang_en() == false){
+        if (pdch->idn != nullptr && LangResource::Instance()->is_lang_en() == false){
             lang_str = LangResource::Instance()->get_lang_text(STR_PAGE_DECODER, pdch->idn, pdch->desc);
         }
 
-        if (lang_str != NULL && bLang){
+        if (lang_str != nullptr && bLang){
             desc_str = lang_str;
         }
         else{
@@ -529,14 +529,14 @@ void DecoderOptionsDlg::create_decoder_form(
 		const struct srd_channel *const pdch = (struct srd_channel *)l->data;
 		DsComboBox *const combo = create_probe_selector(parent, dec, pdch);
 		
-        const char *desc_str = NULL;
-        const char *lang_str = NULL;
+        const char *desc_str = nullptr;
+        const char *lang_str = nullptr;
         
-        if (pdch->idn != NULL && LangResource::Instance()->is_lang_en() == false){
+        if (pdch->idn != nullptr && LangResource::Instance()->is_lang_en() == false){
             lang_str = LangResource::Instance()->get_lang_text(STR_PAGE_DECODER, pdch->idn, pdch->desc);
         }
 
-        if (lang_str != NULL && bLang){
+        if (lang_str != nullptr && bLang){
             desc_str = lang_str;
         }
         else{

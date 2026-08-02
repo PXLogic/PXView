@@ -115,7 +115,7 @@ CLAUDE.md
 # 私有文档(顶部)
 PXLogic使用文档.docx
 
-# 开发脚本(顶部)
+# 开发脚本(顶部) - 旧脚本,不同步到开源仓库
 build_full.cmd
 build_incremental.cmd
 build_incremental.sh
@@ -123,11 +123,13 @@ build_window
 build_window_noall
 build_mac.sh
 build_mac_icon.sh
-build_fx2lafw.sh
 build_linux
 build_deb_package
 clean
 cmake_clear
+
+# 新构建脚本同步到开源仓库 (不在 .gitignore 中):
+# build_linux.sh, build_macos.sh, build_windows.sh, build_fx2lafw.sh
 
 # 同步/迁移脚本
 sync_to_repo.cmd
@@ -141,8 +143,10 @@ devdoc/
 # 补丁文件目录
 _diffs/
 
-# Windows 打包资源目录
-window/
+# Windows 打包二进制资源 (python embed dll/zip)
+# package.sh, copy-deps.sh 等脚本文件需要同步到开源仓库
+window/python/
+window/workflows/
 
 # 私有文档(doc/ 和 docs/ 下的私有文件,精确排除)
 doc/PXLogic使用文档v1.5.0.pdf

@@ -21,10 +21,9 @@
 
  
 #include <algorithm>
-#include <math.h>
+#include <cmath>
 #include <QTextStream>
-#include <boost/functional/hash.hpp>
-#include <stdlib.h>
+#include <cstdlib>
 
 #include "spectrumtrace.h"
 #include "../sigsession.h"
@@ -32,10 +31,9 @@
 #include "../view/dsosignal.h"
 #include "../view/viewport.h"
 #include "../data/spectrumstack.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../ui/langresource.h"
 
-using namespace boost;
 using namespace std;
 
 namespace pv {

@@ -65,6 +65,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/dock/logdock.cpp
     PXView/pv/dock/deviceoptionsdock.cpp
     PXView/pv/dock/mcpcontroldock.cpp
+    PXView/pv/dock/functiondock.cpp
     PXView/pv/dock/protocolitemlayer.cpp
     PXView/pv/dock/keywordlineedit.cpp
     PXView/pv/dock/searchcombobox.cpp
@@ -187,6 +188,7 @@ set(PXView_HEADERS
     PXView/pv/dock/logdock.h
     PXView/pv/dock/deviceoptionsdock.h
     PXView/pv/dock/mcpcontroldock.h
+    PXView/pv/dock/functiondock.h
     PXView/pv/toolbars/logobar.h
     PXView/pv/dialogs/about.h
     PXView/pv/dialogs/search.h
@@ -261,7 +263,7 @@ set(PXView_HEADERS
     PXView/pv/ui/toast.h
     PXView/pv/ui/dscombobox.h
     PXView/pv/ui/dsspinbox.h
-    PXView/pv/dsvdef.h
+    PXView/pv/pxvdef.h
     PXView/pv/dialogs/applicationpardlg.h
     PXView/pv/dock/keywordlineedit.h
     PXView/pv/dock/searchcombobox.h
@@ -307,7 +309,7 @@ set(PXView_HEADERS_NO_MOC
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h
     PXView/pv/ui/msgbox.h
-    PXView/pv/dsvdef.h
+    PXView/pv/pxvdef.h
     PXView/pv/utility/encoding.h
     PXView/pv/utility/path.h
     PXView/pv/utility/array.h

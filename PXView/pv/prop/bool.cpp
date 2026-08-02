@@ -21,21 +21,20 @@
  */
 
 
-#include <assert.h>
+#include <cassert>
 
 #include <QCheckBox>
 
 #include "bool.h"
 
 using namespace std;
-using namespace boost;
 
 namespace pv {
 namespace prop {
 
 Bool::Bool(QString name, QString label, Getter getter, Setter setter) :
     Property(name, label, getter, setter),
-	_check_box(NULL)
+	_check_box(nullptr)
 {
 }
 
@@ -50,7 +49,7 @@ QWidget* Bool::get_widget(QWidget *parent, bool auto_commit)
 
     _check_box = new QCheckBox(label(), parent);
 
-	GVariant *const value = _getter ? _getter() : NULL;
+	GVariant *const value = _getter ? _getter() : nullptr;
 
 	if (value) {
 		_check_box->setCheckState(g_variant_get_boolean(value) ?
@@ -73,7 +72,7 @@ bool Bool::labeled_widget()
 
 GVariant* Bool::get_value()
 {
-    GVariant *const value = _getter ? _getter() : NULL;
+    GVariant *const value = _getter ? _getter() : nullptr;
 
     return value;
 }

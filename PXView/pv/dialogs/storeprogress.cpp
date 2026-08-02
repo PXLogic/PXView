@@ -46,8 +46,8 @@ namespace dialogs {
 StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
     PxDialog(parent)
 {
-    _fileLab = NULL;
-    _ckOrigin = NULL;
+    _fileLab = nullptr;
+    _ckOrigin = nullptr;
 
     _store_session = new StoreSession(session);
 
@@ -59,9 +59,9 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
 
     _isExport = false;
     _is_done = false;
-    _start_cursor = NULL;
-    _end_cursor = NULL;
-    _view = NULL;  
+    _start_cursor = nullptr;
+    _end_cursor = nullptr;
+    _view = nullptr;  
 
     QGridLayout *grid = new QGridLayout(); 
     _grid = grid;
@@ -156,7 +156,7 @@ void StoreProgress::on_timeout()
 void StoreProgress::accept()
 {
     if (_store_session->GetFileName() == ""){
-        MsgBox::Show(NULL, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SEL_FILENAME), "You need to select a file name."));
+        MsgBox::Show(nullptr, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SEL_FILENAME), "You need to select a file name."));
         return;
     }
 
@@ -174,7 +174,7 @@ void StoreProgress::accept()
     }
 
     // Get data range
-    if (_store_session->IsLogicDataType() && _view != NULL)
+    if (_store_session->IsLogicDataType() && _view != nullptr)
     {
         uint64_t start_index = 0;
         uint64_t end_index = 0;
@@ -186,7 +186,7 @@ void StoreProgress::accept()
         {
             auto c = _view->get_cursor_by_index(dex1-1);
             if (!c) {
-                pxv_warn("%s", "StoreProgress::accept: start cursor is NULL");
+                pxv_warn("%s", "StoreProgress::accept: start cursor is nullptr");
                 return;
             }
             assert(c);
@@ -196,7 +196,7 @@ void StoreProgress::accept()
         if (dex2 > 0){
             auto c = _view->get_cursor_by_index(dex2-1);
             if (!c) {
-                pxv_warn("%s", "StoreProgress::accept: end cursor is NULL");
+                pxv_warn("%s", "StoreProgress::accept: end cursor is nullptr");
                 return;
             }
             assert(c);
@@ -235,7 +235,7 @@ void StoreProgress::accept()
     _fileLab->setVisible(false);
     _openButton->setVisible(false);
 
-    if (_ckOrigin != NULL){
+    if (_ckOrigin != nullptr){
         _ckOrigin->setVisible(false);
         _ckCompress->setVisible(false);
     }
@@ -273,7 +273,7 @@ void StoreProgress::save_run(ISessionDataGetter *getter)
     _fileLab->setText(file); 
     _store_session->_sessionDataGetter = getter;
 
-    if (_store_session->IsLogicDataType() && _view != NULL)
+    if (_store_session->IsLogicDataType() && _view != nullptr)
     {
         QFormLayout *lay = new QFormLayout();
         lay->setContentsMargins(5, 0, 0, 0); 
@@ -353,7 +353,7 @@ void StoreProgress::export_run()
     QString file = _store_session->MakeExportFile(false);
     _fileLab->setText(file); 
 
-    if (_ckOrigin != NULL){
+    if (_ckOrigin != nullptr){
         bool bFlag = file.endsWith(".csv");
         _ckOrigin->setVisible(bFlag);
         _ckCompress->setVisible(bFlag);
@@ -365,7 +365,7 @@ void StoreProgress::export_run()
 void StoreProgress::show_error()
 {
     if (!_store_session->error().isEmpty()) { 
-        MsgBox::Show(NULL, _store_session->error().toStdString().c_str(), NULL);
+        MsgBox::Show(nullptr, _store_session->error().toStdString().c_str(), nullptr);
     }
 }
 
@@ -401,7 +401,7 @@ void StoreProgress::on_change_file()
     if (file != ""){
         _fileLab->setText(file); 
 
-        if (_ckOrigin != NULL){
+        if (_ckOrigin != nullptr){
             bool bFlag = file.endsWith(".csv");
             _ckOrigin->setVisible(bFlag);
             _ckCompress->setVisible(bFlag);

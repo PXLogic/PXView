@@ -27,8 +27,8 @@
 #include <QColor>
 #include <QObject>
 #include <QRectF>
-#include <assert.h>
-#include <stdint.h>
+#include <cassert>
+#include <cstdint>
 
 class QPainter;
 class QRect;

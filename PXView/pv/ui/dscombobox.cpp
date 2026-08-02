@@ -109,7 +109,7 @@ void DsComboPopup::showEvent(QShowEvent *event)
 #ifdef WIN32
     const DWORD DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     const DWORD DWMWCP_DONOTROUND = 1;
-    typedef HRESULT(WINAPI *tDwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+    using tDwmSetWindowAttribute = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
     tDwmSetWindowAttribute pDwmSetWindowAttribute =
         tDwmSetWindowAttribute(QLibrary::resolve("dwmapi", "DwmSetWindowAttribute"));
     if (pDwmSetWindowAttribute) {

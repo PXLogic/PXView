@@ -22,8 +22,8 @@
  */
 
 #include "ruler.h"
-#include <assert.h>
-#include <math.h>
+#include <cassert>
+#include <cmath>
 #include <limits.h>
 #include <cmath>
 #include <QMouseEvent>
@@ -34,7 +34,7 @@
 #include "viewport.h"
 #include "../sigsession.h"
 #include "dsosignal.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../config/appconfig.h"
 #include "../ui/fn.h"
 #include "../ui/dockfonts.h"
@@ -93,7 +93,7 @@ Ruler::Ruler(View &parent) :
     _cursor_sel_visible(false),
     _cursor_go_visible(false),
     _cursor_sel_x(-1),
-    _grabbed_marker(NULL),
+    _grabbed_marker(nullptr),
     _hitCursor(false),
     _curs_moved(false)
 {
@@ -241,7 +241,7 @@ void Ruler::rel_grabbed_cursor()
 {
     if (_grabbed_marker) {
         _grabbed_marker->set_grabbed(false);
-        _grabbed_marker = NULL;
+        _grabbed_marker = nullptr;
     }
 }
 

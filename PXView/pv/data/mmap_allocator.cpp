@@ -88,10 +88,10 @@ bool MmapAllocator::configure(bool use_disk_file, const QString& disk_dir, uint6
         _hFile = CreateFileA(_file_path.toUtf8().constData(),
                              GENERIC_READ | GENERIC_WRITE,
                              0, // No sharing
-                             NULL,
+                             nullptr,
                              CREATE_ALWAYS,
                              FILE_ATTRIBUTE_NORMAL,
-                             NULL);
+                             nullptr);
 
         if (_hFile == INVALID_HANDLE_VALUE) {
             pxv_err("MmapAllocator: Failed to create disk cache file %s, error %lu",
@@ -103,11 +103,11 @@ bool MmapAllocator::configure(bool use_disk_file, const QString& disk_dir, uint6
     }
 
     _hMap = CreateFileMappingA(_hFile,
-                               NULL,
+                               nullptr,
                                PAGE_READWRITE,
                                (DWORD)(_total_bytes >> 32),
                                (DWORD)(_total_bytes & 0xFFFFFFFF),
-                               NULL);
+                               nullptr);
                                
     if (!_hMap) {
         pxv_err("MmapAllocator: CreateFileMapping failed, error %lu", GetLastError());
@@ -143,9 +143,9 @@ bool MmapAllocator::configure(bool use_disk_file, const QString& disk_dir, uint6
             _fd = -1;
             return false;
         }
-        _base_ptr = mmap(NULL, _total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, _fd, 0);
+        _base_ptr = mmap(nullptr, _total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, _fd, 0);
     } else {
-        _base_ptr = mmap(NULL, _total_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        _base_ptr = mmap(nullptr, _total_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     }
     
     if (_base_ptr == MAP_FAILED) {

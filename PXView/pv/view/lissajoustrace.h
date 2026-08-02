@@ -61,12 +61,24 @@ public:
         return _xIndex;
     }
 
+    inline void set_xIndex(int xIndex) {
+        _xIndex = xIndex;
+    }
+
     inline int yIndex(){
         return _yIndex;
     }
 
+    inline void set_yIndex(int yIndex) {
+        _yIndex = yIndex;
+    }
+
     inline int percent(){
         return _percent;
+    }
+
+    inline void set_percent(int percent) {
+        _percent = percent;
     }
 
     inline pv::data::DsoSnapshot* get_data(){

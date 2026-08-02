@@ -26,7 +26,7 @@ DecoderStatus::DecoderStatus()
 {
         m_bNumeric = false;
         m_format = 0;
-        sdr_decoder_handle = NULL;
+        sdr_decoder_handle = nullptr;
 }
 
 void DecoderStatus::clear()

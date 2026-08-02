@@ -24,7 +24,7 @@
 #ifndef PXVIEW_PV_DATA_DATASOURCE_H
 #define PXVIEW_PV_DATA_DATASOURCE_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 #include <memory>
 #include <list>

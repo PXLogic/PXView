@@ -23,7 +23,7 @@ public:
     // 归还指定块区间的物理页给 OS（不释放虚拟映射）。
     // - 匿名 mmap (RAM 模式)：decommit 后页读回零。
     // - 文件 mmap (磁盘模式)：decommit RAM 页 + 对文件区间 punch sparse zero hole，回收磁盘空间。
-    // 调用方需保证该块已不再被读（lbp 已置 NULL）。
+    // 调用方需保证该块已不再被读（lbp 已置 nullptr）。
     bool decommit_block(void* ptr, uint64_t size);
 
     // 由 mmap 地址反推绝对槽位序号 abs_slot = (ptr - base) / block_size。

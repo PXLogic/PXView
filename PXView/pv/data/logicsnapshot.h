@@ -29,6 +29,7 @@
 #include "snapshot.h"
 #include "mmap_allocator.h"
 #include "disk_cache_config.h"
+#include "../pxvdef.h"  // GlitchFilterMode (moved here from this header)
 #include <QString>
 #include <utility>
 #include <vector>
@@ -46,12 +47,6 @@
 // logicsnapshot_diskcache_writer.h/.cpp. Forward-declared here to avoid a
 // circular include; LogicSnapshot holds it via unique_ptr.
 class LogicSnapshotDiskCacheWriter;
-
-enum GlitchFilterMode {
-    GLITCH_FILTER_BOTH = 0,
-    GLITCH_FILTER_HIGH = 1,
-    GLITCH_FILTER_LOW = 2
-};
 
 namespace pv {
 namespace data {
@@ -103,7 +98,7 @@ private:
     };
 
 public:
-    typedef std::pair<uint64_t, bool> EdgePair;
+    using EdgePair = std::pair<uint64_t, bool>;
 
     // 持久化的滤波区间信息（apply_glitch_filter 滤除的区间），供 View 层渲染 overlay
     struct FillRange {
@@ -130,7 +125,7 @@ public:
 
 	void append_payload(const sr_datafeed_logic &logic);
 
-    const uint8_t * get_samples(uint64_t start_sample, uint64_t& end_sample, int sig_index, void **lbp=NULL);
+    const uint8_t * get_samples(uint64_t start_sample, uint64_t& end_sample, int sig_index, void **lbp=nullptr);
 
     bool get_sample(uint64_t index, int sig_index);
 

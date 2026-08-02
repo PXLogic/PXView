@@ -31,7 +31,7 @@
 
 #include "../api/types.h"        // api::MeasurementValue (Core-layer API type)
 #include "../data/signalmodel.h" // data::SignalModel (Core-layer channel model)
-#include "../dsvdef.h"           // DSO_MS_* / DS_CONF_DSO_VDIVS
+#include "../pxvdef.h"           // DSO_MS_* / DS_CONF_DSO_VDIVS
 
 namespace pv {
 

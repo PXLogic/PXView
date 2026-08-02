@@ -34,9 +34,9 @@ Interval::Interval(QWidget *parent) :
     _button_box(QDialogButtonBox::Ok,
         Qt::Horizontal, this)
 {
-    _interval_label = NULL;
-    _interval_spinBox = NULL;
-    _interval_slider = NULL;
+    _interval_label = nullptr;
+    _interval_spinBox = nullptr;
+    _interval_slider = nullptr;
     _bSetting = false;
     _bDone = false;
 

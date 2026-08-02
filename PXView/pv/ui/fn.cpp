@@ -37,7 +37,7 @@
 #include <QTextEdit>
 #include <QToolBar>
 #include <QWidget>
-#include <assert.h>
+#include <cassert>
 
 #include "../config/appconfig.h"
 #include "../ui/xtoolbutton.h"

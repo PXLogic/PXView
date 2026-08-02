@@ -38,10 +38,21 @@ DsoTriggerConfig::DsoTriggerConfig(DsoSignal *signal) : _signal(signal) {}
 DsoTriggerConfig::~DsoTriggerConfig() {}
 
 double DsoTriggerConfig::get_trig_vrate() {
-  if (_signal->_data_source->device()->is_hardware_logic())
-    return _signal->value2ratio(_signal->_trig_value - _signal->ratio2value(0.5)) + _signal->get_zero_ratio();
-  else
+  if (_signal->_data_source->device()->is_hardware_logic()) {
+    /* Compute trigger cursor position as zero_ratio + delta_ratio.
+     * delta_ratio = (_trig_value - mid_value) / (ref_max - ref_min).
+     * This can be negative (cursor above zero line) — do NOT use
+     * value2ratio() which clamps to [0,1] and prevents the cursor
+     * from going above 0V (positive voltage area). */
+    const double mid = _signal->ratio2value(0.5);
+    const double range = (double)_signal->_ref_max - (double)_signal->_ref_min;
+    if (range <= 0)
+      return _signal->get_zero_ratio();
+    const double delta_ratio = ((double)_signal->_trig_value - mid) / range;
+    return delta_ratio + _signal->get_zero_ratio();
+  } else {
     return _signal->value2ratio(_signal->_trig_value);
+  }
 }
 
 void DsoTriggerConfig::set_trig_vpos(int pos, bool delta_change) {
@@ -77,6 +88,21 @@ void DsoTriggerConfig::set_trig_ratio(double ratio, bool delta_change) {
   // 恢复路径 (mainwindow.cpp restore_session) 调用，广播会触发 rebuild 循环。
   if (model) {
     model->set_trig_value((double)_signal->_trig_value);
+  }
+  /* Send the trigger level to the driver immediately so that real-time
+   * trigger detection (e.g. demo_send_dso_packet) uses the updated
+   * threshold. Without this, the driver keeps the old value until
+   * commit_settings() is called, causing the waveform to not respond
+   * to cursor movement during capture. */
+  {
+    sr_channel *probe = model ? model->sr_channel_handle() : nullptr;
+    if (probe) {
+      DeviceAgent *device = _signal->_data_source->device();
+      if (device && device->have_instance()) {
+        device->set_config_int32(SR_CONF_TRIGGER_VALUE,
+                                 (int)_signal->_trig_value, probe, nullptr);
+      }
+    }
   }
 }
 

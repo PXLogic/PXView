@@ -26,7 +26,7 @@
 #define PXVIEW_PV_DATA_ANALOGSNAPSHOT_H
 
 #include <libsigrok/libsigrok.h>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "snapshot.h"
 
 #include <utility>

@@ -33,7 +33,7 @@
 
 #include "view_cursors.h"
 
-#include <assert.h>
+#include <cassert>
 #include <list>
 
 #include <QPalette>
@@ -159,7 +159,7 @@ Cursor *ViewCursors::get_cursor_by_index(int index) {
     }
     dex++;
   }
-  return NULL;
+  return nullptr;
 }
 
 void ViewCursors::make_cursors_order() {

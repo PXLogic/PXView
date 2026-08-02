@@ -19,47 +19,9 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
+
+// All functions are now inline in array.h using std::span + std::ranges.
+// This .cpp is kept for CMake source-list compatibility (it compiles to
+// an empty translation unit since array.h has no non-inline declarations).
+
 #include "array.h"
-#include <assert.h>
-
-namespace pv
-{
-    namespace array
-    {
-        uint64_t find_min_uint64(uint64_t *arr, int size)
-        {
-            if (!arr)
-                return 0;
-            assert(arr);
-            assert(size);
-
-            uint64_t *p = arr;
-            uint64_t v = *p;
-
-            for (int i=1; i<size; i++){
-                p++;
-                if (*p < v)
-                    v = *p;
-            }
-            return v;
-        }
-
-        uint64_t find_max_uint64(uint64_t *arr, int size)
-        {
-            if (!arr)
-                return 0;
-            assert(arr);
-            assert(size);
-
-            uint64_t *p = arr;            
-            uint64_t v = *p;            
-
-            for (int i=1; i<size; i++){
-                p++;
-                if (*p > v)
-                    v = *p;
-            }
-            return v;
-        }
-    }    
-}

@@ -52,9 +52,9 @@
 #include <QPointF>
 #include <QRect>
 #include <QRectF>
-#include <assert.h>
+#include <cassert>
 #include <stdio.h>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../sigsession.h"
 #include "ruler.h"
 

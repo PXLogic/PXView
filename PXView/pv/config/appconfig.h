@@ -76,6 +76,7 @@ struct AppOptions
     bool  displayProfileInBar;
     bool  swapBackBufferAlways;
     bool  autoScrollLatestData;
+    bool  promptSaveOnExit;
     float fontSize;
 
     std::vector<StringPair> m_protocolFormats;

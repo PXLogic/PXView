@@ -24,9 +24,8 @@
 #include "deviceoptions.h"
 
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
-#include <boost/bind.hpp>
 #include <QObject>
-#include <stdint.h>
+#include <cstdint>
 #include "../bool.h"
 #include "../string.h"
 #include "../double.h"
@@ -39,6 +38,7 @@
 #include "../../ui/langresource.h"
  
 using namespace std;
+using std::placeholders::_1;
 
 namespace pv {
 namespace prop {
@@ -60,10 +60,10 @@ DeviceOptions::DeviceOptions(SigSession *session)
              _device_agent->is_dsl_device(),
              _device_agent->is_stream_mode());
 
-	gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+	gvar_opts = _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_OPTIONS);
 
-    if (gvar_opts == NULL) {
-        pxv_warn("DeviceOptions binding: get_config_list(SR_CONF_DEVICE_OPTIONS) returned NULL");
+    if (gvar_opts == nullptr) {
+        pxv_warn("DeviceOptions binding: get_config_list(SR_CONF_DEVICE_OPTIONS) returned nullptr");
 		/* Driver supports no device instance options. */
 		return;
     }
@@ -92,7 +92,7 @@ DeviceOptions::DeviceOptions(SigSession *session)
 		 * 否则 hwdriver.c check_key() 会因 pub_opt & SR_CONF_LIST == 0
 		 * 打印 "Option 'xxx' not available to list" 错误日志。 */
 		const bool can_list = (options[i] & SR_CONF_LIST) != 0;
-		gvar_list = can_list ? _device_agent->get_config_list(NULL, key) : NULL;
+		gvar_list = can_list ? _device_agent->get_config_list(nullptr, key) : nullptr;
 
         const QString name(info->name);
         const char *label_char = info->name;
@@ -121,6 +121,18 @@ DeviceOptions::DeviceOptions(SigSession *session)
             continue;
 
 		case SR_CONF_PATTERN_MODE:
+			/* DSO mode: per-channel pattern is already bound via
+			 * ProbeOptions (devopts_cg_dso_channel[] + probe_configs[]).
+			 * Showing a device-level pattern dropdown here would
+			 * duplicate the per-channel one and, worse, the device-level
+			 * config_set writes ALL dso_pattern[] entries to the same
+			 * value — overriding per-channel selections. Skip it.
+			 * LOGIC/ANALOG modes keep the device-level binding because
+			 * there is no per-channel pattern path for those modes. */
+			if (_device_agent->get_work_mode() == DSO)
+				continue;
+			bind_enum(name, label, key, gvar_list, print_pattern);
+			break;
 		case SR_CONF_BUFFERSIZE:
 		case SR_CONF_TRIGGER_SOURCE:
         case SR_CONF_PROBE_EN:
@@ -185,7 +197,7 @@ DeviceOptions::DeviceOptions(SigSession *session)
             break;
 
         default:
-            gvar_list = NULL;
+            gvar_list = nullptr;
 		}
 
 		if (gvar_list)
@@ -210,7 +222,7 @@ DeviceOptions::DeviceOptions(SigSession *session)
         // above (bind_list), so we only bind here for non-DSL devices.
         if (!_device_agent->is_dsl_device()) {
             GVariant *opmode_list = _device_agent->get_config_list(
-                NULL, SR_CONF_OPERATION_MODE);
+                nullptr, SR_CONF_OPERATION_MODE);
             bind_list("operation_mode", "Operation mode",
                       SR_CONF_OPERATION_MODE, opmode_list);
             if (opmode_list)
@@ -264,14 +276,14 @@ void DeviceOptions::bind_string(const QString &name, const QString label, int ke
 }
 
 void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
-    GVariant *const gvar_list, boost::function<QString (GVariant*)> printer)
+    GVariant *const gvar_list, std::function<QString (GVariant*)> printer)
 {
 	GVariant *gvar;
 	GVariantIter iter;
 	std::vector< pair<GVariant*, QString> > values;
 
 	if (!gvar_list) {
-		pxv_warn("%s", "DeviceOptions::bind_enum: gvar_list is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_enum: gvar_list is nullptr");
 		return;
 	}
 	assert(gvar_list);
@@ -291,7 +303,7 @@ void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
 }
 
 void DeviceOptions::bind_int(const QString &name, const QString label, int key, QString suffix,
-    boost::optional< std::pair<int64_t, int64_t> > range)
+    std::optional< std::pair<int64_t, int64_t> > range)
 {
 	_properties.push_back(
         new Int(name, label, suffix, range,
@@ -300,8 +312,8 @@ void DeviceOptions::bind_int(const QString &name, const QString label, int key, 
 }
 
 void DeviceOptions::bind_double(const QString &name, const QString label, int key, QString suffix,
-    boost::optional< std::pair<double, double> > range,
-    int decimals, boost::optional<double> step)
+    std::optional< std::pair<double, double> > range,
+    int decimals, std::optional<double> step)
 {
     _properties.push_back(
         new Double(name, label, decimals, suffix, range, step,
@@ -314,7 +326,7 @@ QString DeviceOptions::print_gvariant(GVariant *const gvar)
 	QString s;
 
 	if (g_variant_is_of_type(gvar, G_VARIANT_TYPE("s"))){
-        s = QString::fromUtf8(g_variant_get_string(gvar, NULL));
+        s = QString::fromUtf8(g_variant_get_string(gvar, nullptr));
 	}
 	else
 	{
@@ -332,7 +344,7 @@ void DeviceOptions::bind_samplerate(const QString &name, const QString label,
 	GVariant *gvar_list_samplerates;
 
 	if (!gvar_list) {
-		pxv_warn("%s", "DeviceOptions::bind_samplerate: gvar_list is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_samplerate: gvar_list is nullptr");
 		return;
 	}
 	assert(gvar_list);
@@ -380,7 +392,7 @@ GVariant* DeviceOptions::samplerate_double_getter()
     GVariant *const gvar = config_getter(SR_CONF_SAMPLERATE);
 
 	if(!gvar)
-		return NULL;
+		return nullptr;
 
 	GVariant *const gvar_double = g_variant_new_double(
 		g_variant_get_uint64(gvar));
@@ -406,13 +418,29 @@ QString DeviceOptions::print_timebase(GVariant *const gvar)
 
 QString DeviceOptions::print_vdiv(GVariant *const gvar)
 {
-	uint64_t p, q;
-	g_variant_get(gvar, "(tt)", &p, &q);
-	return QString(sr_voltage_string(p, q));
+uint64_t p, q;
+g_variant_get(gvar, "(tt)", &p, &q);
+return QString(sr_voltage_string(p, q));
+}
+
+QString DeviceOptions::print_pattern(GVariant *const gvar)
+{
+QString s = print_gvariant(gvar);
+if (s == "random")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_RANDOM), "Random");
+if (s == "sine")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SINE), "Sine");
+if (s == "square")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SQUARE), "Square");
+if (s == "sawtooth")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SAWTOOTH), "Sawtooth");
+if (s == "triangle")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_TRIANGLE), "Triangle");
+return s;
 }
 
 void DeviceOptions::bind_bandwidths(const QString &name, const QString label, int key,
-    GVariant *const gvar_list, boost::function<QString (GVariant*)> printer)
+    GVariant *const gvar_list, std::function<QString (GVariant*)> printer)
 {
 	(void)printer;
 
@@ -421,7 +449,7 @@ void DeviceOptions::bind_bandwidths(const QString &name, const QString label, in
 	std::vector< pair<GVariant*, QString> > values;
 
 	if (!gvar_list) {
-		pxv_warn("%s", "DeviceOptions::bind_bandwidths: gvar_list is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_bandwidths: gvar_list is nullptr");
 		return;
 	}
 	assert(gvar_list);
@@ -433,7 +461,7 @@ void DeviceOptions::bind_bandwidths(const QString &name, const QString label, in
 	gsize n_items;
 	const gchar **strs = g_variant_get_strv(gvar_list, &n_items);
 	if (!strs) {
-		pxv_warn("%s", "DeviceOptions::bind_bandwidths: strs is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_bandwidths: strs is nullptr");
 		return;
 	}
 
@@ -466,7 +494,7 @@ void DeviceOptions::bind_list(const QString &name, const QString label, int key,
 	std::vector< pair<GVariant*, QString> > values;
 
 	if (!gvar_list) {
-		pxv_warn("%s", "DeviceOptions::bind_list: gvar_list is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_list: gvar_list is nullptr");
 		return;
 	}
 	assert(gvar_list);
@@ -478,7 +506,7 @@ void DeviceOptions::bind_list(const QString &name, const QString label, int key,
 	gsize n_items;
 	const gchar **strs = g_variant_get_strv(gvar_list, &n_items);
 	if (!strs) {
-		pxv_warn("%s", "DeviceOptions::bind_list: strs is NULL");
+		pxv_warn("%s", "DeviceOptions::bind_list: strs is nullptr");
 		return;
 	}
 

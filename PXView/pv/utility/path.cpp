@@ -24,7 +24,7 @@
 #ifdef _WIN32
 #include <QStringEncoder>
 #include "../log.h"
-#include <string.h>
+#include <cstring>
 #endif
 
 namespace pv{

@@ -31,8 +31,8 @@
 #include "triggerconfig.h"
 
 #include <libsigrok/libsigrok.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace pv {
 namespace data {
@@ -98,7 +98,7 @@ data::Snapshot *SessionSnapshot::get_snapshot(int type) {
   else if (type == SR_CHANNEL_DSO)
     return &_dso;
   else
-    return NULL;
+    return nullptr;
 }
 
 uint64_t SessionSnapshot::get_trigger_pos() { return _trig_pos; }

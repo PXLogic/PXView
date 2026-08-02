@@ -163,6 +163,11 @@ target_link_libraries(pxview-core PUBLIC
 target_include_directories(pxview-core PUBLIC
 	${CMAKE_SOURCE_DIR}/libsigrok/include
 )
+# PCH for pxview-core: use the same PCH header directly (not REUSE_FROM,
+# which would create a circular dependency since PXView links pxview-core).
+target_precompile_headers(pxview-core PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/common_pch.h
+)
 
 #===============================================================================
 #= common + libsigrokdecode source lists
@@ -244,6 +249,24 @@ if(NOT WIN32 AND NOT APPLE)
 	target_link_libraries(${PROJECT_NAME} "-Wl,--export-dynamic")
 endif()
 
+#===============================================================================
+#= Precompiled Headers (PCH) + Unity Build
+#-------------------------------------------------------------------------------
+# PCH: Precompiles the most frequently included headers (vector, QString,
+#   log.h, pxvdef.h, etc.) into a single .gch file, eliminating redundant
+#   parsing across ~130 compilation units. Expected 20-40% build speedup.
+# C sources (common/*.c, libsigrokdecode/*.c) cannot use C++ PCH — exclude them.
+set_source_files_properties(${common_SOURCES} ${libsigrokdecode_SOURCES}
+	PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+target_precompile_headers(${PROJECT_NAME} PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/common_pch.h
+)
+if(CMAKE_UNITY_BUILD)
+	set_target_properties(${PROJECT_NAME} PROPERTIES
+		UNITY_BUILD_BATCH_SIZE 8
+	)
+endif()
+
 if(WIN32)
 # Pass -mwindows so that no "DOS box" will open when PXView is started.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "-mwindows")
@@ -288,6 +311,7 @@ include(${CMAKE_SOURCE_DIR}/CMake/install_packaging.cmake)
 #===============================================================================
 #= Tests
 #-------------------------------------------------------------------------------
+option(ENABLE_TESTS "Build test executables" OFF)
 
 if(ENABLE_TESTS)
 	add_subdirectory(tests)

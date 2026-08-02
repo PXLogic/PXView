@@ -22,6 +22,7 @@
 
 #include "trigbar.h"
 
+#include <QMenu>
 #include <QBitmap>
 #include <QPainter>
 #include <QEvent>
@@ -37,6 +38,7 @@
 #include "../ui/fn.h"
 #include "../ui/dockfonts.h"
 #include "../ui/iconcache.h"
+#include "../pxvdef.h"
 
 namespace pv {
 namespace toolbars {
@@ -56,13 +58,15 @@ TrigBar::TrigBar(SigSession *session, QWidget *parent) :
     _action_math = new QAction(this);
     _action_math->setObjectName(QString::fromUtf8("actionMath"));
 
+    _action_lissajous = new QAction(this);
+    _action_lissajous->setObjectName(QString::fromUtf8("actionLissajous"));
+
     _function_menu = new QMenu(this);
     _function_menu->setContentsMargins(0,0,0,0);
     _function_menu->addAction(_action_fft);
     _function_menu->addAction(_action_math);
-
-    _action_lissajous = new QAction(this);
-    _action_lissajous->setObjectName(QString::fromUtf8("actionLissajous"));
+    _function_menu->addSeparator();
+    _function_menu->addAction(_action_lissajous);
 
     _action_dispalyOptions = new QAction(this);
 
@@ -113,6 +117,12 @@ void TrigBar::reStyle()
 
 void TrigBar::reload()
 {
+    // Lissajous is only meaningful in DSO mode (requires 2+ DSO channels).
+    // Hide the action in the function menu for non-DSO modes so users
+    // don't accidentally open a dialog that can't produce a figure.
+    int mode = _session->get_device()->get_work_mode();
+    _action_lissajous->setVisible(mode == DSO);
+
     update_view_status();
     update();
 }

@@ -27,7 +27,7 @@
 #include <list>
 #include <map>
 #include <memory>
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 
 #include <QElapsedTimer>
@@ -485,7 +485,7 @@ public:
 
   void update_view_port();
 
-  inline void update_all_trace_postion() { signals_changed(NULL); }
+  inline void update_all_trace_postion() { signals_changed(nullptr); }
 
   inline Viewport *get_time_view() { return _time_viewport; }
 
@@ -562,12 +562,12 @@ public:
    * (selection, visibility, v_offset, etc.) for signals that survive.
    * Does NOT directly affect DecodeTrace/SpectrumTrace/MathTrace — those
    * are managed by sync_derived_traces() based on Core's Stack list.
-   * Then calls signals_changed(NULL) to refresh layout and trigger lazy
+   * Then calls signals_changed(nullptr) to refresh layout and trigger lazy
    * sync of derived traces.
    *
    * This is intended as the View-layer entry point for the
    * ISessionCallback::signals_changed() event. Currently MainWindow
-   * dispatches the event to View::signals_changed(NULL); once
+   * dispatches the event to View::signals_changed(nullptr); once
    * ISessionCallback is split (Task 13), MainWindow should call
    * View::on_signals_changed() instead.
    */
@@ -576,14 +576,14 @@ public:
   /**
    * Incremental layout update for newly added signals.
    * Called after SignalFactory::update_signals(Added) added new signals
-   * to _own_signals. Triggers signals_changed(NULL) for layout recalculation.
+   * to _own_signals. Triggers signals_changed(nullptr) for layout recalculation.
    */
   void signals_added_layout();
 
   /**
    * Incremental layout update for removed signals.
    * Called after SignalFactory::update_signals(Removed) removed signals
-   * from _own_signals. Triggers signals_changed(NULL) for layout recalculation.
+   * from _own_signals. Triggers signals_changed(nullptr) for layout recalculation.
    */
   void signals_removed_layout();
 

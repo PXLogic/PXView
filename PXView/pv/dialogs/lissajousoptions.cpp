@@ -26,7 +26,7 @@
 #include <QLabel>
 #include <QTabBar>
 #include <QBitmap>
-#include <math.h>
+#include <cmath>
 
 #include "../sigsession.h"
 #include "../data/lissajousmodel.h"
@@ -37,7 +37,6 @@
 #include "../ui/dockfonts.h"
 #include "../config/appconfig.h"
 
-using namespace boost;
 using namespace std;
 using namespace pv::view;
 
@@ -50,11 +49,11 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
-    _enable = NULL;
-    _x_group = NULL;
-    _y_group = NULL;
-    _percent = NULL;
-    _layout = NULL;
+    _enable = nullptr;
+    _x_group = nullptr;
+    _y_group = nullptr;
+    _percent = nullptr;
+    _layout = nullptr;
 
     setMinimumSize(300, 300);
 

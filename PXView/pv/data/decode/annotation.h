@@ -23,7 +23,7 @@
 #ifndef PXVIEW_PV_VIEW_DECODE_ANNOTATION_H
 #define PXVIEW_PV_VIEW_DECODE_ANNOTATION_H
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <QString>
 #include <vector>

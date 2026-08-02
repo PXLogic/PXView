@@ -31,7 +31,7 @@
 #include "../data/dsosnapshot.h"
 #include "../data/sessiondata.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 
 namespace pv {

@@ -21,11 +21,11 @@
  */
 
  
-#include <math.h>
+#include <cmath>
 #include <QTimer>
 
 #include "view.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "lissajoustrace.h"
 #include "../data/dsosnapshot.h"
 #include "../sigsession.h"
@@ -127,6 +127,9 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
         int bottom = _border.bottom();
         double scale = _border.width() / 255.0;
         uint64_t sample_count = _data->get_sample_count() * min(_percent / 100.0, 1.0);
+        if (sample_count == 0)
+            return;
+
         QPointF *points = new QPointF[sample_count];
         QPointF *point = points;
 
@@ -150,8 +153,8 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
 
             p.setPen(view::View::Blue);
             p.drawPolyline(points, point - points);
-            delete[] points;
         }
+        delete[] points;
     }
 }
 

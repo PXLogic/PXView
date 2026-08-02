@@ -25,7 +25,7 @@
 
 #include "../sigsession.h"
 
-#include <stdint.h>
+#include <cstdint>
 #include <list>
 #include <map>
 #include <QDialog>

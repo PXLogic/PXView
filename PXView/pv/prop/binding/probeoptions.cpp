@@ -22,9 +22,8 @@
 
 #include "probeoptions.h"
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
-#include <boost/bind.hpp>
 #include <QObject>
-#include <stdint.h>
+#include <cstdint>
 #include "../bool.h"
 #include "../double.h"
 #include "../enum.h"
@@ -35,6 +34,7 @@
 #include "../../ui/langresource.h"
 
 using namespace std;
+using std::placeholders::_1;
 
 namespace pv {
 namespace prop {
@@ -54,7 +54,7 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
      * drivers don't support this key (only demo does); querying it directly
      * floods the log with "Option 'probe_configs' not available" per
      * channel. */
-    GVariant *gvar_devopts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+    GVariant *gvar_devopts = _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_OPTIONS);
     bool has_probe_configs = false;
     if (gvar_devopts) {
         gsize num_devopts;
@@ -71,8 +71,8 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
     if (!has_probe_configs)
         return;
 
-    GVariant *gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_PROBE_CONFIGS);
-    if (gvar_opts == NULL){
+    GVariant *gvar_opts = _device_agent->get_config_list(nullptr, SR_CONF_PROBE_CONFIGS);
+    if (gvar_opts == nullptr){
 		/* Driver supports no device instance options. */
         return;
     }
@@ -91,7 +91,7 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
 
 		const int key = info->key;
 
-        GVariant *gvar_list = _device_agent->get_config_list(NULL, key);
+        GVariant *gvar_list = _device_agent->get_config_list(nullptr, key);
 
         const QString name(info->name);
         const char *label_char =  LangResource::Instance()->get_lang_text(STR_PAGE_DSL, info->name, info->name);
@@ -120,6 +120,10 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
         case SR_CONF_PROBE_MAP_DEFAULT:
             bind_bool(name, label, key);
             break;
+
+case SR_CONF_PATTERN_MODE:
+bind_enum(name, label, key, gvar_list, print_pattern);
+break;
 		}
 
 		if (gvar_list)
@@ -132,12 +136,12 @@ GVariant* ProbeOptions::config_getter(const struct sr_channel *probe, int key)
 {
     if (!_static_device_agent)
         return nullptr;
-    return _static_device_agent->get_config(key, probe, NULL);
+    return _static_device_agent->get_config(key, probe, nullptr);
 }
 
 void ProbeOptions::config_setter(struct sr_channel *probe, int key, GVariant* value)
 {
-    _static_device_agent->set_config(key, value, probe, NULL);
+    _static_device_agent->set_config(key, value, probe, nullptr);
 }
 
 void ProbeOptions::bind_bool(const QString &name, const QString label, int key)
@@ -148,14 +152,14 @@ void ProbeOptions::bind_bool(const QString &name, const QString label, int key)
 }
 
 void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
-    GVariant *const gvar_list, boost::function<QString (GVariant*)> printer)
+    GVariant *const gvar_list, std::function<QString (GVariant*)> printer)
 {
 	GVariant *gvar;
 	GVariantIter iter;
 	std::vector< pair<GVariant*, QString> > values;
 
 	if (!gvar_list) {
-		pxv_warn("%s", "ProbeOptions::bind_enum: gvar_list is NULL");
+		pxv_warn("%s", "ProbeOptions::bind_enum: gvar_list is nullptr");
 		return;
 	}
 	assert(gvar_list);
@@ -171,7 +175,7 @@ void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
 }
 
 void ProbeOptions::bind_int(const QString &name, const QString label, int key, QString suffix,
-    boost::optional< std::pair<int64_t, int64_t> > range)
+    std::optional< std::pair<int64_t, int64_t> > range)
 {
 	_properties.push_back(
         new Int(name, label, suffix, range,
@@ -180,8 +184,8 @@ void ProbeOptions::bind_int(const QString &name, const QString label, int key, Q
 }
 
 void ProbeOptions::bind_double(const QString &name, const QString label, int key, QString suffix,
-    boost::optional< std::pair<double, double> > range,
-    int decimals, boost::optional<double> step)
+    std::optional< std::pair<double, double> > range,
+    int decimals, std::optional<double> step)
 {
     _properties.push_back(
         new Double(name, label, decimals, suffix, range, step,
@@ -195,7 +199,7 @@ void ProbeOptions::bind_vdiv(const QString &name, const QString label,
     GVariant *gvar_list_vdivs;
 
     if (!gvar_list) {
-        pxv_warn("%s", "ProbeOptions::bind_vdiv: gvar_list is NULL");
+        pxv_warn("%s", "ProbeOptions::bind_vdiv: gvar_list is nullptr");
         return;
     }
 
@@ -207,7 +211,7 @@ void ProbeOptions::bind_vdiv(const QString &name, const QString label,
             gvar_list_vdivs, print_vdiv);
         g_variant_unref(gvar_list_vdivs);
     } else {
-        /* g_variant_lookup_value returned NULL — either the dict is missing
+        /* g_variant_lookup_value returned nullptr — either the dict is missing
          * the "vdivs" key or its value type is not "at". Without this branch
          * the vdiv control would silently disappear from the DeviceOptions
          * dialog in ANALOG mode, leaving the user with no way to change
@@ -216,7 +220,7 @@ void ProbeOptions::bind_vdiv(const QString &name, const QString label,
                  "gvar_list (probe index=%d name='%s') — vdiv control "
                  "will not be created",
                  _probe ? _probe->index : -1,
-                 (_probe && _probe->name) ? _probe->name : "(null)");
+                 (_probe && _probe->name) ? _probe->name : "(nullptr)");
     }
 }
 
@@ -226,7 +230,7 @@ void ProbeOptions::bind_coupling(const QString &name, const QString label,
     GVariant *gvar_list_coupling;
 
     if (!gvar_list) {
-        pxv_warn("%s", "ProbeOptions::bind_coupling: gvar_list is NULL");
+        pxv_warn("%s", "ProbeOptions::bind_coupling: gvar_list is nullptr");
         return;
     }
 
@@ -239,7 +243,7 @@ void ProbeOptions::bind_coupling(const QString &name, const QString label,
             gvar_list_coupling, print_coupling);
         g_variant_unref(gvar_list_coupling);
     } else {
-        /* g_variant_lookup_value returned NULL — either the dict is missing
+        /* g_variant_lookup_value returned nullptr — either the dict is missing
          * the "coupling" key or its value type is not "ai". Without this
          * branch the coupling control would silently disappear from the
          * DeviceOptions dialog in ANALOG mode. Log enough context to
@@ -248,7 +252,7 @@ void ProbeOptions::bind_coupling(const QString &name, const QString label,
                  "gvar_list (probe index=%d name='%s') — coupling control "
                  "will not be created",
                  _probe ? _probe->index : -1,
-                 (_probe && _probe->name) ? _probe->name : "(null)");
+                 (_probe && _probe->name) ? _probe->name : "(nullptr)");
     }
 }
 
@@ -257,7 +261,7 @@ QString ProbeOptions::print_gvariant(GVariant *const gvar)
     QString s;
 
     if (g_variant_is_of_type(gvar, G_VARIANT_TYPE("s")))
-        s = QString::fromUtf8(g_variant_get_string(gvar, NULL));
+        s = QString::fromUtf8(g_variant_get_string(gvar, nullptr));
     else
     {
         gchar *const text = g_variant_print(gvar, FALSE);
@@ -279,6 +283,27 @@ QString ProbeOptions::print_vdiv(GVariant *const gvar)
         p /= 1000;
     }
 	return QString(sr_voltage_string(p, q));
+}
+
+QString ProbeOptions::print_pattern(GVariant *const gvar)
+{
+QString s = print_gvariant(gvar);
+/* Translate driver pattern strings to localized display text.
+ * The driver returns lowercase English strings ("random", "sine",
+ * "square", "sawtooth", "triangle"); the Enum property stores the
+ * GVariant (raw driver value) for SET, but the display string comes
+ * from this printer, so we can freely translate it. */
+if (s == "random")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_RANDOM), "Random");
+if (s == "sine")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SINE), "Sine");
+if (s == "square")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SQUARE), "Square");
+if (s == "sawtooth")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_SAWTOOTH), "Sawtooth");
+if (s == "triangle")
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_PATTERN_TRIANGLE), "Triangle");
+return s;
 }
 
 QString ProbeOptions::print_coupling(GVariant *const gvar)

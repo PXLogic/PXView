@@ -74,14 +74,14 @@ bool Application::notify(QObject *receiver_, QEvent *event_)
 #endif
         return result;
     } catch ( std::exception& e ) {
-        QMessageBox msg(NULL);
+        QMessageBox msg(nullptr);
         msg.setText(tr("Application Error"));
         msg.setInformativeText(e.what());
         msg.setStandardButtons(QMessageBox::Ok);
         msg.setIcon(QMessageBox::Warning);
         msg.exec();
     } catch (...) {
-        QMessageBox msg(NULL);
+        QMessageBox msg(nullptr);
         msg.setText(tr("Application Error"));
         msg.setInformativeText(tr("An unexpected error occurred"));
         msg.setStandardButtons(QMessageBox::Ok);

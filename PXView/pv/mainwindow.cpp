@@ -82,6 +82,7 @@
 #include "dock/deviceoptionsdock.h"
 #include "dock/logdock.h"
 #include "dock/mcpcontroldock.h"
+#include "dock/functiondock.h"
 #include "dock/measuredock.h"
 #include "dock/protocoldock.h"
 #include "dock/searchdock.h"
@@ -112,7 +113,7 @@
 #include "config/appconfig.h"
 #include "config/shortcutdefs.h"
 #include "deviceagent.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "log.h"
 #include "mainframe.h"
 #include "sigsession.h"
@@ -125,8 +126,8 @@
 #include <inttypes.h>
 #include <list>
 #include <stdarg.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <cstdint>
+#include <cstdlib>
 #include <thread>
 
 #ifdef ENABLE_DEBUG_HELPER
@@ -224,7 +225,7 @@ void MainWindow::setupSideBar() {
   _side_bar->addItem("search.svg", S_ID(IDS_TOOLBAR_SEARCH), "Search",
                      widgets::SideBar::DockItem, _drawer_page_search);
   _side_bar->addItem("function.svg", S_ID(IDS_TOOLBAR_FUNCTION), "Function",
-                     widgets::SideBar::DockItem);
+                     widgets::SideBar::DockItem, _drawer_page_function);
   _side_bar->addItem("sliders.svg", S_ID(IDS_TOOLBAR_DEVICE_OPTION), "Options",
                      widgets::SideBar::DockItem, _drawer_page_device_options);
   _side_bar->addItem("workflow.svg", S_ID(IDS_TOOLBAR_MCP), "MCP",
@@ -257,6 +258,7 @@ void MainWindow::setupFileCategory() {
   _title_bar->addSeparator(_category_file_index);
 
   _title_bar->addAction(_category_file_index, _file_bar->_action_export);
+  _title_bar->addAction(_category_file_index, _file_bar->_action_import);
   _title_bar->addAction(_category_file_index, _file_bar->_action_capture);
 }
 
@@ -296,19 +298,19 @@ void MainWindow::Ribbon_retranslateUi() {
 MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
     : QMainWindow(parent) {
   pxv_info("DBG MainWindow::MainWindow() START");
-  _msg = NULL;
+  _msg = nullptr;
   _frame = parent;
   _category_file_index = -1;
   _category_display_index = -1;
   _category_help_index = -1;
 
   if (!title_bar) {
-    pxv_warn("%s", "MainWindow::MainWindow: title_bar is NULL");
-    throw std::invalid_argument("MainWindow: title_bar is NULL");
+    pxv_warn("%s", "MainWindow::MainWindow: title_bar is nullptr");
+    throw std::invalid_argument("MainWindow: title_bar is nullptr");
   }
   if (!_frame) {
-    pxv_warn("%s", "MainWindow::MainWindow: _frame is NULL");
-    throw std::invalid_argument("MainWindow: _frame is NULL");
+    pxv_warn("%s", "MainWindow::MainWindow: _frame is nullptr");
+    throw std::invalid_argument("MainWindow: _frame is nullptr");
   }
   assert(title_bar);
   assert(_frame);
@@ -547,8 +549,18 @@ void MainWindow::setup_ui() {
   _log_widget = new dock::LogDock(_log_dock);
   _log_dock->setWidget(_log_widget);
 
-  // MCP control dock
-  _mcp_control_widget = new dock::McpControlDock(AppControl::Instance(), this);
+// MCP control dock
+_mcp_control_widget = new dock::McpControlDock(AppControl::Instance(), this);
+
+// Function dock (FFT / Math / Lissajous inline controls)
+_function_dock = new QDockWidget(
+    L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"), this);
+_function_dock->setObjectName("function_dock");
+_function_dock->setFeatures(QDockWidget::DockWidgetMovable);
+_function_dock->setAllowedAreas(Qt::RightDockWidgetArea);
+_function_dock->setVisible(false);
+_function_widget = new dock::FunctionDock(_function_dock, _session);
+_function_dock->setWidget(_function_widget);
 
   // Do NOT add dock widgets to the main window layout.
   // They are hidden containers; content is shown via SlidingDrawer instead.
@@ -557,8 +569,9 @@ void MainWindow::setup_ui() {
   _dso_trigger_dock->setVisible(false);
   _measure_dock->setVisible(false);
   _search_dock->setVisible(false);
-  _device_options_dock->setVisible(false);
-  _log_dock->setVisible(false);
+_device_options_dock->setVisible(false);
+_log_dock->setVisible(false);
+_function_dock->setVisible(false);
 
   // --- Create SlidingDrawer (overlay child of _central_widget, push via
   // margin) ---
@@ -613,6 +626,12 @@ void MainWindow::setup_ui() {
   _drawer_page_mcp = _sliding_drawer->addPage(
       _mcp_control_widget,
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_DOCK_TITLE), "MCP Server"));
+
+  // Function (FFT / Math / Lissajous)
+  _function_dock->setWidget(nullptr);
+  _drawer_page_function = _sliding_drawer->addPage(
+      _function_widget,
+      L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
 
   _drawer_current_page = -1;
 
@@ -749,6 +768,8 @@ void MainWindow::setup_ui() {
   connect(_file_bar, &toolbars::FileBar::sig_save, this, &MainWindow::on_save);
   connect(_file_bar, &toolbars::FileBar::sig_export, this,
           &MainWindow::on_export);
+  connect(_file_bar, &toolbars::FileBar::sig_import_file, this,
+          &MainWindow::on_import_file);
   connect(_file_bar, &toolbars::FileBar::sig_screenShot, this,
           &MainWindow::on_screenShot, Qt::QueuedConnection);
   connect(_file_bar, &toolbars::FileBar::sig_load_session, this,
@@ -855,7 +876,7 @@ void MainWindow::setup_ui() {
       pxv_err("file is not exists:%s", file_name.c_str());
       MsgBox::Show(
           L_S(STR_PAGE_MSG, S_ID(IDS_MSG_OPEN_FILE_ERROR), "Open file error!"),
-          ldFileName, NULL);
+          ldFileName, nullptr);
     }
   }
 
@@ -943,6 +964,9 @@ void MainWindow::retranslateUi() {
     _sliding_drawer->setPageTitle(
         _drawer_page_log,
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LOG_DOCK_TITLE), "Log"));
+    _sliding_drawer->setPageTitle(
+        _drawer_page_function,
+        L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
   }
 
   Ribbon_retranslateUi();
@@ -973,6 +997,51 @@ void MainWindow::on_load_file(QString file_name) {
 
     // 架构修复：检查 set_file 返回值，失败时不创建空白 tab
     if (!_session->set_file(file_name)) {
+      QString strMsg(
+          L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
+      strMsg += file_name;
+      MsgBox::Show(strMsg);
+      // 回滚已创建的 tab
+      int idx = _tab_contexts.indexOf(ctx);
+      if (idx >= 0)
+        remove_tab(idx);
+      _session->set_default_device();
+      return;
+    }
+    ctx->make_live();
+    ctx->activate();
+    update_tab_style(_tab_contexts.indexOf(ctx));
+  } catch (QString e) {
+    QString strMsg(
+        L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
+    strMsg += file_name;
+    MsgBox::Show(strMsg);
+    _session->set_default_device();
+  }
+}
+
+void MainWindow::on_import_file(QString file_name) {
+  pv::view::View *new_view = new pv::view::View(_session, _sampling_bar, this);
+  // phase 2: document owned by DocumentRegistry.
+  size_t new_doc_idx = _session->document_registry()->take_document(
+      std::make_unique<pv::data::SessionDocument>(_session));
+  pv::data::SessionDocument *new_doc =
+      _session->document_registry()->get_document_by_index(new_doc_idx);
+  pv::TabContext *ctx =
+      SessionManager::instance()->create_context(new_view, _session, new_doc,
+                                                 new_doc_idx,
+                                                 _session->document_registry());
+
+  QFileInfo fi(file_name);
+  ctx->set_title(fi.baseName());
+  ctx->set_file_path(file_name);
+
+  add_tab(ctx);
+
+  try {
+    // Import external data file using libsigrok input modules
+    // (VCD, CSV, binary, Saleae, etc.) — aligned with PulseView.
+    if (!_session->import_file(file_name)) {
       QString strMsg(
           L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
       strMsg += file_name;
@@ -1051,7 +1120,7 @@ void MainWindow::on_session_error() {
           &msg, &QDialog::accept);
   _msg = &msg;
   msg.exec();
-  _msg = NULL;
+  _msg = nullptr;
 
   _session->clear_error();
 }
@@ -1136,6 +1205,11 @@ bool MainWindow::able_to_close() {
 
   save_config();
 
+  // Check if the user has disabled the save prompt on exit
+  if (!AppConfig::Instance().appOptions.promptSaveOnExit) {
+    return true;
+  }
+
   if (confirm_to_store_data()) {
     on_save();
     return false;
@@ -1186,13 +1260,10 @@ void MainWindow::on_side_bar_dock_clicked(int index) {
     current_view()->show_search_cursor(true);
     drawerPage = _drawer_page_search;
     break;
-  case SIDEBAR_FUNCTION: {
-    // Show function menu (FFT/Math) at the sidebar button position
-    auto btn = _side_bar->getItem(SIDEBAR_FUNCTION)->button;
-    QPoint pos = btn->mapToGlobal(QPoint(btn->width(), 0));
-    _trig_bar->_function_menu->popup(pos);
+  case SIDEBAR_FUNCTION:
+    _function_widget->reload();
+    drawerPage = _drawer_page_function;
     break;
-  }
   case SIDEBAR_OPTIONS:
     _device_options_widget->update_view();
     drawerPage = _drawer_page_device_options;
@@ -1402,13 +1473,13 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
 
   // --- Device instance session config (sample rate, limit_samples, operation_mode, etc.) ---
   GVariant *gvar_opts =
-      _device_agent->get_config_list(NULL, SR_CONF_DEVICE_SESSIONS);
+      _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_SESSIONS);
   GVariant *gvar;
   gsize num_opts;
 
   pxv_info("gen_config_json: querying SR_CONF_DEVICE_SESSIONS, gvar_opts=%p", gvar_opts);
 
-  if (gvar_opts != NULL) {
+  if (gvar_opts != nullptr) {
     /* Driver implements SR_CONF_DEVICE_SESSIONS with an int32[] array
      * (e.g., fork's std::opts_config_list). The array contains bare keys like
      * SR_CONF_SAMPLERATE, NOT packed with flags. */
@@ -1421,7 +1492,7 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
       if (!info || !info->name)
         continue;
       gvar = _device_agent->get_config(info->key);
-      if (gvar != NULL) {
+      if (gvar != nullptr) {
         if (info->datatype == SR_T_BOOL)
           sessionVar[info->name] =
               QJsonValue::fromVariant(g_variant_get_boolean(gvar));
@@ -1439,7 +1510,7 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
               QString::number(g_variant_get_double(gvar)));
         else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING)
           sessionVar[info->name] =
-              QJsonValue::fromVariant(g_variant_get_string(gvar, NULL));
+              QJsonValue::fromVariant(g_variant_get_string(gvar, nullptr));
         else if (info->datatype == SR_T_INT32)
           sessionVar[info->name] =
               QJsonValue::fromVariant(g_variant_get_int32(gvar));
@@ -1460,12 +1531,12 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
   } else if (_device_agent->is_hardware()) {
     /* Driver does not implement SR_CONF_DEVICE_SESSIONS. Use SR_CONF_DEVICE_OPTIONS (uint32_t
      * packed entries with capability flags like SR_CONF_SAMPLERATE | SR_CONF_GET).
-     * DeviceAgent::get_config_list(NULL, SR_CONF_DEVICE_OPTIONS) returns a uint32_t array
+     * DeviceAgent::get_config_list(nullptr, SR_CONF_DEVICE_OPTIONS) returns a uint32_t array
      * (see pxlogic.h devopts[] declaration), each element is key|flags.
      * We mask with 0x1fffffff to extract the bare key for sr_key_info_get(),
      * and iterate the list to save ALL device options, not just a hardcoded subset. */
     pxv_info("gen_config_json: falling back to SR_CONF_DEVICE_OPTIONS");
-    gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+    gvar_opts = _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_OPTIONS);
 
     if (!gvar_opts) {
       pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config section.");
@@ -1485,7 +1556,7 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
           continue;
 
         gvar = _device_agent->get_config(info->key);
-        if (gvar != NULL) {
+        if (gvar != nullptr) {
           if (info->datatype == SR_T_BOOL)
             sessionVar[info->name] =
                 QJsonValue::fromVariant(g_variant_get_boolean(gvar));
@@ -1501,7 +1572,7 @@ bool MainWindow::gen_config_json(QJsonObject &sessionVar) {
                 QString::number(g_variant_get_double(gvar)));
           else if (info->datatype == SR_T_CHAR || info->datatype == SR_T_STRING)
             sessionVar[info->name] =
-                QJsonValue::fromVariant(g_variant_get_string(gvar, NULL));
+                QJsonValue::fromVariant(g_variant_get_string(gvar, nullptr));
           else if (info->datatype == SR_T_INT32)
             sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int32(gvar));
           else if (info->datatype == SR_T_UINT32)
@@ -1630,7 +1701,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
     // check device and mode
     if (driverName != sessionDevice || mode != conf_dev_mode) {
       MsgBox::Show(
-          NULL,
+          nullptr,
           L_S(STR_PAGE_MSG, S_ID(IDS_MSG_PROFILE_NOT_COMPATIBLE),
               "Profile is not compatible with current device or mode!"),
           this);
@@ -1640,10 +1711,10 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
 
   // load device settings
   GVariant *gvar_opts =
-      _device_agent->get_config_list(NULL, SR_CONF_DEVICE_SESSIONS);
+      _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_SESSIONS);
   gsize num_opts;
 
-  if (gvar_opts != NULL) {
+  if (gvar_opts != nullptr) {
     /* Driver implements SR_CONF_DEVICE_SESSIONS with an int32[] array
      * (e.g., fork's std::opts_config_list). The array contains bare keys like
      * SR_CONF_SAMPLERATE, NOT packed with flags. */
@@ -1651,8 +1722,12 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
         gvar_opts, &num_opts, sizeof(int32_t));
 
     for (unsigned int i = 0; i < num_opts; i++) {
+      /* SR_CONF_DEVICE_SESSIONS returns bare keys (no capability flags).
+       * We cannot check SR_CONF_SET here, so we attempt set_config and
+       * silently skip GET-only keys that reject the SET. */
+      const int key = options[i];
       const struct sr_config_info *info =
-          _device_agent->get_config_info(options[i]);
+          _device_agent->get_config_info(key);
 
       if (!info || !info->name)
         continue;
@@ -1660,7 +1735,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
       if (!sessionObj.contains(info->name))
         continue;
 
-      GVariant *gvar = NULL;
+      GVariant *gvar = nullptr;
       int id = 0;
 
       if (info->datatype == SR_T_BOOL) {
@@ -1711,15 +1786,19 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
         gvar = g_variant_new_int16(id);
       }
 
-      if (gvar == NULL) {
+      if (gvar == nullptr) {
         pxv_warn("Warning: Profile failed to parse key:'%s'", info->name);
         continue;
       }
 
       bool bFlag = _device_agent->set_config(info->key, gvar);
       if (!bFlag) {
-        pxv_err("Set device config option failed, id:%d, code:%d", info->key,
-                id);
+        /* GET-only keys (SR_CONF_REF_MAX, SR_CONF_MAX_DSO_SAMPLERATE,
+         * SR_CONF_LOAD_DECODER, SR_CONF_HAVE_ZERO, SR_CONF_MAX_DSO_SAMPLELIMITS)
+         * are listed in SR_CONF_DEVICE_SESSIONS but don't support SET.
+         * Silently skip — the driver keeps its default value. */
+        pxv_dbg("load_config: key '%s' (id=%d) rejected SET, skipping",
+                info->name, info->key);
       }
     }
     g_variant_unref(gvar_opts);
@@ -1727,7 +1806,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
     /* Driver does not implement SR_CONF_DEVICE_SESSIONS. Fall back to SR_CONF_DEVICE_OPTIONS
      * (uint32_t packed entries with capability flags). Mirrors the save-side fallback
      * in gen_config_json(). */
-    gvar_opts = _device_agent->get_config_list(NULL, SR_CONF_DEVICE_OPTIONS);
+    gvar_opts = _device_agent->get_config_list(nullptr, SR_CONF_DEVICE_OPTIONS);
 
     if (!gvar_opts) {
       pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config load.");
@@ -1738,6 +1817,9 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
       for (unsigned int i = 0; i < num_opts; i++) {
         /* Mask off capability bits — see gen_config_json() for details. */
         const int key = (int)(options[i] & 0x1fffffff);
+        /* Skip GET-only keys — SR_CONF_SET bit is bit 30. */
+        if (!(options[i] & SR_CONF_SET))
+          continue;
         const struct sr_config_info *info =
             _device_agent->get_config_info(key);
 
@@ -1747,7 +1829,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
         if (!sessionObj.contains(info->name))
           continue;
 
-        GVariant *gvar = NULL;
+        GVariant *gvar = nullptr;
         int id = 0;
 
         if (info->datatype == SR_T_BOOL) {
@@ -1798,7 +1880,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
           gvar = g_variant_new_int16(id);
         }
 
-        if (gvar == NULL) {
+        if (gvar == nullptr) {
           pxv_warn("Warning: Profile failed to parse key:'%s'", info->name);
           continue;
         }
@@ -1936,7 +2018,7 @@ bool MainWindow::load_config_from_json(QJsonDocument &doc, bool &haveDecoder) {
             s->set_colour(QColor(colourStr));
           s->set_name(chan_name);
 
-          view::LogicSignal *logicSig = NULL;
+          view::LogicSignal *logicSig = nullptr;
           if ((logicSig = dynamic_cast<view::LogicSignal *>(s))) {
             // strigger → trig_type（ChannelConfig 字段名，int）
             logicSig->set_trig(obj["trig_type"].toInt());
@@ -2185,7 +2267,7 @@ bool MainWindow::eventFilter(QObject *object, QEvent *event) {
 
     pxv_info("MainWindow::eventFilter key=%d, object=%p (%s), focused=%p (%s)",
              ke->key(), object, object->metaObject()->className(), focused,
-             focused ? focused->metaObject()->className() : "NULL");
+             focused ? focused->metaObject()->className() : "nullptr");
 
     if (focused && qobject_cast<pv::widgets::SearchPatternInput *>(focused)) {
       in_filter = true;
@@ -2405,6 +2487,9 @@ bool MainWindow::eventFilter(QObject *object, QEvent *event) {
       break;
     case SHORTCUT_FILE_EXPORT:
       _file_bar->_action_export->trigger();
+      break;
+    case SHORTCUT_FILE_IMPORT:
+      _file_bar->_action_import->trigger();
       break;
     case SHORTCUT_FILE_LOAD:
       _file_bar->_action_load->trigger();
@@ -2928,7 +3013,7 @@ QJsonDocument MainWindow::get_config_json_from_data_file(QString file,
   ZipReader rd(f_name.c_str());
   auto *data = rd.GetInnterFileData("session");
 
-  if (data != NULL) {
+  if (data != nullptr) {
     QByteArray raw_bytes = QByteArray::fromRawData(data->data(), data->size());
     QString jsonStr(raw_bytes.data());
     QByteArray qbs = jsonStr.toUtf8();
@@ -2965,7 +3050,7 @@ QJsonArray MainWindow::get_decoder_json_from_data_file(QString file,
   ZipReader rd(f_name.c_str());
   auto *data = rd.GetInnterFileData("decoders");
 
-  if (data != NULL) {
+  if (data != nullptr) {
     QByteArray raw_bytes = QByteArray::fromRawData(data->data(), data->size());
     QString jsonStr(raw_bytes.data());
     QByteArray qbs = jsonStr.toUtf8();
@@ -3007,6 +3092,8 @@ void MainWindow::update_toolbar_view_status() {
   _side_bar->setItemEnabled(SIDEBAR_SEARCH, bEnable);
   _side_bar->setItemEnabled(SIDEBAR_FUNCTION, bEnable);
   _side_bar->setItemEnabled(SIDEBAR_OPTIONS, bEnable);
+  _side_bar->setItemEnabled(SIDEBAR_MCP, bEnable);
+  _side_bar->setItemEnabled(SIDEBAR_LOG, bEnable);
   _side_bar->setItemEnabled(SIDEBAR_RUNSTOP, true);
   _side_bar->setItemEnabled(SIDEBAR_INSTANT, true);
 
@@ -3026,6 +3113,7 @@ void MainWindow::update_toolbar_view_status() {
     _side_bar->setItemVisible(SIDEBAR_SEARCH, true);
     _side_bar->setItemVisible(SIDEBAR_FUNCTION, false);
     _side_bar->setItemVisible(SIDEBAR_OPTIONS, true);
+    _side_bar->setItemVisible(SIDEBAR_MCP, true);
     _side_bar->setItemVisible(SIDEBAR_LOG, true);
     _side_bar->setItemVisible(SIDEBAR_RUNSTOP, true);
     _side_bar->setItemVisible(SIDEBAR_INSTANT, true);
@@ -3036,6 +3124,7 @@ void MainWindow::update_toolbar_view_status() {
     _side_bar->setItemVisible(SIDEBAR_SEARCH, false);
     _side_bar->setItemVisible(SIDEBAR_FUNCTION, false);
     _side_bar->setItemVisible(SIDEBAR_OPTIONS, true);
+    _side_bar->setItemVisible(SIDEBAR_MCP, true);
     _side_bar->setItemVisible(SIDEBAR_LOG, true);
     _side_bar->setItemVisible(SIDEBAR_RUNSTOP, true);
     _side_bar->setItemVisible(SIDEBAR_INSTANT, false);
@@ -3046,6 +3135,7 @@ void MainWindow::update_toolbar_view_status() {
     _side_bar->setItemVisible(SIDEBAR_SEARCH, false);
     _side_bar->setItemVisible(SIDEBAR_FUNCTION, true);
     _side_bar->setItemVisible(SIDEBAR_OPTIONS, true);
+    _side_bar->setItemVisible(SIDEBAR_MCP, true);
     _side_bar->setItemVisible(SIDEBAR_LOG, true);
     _side_bar->setItemVisible(SIDEBAR_RUNSTOP, true);
     _side_bar->setItemVisible(SIDEBAR_INSTANT, true);
@@ -3065,6 +3155,8 @@ void MainWindow::update_toolbar_view_status() {
       should_close = !_side_bar->isItemVisible(SIDEBAR_DECODE);
     else if (cp == _drawer_page_search)
       should_close = !_side_bar->isItemVisible(SIDEBAR_SEARCH);
+    else if (cp == _drawer_page_function)
+      should_close = !_side_bar->isItemVisible(SIDEBAR_FUNCTION);
     if (should_close) {
       _sliding_drawer->close();
       _side_bar->clearAllChecked();
@@ -3235,9 +3327,9 @@ void MainWindow::on_event(const pv::interface::CurrentDeviceChanged &) {
   }
 }
 void MainWindow::on_event(const pv::interface::UsbDeviceArrived &) {
-  if (_msg != NULL) {
+  if (_msg != nullptr) {
     _msg->close();
-    _msg = NULL;
+    _msg = nullptr;
   }
 
   _sampling_bar->update_device_list();
@@ -3253,11 +3345,11 @@ void MainWindow::on_event(const pv::interface::UsbDeviceArrived &) {
     QString msgText = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_TO_SWITCH_DEVICE),
                           "To switch the new device?");
 
-    if (MsgBox::Confirm(msgText, "", &_msg, NULL) == false) {
-      _msg = NULL;
+    if (MsgBox::Confirm(msgText, "", &_msg, nullptr) == false) {
+      _msg = nullptr;
       return;
     }
-    _msg = NULL;
+    _msg = nullptr;
   }
 
   // The store confirm is not processed.
@@ -3291,9 +3383,9 @@ void MainWindow::on_event(const pv::interface::UsbDeviceArrived &) {
   }
 }
 void MainWindow::on_event(const pv::interface::DeviceDetached &) {
-  if (_msg != NULL) {
+  if (_msg != nullptr) {
     _msg->close();
-    _msg = NULL;
+    _msg = nullptr;
   }
 
   // Save current config, and switch to the last device.
@@ -3356,7 +3448,7 @@ void MainWindow::on_event(const pv::interface::DeviceOptionsUpdated &) {
   }
 
   current_view()->rebuild_signals();
-  current_view()->signals_changed(NULL);
+  current_view()->signals_changed(nullptr);
 }
 void MainWindow::on_event(const pv::interface::DsoViewOptionChanged &) {
   // DSO header interaction (vDial/factor/acCoupling). The DsoSignal setters
@@ -3664,9 +3756,9 @@ void MainWindow::on_event(const pv::interface::CurrentDeviceChangePrev &) {
   // modernize-core-layer-radical Task 11: CurrentDeviceChangePrev pre-broadcast
   // hook. Close any modal message, hide calibration, delete all protocols,
   // reload the view BEFORE SigSession releases the old device.
-  if (_msg != NULL) {
+  if (_msg != nullptr) {
     _msg->close();
-    _msg = NULL;
+    _msg = nullptr;
   }
   // Calibration dialog removed; nothing to hide.
 
@@ -3754,13 +3846,13 @@ void MainWindow::on_service_event(const pv::api::ServiceEventData &data) {
     // Core data changed via MCP/API (decoder added/removed or signals
     // changed). Trigger lazy sync so View creates/removes the
     // corresponding DecodeTrace by Core Stack identity comparison.
-    // signals_changed(NULL) internally calls mark_derived_traces_dirty()
+    // signals_changed(nullptr) internally calls mark_derived_traces_dirty()
     // then get_traces() -> get_own_decode_traces() -> sync_derived_traces(),
     // which performs the Stack-pointer-identity-based reconciliation.
     // The explicit mark_derived_traces_dirty() is kept for clarity and
     // defensive purposes (idempotent).
     view->mark_derived_traces_dirty();
-    view->signals_changed(NULL);
+    view->signals_changed(nullptr);
     break;
   }
   default:
@@ -3770,7 +3862,7 @@ void MainWindow::on_service_event(const pv::api::ServiceEventData &data) {
 }
 
 void MainWindow::calc_min_height() {
-  if (_frame != NULL) {
+  if (_frame != nullptr) {
     if (_device_agent->get_work_mode() == LOGIC) {
       int ch_num = _session->get_ch_num(-1);
       int win_height = Base_Height + Per_Chan_Height * ch_num;
@@ -3797,7 +3889,7 @@ void MainWindow::on_delay_prop_msg() {
 
   if (_strMsg != "") {
     MsgBox::Show("", _strMsg, this, &_msg);
-    _msg = NULL;
+    _msg = nullptr;
   }
 }
 

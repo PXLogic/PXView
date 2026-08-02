@@ -45,6 +45,7 @@ static const ShortcutActionInfo g_shortcutActionInfos[] = {
     { SHORTCUT_FILE_OPEN,      "Ctrl+O",       S_ID(IDS_DLG_SC_FILE_OPEN)      },
     { SHORTCUT_FILE_SAVE,      "Ctrl+S",       S_ID(IDS_DLG_SC_FILE_SAVE)      },
     { SHORTCUT_FILE_EXPORT,    "Ctrl+Shift+E", S_ID(IDS_DLG_SC_FILE_EXPORT)    },
+    { SHORTCUT_FILE_IMPORT,    "Ctrl+Shift+I", S_ID(IDS_DLG_SC_FILE_IMPORT)    },
     { SHORTCUT_FILE_LOAD,      "Ctrl+L",       S_ID(IDS_DLG_SC_FILE_LOAD)      },
     { SHORTCUT_FILE_STORE,     "",             S_ID(IDS_DLG_SC_FILE_STORE)     },
     { SHORTCUT_SCREENSHOT,     "Ctrl+P",       S_ID(IDS_DLG_SC_SCREENSHOT)     },

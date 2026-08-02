@@ -177,10 +177,10 @@ void SignalConfigStore::save_signal_config(
     if (mode == ANALOG || mode == DSO) {
       // SR_CONF_PROBE_VDIV / SR_CONF_PROBE_COUPLING fork DSO keys deleted;
       // cfg.vdiv / cfg.coupling keep their defaults (0). map_default is still
-      // queried (key retained in dsvdef.h, migrated in Phase 2).
+      // queried (key retained in pxvdef.h, migrated in Phase 2).
       bool map_default = true;
       agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default, probe,
-                             NULL);
+                             nullptr);
       cfg.map_default = map_default;
 
       // Fork sr_channel fields (hw_offset/offset/zero_offset/vfactor) removed
@@ -292,7 +292,23 @@ void SignalConfigStore::apply_signal_config() {
     }
     const ChannelConfig &cfg = *cfg_ptr;
 
-    agent->enable_probe(probe, cfg.enabled);
+    // Only restore the saved enabled state for channels whose type matches
+    // the current work mode. Channels of a different type (e.g. logic channels
+    // when in DSO mode) must remain disabled — otherwise demo_prepare_data()
+    // detects has_enabled_other and skips the SR_DF_DSO path, leaving the DSO
+    // view empty. This mirrors switch_work_mode()'s channel-type filtering.
+    bool should_enable = cfg.enabled;
+    if (mode == LOGIC && probe->type != SR_CHANNEL_LOGIC)
+      should_enable = false;
+    else if (mode == DSO && probe->type != SR_CHANNEL_DSO)
+      should_enable = false;
+    else if (mode == ANALOG && probe->type != SR_CHANNEL_ANALOG)
+      should_enable = false;
+    else if (mode == MSO && probe->type != SR_CHANNEL_LOGIC &&
+             probe->type != SR_CHANNEL_ANALOG)
+      should_enable = false;
+
+    agent->enable_probe(probe, should_enable);
 
     // Task 3: 通道名（所有模式，原 MainWindow 路径 B 写 probe->name）。
     if (!cfg.name.empty()) {
@@ -301,9 +317,9 @@ void SignalConfigStore::apply_signal_config() {
 
     if (mode == ANALOG || mode == DSO) {
       // SR_CONF_PROBE_VDIV / SR_CONF_PROBE_COUPLING fork DSO keys deleted;
-      // only map_default is restored (key retained in dsvdef.h).
+      // only map_default is restored (key retained in pxvdef.h).
       agent->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, cfg.map_default,
-                             probe, NULL);
+                             probe, nullptr);
       // Fork sr_channel fields (hw_offset/offset/zero_offset/vfactor) are not
       // present on upstream libsigrok's sr_channel. The set_config_* calls
       // above sync the driver state; the SignalModel-side state is restored
@@ -366,7 +382,7 @@ void SignalConfigStore::apply_signal_config() {
       pxv_warn("apply_signal_config: all %d-mode channels were disabled "
                "in .pxc; force-enabling ch[%d] '%s' to avoid empty viewport",
                mode, first_mode_ch->index,
-               first_mode_ch->name ? first_mode_ch->name : "(null)");
+               first_mode_ch->name ? first_mode_ch->name : "(nullptr)");
     }
   }
 }

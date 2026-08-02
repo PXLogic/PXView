@@ -37,7 +37,7 @@
 #include "../config/appconfig.h"
 
 #include "../ui/iconcache.h"
-#include <assert.h>
+#include <cassert>
 
 
 namespace pv {

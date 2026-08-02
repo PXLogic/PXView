@@ -50,7 +50,7 @@
 
 
 
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "config/appconfig.h"
 #include "ui/msgbox.h"
 #include "appcontrol.h"
@@ -68,26 +68,26 @@ namespace pv {
 
 MainFrame::MainFrame()
 {
-    _layout = NULL;
+    _layout = nullptr;
     _bDraging = false;
     _hit_border = None;
     _freezing = false; 
-    _titleBar = NULL;
-    _mainWindow = NULL;
+    _titleBar = nullptr;
+    _mainWindow = nullptr;
     _is_win32_parent_window = false;
     _is_resize_ready = false;   
-    _parentNativeWidget = NULL;
-    _mainWindow = NULL; 
-    _move_start_screen = NULL; 
+    _parentNativeWidget = nullptr;
+    _mainWindow = nullptr; 
+    _move_start_screen = nullptr; 
 
-    _left   = NULL;
-    _right  = NULL;
-    _top    = NULL;
-    _bottom = NULL;
-    _top_left = NULL;
-    _top_right = NULL;
-    _bottom_left = NULL;
-    _bottom_right = NULL;
+    _left   = nullptr;
+    _right  = nullptr;
+    _top    = nullptr;
+    _bottom = nullptr;
+    _top_left = nullptr;
+    _top_right = nullptr;
+    _bottom_left = nullptr;
+    _bottom_right = nullptr;
 
     AppControl::Instance()->SetTopWindow(this);
   
@@ -227,7 +227,7 @@ MainFrame::MainFrame()
 void MainFrame::MoveWindow(int x, int y)
 {
 #ifdef _WIN32
-    assert(_parentNativeWidget == NULL); // move the window by system.
+    assert(_parentNativeWidget == nullptr); // move the window by system.
 #endif
 
     move(x, y);
@@ -236,7 +236,7 @@ void MainFrame::MoveWindow(int x, int y)
 QPoint MainFrame::GetParentPos()
 {  
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         RECT rc;
         int k =  window()->devicePixelRatio(); 
         GetWindowRect(_parentNativeWidget->Handle(), &rc); 
@@ -285,14 +285,14 @@ void MainFrame::OnParentNaitveWindowEvent(int msg)
     Q_UNUSED(msg);
 
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL 
+    if (_parentNativeWidget != nullptr 
             && msg == PARENT_EVENT_DISPLAY_CHANGED){
         
         qApp->processEvents(); //wait the screen dpi ready.
 
         QTimer::singleShot(100, this, [this](){                
             auto screen = _parentNativeWidget->GetPointScreen();
-            if (screen == NULL){
+            if (screen == nullptr){
                 pxv_info("ERROR: MainFrame::OnParentNaitveWindowEvent, failed to get pointing screen.");
                 screen = QGuiApplication::primaryScreen();
             }
@@ -312,7 +312,7 @@ void MainFrame::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
-    if (_layout == NULL){
+    if (_layout == nullptr){
         return;
     }
 
@@ -334,8 +334,8 @@ void MainFrame::closeEvent(QCloseEvent *event)
     if (_mainWindow->able_to_close()){
         
 #ifdef _WIN32
-        if (_parentNativeWidget != NULL){
-            _parentNativeWidget->SetChildWidget(NULL);
+        if (_parentNativeWidget != nullptr){
+            _parentNativeWidget->SetChildWidget(nullptr);
             setVisible(false);
             _parentNativeWidget->Show(false);                   
         }
@@ -355,7 +355,7 @@ void MainFrame::unfreezing()
 
 void MainFrame::hide_border()
 {  
-    if (_top_left == NULL)
+    if (_top_left == nullptr)
         return;
 
     _top_left->setVisible(false);
@@ -370,7 +370,7 @@ void MainFrame::hide_border()
 
 void MainFrame::show_border()
 {  
-    if (_top_left == NULL)
+    if (_top_left == nullptr)
         return;
 
     _top_left->setVisible(true);
@@ -442,7 +442,7 @@ bool MainFrame::eventFilter(QObject *object, QEvent *event)
     const QMouseEvent *const mouse_event = (QMouseEvent*)event;
 
 #ifdef _WIN32 
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return QMainWindow::eventFilter(object, event);
     }
 #endif
@@ -629,7 +629,7 @@ void MainFrame::saveNormalRegion()
     AppConfig &app = AppConfig::Instance();  
 
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         RECT rc;
         int k = _parentNativeWidget->GetDevicePixelRatio();
         
@@ -643,7 +643,7 @@ void MainFrame::saveNormalRegion()
     }
 #endif
 
-    if (_parentNativeWidget == NULL){
+    if (_parentNativeWidget == nullptr){
         QRect rc = geometry();
         app.frameOptions.left = rc.left();
         app.frameOptions.top = rc.top();
@@ -731,7 +731,7 @@ void MainFrame::AttachNativeWindow()
 {
 #ifdef _WIN32 
 
-    assert(_parentNativeWidget == NULL);
+    assert(_parentNativeWidget == nullptr);
 
     int k = _initWndInfo.k; 
     int x = _normalRegion.x * k;
@@ -744,14 +744,14 @@ void MainFrame::AttachNativeWindow()
     WinNativeWidget *nativeWindow = new WinNativeWidget(x, y, w, h, bkColor);
     nativeWindow->setGeometry(x, y, w, h);
 
-    if (nativeWindow->Handle() == NULL){
+    if (nativeWindow->Handle() == nullptr){
         pxv_info("ERROR: native window is invalid.");
         return;
     }
   
     //check the normal region
     QScreen *scr = nativeWindow->GetPointScreen();
-    if (scr != NULL){
+    if (scr != nullptr){
         QRect full_rc = scr->availableGeometry();
         PopupDlgList::SetCurrentScreen(scr);
 
@@ -816,7 +816,7 @@ void MainFrame::SetFormRegion(int x, int y, int w, int h)
 {
    #ifdef _WIN32
 
-   if (_parentNativeWidget != NULL){
+   if (_parentNativeWidget != nullptr){
         int k = _parentNativeWidget->GetDevicePixelRatio(); 
         
         x *= k;
@@ -839,7 +839,7 @@ QRect MainFrame::GetFormRegion()
 
 #ifdef _WIN32
 
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         int k = _parentNativeWidget->GetDevicePixelRatio();
         RECT r; 
         GetWindowRect(_parentNativeWidget->Handle(), &r); 
@@ -862,7 +862,7 @@ QRect MainFrame::GetFormRegion()
 bool MainFrame::IsMaxsized()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return _parentNativeWidget->IsMaxsized();
     }
 #endif
@@ -873,7 +873,7 @@ bool MainFrame::IsMaxsized()
 bool MainFrame::IsNormalsized()
 {
 #ifdef _WIN32
-    if (_parentNativeWidget != NULL){
+    if (_parentNativeWidget != nullptr){
         return _parentNativeWidget->IsNormalsized();
     }
 #endif
@@ -920,7 +920,7 @@ void MainFrame::ReadSettings()
     int zoomk = 1;
     QString scrName = "";
     QRect full_rect = QRect(0,0,0,0);
-    QScreen *screen = NULL;
+    QScreen *screen = nullptr;
     
     for (int i=0; i<QGuiApplication::screens().size(); i++){
         QRect rc  = QGuiApplication::screens().at(i)->availableGeometry();      
@@ -1146,7 +1146,7 @@ bool MainFrame::nativeEvent(const QByteArray &eventType, void *message, qintptr 
 {
 #ifdef _WIN32
 
-    if (_parentNativeWidget != NULL)
+    if (_parentNativeWidget != nullptr)
     { 
         MSG *msg = static_cast<MSG*>(message);
         HWND hwnd = _parentNativeWidget->Handle(); 

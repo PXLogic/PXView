@@ -7,6 +7,7 @@
 #include <thread>
 #include <functional>
 #include <vector>
+#include <concepts>
 
 #include "../interface/icallbacks.h"
 #include "../interface/events.h"
@@ -137,7 +138,9 @@ public:
     // Thread check uses std::this_thread::get_id() instead of
     // QThread::currentThread() because QThread::currentThread() itself may
     // create a QThreadData on the calling worker thread (defeating the purpose).
-    template <typename Iface, typename F> void dispatch_to(F fn) {
+    template <typename Iface, typename F>
+        requires std::invocable<F, Iface*>
+    void dispatch_to(F fn) {
         if (std::this_thread::get_id() == _main_thread_id) {
             for (auto *cb : _callbacks) {
                 if (auto *iface = dynamic_cast<Iface *>(cb))

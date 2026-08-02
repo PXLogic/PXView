@@ -21,11 +21,11 @@
  */
 
 #include "annotationrestable.h"
-#include <assert.h>
-#include <stdlib.h> 
-#include <math.h>
+#include <cassert>
+#include <cstdlib> 
+#include <cmath>
 #include "../../log.h"
-#include "../../dsvdef.h"
+#include "../../pxvdef.h"
  
 const char g_bin_cvt_table[] = "0000000100100011010001010110011110001001101010111100110111101111";
  
@@ -119,7 +119,7 @@ int AnnotationResTable::MakeIndex(const std::string &key, AnnotationSourceItem* 
 
     item->cur_display_format = -1;
     item->is_numeric = false;
-	item->str_number_hex = NULL;
+	item->str_number_hex = nullptr;
     newItem = item;
    
     int dex = m_indexs.size();
@@ -229,7 +229,7 @@ const char* AnnotationResTable::format_to_string(const char *hex_str, int fmt)
 const char* AnnotationResTable::format_numberic(const char *hex_str, int fmt)
 {
 	 if (!hex_str) {
-		 pxv_warn("%s", "AnnotationResTable::format_numberic: hex_str is NULL");
+		 pxv_warn("%s", "AnnotationResTable::format_numberic: hex_str is nullptr");
 		 return nullptr;
 	 }
 	 assert(hex_str);
@@ -350,7 +350,7 @@ void AnnotationResTable::reset()
 int AnnotationResTable::hexToDecimal(char * hex)
 {
 	if (!hex) {
-		pxv_warn("%s", "AnnotationResTable::hexToDecimal: hex is NULL");
+		pxv_warn("%s", "AnnotationResTable::hexToDecimal: hex is nullptr");
 		return 0;
 	}
 	assert(hex);
@@ -379,7 +379,7 @@ void AnnotationResTable::decimalToBinString(unsigned long long num, int bitSize,
     (void)buffer_size;
 
 	if (!buffer) {
-		pxv_warn("%s", "AnnotationResTable::decimalToBinString: buffer is NULL");
+		pxv_warn("%s", "AnnotationResTable::decimalToBinString: buffer is nullptr");
 		return;
 	}
 	assert(buffer);

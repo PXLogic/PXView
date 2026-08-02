@@ -23,7 +23,7 @@
 
 #include "datasource.h"
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include <libsigrok/libsigrok.h>
 
 namespace pv {

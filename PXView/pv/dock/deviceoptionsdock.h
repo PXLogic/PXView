@@ -73,9 +73,10 @@ signals:
 
 private:
   QLayout *get_property_form(QWidget *parent);
-  void logic_probes(QVBoxLayout &layout);
-  void analog_probes(QGridLayout &layout);
-  QString dynamic_widget(QLayout *lay);
+void logic_probes(QVBoxLayout &layout);
+void analog_probes(QGridLayout &layout);
+void dso_probes(QGridLayout &layout);
+QString dynamic_widget(QLayout *lay);
   void set_all_probes(bool set);
   void enable_max_probes();
   void build_dynamic_panel();
@@ -118,7 +119,7 @@ private:
   int _width;
   int _groupHeight1;
   int _groupHeight2;
-  volatile bool _isBuilding;
+  std::atomic<bool> _isBuilding{false};
   DeviceAgent *_device_agent;
   int _cur_analog_tag_index;
   QString _demo_operation_mode;

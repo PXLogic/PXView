@@ -29,7 +29,7 @@
 #include <chrono>
 #include <thread>
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "logicsnapshot.h"
 #include "logicsnapshot_diskcache_writer.h"

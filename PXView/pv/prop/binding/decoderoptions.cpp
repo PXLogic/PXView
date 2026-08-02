@@ -23,8 +23,6 @@
 
 #include "decoderoptions.h"
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
-#include <boost/bind.hpp>
-#include <boost/none_t.hpp>
 
 #include "../../data/decoderstack.h"
 #include "../../data/decode/decoder.h"
@@ -37,8 +35,8 @@
 #include "../../config/appconfig.h"
 #include <stdexcept>
 
-using namespace boost;
 using namespace std;
+using std::placeholders::_1;
  
 namespace pv {
 namespace prop {
@@ -49,16 +47,16 @@ DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_s
 	_decoder(decoder)
 {
 	if (!_decoder) {
-		pxv_warn("%s", "DecoderOptions: _decoder is NULL");
-		throw std::invalid_argument("DecoderOptions: _decoder is NULL");
+		pxv_warn("%s", "DecoderOptions: _decoder is nullptr");
+		throw std::invalid_argument("DecoderOptions: _decoder is nullptr");
 	}
 	assert(_decoder);
 	(void)decoder_stack;
 
 	const srd_decoder *const dec = _decoder->decoder();
 	if (!dec) {
-		pxv_warn("%s", "DecoderOptions: dec is NULL");
-		throw std::invalid_argument("DecoderOptions: dec is NULL");
+		pxv_warn("%s", "DecoderOptions: dec is nullptr");
+		throw std::invalid_argument("DecoderOptions: dec is nullptr");
 	}
 	assert(dec);
 
@@ -73,14 +71,14 @@ DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_s
 		const srd_decoder_option *const opt =
 			(srd_decoder_option*)l->data;
 
-		const char *desc_str = NULL;
-		const char *lang_str = NULL;
+		const char *desc_str = nullptr;
+		const char *lang_str = nullptr;
 
-        if (opt->idn != NULL && LangResource::Instance()->is_lang_en() == false){
+        if (opt->idn != nullptr && LangResource::Instance()->is_lang_en() == false){
             lang_str = LangResource::Instance()->get_lang_text(STR_PAGE_DECODER, opt->idn, opt->desc);
         }
 
-		if (lang_str != NULL && bLang){
+		if (lang_str != nullptr && bLang){
             desc_str = lang_str;
         }
         else{
@@ -94,14 +92,14 @@ DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_s
 		const Property::Setter setter = bind(
 			&DecoderOptions::setter, this, opt->id, _1);
 
-		Property *prop = NULL;
+		Property *prop = nullptr;
 
 		if (opt->values)
             prop = bind_enum(name, opt, getter, setter);
 		else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("d")))
-            prop = new Double(name, name, 2, "",none, none, getter, setter);
+            prop = new Double(name, name, 2, "",std::nullopt, std::nullopt, getter, setter);
 		else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("x")))
-			prop = new Int(name, name, "", none, getter, setter);
+			prop = new Int(name, name, "", std::nullopt, getter, setter);
 		else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("s")))
 			prop = new String(name, name, getter, setter);
 		else
@@ -119,7 +117,7 @@ Property* DecoderOptions::bind_enum(
 	for (GSList *l = option->values; l; l = l->next) {
 		GVariant *const var = (GVariant*)l->data;
 		if (!var) {
-			pxv_warn("%s", "DecoderOptions::bind_enum: var is NULL, skipping");
+			pxv_warn("%s", "DecoderOptions::bind_enum: var is nullptr, skipping");
 			continue;
 		}
 		assert(var);
@@ -131,10 +129,10 @@ Property* DecoderOptions::bind_enum(
 
 GVariant* DecoderOptions::getter(const char *id)
 {
-	GVariant *val = NULL;
+	GVariant *val = nullptr;
 
 	if (!_decoder) {
-		pxv_warn("%s", "DecoderOptions::getter: _decoder is NULL");
+		pxv_warn("%s", "DecoderOptions::getter: _decoder is nullptr");
 		return nullptr;
 	}
 	assert(_decoder);
@@ -170,7 +168,7 @@ GVariant* DecoderOptions::getter(const char *id)
 void DecoderOptions::setter(const char *id, GVariant *value)
 {
 	if (!_decoder) {
-		pxv_warn("%s", "DecoderOptions::setter: _decoder is NULL");
+		pxv_warn("%s", "DecoderOptions::setter: _decoder is nullptr");
 		return;
 	}
 	assert(_decoder);

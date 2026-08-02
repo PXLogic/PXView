@@ -15,7 +15,7 @@
 #include "../log.h"
 
 #include <QDateTime>
-#include <assert.h>
+#include <cassert>
 
 namespace pv {
 namespace core {
@@ -51,7 +51,7 @@ void DataFeedParser::feed_in_trigger() {
   // PXView-local SR_CONF_TRIGGER_POS key. PXLogic exposes it (returns
   // devc->trigger_pos_set); other devices return 0 (start-of-capture
   // fallback, matching prior behavior). device_agent() returns a
-  // reference (never null); the no-device case is handled inside
+  // reference (never nullptr); the no-device case is handled inside
   // get_config (returns false → get_trigger_pos returns 0).
   //
   // Note: For DSO mode, the demo driver does NOT emit SR_DF_TRIGGER —
@@ -265,11 +265,11 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
 void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
                                   const struct sr_datafeed_packet *packet) {
   if (!sdi) {
-    pxv_warn("%s", "SigSession::data_feed_in: sdi is NULL");
+    pxv_warn("%s", "SigSession::data_feed_in: sdi is nullptr");
     return;
   }
   if (!packet) {
-    pxv_warn("%s", "SigSession::data_feed_in: packet is NULL");
+    pxv_warn("%s", "SigSession::data_feed_in: packet is nullptr");
     return;
   }
   assert(sdi);
@@ -377,7 +377,7 @@ void DataFeedParser::data_feed_callback_ex(const struct sr_dev_inst *sdi,
                                            const struct sr_datafeed_packet *packet,
                                            void *user_data) {
   if (!user_data) {
-    pxv_warn("%s", "SigSession::data_feed_callback_ex: user_data is NULL");
+    pxv_warn("%s", "SigSession::data_feed_callback_ex: user_data is nullptr");
     return;
   }
   assert(user_data);

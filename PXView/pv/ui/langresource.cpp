@@ -30,13 +30,13 @@
 #include <QJsonValue>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <assert.h>
+#include <cassert>
 
 //---------------Lang_resource_page
 Lang_resource_page::Lang_resource_page()
 {
     _id = -1;
-    _source = NULL;
+    _source = nullptr;
     _loaded = false;
     _released = false;
     _is_dynamic = false;
@@ -52,15 +52,15 @@ void Lang_resource_page::Clear()
 
 LangResource::LangResource()
 {
-    _current_page = NULL;
+    _current_page = nullptr;
     _cur_lang = -1;
 }
 
 LangResource *LangResource::Instance()
 {
-    static LangResource *ins = NULL;
+    static LangResource *ins = nullptr;
 
-    if (ins == NULL)
+    if (ins == nullptr)
     {
         ins = new LangResource();
     }
@@ -71,7 +71,7 @@ LangResource *LangResource::Instance()
 const char *LangResource::get_lang_key(int lang)
 {
     int num = sizeof(lang_id_keys) / sizeof(lang_key_item);
-    const char *lan_name = NULL;
+    const char *lan_name = nullptr;
 
     for (int i = 0; i < num; i++)
     {
@@ -92,7 +92,7 @@ bool LangResource::Load(int lang)
     int num = sizeof(lang_id_keys) / sizeof(lang_key_item);
     const char *lan_name = get_lang_key(lang);
 
-    if (lan_name == NULL)
+    if (lan_name == nullptr)
     {
         pxv_err("Can't find language key,lang:%d", lang);
         return false;
@@ -147,7 +147,7 @@ void LangResource::release_self()
         delete p;
     }
     _pages.clear();
-    _current_page = NULL;
+    _current_page = nullptr;
 }
 
 void LangResource::load_page(Lang_resource_page &p)
@@ -157,7 +157,7 @@ void LangResource::load_page(Lang_resource_page &p)
     p._loaded = true;
 
     const char *lan_name = get_lang_key(_cur_lang);
-    if (lan_name == NULL){
+    if (lan_name == nullptr){
         pxv_err("Can't find language key,lang:%d", _cur_lang);
         return;
     }
@@ -228,8 +228,8 @@ const char* LangResource::get_lang_text(int page_id, const char *str_id, const c
         assert(false);
     }
 
-    if (_current_page == NULL || _current_page->_id != page_id){
-        _current_page = NULL; 
+    if (_current_page == nullptr || _current_page->_id != page_id){
+        _current_page = nullptr; 
         for (Lang_resource_page *p : _pages){
             if (p->_id == page_id){
                 _current_page = p;
@@ -238,7 +238,7 @@ const char* LangResource::get_lang_text(int page_id, const char *str_id, const c
         }
     }
 
-    if (_current_page == NULL){
+    if (_current_page == nullptr){
         if (_cur_lang != LAN_EN)
             pxv_warn("Warning:Can't find language source page:%d", page_id);
         return default_str;

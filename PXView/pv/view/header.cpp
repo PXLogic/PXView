@@ -38,13 +38,13 @@
 #include <QStyleOption>
 #include <QGuiApplication>
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
 #include <set>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../data/sessiondocument.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../ui/dockfonts.h"
@@ -67,9 +67,9 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
   _moveFlag = false;
   _colorFlag = false;
   _nameFlag = false;
-  _context_trace = NULL;
-  _resize_trace_upper = NULL;
-  _resize_trace_lower = NULL;
+  _context_trace = nullptr;
+  _resize_trace_upper = nullptr;
+  _resize_trace_lower = nullptr;
   _resize_mouse_down_y = 0;
   _resize_upper_height = 0;
   _resize_lower_height = 0;
@@ -119,7 +119,7 @@ pv::view::Trace *Header::get_mTrace(int &action, const QPoint &pt) {
       return t;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 void Header::paintEvent(QPaintEvent *) {
@@ -295,7 +295,7 @@ void Header::mouseDoubleClickEvent(QMouseEvent *event) {
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         enabled_traces[i]->set_own_height(-1);
         enabled_traces[i + 1]->set_own_height(-1);
-        _view.signals_changed(NULL);
+        _view.signals_changed(nullptr);
         return;
       }
     }
@@ -307,7 +307,7 @@ void Header::mouseDoubleClickEvent(QMouseEvent *event) {
                         lastTrace->get_totalHeight() / 2 + View::SignalMargin;
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         lastTrace->set_own_height(-1);
-        _view.signals_changed(NULL);
+        _view.signals_changed(nullptr);
         return;
       }
     }
@@ -389,7 +389,7 @@ void Header::mousePressEvent(QMouseEvent *event) {
                         lastTrace->get_totalHeight() / 2 + View::SignalMargin;
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         _resize_trace_upper = lastTrace;
-        _resize_trace_lower = NULL;
+        _resize_trace_lower = nullptr;
         _resize_mouse_down_y = event->position().toPoint().y();
         _resize_upper_height = lastTrace->get_totalHeight();
         _resize_lower_height = 0;
@@ -541,8 +541,8 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
                doc, dev,
                dev ? dev->have_instance() : 0);
     }
-    _resize_trace_upper = NULL;
-    _resize_trace_lower = NULL;
+    _resize_trace_upper = nullptr;
+    _resize_trace_lower = nullptr;
     return;
   }
 
@@ -581,7 +581,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
         t->set_view_index(index++);
       }
     } else {
-      Trace *draggedTrace = NULL;
+      Trace *draggedTrace = nullptr;
       if (!_drag_traces.empty())
         draggedTrace = _drag_traces.front().first;
 
@@ -750,7 +750,7 @@ void Header::wheelEvent(QWheelEvent *event) {
 }
 
 void Header::changeName(QMouseEvent *event) {
-  if (_context_trace != NULL && _context_trace->get_type() != SR_CHANNEL_DSO &&
+  if (_context_trace != nullptr && _context_trace->get_type() != SR_CHANNEL_DSO &&
       event->button() == Qt::LeftButton) {
     header_resize();
     QFont font = theme_font_trace_label();
@@ -799,7 +799,7 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
     if (newUpperHeight >= View::MinSignalHeight &&
         _view.is_logic_rendering_mode()) {
       _resize_trace_upper->set_own_height(newUpperHeight);
-      _view.signals_changed(NULL);
+      _view.signals_changed(nullptr);
     }
     return;
   }
@@ -848,21 +848,21 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
       if (t) {
         int y = (*i).second + delta;
         if (t->get_type() == SR_CHANNEL_DSO) {
-          DsoSignal *dsoSig = NULL;
+          DsoSignal *dsoSig = nullptr;
           if ((dsoSig = dynamic_cast<DsoSignal *>(t))) {
             dsoSig->set_zero_vpos(y);
             _moveFlag = true;
             traces_moved();
           }
         } else if (t->get_type() == SR_CHANNEL_MATH) {
-          MathTrace *mathTrace = NULL;
+          MathTrace *mathTrace = nullptr;
           if ((mathTrace = dynamic_cast<MathTrace *>(t))) {
             mathTrace->set_zero_vpos(y);
             _moveFlag = true;
             traces_moved();
           }
         } else if (t->get_type() == SR_CHANNEL_ANALOG) {
-          AnalogSignal *analogSig = NULL;
+          AnalogSignal *analogSig = nullptr;
           if ((analogSig = dynamic_cast<AnalogSignal *>(t))) {
             analogSig->set_zero_vpos(y);
             _moveFlag = true;
@@ -1153,7 +1153,7 @@ void Header::on_reset_row_height() {
   if (!_context_trace)
     return;
   _context_trace->set_own_height(-1);
-  _view.signals_changed(NULL);
+  _view.signals_changed(nullptr);
 }
 
 void Header::on_reset_all_row_height() {
@@ -1162,7 +1162,7 @@ void Header::on_reset_all_row_height() {
   for (auto t : traces) {
     t->set_own_height(-1);
   }
-  _view.signals_changed(NULL);
+  _view.signals_changed(nullptr);
 }
 
 void Header::on_set_channel_height() {
@@ -1184,7 +1184,7 @@ void Header::on_set_channel_height() {
 
   h = max(View::MinSignalHeight, min(h, View::MaxSignalHeight));
   _context_trace->set_own_height(h);
-  _view.signals_changed(NULL);
+  _view.signals_changed(nullptr);
 }
 
 void Header::on_batch_set_height() {
@@ -1210,7 +1210,7 @@ void Header::on_batch_set_height() {
   for (auto t : traces) {
     t->set_own_height(h);
   }
-  _view.signals_changed(NULL);
+  _view.signals_changed(nullptr);
 }
 
 void Header::on_action_set_name_triggered() {

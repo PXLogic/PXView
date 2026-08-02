@@ -21,11 +21,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <assert.h>
+#include <cassert>
 #include <cmath>
 #include <limits.h>
 #include <memory>
-#include <string.h>
+#include <cstring>
 
 #include <QCursor>
 #include <QEvent>
@@ -66,7 +66,7 @@
 #include "../data/sessiondocument.h"
 #include "../data/spectrumstack.h"
 #include "../dialogs/lissajousoptions.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../widgets/hoversplitter.h"
@@ -101,8 +101,8 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
       _show_cursors(false), _search_hit(false), _show_xcursors(false),
       _hover_point(-1, -1), _dso_auto(true), _show_lissajous(false),
       _back_ready(false) {
-  _trig_cursor = NULL;
-  _search_cursor = NULL;
+  _trig_cursor = nullptr;
+  _search_cursor = nullptr;
 
   _session = session;
   _data_source = session;
@@ -150,7 +150,7 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _trace_view_map[SR_CHANNEL_LISSAJOUS] = TIME_VIEW;
   _trace_view_map[SR_CHANNEL_MATH] = TIME_VIEW;
 
-  _active_viewport = NULL;
+  _active_viewport = nullptr;
   _header_collapsed = false;
   _ruler = new Ruler(*this);
   _header = new Header(*this);
@@ -587,7 +587,7 @@ void View::dso_factor_updated() { _data_sync->dso_factor_updated(); }
 // -- lissajous figure
 void View::show_lissajous(bool show) {
   _show_lissajous = show;
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void View::show_region(uint64_t start, uint64_t end, bool keep) {
@@ -609,7 +609,7 @@ void View::viewport_update() {
 void View::splitterMoved(int pos, int index) {
   (void)pos;
   (void)index;
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void View::reload() {
@@ -625,7 +625,7 @@ void View::reload() {
 void View::clear() {
   show_trig_cursor(false);
 
-  // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能为 NULL，
+  // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能为 nullptr，
   // 此时 work_mode 查询会失败。用 document 配置或默认值（非 DSO）避免警告刷屏。
   int mode = LOGIC;
   if (_document && _document->has_signal_config()) {
@@ -696,13 +696,13 @@ void View::signals_modified_refresh() {
 void View::auto_set_max_scale() { _data_sync->auto_set_max_scale(); }
 
 int View::get_body_width() {
-  if (_time_viewport != NULL)
+  if (_time_viewport != nullptr)
     return _time_viewport->width();
   return 0;
 }
 
 int View::get_body_height() {
-  if (_time_viewport != NULL)
+  if (_time_viewport != nullptr)
     return _time_viewport->height();
   return 0;
 }

@@ -25,7 +25,7 @@
 #ifndef PXVIEW_PV_DATA_SIGNALDATA_H
 #define PXVIEW_PV_DATA_SIGNALDATA_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <mutex>
 
 namespace pv {

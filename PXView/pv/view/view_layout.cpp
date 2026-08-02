@@ -32,7 +32,7 @@
 
 #include "view_layout.h"
 
-#include <assert.h>
+#include <cassert>
 #include <cmath>
 #include <algorithm>
 

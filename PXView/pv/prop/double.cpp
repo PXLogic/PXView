@@ -21,13 +21,12 @@
  */
 
 
-#include <assert.h>
+#include <cassert>
 
 #include "../ui/dsspinbox.h"
 #include "double.h"
 
 using namespace std;
-using namespace boost;
 
 namespace pv {
 namespace prop {
@@ -35,8 +34,8 @@ namespace prop {
 Double::Double(QString name, QString label,
     int decimals,
     QString suffix,
-    boost::optional< pair<double, double> > range,
-    boost::optional<double> step,
+    std::optional< pair<double, double> > range,
+    std::optional<double> step,
     Getter getter,
     Setter setter) :
     Property(name, label, getter, setter),
@@ -44,7 +43,7 @@ Double::Double(QString name, QString label,
 	_suffix(suffix),
 	_range(range),
 	_step(step),
-	_spin_box(NULL)
+	_spin_box(nullptr)
 {
 }
 
@@ -65,7 +64,7 @@ QWidget* Double::get_widget(QWidget *parent, bool auto_commit)
 	if (_step)
 		_spin_box->setSingleStep(*_step);
 
-	GVariant *const value = _getter ? _getter() : NULL;
+	GVariant *const value = _getter ? _getter() : nullptr;
 
 	if (value) {
 		_spin_box->setValue(g_variant_get_double(value));

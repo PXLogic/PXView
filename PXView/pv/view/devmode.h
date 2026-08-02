@@ -35,7 +35,7 @@
 #include <QIcon>
 #include <libsigrok/libsigrok.h>
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../interface/icallbacks.h"
 #include "../ui/xtoolbutton.h"
 #include "../ui/uimanager.h"

@@ -24,13 +24,13 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <assert.h>
+#include <cassert>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../ui/langresource.h"
 #include "../ui/dockfonts.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../ui/fn.h"
 #include "../ui/iconcache.h"
@@ -80,31 +80,31 @@ TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
   // buttons), force it to render inside the window on all platforms.
   setNativeMenuBar(false);
 
-  _minimizeButton = NULL;
-  _maximizeButton = NULL;
-  _closeButton = NULL;
+  _minimizeButton = nullptr;
+  _maximizeButton = nullptr;
+  _closeButton = nullptr;
   _moving = false;
   _is_draging = false;
   _parent = parent;
   _isTop = top;
   _hasClose = hasClose;
-  _title = NULL;
+  _title = nullptr;
   _is_native = false;
   _titleParent = titleParent;
   _is_done_moved = false;
   _is_able_drag = true;
   _enableRibbon = enableRibbon;
-  _ribbonContainer = NULL;
-  _ribbonPanel = NULL;
-  _ribbonLayout = NULL;
-  _categoryStack = NULL;
-  _ribbonAnimation = NULL;
+  _ribbonContainer = nullptr;
+  _ribbonPanel = nullptr;
+  _ribbonLayout = nullptr;
+  _categoryStack = nullptr;
+  _ribbonAnimation = nullptr;
   _ribbonExpanded = false;
   _ribbonExpandedHeight = 65;
   _slideOffset = 65;
-  _pinButton = NULL;
+  _pinButton = nullptr;
   _ribbonPinned = true;
-  _bottomLine = NULL;
+  _bottomLine = nullptr;
 
   assert(parent);
 
@@ -128,7 +128,7 @@ TitleBar::TitleBar(bool top, QWidget *parent, ITitleParent *titleParent,
     _tabBar->setMinimumWidth(100);
     titleRowLayout->addWidget(_tabBar);
   } else {
-    _tabBar = NULL;
+    _tabBar = nullptr;
   }
 
   titleRowLayout->addStretch(500);
@@ -324,7 +324,7 @@ void TitleBar::addAction(int categoryIndex, QAction *action) {
   if (action->icon().isNull()) {
     static QIcon defaultIcon(":/icons/light/gear.svg");
     action->setIcon(defaultIcon);
-    pxv_info("TitleBar::addAction '%s' icon was NULL, set default",
+    pxv_info("TitleBar::addAction '%s' icon was nullptr, set default",
              action->text().toUtf8().constData());
   }
 
@@ -563,7 +563,7 @@ void TitleBar::reStyle() {
 }
 
 bool TitleBar::ParentIsMaxsized() {
-  if (_titleParent != NULL) {
+  if (_titleParent != nullptr) {
     return _titleParent->ParentIsMaxsized();
   } else {
     return parentWidget()->isMaximized();
@@ -631,7 +631,7 @@ void TitleBar::resizeEvent(QResizeEvent *event) {
 void TitleBar::setTitle(QString title) {
   if (!_is_native) {
     _title->setText(title);
-  } else if (_parent != NULL) {
+  } else if (_parent != nullptr) {
     _parent->setWindowTitle(title);
   }
 }
@@ -639,7 +639,7 @@ void TitleBar::setTitle(QString title) {
 QString TitleBar::title() {
   if (!_is_native) {
     return _title->text();
-  } else if (_parent != NULL) {
+  } else if (_parent != nullptr) {
     return _parent->windowTitle();
   }
   return "";
@@ -721,7 +721,7 @@ void TitleBar::mousePressEvent(QMouseEvent *event) {
 
       _clickPos = event->globalPosition().toPoint();
 
-      if (_titleParent != NULL) {
+      if (_titleParent != nullptr) {
         _oldPos = _titleParent->GetParentPos();
       } else {
         _oldPos = _parent->pos();
@@ -756,7 +756,7 @@ void TitleBar::mouseMoveEvent(QMouseEvent *event) {
       }
     }
 
-    if (_titleParent != NULL) {
+    if (_titleParent != nullptr) {
 
       if (!_is_done_moved) {
         _is_done_moved = true;
@@ -791,7 +791,7 @@ void TitleBar::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void TitleBar::mouseReleaseEvent(QMouseEvent *event) {
-  if (_moving && _titleParent != NULL) {
+  if (_moving && _titleParent != nullptr) {
     _titleParent->MoveEnd();
   }
   _moving = false;

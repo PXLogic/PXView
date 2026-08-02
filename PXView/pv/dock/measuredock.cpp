@@ -21,7 +21,7 @@
  */
 
 #include <iterator>
-#include <math.h>
+#include <cmath>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
@@ -49,7 +49,6 @@
 #include <QObject>
 #include <QPainter>
 
-using namespace boost;
 
 namespace pv {
 namespace dock {
@@ -70,8 +69,8 @@ MeasureDock::MeasureDock(QWidget *parent, View *view, SigSession *session)
       _context(nullptr) {
   _widget = new QWidget(this);
 
-  _dist_pannel = NULL;
-  _edge_pannel = NULL;
+  _dist_pannel = nullptr;
+  _edge_pannel = nullptr;
   _bSetting = false;
 
   _mouse_section = new QWidget(_widget);
@@ -268,7 +267,7 @@ void MeasureDock::set_view(view::View *view) {
 
 void MeasureDock::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "MeasureDock::bind_context: ctx is NULL");
+    pxv_warn("%s", "MeasureDock::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);
@@ -295,11 +294,11 @@ void MeasureDock::bind_context(TabContext *ctx) {
           inf.cursor1 = row_obj["cursor1"].toInt();
           inf.cursor2 = row_obj["cursor2"].toInt();
           inf.channelIndex = 0;
-          inf.del_bt = NULL;
-          inf.start_bt = NULL;
-          inf.end_bt = NULL;
-          inf.r_label = NULL;
-          inf.box = NULL;
+          inf.del_bt = nullptr;
+          inf.start_bt = nullptr;
+          inf.end_bt = nullptr;
+          inf.r_label = nullptr;
+          inf.box = nullptr;
           mode_rows->_dist_row_list.push_back(inf);
         }
 
@@ -310,11 +309,11 @@ void MeasureDock::bind_context(TabContext *ctx) {
           inf.cursor1 = row_obj["cursor1"].toInt();
           inf.cursor2 = row_obj["cursor2"].toInt();
           inf.channelIndex = row_obj["channelIndex"].toInt();
-          inf.del_bt = NULL;
-          inf.start_bt = NULL;
-          inf.end_bt = NULL;
-          inf.r_label = NULL;
-          inf.box = NULL;
+          inf.del_bt = nullptr;
+          inf.start_bt = nullptr;
+          inf.end_bt = nullptr;
+          inf.r_label = nullptr;
+          inf.box = nullptr;
           mode_rows->_edge_row_list.push_back(inf);
         }
 
@@ -362,13 +361,13 @@ void MeasureDock::unbind_context() {
     _mode_rows[i]._dist_row_list.clear();
     _mode_rows[i]._edge_row_list.clear();
     for (auto &row : _mode_rows[i]._opt_row_list) {
-      if (row.del_bt != NULL) {
+      if (row.del_bt != nullptr) {
         row.del_bt->deleteLater();
         row.goto_bt->deleteLater();
         row.info_label->deleteLater();
-        row.del_bt = NULL;
-        row.goto_bt = NULL;
-        row.info_label = NULL;
+        row.del_bt = nullptr;
+        row.goto_bt = nullptr;
+        row.info_label = nullptr;
       }
     }
     _mode_rows[i]._opt_row_list.clear();
@@ -461,9 +460,9 @@ void MeasureDock::measure_updated() {
 }
 
 void MeasureDock::build_dist_pannel() {
-  if (_dist_pannel != NULL) {
+  if (_dist_pannel != nullptr) {
     _dist_pannel->deleteLater();
-    _dist_pannel = NULL;
+    _dist_pannel = nullptr;
   }
 
   QFont labelFont = dock_font_label();
@@ -530,7 +529,7 @@ void MeasureDock::build_dist_pannel() {
 
     lay->addWidget(row_widget, dex++, 0, 1, 7);
 
-    if (o.r_label != NULL) {
+    if (o.r_label != nullptr) {
       r_label->setText(o.r_label->text());
     }
 
@@ -566,11 +565,11 @@ void MeasureDock::add_dist_measure() {
     cursor_row_info inf;
     inf.cursor1 = -1;
     inf.cursor2 = -1;
-    inf.box = NULL;
-    inf.del_bt = NULL;
-    inf.start_bt = NULL;
-    inf.end_bt = NULL;
-    inf.r_label = NULL;
+    inf.box = nullptr;
+    inf.del_bt = nullptr;
+    inf.start_bt = nullptr;
+    inf.end_bt = nullptr;
+    inf.r_label = nullptr;
     inf.channelIndex = 0;
 
     mode_rows->_dist_row_list.push_back(inf);
@@ -584,7 +583,7 @@ void MeasureDock::add_dist_measure() {
 void MeasureDock::del_dist_measure() {
   auto src = dynamic_cast<QToolButton *>(sender());
   if (!src) {
-    pxv_warn("%s", "MeasureDock::del_dist_measure: src is NULL");
+    pxv_warn("%s", "MeasureDock::del_dist_measure: src is nullptr");
     return;
   }
   assert(src);
@@ -602,9 +601,9 @@ void MeasureDock::del_dist_measure() {
 }
 
 void MeasureDock::build_edge_pannel() {
-  if (_edge_pannel != NULL) {
+  if (_edge_pannel != nullptr) {
     _edge_pannel->deleteLater();
-    _edge_pannel = NULL;
+    _edge_pannel = nullptr;
   }
 
   QFont labelFont = dock_font_label();
@@ -683,7 +682,7 @@ void MeasureDock::build_edge_pannel() {
 
     lay->addWidget(row_widget, dex++, 0, 1, 7);
 
-    if (o.r_label != NULL) {
+    if (o.r_label != nullptr) {
       r_label->setText(o.r_label->text());
     }
 
@@ -719,7 +718,7 @@ void MeasureDock::on_edge_channel_selected() {
   QComboBox *box = dynamic_cast<QComboBox *>(sender());
   auto mode_rows = get_mode_rows();
 
-  if (box != NULL && !_bSetting) {
+  if (box != nullptr && !_bSetting) {
     for (auto &o : mode_rows->_edge_row_list) {
       if (o.box == box) {
         o.channelIndex = box->currentIndex();
@@ -739,11 +738,11 @@ void MeasureDock::add_edge_measure() {
     cursor_row_info inf;
     inf.cursor1 = -1;
     inf.cursor2 = -1;
-    inf.box = NULL;
-    inf.del_bt = NULL;
-    inf.start_bt = NULL;
-    inf.end_bt = NULL;
-    inf.r_label = NULL;
+    inf.box = nullptr;
+    inf.del_bt = nullptr;
+    inf.start_bt = nullptr;
+    inf.end_bt = nullptr;
+    inf.r_label = nullptr;
     inf.channelIndex = 0;
 
     mode_rows->_edge_row_list.push_back(inf);
@@ -756,7 +755,7 @@ void MeasureDock::add_edge_measure() {
 void MeasureDock::del_edge_measure() {
   QToolButton *src = dynamic_cast<QToolButton *>(sender());
   if (!src) {
-    pxv_warn("%s", "MeasureDock::del_edge_measure: src is NULL");
+    pxv_warn("%s", "MeasureDock::del_edge_measure: src is nullptr");
     return;
   }
   assert(src);
@@ -818,13 +817,13 @@ void MeasureDock::popup_all_coursors() {
 
 void MeasureDock::set_sel_cursor() {
   if (!_sel_btn) {
-    pxv_warn("%s", "MeasureDock::set_sel_cursor: _sel_btn is NULL");
+    pxv_warn("%s", "MeasureDock::set_sel_cursor: _sel_btn is nullptr");
     return;
   }
   assert(_sel_btn);
   QPushButton *sel_cursor_bt = qobject_cast<QPushButton *>(sender());
   int type = 0;
-  cursor_row_info *inf = NULL;
+  cursor_row_info *inf = nullptr;
   auto mode_rows = get_mode_rows();
 
   if (type == 0) {
@@ -848,7 +847,7 @@ void MeasureDock::set_sel_cursor() {
   }
 
   if (!inf) {
-    pxv_warn("%s", "MeasureDock::set_sel_cursor: inf is NULL");
+    pxv_warn("%s", "MeasureDock::set_sel_cursor: inf is nullptr");
     return;
   }
   assert(inf);
@@ -876,7 +875,7 @@ void MeasureDock::update_dist() {
   auto mode_rows = get_mode_rows();
 
   for (auto &inf : mode_rows->_dist_row_list) {
-    if (inf.start_bt == NULL)
+    if (inf.start_bt == nullptr)
       break;
 
     if (inf.cursor1 != -1) {
@@ -915,7 +914,7 @@ void MeasureDock::update_edge() {
   auto mode_rows = get_mode_rows();
 
   for (auto &inf : mode_rows->_edge_row_list) {
-    if (inf.start_bt == NULL)
+    if (inf.start_bt == nullptr)
       break;
 
     if (inf.cursor1 != -1) {
@@ -976,7 +975,7 @@ void MeasureDock::update_cursor_info() {
   assert(num_cursors == num_rows);
 
   for (int i = 0; i < num_cursors; i++) {
-    if (mode_rows->_opt_row_list[i].info_label != NULL) {
+    if (mode_rows->_opt_row_list[i].info_label != nullptr) {
       QString cur_pos = _view->get_cm_time(i) + "/" +
                         QString::number(_view->get_cursor_samples(i));
       mode_rows->_opt_row_list[i].info_label->setText(cur_pos);
@@ -1044,7 +1043,7 @@ void MeasureDock::reCalc() {
 void MeasureDock::goto_cursor() {
   QPushButton *src = qobject_cast<QPushButton *>(sender());
   if (!src) {
-    pxv_warn("%s", "MeasureDock::goto_cursor: src is NULL");
+    pxv_warn("%s", "MeasureDock::goto_cursor: src is nullptr");
     return;
   }
   assert(src);
@@ -1076,7 +1075,7 @@ void MeasureDock::build_cursor_pannel() {
 
   if (newCount == 0) {
     for (auto &row : mode_rows->_opt_row_list) {
-      if (row.del_bt != NULL) {
+      if (row.del_bt != nullptr) {
         row.del_bt->deleteLater();
         row.goto_bt->deleteLater();
         row.info_label->deleteLater();
@@ -1107,7 +1106,7 @@ void MeasureDock::build_cursor_pannel() {
   if (newCount < oldCount) {
     for (int i = newCount; i < oldCount; i++) {
       auto &row = mode_rows->_opt_row_list[i];
-      if (row.del_bt != NULL) {
+      if (row.del_bt != nullptr) {
         row.del_bt->deleteLater();
         row.goto_bt->deleteLater();
         row.info_label->deleteLater();
@@ -1183,12 +1182,12 @@ void MeasureDock::build_cursor_pannel() {
 void MeasureDock::del_cursor() {
   auto *src = qobject_cast<QToolButton *>(sender());
   if (!src) {
-    pxv_warn("%s", "MeasureDock::del_cursor: src is NULL");
+    pxv_warn("%s", "MeasureDock::del_cursor: src is nullptr");
     return;
   }
   assert(src);
 
-  Cursor *cursor = NULL;
+  Cursor *cursor = nullptr;
   auto &cursor_list = _view->get_cursorList();
   auto mode_rows = get_mode_rows();
 
@@ -1223,7 +1222,7 @@ void MeasureDock::UpdateFont() {
 
 void MeasureDock::adjust_form_size(QWidget *wid) {
   if (!wid) {
-    pxv_warn("%s", "MeasureDock::adjust_form_size: wid is NULL");
+    pxv_warn("%s", "MeasureDock::adjust_form_size: wid is nullptr");
     return;
   }
   assert(wid);
@@ -1270,29 +1269,29 @@ row_list_item *MeasureDock::get_mode_rows() {
     auto rows = &_mode_rows[i];
 
     for (auto &o : rows->_dist_row_list) {
-      o.del_bt = NULL;
-      o.start_bt = NULL;
-      o.end_bt = NULL;
-      o.r_label = NULL;
-      o.box = NULL;
+      o.del_bt = nullptr;
+      o.start_bt = nullptr;
+      o.end_bt = nullptr;
+      o.r_label = nullptr;
+      o.box = nullptr;
     }
 
     for (auto &o : rows->_edge_row_list) {
-      o.del_bt = NULL;
-      o.start_bt = NULL;
-      o.end_bt = NULL;
-      o.r_label = NULL;
-      o.box = NULL;
+      o.del_bt = nullptr;
+      o.start_bt = nullptr;
+      o.end_bt = nullptr;
+      o.r_label = nullptr;
+      o.box = nullptr;
     }
 
     for (auto &row : rows->_opt_row_list) {
-      if (row.del_bt != NULL) {
+      if (row.del_bt != nullptr) {
         row.del_bt->deleteLater();
         row.goto_bt->deleteLater();
         row.info_label->deleteLater();
-        row.del_bt = NULL;
-        row.goto_bt = NULL;
-        row.info_label = NULL;
+        row.del_bt = nullptr;
+        row.goto_bt = nullptr;
+        row.info_label = nullptr;
       }
     }
     rows->_opt_row_list.clear();

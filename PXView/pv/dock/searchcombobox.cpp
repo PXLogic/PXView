@@ -49,7 +49,7 @@ ComboButtonItem::ComboButtonItem(QWidget *parent, ISearchItemClick *click,
 void ComboButtonItem::mousePressEvent(QMouseEvent *e) {
   (void)e;
 
-  if (_click != NULL) {
+  if (_click != nullptr) {
     _click->OnItemClick(this, _data_handle);
   }
 }
@@ -58,7 +58,7 @@ void ComboButtonItem::mousePressEvent(QMouseEvent *e) {
 
 SearchComboBox::SearchComboBox(QWidget *parent) : QDialog(parent) {
   _bShow = false;
-  _item_click = NULL;
+  _item_click = nullptr;
   setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint |
                  Qt::WindowSystemMenuHint);
 }
@@ -81,7 +81,7 @@ void SearchComboBox::ShowDlg(QWidget *editline) {
   int h = 550;
   int eh = 20;
 
-  if (editline != NULL) {
+  if (editline != nullptr) {
     w = editline->width();
   }
 
@@ -131,7 +131,7 @@ void SearchComboBox::ShowDlg(QWidget *editline) {
   _scroll->setFixedSize(w, h - eh);
   _scroll->setLongTailAnimation(true);
 
-  if (editline != NULL) {
+  if (editline != nullptr) {
     QPoint p1 = editline->pos();
     QPoint p2 = editline->mapToGlobal(p1);
     int x = p2.x() - p1.x();
@@ -193,7 +193,7 @@ void SearchComboBox::showEvent(QShowEvent *event) {
 void SearchComboBox::OnItemClick(void *sender, void *data_handle) {
   (void)sender;
 
-  if (data_handle != NULL && _item_click) {
+  if (data_handle != nullptr && _item_click) {
     SearchDataItem *item = (SearchDataItem *)data_handle;
     this->close();
     ISearchItemClick *click = _item_click;

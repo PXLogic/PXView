@@ -20,8 +20,8 @@
  */
 
 #include "mathstack.h"
-#include <math.h>
-#include <assert.h>
+#include <cmath>
+#include <cassert>
 
 #include  "dsosnapshot.h"
 #include  "signalmodel.h"
@@ -32,7 +32,6 @@
 
 #define PI 3.1415
 
-using namespace boost;
 using namespace std;
 
 namespace pv {

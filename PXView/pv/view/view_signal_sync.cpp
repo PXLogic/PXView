@@ -54,7 +54,7 @@
 #include "../data/sessiondocument.h"
 #include "../data/signalconfigstore.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 
@@ -752,7 +752,7 @@ void ViewSignalSync::rebuild_signals_from_config(
     }
   }
 
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void ViewSignalSync::rebuild_signals() {
@@ -823,7 +823,7 @@ void ViewSignalSync::rebuild_signals() {
   // rebuild_signals_from_config() at line 2228 only runs when
   // _data_source == _document; this second path runs when _data_source is
   // _session (e.g., before/during capture), and must also restore layout.
-  // 当 _document 为 null 时（采集完成后 set_data_document 调用前 rebuild），
+  // 当 _document 为 nullptr 时（采集完成后 set_data_document 调用前 rebuild），
   // 从 session.get_active_document() 获取 config，恢复用户拖拽后的通道顺序。
   pv::data::SessionDocument *restore_doc = _view->_document;
   if (!restore_doc && _view->_session) {
@@ -862,7 +862,7 @@ void ViewSignalSync::rebuild_signals() {
     _view->set_data_document(_view->_document);
   }
 
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void ViewSignalSync::on_signals_changed() {
@@ -921,7 +921,7 @@ void ViewSignalSync::on_signals_changed() {
     break;
   case SignalFactory::AllReplaced:
     // Full rebuild, need full layout
-    signals_changed(NULL);
+    signals_changed(nullptr);
     break;
   }
 }
@@ -930,19 +930,19 @@ void ViewSignalSync::signals_added_layout() {
   // Layout recalculation is O(N) but relatively cheap compared to object
   // recreation. SignalFactory::update_signals(Added) already added the new
   // Signal objects without recreating existing ones.
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void ViewSignalSync::signals_removed_layout() {
   // Layout recalculation is O(N) but relatively cheap compared to object
   // recreation. SignalFactory::update_signals(Removed) already removed the
   // Signal objects without recreating existing ones.
-  signals_changed(NULL);
+  signals_changed(nullptr);
 }
 
 void ViewSignalSync::signals_modified_refresh() {
   // Only property changes, no layout changes needed.
-  // Just repaint the signals without calling signals_changed(NULL).
+  // Just repaint the signals without calling signals_changed(nullptr).
   // A1 fix: mark derived traces (Math/Spectrum/Lissajous/Decode) dirty so
   // sync_derived_traces() recreates them on the next paint cycle. Without this,
   // enabling Math/Spectrum/Lissajous via their option dialogs does not show the
@@ -1170,7 +1170,7 @@ void ViewSignalSync::zoom_vertical(double steps) {
   }
 
   if (heightScaleChanged || ownHeightChanged) {
-    _view->signals_changed(NULL);
+    _view->signals_changed(nullptr);
     _view->update_scroll();
     _view->viewport_update();
   }

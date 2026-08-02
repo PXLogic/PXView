@@ -5,6 +5,8 @@
 set(DISABLE_WERROR TRUE) #Build without -Werror
 set(ENABLE_SIGNALS TRUE) #Build with UNIX signals
 set(ENABLE_COTIRE FALSE) #Enable cotire
+option(CMAKE_UNITY_BUILD "Enable unity build (batch compilation) for faster builds" OFF)
+option(ENABLE_PCH "Enable precompiled headers" ON)
 set(ENABLE_TESTS  FALSE) #Enable unit tests
 set(STATIC_PKGDEPS_LIBS FALSE) #Statically link to (pkg-config) libraries
 

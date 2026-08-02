@@ -33,19 +33,21 @@
 #include <memory>
 #include <functional>
 #include <mutex>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <vector>
-#include "data/analogsnapshot.h"
+// Forward-declared snapshot types — full includes only needed in .cpp.
+// This eliminates 3 heavy header chains (analogsnapshot.h → snapshot.h →
+// <mutex>; dsosnapshot.h → snapshot.h; logicsnapshot.h → mmap_allocator.h
+// → <atomic>,<thread>,<QString>) from 59 downstream includers.
+namespace data { class AnalogSnapshot; class DsoSnapshot; class LogicSnapshot; }
 #include "data/datasource.h"
-#include "data/dsosnapshot.h"
-#include "data/logicsnapshot.h"
 #include "data/mathstack.h"
 #include "data/sessiondata.h"
 #include "data/signalmodel.h"
 #include "data/triggerconfig.h"
 #include "deviceagent.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "eventobject.h"
 #include "interface/icallbacks.h"
 #include "core/eventbus.h"
@@ -56,7 +58,7 @@
 struct srd_decoder;
 struct srd_channel;
 class DecoderStatus;
-typedef std::lock_guard<std::mutex> ds_lock_guard;
+using ds_lock_guard = std::lock_guard<std::mutex>;
 
 // Forward declarations for upstream libsigrok types (now the sole libsigrok).
 struct sr_context;
@@ -139,6 +141,7 @@ public:
   bool init(); void uninit(); void Open(); void Close();
   bool set_default_device(); bool set_device(ds_device_handle dev_handle);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
+  bool import_file(QString name);
   bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override { return _capture_manager->start_capture(instant, owner); }
   bool stop_capture() override { return _capture_manager->stop_capture(); }
   bool switch_work_mode(int mode) override;
@@ -334,7 +337,9 @@ public:
 private:
   void set_cur_samplelimits(uint64_t samplelimits); void set_cur_snap_samplerate(uint64_t samplerate);
   void math_disable(); void sync_trigger_to_libsigrok(bool disable_trigger = false);
-  template <typename Iface, typename F> void dispatch_to(F fn) { _event_bus->dispatch_to<Iface>(fn); }
+  template <typename Iface, typename F>
+    requires std::invocable<F, Iface*>
+  void dispatch_to(F fn) { _event_bus->dispatch_to<Iface>(fn); }
   void data_updated(); void set_receive_data_len(quint64 len); void receive_header();
   void cur_snap_samplerate_changed(); void frame_began(); void frame_ended();
   void update_capture(); void repeat_hold(int percent);
@@ -414,7 +419,7 @@ private:
   void start_reconnect_watchdog_();
   void on_reconnect_timeout_();
   // Returns true if the detached device (identified by device_handle, a
-  // libusb_device*) is the currently-open device. NULL device_handle is
+  // libusb_device*) is the currently-open device. nullptr device_handle is
   // treated conservatively as "current device gone" (safe fallback).
   bool is_current_device_gone_(void *device_handle);
   // Rebinds the active sdi to a freshly-scanned device matching the

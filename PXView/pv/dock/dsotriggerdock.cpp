@@ -44,7 +44,6 @@
 #include <QVBoxLayout>
 #include <QVector>
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -240,7 +239,8 @@ void DsoTriggerDock::auto_trig(int index) {
 
 void DsoTriggerDock::pos_changed(int pos) {
   int ret;
-  ret = _session->get_device()->set_config_byte(SR_CONF_HORIZ_TRIGGERPOS, pos);
+  /* SR_CONF_HORIZ_TRIGGERPOS is SR_T_FLOAT in hwdriver.c — must use double. */
+  ret = _session->get_device()->set_config_double(SR_CONF_HORIZ_TRIGGERPOS, (double)pos);
   if (!ret) {
     if (_session->get_device()->is_hardware() || true) {
       QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_HOR_TRI_POS_FAIL),
@@ -410,13 +410,13 @@ void DsoTriggerDock::update_view() {
     return;
   }
 
-  int pos;
   int src;
   int slope;
 
-  // TRIGGERPOS
-  if (_session->get_device()->get_config_byte(SR_CONF_HORIZ_TRIGGERPOS, pos)) {
-    _position_slider->setValue(pos);
+  // TRIGGERPOS (SR_T_FLOAT → double)
+  double dpos;
+  if (_session->get_device()->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dpos)) {
+    _position_slider->setValue((int)dpos);
   }
 
   if (_session->get_device()->get_config_byte(SR_CONF_TRIGGER_SOURCE, src)) {
@@ -560,7 +560,7 @@ void DsoTriggerDock::set_session(QJsonObject &obj) {
 
 void DsoTriggerDock::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "DsoTriggerDock::bind_context: ctx is NULL");
+    pxv_warn("%s", "DsoTriggerDock::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);

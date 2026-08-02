@@ -26,7 +26,7 @@
 
 #include <utility>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 #include "property.h"
 
@@ -43,7 +43,7 @@ class Int : public Property
 
 public:
     Int(QString name, QString label, QString suffix,
-		boost::optional< std::pair<int64_t, int64_t> > range,
+		std::optional< std::pair<int64_t, int64_t> > range,
 		Getter getter, Setter setter);
 
 	virtual ~Int();
@@ -59,7 +59,7 @@ private slots:
 
 private:
 	const QString _suffix;
-	const boost::optional< std::pair<int64_t, int64_t> > _range;
+	const std::optional< std::pair<int64_t, int64_t> > _range;
 
     GVariant *_value;
 	pv::ui::DsSpinBox *_spin_box;

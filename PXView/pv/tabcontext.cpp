@@ -124,11 +124,31 @@ void TabContext::activate()
             }
         }
     } else if (_session->have_view_data() &&
-               (_session->is_working() || _session->is_copy_in_progress()) &&
-               _session->get_capture_owner_document() == _document) {
+               (_session->is_working() || _session->is_copy_in_progress() ||
+                _session->is_stopped_status()) &&
+               (!_session->get_capture_owner_document() ||
+                _session->get_capture_owner_document() == _document)) {
         // Document has no data yet, but session has data.
-        // Bind signals to session data instead of clearing them,
-        // so waveforms remain visible during active capture or background copy.
+        // Bind signals to session data instead of clearing them.
+        //
+        // This covers three scenarios:
+        // 1. Active capture (is_working) — waveforms update in real-time.
+        // 2. Background copy (is_copy_in_progress) — data is being copied
+        //    to the document; show session data in the meantime.
+        // 3. Post-capture gap (is_stopped_status) — e.g., after VCD import
+        //    where SR_DF_END has been received (device ST_STOPPED) and
+        //    capture_ended() populated the snapshot, but the async
+        //    RevEndPacket event hasn't been processed yet (so
+        //    is_copy_in_progress is still false). Without this branch,
+        //    clear_signal_data() would null out all signal data pointers,
+        //    leaving the viewport blank until RevEndPacket fires and
+        //    re-attaches the data.
+        //
+        // The capture owner check is relaxed to also match when no
+        // capture owner is set (nullptr) — this happens for VCD imports
+        // which don't call start_capture(), so the capture owner is
+        // never assigned. When the owner IS set, it must match _document
+        // to avoid binding another tab's data to the wrong view.
         _view->set_signal_data_from_source(_session);
     } else {
         pxv_info("TabContext::activate() no data, clearing signal data bindings");

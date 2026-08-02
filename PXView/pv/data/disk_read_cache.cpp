@@ -22,8 +22,8 @@
  */
 
 
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 #include <algorithm>
 
 #include "disk_read_cache.h"

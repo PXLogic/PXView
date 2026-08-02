@@ -27,9 +27,9 @@
 // unique_ptr<forward-declared type>; the forwarders live in logicsnapshot.cpp.
 
 #include <algorithm>
-#include <string.h>
+#include <cstring>
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "leaf_block_pool.h"
 #include "logicsnapshot_glitch_filter.h"
@@ -78,7 +78,7 @@ void LogicSnapshotGlitchFilter::invert_channel(int sig_index) {
     for (uint64_t j = 0; j < LogicSnapshot::Scale; j++) {
       uint64_t pos_mask = 1ULL << j;
 
-      if (rn.lbp[j] != NULL) {
+      if (rn.lbp[j] != nullptr) {
         // Block has actual data — XOR all sample bytes with 0xFF
         uint8_t *lbp = (uint8_t *)rn.lbp[j];
         uint64_t sample_bytes = LogicSnapshot::LeafBlockSamples / 8;
@@ -103,12 +103,12 @@ void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,
                                               uint64_t index1) {
   void *lbp = _host->_ch_data[order][index0].lbp[index1];
 
-  if (lbp == NULL)
+  if (lbp == nullptr)
     return;
 
   if (index1 > 0) {
     void* prev_ptr = _host->_ch_data[order][index0].lbp[index1 - 1];
-    if (prev_ptr != NULL) {
+    if (prev_ptr != nullptr) {
       uint64_t *prev_lbp = (uint64_t *)prev_ptr;
       _host->_last_sample[order] =
           (prev_lbp[LogicSnapshot::LeafBlockSamples / LogicSnapshot::Scale - 1] &
@@ -222,11 +222,11 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
         uint64_t seg_end = min(end, block_end);
 
         // 如果该块尚未被实例化，则分配空间
-        if (_host->_ch_data[order][idx0].lbp[idx1] == NULL) {
+        if (_host->_ch_data[order][idx0].lbp[idx1] == nullptr) {
           bool const_val =
               (_host->_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
           void *lbp = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
-          if (lbp == NULL) {
+          if (lbp == nullptr) {
             _host->_memory_failed = true;
             return;
           }

@@ -27,7 +27,7 @@
 #include "../dialogs/deviceoptions.h"
 #include "../dialogs/dsmessagebox.h"
 #include "../dialogs/interval.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../interface/icallbacks.h"
 #include "../log.h"
 #include "../tabcontext.h"
@@ -41,9 +41,9 @@
 #include <QAbstractItemView>
 #include <QAction>
 #include <QLabel>
-#include <assert.h>
+#include <cassert>
 #include <libusb-1.0/libusb.h>
-#include <math.h>
+#include <cmath>
 
 #include <QButtonGroup>
 #include <QGridLayout>
@@ -121,7 +121,7 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
   _last_device_handle = NULL_HANDLE;
   _last_device_index = -1;
   _next_switch_device = NULL_HANDLE;
-  _view = NULL;
+  _view = nullptr;
   _mode_group = nullptr;
   _radio_single = nullptr;
   _radio_repeat = nullptr;
@@ -337,7 +337,7 @@ QWidget *SamplingBar::createSamplingSettingsWidget(QWidget *parent) {
 
 void SamplingBar::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "SamplingBar::bind_context: ctx is NULL");
+    pxv_warn("%s", "SamplingBar::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);
@@ -543,7 +543,7 @@ void SamplingBar::set_sample_rate(uint64_t sample_rate) {
 
 void SamplingBar::update_sample_rate_selector() {
   GVariant *gvar_dict, *gvar_list;
-  const uint64_t *elements = NULL;
+  const uint64_t *elements = nullptr;
   gsize num_elements;
 
   pxv_info("Update rate list.");
@@ -563,8 +563,8 @@ void SamplingBar::update_sample_rate_selector() {
 
   _updating_sample_rate = true;
 
-  gvar_dict = _device_agent->get_config_list(NULL, SR_CONF_SAMPLERATE);
-  if (gvar_dict == NULL) {
+  gvar_dict = _device_agent->get_config_list(nullptr, SR_CONF_SAMPLERATE);
+  if (gvar_dict == nullptr) {
     _sample_rate->clear();
     _sample_rate->show();
     _updating_sample_rate = false;
@@ -1019,8 +1019,16 @@ double SamplingBar::commit_hori_res() {
   connect(_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &SamplingBar::on_samplerate_sel);
 
-  if (sample_rate != _device_agent->get_sample_rate())
+  if (sample_rate != _device_agent->get_sample_rate()) {
     _device_agent->set_config_uint64(SR_CONF_SAMPLERATE, sample_rate);
+    // 同步更新 DSO 快照的 samplerate。采集期间 hori_knob → commit_hori_res
+    // 只更新了驱动层 cur_samplerate，但 DsoSnapshot::_samplerate 仍为采集
+    // 开始时的旧值。后续 timebase_changed() → set_scale_offset(new_scale)
+    // 会用新比例尺重绘，paint_mid 计算 samples_per_pixel =
+    // _data->samplerate() * scale 时，旧采样率与新比例尺不匹配，导致可见
+    // 采样范围极小甚至为空，波形"闪消"。此处同步快照采样率即可消除闪烁。
+    _session->apply_samplerate();
+  }
 
   // Only SET TIMEBASE if the value actually changed. Unconditional SET
   // triggers config_changed() -> broadcast_async<SampleCountUpdated> ->
@@ -1114,7 +1122,7 @@ bool SamplingBar::action_run_stop() {
   // DSO zero-calibration check removed (SR_CONF_ZERO fork key deleted,
   // DSO mode deprecated). zero_adj() is a no-op stub.
 
-  if (_device_agent->get_work_mode() == LOGIC && _view != NULL) {
+  if (_device_agent->get_work_mode() == LOGIC && _view != nullptr) {
     if (_session->is_realtime_refresh())
       _view->auto_set_max_scale();
   }
@@ -1156,7 +1164,7 @@ bool SamplingBar::action_instant_stop() {
 
   if (_device_agent->get_work_mode() == LOGIC &&
       _session->is_realtime_refresh()) {
-    if (_view != NULL)
+    if (_view != nullptr)
       _view->auto_set_max_scale();
   }
 
@@ -1345,7 +1353,7 @@ void SamplingBar::on_collect_mode() {
 }
 
 void SamplingBar::update_device_list() {
-  struct ds_device_base_info *array = NULL;
+  struct ds_device_base_info *array = nullptr;
   int dev_count = 0;
   int select_index = 0;
 
@@ -1353,13 +1361,13 @@ void SamplingBar::update_device_list() {
 
   array = _session->get_device_list(dev_count, select_index);
 
-  if (array == NULL) {
+  if (array == nullptr) {
     pxv_err("Get deivce list error!");
     return;
   }
 
   _updating_device_list = true;
-  struct ds_device_base_info *p = NULL;
+  struct ds_device_base_info *p = nullptr;
   ds_device_handle cur_dev_handle = NULL_HANDLE;
 
   _device_selector->clear();
@@ -1392,7 +1400,7 @@ void SamplingBar::config_device() {}
 
 void SamplingBar::update_view_status() {
   int bEnable = _session->is_working() == false;
-  // 设备未打开时用默认值 LOGIC，避免 _dev_handle NULL 警告
+  // 设备未打开时用默认值 LOGIC，避免 _dev_handle nullptr 警告
   int mode = LOGIC;
   if (_session->get_device()->have_instance()) {
     mode = _session->get_device()->get_work_mode();

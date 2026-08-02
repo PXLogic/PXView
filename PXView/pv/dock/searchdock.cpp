@@ -44,7 +44,7 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QtConcurrent/QtConcurrent>
-#include <stdint.h>
+#include <cstdint>
 
 namespace pv {
 namespace dock {
@@ -344,7 +344,7 @@ void SearchDock::set_view(view::View *view) { _view = view; }
 
 void SearchDock::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "SearchDock::bind_context: ctx is NULL");
+    pxv_warn("%s", "SearchDock::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);

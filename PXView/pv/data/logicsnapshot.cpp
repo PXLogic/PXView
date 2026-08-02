@@ -22,13 +22,13 @@
  */
 
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
 #include <atomic>
 #include <chrono>
 #include <functional>
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -37,7 +37,7 @@
 #include <sys/resource.h>
 #endif
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../utility/array.h"
 #include "leaf_block_pool.h"
@@ -114,7 +114,7 @@ void LogicSnapshot::init_all() {
   _ring_sample_count = 0;
   _byte_fraction = 0;
   _ch_fraction = 0;
-  _dest_ptr = NULL;
+  _dest_ptr = nullptr;
   _memory_failed = false;
   _last_ended = true;
   _loop_offset = 0;
@@ -291,7 +291,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     // FREE leaf blocks instead of zeroing in-place. The old in-place memset
     // destroyed data that might still be read by a concurrent decoder (which
     // shares the same LogicSnapshot object as capture_data when config is
-    // unchanged). By freeing (set lbp=NULL, return to pool), allocate_block
+    // unchanged). By freeing (set lbp=nullptr, return to pool), allocate_block
     // will hand out fresh zeroed blocks for the new capture — and the old
     // blocks remain valid in the pool until recycled, so any concurrent
     // reader holding a reference to them via free_decode_lpb is safe.
@@ -302,9 +302,9 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
         iter_rn.last = 0;
 
         for (int j = 0; j < 64; j++) {
-          if (iter_rn.lbp[j] != NULL) {
+          if (iter_rn.lbp[j] != nullptr) {
             push_to_free_list(iter_rn.lbp[j]);
-            iter_rn.lbp[j] = NULL;
+            iter_rn.lbp[j] = nullptr;
           }
         }
       }
@@ -355,7 +355,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
                "Falling back to LeafBlockPool in-memory allocation.");
         // Drop the failed allocator so allocate_block() takes the
         // LeafBlockPool::instance().acquire() fallback path instead of
-        // dereferencing an unconfigured (NULL _base_ptr) allocator.
+        // dereferencing an unconfigured (nullptr _base_ptr) allocator.
         _disk_cache_writer->clear_all_mmap_slots();
         _mmap_alloc.reset();
     } else {
@@ -417,24 +417,24 @@ void LogicSnapshot::clear_mmap_slot_by_abs(uint64_t abs_slot) {
 
 void* LogicSnapshot::allocate_block(uint16_t channel, uint64_t index0, uint64_t index1) {
     void* lbp = _ch_data[channel][index0].lbp[index1];
-    if (lbp != NULL) return lbp;
+    if (lbp != nullptr) return lbp;
 
     bool from_mmap = false;
     uint64_t global_block_seq = 0;
     if (_mmap_alloc) {
         global_block_seq = index0 * RootScale + index1;
         lbp = _mmap_alloc->get_block_data(channel, global_block_seq, _max_blocks_per_channel, LeafBlockSpace);
-        from_mmap = (lbp != NULL);
+        from_mmap = (lbp != nullptr);
         if (from_mmap) {
             // 通知 prefault 线程 writer 进度（block_seq，所有 channel 同步写入同一 block_seq）
             _mmap_alloc->notify_writer_block_seq(global_block_seq);
         }
     }
-    if (lbp == NULL) {
+    if (lbp == nullptr) {
         lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
-        if (lbp == NULL) {
+        if (lbp == nullptr) {
             pxv_err("LogicSnapshot: Malloc memory failed!");
-            return NULL;
+            return nullptr;
         }
     }
     _ch_data[channel][index0].lbp[index1] = lbp;
@@ -527,7 +527,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
             (unsigned long long)index0, _ch_data[0].size());
     _ring_sample_count = align_sample_count + offset - _loop_offset;
     _ch_fraction = 0;
-    _dest_ptr = NULL;
+    _dest_ptr = nullptr;
     return;
   }
 
@@ -782,7 +782,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   uint64_t index0 = 0;
   uint64_t index1 = 0;
   uint64_t offset = 0;
-  void *lbp = NULL;
+  void *lbp = nullptr;
 
   // samples = total samples per channel in this packet
   uint64_t samples = (logic.length * 8) / _channel_num;
@@ -823,8 +823,8 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // Driven by _ch_fraction (channel) and _byte_fraction (bit 0..7 within
   // the current 8-byte u64 for that channel).
   while ((_ch_fraction != 0 || _byte_fraction != 0) && len > 0) {
-    if (_dest_ptr == NULL) {
-      pxv_err("append_cross_payload: _dest_ptr NULL during bit-align");
+    if (_dest_ptr == nullptr) {
+      pxv_err("append_cross_payload: _dest_ptr nullptr during bit-align");
       return;
     }
 
@@ -848,14 +848,14 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         pxv_err("append_cross_payload: index0 %llu out of range (bit-align)",
                 (unsigned long long)index0);
         _ring_sample_count -= _loop_offset;
-        _dest_ptr = NULL;
+        _dest_ptr = nullptr;
         return;
       }
       lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
-      if (lbp == NULL) {
+      if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (bit-align)");
         _ring_sample_count -= _loop_offset;
-        _dest_ptr = NULL;
+        _dest_ptr = nullptr;
         return;
       }
 
@@ -901,14 +901,14 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     pxv_err("append_cross_payload: index0 %llu out of range (main)",
             (unsigned long long)index0);
     _ring_sample_count = align_sample_count - _loop_offset;
-    _dest_ptr = NULL;
+    _dest_ptr = nullptr;
     return;
   }
   lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
-  if (lbp == NULL) {
+  if (lbp == nullptr) {
     pxv_err("append_cross_payload: alloc failed (main)");
     _ring_sample_count = align_sample_count - _loop_offset;
-    _dest_ptr = NULL;
+    _dest_ptr = nullptr;
     return;
   }
 
@@ -951,7 +951,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         break;
       }
       lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
-      if (lbp == NULL) {
+      if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (advance)");
         break;
       }
@@ -980,7 +980,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         break;
       }
       lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
-      if (lbp == NULL) {
+      if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (end)");
         break;
       }
@@ -1003,13 +1003,13 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   if (index0 >= _ch_data[_ch_fraction].size()) {
     pxv_err("append_cross_payload: index0 %llu out of range (finalize)",
             (unsigned long long)index0);
-    _dest_ptr = NULL;
+    _dest_ptr = nullptr;
     return;
   }
   lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
-  if (lbp == NULL) {
+  if (lbp == nullptr) {
     pxv_err("append_cross_payload: alloc failed (finalize)");
-    _dest_ptr = NULL;
+    _dest_ptr = nullptr;
     return;
   }
 
@@ -1068,8 +1068,8 @@ void LogicSnapshot::capture_ended() {
     for (unsigned int chan = 0; chan < _channel_num; chan++) {
       uint8_t *lbp = (uint8_t *)_ch_data[chan][index0].lbp[index1];
 
-      if (lbp == NULL) {
-        // Tolerate NULL leaf block at capture_ended: the async writer may not
+      if (lbp == nullptr) {
+        // Tolerate nullptr leaf block at capture_ended: the async writer may not
         // have allocated a block for the trailing partial chunk (e.g. when the
         // last append_payload_impl invocation early-returned because
         // _sample_count already capped at _total_sample_count). Previously
@@ -1077,7 +1077,7 @@ void LogicSnapshot::capture_ended() {
         // Release, so we already log + skip silently here. Skip the mipmap
         // update for this channel — the trailing partial chunk's mipmap will
         // be 0 anyway, and downstream view rendering already tolerates it.
-        pxv_warn("capture_ended: ch%u leaf block [%llu][%llu] is NULL, skipping",
+        pxv_warn("capture_ended: ch%u leaf block [%llu][%llu] is nullptr, skipping",
                  chan, (unsigned long long)index0, (unsigned long long)index1);
       } else {
         // ONLY clear the signal data part, NOT the mipmaps! Mipmaps start at LeafBlockSamples / 8.
@@ -1113,7 +1113,7 @@ void LogicSnapshot::copy_from(const LogicSnapshot &src) {
 
   _byte_fraction = src._byte_fraction;
   _ch_fraction = src._ch_fraction;
-  _dest_ptr = NULL;
+  _dest_ptr = nullptr;
   memcpy(_last_sample, src._last_sample, sizeof(_last_sample));
   memcpy(_last_calc_count, src._last_calc_count, sizeof(_last_calc_count));
   _is_loop = src._is_loop;
@@ -1155,7 +1155,7 @@ void LogicSnapshot::copy_from(const LogicSnapshot &src) {
       new_rn.first = rn.first;
       new_rn.last = rn.last;
       for (unsigned int k = 0; k < Scale; k++) {
-        if (rn.lbp[k] != NULL) {
+        if (rn.lbp[k] != nullptr) {
           if (_mmap_alloc && src._mmap_alloc && src._mmap_alloc->is_mmap_address(rn.lbp[k])) {
             uint64_t global_block_seq = j * RootScale + k;
             void* new_lbp = _mmap_alloc->get_block_data(i, global_block_seq, _max_blocks_per_channel, LeafBlockSpace);
@@ -1173,7 +1173,7 @@ void LogicSnapshot::copy_from(const LogicSnapshot &src) {
               _memory_failed = true;
           }
         } else {
-          new_rn.lbp[k] = NULL;
+          new_rn.lbp[k] = nullptr;
         }
       }
       new_channel.push_back(new_rn);
@@ -1186,7 +1186,7 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
                                 uint8_t index1, uint64_t samples, bool isEnd) {
   void *lbp = _ch_data[order][index0].lbp[index1];
 
-  if (lbp == NULL)
+  if (lbp == nullptr)
     return;
   void *level1_ptr = (uint8_t *)lbp + LeafBlockSamples / 8;
   void *level2_ptr = (uint8_t *)level1_ptr + LeafBlockSamples / Scale / 8;
@@ -1329,7 +1329,7 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   } else if (isEnd) {
     push_to_free_list(_ch_data[order][index0].lbp[index1]);
 
-    _ch_data[order][index0].lbp[index1] = NULL;
+    _ch_data[order][index0].lbp[index1] = nullptr;
   }
 
   if (isEnd)
@@ -1360,12 +1360,12 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   if (order == -1 || (unsigned int)order >= _ch_data.size()) {
     static int s_warn_cnt = 0;
     if (s_warn_cnt++ < 20) {
-      pxv_warn("LogicSnapshot::get_samples NULL: sig_index=%d order=%d "
+      pxv_warn("LogicSnapshot::get_samples nullptr: sig_index=%d order=%d "
                "ch_data_size=%zu ch_index_size=%zu _loop_offset=%lld",
                sig_index, order, _ch_data.size(), _ch_index.size(),
                (long long)_loop_offset);
     }
-    return NULL;
+    return nullptr;
   }
 
   uint64_t index0 = start_sample >> (LeafBlockPower + RootScalePower);
@@ -1382,21 +1382,21 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   if (index0 >= _ch_data[order].size()) {
     static int s_warn_cnt2 = 0;
     if (s_warn_cnt2++ < 20) {
-      pxv_warn("LogicSnapshot::get_samples NULL: sig_index=%d order=%d "
+      pxv_warn("LogicSnapshot::get_samples nullptr: sig_index=%d order=%d "
                "index0=%llu >= ch_data[order].size()=%zu (start_sample=%llu)",
                sig_index, order, (unsigned long long)index0,
                _ch_data[order].size(), (unsigned long long)start_sample);
     }
-    return NULL;
+    return nullptr;
   }
 
   void *ptr = _ch_data[order][index0].lbp[index1];
 
-  if (ptr == NULL) {
+  if (ptr == nullptr) {
     // Leaf block was freed by calc_mipmap because this region has no toggles
     // (constant value). The value is encoded in _ch_data[order][index0].first
     // bit `index1`. Return a synthetic buffer filled with the constant value
-    // so callers (export, etc.) get valid data instead of NULL.
+    // so callers (export, etc.) get valid data instead of nullptr.
     // 8 samples per byte, LSB-first: all-0 -> 0x00, all-1 -> 0xFF.
     bool const_val = (_ch_data[order][index0].first & (1ULL << index1)) != 0;
     uint64_t bytes_from_offset = (end_sample - start_sample + 1 + 7) / 8;
@@ -1407,14 +1407,14 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
     if (s_const_buf.size() < need) s_const_buf.resize(need);
     uint8_t fill = const_val ? 0xFF : 0x00;
     memset(s_const_buf.data(), fill, need);
-    if (lbp != NULL)
-      *lbp = NULL;
+    if (lbp != nullptr)
+      *lbp = nullptr;
     _cur_ref_block_indexs[order].root_index = index0;
     _cur_ref_block_indexs[order].lbp_index = index1;
     return s_const_buf.data();
   }
 
-  if (lbp != NULL)
+  if (lbp != nullptr)
     *lbp = ptr;
 
   _cur_ref_block_indexs[order].root_index = index0;
@@ -1621,11 +1621,11 @@ bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
                                (inner_tog_pos << LeafBlockPower);
           index = max(blk_start, index);
 
-          if (ptr != NULL && min_level < ScaleLevel) {
+          if (ptr != nullptr && min_level < ScaleLevel) {
             uint64_t block_end = min(index | LeafMask, end);
             edge_hit =
                 block_nxt_edge((uint64_t *)ptr, index, block_end, last_sample, min_level);
-          } else if (ptr != NULL) {
+          } else if (ptr != nullptr) {
             edge_hit = true;
           } else {
             edge_hit = true; // block unavailable, treat as edge
@@ -1732,7 +1732,7 @@ bool LogicSnapshot::get_pre_edge_self(uint64_t &index, bool last_sample,
                               (inner_tog_pos << LeafBlockPower)) |
                              LeafMask;
           index = min(blk_end, index);
-          if (ptr != NULL && min_level < ScaleLevel) {
+          if (ptr != nullptr && min_level < ScaleLevel) {
             edge_hit =
                 block_pre_edge((uint64_t *)ptr, index, last_sample, min_level, sig_index);
           } else {
@@ -1957,7 +1957,7 @@ bool LogicSnapshot::block_pre_edge(uint64_t *lbp, uint64_t &index,
   uint64_t block_start = index & ~LeafMask;
 
   if (!lbp) {
-    pxv_warn("%s", "LogicSnapshot::block_pre_edge: lbp is NULL");
+    pxv_warn("%s", "LogicSnapshot::block_pre_edge: lbp is nullptr");
     return false;
   }
   assert(lbp);
@@ -2238,7 +2238,7 @@ uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
   int order = get_ch_order(sig_index);
   if (order == -1 || (unsigned int)order >= _ch_data.size()) {
     sample = 0;
-    return NULL;
+    return nullptr;
   }
 
   int block_index0 = block_index;
@@ -2248,15 +2248,15 @@ uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
   uint8_t pos = block_index % RootScale;
   if (index >= _ch_data[order].size()) {
     sample = 0;
-    return NULL;
+    return nullptr;
   }
   uint8_t *lbp = (uint8_t *)_ch_data[order][index].lbp[pos];
 
-  if (lbp == NULL) {
+  if (lbp == nullptr) {
     sample = (_ch_data[order][index].first & 1ULL << pos) != 0;
   }
 
-  if (lbp != NULL && _loop_offset > 0 && block_index0 == 0) {
+  if (lbp != nullptr && _loop_offset > 0 && block_index0 == 0) {
     lbp += (_loop_offset % LeafBlockSamples) / 8;
   }
 
@@ -2282,9 +2282,9 @@ void LogicSnapshot::move_first_node_to_last() {
     _ch_data[i].erase(_ch_data[i].begin());
 
     for (int x = 0; x < (int)Scale; x++) {
-      if (rn.lbp[x] != NULL) {
+      if (rn.lbp[x] != nullptr) {
         push_to_free_list(rn.lbp[x]);
-        rn.lbp[x] = NULL;
+        rn.lbp[x] = nullptr;
       }
     }
 
@@ -2326,7 +2326,7 @@ void LogicSnapshot::push_to_free_list(void* ptr) {
 
 void LogicSnapshot::free_decode_lpb(void *lbp) {
   if (!lbp) {
-    pxv_warn("%s", "LogicSnapshot::free_decode_lpb: lbp is NULL");
+    pxv_warn("%s", "LogicSnapshot::free_decode_lpb: lbp is nullptr");
     return;
   }
   assert(lbp);
@@ -2350,9 +2350,9 @@ void LogicSnapshot::free_head_blocks(int count) {
 
   for (int i = 0; i < (int)_channel_num; i++) {
     for (int j = _lst_free_block_index; j < count; j++) {
-      if (_ch_data[i][0].lbp[j] != NULL) {
+      if (_ch_data[i][0].lbp[j] != nullptr) {
         push_to_free_list(_ch_data[i][0].lbp[j]);
-        _ch_data[i][0].lbp[j] = NULL;
+        _ch_data[i][0].lbp[j] = nullptr;
       }
 
       _ch_data[i][0].tog = (_ch_data[i][0].tog >> count) << count;
@@ -2365,7 +2365,7 @@ void LogicSnapshot::free_head_blocks(int count) {
 
 int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
   if (!out_offset) {
-    pxv_warn("%s", "LogicSnapshot::get_block_with_sample: out_offset is NULL");
+    pxv_warn("%s", "LogicSnapshot::get_block_with_sample: out_offset is nullptr");
     return -1;
   }
   assert(out_offset);

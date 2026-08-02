@@ -59,7 +59,8 @@ enum ShortcutActionId {
     SHORTCUT_NEW_TAB = 30,
     SHORTCUT_CLOSE_TAB = 31,
     SHORTCUT_ZOOM_FIT = 32,
-    SHORTCUT_COUNT = 33
+    SHORTCUT_FILE_IMPORT = 33,
+    SHORTCUT_COUNT = 34
 };
 
 struct ShortcutActionInfo {

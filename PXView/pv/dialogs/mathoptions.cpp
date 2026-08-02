@@ -36,7 +36,6 @@
 #include "../ui/dockfonts.h"
 #include "../config/appconfig.h"
 
-using namespace boost;
 using namespace std;
 using namespace pv::view;
 

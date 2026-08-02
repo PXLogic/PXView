@@ -28,17 +28,17 @@
 #include <QGuiApplication>
 #include <QWindow>
 #include <dwmapi.h> 
-#include <assert.h>
+#include <cassert>
 #include <QString>
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
 #include <qmath.h>
-#include <string.h>
+#include <cstring>
 
 #include "log.h"
 #include "mainframe.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "appcontrol.h"
 
 #define FIXED_WIDTH(widget) (widget->minimumWidth() >= widget->maximumWidth())
@@ -63,13 +63,13 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
     _childWindow = nullptr;
     _childWidget = nullptr;
     _bodyViewWidget = nullptr;
-    _hWnd = NULL;
-    _event_callback = NULL;
+    _hWnd = nullptr;
+    _event_callback = nullptr;
     _is_lose_foreground = false;
     _is_closing = false;
-    _hCurrentMonitor = NULL;
-    _shadow = NULL; 
-    _titleBarWidget = NULL;
+    _hCurrentMonitor = nullptr;
+    _shadow = nullptr; 
+    _titleBarWidget = nullptr;
 
     _is_native_border = IsWin11OrGreater();
 
@@ -103,7 +103,7 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
             //WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN,
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 
             x, y, width, height,
-            NULL, NULL, hInstance, NULL);
+            nullptr, nullptr, hInstance, nullptr);
 
     if (!_hWnd)
     {
@@ -112,10 +112,10 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
     }
     
     SetWindowLongPtr(_hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-    SetWindowPos(_hWnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(_hWnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
 
     if (!_is_native_border){
-        _shadow = new WinShadow(_hWnd, NULL);
+        _shadow = new WinShadow(_hWnd, nullptr);
         _shadow->createWinId();
         _shadow->SetCallback(this);
     }
@@ -132,12 +132,12 @@ WinNativeWidget::~WinNativeWidget()
 void WinNativeWidget::SetChildWidget(QWidget *w)
 { 
     _childWidget = w;
-    _childWindow = NULL;
+    _childWindow = nullptr;
 
-    if (w != NULL){
+    if (w != nullptr){
         _childWindow = (HWND)w->winId();
     }
-    else if (_shadow != NULL){
+    else if (_shadow != nullptr){
         _shadow->hideShadow();
         _shadow->close();
     }
@@ -165,7 +165,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
 
     WinNativeWidget *self = reinterpret_cast<WinNativeWidget*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
-    if (self == NULL){
+    if (self == nullptr){
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
 
@@ -178,7 +178,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
                 RECT rc;
                 GetWindowRect(hWnd, &rc);
                 TrackPopupMenu(GetSystemMenu(hWnd, false), TPM_TOPALIGN | TPM_LEFTALIGN, 
-                            rc.left + 5, rc.top + 5, 0, hWnd, NULL);
+                            rc.left + 5, rc.top + 5, 0, hWnd, nullptr);
             }
             break;
         }
@@ -253,7 +253,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
         case WM_CLOSE:
         {
-            if (self->_childWidget != NULL) {
+            if (self->_childWidget != nullptr) {
                 self->_childWidget->close();
                 return 0;
             }
@@ -264,10 +264,10 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
             if (IsIconic(hWnd) == FALSE) {
                 HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
 
-                if (hMonitor == NULL){
+                if (hMonitor == nullptr){
                     pxv_info("ERROR: WM_MOVE: get an invalid monitor.");
                 }
-                else if (self->_hCurrentMonitor == NULL){
+                else if (self->_hCurrentMonitor == nullptr){
                     RECT rc = GetMonitorArea(hMonitor, true);
 
                     pxv_info("WM_MOVE: get a monitor, handle:%x, x:%d, y:%d, w:%d, h:%d", 
@@ -301,14 +301,14 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
                 pxv_info("display changed.");
             }
 
-            if (self->_event_callback != NULL && self->_childWindow != NULL){ 
+            if (self->_event_callback != nullptr && self->_childWindow != nullptr){ 
                 self->_event_callback->OnParentNativeEvent(PARENT_EVENT_DISPLAY_CHANGED);
             }
             break;
         }
         case WM_SIZE:
         {   
-            if (wParam != SIZE_MINIMIZED && self->_childWindow != NULL){ 
+            if (wParam != SIZE_MINIMIZED && self->_childWindow != nullptr){ 
                self->ResizeChild();
             }
             break;
@@ -317,7 +317,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         {
             static int lst_state = -1;
             
-            if (self->_childWidget != NULL && !bMoving){
+            if (self->_childWidget != nullptr && !bMoving){
 
                 int st = WINDOW_STATUS_MIN;
                 if (self->IsMaxsized())
@@ -371,7 +371,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
         case WM_NCHITTEST:
         {   
-            if (self->_childWidget != NULL){
+            if (self->_childWidget != nullptr){
                 return self->hitTest(hWnd, wParam, lParam);
             }
             break;           
@@ -379,7 +379,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         case WM_MOUSEWHEEL:
         {
             // If system not send this message to the focus window, the native window will be received it.
-            if (self->_childWindow != NULL){
+            if (self->_childWindow != nullptr){
                 return SendMessage(self->_childWindow, message, wParam, lParam);
             }
             break;
@@ -496,7 +496,7 @@ LRESULT WinNativeWidget::hitTest(HWND hWnd, WPARAM wParam, LPARAM lParam)
 RECT WinNativeWidget::GetMonitorArea(HMONITOR hMonitor, bool isPhysics)
 {
     if (!hMonitor) {
-        pxv_warn("%s", "WinNativeWidget::GetMonitorArea: hMonitor is NULL");
+        pxv_warn("%s", "WinNativeWidget::GetMonitorArea: hMonitor is nullptr");
         return RECT{};
     }
     assert(hMonitor);
@@ -539,11 +539,11 @@ bool WinNativeWidget::getMonitorWorkArea(HMONITOR hMonitor, int *outWidth, int *
 
 void WinNativeWidget::ResizeChild()
 {
-    if (_childWindow != NULL){ 
+    if (_childWindow != nullptr){ 
 
         int k =  GetDevicePixelRatio();
         
-        if (_shadow != NULL){
+        if (_shadow != nullptr){
             _shadow->setScale(k);
             _shadow->moveShadow();
         }
@@ -579,7 +579,7 @@ bool WinNativeWidget::isActiveWindow()
 
 void WinNativeWidget::setGeometry(const int x, const int y, const int width, const int height)
 { 
-    if (_hWnd != NULL){
+    if (_hWnd != nullptr){
         MoveWindow(_hWnd, x, y, width, height, 1);
     }
 }
@@ -625,14 +625,14 @@ void WinNativeWidget::UpdateChildDpi()
 {
     QScreen *screen = GetPointScreen();
 
-    if (screen == NULL){
+    if (screen == nullptr){
         pxv_info("ERROR: failed to get pointing screen, will select the primary.");
         screen = QGuiApplication::primaryScreen();
     }
 
-    if (screen != NULL && _childWidget != NULL){
+    if (screen != nullptr && _childWidget != nullptr){
         _childWidget->windowHandle()->setScreen(screen);
-        if (_shadow != NULL){
+        if (_shadow != nullptr){
             _shadow->windowHandle()->setScreen(screen);
         }
     }
@@ -641,7 +641,7 @@ void WinNativeWidget::UpdateChildDpi()
 QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
 {
     if (!_hWnd) {
-        pxv_warn("%s", "WinNativeWidget::screenFromCurrentMonitorHandle: _hWnd is NULL");
+        pxv_warn("%s", "WinNativeWidget::screenFromCurrentMonitorHandle: _hWnd is nullptr");
         return nullptr;
     }
     assert(_hWnd);
@@ -649,29 +649,29 @@ QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
     HMONITOR hMonitor = _hCurrentMonitor;
     RECT rc;
 
-    if (hMonitor != NULL)
+    if (hMonitor != nullptr)
     {
         rc = GetMonitorArea(hMonitor, true);
 
         if (rc.right - rc.left == 0){
           //  pxv_info("ERROR: Got an invalid monitor information from current monitor handle.");
-            hMonitor = NULL;
+            hMonitor = nullptr;
         }
     }
  
-    if (hMonitor == NULL){
+    if (hMonitor == nullptr){
         hMonitor = MonitorFromWindow(_hWnd, MONITOR_DEFAULTTONEAREST);
 
-        if (hMonitor == NULL){
+        if (hMonitor == nullptr){
             pxv_info("ERROR: MonitorFromWindow() can't returns a handle.");
-            return NULL;
+            return nullptr;
         }
 
         rc = GetMonitorArea(hMonitor, true);
 
         if (rc.right - rc.left == 0){
           //  pxv_info("ERROR: Got an invalid monitor information from window handle.");
-            return NULL;
+            return nullptr;
         }
     } 
 
@@ -690,7 +690,7 @@ QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
 
    // pxv_info("ERROR: can't match a monitor.");
   
-    return NULL;
+    return nullptr;
 }
 
 QScreen* WinNativeWidget::GetPointScreen()
@@ -732,14 +732,14 @@ void WinNativeWidget::SetBorderColor(QColor color)
         {
             const DWORD DWMWINDOWATTRIBUTE_DWMWA_BORDER_COLOR = 34;
             COLORREF COLOR = RGB(color.red(), color.green(), color.blue());
-            typedef HRESULT(WINAPI *tDwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+            using tDwmSetWindowAttribute = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
             tDwmSetWindowAttribute pDwmSetWindowAttribute =
                 tDwmSetWindowAttribute(QLibrary::resolve("dwmapi", "DwmSetWindowAttribute"));
             if (pDwmSetWindowAttribute){
                 pDwmSetWindowAttribute(_hWnd, DWMWINDOWATTRIBUTE_DWMWA_BORDER_COLOR, &COLOR, sizeof(COLOR));
             }
         }
-        else if (_childWidget != NULL){
+        else if (_childWidget != nullptr){
             if (IsMaxsized()){
                 hideBorder();
             }
@@ -752,7 +752,7 @@ void WinNativeWidget::SetBorderColor(QColor color)
 
 void WinNativeWidget::showBorder()
 {
-    if (_childWidget != NULL && !_is_native_border){
+    if (_childWidget != nullptr && !_is_native_border){
         _childWidget->setObjectName("PXViewFrame");
         QString borderCss = "#PXViewFrame {border-radius:0px; border:1px solid %1;}";
         QString borderStyle = borderCss.arg(_border_color.name());
@@ -762,7 +762,7 @@ void WinNativeWidget::showBorder()
 
 void WinNativeWidget::hideBorder()
 {
-     if (_childWidget != NULL && !_is_native_border){
+     if (_childWidget != nullptr && !_is_native_border){
         _childWidget->setObjectName("PXViewFrame");
         QString borderCss = "#PXViewFrame {border-radius:0px; border:0px solid %1;}";
         QString borderStyle = borderCss.arg(_border_color.name());
@@ -773,7 +773,7 @@ void WinNativeWidget::hideBorder()
 bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_version, DWORD *build_number)
 {
     if (!major_version || !minor_version || !build_number) {
-        pxv_warn("%s", "WinNativeWidget::getWinSysVersion: version pointer is NULL");
+        pxv_warn("%s", "WinNativeWidget::getWinSysVersion: version pointer is nullptr");
         return false;
     }
     assert(major_version);
@@ -784,7 +784,7 @@ bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_versio
     *minor_version = 0;
     *build_number = 0;
 
-    typedef NTSTATUS(WINAPI *tRtlGetVersion)(LPOSVERSIONINFOEXW);
+    using tRtlGetVersion = NTSTATUS(WINAPI *)(LPOSVERSIONINFOEXW);
     tRtlGetVersion pRtlGetVersion = tRtlGetVersion(QLibrary::resolve("ntdll", "RtlGetVersion"));
 
     if (pRtlGetVersion)
@@ -839,7 +839,7 @@ bool WinNativeWidget::IsWin7()
 double WinNativeWidget::GetDevicePixelRatio()
 {
     auto screen = GetPointScreen();
-    if (screen != NULL){
+    if (screen != nullptr){
         return screen->devicePixelRatio();
     }
     else{
@@ -862,7 +862,7 @@ void WinNativeWidget::OnForeWindowLosed()
 
 void WinNativeWidget::setShadowStatus(int windowStatus)
 { 
-    if (_shadow == NULL)
+    if (_shadow == nullptr)
         return;
 
     switch (windowStatus)

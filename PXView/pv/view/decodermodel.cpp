@@ -27,7 +27,6 @@
 #include "../data/decoderstack.h"
 #include "decodermodel.h"
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -35,7 +34,7 @@ namespace view {
 
 DecoderModel::DecoderModel(QObject *parent)
     : QAbstractTableModel(parent),
-      _decoder_stack(NULL)
+      _decoder_stack(nullptr)
 {
 }
 

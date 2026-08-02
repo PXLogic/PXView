@@ -21,7 +21,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
  
-#include <stdint.h>
+#include <cstdint>
 #include <getopt.h>
 #include <QApplication>
 #include <QCoreApplication>
@@ -64,11 +64,11 @@ void myMessageHandler(QtMsgType type, const QMessageLogContext &context, const Q
 
     if (type == QtFatalMsg || (msg_str && strstr(msg_str, "ASSERT failure"))) {
         fprintf(stderr, "=== FATAL/ASSERT BACKTRACE ===\n");
-        fprintf(stderr, "Base of PXView.exe: %p\n", GetModuleHandleW(NULL));
+        fprintf(stderr, "Base of PXView.exe: %p\n", GetModuleHandleW(nullptr));
         fprintf(stderr, "Base of Qt6Core.dll: %p\n", GetModuleHandleA("Qt6Core.dll"));
         
         void* backtrace[64];
-        USHORT frames = CaptureStackBackTrace(0, 64, backtrace, NULL);
+        USHORT frames = CaptureStackBackTrace(0, 64, backtrace, nullptr);
         for (USHORT i = 0; i < frames; ++i) {
             fprintf(stderr, "  #%d: %p\n", i, backtrace[i]);
         }
@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
 #endif
 
 	int ret = 0;
-	const char *open_file = NULL;
+	const char *open_file = nullptr;
 	int logLevel = -1;
 	bool bStoreLog = false;
 	bool bHeadless = false;
@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 		};
 
         const char *shortopts = "l:Vvhs?";
-        const int c = getopt_long(argcFinal, argvFinal, shortopts, long_options, NULL);
+        const int c = getopt_long(argcFinal, argvFinal, shortopts, long_options, nullptr);
 		if (c == -1)
 			break;
 
@@ -359,7 +359,7 @@ int main(int argc, char *argv[])
 	}
 	pxv_info("DBG: control->Init() done");
 
-	if (open_file != NULL){
+	if (open_file != nullptr){
 		control->_open_file_name = open_file;
 	}	
 

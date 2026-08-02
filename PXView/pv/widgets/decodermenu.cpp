@@ -22,7 +22,7 @@
 
 #include <libsigrokdecode.h>
 #include "decodermenu.h"
-#include <assert.h>
+#include <cassert>
 
 namespace pv {
 namespace widgets {

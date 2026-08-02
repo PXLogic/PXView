@@ -21,14 +21,14 @@
  */
 
 
-#include <stdint.h>
-#include <assert.h>
-#include <math.h>
+#include <cstdint>
+#include <cassert>
+#include <cmath>
 
 #include "../ui/dsspinbox.h"
 #include "int.h"
 
-using boost::optional;
+using std::optional;
 using namespace std;
 
 //#define INT8_MIN    (-0x7f - 1)
@@ -51,14 +51,14 @@ namespace prop {
 
 Int::Int(QString name, QString label,
     QString suffix,
-    boost::optional< pair<int64_t, int64_t> > range,
+    std::optional< pair<int64_t, int64_t> > range,
     Getter getter,
     Setter setter) :
     Property(name, label, getter, setter),
 	_suffix(suffix),
 	_range(range),
-    _value(NULL),
-	_spin_box(NULL)
+    _value(nullptr),
+	_spin_box(nullptr)
 {
 }
 
@@ -78,9 +78,9 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
     if (_value)
         g_variant_unref(_value);
 
-    _value = _getter ? _getter() : NULL;
+    _value = _getter ? _getter() : nullptr;
     if (!_value)
-        return NULL;
+        return nullptr;
 
     _spin_box = new pv::ui::DsSpinBox(parent);
     _spin_box->setSuffix(_suffix);
@@ -166,7 +166,7 @@ void Int::commit()
         return;
     assert(_value);
 
-    GVariant *new_value = NULL;
+    GVariant *new_value = nullptr;
     const GVariantType *const type = g_variant_get_type(_value);
     if (!type)
         return;

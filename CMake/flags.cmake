@@ -13,9 +13,9 @@ if(NOT DISABLE_WERROR)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
 endif()
 
-# C++20: required for std::span / concepts / structured bindings in the
-# LogicSnapshot rewrite. Qt6.6+ and MinGW GCC 13+ fully support C++20.
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+# C++23: required for std::expected / std::print / concepts (C++20) /
+# std::span (C++20). Qt6.6+ and MinGW GCC 16+ fully support C++23.
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++23")
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 
 

@@ -27,7 +27,7 @@
 
 #include <QWidget>
 #include <QColor>
-#include <stdint.h>
+#include <cstdint>
 #include "../ui/uimanager.h"
 
 #define CURSOR_HSB_COLOR_TABLE_LENGTH   22

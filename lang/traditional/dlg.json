@@ -89,6 +89,10 @@
         "text": "開啟檔案"
     },
     {
+        "id": "IDS_DLG_IMPORT_FILE",
+        "text": "匯入檔案"
+    },
+    {
         "id": "IDS_DLG_OPEN_SEESION",
         "text": "開啟設定"
     },
@@ -785,6 +789,10 @@
         "text": "標題列顯示設定檔名稱"
     },
     {
+        "id": "IDS_DLG_PROMPT_SAVE_ON_EXIT",
+        "text": "結束時提示儲存資料"
+    },
+    {
         "id": "IDS_DLG_SERIAL_HEX",
         "text": "十六進位 :"
     },
@@ -1067,6 +1075,10 @@
     {
         "id": "IDS_DLG_SC_FILE_EXPORT",
         "text": "匯出資料"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_IMPORT",
+        "text": "匯入資料"
     },
     {
         "id": "IDS_DLG_SC_FILE_LOAD",
@@ -1875,5 +1887,25 @@
     {
         "id": "IDS_DLG_NO_DATA",
         "text": "無可用資料"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_RANDOM",
+        "text": "隨機"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SINE",
+        "text": "正弦波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SQUARE",
+        "text": "方波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SAWTOOTH",
+        "text": "鋸齒波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_TRIANGLE",
+        "text": "三角波"
     }
 ]

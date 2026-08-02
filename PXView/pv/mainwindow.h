@@ -83,6 +83,7 @@ class SearchDock;
 class DeviceOptionsDock;
 class LogDock;
 class McpControlDock;
+class FunctionDock;
 }
 
 namespace view {
@@ -131,6 +132,7 @@ private slots:
     void on_save();
 
     void on_export();
+    void on_import_file(QString file_name);
     bool on_load_session(QString name);  
     bool on_store_session(QString name); 
     void on_data_updated();
@@ -324,6 +326,8 @@ private:
     QDockWidget             *_log_dock;
     dock::LogDock           *_log_widget;
     dock::McpControlDock       *_mcp_control_widget;
+    dock::FunctionDock        *_function_widget;
+    QDockWidget               *_function_dock;
 
     // Sliding drawer panel
     widgets::SlidingDrawer  *_sliding_drawer;
@@ -335,6 +339,7 @@ private:
     int _drawer_page_device_options;
     int _drawer_page_log;
     int _drawer_page_mcp;
+    int _drawer_page_function;
     int _drawer_current_page; // -1 = no page open
 
     QTranslator     _qtTrans;

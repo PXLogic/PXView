@@ -46,7 +46,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStandardPaths>
-#include <math.h>
+#include <cmath>
 #include <QTextStream>
 #include <list>
 
@@ -54,7 +54,7 @@
 
 #include <libsigrokdecode.h>
 #include "config/appconfig.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "utility/encoding.h"
 #include "utility/path.h"
 #include "log.h" 
@@ -67,13 +67,13 @@ namespace pv {
 
 StoreSession::StoreSession(SigSession *session) :
 	_session(session),
-    _outModule(NULL),
+    _outModule(nullptr),
 	_units_stored(0),
     _unit_count(0),
     _has_error(false),
     _canceled(false)
 { 
-    _sessionDataGetter = NULL;
+    _sessionDataGetter = nullptr;
     _start_index = 0;
     _end_index = 0;
     _is_busy = false;
@@ -94,7 +94,7 @@ void StoreSession::get_progress(uint64_t *writed, uint64_t *total)
     assert(writed);
     assert(total);
     if (!writed || !total) {
-        pxv_warn("StoreSession::get_progress called with NULL out-parameter.");
+        pxv_warn("StoreSession::get_progress called with nullptr out-parameter.");
         return;
     }
 
@@ -122,7 +122,7 @@ QList<QString> StoreSession::getSuportedExportFormats(){
     const struct sr_output_module** supportedModules = sr_output_list();
     QList<QString> list;
     while(*supportedModules){
-        if(*supportedModules == NULL)
+        if(*supportedModules == nullptr)
             break;
         // Upstream libsigrok makes sr_output_module opaque — use accessor
         // functions sr_output_id_get() / sr_output_description_get() instead
@@ -325,14 +325,14 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
 
                 uint8_t *buf = logic_snapshot->get_block_buf(i, ch_index, sample);
                 uint64_t size = logic_snapshot->get_block_size(i);
-                bool need_malloc = (buf == NULL);
+                bool need_malloc = (buf == nullptr);
 
                 if (i == end_block && end_offset / 8 < size && end_offset > 0){
                     size = end_offset / 8;
                 }
 
                 if (i == start_block && start_offset > 0){
-                    if (buf != NULL){
+                    if (buf != nullptr){
                         buf += start_offset / 8;
                     }
                     size -= start_offset / 8;
@@ -340,7 +340,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                 
                 if (need_malloc) {
                     buf = (uint8_t *)malloc(size);
-                    if (buf == NULL) {
+                    if (buf == nullptr) {
                         _has_error = true;
                         _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1), 
                                     "Failed to create zip file. Malloc error.");
@@ -412,8 +412,8 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
         _unit_count = analog_snapshot->get_sample_count() *
                         analog_snapshot->get_unit_bytes() *
                         analog_snapshot->get_channel_num();
-        uint8_t *buf = NULL;
-        uint8_t *buf_start = NULL;
+        uint8_t *buf = nullptr;
+        uint8_t *buf_start = nullptr;
 
         buf = (uint8_t *)analog_snapshot->get_data() +
                         (analog_snapshot->get_ring_start() * analog_snapshot->get_unit_bytes()
@@ -427,7 +427,7 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
             const uint64_t size = analog_snapshot->get_block_size(i);
             if ((buf + size) > buf_end) {
                 uint8_t *tmp = (uint8_t *)malloc(size);
-                if (tmp == NULL) {
+                if (tmp == nullptr) {
                     _has_error = true;
                     _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1), 
                                 "Failed to create zip file. Malloc error.");
@@ -526,7 +526,7 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
 {
 	assert(snapshot);
     if (!snapshot) {
-        pxv_warn("StoreSession::save_proc called with NULL snapshot.");
+        pxv_warn("StoreSession::save_proc called with nullptr snapshot.");
         return;
     }
 
@@ -630,7 +630,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             analog_count++;
     }
 
-    data::LogicSnapshot *logic_snapshot = NULL;
+    data::LogicSnapshot *logic_snapshot = nullptr;
     if ((logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot))) {
         uint16_t to_save_probes = 0;
         for (l = _session->get_device()->get_channels(); l; l = l->next) {
@@ -712,7 +712,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         sprintf(meta, "trigger time = %lld\n", _session->get_session_time().toMSecsSinceEpoch()); str += meta;
     }
     else if (mode == ANALOG) {
-        data::AnalogSnapshot *analog_snapshot = NULL;
+        data::AnalogSnapshot *analog_snapshot = nullptr;
         if ((analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot))) {
             uint8_t tmp_u8 = analog_snapshot->get_unit_bytes();
             sprintf(meta, "bits = %d\n", tmp_u8*8); str += meta;
@@ -867,7 +867,7 @@ bool StoreSession::export_start()
 
     const auto snapshot = _session->get_snapshot(*type_set.begin());
     if (!snapshot) {
-        // Don't dereference a NULL snapshot (the original `assert(snapshot)`
+        // Don't dereference a nullptr snapshot (the original `assert(snapshot)`
         // is a no-op in Release builds and would crash on the next line).
         _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
         return false;
@@ -886,7 +886,7 @@ bool StoreSession::export_start()
     const struct sr_output_module **supportedModules = sr_output_list();
     while (*supportedModules)
     {
-        if (*supportedModules == NULL)
+        if (*supportedModules == nullptr)
             break;
         // Upstream libsigrok makes sr_output_module opaque — use sr_output_id_get()
         // instead of direct field access (fork libsigrok exposed ->id).
@@ -899,7 +899,7 @@ bool StoreSession::export_start()
         supportedModules++;
     }
 
-    if (_outModule == NULL)
+    if (_outModule == nullptr)
     {
         // Preserve the error message — the previous code fell through to
         // `_error.clear(); return false;` here, which wiped the "Invalid
@@ -932,7 +932,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 {
     assert(snapshot);
     if (!snapshot) {
-        pxv_warn("StoreSession::export_exec called with NULL snapshot.");
+        pxv_warn("StoreSession::export_exec called with nullptr snapshot.");
         _has_error = true;
         _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
         return;
@@ -942,9 +942,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // libsigrok — "export original data" flag is no longer carried per-packet.
     // AppConfig::appOptions.originalData is still respected by other paths.
 
-    data::LogicSnapshot *logic_snapshot = NULL;
-    data::AnalogSnapshot *analog_snapshot = NULL;
-    data::DsoSnapshot *dso_snapshot = NULL;
+    data::LogicSnapshot *logic_snapshot = nullptr;
+    data::AnalogSnapshot *analog_snapshot = nullptr;
+    data::DsoSnapshot *dso_snapshot = nullptr;
     int channel_type;
 
     if ((logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot))) {
@@ -975,9 +975,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                                                    _session->get_device()->inst(),
                                                    _file_name.toUtf8().data());
     if (!output) {
-        pxv_err("Failed to init export module (sr_output_new returned NULL).");
+        pxv_err("Failed to init export module (sr_output_new returned nullptr).");
         g_hash_table_destroy(params);
-        if (filenameGVariant != NULL)
+        if (filenameGVariant != nullptr)
             g_variant_unref(filenameGVariant);
         return;
     }
@@ -1027,7 +1027,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     src = _session->get_device()->new_config(SR_CONF_SAMPLERATE,
                 g_variant_new_uint64(_session->cur_snap_samplerate()));
 
-    meta.config = g_slist_append(NULL, src);
+    meta.config = g_slist_append(nullptr, src);
 
     src = _session->get_device()->new_config(SR_CONF_LIMIT_SAMPLES,
                 g_variant_new_uint64(snapshot->get_sample_count()));
@@ -1040,7 +1040,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     _session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, bits);
 
     gvar = _session->get_device()->get_config(SR_CONF_REF_MIN);
-    if (gvar != NULL) {
+    if (gvar != nullptr) {
         src = _session->get_device()->new_config(SR_CONF_REF_MIN, gvar);
         g_variant_unref(gvar);
     }
@@ -1051,7 +1051,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     meta.config = g_slist_append(meta.config, src);
 
     gvar = _session->get_device()->get_config(SR_CONF_REF_MAX);
-    if (gvar != NULL) {
+    if (gvar != nullptr) {
         src = _session->get_device()->new_config(SR_CONF_REF_MAX, gvar);
         g_variant_unref(gvar);
     }
@@ -1151,7 +1151,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 if(buf_sample_num - i < usize)
                     size = buf_sample_num - i;
                 uint8_t *xbuf = (uint8_t *)malloc(size * unitsize);
-                if (xbuf == NULL) {
+                if (xbuf == nullptr) {
                     _has_error = true;
                     _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed.");
                     return;
@@ -1160,7 +1160,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
                 for (uint64_t j = 0; j < size; j++) {
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
-                        if (buf_vec[k] == NULL && buf_sample[k])
+                        if (buf_vec[k] == nullptr && buf_sample[k])
                             xbuf[j*unitsize+k/8] +=  1 << k%8;
                         else if (buf_vec[k] && (buf_vec[k][(i+j)/8] & (1 << j%8)))
                             xbuf[j*unitsize+k/8] +=  1 << k%8;
@@ -1193,7 +1193,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         struct sr_datafeed_dso dp; 
 
         uint8_t *ch_data_buffer = (uint8_t*)malloc(usize * dso_snapshot->get_channel_num() + 1);
-        if (ch_data_buffer == NULL){
+        if (ch_data_buffer == nullptr){
             pxv_err("StoreSession::export_proc, malloc failed.");
             return;
         }
@@ -1244,7 +1244,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
         if (ch_data_buffer){
             free(ch_data_buffer);
-            ch_data_buffer = NULL;
+            ch_data_buffer = nullptr;
         }
 
     } else if (channel_type == SR_CHANNEL_ANALOG) {
@@ -1309,7 +1309,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // Upstream libsigrok: sr_output_free() replaces fork _outModule->cleanup().
     sr_output_free(output);
     g_hash_table_destroy(params);
-    if (filenameGVariant != NULL)
+    if (filenameGVariant != nullptr)
         g_variant_unref(filenameGVariant);
 
     progress_updated();
@@ -1361,20 +1361,20 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
 
                 if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("d"))) {
                     GVariant *const var = dec_binding->getter(opt->id);
-                    if (var != NULL) {
+                    if (var != nullptr) {
                         options_obj[opt->id] = QJsonValue::fromVariant(g_variant_get_double(var));
                         g_variant_unref(var);
                     }
                 } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("x"))) {
                     GVariant *const var = dec_binding->getter(opt->id);
-                    if (var != NULL) {
+                    if (var != nullptr) {
                         options_obj[opt->id] = QJsonValue::fromVariant(get_integer(var));
                         g_variant_unref(var);
                     }
                 } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("s"))) {
                     GVariant *const var = dec_binding->getter(opt->id);
-                    if (var != NULL) {
-                        const char *sz = g_variant_get_string(var, NULL);
+                    if (var != nullptr) {
+                        const char *sz = g_variant_get_string(var, nullptr);
                         options_obj[opt->id] = QJsonValue::fromVariant(QString(sz));
                         g_variant_unref(var);
                     }
@@ -1458,7 +1458,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                         const srd_decoder *const d = (srd_decoder*)dl->data;
                         assert(d);
                         if (!d) {
-                            pxv_warn("StoreSession::load_decoders: srd_decoder list node has NULL data, skipping.");
+                            pxv_warn("StoreSession::load_decoders: srd_decoder list node has nullptr data, skipping.");
                             continue;
                         }
 
@@ -1575,7 +1575,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
 
                     if (options_obj.contains(opt->id)) 
                     {
-                        GVariant *new_value = NULL;
+                        GVariant *new_value = nullptr;
                         // When the numberic value is a string, it got zero always,
                         // so must convert from string.
                         QString vs = options_obj[opt->id].toString();
@@ -1629,7 +1629,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                             new_value = g_variant_new_string(vs.toUtf8().data());
                         }
 
-                        if (new_value != NULL){
+                        if (new_value != nullptr){
                             dec->set_option(opt->id, new_value);
                         }
                     }
@@ -1649,7 +1649,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                 // TODO: adapt — DecoderStack no longer exposes set_index_list;
                 // channel binding should be set via the decoder's probe map API.
                 // auto dec_trace = _session->get_decoder_trace(dec_index);
-                // if (dec_trace != NULL) dec_trace->set_index_list(bind_indexs);
+                // if (dec_trace != nullptr) dec_trace->set_index_list(bind_indexs);
             }
 
             int decoder_cfg_version = -1;
@@ -1693,7 +1693,7 @@ double StoreSession::get_integer(GVariant *var)
     const GVariantType *const type = g_variant_get_type(var);
     assert(type);
     if (!type) {
-        pxv_warn("StoreSession::get_integer: g_variant_get_type returned NULL.");
+        pxv_warn("StoreSession::get_integer: g_variant_get_type returned nullptr.");
         return 0.0;
     }
 
@@ -1747,7 +1747,7 @@ QString StoreSession::MakeSaveFile(bool bDlg)
     if (bDlg)
     {
         default_name = QFileDialog::getSaveFileName(
-            NULL,
+            nullptr,
             L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_FILE),"Save File"),
             default_name,
             //tr
@@ -1822,7 +1822,7 @@ QString StoreSession::MakeExportFile(bool bDlg)
     if (bDlg)
     {
         default_name = QFileDialog::getSaveFileName(
-            NULL,
+            nullptr,
             L_S(STR_PAGE_MSG, S_ID(IDS_MSG_EXPORT_DATA),"Export Data"),
             default_name,
             filter,
@@ -1891,7 +1891,7 @@ void StoreSession::MakeChunkName(char *chunk_name, int chunk_num, int index, int
 
     if (version >= 2)
     {
-        const char *type_name = NULL;
+        const char *type_name = nullptr;
         type_name = (type == SR_CHANNEL_LOGIC) ? "L" : (type == SR_CHANNEL_DSO)  ? "O"
                                                    : (type == SR_CHANNEL_ANALOG) ? "A"
                                                                                  : "U";

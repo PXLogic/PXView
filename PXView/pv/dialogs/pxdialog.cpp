@@ -29,7 +29,7 @@
 #include <QMouseEvent>
 #include <QVBoxLayout>
 #include <QAbstractButton>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../config/appconfig.h"
 #include "../ui/fn.h"
 #include "../ui/dockfonts.h"
@@ -39,7 +39,7 @@ namespace pv {
 namespace dialogs {
 
 PxDialog::PxDialog() : 
- PxDialog(NULL, false, false)
+ PxDialog(nullptr, false, false)
 {
 }
 
@@ -55,7 +55,7 @@ PxDialog::PxDialog(QWidget *parent, bool hasClose):
 
 PxDialog::PxDialog(QWidget *parent, bool hasClose, bool bBaseButton) :
 #ifdef Q_OS_LINUX
-    QDialog(NULL),  //enable the popup dialog draged.
+    QDialog(nullptr),  //enable the popup dialog draged.
 #else
     QDialog(parent),
 #endif
@@ -63,15 +63,15 @@ PxDialog::PxDialog(QWidget *parent, bool hasClose, bool bBaseButton) :
 {
     (void)parent;
 
-    _base_layout = NULL;
-    _main_layout = NULL;
-    _main_widget = NULL;
-    _titlebar = NULL;
-    _shadow = NULL; 
-    _base_button = NULL;
-    _titleSpaceLine = NULL;
+    _base_layout = nullptr;
+    _main_layout = nullptr;
+    _main_widget = nullptr;
+    _titlebar = nullptr;
+    _shadow = nullptr; 
+    _base_button = nullptr;
+    _titleSpaceLine = nullptr;
 
-    m_callback = NULL; 
+    m_callback = nullptr; 
     _clickYes = false;
     
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
@@ -145,7 +145,7 @@ int PxDialog::exec()
 
  void PxDialog::SetTitleSpace(int h)
  {
-     if (_titleSpaceLine != NULL){ 
+     if (_titleSpaceLine != nullptr){ 
          if (h > 0){
              _titleSpaceLine->setFixedHeight(h);
              _titleSpaceLine->setVisible(true);
@@ -169,7 +169,7 @@ void PxDialog::build_base(bool hasClose)
     _main_widget->setAutoFillBackground(true); 
     this->setGraphicsEffect(_shadow);
 
-    _titlebar = new toolbars::TitleBar(false, this, NULL,hasClose, false);
+    _titlebar = new toolbars::TitleBar(false, this, nullptr,hasClose, false);
     _main_layout->addWidget(_titlebar);
 
     _titleSpaceLine = new QWidget(this);
@@ -189,7 +189,7 @@ void PxDialog::update_font()
     QFont font = theme_font_dialog();
     ui::set_form_font(this, font);
 
-    if (_titlebar != NULL){
+    if (_titlebar != nullptr){
         _titlebar->update_font();
     }
 }

@@ -22,10 +22,10 @@
 
 #include "protocolitemlayer.h"
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../ui/dockfonts.h"
-#include <assert.h>
+#include <cassert>
 #include <stdexcept>
 #include "../ui/iconcache.h"
 
@@ -35,12 +35,12 @@ namespace dock {
 ProtocolItemLayer::ProtocolItemLayer(QWidget *parent, QString protocolName,
                                      IProtocolItemLayerCallback *callback) {
   if (!parent) {
-    pxv_warn("%s", "ProtocolItemLayer: parent is NULL");
-    throw std::invalid_argument("ProtocolItemLayer: parent is NULL");
+    pxv_warn("%s", "ProtocolItemLayer: parent is nullptr");
+    throw std::invalid_argument("ProtocolItemLayer: parent is nullptr");
   }
   if (!callback) {
-    pxv_warn("%s", "ProtocolItemLayer: callback is NULL");
-    throw std::invalid_argument("ProtocolItemLayer: callback is NULL");
+    pxv_warn("%s", "ProtocolItemLayer: callback is nullptr");
+    throw std::invalid_argument("ProtocolItemLayer: callback is nullptr");
   }
   assert(parent);
   assert(callback);
@@ -48,8 +48,8 @@ ProtocolItemLayer::ProtocolItemLayer(QWidget *parent, QString protocolName,
   m_callback = callback;
   _protocolName = protocolName;
   m_bSetting = false;
-  m_decoderStatus = NULL;
-  _trace = NULL;
+  m_decoderStatus = nullptr;
+  _trace = nullptr;
   m_expanded = true;
 
   _protocol_label = new QLabel(parent);
@@ -185,7 +185,7 @@ void ProtocolItemLayer::LoadFormatSelect(bool bSingle) {
 
 void ProtocolItemLayer::SetProtocolFormat(const char *format) {
   if (!format) {
-    pxv_warn("%s", "ProtocolItemLayer::SetProtocolFormat: format is NULL");
+    pxv_warn("%s", "ProtocolItemLayer::SetProtocolFormat: format is nullptr");
     return;
   }
   assert(format);

@@ -22,8 +22,8 @@
  */
 
 
-#include <string.h>
-#include <stdlib.h>
+#include <cstring>
+#include <cstdlib>
 #include <algorithm>
 
 #include "disk_buffer_manager.h"
@@ -194,27 +194,27 @@ bool DiskBufferManager::save_index()
     string filename = get_index_filename();
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_WRITE, 0, NULL,
-        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
         pxv_err("DiskBufferManager: failed to create index file");
         return false;
     }
 
     DWORD written = 0;
-    WriteFile(hFile, IndexMagic, 4, &written, NULL);
+    WriteFile(hFile, IndexMagic, 4, &written, nullptr);
     uint32_t version = IndexVersion;
-    WriteFile(hFile, &version, sizeof(uint32_t), &written, NULL);
+    WriteFile(hFile, &version, sizeof(uint32_t), &written, nullptr);
     uint32_t ch_count = (uint32_t)_channel_count;
-    WriteFile(hFile, &ch_count, sizeof(uint32_t), &written, NULL);
+    WriteFile(hFile, &ch_count, sizeof(uint32_t), &written, nullptr);
 
     for (int i = 0; i < _channel_count; i++) {
         ChannelIndex &ch_idx = _channel_indexes[i];
         uint64_t bc = ch_idx.block_count;
-        WriteFile(hFile, &bc, sizeof(uint64_t), &written, NULL);
+        WriteFile(hFile, &bc, sizeof(uint64_t), &written, nullptr);
         for (uint64_t j = 0; j < ch_idx.entries.size(); j++) {
-            WriteFile(hFile, &ch_idx.entries[j].disk_offset, sizeof(uint64_t), &written, NULL);
-            WriteFile(hFile, &ch_idx.entries[j].block_state, sizeof(uint32_t), &written, NULL);
+            WriteFile(hFile, &ch_idx.entries[j].disk_offset, sizeof(uint64_t), &written, nullptr);
+            WriteFile(hFile, &ch_idx.entries[j].block_state, sizeof(uint32_t), &written, nullptr);
         }
     }
 
@@ -259,8 +259,8 @@ bool DiskBufferManager::load_index()
     string filename = get_index_filename();
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
         pxv_err("DiskBufferManager: index file not found");
         return false;
@@ -268,7 +268,7 @@ bool DiskBufferManager::load_index()
 
     DWORD bytesRead = 0;
     char magic[4];
-    ReadFile(hFile, magic, 4, &bytesRead, NULL);
+    ReadFile(hFile, magic, 4, &bytesRead, nullptr);
     if (memcmp(magic, IndexMagic, 4) != 0) {
         CloseHandle(hFile);
         pxv_err("DiskBufferManager: invalid index magic");
@@ -276,7 +276,7 @@ bool DiskBufferManager::load_index()
     }
 
     uint32_t version;
-    ReadFile(hFile, &version, sizeof(uint32_t), &bytesRead, NULL);
+    ReadFile(hFile, &version, sizeof(uint32_t), &bytesRead, nullptr);
     if (version != IndexVersion) {
         CloseHandle(hFile);
         pxv_err("DiskBufferManager: unsupported index version %u", version);
@@ -284,7 +284,7 @@ bool DiskBufferManager::load_index()
     }
 
     uint32_t ch_count;
-    ReadFile(hFile, &ch_count, sizeof(uint32_t), &bytesRead, NULL);
+    ReadFile(hFile, &ch_count, sizeof(uint32_t), &bytesRead, nullptr);
     if ((int)ch_count != _channel_count) {
         CloseHandle(hFile);
         pxv_err("DiskBufferManager: index channel count mismatch");
@@ -294,11 +294,11 @@ bool DiskBufferManager::load_index()
     _next_disk_offset = 0;
     for (uint32_t i = 0; i < ch_count; i++) {
         ChannelIndex &ch_idx = _channel_indexes[i];
-        ReadFile(hFile, &ch_idx.block_count, sizeof(uint64_t), &bytesRead, NULL);
+        ReadFile(hFile, &ch_idx.block_count, sizeof(uint64_t), &bytesRead, nullptr);
         ch_idx.entries.resize(ch_idx.block_count);
         for (uint64_t j = 0; j < ch_idx.block_count; j++) {
-            ReadFile(hFile, &ch_idx.entries[j].disk_offset, sizeof(uint64_t), &bytesRead, NULL);
-            ReadFile(hFile, &ch_idx.entries[j].block_state, sizeof(uint32_t), &bytesRead, NULL);
+            ReadFile(hFile, &ch_idx.entries[j].disk_offset, sizeof(uint64_t), &bytesRead, nullptr);
+            ReadFile(hFile, &ch_idx.entries[j].block_state, sizeof(uint32_t), &bytesRead, nullptr);
             if (ch_idx.entries[j].disk_offset + LeafBlockSpace > _next_disk_offset)
                 _next_disk_offset = ch_idx.entries[j].disk_offset + LeafBlockSpace;
         }
@@ -475,7 +475,7 @@ bool DiskBufferManager::create_channel_file(int channel)
 
 #ifdef _WIN32
     HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_READ | GENERIC_WRITE,
-        0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
         pxv_err("DiskBufferManager: failed to create file %s", filename.c_str());
         return false;
@@ -499,7 +499,7 @@ bool DiskBufferManager::open_channel_file(int channel)
 
 #ifdef _WIN32
     HANDLE hFile = CreateFileA(filename.c_str(), GENERIC_READ | GENERIC_WRITE,
-        0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
         return false;
     _channel_handles[channel] = hFile;
@@ -537,10 +537,10 @@ bool DiskBufferManager::write_file(int channel, uint64_t offset, const void *dat
 
     LARGE_INTEGER li;
     li.QuadPart = (LONGLONG)offset;
-    SetFilePointerEx(hFile, li, NULL, FILE_BEGIN);
+    SetFilePointerEx(hFile, li, nullptr, FILE_BEGIN);
 
     DWORD written = 0;
-    BOOL result = WriteFile(hFile, data, (DWORD)size, &written, NULL);
+    BOOL result = WriteFile(hFile, data, (DWORD)size, &written, nullptr);
     return result && written == (DWORD)size;
 #else
     int fd = _channel_fds[channel];
@@ -561,10 +561,10 @@ bool DiskBufferManager::read_file(int channel, uint64_t offset, void *data, uint
 
     LARGE_INTEGER li;
     li.QuadPart = (LONGLONG)offset;
-    SetFilePointerEx(hFile, li, NULL, FILE_BEGIN);
+    SetFilePointerEx(hFile, li, nullptr, FILE_BEGIN);
 
     DWORD bytesRead = 0;
-    BOOL result = ReadFile(hFile, data, (DWORD)size, &bytesRead, NULL);
+    BOOL result = ReadFile(hFile, data, (DWORD)size, &bytesRead, nullptr);
     return result && bytesRead == (DWORD)size;
 #else
     int fd = _channel_fds[channel];

@@ -22,8 +22,8 @@
  */
 
 
-#include <string.h>
-#include <stdlib.h>
+#include <cstring>
+#include <cstdlib>
 #include <algorithm>
 
 #include "disk_write_thread.h"

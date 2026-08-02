@@ -27,7 +27,7 @@
 #include <QString>
 #include <QDateTime>
 #include <cstddef>
-#include <stdint.h>
+#include <cstdint>
 
 namespace pv {
 

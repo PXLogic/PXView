@@ -16,7 +16,7 @@
 #include "../interface/icallbacks.h"
 #include "../log.h"
 
-#include <assert.h>
+#include <cassert>
 
 namespace pv {
 namespace core {
@@ -270,7 +270,7 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
   //
   // instant 模式（disable_trigger=true）：清除 session 上的 sr_trigger，
   // 让所有 driver 都不等待触发：
-  //   - demo/fx2lafw: sr_session_trigger_get 返回 NULL → 不创建
+  //   - demo/fx2lafw: sr_session_trigger_get 返回 nullptr → 不创建
   //     soft_trigger_logic → 持续发送数据（恢复旧版 fork demo 行为）
   //   - pxlogic: set_trigger() 走 "No session trigger set" 分支 →
   //     trig_zero/one/fall/rise 全 0 → 硬件不配置触发位图

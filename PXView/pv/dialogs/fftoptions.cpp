@@ -28,14 +28,13 @@
 #include "../view/trace.h"
 #include "../view/dsosignal.h"
 #include "../view/spectrumtrace.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../eventobject.h"
 #include "../log.h"
 
 #include "../ui/langresource.h"
 
 
-using namespace boost;
 using namespace std;
  
 namespace pv {
@@ -47,17 +46,17 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
-    _len_combobox = NULL;
-    _interval_combobox = NULL;
-    _en_checkbox = NULL;
-    _ch_combobox = NULL;
-    _window_combobox = NULL;
-    _dc_checkbox = NULL;
-    _view_combobox = NULL;
-    _dbv_combobox = NULL;
-    _hint_label = NULL;
-    _glayout = NULL;
-    _layout = NULL;
+    _len_combobox = nullptr;
+    _interval_combobox = nullptr;
+    _en_checkbox = nullptr;
+    _ch_combobox = nullptr;
+    _window_combobox = nullptr;
+    _dc_checkbox = nullptr;
+    _view_combobox = nullptr;
+    _dbv_combobox = nullptr;
+    _hint_label = nullptr;
+    _glayout = nullptr;
+    _layout = nullptr;
 
     _en_checkbox = new QCheckBox(this);
     _len_combobox = new DsComboBox(this);
@@ -78,7 +77,7 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
 
     // setup _window_combobox _len_combobox
     // SR_CONF_MAX_DSO_SAMPLELIMITS was a fork DSO stub key (deleted from
-    // dsvdef.h) with no driver backend. Default to a sensible upper bound
+    // pxvdef.h) with no driver backend. Default to a sensible upper bound
     // (1 MSa) so the FFT length combo box still populates.
     _sample_limit = SR_MHZ(1);
     _sample_limit = _sample_limit * 0.5;

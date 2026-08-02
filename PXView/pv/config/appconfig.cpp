@@ -25,7 +25,7 @@
 #include <QSettings>
 #include <QLocale>
 #include <QDir> 
-#include <assert.h>
+#include <cassert>
 #include <QStandardPaths>
 #include "../log.h"
   
@@ -124,6 +124,7 @@ static void _loadApp(AppOptions &o, QSettings &st)
     getFiled("swapBackBufferAlways", st, o.swapBackBufferAlways, false);
     getFiled("fontSize", st, o.fontSize, 9.0);
     getFiled("autoScrollLatestData", st, o.autoScrollLatestData, true);
+    getFiled("promptSaveOnExit", st, o.promptSaveOnExit, true);
     getFiled("version", st, o.version, 1);
 
     o.warnofMultiTrig = true;
@@ -161,6 +162,7 @@ static void _saveApp(AppOptions &o, QSettings &st)
     setFiled("swapBackBufferAlways", st, o.swapBackBufferAlways);
     setFiled("fontSize", st, o.fontSize);
     setFiled("autoScrollLatestData", st, o.autoScrollLatestData);
+    setFiled("promptSaveOnExit", st, o.promptSaveOnExit);
     setFiled("version", st, APP_CONFIG_VERSION);
 
     QString fmt =  FormatArrayToString(o.m_protocolFormats);
@@ -406,8 +408,8 @@ AppConfig::~AppConfig()
 
  AppConfig& AppConfig::Instance()
  {
-     static AppConfig *ins = NULL;
-     if (ins == NULL){
+     static AppConfig *ins = nullptr;
+     if (ins == nullptr){
          ins = new AppConfig();
      }
      return *ins;
@@ -618,7 +620,7 @@ std::string AppConfig::GetProtocolFormat(const std::string &protocolName)
 void AppConfig::GetFontSizeRange(float *minSize, float *maxSize)
 {
     if (!minSize || !maxSize) {
-        pxv_warn("%s", "AppConfig::GetFontSizeRange: minSize or maxSize is NULL");
+        pxv_warn("%s", "AppConfig::GetFontSizeRange: minSize or maxSize is nullptr");
         return;
     }
     assert(minSize);

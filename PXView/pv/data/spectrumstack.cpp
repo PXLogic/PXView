@@ -20,7 +20,7 @@
  */
 
 #include "spectrumstack.h"
-#include <math.h>
+#include <cmath>
 #include "dsosnapshot.h"
 #include "../sigsession.h"
 #include "../view/dsosignal.h"
@@ -29,7 +29,6 @@
 
 #define PI 3.1415
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -41,7 +40,7 @@ SpectrumStack::SpectrumStack(pv::SigSession *session, int index) :
     _dc_ignore(true),
     _sample_interval(1),
     _spectrum_state(Init),
-    _fft_plan(NULL)
+    _fft_plan(nullptr)
 {
 
 }
@@ -135,7 +134,7 @@ void SpectrumStack::calc_fft()
 {
     _spectrum_state = Running;
     // Get the dso data
-    pv::data::DsoSnapshot *data = NULL;
+    pv::data::DsoSnapshot *data = nullptr;
     std::shared_ptr<pv::data::SignalModel> model;
 
     for(auto m : _session->get_signal_models()) {
@@ -148,7 +147,7 @@ void SpectrumStack::calc_fft()
         }
     }
 
-    if (data == NULL || model == NULL)
+    if (data == nullptr || model == nullptr)
         return;
 
     if (data->empty())

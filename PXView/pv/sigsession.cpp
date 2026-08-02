@@ -23,6 +23,8 @@
 
 #include <libsigrokdecode.h>
 #include <libusb.h>
+#include <libsigrok/libsigrok.h>
+#include <glib.h>
 
 #include "mainwindow.h"
 #include "sigsession.h"
@@ -48,9 +50,10 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QObject>
 #include <QString>
-#include <assert.h>
+#include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -65,7 +68,7 @@
 
 #include "config/appconfig.h"
 #include "data/decode/decoderstatus.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "log.h"
 #include "ui/langresource.h"
 #include "ui/msgbox.h"
@@ -100,7 +103,7 @@ void SigSession::delay_prop_msg(QString strMsg) { _state->delay_prop_msg(strMsg)
 // exposes it via get_decoder_stacks(). SigSession::get_decoder_stacks forwards.
 
 SigSession::SigSession() {
-  _decoder_pannel = NULL;
+  _decoder_pannel = nullptr;
 
   // SessionStateContext owns all shared mutable state (mutexes, signal models,
   // device agent, view/capture data, atomic flags, trigger config, etc.).
@@ -251,7 +254,7 @@ static int sigrok_log_callback(void *cb_data, int loglevel,
 // standard libusb_set_log_cb path — no separate hotplug log callback needed.
 #ifdef _WIN32
 extern "C" {
-typedef void (*windows_hotplug_log_cb_t)(int level, const char *msg);
+using windows_hotplug_log_cb_t = void (*)(int level, const char *msg);
 void windows_hotplug_set_log_cb(windows_hotplug_log_cb_t cb);
 }
 extern "C" void pxv_hotplug_log_cb(int level, const char *msg)
@@ -342,7 +345,7 @@ bool SigSession::init() {
   GSList *fw_paths = sr_resourcepaths_get(SR_RESOURCE_FIRMWARE);
   pxv_info("libsigrok firmware search paths:");
   for (GSList *p = fw_paths; p; p = p->next) {
-    pxv_info("  -> %s", p->data ? (const char *)p->data : "(null)");
+    pxv_info("  -> %s", p->data ? (const char *)p->data : "(nullptr)");
   }
   g_slist_free_full(fw_paths, g_free);
 
@@ -358,8 +361,8 @@ bool SigSession::init() {
   // LIBUSB_LOG_LEVEL_NONE: disable libusb core logging (hotplug backend
   // still logs via windows_hotplug_set_log_cb). Change to
   // LIBUSB_LOG_LEVEL_INFO/WARNING for diagnostics.
-  libusb_set_log_cb(NULL, pxv_libusb_log_cb, LIBUSB_LOG_CB_GLOBAL);
-  libusb_set_debug(NULL, LIBUSB_LOG_LEVEL_NONE);
+  libusb_set_log_cb(nullptr, pxv_libusb_log_cb, LIBUSB_LOG_CB_GLOBAL);
+  libusb_set_debug(nullptr, LIBUSB_LOG_LEVEL_NONE);
 
   // 首次扫描所有驱动，缓存到 DeviceAgent。后续 get_device_list 复用缓存，
   // 避免在设备 dev_open 后重复 sr_driver_scan 导致 LIBUSB_ERROR_ACCESS。
@@ -424,7 +427,7 @@ bool SigSession::set_default_device() {
   int count = 0;
   int actived_index = -1;
   struct ds_device_base_info *array = get_device_list(count, actived_index);
-  if (count < 1 || array == NULL) {
+  if (count < 1 || array == nullptr) {
     pxv_err("Error! Device list is empty, can't set default device.");
     if (array)
       free(array);
@@ -506,8 +509,8 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
     // Broadcast DeviceOpenFailed so MainWindow can show a user-facing message
     // ("Failed to open device: <reason>") instead of leaving the UI blank.
     // The old device was already released above and the new one never opened,
-    // so _dev_handle is NULL — without this event, the UI silently stays empty
-    // and "_dev_handle is NULL" warnings flood the log.
+    // so _dev_handle is nullptr — without this event, the UI silently stays empty
+    // and "_dev_handle is nullptr" warnings flood the log.
     _event_bus->broadcast_async<interface::DeviceOpenFailed>({});
     return false;
   }
@@ -597,9 +600,186 @@ bool SigSession::set_file(QString name) {
   return true;
 }
 
+bool SigSession::import_file(QString name) {
+  assert(!_state->is_saving());
+  assert(!_state->is_working());
+
+  std::string file_name = pv::path::ToUnicodePath(name);
+  pxv_info("Import file: \"%s\"", file_name.c_str());
+
+  // Step 1: Detect format using sr_input_scan_file (aligned with PulseView).
+  // sr_input_scan_file reads the file header and finds the best matching
+  // input module. It creates a temporary sr_input with the header data
+  // buffered in input->buf, but receive() has NOT been called yet.
+  const struct sr_input *tmp_input = nullptr;
+  int ret = sr_input_scan_file(file_name.c_str(), &tmp_input);
+  if (ret != SR_OK || !tmp_input) {
+    pxv_err("Import file error: sr_input_scan_file failed for \"%s\"",
+            file_name.c_str());
+    return false;
+  }
+
+  // Extract the module ID, then free the temporary input instance.
+  // We create a fresh input below so we can control exactly when data
+  // is fed to the module (the temp input has up to 4MB of pre-read data
+  // in its buffer which complicates the feed sequence).
+  const struct sr_input_module *imod = sr_input_module_get(tmp_input);
+  const char *mod_id = imod ? sr_input_id_get(imod) : nullptr;
+  if (!mod_id) {
+    pxv_err("Import file error: cannot determine input module ID");
+    sr_input_free(tmp_input);
+    return false;
+  }
+  std::string mod_id_str(mod_id);
+  sr_input_free(tmp_input);
+
+  // Step 2: Create a fresh input instance.
+  // sr_input_new() calls the module's init() which creates the sdi.
+  // For header-based formats (VCD, CSV, Saleae): sdi_ready is FALSE
+  //   until enough header data is fed via sr_input_send().
+  // For headerless formats (binary): sdi_ready is TRUE immediately.
+  const struct sr_input_module *mod = sr_input_find(mod_id_str.c_str());
+  if (!mod) {
+    pxv_err("Import file error: sr_input_find failed for \"%s\"",
+            mod_id_str.c_str());
+    return false;
+  }
+  const struct sr_input *input = sr_input_new(mod, nullptr);
+  if (!input) {
+    pxv_err("Import file error: sr_input_new failed for \"%s\"",
+            mod_id_str.c_str());
+    return false;
+  }
+
+  // Step 3: Open file and feed data until the sdi becomes ready.
+  // For header-based formats, the receive() function parses the header
+  // (creates channels, sets sdi_ready=TRUE) WITHOUT sending any
+  // datafeed packets — so this is safe to do before the session is
+  // set up. After the header is parsed, remaining sample data stays
+  // in input->buf unprocessed.
+  // For headerless formats (binary), sdi_ready is TRUE immediately,
+  // so the loop exits without feeding any data.
+  // Use QFile for cross-platform Unicode path handling (g_fopen needs
+  // glib/gstdio.h which is not reliably available on all platforms).
+  QFile file(name);
+  if (!file.open(QIODevice::ReadOnly)) {
+    pxv_err("Import file error: cannot open file \"%s\"",
+            file_name.c_str());
+    sr_input_free(input);
+    return false;
+  }
+
+  GString *chunk = g_string_sized_new(65536);
+  struct sr_dev_inst *sdi = sr_input_dev_inst_get(input);
+
+  while (!sdi) {
+    qint64 n = file.read(chunk->str, 65536);
+    if (n <= 0) {
+      // EOF — check if sdi became ready on the last chunk
+      sdi = sr_input_dev_inst_get(input);
+      break;
+    }
+    chunk->len = n;
+    sr_input_send(input, chunk);
+    sdi = sr_input_dev_inst_get(input);
+  }
+
+  if (!sdi) {
+    pxv_err("Import file error: could not determine device instance "
+            "from input module \"%s\"", mod_id_str.c_str());
+    g_string_free(chunk, TRUE);
+    file.close();
+    sr_input_free(input);
+    return false;
+  }
+
+  pxv_info("Import file: input module \"%s\" ready, sdi=%p",
+           mod_id_str.c_str(), (void *)sdi);
+
+  // Step 4: Register the input sdi with DeviceAgent and set up the
+  // session (create sr_session, add device, register datafeed callback,
+  // init_signals, broadcast CurrentDeviceChanged).
+  // open_by_handle() handles nullptr-driver sdi by skipping sr_dev_open.
+  ds_device_handle dev_handle =
+      _state->device_agent().set_file_device(sdi, name);
+  if (dev_handle == NULL_HANDLE) {
+    pxv_err("Import file error: set_file_device returned NULL_HANDLE");
+    g_string_free(chunk, TRUE);
+    file.close();
+    // sdi was NOT registered (set_file_device failed), so sr_input_free
+    // is safe here — it frees the sdi along with the input.
+    sr_input_free(input);
+    return false;
+  }
+
+  if (!set_device(dev_handle)) {
+    pxv_err("Import file error: set_device failed for input device");
+    g_string_free(chunk, TRUE);
+    file.close();
+    // The sdi was registered with DeviceAgent via set_file_device(),
+    // so ownership has been transferred. Use sr_input_release_sdi() to
+    // avoid freeing the sdi, then remove_device() to clean it up from
+    // _file_sdi and free it properly via sr_dev_inst_free().
+    sr_input_release_sdi(input);
+    _state->device_agent().remove_device(dev_handle);
+    return false;
+  }
+
+  // Step 5: Process any remaining data in the input buffer.
+  // After header parsing, sample data from the last chunk stays in
+  // input->buf. Feeding an empty GString triggers receive() which
+  // processes this data (now that the session is set up, datafeed
+  // packets are properly routed to DataFeedParser).
+  // For headerless formats (binary), input->buf is empty, so this
+  // is a no-op except for sending the DF header packet.
+  {
+    GString *empty = g_string_new("");
+    sr_input_send(input, empty);
+    g_string_free(empty, TRUE);
+  }
+
+  // Step 6: Feed the rest of the file in chunks.
+  // sr_input_send() calls the module's receive() which processes the
+  // data and calls sr_session_send() — this directly invokes the
+  // datafeed callback (DataFeedParser::data_feed_in) which appends
+  // samples to the snapshot. No sr_session_run() is needed.
+  while (true) {
+    qint64 n = file.read(chunk->str, 65536);
+    if (n <= 0)
+      break;
+    chunk->len = n;
+    sr_input_send(input, chunk);
+  }
+
+  // Step 7: Signal end-of-data and release the input.
+  // sr_input_end() flushes any buffered samples and sends SR_DF_END,
+  // which triggers DataFeedParser's SR_DF_END handler: calls
+  // capture_ended() on all snapshot types, sets device status to
+  // ST_STOPPED, and broadcasts RevEndPacket (for LOGIC mode) which
+  // swaps the capture/view buffer and kicks off decoders.
+  //
+  // Use sr_input_release_sdi() instead of sr_input_free() because the
+  // sdi has been registered with DeviceAgent (via set_file_device +
+  // open_by_handle). sr_input_free() would call sr_dev_inst_free() on
+  // the sdi, causing a use-after-free when the async CurrentDeviceChanged
+  // event later triggers reset_all_view() → DevMode::set_device() →
+  // get_device_mode_list(), which accesses _di (the same sdi pointer).
+  // sr_input_release_sdi() detaches the sdi from the input so it is NOT
+  // freed; DeviceAgent takes ownership and will free it via
+  // sr_dev_inst_free() in release() when the device is closed.
+  sr_input_end(input);
+  sr_input_release_sdi(input);
+  g_string_free(chunk, TRUE);
+  file.close();
+
+  pxv_info("Import file complete: \"%s\"", file_name.c_str());
+
+  return true;
+}
+
 void SigSession::close_file(unsigned long long dev_handle) {
   if (!dev_handle) {
-    pxv_warn("%s", "SigSession::close_file: dev_handle is NULL");
+    pxv_warn("%s", "SigSession::close_file: dev_handle is nullptr");
     return;
   }
 
@@ -701,7 +881,7 @@ void SigSession::refresh_device_list() {
 
   struct sr_dev_driver **drivers = sr_driver_list(_sr_ctx);
   if (!drivers) {
-    pxv_err("refresh_device_list: sr_driver_list returned NULL");
+    pxv_err("refresh_device_list: sr_driver_list returned nullptr");
     return;
   }
 
@@ -719,7 +899,7 @@ void SigSession::refresh_device_list() {
     if (sr_driver_init(_sr_ctx, drv) != SR_OK) {
       init_fail_count++;
       pxv_dbg("refresh_device_list: sr_driver_init failed for '%s'",
-              drv->name ? drv->name : "(null)");
+              drv->name ? drv->name : "(nullptr)");
       continue;
     }
     GSList *devs = sr_driver_scan(drv, nullptr);
@@ -727,7 +907,7 @@ void SigSession::refresh_device_list() {
     if (found > 0) {
       scan_found_count += found;
       pxv_info("refresh_device_list: driver '%s' found %d device(s)",
-               drv->name ? drv->name : "(null)", found);
+               drv->name ? drv->name : "(nullptr)", found);
     }
     for (GSList *l = devs; l; l = l->next) {
       struct sr_dev_inst *sdi = (struct sr_dev_inst *)l->data;
@@ -878,10 +1058,42 @@ void SigSession::init_signals() {
   int channel_count = g_slist_length((GSList *)_state->device_agent().get_channels());
   pxv_info("SigSession::init_signals() start. mode=%d, channel_count=%d", mode, channel_count);
 
+  // Ensure at least one channel of the current work mode's type is enabled.
+  // If all channels are disabled (e.g., VCD file with no enabled channels,
+  // or user disabled all channels), force-enable the first matching one
+  // to prevent a blank viewport with zero signal models.
+  {
+    bool has_enabled = false;
+    for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
+      sr_channel *p = (sr_channel *)l->data;
+      if (!p) continue;
+      if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
+      if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
+      if (mode == ANALOG && p->type != SR_CHANNEL_ANALOG) continue;
+      if (mode == MSO && p->type == SR_CHANNEL_DSO) continue;
+      if (p->enabled) { has_enabled = true; break; }
+    }
+    if (!has_enabled) {
+      for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
+        sr_channel *p = (sr_channel *)l->data;
+        if (!p) continue;
+        if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
+        if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
+        if (mode == ANALOG && p->type != SR_CHANNEL_ANALOG) continue;
+        if (mode == MSO && p->type == SR_CHANNEL_DSO) continue;
+        _state->device_agent().enable_probe(p, true);
+        pxv_warn("init_signals: no enabled channel for mode %d, "
+                 "force-enabling channel index=%d name=%s",
+                 mode, p->index, p->name ? p->name : "nullptr");
+        break;
+      }
+    }
+  }
+
   for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
     sr_channel *probe = (sr_channel *)l->data;
     if (!probe) {
-      pxv_warn("%s", "SigSession: probe is NULL in channel loop, skipping");
+      pxv_warn("%s", "SigSession: probe is nullptr in channel loop, skipping");
       continue;
     }
     assert(probe);
@@ -906,7 +1118,7 @@ void SigSession::init_signals() {
     }
 
     pxv_info("init_signals probe examine: index=%d name=%s type=%d enabled=%d",
-             probe->index, probe->name ? probe->name : "null", probe->type, probe->enabled);
+             probe->index, probe->name ? probe->name : "nullptr", probe->type, probe->enabled);
 
     bool should_create = false;
     int ch_type = SR_CHANNEL_LOGIC;
@@ -1023,6 +1235,37 @@ void SigSession::reload() {
   int channel_count = g_slist_length((GSList *)_state->device_agent().get_channels());
   pxv_info("SigSession::reload() start. mode=%d, channel_count=%d", mode, channel_count);
 
+  // Ensure at least one channel of the current work mode's type is enabled.
+  // Mirrors init_signals() — if all channels are disabled, force-enable the
+  // first matching one to prevent a blank viewport with zero signal models.
+  {
+    bool has_enabled = false;
+    for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
+      sr_channel *p = (sr_channel *)l->data;
+      if (!p) continue;
+      if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
+      if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
+      if (mode == ANALOG && p->type != SR_CHANNEL_ANALOG) continue;
+      if (mode == MSO && p->type == SR_CHANNEL_DSO) continue;
+      if (p->enabled) { has_enabled = true; break; }
+    }
+    if (!has_enabled) {
+      for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
+        sr_channel *p = (sr_channel *)l->data;
+        if (!p) continue;
+        if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
+        if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
+        if (mode == ANALOG && p->type != SR_CHANNEL_ANALOG) continue;
+        if (mode == MSO && p->type == SR_CHANNEL_DSO) continue;
+        _state->device_agent().enable_probe(p, true);
+        pxv_warn("reload: no enabled channel for mode %d, "
+                 "force-enabling channel index=%d name=%s",
+                 mode, p->index, p->name ? p->name : "nullptr");
+        break;
+      }
+    }
+  }
+
   uint64_t sr = _state->device_agent().get_sample_rate();
   uint64_t sl = _state->device_agent().get_sample_limit();
   pxv_info("[DEBUG-DSO] reload: get_sample_rate=%llu get_sample_limit=%llu", (unsigned long long)sr, (unsigned long long)sl);
@@ -1032,7 +1275,7 @@ void SigSession::reload() {
   for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
     sr_channel *probe = (sr_channel *)l->data;
     if (!probe) {
-      pxv_warn("%s", "SigSession: probe is NULL in channel loop, skipping");
+      pxv_warn("%s", "SigSession: probe is nullptr in channel loop, skipping");
       continue;
     }
     assert(probe);
@@ -1052,7 +1295,7 @@ void SigSession::reload() {
     }
 
     pxv_info("reload probe examine: index=%d name=%s type=%d enabled=%d",
-             probe->index, probe->name ? probe->name : "null", probe->type, probe->enabled);
+             probe->index, probe->name ? probe->name : "nullptr", probe->type, probe->enabled);
 
     bool should_create = false;
     int ch_type = SR_CHANNEL_LOGIC;
@@ -1218,8 +1461,8 @@ bool SigSession::add_decoder(
     std::shared_ptr<data::DecoderStack> &out_stack,
     data::SessionDocument *doc) {
   (void)silent;
-  if (dec == NULL) {
-    pxv_err("Decoder instance is null!");
+  if (dec == nullptr) {
+    pxv_err("Decoder instance is nullptr!");
     return false;
   }
 
@@ -1283,7 +1526,7 @@ bool SigSession::add_decoder(
       if (target) {
         target->get_decoder_stacks().push_back(decoder_stack);
       }
-      // When target is null (neither doc nor _active_document is bound, a
+      // When target is nullptr (neither doc nor _active_document is bound, a
       // rare edge case now that MCP uses _api_document and UI uses
       // _active_document), the newly created DecoderStack is intentionally
       // NOT stored in any container — it is returned via out_stack and the
@@ -1436,7 +1679,7 @@ void SigSession::math_rebuild(bool enable, int ch1_index, int ch2_index,
   //
   // When the user disables math (enable=false), we destroy any existing
   // MathStack and do not create a new one. The View's sync_derived_traces
-  // observes the null MathStack and tears down its MathTrace.
+  // observes the nullptr MathStack and tears down its MathTrace.
   if (enable) {
     _state->set_math_stack(
         std::make_shared<data::MathStack>(this, ch1_index, ch2_index, type));
@@ -1458,7 +1701,7 @@ data::Snapshot *SigSession::get_snapshot(int type) {
   else if (type == SR_CHANNEL_DSO)
     return _state->view_data()->get_dso();
   else
-    return NULL;
+    return nullptr;
 }
 
 void SigSession::clear_error() {
@@ -1856,7 +2099,7 @@ bool SigSession::switch_work_mode(int mode) {
       if (probe->enabled != want_enabled) {
         sr_dev_channel_enable(probe, want_enabled);
         pxv_info("switch_work_mode: ch[%d] '%s' type=%d enabled %d->%d",
-                 probe->index, probe->name ? probe->name : "(null)",
+                 probe->index, probe->name ? probe->name : "(nullptr)",
                  probe->type, probe->enabled, want_enabled);
       }
     }
@@ -1923,7 +2166,7 @@ void SigSession::clear_view_data() {
 void SigSession::set_trace_name(std::shared_ptr<data::SignalModel> model,
                                 QString name) {
   if (!model) {
-    pxv_warn("%s", "SigSession::set_trace_name: model is NULL");
+    pxv_warn("%s", "SigSession::set_trace_name: model is nullptr");
     return;
   }
   assert(model);
@@ -2526,7 +2769,7 @@ bool SigSession::is_current_device_gone_(void *device_handle) {
   // Conservative fallback: no device_handle means we can't identify the
   // detached device, so assume the worst (current device may be gone).
   // This preserves the pre-Task-4 behavior for any path that still passes
-  // NULL (e.g. a future libsigrok backend without libusb_device* support).
+  // nullptr (e.g. a future libsigrok backend without libusb_device* support).
   if (!device_handle)
     return true;
 

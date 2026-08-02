@@ -42,7 +42,7 @@ XCursor::XCursor(View &view, int order, double value0, double value1) :
     _grabbed(XCur_None),
     _order(order)
 {
-    _dsoSig = NULL;
+    _dsoSig = nullptr;
     _sig_index = -1;
     _colour = Qt::blue;
     
@@ -56,7 +56,7 @@ XCursor::XCursor(View &view, int order, double value0, double value1) :
         }
     }
 
-    if (_dsoSig != NULL){
+    if (_dsoSig != nullptr){
         connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
         _sig_index = _dsoSig->get_index();
     }
@@ -74,7 +74,7 @@ XCursor::XCursor(const XCursor &x) :
     _colour = x._colour;
     _sig_index = -1;
 
-    if (_dsoSig != NULL){
+    if (_dsoSig != nullptr){
         connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
         _sig_index = _dsoSig->get_index();
     }
@@ -102,7 +102,7 @@ void XCursor::set_channel(DsoSignal *sig)
 {
     _dsoSig = sig;
 
-    if (_dsoSig != NULL){
+    if (_dsoSig != nullptr){
         connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
         _sig_index = _dsoSig->get_index();
     }
@@ -111,7 +111,7 @@ void XCursor::set_channel(DsoSignal *sig)
 void XCursor::on_signal_deleted(void *o)
 {
     if (o == _dsoSig){
-        _dsoSig = NULL;
+        _dsoSig = nullptr;
     }   
 }
 
@@ -159,11 +159,11 @@ void XCursor::set_value(XCur_type type, double value)
 void XCursor::paint(QPainter &p, const QRect &rect, XCur_type highlight)
 {   
     // Attach the channel
-    if (_dsoSig == NULL && _sig_index != -1){
+    if (_dsoSig == nullptr && _sig_index != -1){
         for (auto s : _view.get_own_signals()) {
             if (s->signal_type() == SR_CHANNEL_DSO && s->get_index() == _sig_index) {
                 _dsoSig = dynamic_cast<DsoSignal*>(s);
-                if (_dsoSig != NULL){
+                if (_dsoSig != nullptr){
                     connect(_dsoSig, &Signal::sig_released, this, &XCursor::on_signal_deleted);
                 }
                 break;
@@ -260,7 +260,7 @@ void XCursor::paint_label(QPainter &p, const QRect &rect)
 
     if (close.contains(QPoint(_view.hover_point().x(), _view.hover_point().y())))
         p.setBrush(View::Red);
-    else if (_dsoSig != NULL)
+    else if (_dsoSig != nullptr)
         p.setBrush(_dsoSig->get_colour());
     else
         p.setBrush(View::Blue);

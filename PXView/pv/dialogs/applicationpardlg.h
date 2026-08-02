@@ -124,6 +124,7 @@ namespace dialogs
         QCheckBox *_ck_profileBar;
         QCheckBox *_ck_abortData;
         QCheckBox *_ck_autoScrollLatestData;
+        QCheckBox *_ck_promptSaveOnExit;
         QListWidget *_shortcut_list;
         int _shortcut_selected_row;
         QPushButton *_btn_accept;

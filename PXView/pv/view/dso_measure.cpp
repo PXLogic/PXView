@@ -24,13 +24,13 @@
 
 #include <QApplication>
 #include <functional>
-#include <math.h>
+#include <cmath>
 #include <libsigrok/libsigrok.h>
 
 #include "../api/types.h"        // Task C1.7: api::MeasurementValue
 #include "../data/dsosnapshot.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "dsosignal.h"
@@ -221,7 +221,7 @@ double DsoMeasure::get_voltage(uint64_t index) {
 }
 
 QString DsoMeasure::get_voltage(double v, int p, bool scaled) {
-  if (_signal->_vDial == NULL) {
+  if (_signal->_vDial == nullptr) {
     assert(false);
     return QString("--");
   }

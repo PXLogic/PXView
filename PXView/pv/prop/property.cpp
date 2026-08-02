@@ -55,7 +55,7 @@ bool Property::labeled_widget()
 
 GVariant* Property::get_value()
 {
-    return NULL;
+    return nullptr;
 }
 
 } // prop

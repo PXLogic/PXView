@@ -30,9 +30,9 @@
 #include <QFile>
 #include <QWidget>
 #include <string>
-#include <assert.h>
+#include <cassert>
 #include "sigsession.h"
-#include "dsvdef.h"
+#include "pxvdef.h"
 #include "config/appconfig.h"
 #include "log.h"
 #include "utility/path.h"
@@ -47,7 +47,7 @@
 
 AppControl::AppControl()
 {
-    _topWindow = NULL; 
+    _topWindow = nullptr; 
     _session = new pv::SigSession();
 }
 
@@ -63,8 +63,8 @@ AppControl::~AppControl()
 
 AppControl* AppControl::Instance()
 {
-    static AppControl *ins = NULL;
-    if (ins == NULL){
+    static AppControl *ins = nullptr;
+    if (ins == nullptr){
         ins = new AppControl();
     }
     return ins;
@@ -357,7 +357,7 @@ void AppControl::UnInit()
 
 bool AppControl::TopWindowIsMaximized()
 {
-    if (_topWindow != NULL){
+    if (_topWindow != nullptr){
         return _topWindow->isMaximized();
     }
     return false;

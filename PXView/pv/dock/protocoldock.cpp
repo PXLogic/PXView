@@ -37,7 +37,7 @@
 #include "../config/appconfig.h"
 #include "../data/decode/decoder.h"
 #include "../data/decode/decoderstatus.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../tabcontext.h"
 #include "../ui/dockfonts.h"
@@ -60,7 +60,7 @@
 #include <QTableWidgetItem>
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
 #include <map>
 #include <string>
 
@@ -77,7 +77,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _session = session;
   _cur_search_index = -1;
   _search_edited = false;
-  _pro_add_button = NULL;
+  _pro_add_button = nullptr;
   // View-owned DecoderModel (Task 10): was previously a Core singleton
   // owned by SigSession. Qt parent ownership (this) handles destruction.
   _decoder_model = new pv::view::DecoderModel(this);
@@ -90,7 +90,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   for (; l; l = l->next) {
     const srd_decoder *const d = (srd_decoder *)l->data;
     if (!d) {
-      pxv_warn("%s", "ProtocolDock: decoder list item d is NULL, skipping");
+      pxv_warn("%s", "ProtocolDock: decoder list item d is nullptr, skipping");
       continue;
     }
     assert(d);
@@ -325,7 +325,7 @@ void ProtocolDock::set_view(view::View *view) { _view = view; }
 
 void ProtocolDock::bind_context(TabContext *ctx) {
   if (!ctx) {
-    pxv_warn("%s", "ProtocolDock::bind_context: ctx is NULL");
+    pxv_warn("%s", "ProtocolDock::bind_context: ctx is nullptr");
     return;
   }
   assert(ctx);
@@ -400,7 +400,7 @@ void ProtocolDock::retranslateUi() {
 void ProtocolDock::reStyle() {
   QString iconPath = GetIconPath();
 
-  if (_pro_add_button == NULL) {
+  if (_pro_add_button == nullptr) {
     return;
   }
 
@@ -440,12 +440,12 @@ int ProtocolDock::get_protocol_index_by_id(QString id) {
 
 void ProtocolDock::on_add_protocol() {
   if (_decoderInfoList.size() == 0) {
-    MsgBox::Show(NULL, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODER_LIST_EMPTY),
+    MsgBox::Show(nullptr, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODER_LIST_EMPTY),
                            "Decoder list is empty!"));
     return;
   }
   if (_selected_protocol_id == "") {
-    MsgBox::Show(NULL, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NO_SEL_DECODER),
+    MsgBox::Show(nullptr, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NO_SEL_DECODER),
                            "Please select a decoder!"));
     return;
   }
@@ -629,7 +629,7 @@ void ProtocolDock::rebuild_protocol_layers() {
     if (stack->out_of_memory())
       err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY), "Out of Memory");
     layer->SetProgress(pg, err);
-    if (pg == 100 && dstatus != NULL) {
+    if (pg == 100 && dstatus != nullptr) {
       layer->enable_format(dstatus->m_bNumeric);
     }
 
@@ -645,7 +645,7 @@ void ProtocolDock::rebuild_protocol_layers() {
 
 void ProtocolDock::on_del_all_protocol() {
   if (_protocol_lay_items.size() == 0) {
-    MsgBox::Show(NULL,
+    MsgBox::Show(nullptr,
                  L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NO_DECODER_DEL),
                      "Have no decoder to remove!"),
                  this);
@@ -700,7 +700,7 @@ void ProtocolDock::decoded_progress(int progress) {
       lay.SetProgress(pg, err);
 
       // have custom data format
-      if (pg == 100 && lay.m_decoderStatus != NULL) {
+      if (pg == 100 && lay.m_decoderStatus != nullptr) {
         lay.enable_format(lay.m_decoderStatus->m_bNumeric);
       }
     }
@@ -745,7 +745,7 @@ void ProtocolDock::update_model() {
   const auto &decode_sigs = _session->get_decoder_stacks();
 
   if (decode_sigs.size() == 0)
-    decoder_model->setDecoderStack(NULL);
+    decoder_model->setDecoderStack(nullptr);
   else if (!decoder_model->getDecoderStack())
     decoder_model->setDecoderStack(decode_sigs.at(0).get());
   else {
@@ -1029,8 +1029,8 @@ void ProtocolDock::search_nxt() {
   pv::view::DecoderModel *decoder_model = _decoder_model;
   auto decoder_stack = decoder_model->getDecoderStack();
 
-  if (decoder_stack == NULL) {
-    pxv_err("decoder_stack is null");
+  if (decoder_stack == nullptr) {
+    pxv_err("decoder_stack is nullptr");
     return;
   }
 
@@ -1121,7 +1121,7 @@ void ProtocolDock::search_update() {
     dlg.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint |
                        Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
                        Qt::WindowMaximizeButtonHint);
-    dlg.setCancelButton(NULL);
+    dlg.setCancelButton(nullptr);
 
     QFutureWatcher<void> watcher;
     connect(&watcher, &QFutureWatcher<void>::finished, &dlg,
@@ -1213,7 +1213,7 @@ void ProtocolDock::OnProtocolVisibilityChanged(void *handle) {
                 break;
               }
             }
-            _view->signals_changed(NULL);
+            _view->signals_changed(nullptr);
           }
         }
       }
@@ -1232,7 +1232,7 @@ void ProtocolDock::OnProtocolFormatChanged(QString format, void *handle) {
       AppConfig::Instance().SetProtocolFormat(lay->m_protocolId.toStdString(),
                                               format.toStdString());
 
-      if (lay->m_decoderStatus != NULL) {
+      if (lay->m_decoderStatus != nullptr) {
         lay->m_decoderStatus->m_format =
             DecoderDataFormat::Parse(format.toStdString().c_str());
         protocol_updated();
@@ -1279,13 +1279,13 @@ bool ProtocolDock::protocol_sort_callback(const DecoderInfoItem *o1,
 }
 
 QString ProtocolDock::parse_protocol_id(const char *id) {
-  if (id == NULL || *id == 0) {
+  if (id == nullptr || *id == 0) {
     assert(false);
   }
   char buf[25];
   strncpy(buf, id, sizeof(buf) - 1);
   char *rd = buf;
-  char *start = NULL;
+  char *start = nullptr;
   unsigned int len = 0;
 
   while (*rd && len - 1 < sizeof(buf)) {
@@ -1298,7 +1298,7 @@ QString ProtocolDock::parse_protocol_id(const char *id) {
     ++rd;
     len++;
   }
-  if (start == NULL) {
+  if (start == nullptr) {
     start = const_cast<char *>(id);
   }
 
@@ -1350,7 +1350,7 @@ void ProtocolDock::show_protocol_select() {
 void ProtocolDock::OnItemClick(void *sender, void *data_handle) {
   (void)sender;
 
-  if (data_handle != NULL) {
+  if (data_handle != nullptr) {
     DecoderInfoItem *info = (DecoderInfoItem *)data_handle;
     srd_decoder *dec = (srd_decoder *)(info->_data_handle);
     this->_pro_keyword_edit->SetInputText(QString(dec->name));

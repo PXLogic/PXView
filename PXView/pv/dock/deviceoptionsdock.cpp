@@ -40,13 +40,13 @@
 #include <QTabWidget>
 #include <QThreadPool>
 #include <QToolButton>
-#include <assert.h>
+#include <cassert>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../data/sessiondocument.h"
 #include "../deviceagent.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../interface/icallbacks.h"
 #include "../log.h"
 #include "../prop/property.h"
@@ -61,7 +61,6 @@
 #include "../view/view.h"
 
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -69,20 +68,20 @@ namespace dock {
 
 DeviceOptionsDock::DeviceOptionsDock(QWidget *parent, SigSession *session)
     : QWidget(parent), _session(session), _context(nullptr) {
-  _scroll_panel = NULL;
-  _container_panel = NULL;
-  _container_lay = NULL;
-  _dynamic_panel = NULL;
+  _scroll_panel = nullptr;
+  _container_panel = nullptr;
+  _container_lay = nullptr;
+  _dynamic_panel = nullptr;
   _width = 0;
   _groupHeight1 = 0;
   _groupHeight2 = 0;
   _isBuilding = false;
   _cur_analog_tag_index = 0;
   _opt_mode = 0;
-  _sampling_settings_widget = NULL;
+  _sampling_settings_widget = nullptr;
 
   _device_agent = session->get_device();
-  _device_options_binding = NULL;
+  _device_options_binding = nullptr;
 
   this->setObjectName("dock_device_options_scroll");
 
@@ -172,7 +171,7 @@ DeviceOptionsDock::~DeviceOptionsDock() {
       delete p;
     }
     delete _device_options_binding;
-    _device_options_binding = NULL;
+    _device_options_binding = nullptr;
   }
 }
 
@@ -196,7 +195,7 @@ void DeviceOptionsDock::commit_channels() {
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
       sr_channel *const probe = (sr_channel *)l->data;
       if (!probe) {
-        pxv_warn("%s", "DeviceOptionsDock: probe is NULL in channel loop, skipping");
+        pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in channel loop, skipping");
         continue;
       }
       assert(probe);
@@ -216,7 +215,7 @@ void DeviceOptionsDock::commit_channels() {
         pxv_warn("commit_channels: index %d >= _probes_checkBox_list size %d "
                  "(mode=%d, ch[%d] '%s' type=%d) — list out of sync, skipping",
                  index, (int)_probes_checkBox_list.size(), mode,
-                 probe->index, probe->name ? probe->name : "(null)",
+                 probe->index, probe->name ? probe->name : "(nullptr)",
                  probe->type);
         break;
       }
@@ -277,11 +276,11 @@ QLayout *DeviceOptionsDock::get_property_form(QWidget *parent) {
 
     QWidget *wid = p->get_widget_live(parent);
 
-    // Property::get_widget may return NULL when the underlying getter fails
+    // Property::get_widget may return nullptr when the underlying getter fails
     // (e.g. driver doesn't support the key). Skip such properties instead of
-    // dereferencing a NULL widget pointer.
+    // dereferencing a nullptr widget pointer.
     if (!wid) {
-      pxv_info("DeviceOptionsDock: skipping property '%s' — get_widget returned NULL",
+      pxv_info("DeviceOptionsDock: skipping property '%s' — get_widget returned nullptr",
                p->label().toUtf8().constData());
       continue;
     }
@@ -388,9 +387,9 @@ void DeviceOptionsDock::logic_probes(QVBoxLayout &layout) {
 
   if (_device_agent->get_work_mode() == LOGIC) {
     GVariant *gvar_opts =
-        _device_agent->get_config_list(NULL, SR_CONF_CHANNEL_MODE);
+        _device_agent->get_config_list(nullptr, SR_CONF_CHANNEL_MODE);
 
-    if (gvar_opts != NULL) {
+    if (gvar_opts != nullptr) {
       /* Task 10.6: config_list now returns a GVariant string array
        * (g_variant_new_strv) instead of a uint64 bare-pointer cast.
        * Note: g_variant_get_strv returns pointers into the GVariant's
@@ -516,7 +515,7 @@ void DeviceOptionsDock::logic_probes(QVBoxLayout &layout) {
     bool is_analog = (probe->type == SR_CHANNEL_ANALOG ||
                       probe->type == SR_CHANNEL_DSO);
     ChannelLabel *ch_item = new ChannelLabel(
-        this, NULL, probe->index,
+        this, nullptr, probe->index,
         is_analog ? ChannelLabel::Analog : ChannelLabel::Logic);
 
     if (is_dso_hidden) {
@@ -534,7 +533,7 @@ void DeviceOptionsDock::logic_probes(QVBoxLayout &layout) {
       if (analog_column == channel_columns) {
         analog_column = 0;
         analog_row++;
-        if (l->next != NULL)
+        if (l->next != nullptr)
           row2++;
       }
     } else {
@@ -544,7 +543,7 @@ void DeviceOptionsDock::logic_probes(QVBoxLayout &layout) {
       if (digital_column == channel_columns) {
         digital_column = 0;
         digital_row++;
-        if (l->next != NULL)
+        if (l->next != nullptr)
           row2++;
       }
     }
@@ -729,7 +728,7 @@ void DeviceOptionsDock::mode_check_timeout() {
 void DeviceOptionsDock::channel_check() {
   QRadioButton *bt = dynamic_cast<QRadioButton *>(sender());
   if (!bt) {
-    pxv_warn("%s", "DeviceOptionsDock::channel_check: bt is NULL");
+    pxv_warn("%s", "DeviceOptionsDock::channel_check: bt is nullptr");
     return;
   }
   assert(bt);
@@ -763,7 +762,7 @@ void DeviceOptionsDock::channel_check() {
 
 void DeviceOptionsDock::analog_channel_check() {
   QCheckBox *sc = dynamic_cast<QCheckBox *>(sender());
-  if (sc != NULL) {
+  if (sc != nullptr) {
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
       sr_channel *const probe = (sr_channel *)l->data;
 
@@ -792,7 +791,7 @@ void DeviceOptionsDock::on_analog_channel_enable() {
 void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
   if (_device_agent->get_work_mode() == LOGIC ||
       _device_agent->get_work_mode() == MSO) {
-    if (sc == NULL || !sc->isChecked())
+    if (sc == nullptr || !sc->isChecked())
       return;
 
     // SR_CONF_STREAM fork key deleted — use DeviceAgent typed wrapper.
@@ -822,7 +821,7 @@ void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
       sc->setChecked(false);
     }
   } else if (_device_agent->get_work_mode() == ANALOG) {
-    if (sc != NULL) {
+    if (sc != nullptr) {
       QGridLayout *const layout =
           (QGridLayout *)sc->property("Layout").value<void *>();
       int i = layout->count();
@@ -841,7 +840,7 @@ void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
 
       if (ck_index != -1) {
         _device_agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                       _dso_channel_list[ck_index], NULL);
+                                       _dso_channel_list[ck_index], nullptr);
       }
 
       while (i--) {
@@ -865,6 +864,123 @@ void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
   }
 }
 
+void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
+  using namespace Qt;
+
+  pxv_info("DeviceOptionsDock::dso_probes: ENTER");
+
+  _probes_checkBox_list.clear();
+  _probe_options_binding_list.clear();
+  _dso_channel_list.clear();
+
+  QTabWidget *tabWidget = new QTabWidget();
+  tabWidget->setTabPosition(QTabWidget::North);
+  tabWidget->setUsesScrollButtons(false);
+
+  QFont labelFont = dock_font_label();
+  QFont contentFont = dock_font_content();
+
+  int ch_dex = 0;
+
+  for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
+    sr_channel *const probe = (sr_channel *)l->data;
+    if (!probe) {
+      pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in dso channel loop, skipping");
+      continue;
+    }
+    assert(probe);
+
+    // DSO mode: only show DSO channels
+    if (probe->type != SR_CHANNEL_DSO) {
+      continue;
+    }
+
+    _dso_channel_list.push_back(probe);
+
+    QWidget *probe_widget = new QWidget(tabWidget);
+    QGridLayout *probe_layout = new QGridLayout(probe_widget);
+    probe_widget->setLayout(probe_layout);
+
+    bool ch_enabled = probe->enabled;
+    if (ch_dex < (int)_lst_probe_enabled_status.size()) {
+      ch_enabled = _lst_probe_enabled_status[ch_dex];
+    }
+
+    ch_dex++;
+
+    QCheckBox *probe_checkBox = new QCheckBox(_container_panel);
+    probe_checkBox->setObjectName("dock_content");
+    QVariant vlayout = QVariant::fromValue((void *)probe_layout);
+    probe_checkBox->setProperty("Layout", vlayout);
+    probe_checkBox->setProperty("Enable", true);
+    probe_checkBox->setChecked(ch_enabled);
+    _probes_checkBox_list.push_back(probe_checkBox);
+
+    QLabel *en_label = new QLabel(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_ENABLE), "Enable: "), _container_panel);
+    en_label->setObjectName("dock_label");
+    en_label->setFont(labelFont);
+    en_label->setProperty("Enable", true);
+    en_label->setProperty("lang_id", S_ID(IDS_DLG_ENABLE));
+    probe_layout->addWidget(en_label, 0, 0, 1, 1);
+    probe_layout->addWidget(probe_checkBox, 0, 1, 1, 3);
+
+    auto *probe_options_binding = new pv::prop::binding::ProbeOptions(_session, probe);
+    const auto &properties = probe_options_binding->properties();
+    int i = 1;
+
+    for (auto p : properties) {
+      const QString label = p->labeled_widget() ? QString() : p->label();
+      QString lb_text = label;
+      if (!label.isEmpty()) {
+        lb_text = QString::fromUtf8(LangResource::Instance()->get_lang_text(
+            STR_PAGE_DSL, label.toUtf8().data(), label.toUtf8().data()));
+      }
+      QLabel *lb = new QLabel(lb_text, probe_widget);
+      lb->setObjectName("dock_label");
+      lb->setFont(labelFont);
+      lb->setProperty("lang_src", label);
+      lb->setProperty("lang_page", STR_PAGE_DSL);
+      probe_layout->addWidget(lb, i, 0, 1, 1);
+
+      QWidget *pow = p->get_widget_live(probe_widget);
+      if (!pow) {
+        pxv_warn("DeviceOptionsDock::dso_probes: get_widget returned nullptr "
+                 "for property '%s' (name='%s'), skipping",
+                 label.toUtf8().data(), p->name().toUtf8().data());
+        delete lb;
+        continue;
+      }
+      pow->setEnabled(probe_checkBox->isChecked());
+      pow->setFont(contentFont);
+
+      connect(p, &pv::prop::Property::committed, this,
+              &DeviceOptionsDock::on_property_committed);
+
+      probe_layout->addWidget(pow, i, 1, 1, 3);
+      i++;
+    }
+    _probe_options_binding_list.push_back(probe_options_binding);
+
+    connect(probe_checkBox, &QCheckBox::released, this,
+            &DeviceOptionsDock::on_analog_channel_enable);
+
+    QString tabName = QString::fromUtf8(probe->name);
+    tabName += " ";
+
+    tabWidget->addTab(probe_widget, tabName);
+  }
+
+  layout.addWidget(tabWidget, 0, 0, 1, 1);
+
+  ::ui::set_dock_form_font(this);
+  _groupHeight2 = tabWidget->sizeHint().height() + 50;
+
+  connect(tabWidget, &QTabWidget::currentChanged, this,
+          &DeviceOptionsDock::on_anlog_tab_changed);
+  tabWidget->setCurrentIndex(_cur_analog_tag_index);
+}
+
 void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
   using namespace Qt;
 
@@ -886,7 +1002,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
     sr_channel *const probe = (sr_channel *)l->data;
     if (!probe) {
-      pxv_warn("%s", "DeviceOptionsDock: probe is NULL in dso channel loop, skipping");
+      pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in dso channel loop, skipping");
       continue;
     }
     assert(probe);
@@ -895,10 +1011,10 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     // the demo device still exposes in its channel list but are disabled
     // in this mode). Without this filter, ProbeOptions was created for
     // LOGIC channels (D0-D7) whose cg is the "Logic" group — VDIV/COUPLING
-    // are not in that group's devopts, so every _getter() returned NULL.
+    // are not in that group's devopts, so every _getter() returned nullptr.
     if (probe->type != SR_CHANNEL_ANALOG) {
       pxv_info("DeviceOptionsDock::analog_probes: skipping non-analog channel "
-               "'%s' (type=%d)", probe->name ? probe->name : "(null)", probe->type);
+               "'%s' (type=%d)", probe->name ? probe->name : "(nullptr)", probe->type);
       continue;
     }
 
@@ -957,7 +1073,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
        * the driver never received SR_CONF_PROBE_COUPLING SET. */
       QWidget *pow = p->get_widget_live(probe_widget);
       if (!pow) {
-        pxv_warn("DeviceOptionsDock::analog_probes: get_widget returned NULL "
+        pxv_warn("DeviceOptionsDock::analog_probes: get_widget returned nullptr "
                  "for property '%s' (name='%s'), skipping",
                  label.toUtf8().data(), p->name().toUtf8().data());
         delete lb;
@@ -973,7 +1089,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
 
       if (p->name().contains("map default", Qt::CaseInsensitive)) {
         // Bool 属性创建的是 QCheckBox (bool.cpp:51), 不是 QPushButton。
-        // 旧代码 qobject_cast<QPushButton*> 返回 NULL → connect 失败 →
+        // 旧代码 qobject_cast<QPushButton*> 返回 nullptr → connect 失败 →
         // 点击 "map default" 复选框不触发重建 → map unit/min/max 永远禁用。
         pow->setProperty("index", probe->index);
         QCheckBox *map_ckbox = qobject_cast<QCheckBox *>(pow);
@@ -986,7 +1102,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
           bool map_default = true;
 
           _device_agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                         probe, NULL);
+                                         probe, nullptr);
 
           if (map_default)
             pow->setEnabled(false);
@@ -1028,34 +1144,42 @@ QString DeviceOptionsDock::dynamic_widget(QLayout *lay) {
   if (mode == LOGIC || mode == MSO) {
     QVBoxLayout *grid = dynamic_cast<QVBoxLayout *>(lay);
     if (!grid) {
-      pxv_warn("%s", "DeviceOptionsDock::dynamic_widget: grid is NULL (LOGIC/MSO)");
+      pxv_warn("%s", "DeviceOptionsDock::dynamic_widget: grid is nullptr (LOGIC/MSO)");
       return QString();
     }
     assert(grid);
     logic_probes(*grid);
     return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHANNEL), "Channel");
-  } else if (mode == DSO) {
-    // DSO calibration UI removed: SR_CONF_HAVE_ZERO fork key was deleted
-    // (DSO mode deprecated, DSCope hardware dropped). DSO mode shows no
-    // dynamic panel content.
-    (void)lay;
-  } else if (mode == ANALOG) {
+} else if (mode == DSO) {
+// DSO mode: build per-channel probe options (vdiv/coupling/pattern/etc).
+// This mirrors analog_probes() but for DSO channels, enabling the user to
+// select DSO waveform patterns (sine/square/sawtooth/triangle/random)
+// and adjust per-channel vdiv/coupling/offset from the DeviceOptions dock.
+QGridLayout *grid = dynamic_cast<QGridLayout *>(lay);
+if (!grid) {
+pxv_warn("%s", "DeviceOptionsDock::dynamic_widget: grid is nullptr (DSO)");
+return QString();
+}
+assert(grid);
+dso_probes(*grid);
+return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHANNEL), "Channel");
+} else if (mode == ANALOG) {
     QGridLayout *grid = dynamic_cast<QGridLayout *>(lay);
     if (!grid) {
-      pxv_warn("%s", "DeviceOptionsDock::dynamic_widget: grid is NULL (ANALOG)");
+      pxv_warn("%s", "DeviceOptionsDock::dynamic_widget: grid is nullptr (ANALOG)");
       return QString();
     }
     assert(grid);
     analog_probes(*grid);
     return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHANNEL), "Channel");
   }
-  return NULL;
+  return nullptr;
 }
 
 void DeviceOptionsDock::build_dynamic_panel() {
   _isBuilding = true;
 
-  if (_dynamic_panel != NULL) {
+  if (_dynamic_panel != nullptr) {
     int idx = 0;
     QLayoutItem *item = nullptr;
     while ((item = _container_lay->itemAt(idx)) != nullptr) {
@@ -1067,12 +1191,12 @@ void DeviceOptionsDock::build_dynamic_panel() {
       idx++;
     }
     delete _dynamic_panel;
-    _dynamic_panel = NULL;
+    _dynamic_panel = nullptr;
   }
 
   QFont sectionTitleFont = dock_font_section_title();
 
-  if (_dynamic_panel == NULL) {
+  if (_dynamic_panel == nullptr) {
     _dynamic_panel = new QWidget(_container_panel);
     int insert_idx = 0;
     if (_sampling_settings_widget) {
@@ -1156,7 +1280,7 @@ void DeviceOptionsDock::update_dynamic_panel_visibility(bool visible) {
 
 void DeviceOptionsDock::try_resize_scroll() {
 #ifdef _WIN32
-  if (_dynamic_panel == NULL)
+  if (_dynamic_panel == nullptr)
     return;
 
   auto labels = _dynamic_panel->findChildren<QLabel *>();
@@ -1200,7 +1324,7 @@ void DeviceOptionsDock::update_view() {
       delete p;
     }
     delete _device_options_binding;
-    _device_options_binding = NULL;
+    _device_options_binding = nullptr;
   }
 
   // Preserve sampling settings widget from being deleted
@@ -1214,19 +1338,19 @@ void DeviceOptionsDock::update_view() {
   }
 
   QLayoutItem *item;
-  while ((item = _container_lay->takeAt(0)) != NULL) {
+  while ((item = _container_lay->takeAt(0)) != nullptr) {
     if (item->widget()) {
       delete item->widget();
     }
     delete item;
   }
 
-  _dynamic_panel = NULL;
+  _dynamic_panel = nullptr;
   _probes_checkBox_list.clear();
   _channel_mode_indexs.clear();
   _dso_channel_list.clear();
 
-  if (_device_options_binding == NULL)
+  if (_device_options_binding == nullptr)
     return;
 
   QFont sectionTitleFont = dock_font_section_title();
@@ -1312,7 +1436,7 @@ void DeviceOptionsDock::on_mode_changed() {
       delete p;
     }
     delete _device_options_binding;
-    _device_options_binding = NULL;
+    _device_options_binding = nullptr;
   }
 
   // 3. Delete old Mode section container (remaining labels/layout shell)
@@ -1392,13 +1516,13 @@ void DeviceOptionsDock::update_widgets_status() {
 void DeviceOptionsDock::device_updated() {
   if (_device_agent->have_instance() == false) {
     QLayoutItem *item;
-    while ((item = _container_lay->takeAt(0)) != NULL) {
+    while ((item = _container_lay->takeAt(0)) != nullptr) {
       if (item->widget()) {
         delete item->widget();
       }
       delete item;
     }
-    _dynamic_panel = NULL;
+    _dynamic_panel = nullptr;
     _probes_checkBox_list.clear();
     _channel_mode_indexs.clear();
     _dso_channel_list.clear();
@@ -1409,7 +1533,7 @@ void DeviceOptionsDock::device_updated() {
         delete p;
       }
       delete _device_options_binding;
-      _device_options_binding = NULL;
+      _device_options_binding = nullptr;
     }
     for (auto ptr : _probe_options_binding_list) {
       const auto &props = ptr->properties();
@@ -1422,7 +1546,7 @@ void DeviceOptionsDock::device_updated() {
     return;
   }
 
-  if (_device_options_binding == NULL) {
+  if (_device_options_binding == nullptr) {
     update_view();
   }
 }
@@ -1432,7 +1556,7 @@ void DeviceOptionsDock::UpdateLanguage() { retranslateUi(); }
 void DeviceOptionsDock::UpdateTheme() { retranslateUi(); }
 
 void DeviceOptionsDock::retranslateUi() {
-  if (_container_panel == NULL || _device_options_binding == NULL)
+  if (_container_panel == nullptr || _device_options_binding == nullptr)
     return;
 
   setUpdatesEnabled(false);
@@ -1469,7 +1593,7 @@ void DeviceOptionsDock::retranslateUi() {
 }
 
 void DeviceOptionsDock::UpdateFont() {
-  if (_container_panel == NULL)
+  if (_container_panel == nullptr)
     return;
 
   QFont sectionTitleFont = dock_font_section_title();
@@ -1629,10 +1753,10 @@ QJsonObject DeviceOptionsDock::get_session() {
         }
       } else {
         // PROBE_VDIV/PROBE_COUPLING fork DSO keys deleted; only map_default
-        // is queried (still in dsvdef.h, migrated in Phase 2).
+        // is queried (still in pxvdef.h, migrated in Phase 2).
         bool map_default = true;
         _device_agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                       probe, NULL);
+                                       probe, nullptr);
         ch_obj["map_default"] = map_default;
       }
     }
@@ -1688,11 +1812,11 @@ void DeviceOptionsDock::set_session(QJsonObject &obj) {
 
         if (mode == ANALOG || mode == DSO) {
           // PROBE_VDIV/PROBE_COUPLING fork DSO keys deleted; only
-          // map_default is restored (still in dsvdef.h, migrated in Phase 2).
+          // map_default is restored (still in pxvdef.h, migrated in Phase 2).
           if (ch_obj.contains("map_default")) {
             _device_agent->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT,
                                            ch_obj["map_default"].toBool(),
-                                           probe, NULL);
+                                           probe, nullptr);
           }
         }
       }

@@ -154,7 +154,7 @@ private:
     int     _width;
     int     _groupHeight1;
     int     _groupHeight2;
-    volatile    bool _isBuilding;
+    std::atomic<bool> _isBuilding{false};
     SigSession *_session;
     DeviceAgent *_device_agent;
     int     _cur_analog_tag_index;

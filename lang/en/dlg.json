@@ -89,6 +89,10 @@
         "text": "Open File"
     },
     {
+        "id": "IDS_DLG_IMPORT_FILE",
+        "text": "Import File"
+    },
+    {
         "id": "IDS_DLG_OPEN_SEESION",
         "text": "Open Session"
     },
@@ -785,6 +789,10 @@
         "text": "Display the profile in title bar"
     },
     {
+        "id": "IDS_DLG_PROMPT_SAVE_ON_EXIT",
+        "text": "Prompt to save data on exit"
+    },
+    {
         "id": "IDS_DLG_SERIAL_HEX",
         "text": "Hex :"
     },
@@ -1067,6 +1075,10 @@
     {
         "id": "IDS_DLG_SC_FILE_EXPORT",
         "text": "Export Data"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_IMPORT",
+        "text": "Import Data"
     },
     {
         "id": "IDS_DLG_SC_FILE_LOAD",
@@ -1879,5 +1891,25 @@
     {
         "id": "IDS_DLG_NO_DATA",
         "text": "No data available"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_RANDOM",
+        "text": "Random"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SINE",
+        "text": "Sine"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SQUARE",
+        "text": "Square"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SAWTOOTH",
+        "text": "Sawtooth"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_TRIANGLE",
+        "text": "Triangle"
     }
 ]

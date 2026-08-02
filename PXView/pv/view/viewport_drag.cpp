@@ -62,7 +62,7 @@ void ViewportDrag::applyDragFrame() {
     if (newUpperHeight >= View::MinSignalHeight &&
         _viewport->_view.is_logic_rendering_mode()) {
       _viewport->_resize_trace_upper->set_own_height(newUpperHeight);
-      _viewport->_view.signals_changed(NULL);
+      _viewport->_view.signals_changed(nullptr);
     }
     return;
   }

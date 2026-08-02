@@ -27,7 +27,7 @@
 #include <QMouseEvent>
 #include <QVBoxLayout>
 #include <QAbstractButton>
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../ui/langresource.h"
 #include "../config/appconfig.h"
 #include "../ui/fn.h"
@@ -39,18 +39,18 @@ namespace dialogs {
 
 DSMessageBox::DSMessageBox(QWidget *parent,const QString title) :
 #ifdef Q_OS_LINUX
-    QDialog(NULL)  //enable the popup dialog draged.
+    QDialog(nullptr)  //enable the popup dialog draged.
 #else
     QDialog(parent)
 #endif
 {
     (void)parent;
-    _layout = NULL;
-    _main_widget = NULL;
-    _msg = NULL;
-    _titlebar = NULL;
-    _shadow = NULL;
-    _main_layout = NULL;
+    _layout = nullptr;
+    _main_widget = nullptr;
+    _msg = nullptr;
+    _titlebar = nullptr;
+    _shadow = nullptr;
+    _main_layout = nullptr;
 
     _bClickYes = false;
 
@@ -62,7 +62,7 @@ DSMessageBox::DSMessageBox(QWidget *parent,const QString title) :
 
     _shadow = new Shadow(this);
     _msg = new QMessageBox(this);
-    _titlebar = new toolbars::TitleBar(false, this, NULL, false, false);
+    _titlebar = new toolbars::TitleBar(false, this, nullptr, false, false);
     _layout = new QVBoxLayout(this);
 
     _shadow->setBlurRadius(10.0);
@@ -139,7 +139,7 @@ int DSMessageBox::exec()
     QFont font = theme_font_dialog();
     ui::set_form_font(this, font);
 
-    if (_titlebar != NULL){
+    if (_titlebar != nullptr){
         _titlebar->update_font();
     }
 

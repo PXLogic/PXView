@@ -24,7 +24,7 @@
 #ifndef PXVIEW_PV_DATA_SESSIONSNAPSHOT_H
 #define PXVIEW_PV_DATA_SESSIONSNAPSHOT_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 #include <QString>
 #include <QDateTime>

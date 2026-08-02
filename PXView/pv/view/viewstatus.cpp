@@ -88,7 +88,7 @@ void ViewStatus::paintEvent(QPaintEvent *)
 
         for(size_t i = 0; i < _mrects.size(); i++) {
             int sig_index = std::get<1>(_mrects[i]);
-            view::DsoSignal *dsoSig = NULL;
+            view::DsoSignal *dsoSig = nullptr;
 
             for(auto s : _view.get_own_signals()) {
                 if (s->signal_type() == SR_CHANNEL_DSO && s->enabled()) {
@@ -96,7 +96,7 @@ void ViewStatus::paintEvent(QPaintEvent *)
                     if (sig_index == dsoSig->get_index())
                         break;
                     else
-                        dsoSig = NULL;
+                        dsoSig = nullptr;
                 }
             }
 
@@ -272,7 +272,7 @@ void ViewStatus::load_session(QJsonArray measure_array, int version)
         int sig_index = m_obj["index"].toInt();
        
         if (version >= 3){
-            Signal *trace = NULL;
+            Signal *trace = nullptr;
 
             for(auto s : _view.get_own_signals()){
                 if (s->get_name().toInt() == sig_index){
@@ -281,7 +281,7 @@ void ViewStatus::load_session(QJsonArray measure_array, int version)
                 }
             }
 
-            if (trace == NULL)
+            if (trace == nullptr)
                 continue;
             sig_index = trace->get_index();
         }

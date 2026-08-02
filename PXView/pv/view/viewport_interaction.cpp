@@ -45,11 +45,11 @@
 #include <QStyleOption>
 #include <QWheelEvent>
 #include <QDateTime>
-#include <math.h>
+#include <cmath>
 #include <set>
 
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../ui/dockfonts.h"
 #include "../ui/fn.h"
@@ -115,7 +115,7 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         _viewport->_action_type = RESIZE_SIGNAL;
         _viewport->_resize_trace_upper = lastTrace;
-        _viewport->_resize_trace_lower = NULL;
+        _viewport->_resize_trace_lower = nullptr;
         _viewport->_resize_mouse_down_y = event->position().toPoint().y();
         _viewport->_resize_upper_height = lastTrace->get_totalHeight();
         _viewport->_resize_lower_height = 0;
@@ -223,7 +223,7 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
                        _viewport->_view.hover_point())) {
           auto &sigs = _viewport->_view.get_own_signals();
           auto s = sigs.begin();
-          bool sig_looped = ((*i)->channel() == NULL);
+          bool sig_looped = ((*i)->channel() == nullptr);
           bool no_dsoSig = true;
 
           while (true) {
@@ -241,7 +241,7 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
             s++;
             if (s == sigs.end()) {
               if (no_dsoSig) {
-                (*i)->set_channel(NULL);
+                (*i)->set_channel(nullptr);
                 break;
               }
               sig_looped = true;
@@ -558,7 +558,7 @@ void ViewportInteraction::onDsoMouseRelease(QMouseEvent *event) {
   }
   case DSO_TRIG_MOVE: {
     if (_viewport->_dso_trig_moved && event->button() == Qt::LeftButton) {
-      _viewport->_drag_sig = NULL;
+      _viewport->_drag_sig = nullptr;
       _viewport->set_action(NO_ACTION);
       _viewport->_dso_trig_moved = false;
 
@@ -646,8 +646,8 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
   int mode = _viewport->_view.get_work_mode();
 
   if (_viewport->_action_type == RESIZE_SIGNAL) {
-    _viewport->_resize_trace_upper = NULL;
-    _viewport->_resize_trace_lower = NULL;
+    _viewport->_resize_trace_upper = nullptr;
+    _viewport->_resize_trace_lower = nullptr;
     _viewport->set_action(NO_ACTION);
     return;
   }
@@ -724,7 +724,7 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         enabled_traces[i]->set_own_height(-1);
         enabled_traces[i + 1]->set_own_height(-1);
-        _viewport->_view.signals_changed(NULL);
+        _viewport->_view.signals_changed(nullptr);
         return;
       }
     }
@@ -737,7 +737,7 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
                         View::SignalMargin;
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         lastTrace->set_own_height(-1);
-        _viewport->_view.signals_changed(NULL);
+        _viewport->_view.signals_changed(nullptr);
         return;
       }
     }

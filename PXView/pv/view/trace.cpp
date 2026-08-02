@@ -22,15 +22,15 @@
  */
 
  
-#include <assert.h>
-#include <math.h> 
+#include <cassert>
+#include <cmath> 
 #include <QFormLayout>
 #include <QApplication>
 
 #include "trace.h"
 #include "view.h"
 #include "../sigsession.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../config/appconfig.h"
 #include "../config/appconfig.h"
@@ -68,7 +68,7 @@ const QColor Trace::PROBE_COLORS[8] = {
 const int Trace::LabelHitPadding = 2;
 
 Trace::Trace(QString name, uint16_t index, int type) :
-    _view(NULL),
+    _view(nullptr),
 	_name(name),
     _v_offset(INT_MAX),
     _type(type),
@@ -82,7 +82,7 @@ Trace::Trace(QString name, uint16_t index, int type) :
 }
 
 Trace::Trace(QString name, std::list<int> index_list, int type, int sec_index) :
-    _view(NULL),
+    _view(nullptr),
     _name(name),
     _v_offset(INT_MAX),
     _type(type),

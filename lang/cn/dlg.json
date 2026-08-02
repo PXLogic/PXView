@@ -89,6 +89,10 @@
         "text": "打开文件"
     },
     {
+        "id": "IDS_DLG_IMPORT_FILE",
+        "text": "导入文件"
+    },
+    {
         "id": "IDS_DLG_OPEN_SEESION",
         "text": "打开配置"
     },
@@ -785,6 +789,10 @@
         "text": "标题栏显示配置文件名"
     },
     {
+        "id": "IDS_DLG_PROMPT_SAVE_ON_EXIT",
+        "text": "退出时提示保存数据"
+    },
+    {
         "id": "IDS_DLG_SERIAL_HEX",
         "text": "十六进制 :"
     },
@@ -1067,6 +1075,10 @@
     {
         "id": "IDS_DLG_SC_FILE_EXPORT",
         "text": "导出数据"
+    },
+    {
+        "id": "IDS_DLG_SC_FILE_IMPORT",
+        "text": "导入数据"
     },
     {
         "id": "IDS_DLG_SC_FILE_LOAD",
@@ -1883,5 +1895,25 @@
     {
         "id": "IDS_DLG_NO_DATA",
         "text": "无可用数据"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_RANDOM",
+        "text": "随机"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SINE",
+        "text": "正弦波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SQUARE",
+        "text": "方波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_SAWTOOTH",
+        "text": "锯齿波"
+    },
+    {
+        "id": "IDS_DLG_PATTERN_TRIANGLE",
+        "text": "三角波"
     }
 ]

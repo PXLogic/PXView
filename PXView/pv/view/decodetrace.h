@@ -178,7 +178,7 @@ private slots:
   void on_decode_done();
 
 public:
-  volatile bool _delete_flag; // destroy it when deocde task end
+  std::atomic<bool> _delete_flag{false}; // destroy it when deocde task end
 
 private:
   data::DataSource *_data_source = nullptr;

@@ -52,7 +52,7 @@
 #include "../data/datasource.h"
 #include "../data/sessiondocument.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../sigsession.h"
 #include "../toolbars/samplingbar.h"
 
@@ -691,7 +691,7 @@ void ViewDataSync::resizeEvent(QResizeEvent *event) {
   _view->setViewportMargins(_view->headerWidth(), View::RulerHeight, 0, 0);
   _view->update_margins();
   _view->update_scroll();
-  _view->signals_changed(NULL);
+  _view->signals_changed(nullptr);
 
   if (_view->get_work_mode() == DSO) {
     _view->set_scale_offset(_view->_data_source->cur_view_time() / width, _view->_offset);

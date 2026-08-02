@@ -20,7 +20,7 @@
 #include <QDir>
 #include <QString>
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
 #include <chrono>
 #include <functional>
 #include <stdexcept>

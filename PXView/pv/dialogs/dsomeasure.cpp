@@ -32,7 +32,7 @@
 #include <QTabBar>
 #include <QBitmap>
  
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../eventobject.h"
 
 #include "../ui/langresource.h"
@@ -53,7 +53,7 @@ DsoMeasure::DsoMeasure(SigSession *session, View &parent,
     _button_box(QDialogButtonBox::Reset | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
-    _measure_tab = NULL;
+    _measure_tab = nullptr;
 
     setMinimumSize(500, 400);
 
@@ -126,7 +126,7 @@ void DsoMeasure::set_measure(bool en)
 {
     (void)en;
     QCheckBox* sc=dynamic_cast<QCheckBox*>(sender());
-    if(sc != NULL) {
+    if(sc != nullptr) {
         QVariant id = sc->property("id");
     }
 }
@@ -148,7 +148,7 @@ QString DsoMeasure::get_ms_text(int ms_type)
     assert(ms_type >= DSO_MS_BEGIN);
     assert(ms_type < DSO_MS_END);
     //tr
-    const QString label_name[DSO_MS_END-DSO_MS_BEGIN] = {tr("NULL"),
+    const QString label_name[DSO_MS_END-DSO_MS_BEGIN] = {tr("nullptr"),
                                                          tr("Freq"), tr("Period"), tr("+Duty"), tr("-Duty"), tr("+Count"),
                                                          tr("Rise"), tr("Fall"), tr("+Width"), tr("-Width"), tr("BrstW"),
                                                          tr("Ampl"), tr("High"), tr("Low"), tr("RMS"), tr("Mean"),
@@ -161,7 +161,7 @@ void DsoMeasure::accept()
 	using namespace Qt;
 
     auto sc = dynamic_cast<QToolButton*>(sender());
-    if(sc != NULL) {
+    if(sc != nullptr) {
         QVariant id = sc->property("id");
         enum DSO_MEASURE_TYPE ms_type = DSO_MEASURE_TYPE(id.toInt());
         

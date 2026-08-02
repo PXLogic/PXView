@@ -21,14 +21,13 @@
  */
 
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
-#include <boost/bind.hpp>
 
 #include <QApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QMetaObject>
 #include <QUrl>
-#include <assert.h>
+#include <cassert>
 
 #include "../config/appconfig.h"
 #include "../dialogs/about.h"
@@ -47,7 +46,7 @@ LogoBar::LogoBar(SigSession *session, QWidget *parent)
 // _logo_button(this)
 
 {
-  _mainForm = NULL;
+  _mainForm = nullptr;
 
   setMovable(false);
   setContentsMargins(0, 0, 0, 0);

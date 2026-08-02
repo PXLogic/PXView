@@ -22,7 +22,7 @@
 
 #include "uimanager.h"
 #include "iconcache.h"
-#include <assert.h>
+#include <cassert>
 
 UiManager::UiManager()
 {

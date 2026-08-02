@@ -26,7 +26,7 @@
 
 #include <utility>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 #include "property.h"
 
@@ -43,8 +43,8 @@ class Double : public Property
 
 public:
     Double(QString name, QString label, int decimals, QString suffix,
-		boost::optional< std::pair<double, double> > range,
-		boost::optional<double> step,
+		std::optional< std::pair<double, double> > range,
+		std::optional<double> step,
 		Getter getter,
 		Setter setter);
 
@@ -62,8 +62,8 @@ private slots:
 private:
 	const int _decimals;
 	const QString _suffix;
-	const boost::optional< std::pair<double, double> > _range;
-	const boost::optional<double> _step;
+	const std::optional< std::pair<double, double> > _range;
+	const std::optional<double> _step;
 
 	pv::ui::DsDoubleSpinBox *_spin_box;
 };

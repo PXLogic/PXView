@@ -44,11 +44,11 @@
 #include <QScrollBar>
 #include <QStyleOption>
 #include <QWheelEvent>
-#include <math.h>
+#include <cmath>
 #include <set>
 
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../ui/dockfonts.h"
 #include "../ui/fn.h"

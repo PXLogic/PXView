@@ -26,7 +26,7 @@
 
 #include <list>
 
-#include <boost/optional.hpp> 
+#include <optional> 
   
 
 #include <QObject>

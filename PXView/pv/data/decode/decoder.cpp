@@ -1,6 +1,6 @@
 #include <libsigrokdecode.h>
 #include "decoder.h"
-#include <assert.h>
+#include <cassert>
 #include "../../log.h"
 
 namespace pv {
@@ -34,7 +34,7 @@ void Decoder::set_probes(std::map<const srd_channel *, int> probes) {
 void Decoder::set_option(const char *id, GVariant *value)
 {
 	if (!value) {
-		pxv_warn("%s", "Decoder::set_option: value is NULL");
+		pxv_warn("%s", "Decoder::set_option: value is nullptr");
 		return;
 	}
 	assert(value);
@@ -139,7 +139,7 @@ srd_decoder_inst* Decoder::create_decoder_inst(srd_session *session)
 	g_hash_table_destroy(opt_hash);
 
 	if(!decoder_inst)
-		return NULL;
+		return nullptr;
 
 	GHashTable *const probes = g_hash_table_new_full(g_str_hash,
 		g_str_equal, g_free, (GDestroyNotify)g_variant_unref);

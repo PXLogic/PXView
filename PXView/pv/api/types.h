@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace pv {
@@ -150,83 +152,71 @@ struct Error {
         : code(c), message(std::move(msg)) {}
 };
 
-// ---- Result<T> ----
+// ---- Result<T> (C++23: thin wrapper over std::expected) ----
+//
+// Result<T> is now backed by std::expected<T, Error>, leveraging the C++23
+// standard library for error handling semantics. The public API (Success /
+// Fail / ok / value / error / operator bool) is preserved for backward
+// compatibility with all existing call sites (~255 call sites in
+// session_service.cpp + app_service.cpp).
+//
+// New code MAY use std::expected<T, Error> directly for idiomatic C++23.
 
 template<typename T>
 class Result {
 public:
     static Result Success(T val) {
-        Result r;
-        r.ok_     = true;
-        r.value_  = std::move(val);
-        return r;
+        return Result{std::expected<T, Error>{std::move(val)}};
     }
 
     static Result Fail(ErrorCode code, std::string msg = "") {
-        Result r;
-        r.ok_    = false;
-        r.error_ = Error(code, std::move(msg));
-        return r;
+        return Result{std::expected<T, Error>{std::unexpected(Error(code, std::move(msg)))}};
     }
 
     static Result Fail(Error err) {
-        Result r;
-        r.ok_    = false;
-        r.error_ = std::move(err);
-        return r;
+        return Result{std::expected<T, Error>{std::unexpected(std::move(err))}};
     }
 
-    explicit operator bool() const noexcept { return ok_; }
+    explicit operator bool() const noexcept { return impl_.has_value(); }
 
-    bool ok() const noexcept { return ok_; }
+    bool ok() const noexcept { return impl_.has_value(); }
 
-    const T& value() const { return value_; }
-    T&       value()       { return value_; }
+    const T& value() const & { return impl_.value(); }
+    T&       value()       & { return impl_.value(); }
 
-    const Error& error() const { return error_; }
-    Error&       error()       { return error_; }
+    const Error& error() const & { return impl_.error(); }
+    Error&       error()       & { return impl_.error(); }
 
 private:
-    Result() = default;
-    bool   ok_ = false;
-    T      value_;
-    Error  error_{ErrorCode::Ok};
+    explicit Result(std::expected<T, Error>&& e) : impl_(std::move(e)) {}
+    std::expected<T, Error> impl_;
 };
 
 template<>
 class Result<void> {
 public:
     static Result Success() {
-        Result r;
-        r.ok_ = true;
-        return r;
+        return Result{std::expected<void, Error>{}};
     }
 
     static Result Fail(ErrorCode code, std::string msg = "") {
-        Result r;
-        r.ok_    = false;
-        r.error_ = Error(code, std::move(msg));
-        return r;
+        return Result{std::expected<void, Error>{std::unexpected(Error(code, std::move(msg)))}};
     }
 
     static Result Fail(Error err) {
-        Result r;
-        r.ok_    = false;
-        r.error_ = std::move(err);
-        return r;
+        return Result{std::expected<void, Error>{std::unexpected(std::move(err))}};
     }
 
-    explicit operator bool() const noexcept { return ok_; }
+    explicit operator bool() const noexcept { return impl_.has_value(); }
 
-    bool ok() const noexcept { return ok_; }
+    bool ok() const noexcept { return impl_.has_value(); }
 
-    const Error& error() const { return error_; }
-    Error&       error()       { return error_; }
+    const Error& error() const & { return impl_.error(); }
+    Error&       error()       & { return impl_.error(); }
 
 private:
-    Result() = default;
-    bool  ok_ = false;
-    Error error_{ErrorCode::Ok};
+    explicit Result(std::expected<void, Error>&& e) : impl_(std::move(e)) {}
+    std::expected<void, Error> impl_;
 };
 
 // ---- Data Structs ----

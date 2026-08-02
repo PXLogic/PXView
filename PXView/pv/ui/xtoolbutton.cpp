@@ -33,13 +33,13 @@
 namespace
 {
     static int _click_times = 0;
-    static XToolButton *_lst_button = NULL;
+    static XToolButton *_lst_button = nullptr;
 } 
 
 XToolButton::XToolButton(QWidget *parent)
     :QToolButton(parent)
 {
-    _menu = NULL;
+    _menu = nullptr;
     _is_mouse_down = false; 
 }
 
@@ -55,7 +55,7 @@ void XToolButton::mousePressEvent(QMouseEvent *event)
 
 #ifdef _WIN32
     _menu = this->menu();
-    if (_menu == NULL){
+    if (_menu == nullptr){
         QToolButton::mousePressEvent(event); // is not a popup menu.
         return;
     }
@@ -111,7 +111,7 @@ void XToolButton::onHidePopupMenu()
        _click_times = 0;
     }
    
-    if (_menu != NULL){
+    if (_menu != nullptr){
         disconnect(_menu, &QMenu::aboutToHide, this, &XToolButton::onHidePopupMenu);
     } 
 

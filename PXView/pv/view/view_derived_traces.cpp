@@ -42,7 +42,7 @@
 #include "../data/decoderstack.h"
 #include "../data/lissajousmodel.h"
 #include "../data/spectrumstack.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 
@@ -147,10 +147,10 @@ bool ViewDerivedTraces::add_decoder(
     _view->_data_source->start_all_decode_tasks();
   }
 
-  // 7. Refresh layout. signals_changed(NULL) calls mark_derived_traces_dirty()
+  // 7. Refresh layout. signals_changed(nullptr) calls mark_derived_traces_dirty()
   //    at the top, but since the DecodeTrace list is already in sync, the
   //    subsequent sync_derived_traces() will be a no-op for decoders.
-  _view->signals_changed(NULL);
+  _view->signals_changed(nullptr);
 
   return true;
 }
@@ -214,7 +214,7 @@ void ViewDerivedTraces::remove_decoder(DecodeTrace *trace) {
   //    Core's remove_decoder_by_key_handel() will remove the stack from
   //    its list and delete it (immediately if no decode thread holds it,
   //    otherwise asynchronously via _delete_flag). Core fires
-  //    signals_changed() callback which triggers View::signals_changed(NULL)
+  //    signals_changed() callback which triggers View::signals_changed(nullptr)
   //    — at that point sync_derived_traces() will find no DecodeTrace to
   //    remove (we already deleted it), so no double-free occurs.
   if (key_handel) {
@@ -449,6 +449,16 @@ void ViewDerivedTraces::sync_derived_traces() {
           lissajous_model->enabled(), snapshot, lissajous_model->x_index(),
           lissajous_model->y_index(), lissajous_model->percent());
       changed = true;
+    } else {
+      // Update parameters in case the user changed X/Y channel or percent
+      // in the LissajousOptions dialog without disabling first.
+      _view->_own_lissajous_trace->set_xIndex(lissajous_model->x_index());
+      _view->_own_lissajous_trace->set_yIndex(lissajous_model->y_index());
+      _view->_own_lissajous_trace->set_percent(lissajous_model->percent());
+      // Refresh the DsoSnapshot pointer — reload() may have rebuilt the
+      // snapshot, leaving the old pointer dangling. Without this, paint_mid
+      // would dereference a freed DsoSnapshot (UAF) or find it empty.
+      _view->_own_lissajous_trace->set_data(source->get_dso_snapshot());
     }
   } else {
     if (_view->_own_lissajous_trace) {

@@ -32,7 +32,7 @@
 #include <QRadioButton>
 #include <QSlider>
 #include "../view/dsosignal.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../toolbars/titlebar.h"
 #include "pxdialog.h"
 #include "../ui/uimanager.h"

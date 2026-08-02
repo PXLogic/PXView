@@ -23,16 +23,43 @@
 #ifndef UTILITY_ARRAY_H
 #define UTILITY_ARRAY_H
 
-#include <stdint.h>
+#include <cstdint>
+#include <span>
+#include <algorithm>
 
 namespace pv
 {
     namespace array
     {
-        uint64_t find_min_uint64(uint64_t *arr, int size);
+        // C++20: std::span replaces raw pointer + size parameters.
+        // Overloads for backward compat with existing callers that pass
+        // raw pointers; new code should pass containers directly.
 
-        uint64_t find_max_uint64(uint64_t *arr, int size);
-    }    
+        [[nodiscard]] inline uint64_t find_min_uint64(std::span<const uint64_t> arr) noexcept
+        {
+            if (arr.empty()) return 0;
+            return *std::ranges::min_element(arr);
+        }
+
+        [[nodiscard]] inline uint64_t find_max_uint64(std::span<const uint64_t> arr) noexcept
+        {
+            if (arr.empty()) return 0;
+            return *std::ranges::max_element(arr);
+        }
+
+        // Backward-compat overloads for raw pointer + size callers.
+        [[nodiscard]] inline uint64_t find_min_uint64(const uint64_t *arr, int size) noexcept
+        {
+            if (!arr || size <= 0) return 0;
+            return find_min_uint64(std::span<const uint64_t>{arr, static_cast<size_t>(size)});
+        }
+
+        [[nodiscard]] inline uint64_t find_max_uint64(const uint64_t *arr, int size) noexcept
+        {
+            if (!arr || size <= 0) return 0;
+            return find_max_uint64(std::span<const uint64_t>{arr, static_cast<size_t>(size)});
+        }
+    }
 }
 
 #endif

@@ -89,7 +89,7 @@ public:
     void Close();
 
     inline bool HaveArchive(){
-        return m_archive != NULL;
+        return m_archive != nullptr;
     }
 
     ZipInnerFileData* GetInnterFileData(const char *innerFile);

@@ -24,7 +24,7 @@
 #include "../core/documentregistry.h"
 #include "../core/eventbus.h"
 #include "../deviceagent.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../data/signalmodel.h"
 #include "../data/logicsnapshot.h"
 #include "../data/analogsnapshot.h"
@@ -398,7 +398,7 @@ ChannelType SessionService::sr_channel_type_to_api(int sr_type) const {
 Result<void> SessionService::start_capture(bool instant) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
     if (_session->is_working())
         return Result<void>::Fail(ErrorCode::CaptureInProgress,
                                  "Capture already in progress");
@@ -413,7 +413,7 @@ Result<void> SessionService::start_capture(bool instant) {
 Result<void> SessionService::stop_capture() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
     if (!_session->is_working())
         return Result<void>::Fail(ErrorCode::CaptureNotStarted,
                                  "No capture in progress");
@@ -436,7 +436,7 @@ Result<void> SessionService::stop_capture() {
 Result<void> SessionService::switch_work_mode(WorkMode mode) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
 
     int sr_mode = 0;
     switch (mode) {
@@ -467,7 +467,7 @@ Result<void> SessionService::switch_work_mode(WorkMode mode) {
 Result<void> SessionService::restart_capture() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
 
     bool ok = _session->re_start();
     if (!ok)
@@ -479,7 +479,7 @@ Result<void> SessionService::restart_capture() {
 Result<void> SessionService::wait_capture_complete(uint64_t timeout_ms) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
 
     CaptureState state = get_capture_state();
 
@@ -588,7 +588,7 @@ Result<int> SessionService::configure_and_start(
     (void)analog_sample_rate;
     if (!_session)
         return Result<int>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
     if (!_device || !_device->have_instance())
         return Result<int>::Fail(ErrorCode::MissingDevice,
                                  "No device connected");
@@ -1023,7 +1023,7 @@ int SessionService::get_current_capture_id() const {
 Result<void> SessionService::close_capture() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is null");
+                                 "Session is nullptr");
 
     // If capture is running, stop it first
     if (_session->is_working()) {
@@ -1338,7 +1338,7 @@ Result<void> SessionService::set_time_base(uint64_t tb) {
 Result<void> SessionService::set_collect_mode(CollectMode mode) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     DEVICE_COLLECT_MODE cm = COLLECT_SINGLE;
     switch (mode) {
@@ -1367,7 +1367,7 @@ Result<void> SessionService::set_collect_mode(CollectMode mode) {
 Result<void> SessionService::set_repeat_interval(double seconds) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     double old_interval = _session->get_repeat_intvl();
     _session->set_repeat_intvl(seconds);
@@ -1383,7 +1383,7 @@ Result<void> SessionService::set_repeat_interval(double seconds) {
 Result<uint64_t> SessionService::get_actual_sample_rate() const {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     uint64_t rate = _session->cur_samplerate();
     if (rate == 0)
@@ -1395,7 +1395,7 @@ Result<uint64_t> SessionService::get_actual_sample_rate() const {
 Result<uint64_t> SessionService::get_actual_sample_count() const {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     uint64_t count = _session->cur_samplelimits();
     if (count == 0)
@@ -1825,7 +1825,7 @@ Result<uint64_t> SessionService::get_logic_samples(
     std::vector<uint8_t> &out_data) {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     auto *snapshot = _session->get_logic_snapshot();
     if (!snapshot || !snapshot->have_data())
@@ -1857,7 +1857,7 @@ Result<uint64_t> SessionService::get_analog_samples(
     std::vector<float> &out_data) {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     auto *snapshot = _session->get_analog_snapshot();
     if (!snapshot || !snapshot->have_data())
@@ -1889,7 +1889,7 @@ Result<uint64_t> SessionService::get_dso_samples(
     std::vector<float> &out_data) {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     auto *snapshot = _session->get_dso_snapshot();
     if (!snapshot || !snapshot->have_data())
@@ -1921,7 +1921,7 @@ Result<uint64_t> SessionService::find_next_edge(
     uint64_t from_sample, int16_t channel_index, bool rising_edge) {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     auto *snapshot = _session->get_logic_snapshot();
     if (!snapshot || !snapshot->have_data())
@@ -1945,7 +1945,7 @@ Result<uint64_t> SessionService::find_pattern(
     const std::string &pattern) {
     if (!_session)
         return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is null");
+                                      "Session is nullptr");
 
     auto *snapshot = _session->get_logic_snapshot();
     if (!snapshot || !snapshot->have_data())
@@ -2245,7 +2245,7 @@ Result<std::string> SessionService::add_decoder(
     const std::string &stack_on_analyzer_id) {
     if (!_session)
         return Result<std::string>::Fail(ErrorCode::InternalError,
-                                         "Session is null");
+                                         "Session is nullptr");
 
     // Look up the decoder by ID
     srd_decoder *dec = srd_decoder_get_by_id(decoder_id.c_str());
@@ -2949,7 +2949,7 @@ Result<std::string> SessionService::add_decoder(
 Result<void> SessionService::remove_decoder(const std::string &instance_id) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // remove_decoder modifies Qt objects (DecoderStack is a QObject) and
     // triggers signals, so it MUST run on the main thread.
@@ -2981,7 +2981,7 @@ Result<void> SessionService::remove_decoder(const std::string &instance_id) {
 Result<void> SessionService::clear_all_decoders() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Snapshot the current decoder stacks BEFORE clearing so each removed
     // stack can be reported via DecoderRemoved events (mirrors remove_decoder).
@@ -3016,7 +3016,7 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
     uint64_t end_sample, int max_count) {
     if (!_session)
         return Result<std::vector<DecoderAnnotation>>::Fail(
-            ErrorCode::InternalError, "Session is null");
+            ErrorCode::InternalError, "Session is nullptr");
 
     // Find the decoder stack by instance_id
     auto &stacks = _session->get_decoder_stacks(api_document());
@@ -3159,7 +3159,7 @@ std::vector<CursorInfo> SessionService::get_cursors() const {
 Result<void> SessionService::add_cursor(uint64_t sample_pos) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Task C2.5: write to the Core-layer CursorRegistry first so headless
     // mode persists state. The broadcast is retained so the GUI View layer
@@ -3180,7 +3180,7 @@ Result<void> SessionService::add_cursor(uint64_t sample_pos) {
 Result<void> SessionService::remove_cursor(int index) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Task C2.5: remove from the Core-layer CursorRegistry. The broadcast
     // is retained so the GUI View layer (when present) can remove the
@@ -3198,7 +3198,7 @@ Result<void> SessionService::remove_cursor(int index) {
 Result<void> SessionService::clear_cursors() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Task C2.5: clear the Core-layer CursorRegistry. The broadcast is
     // retained so the GUI View layer (when present) clears its rendering
@@ -3216,7 +3216,7 @@ Result<void> SessionService::clear_cursors() {
 Result<void> SessionService::set_glitch_filter(const GlitchFilterConfig &config) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // 架构修复：用 channel_index 作 key，消除 View/Core 位置序号错位
     std::map<int, uint32_t> thresholds;
@@ -3251,7 +3251,7 @@ Result<void> SessionService::set_glitch_filter(const GlitchFilterConfig &config)
 Result<void> SessionService::clear_glitch_filter() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     _session->clear_glitch_filter();
     return Result<void>::Success();
@@ -3288,7 +3288,7 @@ GlitchFilterConfig SessionService::get_glitch_filter_config() const {
 Result<void> SessionService::set_signal_invert(const SignalInvertConfig &config) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     std::vector<bool> channels;
     channels.reserve(config.channels.size());
@@ -3303,7 +3303,7 @@ Result<void> SessionService::set_signal_invert(const SignalInvertConfig &config)
 Result<void> SessionService::clear_signal_invert() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     _session->clear_signal_invert();
     return Result<void>::Success();
@@ -3349,7 +3349,7 @@ DiskCacheInfo SessionService::get_disk_cache_info() const {
 Result<void> SessionService::load_file(const std::string &path) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     bool ok = _session->set_file(QString::fromStdString(path));
     if (!ok)
@@ -3363,7 +3363,7 @@ Result<void> SessionService::load_file(const std::string &path) {
 Result<void> SessionService::save_file(const std::string &path) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     StoreSession store(_session);
     store._sessionDataGetter = nullptr;
@@ -3382,7 +3382,7 @@ Result<void> SessionService::save_file(const std::string &path) {
 Result<void> SessionService::export_data(const ExportConfig &config) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     StoreSession store(_session);
     store._sessionDataGetter = nullptr;
@@ -3435,7 +3435,7 @@ Result<void> SessionService::export_data(const ExportConfig &config) {
 Result<void> SessionService::export_binary(const ExportConfig &config) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     QString output_dir = QString::fromStdString(config.output_path);
     QDir dir(output_dir);
@@ -3589,7 +3589,7 @@ Result<void> SessionService::export_decoder_table(
     bool iso8601_timestamp) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     auto &stacks = _session->get_decoder_stacks(api_document());
     if (stacks.empty())
@@ -3722,7 +3722,7 @@ Result<void> SessionService::export_raw_data_csv(
     bool iso8601_timestamp) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Ensure output directory exists
     QDir dir(QString::fromStdString(directory));
@@ -3776,7 +3776,7 @@ Result<void> SessionService::export_raw_data_binary(
     int analog_downsample_ratio) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     ExportConfig config;
     config.analog_downsample_ratio = static_cast<uint64_t>(analog_downsample_ratio);
@@ -3808,7 +3808,7 @@ Result<void> SessionService::export_data_table_csv(
     bool iso8601_timestamp) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     std::vector<AnalyzerExportConfig> analyzers;
     if (!analyzer_id.empty()) {
@@ -3829,7 +3829,7 @@ Result<void> SessionService::show_region(uint64_t start_sample,
                                          uint64_t end_sample) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Broadcast a ViewShowRegion request. The View layer (when present)
     // subscribes via IServiceEventListener and calls View::set_view_region().
@@ -3845,7 +3845,7 @@ Result<void> SessionService::show_region(uint64_t start_sample,
 Result<void> SessionService::zoom_fit() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // View-side operation. In GUI mode a subscribed View will respond;
     // in headless mode this is a no-op.
@@ -3856,7 +3856,7 @@ Result<void> SessionService::zoom_fit() {
 Result<void> SessionService::zoom_in() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     broadcast_event(ServiceEvent::ViewZoomIn);
     return Result<void>::Success();
@@ -3865,7 +3865,7 @@ Result<void> SessionService::zoom_in() {
 Result<void> SessionService::zoom_out() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     broadcast_event(ServiceEvent::ViewZoomOut);
     return Result<void>::Success();
@@ -3879,7 +3879,7 @@ Result<void> SessionService::enable_spectrum(int16_t channel_index,
                                              bool enable) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // The legacy SpectrumTrace had a separate enabled flag; SpectrumStack
     // (the de-view-ified core data object) does not. We rely on
@@ -3901,7 +3901,7 @@ Result<void> SessionService::enable_lissajous(int16_t x_channel,
                                               double percent) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     _session->lissajous_rebuild(true, x_channel, y_channel, percent);
     broadcast_event(ServiceEvent::ChannelConfigChanged,
@@ -3913,7 +3913,7 @@ Result<void> SessionService::enable_lissajous(int16_t x_channel,
 Result<void> SessionService::disable_lissajous() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     _session->lissajous_disable();
     return Result<void>::Success();
@@ -3923,7 +3923,7 @@ Result<void> SessionService::enable_math(int16_t ch1, int16_t ch2,
                                          int math_type) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     // Verify that both indices are valid DSO channels before invoking
     // math_rebuild (which now takes channel indices directly, not
@@ -4243,7 +4243,7 @@ void SessionService::on_event(const pv::interface::CopyInProgressChanged &) {
 }
 
 void SessionService::on_event(const pv::interface::CaptureOwnerChanged &ev) {
-    // new_owner non-null = capture in progress, null = idle.
+    // new_owner non-nullptr = capture in progress, nullptr = idle.
     broadcast_event(ServiceEvent::CaptureStateChanged,
                     {{"change", "capture_owner"},
                      {"is_working", ev.new_owner ? "true" : "false"}});
@@ -4277,7 +4277,7 @@ Result<void> SessionService::reconfigure_decoder(
     const std::map<std::string, int> &channel_map) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     auto do_reconfigure = [this, &instance_id, &options, &channel_map]() -> Result<void> {
         auto &stacks = _session->get_decoder_stacks(api_document());
@@ -4508,7 +4508,7 @@ Result<void> SessionService::reconfigure_decoder(
 Result<ErrorState> SessionService::get_error_state() {
     if (!_session)
         return Result<ErrorState>::Fail(ErrorCode::InternalError,
-                                        "Session is null");
+                                        "Session is nullptr");
 
     ErrorState state;
     auto err = _session->get_error();
@@ -4547,7 +4547,7 @@ Result<ErrorState> SessionService::get_error_state() {
 Result<void> SessionService::clear_error_state() {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     _session->clear_error();
     return Result<void>::Success();
@@ -4561,7 +4561,7 @@ Result<void> SessionService::set_save_range(uint64_t start_sample,
                                             uint64_t end_sample) {
     if (!_session)
         return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is null");
+                                  "Session is nullptr");
 
     if (start_sample > end_sample)
         return Result<void>::Fail(ErrorCode::ConfigInvalid,
@@ -4579,7 +4579,7 @@ Result<void> SessionService::set_save_range(uint64_t start_sample,
 Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
     if (!_session)
         return Result<std::vector<DeviceInfo>>::Fail(ErrorCode::InternalError,
-                                                     "Session is null");
+                                                     "Session is nullptr");
 
     // Trigger a hot-plug rescan of all upstream drivers. This refreshes
     // DeviceAgent's cached scanned_sdi() list (get_device_list reuses the
@@ -4670,7 +4670,7 @@ Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
 Result<MathResult> SessionService::get_math_results() {
     if (!_session)
         return Result<MathResult>::Fail(ErrorCode::InternalError,
-                                        "Session is null");
+                                        "Session is nullptr");
 
     MathResult result;
     auto math_stack = _session->get_math_stack();
@@ -4701,7 +4701,7 @@ Result<MathResult> SessionService::get_math_results() {
 Result<SpectrumResult> SessionService::get_spectrum_results() {
     if (!_session)
         return Result<SpectrumResult>::Fail(ErrorCode::InternalError,
-                                            "Session is null");
+                                            "Session is nullptr");
 
     SpectrumResult result;
     auto &stacks = _session->get_spectrum_stacks();
@@ -4737,7 +4737,7 @@ Result<SpectrumResult> SessionService::get_spectrum_results() {
 Result<LissajousResult> SessionService::get_lissajous_results() {
     if (!_session)
         return Result<LissajousResult>::Fail(ErrorCode::InternalError,
-                                             "Session is null");
+                                             "Session is nullptr");
 
     LissajousResult result;
     auto *model = _session->get_lissajous_model();
@@ -4762,7 +4762,7 @@ Result<std::vector<uint8_t>> SessionService::get_decoder_binary_output(
     const std::string &instance_id, int output_id) {
     if (!_session)
         return Result<std::vector<uint8_t>>::Fail(ErrorCode::InternalError,
-                                                  "Session is null");
+                                                  "Session is nullptr");
 
     // DecoderStack only registers an SRD_OUTPUT_ANN callback (see
     // decoderstack.cpp:815). Binary output (SRD_OUTPUT_BINARY) is declared
@@ -4792,7 +4792,7 @@ Result<std::vector<DecoderClassInfo>> SessionService::get_decoder_class_names(
     const std::string &decoder_id) {
     if (!_session)
         return Result<std::vector<DecoderClassInfo>>::Fail(
-            ErrorCode::InternalError, "Session is null");
+            ErrorCode::InternalError, "Session is nullptr");
 
     // Look up the decoder by ID. srd_decoder_get_by_id is the same accessor
     // used by add_decoder.
@@ -4804,7 +4804,7 @@ Result<std::vector<DecoderClassInfo>> SessionService::get_decoder_class_names(
 
     std::vector<DecoderClassInfo> result;
 
-    // dec->annotations is a GSList of char* (NULL-terminated descriptions).
+    // dec->annotations is a GSList of char* (nullptr-terminated descriptions).
     // The index in the list is the annotation class id, which matches the
     // ann_class field of DecoderAnnotation returned by get_decoder_annotations.
     int class_id = 0;

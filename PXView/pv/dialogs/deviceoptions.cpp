@@ -32,11 +32,11 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QSpinBox>
-#include <assert.h>
+#include <cassert>
 
 
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../prop/property.h"
 #include "../sigsession.h"
@@ -47,7 +47,6 @@
 #include "dsmessagebox.h"
 
 
-using namespace boost;
 using namespace std;
 
 //--------------------------ChannelLabel
@@ -161,14 +160,14 @@ DeviceOptions::DeviceOptions(SigSession *session, QWidget *parent)
   , _session(session)
   , _device_options_binding(session)
 {
-  _scroll_panel = NULL;
-  _container_panel = NULL;
-  _scroll = NULL;
+  _scroll_panel = nullptr;
+  _container_panel = nullptr;
+  _scroll = nullptr;
   _width = 0;
   _groupHeight1 = 0;
   _groupHeight2 = 0;
-  _dynamic_panel = NULL;
-  _container_lay = NULL;
+  _dynamic_panel = nullptr;
+  _container_lay = nullptr;
   _isBuilding = false;
   _cur_analog_tag_index = 0;
 
@@ -381,9 +380,9 @@ void DeviceOptions::logic_probes(QVBoxLayout &layout) {
   // channel count checked
   if (_device_agent->get_work_mode() == LOGIC) {
     GVariant *gvar_opts =
-        _device_agent->get_config_list(NULL, SR_CONF_CHANNEL_MODE);
+        _device_agent->get_config_list(nullptr, SR_CONF_CHANNEL_MODE);
 
-    if (gvar_opts != NULL) {
+    if (gvar_opts != nullptr) {
       /* Task 10.6/Phase 3: config_list now returns a GVariant string array
        * (g_variant_new_strv). Read via g_variant_get_strv instead of the
        * fork-style uint64 bare-pointer cast. Driver config_get also returns
@@ -458,7 +457,7 @@ void DeviceOptions::logic_probes(QVBoxLayout &layout) {
     if (cur_ch_num > vld_ch_num)
       probe->enabled = false;
 
-    ChannelLabel *ch_item = new ChannelLabel(this, NULL, probe->index);
+    ChannelLabel *ch_item = new ChannelLabel(this, nullptr, probe->index);
     channel_grid->addWidget(ch_item, channel_row, channel_column++);
     _probes_checkBox_list.push_back(ch_item->getCheckBox());
     ch_item->getCheckBox()->setCheckState(probe->enabled ? Qt::Checked
@@ -469,7 +468,7 @@ void DeviceOptions::logic_probes(QVBoxLayout &layout) {
       channel_column = 0;
       channel_row++;
 
-      if (l->next != NULL) {
+      if (l->next != nullptr) {
         row2++;
       }
     }
@@ -639,7 +638,7 @@ void DeviceOptions::channel_check() {
 
 void DeviceOptions::analog_channel_check() {
   QCheckBox *sc = dynamic_cast<QCheckBox *>(sender());
-  if (sc != NULL) {
+  if (sc != nullptr) {
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
       sr_channel *const probe = (sr_channel *)l->data;
 
@@ -666,7 +665,7 @@ void DeviceOptions::on_analog_channel_enable() {
 
 void DeviceOptions::channel_checkbox_clicked(QCheckBox *sc) {
   if (_device_agent->get_work_mode() == LOGIC) {
-    if (sc == NULL || !sc->isChecked())
+    if (sc == nullptr || !sc->isChecked())
       return;
 
     // SR_CONF_STREAM fork key deleted — use DeviceAgent typed wrapper.
@@ -693,7 +692,7 @@ void DeviceOptions::channel_checkbox_clicked(QCheckBox *sc) {
       sc->setChecked(false);
     }
   } else if (_device_agent->get_work_mode() == ANALOG) {
-    if (sc != NULL) {
+    if (sc != nullptr) {
       QGridLayout *const layout =
           (QGridLayout *)sc->property("Layout").value<void *>();
       int i = layout->count();
@@ -712,7 +711,7 @@ void DeviceOptions::channel_checkbox_clicked(QCheckBox *sc) {
 
       if (ck_index != -1) {
         _device_agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                       _dso_channel_list[ck_index], NULL);
+                                       _dso_channel_list[ck_index], nullptr);
       }
 
       while (i--) {
@@ -804,7 +803,7 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
       // map default 复选框的 connect 失效 + map 字段不被标记为 map-row。
       if (p->name().contains("map default", Qt::CaseInsensitive)) {
         // Bool 属性创建的是 QCheckBox (bool.cpp:51), 不是 QPushButton。
-        // 旧代码 qobject_cast<QPushButton*> 返回 NULL → connect 失效。
+        // 旧代码 qobject_cast<QPushButton*> 返回 nullptr → connect 失效。
         pow->setProperty("index", probe->index);
         QCheckBox *map_ckbox = qobject_cast<QCheckBox *>(pow);
         if (map_ckbox) {
@@ -816,7 +815,7 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
           bool map_default = true;
 
           _device_agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
-                                         probe, NULL);
+                                         probe, nullptr);
 
           if (map_default)
             pow->setEnabled(false);
@@ -841,13 +840,13 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
       /* demo 驱动 GET 返回 int32 ("i"), 匹配 sr_key_info_config SR_T_INT32。
        * 用 get_config_int32 读取。 */
       if (_device_agent->get_config_int32(SR_CONF_PROBE_COUPLING,
-                                          coupling_val, probe, NULL)) {
+                                          coupling_val, probe, nullptr)) {
         pxv_info("analog_probes: probe=%s coupling=%d (expected 1=DC)",
                  probe->name, coupling_val);
         if (coupling_val == 0 && _device_agent->is_demo()) {
           pxv_info("  -> syncing DC default (was GND=0)");
           _device_agent->set_config_int32(SR_CONF_PROBE_COUPLING, 1,
-                                           probe, NULL);
+                                           probe, nullptr);
         }
       } else {
         pxv_warn("analog_probes: probe=%s GET SR_CONF_PROBE_COUPLING failed",
@@ -855,13 +854,13 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
       }
       uint64_t vdiv_val = 0;
       if (_device_agent->get_config_uint64(SR_CONF_PROBE_VDIV,
-                                           vdiv_val, probe, NULL)) {
+                                           vdiv_val, probe, nullptr)) {
         pxv_info("analog_probes: probe=%s vdiv=%llu (expected 1000)",
                  probe->name, (unsigned long long)vdiv_val);
         if (vdiv_val == 0 && _device_agent->is_demo()) {
           pxv_info("  -> syncing default vdiv=1000 (was 0)");
           _device_agent->set_config_uint64(SR_CONF_PROBE_VDIV, 1000,
-                                           probe, NULL);
+                                           probe, nullptr);
         }
       } else {
         pxv_warn("analog_probes: probe=%s GET SR_CONF_PROBE_VDIV failed",
@@ -916,20 +915,20 @@ QString DeviceOptions::dynamic_widget(QLayout *lay) {
     // tr
     return L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHANNEL), "Channel");
   }
-  return NULL;
+  return nullptr;
 }
 
 void DeviceOptions::build_dynamic_panel() {
   _isBuilding = true;
 
-  if (_dynamic_panel != NULL) {
+  if (_dynamic_panel != nullptr) {
     _dynamic_panel->deleteLater();
-    _dynamic_panel = NULL;
+    _dynamic_panel = nullptr;
   }
 
   QFont font = theme_font_dialog();
 
-  if (_dynamic_panel == NULL) {
+  if (_dynamic_panel == nullptr) {
     _dynamic_panel = new QGroupBox("group", _dynamic_panel);
     _dynamic_panel->setFont(font);
     _container_lay->addWidget(_dynamic_panel);
@@ -998,7 +997,7 @@ void DeviceOptions::try_resize_scroll() {
   }
 
   QScrollArea *scroll = _scroll;
-  if (scroll == NULL) {
+  if (scroll == nullptr) {
     scroll = new QScrollArea(_scroll_panel);
     scroll->setWidget(_container_panel);
     scroll->setStyleSheet("QScrollArea{border:none;}");

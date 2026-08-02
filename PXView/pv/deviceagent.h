@@ -24,14 +24,14 @@
 #define DEVICE_AGENT_H
 
 #include <glib.h>
-#include <stdint.h>
+#include <cstdint>
 #include <libsigrok/libsigrok.h>
 #include <QString>
 #include <QVector>
 #include <thread>
 #include <vector>
 
-#include "dsvdef.h"
+#include "pxvdef.h"
 
 class IDeviceAgentCallback
 {
@@ -217,36 +217,36 @@ public:
 
     // --- Config (via sdi->driver->config_get/set/list) ---
     GVariant* get_config_list(const sr_channel_group *group, int key);
-    GVariant* get_config(int key, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config(int key, GVariant *data, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool have_config(int key, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    GVariant* get_config(int key, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config(int key, GVariant *data, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool have_config(int key, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_string(int key, QString &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_string(int key, const char *value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_string(int key, QString &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_string(int key, const char *value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_bool(int key, bool &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_bool(int key, bool value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_bool(int key, bool &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_bool(int key, bool value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_uint64(int key, uint64_t &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_uint64(int key, uint64_t value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_uint64(int key, uint64_t &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_uint64(int key, uint64_t value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_uint16(int key, int &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_uint16(int key, int value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_uint16(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_uint16(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_uint32(int key, uint32_t &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_uint32(int key, uint32_t value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_uint32(int key, uint32_t &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_uint32(int key, uint32_t value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_int16(int key, int &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_int16(int key, int value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_int16(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_int16(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_int32(int key, int &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_int32(int key, int value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_int32(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_int32(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_byte(int key, int &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_byte(int key, int value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_byte(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_byte(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
-    bool get_config_double(int key, double &value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
-    bool set_config_double(int key, double value, const sr_channel *ch = NULL, const sr_channel_group *cg = NULL);
+    bool get_config_double(int key, double &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_double(int key, double value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
     // --- sr_config create/free (fork libsigrok API stub) ---
     // Fork libsigrok exposed ds_new_config / ds_free_config for building
@@ -282,13 +282,13 @@ public:
     // PXView-local: real trigger sample position (uint64, read-only). Only
     // the PXLogic driver exposes it via SR_CONF_TRIGGER_POS. Returns 0 for
     // devices that don't support it (start-of-capture fallback). Safe to
-    // call when no device is connected (get_config handles the null case).
+    // call when no device is connected (get_config handles the nullptr case).
     uint64_t get_trigger_pos() const;
     QVector<uint64_t> get_probe_vdiv_list();
 
     // --- USB link info (replaces deleted SR_CONF_USB_SPEED/USB30_SUPPORT keys) ---
     // Returns PXV_USB_SPEED_* (LOW=1/FULL=2/HIGH=3/SUPER=4/SUPER_PLUS=5),
-    // defined in dsvdef.h. PXV_USB_SPEED_UNKNOWN (0) for non-USB devices or
+    // defined in pxvdef.h. PXV_USB_SPEED_UNKNOWN (0) for non-USB devices or
     // when speed cannot be determined. Values mirror libusb's enum so View
     // code may compare against LIBUSB_SPEED_* interchangeably. Reads
     // libusb_get_device_speed via libsigrok's sr_dev_inst_usb_speed_get() —
@@ -299,7 +299,7 @@ public:
     bool is_usb30();
 
     // Returns the active device's underlying libusb_device* (as void* to
-    // avoid pulling libusb.h into the header). NULL when no device is open
+    // avoid pulling libusb.h into the header). nullptr when no device is open
     // or the device is not USB. Intended for pointer-identity comparison
     // against hotplug DETACH device_handle values — comparing two pointer
     // values is safe even if one has been freed by libusb (no dereference).

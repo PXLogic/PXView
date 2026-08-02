@@ -21,7 +21,7 @@
  */
 
 
-#include <assert.h>
+#include <cassert>
 
 #include <QAbstractItemView>
 
@@ -29,7 +29,6 @@
 #include "../ui/dscombobox.h"
 #include "../log.h"
 
-using namespace boost;
 using namespace std;
 
 namespace pv {
@@ -40,7 +39,7 @@ Enum::Enum(QString name, QString label,
     Getter getter, Setter setter) :
     Property(name, label, getter, setter),
 	_values(values),
-	_selector(NULL)
+	_selector(nullptr)
 {
     for (std::vector< pair<GVariant*, QString> >::const_iterator i =
         _values.begin(); i != _values.end(); i++)
@@ -54,9 +53,9 @@ Enum::~Enum()
             g_variant_unref(_values[i].first);
 	}
 
-	if (_selector != NULL){
+	if (_selector != nullptr){
 		delete _selector;
-		_selector = NULL;
+		_selector = nullptr;
 	}
 }
 
@@ -65,12 +64,12 @@ QWidget* Enum::get_widget(QWidget *parent, bool auto_commit)
 	if (_selector)
 		return _selector;
 
-	GVariant *const value = _getter ? _getter() : NULL;
+	GVariant *const value = _getter ? _getter() : nullptr;
     if (!value) {
-        pxv_warn("Enum::get_widget: _getter() returned NULL for property '%s' "
+        pxv_warn("Enum::get_widget: _getter() returned nullptr for property '%s' "
                  "(name='%s'), widget will not be created",
                  label().toUtf8().data(), name().toUtf8().data());
-        return NULL;
+        return nullptr;
     }
 
 	_selector = new DsComboBox(parent);

@@ -25,11 +25,11 @@
 #include "../config/appconfig.h"
 #include "../data/logicsnapshot.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../sigsession.h"
 #include "view.h"
 #include <libsigrokdecode.h>
-#include <math.h>
+#include <cmath>
 
 using namespace std;
 

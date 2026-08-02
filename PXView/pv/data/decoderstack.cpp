@@ -21,10 +21,10 @@
  */
 
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
 #include <stdexcept>
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../ui/langresource.h"
@@ -40,7 +40,6 @@
 
 using namespace pv::data::decode;
 using namespace std;
-using namespace boost;
 
 namespace {
 // Static error message constants for decode worker thread.
@@ -68,16 +67,16 @@ DecoderStack::DecoderStack(pv::SigSession *session,
                            DecoderStatus *decoder_status)
     : _session(session) {
   if (!session) {
-    pxv_warn("%s", "DecoderStack::DecoderStack: session is NULL");
-    throw std::invalid_argument("DecoderStack: session is NULL");
+    pxv_warn("%s", "DecoderStack::DecoderStack: session is nullptr");
+    throw std::invalid_argument("DecoderStack: session is nullptr");
   }
   if (!dec) {
-    pxv_warn("%s", "DecoderStack::DecoderStack: dec is NULL");
-    throw std::invalid_argument("DecoderStack: dec is NULL");
+    pxv_warn("%s", "DecoderStack::DecoderStack: dec is nullptr");
+    throw std::invalid_argument("DecoderStack: dec is nullptr");
   }
   if (!decoder_status) {
-    pxv_warn("%s", "DecoderStack::DecoderStack: decoder_status is NULL");
-    throw std::invalid_argument("DecoderStack: decoder_status is NULL");
+    pxv_warn("%s", "DecoderStack::DecoderStack: decoder_status is nullptr");
+    throw std::invalid_argument("DecoderStack: decoder_status is nullptr");
   }
   assert(session);
   assert(dec);
@@ -90,9 +89,9 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _no_memory = false;
   _mark_index = -1;
   _decoder_status = decoder_status;
-  _stask_stauts = NULL;
+  _stask_stauts = nullptr;
   _is_capture_end = true;
-  _snapshot = NULL;
+  _snapshot = nullptr;
   _progress = 0;
   _is_decoding = false;
   _result_count = 0;
@@ -127,7 +126,7 @@ DecoderStack::~DecoderStack() {
 
 void DecoderStack::add_sub_decoder(decode::Decoder *decoder) {
   if (!decoder) {
-    pxv_warn("%s", "DecoderStack::add_sub_decoder: decoder is NULL");
+    pxv_warn("%s", "DecoderStack::add_sub_decoder: decoder is nullptr");
     return;
   }
   assert(decoder);
@@ -154,7 +153,7 @@ void DecoderStack::remove_sub_decoder(Decoder *decoder) {
 }
 
 void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
-  Decoder *decoder = NULL;
+  Decoder *decoder = nullptr;
 
   for (auto d : _stack) {
     if (d->get_dec_handel() == dec) {
@@ -206,7 +205,7 @@ void DecoderStack::build_row() {
       const srd_decoder_annotation_row *const ann_row =
           (srd_decoder_annotation_row *)l->data;
       if (!ann_row) {
-        pxv_warn("%s", "DecoderStack::build_row: ann_row is NULL, skipping");
+        pxv_warn("%s", "DecoderStack::build_row: ann_row is nullptr, skipping");
         continue;
       }
       assert(ann_row);
@@ -401,7 +400,7 @@ void DecoderStack::init() {
   _samples_decoded = 0;
   _error_message = QString();
   _no_memory = false;
-  _snapshot = NULL;
+  _snapshot = nullptr;
   _result_count = 0;
   _ann_dropped_stop = 0;
   _ann_dropped_mem = 0;
@@ -461,7 +460,7 @@ void DecoderStack::do_decode_work() {
 
   init();
 
-  _snapshot = NULL;
+  _snapshot = nullptr;
 
   pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
 
@@ -490,7 +489,7 @@ void DecoderStack::do_decode_work() {
       for (auto m : _session->get_signal_models()) {
         bool index_match = (m->index() == probe_idx);
         bool type_match = (m->type() == SR_CHANNEL_LOGIC);
-        bool snapshot_ok = (m->snapshot() != NULL);
+        bool snapshot_ok = (m->snapshot() != nullptr);
 
         pxv_info("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
                  m->index(), (int)m->type(), (int)SR_CHANNEL_LOGIC,
@@ -499,18 +498,18 @@ void DecoderStack::do_decode_work() {
         if (index_match && type_match) {
           _snapshot = (pv::data::LogicSnapshot*)m->snapshot();
           pxv_info("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot);
-          if (_snapshot != NULL)
+          if (_snapshot != nullptr)
             break;
         }
       }
-      if (_snapshot != NULL)
+      if (_snapshot != nullptr)
         break;
     } else {
       pxv_info("DecoderStack::do_decode_work: decoder %p has no probes, skipping", dec);
     }
   }
 
-  if (_snapshot == NULL) {
+  if (_snapshot == nullptr) {
     _error_message =
         QString::fromStdString(s_kRequiredChannelsMissing);
     pxv_err("ERROR:%s", _error_message.toStdString().c_str());
@@ -548,11 +547,11 @@ void DecoderStack::decode_data(const uint64_t decode_start,
                                srd_session *const session) {
   decode_task_status *status = _stask_stauts;
 
-  // uint8_t *chunk = NULL;
+  // uint8_t *chunk = nullptr;
   uint64_t last_cnt = 0;
   uint64_t notify_cnt = (decode_end - decode_start + 1) / 1000;
   if (notify_cnt == 0) notify_cnt = 1;
-  srd_decoder_inst *logic_di = NULL;
+  srd_decoder_inst *logic_di = nullptr;
 
   // find the first level decoder instant
   for (GSList *d = session->di_list; d; d = d->next) {
@@ -566,14 +565,14 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   }
 
   if (!logic_di) {
-    pxv_warn("%s", "DecoderStack::decode_data: logic_di is NULL");
+    pxv_warn("%s", "DecoderStack::decode_data: logic_di is nullptr");
     return;
   }
   assert(logic_di);
 
   uint64_t entry_cnt = 0;
   uint64_t i = decode_start;
-  char *error = NULL;
+  char *error = nullptr;
   bool bError = false;
   bool bEndTime = false;
   // struct srd_push_param push_param;
@@ -595,7 +594,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   void *lbp_array[35];
 
   for (int j = 0; j < logic_di->dec_num_channels; j++) {
-    lbp_array[j] = NULL;
+    lbp_array[j] = nullptr;
   }
 
   while (i < end_index && !_no_memory && !status->_bStop) {
@@ -635,10 +634,10 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
     for (int j = 0; j < logic_di->dec_num_channels; j++) {
       int sig_index = logic_di->dec_channelmap[j];
-      void *lbp = NULL;
+      void *lbp = nullptr;
 
       if (sig_index == -1) {
-        chunk.push_back(NULL);
+        chunk.push_back(nullptr);
         chunk_const.push_back(0);
       } else {
         if (_snapshot->has_data(sig_index)) {
@@ -649,7 +648,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
           if (_snapshot->is_able_free() == false) {
             if (lbp_array[j] != lbp) {
-              if (lbp_array[j] != NULL)
+              if (lbp_array[j] != nullptr)
                 _snapshot->free_decode_lpb(lbp_array[j]);
               lbp_array[j] = lbp;
             }
@@ -676,7 +675,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
         _error_message = QString::fromLocal8Bit(error);
         pxv_err("Failed to call srd_session_send:%s", error);
         g_free(error);
-        error = NULL;
+        error = nullptr;
       }
 
       bError = true;
@@ -718,13 +717,13 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   if (!bError && bEndTime) {
     srd_session_end(session, &error);
 
-    if (error != NULL) {
+    if (error != nullptr) {
       _error_message = QString::fromLocal8Bit(error);
       pxv_err("Failed to call srd_session_end:%s", error);
     }
   }
 
-  if (error != NULL)
+  if (error != nullptr)
     g_free(error);
 
   if (!_session->is_closed())
@@ -733,13 +732,13 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 }
 
 void DecoderStack::execute_decode_stack() {
-  srd_session *session = NULL;
-  srd_decoder_inst *prev_di = NULL;
+  srd_session *session = nullptr;
+  srd_decoder_inst *prev_di = nullptr;
   uint64_t decode_start = 0;
   uint64_t decode_end = 0;
 
   if (!_snapshot) {
-    pxv_warn("%s", "DecoderStack::execute_decode_stack: _snapshot is NULL");
+    pxv_warn("%s", "DecoderStack::execute_decode_stack: _snapshot is nullptr");
     return;
   }
   assert(_snapshot);
@@ -749,7 +748,7 @@ void DecoderStack::execute_decode_stack() {
   // all decoderstatck execute in sequence
   srd_session_new(&session);
 
-  if (session == NULL) {
+  if (session == nullptr) {
     pxv_err("Failed to call srd_session_new()");
     assert(false);
   }
@@ -803,18 +802,18 @@ void DecoderStack::execute_decode_stack() {
   srd_pd_output_callback_add(session, SRD_OUTPUT_ANN,
                              DecoderStack::annotation_callback, _stask_stauts);
 
-  char *error = NULL;
+  char *error = nullptr;
   int srd_ret = srd_session_start(session, &error);
 
   if (srd_ret == SRD_OK) {
     // need a lot time
     decode_data(decode_start, decode_end, session);
-  } else if (error != NULL) {
+  } else if (error != nullptr) {
     _error_message = QString::fromLocal8Bit(error);
   }
 
   // Destroy the session
-  if (error != NULL) {
+  if (error != nullptr) {
     g_free(error);
   }
 
@@ -833,11 +832,11 @@ uint64_t DecoderStack::sample_rate() { return _samplerate; }
 // the decode callback, annotation object will be create
 void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   if (!pdata) {
-    pxv_warn("%s", "DecoderStack::annotation_callback: pdata is NULL");
+    pxv_warn("%s", "DecoderStack::annotation_callback: pdata is nullptr");
     return;
   }
   if (!self) {
-    pxv_warn("%s", "DecoderStack::annotation_callback: self is NULL");
+    pxv_warn("%s", "DecoderStack::annotation_callback: self is nullptr");
     return;
   }
   assert(pdata);
@@ -847,7 +846,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
 
   DecoderStack *const d = st->_decoder;
   if (!d) {
-    pxv_warn("%s", "DecoderStack::annotation_callback: d is NULL");
+    pxv_warn("%s", "DecoderStack::annotation_callback: d is nullptr");
     return;
   }
   assert(d);
@@ -856,7 +855,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     d->_ann_dropped_stop++;
     return;
   }
-  if (d->_decoder_status == NULL) {
+  if (d->_decoder_status == nullptr) {
     pxv_err("decode task was deleted.");
     assert(false);
   }
@@ -867,7 +866,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
 
   Annotation *a = new Annotation(pdata, d->_decoder_status);
-  if (a == NULL) {
+  if (a == nullptr) {
     d->_no_memory = true;
     return;
   }
@@ -878,7 +877,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   assert(pdata->pdo->di);
   const srd_decoder *const decc = pdata->pdo->di->decoder;
   if (!decc) {
-    pxv_warn("%s", "DecoderStack::annotation_callback: decc is NULL");
+    pxv_warn("%s", "DecoderStack::annotation_callback: decc is nullptr");
     return;
   }
   assert(decc);
@@ -968,7 +967,7 @@ const char *DecoderStack::get_root_decoder_id() {
     decode::Decoder *dec = _stack.front();
     return dec->decoder()->id;
   }
-  return NULL;
+  return nullptr;
 }
 
 } // namespace data

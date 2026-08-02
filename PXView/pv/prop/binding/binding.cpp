@@ -98,7 +98,7 @@ QString Binding::print_gvariant(GVariant *const gvar)
     QString s;
 
     if (g_variant_is_of_type(gvar, G_VARIANT_TYPE("s")))
-        s = QString::fromUtf8(g_variant_get_string(gvar, NULL));
+        s = QString::fromUtf8(g_variant_get_string(gvar, nullptr));
     else
     {
         gchar *const text = g_variant_print(gvar, FALSE);

@@ -36,7 +36,7 @@ WinShadow::WinShadow(HWND hwnd, QWidget *parent)
     m_parent = parent;
     m_scale = 1;
     m_bActived = false;
-    m_callback = NULL;
+    m_callback = nullptr;
 
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint |
                    (!m_parent ? Qt::Tool : Qt::WindowFlags(0)));
@@ -64,7 +64,7 @@ void WinShadow::onMoveSelf()
 
 void WinShadow::onCheckForeWindow()
 {
-    if (m_callback != NULL){
+    if (m_callback != nullptr){
         HWND hw = GetForegroundWindow();
         if (hw != m_hwnd){
             m_callback->OnForeWindowLosed();

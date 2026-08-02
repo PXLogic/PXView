@@ -55,10 +55,10 @@ public:
     // QObject disables copy; SignalModel is managed by pointer (new/delete).
 
     // ---- Channel identity ----
-    inline int index() const { return _index; }
+    [[nodiscard]] inline int index() const { return _index; }
     void set_index(int index);
 
-    inline const std::string &name() const { return _name; }
+    [[nodiscard]] inline const std::string &name() const { return _name; }
     void set_name(const std::string &name);
 
     /// Returns the libsigrok SR_CHANNEL_* value (LOGIC=10000/DSO=10001/
@@ -67,26 +67,26 @@ public:
     /// (ds_*, get_snapshot, Trace base class, etc.). For the external MCP/JSON
     /// api::ChannelType contract, convert at the API boundary via
     /// SessionService::sr_channel_type_to_api().
-    inline int type() const { return _type; }
+    [[nodiscard]] inline int type() const { return _type; }
     void set_type(int type);
 
-    inline bool enabled() const { return _enabled; }
+    [[nodiscard]] inline bool enabled() const { return _enabled; }
     void set_enabled(bool enabled);
 
-    inline const std::string &color() const { return _color; }
+    [[nodiscard]] inline const std::string &color() const { return _color; }
     void set_color(const std::string &color);
 
     // ---- Probe configuration ----
-    inline double vdiv() const { return _vdiv; }
+    [[nodiscard]] inline double vdiv() const { return _vdiv; }
     void set_vdiv(double vdiv);
 
-    inline int coupling() const { return _coupling; }
+    [[nodiscard]] inline int coupling() const { return _coupling; }
     void set_coupling(int coupling);
 
-    inline double vfactor() const { return _vfactor; }
+    [[nodiscard]] inline double vfactor() const { return _vfactor; }
     void set_vfactor(double vfactor);
 
-    inline bool map_default() const { return _map_default; }
+    [[nodiscard]] inline bool map_default() const { return _map_default; }
     void set_map_default(bool map_default);
 
     // ---- Probe configuration (explicit sr_channel override) ----
@@ -100,10 +100,10 @@ public:
     void set_probe_factor(uint64_t factor, struct sr_channel *probe = nullptr);
 
     // ---- Trigger ----
-    inline int trig_type() const { return _trig_type; }
+    [[nodiscard]] inline int trig_type() const { return _trig_type; }
     void set_trig_type(int trig_type);
 
-    inline double trig_value() const { return _trig_value; }
+    [[nodiscard]] inline double trig_value() const { return _trig_value; }
     void set_trig_value(double v);
 
     /// Forward trig level via set_config_byte. Unlike set_trig_value
@@ -114,24 +114,24 @@ public:
     bool commit_trig();
 
     // ---- DSO parameters ----
-    inline double vertical_offset() const { return _vertical_offset; }
+    [[nodiscard]] inline double vertical_offset() const { return _vertical_offset; }
     void set_vertical_offset(double offset);
 
-    inline double zero_offset() const { return _zero_offset; }
+    [[nodiscard]] inline double zero_offset() const { return _zero_offset; }
     void set_zero_offset(double offset);
 
-    inline double hw_offset() const { return _hw_offset; }
+    [[nodiscard]] inline double hw_offset() const { return _hw_offset; }
     void set_hw_offset(double offset);
 
     // ---- Glitch filter ----
-    inline bool glitch_filter_enabled() const { return _glitch_filter_enabled; }
+    [[nodiscard]] inline bool glitch_filter_enabled() const { return _glitch_filter_enabled; }
     void set_glitch_filter_enabled(bool enabled);
 
-    inline int glitch_filter_width() const { return _glitch_filter_width; }
+    [[nodiscard]] inline int glitch_filter_width() const { return _glitch_filter_width; }
     void set_glitch_filter_width(int width);
 
     // ---- Signal invert ----
-    inline bool signal_invert_enabled() const { return _signal_invert_enabled; }
+    [[nodiscard]] inline bool signal_invert_enabled() const { return _signal_invert_enabled; }
     void set_signal_invert_enabled(bool enabled);
 
     // ---- Snapshot association ----

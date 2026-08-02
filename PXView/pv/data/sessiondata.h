@@ -31,7 +31,7 @@
 #include "analogsnapshot.h"
 #include "dsosnapshot.h"
 #include "logicsnapshot.h"
-#include "../dsvdef.h" // GlitchFilterMode
+#include "../pxvdef.h" // GlitchFilterMode
 
 namespace pv {
 

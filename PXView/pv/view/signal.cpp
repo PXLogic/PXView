@@ -24,10 +24,10 @@
 #include "signal.h"
 #include "../data/datasource.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../sigsession.h"
 #include "view.h"
-#include <math.h>
+#include <cmath>
 
 namespace pv {
 namespace view {

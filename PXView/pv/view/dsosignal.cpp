@@ -27,13 +27,13 @@
 #include <QCoreApplication>
 #include <QTimer>
 #include <functional>
-#include <math.h>
+#include <cmath>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
 #include "../data/dsosnapshot.h"
 #include "../data/signalmodel.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 #include "../sigsession.h"
 #include "../ui/langresource.h"
@@ -91,7 +91,7 @@ DsoSignal::DsoSignal(data::DsoSnapshot *data,
     : Signal(model, data_source), _data(data),
       _cached_hw_offset(model ? model->hw_offset() : 128),
       _hover_point(QPointF(-1, -1)) {
-  _vDial = NULL;
+  _vDial = nullptr;
   _period = 0;
   _pcount = 0;
   _scale = 0;
@@ -130,7 +130,7 @@ DsoSignal::DsoSignal(DsoSignal *s, pv::data::DsoSnapshot *data,
       _high_time(0), _burst_time(0), _pcount(0), _autoV(false), _autoH(false),
       _autoV_over(false), _auto_cnt(0), _hover_en(false), _hover_index(0),
       _hover_point(QPointF(-1, -1)), _hover_value(0) {
-  _vDial = NULL;
+  _vDial = nullptr;
 
   _trig_config = std::make_unique<DsoTriggerConfig>(this);
   _measure = std::make_unique<DsoMeasure>(this);
@@ -303,7 +303,7 @@ void DsoSignal::init_vDial(DsoSignal *src) {
     vUnit.append(DsoSignal::vDialUnit[i]);
   }
 
-  _vDial = NULL;
+  _vDial = nullptr;
 
   QVector<uint64_t> vValue = _data_source->device()->get_probe_vdiv_list();
   if (vValue.isEmpty()) {
@@ -395,7 +395,7 @@ bool DsoSignal::load_settings() {
   // -- enable state (sync from driver so CH1 is enabled by default)
   if (probe) {
     bool ch_enabled = false;
-    ret = _data_source->device()->get_config_bool(SR_CONF_PROBE_EN, ch_enabled, probe, NULL);
+    ret = _data_source->device()->get_config_bool(SR_CONF_PROBE_EN, ch_enabled, probe, nullptr);
     if (ret) {
       set_enable(ch_enabled);
     } else {
@@ -996,7 +996,7 @@ void DsoSignal::paint_trace(QPainter &p, const pv::data::DsoSnapshot *snapshot,
     s_dso_timing.get_samples_ms += gs_timer.elapsed();
 
     if (!samples_buffer) {
-      pxv_warn("[DSO] paint_trace: samples_buffer is NULL, skipping draw");
+      pxv_warn("[DSO] paint_trace: samples_buffer is nullptr, skipping draw");
       return;
     }
 

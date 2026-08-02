@@ -20,14 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <assert.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
+#include <cassert>
+#include <cstring>
+#include <cstdlib>
+#include <cmath>
 #include <algorithm>
  
 #include "dsosnapshot.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../log.h"
 
 using namespace std;
@@ -152,7 +152,7 @@ void DsoSnapshot::copy_from(const DsoSnapshot &src)
 
             dst_env.length = src_env.length;
             dst_env.data_length = src_env.data_length;
-            dst_env.samples = NULL;
+            dst_env.samples = nullptr;
 
             if (buffer_len > 0) {
                 dst_env.samples = (EnvelopeSample *)malloc(buffer_len);
@@ -196,7 +196,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
                                 GSList *channels, bool instant, bool isFile)
 {
     if (!channels) {
-        pxv_warn("%s", "DsoSnapshot::first_payload: channels is NULL");
+        pxv_warn("%s", "DsoSnapshot::first_payload: channels is nullptr");
         return;
     }
     assert(channels);
@@ -242,7 +242,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
             if (probe->type == SR_CHANNEL_DSO && (probe->enabled || isFile)) {
                 
                 uint8_t *chan_buffer = (uint8_t*)malloc(total_sample_count + 1);
-                if (chan_buffer == NULL){
+                if (chan_buffer == nullptr){
                     isOk = false;
                     pxv_err("DsoSnapshot::first_payload, Malloc memory failed!");
                     break;
@@ -266,7 +266,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
                     uint64_t buffer_len = envelop_count * sizeof(EnvelopeSample);
                     _envelope_levels[i][level].samples = (EnvelopeSample*)malloc(buffer_len);
                     
-                    if (_envelope_levels[i][level].samples == NULL) {
+                    if (_envelope_levels[i][level].samples == nullptr) {
                         pxv_err("DsoSnapshot::first_payload, malloc failed!");
                         isOk = false;
                         break;
@@ -374,10 +374,10 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
 
     /* AGENTS.md: assert() is a no-op in Release. If _ch_data[order] has
      * not been allocated yet (channel data not populated), return nullptr
-     * so callers can check for null instead of dereferencing a wild pointer
-     * (NULL + start_sample). */
+     * so callers can check for nullptr instead of dereferencing a wild pointer
+     * (nullptr + start_sample). */
     if (!_ch_data[order]) {
-        pxv_warn("DsoSnapshot::get_samples: _ch_data[%d] is NULL", order);
+        pxv_warn("DsoSnapshot::get_samples: _ch_data[%d] is nullptr", order);
         return nullptr;
     }
 

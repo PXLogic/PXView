@@ -40,7 +40,7 @@
 #include "../view/decodermodel.h"
 #include "../eventobject.h"
 #include "../config/appconfig.h"
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../utility/encoding.h"
 #include "../utility/path.h"
 #include "../log.h"
@@ -334,7 +334,7 @@ bool ProtocolExp::compare_ann_index(const data::decode::Annotation *a,
                     const data::decode::Annotation *b)
 {
     if (!a || !b) {
-        pxv_warn("%s", "ProtocolExp::compare_ann_index: annotation pointer is NULL");
+        pxv_warn("%s", "ProtocolExp::compare_ann_index: annotation pointer is nullptr");
         return false;
     }
     assert(a);

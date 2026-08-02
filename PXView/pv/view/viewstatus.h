@@ -29,7 +29,7 @@
 #include <QPushButton>
 #include <libsigrok/libsigrok.h>
 
-#include "../dsvdef.h"
+#include "../pxvdef.h"
 #include "../data/datasource.h"
 
 namespace pv {

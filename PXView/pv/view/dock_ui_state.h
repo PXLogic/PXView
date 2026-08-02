@@ -25,7 +25,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <map>
-#include <stdint.h>
+#include <cstdint>
 
 namespace pv {
 namespace view {

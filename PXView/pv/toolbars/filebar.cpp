@@ -33,9 +33,11 @@
 #include "../config/appconfig.h"
 #include "../utility/path.h"
 #include "../ui/langresource.h"
-#include "../log.h" 
+#include "../log.h"
 #include "../ui/fn.h"
 #include "../ui/iconcache.h"
+#include <libsigrok/libsigrok.h>
+#include <QFileInfo>
 
 
 namespace pv {
@@ -73,6 +75,9 @@ FileBar::FileBar(SigSession *session, QWidget *parent) :
      
     _action_export = new QAction(this);
     _action_export->setObjectName(QString::fromUtf8("actionExport"));
+
+    _action_import = new QAction(this);
+    _action_import->setObjectName(QString::fromUtf8("actionImport"));
      
     _action_capture = new QAction(this);
     _action_capture->setObjectName(QString::fromUtf8("actionCapture"));
@@ -85,6 +90,7 @@ FileBar::FileBar(SigSession *session, QWidget *parent) :
     _menu->addAction(_action_open);
     _menu->addAction(_action_save);
     _menu->addAction(_action_export);
+    _menu->addAction(_action_import);
     _menu->addAction(_action_capture);
     // _file_button.setMenu(_menu);
     // addWidget(&_file_button);
@@ -95,6 +101,7 @@ FileBar::FileBar(SigSession *session, QWidget *parent) :
     connect(_action_open, &QAction::triggered, this, &FileBar::on_actionOpen_triggered);
     connect(_action_save, &QAction::triggered, this, &FileBar::sig_save);
     connect(_action_export, &QAction::triggered, this, &FileBar::sig_export);
+    connect(_action_import, &QAction::triggered, this, &FileBar::on_actionImport_triggered);
     connect(_action_capture, &QAction::triggered, this, &FileBar::on_actionCapture_triggered);
 
     ADD_UI(this);
@@ -115,6 +122,7 @@ void FileBar::retranslateUi()
     _action_open->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_OPEN), "&Open..."));
     _action_save->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_SAVE), "&Save..."));
     _action_export->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_EXPORT), "&Export..."));
+    _action_import->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT), "&Import..."));
     _action_capture->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CAPTURE), "&Capture..."));
 }
 
@@ -135,6 +143,7 @@ void FileBar::reStyle()
     _action_open->setIcon(getIcon("/open.svg"));
     _action_save->setIcon(getIcon("/save.svg"));
     _action_export->setIcon(getIcon("/export.svg"));
+    _action_import->setIcon(getIcon("/import.svg"));
     _action_capture->setIcon(getIcon("/capture.svg"));
     // _file_button.setIcon(QIcon(iconPath+"/file.svg"));
 }
@@ -169,6 +178,82 @@ void FileBar::on_actionOpen_triggered()
     }
 }
 
+void FileBar::on_actionImport_triggered()
+{
+    //import external data file (VCD, CSV, binary, etc.)
+    //aligned with PulseView's import data functionality
+    AppConfig &app = AppConfig::Instance();
+
+    if (_session->have_hardware_data() && _session->is_first_store_confirm()){
+        if (MsgBox::Confirm(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_CAPDATE), "Save captured data?"))){
+            sig_save();
+            return;
+        }
+    }
+
+    // Build file filter from libsigrok input modules
+    QStringList filters;
+    QStringList allExtensions;
+    const struct sr_input_module **imods = sr_input_list();
+    if (imods) {
+        while (*imods) {
+            const struct sr_input_module *imod = *imods;
+            const char *id = sr_input_id_get(imod);
+            const char *name = sr_input_name_get(imod);
+            const char *const *exts = sr_input_extensions_get(imod);
+
+            if (!id)
+                continue;
+
+            // Collect extensions for "All supported formats" filter
+            if (exts) {
+                for (int i = 0; exts[i]; i++) {
+                    allExtensions << QString("*.") + exts[i];
+                }
+            }
+
+            // Build per-module filter: "Module Name (*.ext1 *.ext2)"
+            QString filter = QString(name ? name : id) + " (";
+            if (exts) {
+                for (int i = 0; exts[i]; i++) {
+                    if (i > 0)
+                        filter += " ";
+                    filter += "*." + QString(exts[i]);
+                }
+            }
+            filter += ")";
+            filters << filter;
+
+            imods++;
+        }
+    }
+
+    // Build the complete filter string
+    QString filterStr;
+    if (!allExtensions.isEmpty()) {
+        filterStr = QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File")) +
+                    " (" + allExtensions.join(" ") + ")";
+        filterStr += ";;";
+    }
+    filterStr += filters.join(";;");
+
+    const QString file_name = QFileDialog::getOpenFileName(
+        this,
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File"),
+        app.userHistory.openDir,
+        filterStr);
+
+    if (!file_name.isEmpty()) {
+        QString fname = path::GetDirectoryName(file_name);
+        if (fname != app.userHistory.openDir){
+            app.userHistory.openDir = fname;
+            app.SaveHistory();
+        }
+
+        sig_import_file(file_name);
+    }
+}
+
 void FileBar::on_actionLoad_triggered()
 { 
     //load session file
@@ -194,7 +279,7 @@ void FileBar::on_actionDefault_triggered()
 { 
     QDir dir(GetFirmwareDir());
     if (!dir.exists()) { 
-          MsgBox::Show(NULL, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NOT_FOND_DEFAULT_PROFILE),
+          MsgBox::Show(nullptr, L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NOT_FOND_DEFAULT_PROFILE),
              "Cannot find default profile for this device!"), this);
           return;
     }

@@ -30,7 +30,7 @@
 
 namespace{
     std::vector<PopuDlgItem> g_popup_dlg_list;
-    QScreen     *currentScreen = NULL;
+    QScreen     *currentScreen = nullptr;
 }
 
 void PopupDlgList::AddDlgTolist(QWidget *w)

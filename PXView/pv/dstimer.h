@@ -31,7 +31,7 @@
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
-typedef std::function<void()> CALLBACL_FUNC;
+using CALLBACL_FUNC = std::function<void()>;
 
 
 class DsTimer : public QObject
