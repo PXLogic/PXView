@@ -14,9 +14,15 @@ if(NOT DISABLE_WERROR)
 endif()
 
 # C++23: required for std::expected / std::print / concepts (C++20) /
-# std::span (C++20). Qt6.6+ and MinGW GCC 16+ fully support C++23.
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++23")
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
+# std::span (C++20). Use CMAKE_CXX_STANDARD instead of -std=c++23 in
+# CMAKE_CXX_FLAGS so that CMake appends the standard flag AFTER Qt's
+# imported-target flags (which may add -std=gnu++17 on macOS, overriding
+# our flag if it appears earlier on the command line).
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS ON)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 
 include_directories(
