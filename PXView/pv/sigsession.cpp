@@ -949,7 +949,12 @@ double SigSession::cur_snap_sampletime() {
 }
 
 double SigSession::get_logic_data_view_time() {
-  return _state->view_data()->get_logic()->get_ring_sample_count() * 1.0 /
+  // Use capture_data (live buffer) during realtime refresh in double-buffer mode.
+  SessionData *data = _state->view_data();
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    data = _state->capture_data();
+  return data->get_logic()->get_ring_sample_count() * 1.0 /
          cur_snap_samplerate();
 }
 
@@ -1793,12 +1798,18 @@ SigSession::get_decoder_trace(int index, data::SessionDocument *doc) {
 
 Snapshot *SigSession::get_signal_snapshot() {
   int mode = _state->device_agent().get_work_mode();
+  // During realtime refresh in double-buffer mode, check the live capture
+  // buffer (capture_data) instead of the stale view_data.
+  SessionData *data = _state->view_data();
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    data = _state->capture_data();
   if (mode == ANALOG)
-    return _state->view_data()->get_analog();
+    return data->get_analog();
   else if (mode == DSO)
-    return _state->view_data()->get_dso();
+    return data->get_dso();
   else
-    return _state->view_data()->get_logic();
+    return data->get_logic();
 }
 
 // Note: device_lib_event_callback_ex / on_device_lib_event removed.
@@ -1874,10 +1885,8 @@ void SigSession::on_event(const interface::RevEndPacket &) {
         bAddDecoder = true;
         bSwapBuffer = true;
       } else if (_capture_manager->capture_times() > 1) {
-        // Stream mode + repeat: start decoders but don't swap buffers.
-        // Single-buffer mode means _view_data == _capture_data, so the
-        // swap is unnecessary — the view already shows the live data.
         bAddDecoder = true;
+        bSwapBuffer = true;
       }
     } else if (is_loop_mode()) {
       bAddDecoder = true;
@@ -1902,6 +1911,16 @@ void SigSession::on_event(const interface::RevEndPacket &) {
 
     // Switch the caputrued data buffer to view.
     if (bSwapBuffer) {
+      // CRITICAL: Join any pending copy thread before clearing old view_data.
+      // The copy thread reads from _state->view_data() (the previous capture's
+      // data). If we clear it here without joining, the copy thread would read
+      // freed/corrupted memory. In double-buffer mode, exec_capture skips the
+      // copy_in_progress wait, so the copy might still be running when the next
+      // RevEndPacket arrives.
+      if (_document_registry->copy_thread().joinable()) {
+        _document_registry->copy_thread().join();
+      }
+
       if (_state->view_data() != _state->capture_data())
         _state->view_data()->clear();
 
@@ -1914,19 +1933,9 @@ void SigSession::on_event(const interface::RevEndPacket &) {
       _event_bus->broadcast_async<interface::DataPoolChanged>({});
     }
 
-    if (bAddDecoder && _document_registry->get_active_document() &&
-        !(_capture_manager->is_stream_mode() && is_repeat_mode())) {
+    if (bAddDecoder && _document_registry->get_active_document()) {
       // Move copy_data_to_document to a background thread
       // so the UI thread is not blocked by the deep copy.
-      //
-      // CRITICAL: Stream mode + repeat mode is EXCLUDED from the copy thread
-      // path. In single-buffer mode (used for scrolling), exec_capture() must
-      // wait for is_copy_in_progress() to finish before clearing
-      // capture_data() (= view_data). The deep copy of a large ring buffer
-      // can take seconds, blocking the main thread and causing visible lag
-      // at each capture end. Instead, use the ELSE branch (direct decode)
-      // which starts decoders immediately without a copy — they read from
-      // _view_data directly.
       // C4 fix: lock _capture_state_mutex to make the snapshot of
       // _copy_in_progress + _capture_owner_document atomic with respect
       // to CaptureOwnerGuard ctor/dtor and clear_capture_owner_document.
@@ -1956,9 +1965,8 @@ void SigSession::on_event(const interface::RevEndPacket &) {
       });
     } else {
       // No active document (typical in headless mode) OR stream mode (no
-      // copy thread needed) OR stream mode + repeat mode (skip copy to avoid
-      // blocking the main thread). Skip the deep copy to a SessionDocument
-      // and start the decoders directly. The decoders read their snapshots
+      // copy thread needed). Skip the deep copy to a SessionDocument and
+      // start the decoders directly. The decoders read their snapshots
       // from _view_data via get_signal_models(), so they don't need a
       // SessionDocument to be set up.
       pxv_info("RevEndPacket ELSE branch: starting decoders (single=%d)",
@@ -2273,14 +2281,27 @@ bool SigSession::have_decoded_result() {
 void SigSession::apply_samplerate() { on_load_config_end(); }
 
 data::LogicSnapshot *SigSession::get_logic_snapshot() {
+  // During realtime refresh in double-buffer mode (stream + repeat),
+  // capture_data != view_data. The live data is in capture_data (being
+  // filled by the driver), while view_data holds the previous capture.
+  // Return capture_data's logic so the view shows live scrolling data.
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->get_logic();
   return _state->view_data()->get_logic();
 }
 
 data::AnalogSnapshot *SigSession::get_analog_snapshot() {
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->get_analog();
   return _state->view_data()->get_analog();
 }
 
 data::DsoSnapshot *SigSession::get_dso_snapshot() {
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->get_dso();
   return _state->view_data()->get_dso();
 }
 

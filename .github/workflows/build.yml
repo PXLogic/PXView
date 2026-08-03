@@ -12,11 +12,11 @@ on:
         required: true
         default: '1.5.4'
       targets:
-        description: 'Which platforms to build (linux / mac / both)'
+        description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
-        default: 'both'
+        default: 'all'
         type: choice
-        options: [linux, mac, both]
+        options: [linux, mac, windows, both, all]
   push:
     tags:
       - 'v*'
@@ -45,7 +45,7 @@ jobs:
 
   linux:
     name: Linux AppImage (x86_64)
-    if: ${{ github.event.inputs.targets == 'linux' || github.event.inputs.targets == 'both' || github.event_name == 'push' }}
+    if: ${{ github.event.inputs.targets == 'linux' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     env:
       QT_PREFIX: ${{ github.workspace }}/Qt
@@ -295,7 +295,7 @@ jobs:
 
   mac:
     name: macOS (${{ matrix.arch }})
-    if: ${{ github.event.inputs.targets == 'mac' || github.event.inputs.targets == 'both' || github.event_name == 'push' }}
+    if: ${{ github.event.inputs.targets == 'mac' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
     strategy:
       fail-fast: false
       matrix:
@@ -672,6 +672,144 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: install.dir/*.dmg
+          draft: true
+          name: PXView ${{ steps.version.outputs.value }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows:
+    name: Windows x86_64 (MinGW)
+    if: ${{ github.event.inputs.targets == 'windows' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-svg
+            mingw-w64-x86_64-qt6-websockets
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-fftw
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-nettle
+            mingw-w64-x86_64-libftdi
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-lcms2
+            zip
+            unzip
+
+      - name: Resolve ref
+        id: ref
+        run: |
+          if [ -n "${{ github.event.inputs.ref }}" ]; then
+            echo "value=${{ github.event.inputs.ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=${{ github.ref }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "value=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          else
+            echo "value=1.5.4" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.value }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup Node.js (for Web UI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build fx2lafw firmware
+        run: |
+          bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=../install.dir
+
+      - name: Build and Install Web UI (optional)
+        run: cd build && ninja install-webui || echo "WARNING: Web UI skipped"
+
+      - name: Build PXView
+        run: cd build && ninja -j $(nproc)
+
+      - name: Install
+        run: cd build && ninja install
+
+      - name: Package (bundle DLLs and resources)
+        run: |
+          chmod +x window/copy-deps.sh
+          bash window/package.sh
+
+      - name: Create NSIS installer
+        shell: pwsh
+        run: |
+          $installer = "PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe"
+          makensis "/DPRODUCT_VERSION=${{ steps.version.outputs.value }}" window_nisi.nsi
+          if (Test-Path $installer) {
+            Write-Host "Installer created: $installer"
+            Get-Item $installer | Format-List Name, Length, LastWriteTime
+          } else {
+            Write-Error "NSIS installer not found: $installer"
+            exit 1
+          }
+
+      - name: Create portable zip
+        shell: pwsh
+        run: |
+          $zip = "PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip"
+          Compress-Archive -Path package\* -DestinationPath $zip
+          Write-Host "Portable zip created: $zip"
+
+      - name: Upload NSIS Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}
+          path: PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe
+          if-no-files-found: error
+
+      - name: Upload Portable Zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}
+          path: PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe
+            PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:

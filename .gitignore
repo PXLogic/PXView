@@ -5,7 +5,6 @@ build.dir/
 install.dir/
 install-qt6.dir/
 package/
-PXView-build/
 # CMake generated files
 CMakeCache.txt
 CMakeFiles/
@@ -131,9 +130,12 @@ cmake_clear
 # 新构建脚本同步到开源仓库 (不在 .gitignore 中):
 # build_linux.sh, build_macos.sh, build_windows.sh, build_fx2lafw.sh
 
-# 同步/迁移脚本
+# 同步/迁移脚本(旧双仓库模式,已废弃,单仓库模式不再需要)
 sync_to_repo.cmd
 sync_to_repo.ps1
+sync_to_opensource.ps1
+sync_to_package.ps1
+sync_to_wsl.cmd
 sync_opensource.ps1
 migrate_to_worktree.ps1
 
@@ -144,9 +146,8 @@ devdoc/
 _diffs/
 
 # Windows 打包二进制资源 (python embed dll/zip)
-# package.sh, copy-deps.sh 等脚本文件需要同步到开源仓库
+# package.sh, copy-deps.sh 等脚本文件已纳入 git 跟踪
 window/python/
-window/workflows/
 
 # 私有文档(doc/ 和 docs/ 下的私有文件,精确排除)
 doc/PXLogic使用文档v1.5.0.pdf

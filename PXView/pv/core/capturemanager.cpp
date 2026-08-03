@@ -304,7 +304,25 @@ bool CaptureManager::exec_capture() {
 
   // Wait for background copy_data_to_document to complete before
   // starting a new capture, to prevent source data from being cleared.
-  if (_state->document_registry()->is_copy_in_progress()) {
+  // In double-buffer mode (bSwapBuffer=true), the copy reads from view_data
+  // while the new capture goes to capture_data (a different buffer), so
+  // there's no conflict and we can skip the wait. This eliminates the
+  // main-thread lag at each capture end in stream mode + repeat mode.
+  bool will_swap_buffer = false;
+  {
+    int mode = _state->device_agent().get_work_mode();
+    if (mode != DSO && mode != ANALOG) {
+      if (is_repeat_mode()) {
+        if (_is_stream_mode) {
+          if (_capture_times > 1)
+            will_swap_buffer = true;
+        } else {
+          will_swap_buffer = true;
+        }
+      }
+    }
+  }
+  if (_state->document_registry()->is_copy_in_progress() && !will_swap_buffer) {
     pxv_info("Waiting for background copy_data_to_document to complete...");
     while (_state->document_registry()->is_copy_in_progress()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -339,25 +357,10 @@ bool CaptureManager::exec_capture() {
         bAddDecoder = true;
     } else if (is_repeat_mode()) {
       if (_is_stream_mode) {
-        // Stream mode + repeat: keep single buffer for all captures so
-        // is_single_buffer() stays true, is_realtime_refresh() returns
-        // true, and the waveform scrolls in realtime during every capture.
-        //
-        // DO NOT set bSwapBuffer — that would make is_single_buffer()
-        // false, causing the viewport to return early in set_receive_len()
-        // (the "else { return; }" branch), preventing both scroll and
-        // viewport updates. The user would see no data flowing and think
-        // repeat has stopped.
-        //
-        // For _capture_times == 1: set bAddDecoder to clear stale decode
-        // state from the previous session and start fresh.
-        // For _capture_times > 1: leave both flags false — the ongoing
-        // decode from the previous RevEndPacket continues running (it has
-        // the full capture duration to make progress), and the view shows
-        // live data via document_snapshot_source() falling back to
-        // _data_source when is_realtime_refresh() is true.
         if (_capture_times == 1)
           bAddDecoder = true;
+        else
+          bSwapBuffer = true;
       } else {
         bSwapBuffer = true;
       }
@@ -799,7 +802,7 @@ bool CaptureManager::is_realtime_refresh() {
     return true;
   if (_is_stream_mode && is_single_mode())
     return true;
-  if (_is_stream_mode && is_repeat_mode() && _state->is_single_buffer())
+  if (_is_stream_mode && is_repeat_mode())
     return true;
   return false;
 }

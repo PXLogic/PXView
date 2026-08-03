@@ -4,7 +4,11 @@
 
 ; --- Product constants ---
 !define PRODUCT_NAME "PXView"
-!define PRODUCT_VERSION "1.5.4"
+; PRODUCT_VERSION can be overridden from the command line:
+;   makensis /DPRODUCT_VERSION=1.5.4 window_nisi.nsi
+!ifndef PRODUCT_VERSION
+  !define PRODUCT_VERSION "1.5.4"
+!endif
 !define PRODUCT_PUBLISHER "pxview"
 !define PRODUCT_WEB_SITE "http://www.pxview.com"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\PXView.exe"

@@ -242,14 +242,6 @@ void ViewDataSync::clone_signals_for_document(
 }
 
 pv::data::DataSource *ViewDataSync::document_snapshot_source() {
-  // During realtime refresh (stream mode + single/repeat, loop mode), the
-  // view must show live capture data, not the document snapshot from the
-  // previous capture. Without this check, document_snapshot_source() would
-  // return the document (which has data from the previous capture's
-  // copy_data_to_document), causing the view to show frozen data instead
-  // of the live scrolling waveform.
-  if (_view->session().is_realtime_refresh())
-    return _view->_data_source;
   if (_view->_document && _view->_document->has_data())
     return _view->_document;
   return _view->_data_source;
