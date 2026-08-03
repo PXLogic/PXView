@@ -15,6 +15,7 @@ SetCompressor lzma
 
 ; ------ MUI Modern Interface (1.67+) ------
 !include "MUI.nsh"
+!include "LogicLib.nsh"
 
 ; MUI predefined constants
 !define MUI_ABORTWARNING
@@ -50,6 +51,16 @@ SetCompressor lzma
 !insertmacro MUI_RESERVEFILE_INSTALLOPTIONS
 ; ------ MUI Interface Definition End ------
 
+; ------ i18n LangStrings ------
+LangString MsgAppRunning ${LANG_ENGLISH} "PXView is currently running. Please close it before installing."
+LangString MsgAppRunning ${LANG_SIMPCHINESE} "PXView 正在运行中，请先关闭它再进行安装。"
+
+LangString MsgPrevDetected ${LANG_ENGLISH} "A previous version of ${PRODUCT_NAME} was detected. It must be removed before installing the new version.$\r$\n$\r$\nDo you want to automatically uninstall the old version now?"
+LangString MsgPrevDetected ${LANG_SIMPCHINESE} "检测到旧版本 ${PRODUCT_NAME}，安装新版本前需要先卸载旧版本。$\r$\n$\r$\n是否立即自动卸载旧版本？"
+
+LangString MsgUninstPrepFailed ${LANG_ENGLISH} "Failed to prepare the old uninstaller. Please manually uninstall ${PRODUCT_NAME} from Control Panel and try again."
+LangString MsgUninstPrepFailed ${LANG_SIMPCHINESE} "准备卸载程序失败，请从控制面板手动卸载 ${PRODUCT_NAME} 后重试。"
+
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "PXView-Windows-x86_64-Setup-${PRODUCT_VERSION}.exe"
 InstallDir "$PROGRAMFILES\PXView"
@@ -57,9 +68,18 @@ InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
 ShowInstDetails show
 ShowUnInstDetails show
 
+Var PREV_UNINSTALLER
+Var NEED_REBOOT_AFTER_INSTALL
+
 Section "MainSection" SEC01
+  ; If a previous uninstaller was found and executed, reboot if needed
+  ${If} $NEED_REBOOT_AFTER_INSTALL == 1
+    SetRebootFlag true
+  ${EndIf}
+
   SetOutPath "$INSTDIR"
-  SetOverwrite ifnewer
+  ; Force overwrite to ensure all files are updated (not just ifnewer)
+  SetOverwrite on
   File "package\PXView.exe"
   CreateDirectory "$SMPROGRAMS\PXView"
   CreateShortCut "$SMPROGRAMS\PXView\PXView.lnk" "$INSTDIR\PXView.exe"
@@ -88,6 +108,57 @@ SectionEnd
 
 Function .onInit
   !insertmacro MUI_LANGDLL_DISPLAY
+
+  ; --- Check if PXView is running (using built-in nsExec + tasklist, no plugin needed) ---
+  nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq PXView.exe" /NH | find /I "PXView.exe"'
+  Pop $R0
+  ${If} $R0 == 0
+    MessageBox MB_OK|MB_ICONSTOP "$(MsgAppRunning)" /SD IDOK
+    Abort
+  ${EndIf}
+
+  ; --- Check for previous installation and uninstall it first ---
+  ReadRegStr $PREV_UNINSTALLER HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
+  ${If} $PREV_UNINSTALLER != ""
+    ; If the uninstaller file exists, run it silently before installing
+    ${If} ${FileExists} "$PREV_UNINSTALLER"
+      MessageBox MB_YESNO|MB_ICONQUESTION \
+        "$(MsgPrevDetected)" \
+        /SD IDYES IDNO abort_install
+
+      ; Copy the old uninstaller to a temp location (because the uninstaller
+      ; cannot delete itself while running from $INSTDIR)
+      ClearErrors
+      CopyFiles /SILENT "$PREV_UNINSTALLER" "$TEMP\_pxview_old_uninst.exe"
+      ${If} ${Errors}
+        MessageBox MB_OK|MB_ICONSTOP \
+          "$(MsgUninstPrepFailed)" \
+          /SD IDOK
+        Abort
+      ${EndIf}
+
+      ; Run the old uninstaller silently
+      ClearErrors
+      ExecWait '"$TEMP\_pxview_old_uninst.exe" /S _?=$INSTDIR' $R0
+
+      ; Clean up the temp uninstaller copy
+      Delete "$TEMP\_pxview_old_uninst.exe"
+
+      ; If the uninstaller requested a reboot, defer it until after install
+      ${If} $R0 == 2
+        StrCpy $NEED_REBOOT_AFTER_INSTALL 1
+      ${EndIf}
+
+      ; Small delay to let file handles release
+      Sleep 1000
+    ${EndIf}
+  ${EndIf}
+  GoTo done
+
+  abort_install:
+    Abort
+
+  done:
 FunctionEnd
 
 /******************************
@@ -106,6 +177,7 @@ Section Uninstall
 
   RMDir "$SMPROGRAMS\PXView"
 
+  ; Remove everything under INSTDIR to ensure no stale files remain
   RMDir /r "$INSTDIR\styles"
   RMDir /r "$INSTDIR\sqldrivers"
   RMDir /r "$INSTDIR\res"
@@ -120,8 +192,10 @@ Section Uninstall
   RMDir /r "$INSTDIR\demo"
   RMDir /r "$INSTDIR\decoders"
   RMDir /r "$INSTDIR\bearer"
-  RMDir /r "$INSTDIR\*"
-  RMDir "$INSTDIR"
+  RMDir /r "$INSTDIR\translations"
+  RMDir /r "$INSTDIR\Qt*"
+  ; Remove any remaining files and subdirectories
+  RMDir /r "$INSTDIR"
 
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKLM "${PRODUCT_DIR_REGKEY}"
@@ -132,11 +206,8 @@ SectionEnd
 
 Function un.onInit
   !insertmacro MUI_UNGETLANGUAGE
-  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES +2
-  Abort
 FunctionEnd
 
 Function un.onUninstSuccess
   HideWindow
-  MessageBox MB_ICONINFORMATION|MB_OK "$(^Name) has been successfully removed from your computer."
 FunctionEnd

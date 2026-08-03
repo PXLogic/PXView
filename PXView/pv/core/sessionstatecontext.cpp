@@ -17,6 +17,7 @@
 #include "../log.h"
 
 #include <cassert>
+#include <QJsonDocument>
 
 namespace pv {
 namespace core {
@@ -291,11 +292,46 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
 
   const auto &cfg = _trigger_config;
 
-  // Only Simple trigger mode is synced to the driver. Adv/Serial trigger
-  // configurations are retained in TriggerConfig for future PXLogic driver
-  // extension but not currently synced (stub).
+  // Always sync capture_ratio (trigger position as 0..100 percent) to the driver.
+  // pxlogic's set_trigger() reads devc->capture_ratio at acquisition start to
+  // compute trigger_pos_set; demo/fx2lafw and other drivers also read it.
+  // Without this, trigger_pos_set stays at zero — trigger position is broken.
+  const int trig_pos = cfg.trigger_pos();
+  if (trig_pos >= 0 && trig_pos <= 100) {
+    if (!_device_agent.set_config_uint64(SR_CONF_CAPTURE_RATIO,
+                                         (uint64_t)trig_pos)) {
+      pxv_warn("sync_trigger_to_libsigrok: set SR_CONF_CAPTURE_RATIO=%d failed",
+               trig_pos);
+    } else {
+      pxv_info("sync_trigger_to_libsigrok: capture_ratio=%d synced", trig_pos);
+    }
+  }
+
+  // Sync advanced trigger configuration via SR_CONF_TRIGGER_ADV_* keys.
+  // These keys carry the full multi-stage trigger config (value0/value1/
+  // logic/inv/count per stage, serial trigger params) to the driver.
+  // The old fork used ds_trigger_* C API for this; upstream libsigrok
+  // has no equivalent, so these PXView-local keys bridge the gap.
+  _device_agent.set_config_byte(SR_CONF_TRIGGER_ADV_MODE,
+                                (uint8_t)cfg.mode());
+  _device_agent.set_config_bool(SR_CONF_TRIGGER_ADV_ENABLE,
+                                cfg.adv_enabled());
+  _device_agent.set_config_byte(SR_CONF_TRIGGER_ADV_STAGES,
+                                (uint8_t)cfg.stage_count());
+  {
+    QJsonDocument doc(cfg.to_json());
+    std::string json_str = doc.toJson(QJsonDocument::Compact).toStdString();
+    _device_agent.set_config_string(SR_CONF_TRIGGER_ADV_CONFIG, json_str.c_str());
+    pxv_info("sync_trigger_to_libsigrok: adv trigger synced (mode=%d, enable=%d, stages=%d, config_len=%zu)",
+             (int)cfg.mode(), (int)cfg.adv_enabled(), cfg.stage_count(),
+             json_str.size());
+  }
+
+  // Only Simple trigger mode uses the upstream sr_trigger API. Adv/Serial
+  // trigger is pushed via SR_CONF_TRIGGER_ADV_* keys above; the driver reads
+  // them at acquisition start (pxlogic set_trigger / demo receive_data).
   if (cfg.mode() != data::TriggerConfig::Simple) {
-    pxv_info("sync_trigger_to_libsigrok: Adv/Serial trigger not synced (stub)");
+    pxv_info("sync_trigger_to_libsigrok: Adv/Serial trigger synced via SR_CONF keys");
     return;
   }
 

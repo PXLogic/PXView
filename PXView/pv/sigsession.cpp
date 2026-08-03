@@ -1874,8 +1874,10 @@ void SigSession::on_event(const interface::RevEndPacket &) {
         bAddDecoder = true;
         bSwapBuffer = true;
       } else if (_capture_manager->capture_times() > 1) {
+        // Stream mode + repeat: start decoders but don't swap buffers.
+        // Single-buffer mode means _view_data == _capture_data, so the
+        // swap is unnecessary — the view already shows the live data.
         bAddDecoder = true;
-        bSwapBuffer = true;
       }
     } else if (is_loop_mode()) {
       bAddDecoder = true;
@@ -1912,9 +1914,19 @@ void SigSession::on_event(const interface::RevEndPacket &) {
       _event_bus->broadcast_async<interface::DataPoolChanged>({});
     }
 
-    if (bAddDecoder && _document_registry->get_active_document()) {
+    if (bAddDecoder && _document_registry->get_active_document() &&
+        !(_capture_manager->is_stream_mode() && is_repeat_mode())) {
       // Move copy_data_to_document to a background thread
       // so the UI thread is not blocked by the deep copy.
+      //
+      // CRITICAL: Stream mode + repeat mode is EXCLUDED from the copy thread
+      // path. In single-buffer mode (used for scrolling), exec_capture() must
+      // wait for is_copy_in_progress() to finish before clearing
+      // capture_data() (= view_data). The deep copy of a large ring buffer
+      // can take seconds, blocking the main thread and causing visible lag
+      // at each capture end. Instead, use the ELSE branch (direct decode)
+      // which starts decoders immediately without a copy — they read from
+      // _view_data directly.
       // C4 fix: lock _capture_state_mutex to make the snapshot of
       // _copy_in_progress + _capture_owner_document atomic with respect
       // to CaptureOwnerGuard ctor/dtor and clear_capture_owner_document.
@@ -1944,8 +1956,9 @@ void SigSession::on_event(const interface::RevEndPacket &) {
       });
     } else {
       // No active document (typical in headless mode) OR stream mode (no
-      // copy thread needed). Skip the deep copy to a SessionDocument and
-      // start the decoders directly. The decoders read their snapshots
+      // copy thread needed) OR stream mode + repeat mode (skip copy to avoid
+      // blocking the main thread). Skip the deep copy to a SessionDocument
+      // and start the decoders directly. The decoders read their snapshots
       // from _view_data via get_signal_models(), so they don't need a
       // SessionDocument to be set up.
       pxv_info("RevEndPacket ELSE branch: starting decoders (single=%d)",
@@ -2407,116 +2420,11 @@ void SigSession::set_trigger_config(const data::TriggerConfig &cfg) {
 }
 
 void SigSession::sync_trigger_to_libsigrok(bool disable_trigger) {
-  // Core→libsigrok 触发配置唯一同步点。在 start_capture 内部 sr_session_start 前调用。
-  //
-  // Fork libsigrok 删除后，ds_trigger_* API 不复存在。改用上游 sr_trigger_* API
-  // 同步 simple trigger。Adv/Serial trigger 字段保留在 TriggerConfig 中但暂不下发
-  // （UI 保留供 PXLogic 驱动未来扩展）。
-  //
-  // instant 模式（disable_trigger=true）：转发到 SessionStateContext 的统一实现，
-  // 清除 session 上的 sr_trigger，让所有 driver 都不等待触发。
-  if (disable_trigger) {
-    _state->sync_trigger_to_libsigrok(true);
-    return;
-  }
-
-  const auto &cfg = _state->trigger_config();
-
-  // Always sync capture_ratio (trigger position as 0..100 percent) to the driver.
-  // pxlogic's set_trigger() reads devc->capture_ratio at acquisition start to
-  // compute trigger_pos_set; scilogic already supported SR_CONF_CAPTURE_RATIO.
-  // Previously pxlogic read from pxlogic_trigger_cfg.trigger_pos stub that nobody
-  // populated, leaving trigger_pos_set at zero — broken since the fork removal.
-  const int trig_pos = cfg.trigger_pos();
-  if (trig_pos >= 0 && trig_pos <= 100) {
-    if (!_state->device_agent().set_config_uint64(SR_CONF_CAPTURE_RATIO,
-                                                   (uint64_t)trig_pos)) {
-      pxv_warn("sync_trigger_to_libsigrok: set SR_CONF_CAPTURE_RATIO=%d failed",
-               trig_pos);
-    } else {
-      pxv_info("sync_trigger_to_libsigrok: capture_ratio=%d synced", trig_pos);
-    }
-  }
-
-  // Only Simple trigger mode is synced to the driver. Adv/Serial trigger
-  // configurations are retained in TriggerConfig for future PXLogic driver
-  // extension but not currently synced (stub).
-  if (cfg.mode() != data::TriggerConfig::Simple) {
-    pxv_info("sync_trigger_to_libsigrok: Adv/Serial trigger not synced (stub)");
-    return;
-  }
-
-  // Build an upstream sr_trigger from the SignalModel trig_type fields.
-  // The trigger is attached to the session via sr_session_trigger_set().
-  struct sr_trigger *trig = sr_trigger_new("pxview");
-  if (!trig) {
-    pxv_err("sync_trigger_to_libsigrok: sr_trigger_new failed");
-    return;
-  }
-
-  struct sr_trigger_stage *stage = sr_trigger_stage_add(trig);
-  if (!stage) {
-    sr_trigger_free(trig);
-    return;
-  }
-
-  bool any_triggered = false;
-  for (const auto &m : _state->signal_models()) {
-    if (!m || m->type() != SR_CHANNEL_LOGIC)
-      continue;
-
-    // Find the sr_channel for this SignalModel index.
-    struct sr_channel *ch = nullptr;
-    for (const GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-      struct sr_channel *probe = (struct sr_channel *)l->data;
-      if (probe && probe->index == m->index()) {
-        ch = probe;
-        break;
-      }
-    }
-    if (!ch)
-      continue;
-
-    int match = 0;
-    const char *match_name = "UNKNOWN";
-    switch (m->trig_type()) {
-    case data::SignalModel::POSTRIG:  match = SR_TRIGGER_RISING;  match_name = "RISING";  any_triggered = true; break;
-    case data::SignalModel::NEGTRIG:  match = SR_TRIGGER_FALLING; match_name = "FALLING"; any_triggered = true; break;
-    case data::SignalModel::HIGTRIG:  match = SR_TRIGGER_ONE;     match_name = "ONE";     any_triggered = true; break;
-    case data::SignalModel::LOWTRIG:  match = SR_TRIGGER_ZERO;    match_name = "ZERO";    any_triggered = true; break;
-    case data::SignalModel::EDGTRIG:  match = SR_TRIGGER_EDGE;    match_name = "EDGE";    any_triggered = true; break;
-    case data::SignalModel::NONTRIG:
-    default: continue; // skip non-trigger channels
-    }
-
-    pxv_info("sync_trigger_to_libsigrok: ch index=%d (sr_ch index=%d, enabled=%d), trig_type=%d (%s)",
-             m->index(), ch->index, (int)ch->enabled, m->trig_type(), match_name);
-
-    if (sr_trigger_match_add(stage, ch, match, 0.0f) != SR_OK) {
-      pxv_warn("sync_trigger_to_libsigrok: sr_trigger_match_add failed for ch %d", m->index());
-    }
-  }
-
-  // sr_session_trigger_set does NOT copy the trigger — it stores the pointer
-  // directly (session->trigger = trig). Freeing it here would leave
-  // session->trigger dangling → use-after-free. The session takes ownership;
-  // we only free the previous trigger to avoid leaking across captures.
-  if (_state->device_agent().sr_session()) {
-    struct sr_trigger *old = sr_session_trigger_get(_state->device_agent().sr_session());
-    if (old)
-      sr_trigger_free(old);
-    if (any_triggered) {
-      sr_session_trigger_set(_state->device_agent().sr_session(), trig);
-      pxv_info("sync_trigger_to_libsigrok: simple trigger synced (%d matches)", stage->matches ? g_slist_length(stage->matches) : 0);
-      // Session owns trig now; do NOT free it here.
-    } else {
-      sr_session_trigger_set(_state->device_agent().sr_session(), nullptr);
-      pxv_info("sync_trigger_to_libsigrok: no trigger matches, trigger disabled");
-      sr_trigger_free(trig);
-    }
-  } else {
-    sr_trigger_free(trig);
-  }
+  // Delegate to SessionStateContext::sync_trigger_to_libsigrok() — the actual
+  // implementation called by CaptureManager. This wrapper exists for backward
+  // compatibility but is not in the active call path (CaptureManager calls
+  // _state->sync_trigger_to_libsigrok() directly).
+  _state->sync_trigger_to_libsigrok(disable_trigger);
 }
 
 void SigSession::copy_data_to_document(data::SessionDocument *doc) {

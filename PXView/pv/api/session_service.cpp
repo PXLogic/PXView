@@ -1441,17 +1441,34 @@ Result<void> SessionService::set_logic_trigger_config(
         return Result<void>::Fail(ErrorCode::MissingDevice,
                                   "No device connected");
 
-    // Fork libsigrok's ds_trigger_set_stage/set_en are gone. Trigger state
-    // is written to the Core TriggerConfig (single source of truth) and
-    // synced to upstream libsigrok via sync_trigger_to_libsigrok() at
-    // capture start.
+    // Trigger state is written to the Core TriggerConfig (single source of
+    // truth) and synced to libsigrok via sync_trigger_to_libsigrok() at
+    // capture start. The config_json field carries the full trigger
+    // configuration as JSON (produced by TriggerConfig::to_json()).
     if (_session) {
-        auto tcfg = _session->trigger_config();
-        if (config.stage_count > 0) {
-            tcfg.set_stage_count(config.stage_count);
+        if (!config.config_json.empty()) {
+            // Parse the JSON and build a TriggerConfig from it.
+            QJsonParseError parse_err;
+            QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(config.config_json), &parse_err);
+            if (parse_err.error != QJsonParseError::NoError || !doc.isObject()) {
+                return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                    "Invalid trigger config JSON: " + parse_err.errorString().toStdString());
+            }
+            auto tcfg = pv::data::TriggerConfig::from_json(doc.object());
+
+            // Override stage_count if explicitly provided.
+            if (config.stage_count > 0)
+                tcfg.set_stage_count(config.stage_count);
+
+            _session->set_trigger_config(tcfg);
+        } else {
+            // No JSON provided — just update stage_count on existing config.
+            auto tcfg = _session->trigger_config();
+            if (config.stage_count > 0)
+                tcfg.set_stage_count(config.stage_count);
+            _session->set_trigger_config(tcfg);
         }
-        // new_en is derived from whether config_json is non-empty.
-        // The actual trigger enable/position is encoded in the JSON.
     }
 
     broadcast_event(ServiceEvent::TriggerConfigChanged,

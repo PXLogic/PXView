@@ -339,10 +339,25 @@ bool CaptureManager::exec_capture() {
         bAddDecoder = true;
     } else if (is_repeat_mode()) {
       if (_is_stream_mode) {
+        // Stream mode + repeat: keep single buffer for all captures so
+        // is_single_buffer() stays true, is_realtime_refresh() returns
+        // true, and the waveform scrolls in realtime during every capture.
+        //
+        // DO NOT set bSwapBuffer — that would make is_single_buffer()
+        // false, causing the viewport to return early in set_receive_len()
+        // (the "else { return; }" branch), preventing both scroll and
+        // viewport updates. The user would see no data flowing and think
+        // repeat has stopped.
+        //
+        // For _capture_times == 1: set bAddDecoder to clear stale decode
+        // state from the previous session and start fresh.
+        // For _capture_times > 1: leave both flags false — the ongoing
+        // decode from the previous RevEndPacket continues running (it has
+        // the full capture duration to make progress), and the view shows
+        // live data via document_snapshot_source() falling back to
+        // _data_source when is_realtime_refresh() is true.
         if (_capture_times == 1)
           bAddDecoder = true;
-        else
-          bSwapBuffer = true;
       } else {
         bSwapBuffer = true;
       }
