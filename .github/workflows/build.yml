@@ -29,7 +29,7 @@ on:
 jobs:
   audit:
     name: Config Type Audit
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +46,7 @@ jobs:
   linux:
     name: Linux AppImage (x86_64)
     if: ${{ github.event.inputs.targets == 'linux' || github.event.inputs.targets == 'both' || github.event_name == 'push' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       QT_PREFIX: ${{ github.workspace }}/Qt
       QT_VERSION: "6.11.0"
@@ -67,10 +67,11 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             echo "value=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            # 从 tag 名提取版本号 (如 v1.5.4 → 1.5.4)
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          else
+            echo "value=1.5.4" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -82,19 +83,10 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          # Install GCC 14 from Ubuntu Toolchain PPA (required for C++23 <expected>)
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          # Ubuntu 24.04 自带 GCC 14,无需 PPA
           sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14
-          # Set GCC 14 as default compiler
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
-          echo "CC=gcc-14" >> $GITHUB_ENV
-          echo "CXX=g++-14" >> $GITHUB_ENV
-          gcc --version
-          g++ --version
           sudo apt-get install -y \
-            git make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev \
             python3-dev python3-pip \
@@ -106,6 +98,8 @@ jobs:
             libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
             libzip-dev nettle-dev libftdi1-dev \
             sdcc wget zip
+          gcc --version
+          g++ --version
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v4
@@ -122,11 +116,6 @@ jobs:
 
       - name: Build qtwayland platform plugin
         run: |
-          # aqtinstall does not provide the qtwayland client platform plugin.
-          # Build it from source against the aqtinstalled Qt so the AppImage
-          # bundles both xcb and wayland platform plugins.
-          # Only build the client side — the compositor (server) needs libdrm
-          # and we don't need it (PXView is a client app, not a compositor).
           sudo apt-get install -y wayland-protocols libwayland-dev
           git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
           cd qtwayland
@@ -148,8 +137,6 @@ jobs:
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
-          # linuxdeploy expects AppDir to contain usr/{bin,share,lib}.
-          # Install to install.dir/usr so paths align with linuxdeploy's --appdir.
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
@@ -167,22 +154,15 @@ jobs:
 
       - name: Bundle Python standard library into AppDir
         run: |
-          # libsigrokdecode 内嵌 Python 解释器,需要 Python 标准库(encodings 等模块)
-          # 否则用户系统若 Python 版本不匹配(如构建用 3.10, 用户是 3.12)
-          # 会出现 "ModuleNotFoundError: No module named 'encodings'" 启动失败
           PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "Bundling Python $PY_VERSION standard library"
-          # 复制标准库 .py 文件
           mkdir -p install.dir/usr/lib/python$PY_VERSION
           cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
-          # 复制 lib-dynload(encodings 等内置模块的 .so 文件)
           mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
           cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
-          # 删除不必要的测试和 __pycache__ 以减小体积
           rm -rf install.dir/usr/lib/python$PY_VERSION/test
           rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
           find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-          # 同时打包 python3 目录(部分发行版 stdlib 在这里)
           if [ -d /usr/lib/python$PY_VERSION/encodings ]; then
             echo "OK: encodings module found at /usr/lib/python$PY_VERSION/encodings"
           else
@@ -191,8 +171,36 @@ jobs:
           echo "Bundled Python stdlib size:"
           du -sh install.dir/usr/lib/python$PY_VERSION
 
+      - name: Bundle GCC runtime libraries into AppDir
+        run: |
+          # Ubuntu 24.04 自带 GCC 14,但目标用户可能在 Ubuntu 22.04 上运行,
+          # 那里只有 GCC 12。打包 libstdc++.so.6 和 libgcc_s.so.1 确保
+          # GLIBCXX_3.4.33 等符号在旧系统上可用。
+          echo "=== Bundling GCC runtime libraries ==="
+          mkdir -p install.dir/usr/lib
+          STDCPP_SRC=$(gcc -print-file-name=libstdc++.so.6)
+          if [ -f "$STDCPP_SRC" ]; then
+            cp -f "$STDCPP_SRC" install.dir/usr/lib/
+            echo "  libstdc++.so.6: $STDCPP_SRC -> install.dir/usr/lib/"
+          else
+            echo "  WARNING: libstdc++.so.6 not found"
+          fi
+          LIBGCC_SRC=$(gcc -print-file-name=libgcc_s.so.1)
+          if [ -f "$LIBGCC_SRC" ]; then
+            cp -f "$LIBGCC_SRC" install.dir/usr/lib/
+            echo "  libgcc_s.so.1: $LIBGCC_SRC -> install.dir/usr/lib/"
+          else
+            echo "  WARNING: libgcc_s.so.1 not found"
+          fi
+          echo "=== Bundled library versions ==="
+          strings install.dir/usr/lib/libstdc++.so.6 | grep GLIBCXX | tail -5
+          ls -la install.dir/usr/lib/libstdc++.so.6 install.dir/usr/lib/libgcc_s.so.1
+
       - name: Create AppImage using linuxdeploy
         run: |
+          # linuxdeploy 的 mksquashfs 需要可写的 TMPDIR (GitHub Actions 默认 /tmp 可能空间不足)
+          export TMPDIR="$HOME/tmp"
+          mkdir -p "$TMPDIR"
           wget -c "https://github.com/linuxdeploy/linuxdeploy/releases/download/${{ env.LINUXDEPLOY_VERSION }}/linuxdeploy-x86_64.AppImage"
           wget -c "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${{ env.LINUXDEPLOY_VERSION }}/linuxdeploy-plugin-qt-x86_64.AppImage"
           chmod +x linuxdeploy*.AppImage
@@ -213,13 +221,6 @@ jobs:
 
       - name: Package udev rules (separate artifact)
         run: |
-          # udev rules must be installed to system path, not inside AppImage.
-          # Package them separately with an install script.
-          # Includes:
-          #   - 60-px.rules: PXView-specific rules (PXLogic/Qinheng/Van Ooijen VID)
-          #   - 60-libsigrok.rules: marks all libsigrok-supported USB devices with ID_SIGROK=1
-          #   - 61-libsigrok-plugdev.rules: grants plugdev group access (Debian-based)
-          #   - 61-libsigrok-uaccess.rules: grants local logged-in user access (systemd-logind)
           mkdir -p udev-rules
           cp install.dir/usr/lib/udev/rules.d/60-px.rules udev-rules/
           cp libsigrok/contrib/60-libsigrok.rules udev-rules/
@@ -227,16 +228,12 @@ jobs:
           cp libsigrok/contrib/61-libsigrok-uaccess.rules udev-rules/
           cat > udev-rules/install-udev-rules.sh << 'EOF'
           #!/bin/bash
-          # Install udev rules for PXView hardware access (non-root USB permission)
-          # Covers PXView devices (PXLogic, Qinheng, etc.) and all libsigrok-supported devices.
-          # Usage: sudo ./install-udev-rules.sh
           set -e
           RULES_FILES="60-px.rules 60-libsigrok.rules 61-libsigrok-plugdev.rules 61-libsigrok-uaccess.rules"
           if [ "$(id -u)" -ne 0 ]; then
             echo "Please run with sudo: sudo $0"
             exit 1
           fi
-          # Find system udev rules directory
           if [ -d /usr/lib/udev/rules.d ]; then
             DEST=/usr/lib/udev/rules.d
           elif [ -d /lib/udev/rules.d ]; then
@@ -265,7 +262,6 @@ jobs:
           echo "Then log out and back in (or run 'newgrp plugdev')."
           EOF
           chmod +x udev-rules/install-udev-rules.sh
-          # Create tarball
           (cd udev-rules && zip -r ../PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip .)
           ls -la PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
           echo "=== udev rules contents ==="
@@ -304,14 +300,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ARM64: 原生编译，直接在 Apple Silicon (M1) runner 上构建
           - arch: ARM64
             cross_compile: false
-          # x86_64: 在 ARM64 runner 上通过 Rosetta 2 交叉编译
-          # GitHub 已下线 macos-13 (Intel) runner，macos-14/15 全部是 ARM64。
-          # 方案：安装 x86_64 Homebrew (/usr/local) + Rosetta 2，
-          #       整个工具链 (cmake/ninja/clang/Qt) 以 x86_64 模式运行，
-          #       效果等同于在 Intel Mac 上原生编译。
           - arch: x86_64
             cross_compile: true
     runs-on: macos-14
@@ -330,9 +320,11 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             echo "value=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          else
+            echo "value=1.5.4" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -345,42 +337,21 @@ jobs:
       - name: Setup x86_64 cross-compilation (Rosetta 2)
         if: matrix.cross_compile
         run: |
-          # 安装 Rosetta 2（macos-14 是 ARM64，需要 Rosetta 运行 x86_64 二进制）
           softwareupdate --install-rosetta --agree-to-license || true
-
-          # 安装 x86_64 Homebrew 到 /usr/local
-          # ARM64 Homebrew 在 /opt/homebrew，x86_64 Homebrew 在 /usr/local，互不冲突
           if [ ! -f /usr/local/bin/brew ]; then
             NONINTERACTIVE=1 arch -x86_64 /bin/bash -c \
               "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           fi
-
-          # ── 环境变量（通过 GITHUB_ENV 传递给后续所有步骤）──
           echo "HOMEBREW_NO_PATH_SHADOW_CHECK=1" >> $GITHUB_ENV
           echo "HOMEBREW_NO_ENV_HINTS=1" >> $GITHUB_ENV
           echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $GITHUB_ENV
-
-          # 将 x86_64 Homebrew 的 bin 目录添加到 PATH 最前面
           echo "/usr/local/bin" >> $GITHUB_PATH
-
-          # 验证 brew 二进制是 x86_64 架构
           echo "=== x86_64 Homebrew 验证 ==="
           /usr/local/bin/brew --version
-          BREW_CORE="/usr/local/Homebrew/bin/brew"
-          if [ -f "$BREW_CORE" ]; then
-            echo "brew binary 架构:"
-            file "$BREW_CORE"
-            lipo -info "$BREW_CORE" 2>/dev/null || true
-          fi
-          echo "BREW_PREFIX=$(/usr/local/bin/brew --prefix)"
 
       - name: Install dependencies via Homebrew
         run: |
           brew update
-          # sdcc: 编译 fx2lafw 固件（Cypress FX2 USB 芯片，老款逻辑分析仪用）
-          # --overwrite: x86_64 Homebrew 安装 python@3.14 时 brew link 失败，
-          #   因为 runner 预装了 /usr/local/bin/idle3 等文件，
-          #   --overwrite 强制覆盖所有冲突文件。
           if [ "${{ matrix.cross_compile }}" = "true" ]; then
             BREW_OVERWRITE="--overwrite"
           else
@@ -395,7 +366,6 @@ jobs:
 
       - name: Build fx2lafw firmware
         run: |
-          # 编译 15 个 fx2lafw-*.fw 固件文件（Cypress FX2 USB 芯片）
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
 
       - name: Configure CMake
@@ -404,19 +374,11 @@ jobs:
           export LDFLAGS="-L$(brew --prefix gettext)/lib"
           export CPPFLAGS="-I$(brew --prefix gettext)/include"
           export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
-
-          # x86_64 交叉编译：在 ARM64 Mac 上用 x86_64 Homebrew 库编译 x86_64 二进制。
-          # 系统 clang (universal binary) 默认编译 ARM64 (host arch)，
-          # 但 x86_64 Homebrew 的库是 x86_64 的，必须用 CMAKE_OSX_ARCHITECTURES=x86_64
-          # 让 clang 编译 x86_64 代码，否则 ARM64 object 文件链接 x86_64 库会失败。
           if [ "${{ matrix.cross_compile }}" = "true" ]; then
             OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=x86_64"
-            echo "配置: x86_64 交叉编译 (Rosetta 2)"
           else
             OSX_ARCH_FLAG=""
-            echo "配置: ARM64 原生编译"
           fi
-
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
@@ -433,9 +395,7 @@ jobs:
         run: |
           MACDEPLOYQT="$(brew --prefix qt)/bin/macdeployqt"
 
-          # Python framework 路径修正：
-          # Homebrew python@3.x 把 framework 放在 <prefix>/Frameworks/Python.framework，
-          # 但 macdeployqt 期望在 <prefix>/lib/Python.framework。
+          # Python framework 路径修正
           PY_PREFIX="$(brew --prefix python3 2>/dev/null \
                        || brew --prefix python@3.14 2>/dev/null \
                        || brew --prefix python@3.13 2>/dev/null \
@@ -447,7 +407,7 @@ jobs:
             fi
           fi
 
-          # macdeployqt 只做依赖收集，不传 -codesign=-。
+          # macdeployqt 依赖收集
           echo "=== macdeployqt (依赖收集) ==="
           SECS_START=$SECONDS
           $MACDEPLOYQT install.dir/PXView.app \
@@ -524,22 +484,62 @@ jobs:
           # 清除隔离标记
           xattr -cr install.dir/PXView.app 2>/dev/null || true
 
-          # 递归签名
-          echo "=== codesign (递归签名) ==="
+          # ── 逐层签名 (Apple 推荐方式,替代 --deep) ──
+          # 顺序: Frameworks → PlugIns → 可执行文件 → .app bundle
+          echo "=== codesign (逐层签名) ==="
           SECS_CS=$SECONDS
-          codesign --force --deep --sign - install.dir/PXView.app
+          APP="install.dir/PXView.app"
+
+          # 1. Frameworks (最底层依赖)
+          echo "  [1/4] Signing Frameworks..."
+          find "$APP/Contents/Frameworks" -type f -name '*.dylib' -print0 2>/dev/null | \
+            while IFS= read -r -d '' dylib; do
+              codesign --force --sign - "$dylib" 2>/dev/null || true
+            done
+          # Framework bundles (.framework directories)
+          find "$APP/Contents/Frameworks" -maxdepth 1 -type d -name '*.framework' -print0 2>/dev/null | \
+            while IFS= read -r -d '' fw; do
+              codesign --force --sign - "$fw" 2>/dev/null || true
+            done
+
+          # 2. PlugIns
+          if [ -d "$APP/Contents/PlugIns" ]; then
+            echo "  [2/4] Signing PlugIns..."
+            find "$APP/Contents/PlugIns" -type f -name '*.so' -print0 2>/dev/null | \
+              while IFS= read -r -d '' plugin; do
+                codesign --force --sign - "$plugin" 2>/dev/null || true
+              done
+            find "$APP/Contents/PlugIns" -maxdepth 1 -type d -print0 2>/dev/null | \
+              while IFS= read -r -d '' plugin_dir; do
+                [ "$plugin_dir" = "$APP/Contents/PlugIns" ] && continue
+                codesign --force --sign - "$plugin_dir" 2>/dev/null || true
+              done
+          else
+            echo "  [2/4] No PlugIns directory, skipping"
+          fi
+
+          # 3. 主可执行文件
+          echo "  [3/4] Signing executable..."
+          codesign --force --sign - "$APP/Contents/MacOS/PXView" 2>/dev/null || true
+
+          # 4. .app bundle (最外层,最后签)
+          echo "  [4/4] Signing .app bundle..."
+          codesign --force --sign - "$APP" 2>/dev/null || true
+
           echo "codesign 耗时: $((SECONDS - SECS_CS))s"
 
           # 验证签名
-          if ! codesign --verify --deep --strict install.dir/PXView.app 2>&1; then
+          echo "=== 验证签名 ==="
+          if ! codesign --verify --strict "$APP" 2>&1; then
             echo "ERROR: codesign verification failed"
             echo "=== Diagnostic: libbrotlicommon.1.dylib ==="
-            ls -la install.dir/PXView.app/Contents/Frameworks/libbrotlicommon* 2>/dev/null || true
-            codesign -dvvv install.dir/PXView.app/Contents/Frameworks/libbrotlicommon.1.dylib 2>&1 || true
+            ls -la "$APP/Contents/Frameworks/libbrotlicommon"* 2>/dev/null || true
+            codesign -dvvv "$APP/Contents/Frameworks/libbrotlicommon.1.dylib" 2>&1 || true
             echo "=== All Frameworks ==="
-            ls -la install.dir/PXView.app/Contents/Frameworks/
+            ls -la "$APP/Contents/Frameworks/"
             exit 1
           fi
+          echo "签名验证通过"
 
           # 签名完成后生成 dmg
           echo "=== hdiutil (DMG 生成) ==="
@@ -553,7 +553,6 @@ jobs:
         run: |
           set -e
 
-          # ── 挂载 DMG 并提取 .app 到可写临时目录 ──
           hdiutil attach "install.dir/PXView-macOS-${{ matrix.arch }}-${{ steps.version.outputs.value }}.dmg" -nobrowse -mountpoint /tmp/vrf-mount
           rm -rf /tmp/PXView-vrf.app
           cp -R /tmp/vrf-mount/PXView.app /tmp/PXView-vrf.app
@@ -619,10 +618,8 @@ jobs:
           echo "启动 PXView --headless,等待 15 秒..."
 
           if [ "${{ matrix.cross_compile }}" = "true" ]; then
-            echo "运行模式: x86_64 (via Rosetta 2 on ARM64 runner)"
             arch -x86_64 "$APP_BIN" --headless -l 4 > /tmp/pxv-headless.log 2>&1 &
           else
-            echo "运行模式: ARM64 (native)"
             "$APP_BIN" --headless -l 4 > /tmp/pxv-headless.log 2>&1 &
           fi
           PID=$!
@@ -630,7 +627,6 @@ jobs:
 
           if kill -0 "$PID" 2>/dev/null; then
             echo "通过: 进程存活 15 秒 — 所有库加载成功"
-            # 检查 API 端口是否在监听
             if lsof -iTCP:10110 -sTCP:LISTEN -P 2>/dev/null | grep -q LISTEN; then
               echo "通过: MCP 端口 10110 正在监听"
             else
@@ -641,7 +637,6 @@ jobs:
             else
               echo "警告: WS 端口 10430 未监听(可能仍在初始化)"
             fi
-            # 打印前 20 行输出用于诊断
             echo ""
             echo "=== 应用输出(前 20 行) ==="
             head -20 /tmp/pxv-headless.log 2>/dev/null || true
@@ -677,182 +672,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: install.dir/*.dmg
-          draft: true
-          name: PXView ${{ steps.version.outputs.value }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  mac-universal:
-    name: macOS Universal DMG (ARM64 + x86_64)
-    needs: mac
-    if: ${{ (github.event.inputs.targets == 'mac' || github.event.inputs.targets == 'both' || github.event_name == 'push') && always() && !cancelled() }}
-    runs-on: macos-14
-    steps:
-      - name: Resolve ref
-        id: ref
-        run: |
-          if [ -n "${{ github.event.inputs.ref }}" ]; then
-            echo "value=${{ github.event.inputs.ref }}" >> $GITHUB_OUTPUT
-          else
-            echo "value=${{ github.ref }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Resolve version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "value=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-            echo "value=${TAG#v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download ARM64 build
-        uses: actions/download-artifact@v4
-        with:
-          name: PXView-macOS-ARM64-${{ steps.version.outputs.value }}
-          path: arm64-dl
-
-      - name: Download x86_64 build
-        uses: actions/download-artifact@v4
-        with:
-          name: PXView-macOS-x86_64-${{ steps.version.outputs.value }}
-          path: x86_64-dl
-
-      - name: Mount DMGs and extract apps
-        run: |
-          mkdir -p arm64 x86_64 universal
-          # 挂载 ARM64 DMG 并提取 PXView.app
-          hdiutil attach arm64-dl/*.dmg -nobrowse -mountpoint /tmp/arm64-mount
-          cp -R /tmp/arm64-mount/PXView.app arm64/PXView.app
-          hdiutil detach /tmp/arm64-mount
-          # 挂载 x86_64 DMG 并提取 PXView.app
-          hdiutil attach x86_64-dl/*.dmg -nobrowse -mountpoint /tmp/x86_64-mount
-          cp -R /tmp/x86_64-mount/PXView.app x86_64/PXView.app
-          hdiutil detach /tmp/x86_64-mount
-
-      - name: Create universal binary with lipo
-        run: |
-          # 以 ARM64 app 为基础复制，然后逐个合并 x86_64 的 Mach-O 二进制
-          cp -R arm64/PXView.app universal/PXView.app
-
-          # 遍历 x86_64 app 中的所有文件，找出 Mach-O 二进制并用 lipo 合并
-          find x86_64/PXView.app -type f | while read -r x86_file; do
-              rel="${x86_file#x86_64/PXView.app/}"
-              arm_file="arm64/PXView.app/$rel"
-              uni_file="universal/PXView.app/$rel"
-
-              # ARM64 版本不存在则跳过（保留 ARM64 基础中的文件）
-              [ -f "$arm_file" ] || continue
-
-              # 只对双方都是 Mach-O 的文件做 lipo 合并
-              if file "$x86_file" | grep -q "Mach-O" && file "$arm_file" | grep -q "Mach-O"; then
-                  echo "Combining: $rel"
-                  lipo -create "$arm_file" "$x86_file" -output "$uni_file" \
-                    || echo "WARN: Failed to combine $rel, keeping ARM64 version"
-              fi
-          done
-
-          echo "=== Universal binary verification ==="
-          file universal/PXView.app/Contents/MacOS/PXView
-          lipo -info universal/PXView.app/Contents/MacOS/PXView
-
-      - name: Re-sign and create universal DMG
-        run: |
-          # 清除可能的隔离标记
-          xattr -cr universal/PXView.app
-          # 重新递归签名（lipo 合并后签名失效，需要重新签）
-          codesign --force --deep --sign - universal/PXView.app
-          # 验证签名
-          if ! codesign --verify --deep --strict universal/PXView.app 2>&1; then
-            echo "ERROR: codesign verification failed for universal app"
-            exit 1
-          fi
-          # 生成 Universal DMG
-          hdiutil create -volname PXView -srcfolder universal/PXView.app \
-            -ov -format UDZO "universal/PXView-macOS-Universal-${{ steps.version.outputs.value }}.dmg"
-          ls -la universal/*.dmg
-
-      - name: Verify Universal DMG (headless launch test)
-        run: |
-          set -e
-
-          # ── 挂载 Universal DMG 并提取 .app ──
-          hdiutil attach "universal/PXView-macOS-Universal-${{ steps.version.outputs.value }}.dmg" -nobrowse -mountpoint /tmp/vrf-uni-mount
-          rm -rf /tmp/PXView-uni-vrf.app
-          cp -R /tmp/vrf-uni-mount/PXView.app /tmp/PXView-uni-vrf.app
-          hdiutil detach /tmp/vrf-uni-mount
-          xattr -cr /tmp/PXView-uni-vrf.app
-
-          APP_BIN="/tmp/PXView-uni-vrf.app/Contents/MacOS/PXView"
-
-          echo "=== 1. 二进制架构验证 ==="
-          file "$APP_BIN"
-          lipo -info "$APP_BIN"
-          ARCHS=$(lipo -archs "$APP_BIN" 2>/dev/null)
-          echo "包含架构: $ARCHS"
-          if echo "$ARCHS" | grep -q "x86_64" && echo "$ARCHS" | grep -q "arm64"; then
-            echo "通过: Universal 二进制包含 arm64 + x86_64"
-          else
-            echo "失败: 不是 Universal 二进制"
-            exit 1
-          fi
-
-          echo ""
-          echo "=== 2. headless 启动测试 (ARM64 slice) ==="
-          echo "在 ARM64 runner 上运行 Universal 二进制(自动选择 arm64 slice)..."
-          echo ""
-          "$APP_BIN" --headless -l 4 > /tmp/pxv-uni-headless.log 2>&1 &
-          PID=$!
-          sleep 15
-
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "通过: 进程存活 15 秒 — 所有库加载成功"
-            if lsof -iTCP:10110 -sTCP:LISTEN -P 2>/dev/null | grep -q LISTEN; then
-              echo "通过: MCP 端口 10110 正在监听"
-            else
-              echo "警告: MCP 端口 10110 未监听"
-            fi
-            if lsof -iTCP:10430 -sTCP:LISTEN -P 2>/dev/null | grep -q LISTEN; then
-              echo "通过: WebSocket 端口 10430 正在监听"
-            else
-              echo "警告: WS 端口 10430 未监听"
-            fi
-            echo ""
-            echo "=== 应用输出(前 20 行) ==="
-            head -20 /tmp/pxv-uni-headless.log 2>/dev/null || true
-            kill "$PID" 2>/dev/null || true
-            wait "$PID" 2>/dev/null || true
-          else
-            echo "失败: 进程在 15 秒内退出"
-            EXIT_CODE=0
-            wait "$PID" 2>/dev/null || EXIT_CODE=$?
-            echo "退出码: $EXIT_CODE"
-            echo ""
-            echo "=== 应用输出日志 ==="
-            cat /tmp/pxv-uni-headless.log 2>/dev/null || true
-            echo ""
-            echo "=== 崩溃报告 ==="
-            ls -lt ~/Library/Logs/DiagnosticReports/PXView* 2>/dev/null | head -5 || echo "未找到崩溃日志"
-            cat ~/Library/Logs/DiagnosticReports/PXView*.crash 2>/dev/null | head -80 || true
-            exit 1
-          fi
-
-          echo ""
-          echo "=== ✅ Universal DMG 验证通过 ==="
-
-      - name: Upload Universal Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PXView-macOS-Universal-${{ steps.version.outputs.value }}
-          path: universal/*.dmg
-          if-no-files-found: error
-
-      - name: Create GitHub Release (on tag push)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: universal/*.dmg
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:
