@@ -94,6 +94,18 @@ FORK_CHANGED_KEYS = {
     'BANDWIDTH_LIMIT',
     # Fork uses uint8; upstream uses int32.
     'MAX_HEIGHT_VALUE',
+    # Fork uses bool; upstream uses string.  pxlogic uses bool for GET/SET,
+    # GUI bind_bool() sends/expects boolean.
+    'CLOCK_EDGE',
+    # Fork uses string; upstream uses int32.  pxlogic uses string for GET/SET,
+    # GUI bind_list() sends/expects string.
+    'EX_TRIGGER_MATCH',
+    # Fork uses uint8; upstream uses uint32.  Both demo and DSL use byte,
+    # GUI get_config_byte() reads as byte.
+    'UNIT_BITS',
+    # Fork uses int16; upstream uses uint8.  DSL returns int16,
+    # GUI get_config_int16() reads as int16.
+    'TOTAL_CH_NUM',
 }
 
 
@@ -133,16 +145,27 @@ def parse_hwdriver_table(hwdriver_path):
 def find_case_blocks(text):
     """Find all 'case SR_CONF_*:' blocks in a source file.
 
-    Returns list of (key_name, start_line, body_text) tuples.
+    Returns list of (key_name, start_line, body_text, func_name) tuples.
     The body_text extends from the case line to the next 'break;',
     'case ', 'default:', or closing brace at the same or lower indent.
+    func_name is 'get', 'set', or 'list' (which config_* function the
+    case block is in), or None if unknown.
     """
     lines = text.split('\n')
     results = []
 
     case_re = re.compile(r'\bcase\s+SR_CONF_(\w+)\s*:')
+    func_re = re.compile(r'^\s*static\s+int\s+config_(get|set|list)\s*\(')
+
+    current_func = None
 
     for i, line in enumerate(lines):
+        # Track which config_* function we're in
+        fm = func_re.match(line)
+        if fm:
+            current_func = fm.group(1)
+            continue
+
         m = case_re.search(line)
         if not m:
             continue
@@ -170,7 +193,7 @@ def find_case_blocks(text):
             body_lines.append(next_line)
 
         body = '\n'.join(body_lines)
-        results.append((key_name, i + 1, body))
+        results.append((key_name, i + 1, body, current_func))
 
     return results
 
@@ -185,19 +208,38 @@ def extract_gvariant_types(body):
     get_types = set()
     set_types = set()
 
+    # If the body contains an inner switch on 'key', the g_variant calls
+    # belong to different sub-cases and can't be attributed to the outer
+    # case label.  Skip type extraction for these shared case blocks.
+    if re.search(r'switch\s*\(\s*key\s*\)', body):
+        return get_types, set_types
+
+    # If the body constructs a tuple (g_variant_new_tuple), the individual
+    # g_variant_new_* calls are building tuple children, not the return
+    # value.  Skip them — the tuple type (e.g. SR_T_MQ, SR_T_DOUBLE_RANGE)
+    # is handled by the cross_validate step via the table type.
+    has_new_tuple = 'g_variant_new_tuple' in body
+
+    # If the body deconstructs a tuple (g_variant_get_child_value), the
+    # individual g_variant_get_* calls operate on tuple children, not the
+    # main data parameter.  Skip them.
+    has_get_child = 'g_variant_get_child_value' in body
+
     # g_variant_new_<suffix>(...)  -> config_get creates data
-    for m in re.finditer(r'g_variant_new_(\w+)\s*\(', body):
-        suffix = m.group(1)
-        sr_type = GVARIANT_FUNC_TO_SRTYPE.get(suffix)
-        if sr_type:
-            get_types.add(sr_type)
+    if not has_new_tuple:
+        for m in re.finditer(r'g_variant_new_(\w+)\s*\(', body):
+            suffix = m.group(1)
+            sr_type = GVARIANT_FUNC_TO_SRTYPE.get(suffix)
+            if sr_type:
+                get_types.add(sr_type)
 
     # g_variant_get_<suffix>(...)  -> config_set reads data
-    for m in re.finditer(r'g_variant_get_(\w+)\s*\(', body):
-        suffix = m.group(1)
-        sr_type = GVARIANT_FUNC_TO_SRTYPE.get(suffix)
-        if sr_type:
-            set_types.add(sr_type)
+    if not has_get_child:
+        for m in re.finditer(r'g_variant_get_(\w+)\s*\(', body):
+            suffix = m.group(1)
+            sr_type = GVARIANT_FUNC_TO_SRTYPE.get(suffix)
+            if sr_type:
+                set_types.add(sr_type)
 
     # std_str_idx(data, ...) -> consumes a string GVariant
     if 'std_str_idx' in body:
@@ -223,7 +265,13 @@ def scan_driver_file(filepath, driver_name):
         return []
 
     results = []
-    for key_name, line_no, body in find_case_blocks(text):
+    for key_name, line_no, body, func_name in find_case_blocks(text):
+        # Skip case blocks in config_list functions.  config_list returns
+        # available options as string arrays (strv), which is normal and
+        # should not be type-checked against the table's config_get/set type.
+        if func_name == 'list':
+            continue
+
         get_types, set_types = extract_gvariant_types(body)
         results.append({
             'driver': driver_name,
@@ -339,7 +387,7 @@ def print_report(table, fork_mismatches, upstream_mismatches, driver_results):
                 print(f"    All SET:  {', '.join(sorted(m['set_types']))}")
             print()
     else:
-        print("  \u2713 All fork driver GVariant types match the hwdriver.c table.")
+        print("  [OK] All fork driver GVariant types match the hwdriver.c table.")
         print()
 
     # Upstream driver mismatches (informational)
