@@ -159,3 +159,21 @@ BFA_Reference/
 # 私有逆向解码器源码与文档
 libsigrokdecode/c_decoders_private/
 doc/private_protocols/
+
+# 顶层 Python 运行时二进制 (嵌入版 python 3.14, 不应入库, 本地文件保留)
+# 仅忽略二进制运行时; 文本文件(LICENSE.txt/python314._pth/python.cat)仍保留追踪
+python/*.pyd
+python/*.dll
+python/*.exe
+python/*.zip
+
+# IDE 本地数据 (CodeBuddy 工作区数据, 绝不入库)
+.codebuddy/
+
+# Windows 资源管理器残留文件
+desktop.ini
+
+# 开发辅助脚本(不入库)
+bump_version.ps1
+generate_8b10b.py
+scripts/migrate_driver.py
