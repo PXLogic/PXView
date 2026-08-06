@@ -10,7 +10,7 @@ on:
       version:
         description: 'Version number for package naming (e.g. 1.5.4)'
         required: true
-        default: '1.5.4'
+        default: '1.5.5'
       targets:
         description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
@@ -87,7 +87,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.4" >> $GITHUB_OUTPUT
+            echo "value=1.5.5" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -352,7 +352,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.4" >> $GITHUB_OUTPUT
+            echo "value=1.5.5" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -768,7 +768,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.4" >> $GITHUB_OUTPUT
+            echo "value=1.5.5" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -822,6 +822,43 @@ jobs:
         run: |
           chmod +x window/copy-deps.sh
           bash window/package.sh
+
+      - name: Verify Python DLL in package
+        shell: msys2 {0}
+        run: |
+          echo "=== Checking for MinGW Python DLLs in package/ ==="
+          found=0
+          for dll in package/libpython3*.dll; do
+            if [ -f "$dll" ]; then
+              echo "  [OK] Found: $dll"
+              found=1
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "  [ERROR] No MinGW Python DLL (libpython3*.dll) found in package!"
+            echo "  PXView.exe will fail to start with 'python314.dll not found'"
+            echo "  This means CMake found python.org Python instead of MSYS2 MinGW Python."
+            echo "  === ldd output for PXView.exe ==="
+            ldd package/PXView.exe 2>&1 | grep -i python || echo "  (no python dependency found by ldd)"
+            exit 1
+          fi
+          # Warn if python.org DLLs are present (should not be)
+          for dll in package/python314.dll package/python3.dll; do
+            if [ -f "$dll" ]; then
+              echo "  [WARNING] Found python.org DLL: $dll — should not be in package"
+            fi
+          done
+          echo "=== Checking Python stdlib ==="
+          if [ -d package/lib/python3.* ]; then
+            echo "  [OK] Python stdlib directory found"
+            ls -d package/lib/python3.*/ 2>/dev/null
+          else
+            echo "  [WARNING] Python stdlib directory not found"
+          fi
+          echo "=== Checking python*.zip (PYTHONHOME marker) ==="
+          ls -la package/python*.zip 2>/dev/null || echo "  [WARNING] No python*.zip found"
+          echo "=== All Python-related files in package ==="
+          ls -la package/*python* package/lib/python*/* 2>/dev/null | head -20 || true
 
       - name: Create NSIS installer
         shell: pwsh

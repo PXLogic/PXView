@@ -3,7 +3,7 @@
 # PXView
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/version-1.5.4-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.5.5-green.svg)](#)
 
 PXView is a Qt-based signal analysis software for [PXLogic](https://marrychip.com) logic analyzers and a wide range of third-party instruments. It is built upon the [sigrok](https://sigrok.org) project and [DSView](https://www.dreamsourcelab.com), providing a comprehensive GUI for signal capture, protocol decoding, and automated testing.
 

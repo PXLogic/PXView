@@ -10,7 +10,7 @@ Unicode true
 ; PRODUCT_VERSION can be overridden from the command line:
 ;   makensis /DPRODUCT_VERSION=1.5.4 window_nisi.nsi
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.5.4"
+  !define PRODUCT_VERSION "1.5.5"
 !endif
 !define PRODUCT_PUBLISHER "pxview"
 !define PRODUCT_WEB_SITE "http://www.pxview.com"
@@ -223,6 +223,7 @@ Section Uninstall
   RMDir /r "$INSTDIR\decoders"
   RMDir /r "$INSTDIR\bearer"
   RMDir /r "$INSTDIR\translations"
+  RMDir /r "$INSTDIR\lib"
   RMDir /r "$INSTDIR\Qt*"
   ; Remove any remaining files and subdirectories
   RMDir /r "$INSTDIR"

@@ -27,7 +27,17 @@ link_directories(${GLIB_LIBDIR})
 #= python3
 #-------------------------------------------------------------------------------
 
-if(POLICY CMP0148)
+# On Windows with MSYS2 MinGW64, CMP0148 NEW may cause CMake's FindPython3
+# to find a python.org Python from the Windows registry instead of the
+# MSYS2 MinGW Python. This results in PXView.exe linking against
+# python314.dll (python.org naming) instead of libpython3.14.dll (MinGW
+# naming), causing a DLL-not-found error at runtime because package.sh
+# copies MinGW DLLs (libpython3.14.dll), not python.org DLLs.
+# Using the OLD policy ensures CMake searches the PATH first, where the
+# MSYS2 MinGW Python (/mingw64/bin/python3) is found.
+if(WIN32 AND POLICY CMP0148)
+	cmake_policy(SET CMP0148 OLD)
+elseif(POLICY CMP0148)
 	cmake_policy(SET CMP0148 NEW)
 endif()
 find_package(Python3 COMPONENTS Interpreter Development)
@@ -36,6 +46,18 @@ if (Python3_FOUND)
 	message("----- python3:")
 	message(STATUS "	 includes:" ${Python3_INCLUDE_DIRS})
 	message(STATUS "	 libraries:" ${Python3_LIBRARIES})
+	# Diagnostic: show the actual DLL name that PXView.exe will reference.
+	# On MSYS2 MinGW64, the import library is libpython3.14.dll.a which
+	# references libpython3.14.dll. On python.org (MSVC), it would be
+	# python314.lib which references python314.dll. Mismatched naming
+	# causes "python314.dll not found" errors at runtime.
+	if(WIN32 AND Python3_LIBRARIES)
+		foreach(py_lib ${Python3_LIBRARIES})
+			if(EXISTS "${py_lib}")
+				message(STATUS "	 Python lib exists: ${py_lib}")
+			endif()
+		endforeach()
+	endif()
 	include_directories(${Python3_INCLUDE_DIRS})
 	set(PY_LIB ${Python3_LIBRARIES})
 else()
