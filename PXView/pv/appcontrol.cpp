@@ -129,29 +129,11 @@ bool AppControl::Init()
     pxv_info("DBG: srd_log_set_context done");
 
 #if defined(_WIN32)
-    // Set Python home to application directory for embedded Python.
-    // Two detection methods:
-    // 1. python*.zip present (embeddable package marker) — original method
-    // 2. lib/python3.X/ directory present (MSYS2 MinGW stdlib layout) — fallback
-    // Method 2 is needed when package.sh copies the stdlib from MSYS2 but
-    // does not include python3XX.zip (e.g., if the embeddable download failed).
+    // Set Python home to application directory for embedded Python
     QString pythonHome = QCoreApplication::applicationDirPath();
     QDir pydir(pythonHome);
-    bool pyBundled = false;
-    // Method 1: check for python*.zip (embeddable package marker)
     QStringList zipFiles = pydir.entryList(QStringList() << "python*.zip", QDir::Files);
     if (!zipFiles.isEmpty()) {
-        pyBundled = true;
-    }
-    // Method 2: check for lib/python3.X/ directory (MSYS2 MinGW layout)
-    if (!pyBundled) {
-        QDir libDir(pythonHome + "/lib");
-        QStringList pyDirs = libDir.entryList(QStringList() << "python3.*", QDir::Dirs, QDir::Name);
-        if (!pyDirs.isEmpty()) {
-            pyBundled = true;
-        }
-    }
-    if (pyBundled) {
         const wchar_t *pyhome = reinterpret_cast<const wchar_t*>(pythonHome.utf16());
         srd_set_python_home(pyhome);
         pxv_info("Set Python home to: %s", pythonHome.toUtf8().data());

@@ -223,7 +223,6 @@ Section Uninstall
   RMDir /r "$INSTDIR\decoders"
   RMDir /r "$INSTDIR\bearer"
   RMDir /r "$INSTDIR\translations"
-  RMDir /r "$INSTDIR\lib"
   RMDir /r "$INSTDIR\Qt*"
   ; Remove any remaining files and subdirectories
   RMDir /r "$INSTDIR"

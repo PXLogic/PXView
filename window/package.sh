@@ -22,45 +22,8 @@ cp -r ../install.dir/share/PXView/* .
 cp -r ../install.dir/share/libsigrokdecode/* .
 
 # --- Resolve MinGW DLL dependencies via ldd ---
-# This copies libpython3.14.dll, libgcc_s_seh-1.dll, libstdc++-6.dll, etc.
+# This copies python314.dll, libgcc_s_seh-1.dll, libstdc++-6.dll, etc.
 ../window/copy-deps.sh PXView.exe /mingw64
-
-# --- Explicitly copy MinGW Python DLLs as a safety net ---
-# copy-deps.sh relies on ldd, which may not resolve all dependencies
-# correctly in CI environments. Explicitly copy the MinGW Python DLLs
-# so they are always present.
-# NOTE: Do NOT copy python.org embeddable DLLs (python314.dll, python3.dll).
-# They are MSVC-built and ABI-incompatible with MinGW's .pyd extension
-# modules. If PXView.exe links against python314.dll (python.org naming)
-# instead of libpython3.14.dll (MinGW naming), it means CMake found the
-# wrong Python — fix the root cause in CMake (CMP0148), don't paper over
-# it by mixing two incompatible Python runtimes in one process.
-for py_dll in /mingw64/bin/libpython3.*.dll /mingw64/bin/libpython3.dll; do
-    if [ -f "$py_dll" ]; then
-        dll_name=$(basename "$py_dll")
-        if [ ! -f "$dll_name" ]; then
-            echo "Explicitly copying Python DLL: $py_dll"
-            cp "$py_dll" .
-        fi
-    fi
-done
-
-# --- Detect which Python build PXView.exe links against ---
-# This is a diagnostic: if PXView links against python3XX.dll (python.org
-# naming), the build is misconfigured and the package will not work.
-PY_LINK=$(ldd PXView.exe 2>/dev/null | grep -oE '(lib)?python3[0-9.]*\.dll' | head -1)
-if echo "$PY_LINK" | grep -q '^python3'; then
-    echo "============================================================"
-    echo "ERROR: PXView.exe links against $PY_LINK (python.org MSVC build)"
-    echo "       Expected: libpython3.XX.dll (MinGW GCC build)"
-    echo "       CMake found the wrong Python. Fix: ensure CMake uses"
-    echo "       CMP0148 OLD on Windows to search PATH (MSYS2 MinGW)"
-    echo "       instead of the Windows registry (python.org)."
-    echo "       The .pyd extensions from MSYS2 require libpython3.XX.dll"
-    echo "       and will crash if loaded against python3XX.dll."
-    echo "============================================================"
-    exit 1
-fi
 
 # --- Qt6 plugins ---
 mkdir -p plugins
@@ -69,8 +32,8 @@ cp -r /mingw64/share/qt6/plugins/* .
 ../window/copy-deps.sh imageformats/qjpeg.dll /mingw64
 
 # --- Python standard library ---
-# Detect Python version from the DLL that PXView.exe ACTUALLY links.
-# Try both MinGW naming (libpython3.X.dll) and python.org naming (python3XX.dll).
+# Detect Python version from the python3XX.dll that PXView.exe ACTUALLY links
+# (authoritative — avoids mismatch when `python` on PATH is a different version).
 PY_VER=""
 PY_DLL=$(ldd PXView.exe 2>/dev/null | grep -oE 'libpython3\.[0-9]+\.dll' | head -1)
 if [ -n "$PY_DLL" ]; then
@@ -78,26 +41,14 @@ if [ -n "$PY_DLL" ]; then
     PY_VER=$(echo "$PY_DLL" | grep -oE '3\.[0-9]+')
 fi
 if [ -z "$PY_VER" ]; then
-    # Try python.org naming: python314.dll
-    PY_DLL=$(ldd PXView.exe 2>/dev/null | grep -oE 'python3[0-9]+\.dll' | head -1)
+    # Fallback: extract from /mingw64/bin/python3*.dll filename
+    PY_DLL=$(ls /mingw64/bin/python3*.dll 2>/dev/null | head -1)
     if [ -n "$PY_DLL" ]; then
-        # python314.dll -> 3.14
-        PY_TAG=$(echo "$PY_DLL" | grep -oE '3[0-9]+')
-        PY_MAJOR="${PY_TAG:0:1}"
-        PY_MINOR="${PY_TAG:1}"
+        PY_BASE=$(basename "$PY_DLL" .dll)
+        PY_MAJOR="${PY_BASE:6:1}"
+        PY_MINOR="${PY_BASE:7}"
         PY_VER="${PY_MAJOR}.${PY_MINOR}"
     fi
-fi
-if [ -z "$PY_VER" ]; then
-    # Fallback 1: extract from /mingw64/bin/libpython3*.dll filename
-    PY_DLL=$(ls /mingw64/bin/libpython3.*.dll 2>/dev/null | head -1)
-    if [ -n "$PY_DLL" ]; then
-        PY_VER=$(basename "$PY_DLL" .dll | grep -oE '3\.[0-9]+')
-    fi
-fi
-if [ -z "$PY_VER" ]; then
-    # Fallback 2: use the MSYS2 python interpreter version
-    PY_VER=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")
 fi
 
 if [ -z "$PY_VER" ]; then
@@ -145,19 +96,10 @@ else
         fi
     done
 
-    # Copy python3XX.zip from embeddable package. This serves two purposes:
-    # 1. appcontrol.cpp checks for python*.zip to detect bundled Python and
-    #    set PYTHONHOME to the application directory.
-    # 2. The .pyc files inside are bytecode-compatible with MinGW Python.
-    # NOTE: Do NOT copy python3XX._pth — it forces Python into isolated mode,
-    # restricting sys.path to only the paths listed in the _pth file
-    # (python314.zip and .). This conflicts with the MSYS2 MinGW stdlib
-    # layout (lib/python3.14/). Without the _pth file, Python uses
-    # PYTHONHOME-based sys.path, which correctly finds lib/python3.14/.
+    # Copy python3XX._pth if it exists (configures sys.path)
     PY_SHORT=$(echo "$PY_VER" | tr -d '.')
-    if [ -f "../python/python${PY_SHORT}.zip" ]; then
-        echo "Copying python${PY_SHORT}.zip (for PYTHONHOME detection + .pyc stdlib)"
-        cp "../python/python${PY_SHORT}.zip" .
+    if [ -f "../python/python${PY_SHORT}._pth" ]; then
+        cp "../python/python${PY_SHORT}._pth" .
     fi
 fi
 
