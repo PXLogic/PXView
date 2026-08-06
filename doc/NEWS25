@@ -7,6 +7,104 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
   
+    PXView V1.5.5修改
+    时间：2026年8月7日
+    变更如下：
+
+    【新功能】
+    *新增入口文件导入功能，基于libsigrok输入模块实现文件导入，工具栏新增导入按钮与国际化文案，支持dark/light主题图标
+    *新增函数面板Dock（FunctionDock），支持FFT、数学运算和李萨如图形的可视化控制，从弹出菜单改为可停靠面板
+    *新增波形图案模式支持（正弦波、方波、锯齿波、三角波、随机）
+    *实现李萨如波形的轴索引和百分比设置功能
+    *新增DSO通道配置面板，支持调整每通道参数
+    *添加退出时提示保存数据的配置选项
+    *新增统一多格式原始数据导出接口（export_raw_data），支持csv/binary/vcd/hex/bits格式导出
+    *新增RPC工具schema和MCP客户端接口，统一原有csv/binary导出流程
+    *新增配置类型审核CI脚本（audit_config_types.py），增强配置项类型校验逻辑
+
+    【问题修复】
+    *修复实时捕获模式下波形显示冻结的问题，优先返回实时数据源
+    *优化重复流捕获逻辑，保留单缓冲模式避免界面卡顿，正确维持滚动和视图更新
+    *重构触发配置同步逻辑：移除旧的fork版libsigrok触发API兼容代码，新增完整的高级触发配置同步（SR_CONF_TRIGGER_ADV_*系列键值对）
+    *修复触发位置（capture_ratio）不生效的问题
+    *修复二进制导出时未按有效样本数裁剪导致多导出陈旧数据的问题
+    *使用稳定的单调计数器分配文件设备句柄，解决release后句柄失效的问题
+    *保存并恢复Mode区域设备级配置键，防止切换选项卡时丢失选择
+    *修复采样率变更导致的波形闪烁问题
+    *修复触发值同步更新问题
+    *修正水平触发位置配置的数据类型错误
+    *修复导入文件时的内存泄漏问题
+    *修复无可用通道时的空白视图问题
+    *修复李萨如追踪的UAF（Use-After-Free）问题，重新获取快照数据
+    *修复输入模块设备启动崩溃问题
+    *修复datafeedparser中isFile参数错误
+    *实现DeviceAgent get_config_int64接口
+    *修复回放文件时间戳显示错误
+    *修复循环模式下捕获停止后画面空白问题
+    *修复MCP传输连接挂起问题
+    *完善设备ID异常处理与测试用例
+    *修复默认设备选择逻辑，跳过无通道的输入模块设备避免UI崩溃
+    *优化StoreSession二进制导出逻辑，修复UTF-8转换和换行符问题
+    *修复逻辑通道导出时的样本计数对齐问题，确保保存加载无损耗
+    *修复SessionData采样率注入时机，消除波形平窗问题
+    *修复缩放范围限制、MSO模式波形不显示等bug
+    *修复View析构时游标对象内存泄漏
+    *完善Windows安装包：添加多语言提示、进程检测、自动卸载旧版本和强制覆盖安装文件
+    *将SR_CONF_CLOCK_EDGE绑定为字符串下拉框以匹配驱动支持
+    *修复跨工作模式通道异常启用问题
+
+    【性能优化】
+    *优化捕获结束后的解码和数据拷贝逻辑，针对流重复捕获跳过耗时的数据拷贝，直接复用实时缓冲
+    *重构会话数据零拷贝共享机制
+    *全面替换dynamic_cast为as_*()窄cast方法，新增trace_visitor实现visitor模式消除RTTI开销
+    *使用std::vector替代手动new[]/delete[]，将裸指针替换为std::unique_ptr管理资源
+    *新增预编译头文件（common_pch.h）优化编译速度
+
+    【重构】
+    *完成项目现代化迁移：将boost/optional替换为std::optional，旧式C头文件替换为<cxxx>标准版本，NULL替换为nullptr，dsvdef.h重命名为pxvdef.h并更新所有引用，volatile标志替换为std::atomic，统一C++标准为C++23
+    *将MainWindow代码按职责拆分为独立委托类：MainWindowConfigIO（配置序列化）、MainWindowDockManager（Dock管理）、MainWindowEventDispatcher（事件分发）、MainWindowFileOps（文件操作）、MainWindowSignalConnector（信号槽连接）、MainWindowShortcutManager（快捷键）、MainWindowStatusBar（状态栏）、MainWindowTabManager（标签页）、MainWindowThemeManager（主题管理）
+    *提取ViewLayout、ViewCursors等委托类，将状态和行为从View剥离，新增IViewCursors、IViewSignalStore接口解耦视图渲染依赖
+    *新增RenderPass独立渲染Pass管线，将信号绘制、解码渲染和光标叠加逻辑从ViewportPainter迁移至独立组件
+    *将测量叠加层和触发状态信息提取为独立的MeasureOverlayPass和TriggerInfoPass
+    *将dsosignal.cpp中的所有绘图方法提取到dsosignal_paint.cpp，提升模块化程度
+    *将CaptureManager所有跨线程访问的成员变量替换为std::atomic，修复数据竞争、空指针解引用、悬垂指针及线程不安全的容器访问
+    *重构属性绑定生命周期：将属性删除职责移入Binding基类析构函数，移除boost::bind改用lambda表达式，引入GVarPtr自动管理GVariant生命周期
+    *将DataSource胖接口拆分为IDataSource/ISignalSource/ICaptureControl/IMeasureSource/IDecoderHost五个细粒度接口，遵循ISP原则
+    *废弃ISessionCallback体系，改用统一的IEventListener事件总线
+    *新增ISessionState接口，打破Manager与SessionStateContext之间的循环依赖
+    *全面迁移容器为std::unique_ptr智能指针管理，移除手动delete代码
+    *将GlitchFilterMode改为强类型枚举，移除全局枚举依赖
+    *新增SignalListModel实现信号列表Qt模型封装
+    *新增IViewLayout接口和MockViewLayout用于单元测试
+    *移除RenderPipeline，改为显式调用渲染流程
+    *统一派生轨迹、游标、滤镜等资源的清理逻辑
+    *拆分LissajousModel和MathStack的实现至独立cpp文件
+
+    【测试】
+    *重构测试体系，迁移至pytest自动化测试框架
+    *实现完整的MCP E2E测试套件，包含23个测试套件覆盖协议、设备管理、采集、数据完整性、导出导入、解码器（I2C/SPI/UART/CAN/PWM）、信号数据、配置、滤波反转、会话高级、错误处理、压力测试等模块
+    *新增Windows批量测试脚本与调试工具
+    *新增pytest-timeout依赖并配置全局超时
+    *添加Google Test C++单元测试子项目
+
+    【构建与CI】
+    *补充Windows/Linux/macOS全平台本地构建脚本
+    *新增Windows依赖复制与打包脚本
+    *新增GitHub Actions构建流水线，支持view_and_data分支触发构建
+    *新增Windows E2E测试CI流水线
+    *调整C++标准配置，为CI安装GCC14以支持C++23所需特性
+    *添加libsigrok子模块初始化步骤
+    *优化版本号构建方式，支持从命令行覆盖PRODUCT_VERSION
+    *CI升级至ubuntu-24.04，GCC14 runtime bundling，分层codesign签名
+    *修复AppImage TMPDIR问题，移除绝对OUTPUT路径
+    *修复手动构建时ref为空导致失败的问题
+    *将Python运行时二进制和废弃脚本移出git追踪（本地保留）
+    *修复NSIS BOM问题，CI下载Python embeddable时删除python314.zip
+    *更新libsigrok和libusb子模块到最新版本
+    *同步脚本白名单新增tools目录，优化子模块同步逻辑
+
+--------------------------------------------------------------------------------
+
     PXView V1.5.4修改
     时间：2026年7月31日
     变更如下：
