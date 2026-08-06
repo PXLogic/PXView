@@ -22,14 +22,11 @@
  */
 
 // Phase E (modernize-view-layer-v2): cursor / xcursor behaviour extracted
-// from the View God-class. ViewCursors is declared a friend of View so it
-// can touch the private cursor state (_logic_cursors / _dso_cursors /
-// _trig_cursor / _search_cursor / _show_cursors / _show_trig_cursor /
-// _show_search_cursor / _search_pos / _search_hit / _xcursorList /
-// _show_xcursors) and emit the protected Qt signals cursor_update() /
-// xcursor_update(). Cross-method calls that remain on View (e.g.
-// set_scale_offset, get_view_width, document_snapshot_source) go through
-// _view->… so the public View API is unchanged.
+// from the View God-class. Since Phase 1 state migration, cursor state
+// lives on ViewCursors directly (not on View). Cross-method calls that
+// remain on View (e.g. set_scale_offset, get_view_width,
+// document_snapshot_source) go through _view->… so the public View API is
+// unchanged.
 
 #include "view_cursors.h"
 
@@ -53,28 +50,45 @@ using namespace std;
 namespace pv {
 namespace view {
 
+ViewCursors::ViewCursors(View *view) : _view(view) {}
+
+ViewCursors::~ViewCursors() {
+  // unique_ptr containers auto-delete all elements.
+  // _trig_cursor and _search_cursor also auto-deleted by unique_ptr.
+}
+
+void ViewCursors::init_cursors(QColor foreColor) {
+  _show_trig_cursor = false;
+  _trig_cursor = std::make_unique<Cursor>(*_view, -1, 0);
+  _trig_cursor->set_colour(View::LightRed);
+  _show_search_cursor = false;
+  _search_pos = 0;
+  _search_cursor = std::make_unique<Cursor>(*_view, -1, _search_pos);
+  _search_cursor->set_colour(foreColor);
+}
+
 void ViewCursors::show_cursors(bool show) {
-  _view->_show_cursors = show;
-  _view->_ruler->update();
+  _show_cursors = show;
+  _view->get_ruler()->update();
   _view->viewport_update();
 }
 
 void ViewCursors::show_trig_cursor(bool show) {
-  _view->_show_trig_cursor = show;
-  _view->_ruler->update();
+  _show_trig_cursor = show;
+  _view->get_ruler()->update();
   _view->viewport_update();
 }
 
 void ViewCursors::show_search_cursor(bool show) {
-  _view->_show_search_cursor = show;
-  _view->_ruler->update();
+  _show_search_cursor = show;
+  _view->get_ruler()->update();
   _view->viewport_update();
 }
 
 void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
   const double time =
       trig_pos * 1.0 / _view->document_snapshot_source()->cur_snap_samplerate();
-  _view->_trig_cursor->set_index(trig_pos);
+  _trig_cursor->set_index(trig_pos);
 
   int width = _view->get_view_width();
   assert(width > 0);
@@ -83,11 +97,11 @@ void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
   // Trigger is enabled if any logic channel has a non-NONTRIG trig_type
   // (Simple mode), or if trigger_config mode is Adv/Serial (always enabled).
   bool trigger_enabled = false;
-  const auto &trig_cfg = _view->_data_source->trigger_config();
+  const auto &trig_cfg = _view->data_source()->trigger_config();
   if (trig_cfg.mode() != pv::data::TriggerConfig::Simple) {
     trigger_enabled = true;
   } else {
-    for (const auto &m : _view->_data_source->get_signal_models()) {
+    for (const auto &m : _view->data_source()->get_signal_models()) {
       if (m && m->type() == SR_CHANNEL_LOGIC &&
           m->trig_type() != pv::data::SignalModel::NONTRIG) {
         trigger_enabled = true;
@@ -98,9 +112,9 @@ void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
 
   AppConfig &app = AppConfig::Instance();
 
-  if (trigger_enabled || _view->_device_agent->is_virtual() ||
+  if (trigger_enabled || _view->device_agent()->is_virtual() ||
       _view->get_work_mode() == DSO) {
-    _view->_show_trig_cursor = true;
+    _show_trig_cursor = true;
 
     // DSO 持续采集时每帧都会调用 set_trig_cursor_posistion() (经由
     // receive_trigger -> ViewDataSync::receive_trigger)。如果此处也调用
@@ -112,11 +126,11 @@ void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
     // 路径或首次进入 DSO 时由其他逻辑处理居中。
     if (app.appOptions.trigPosDisplayInMid &&
         _view->get_work_mode() != DSO) {
-      _view->set_scale_offset(_view->_scale, (time / _view->_scale) - (width / 2));
+      _view->set_scale_offset(_view->scale(), (time / _view->scale()) - (width / 2));
     }
   }
 
-  _view->_ruler->update();
+  _view->get_ruler()->update();
   _view->viewport_update();
 }
 
@@ -126,26 +140,26 @@ void ViewCursors::set_search_pos(uint64_t search_pos, bool hit) {
 
   const double time =
       search_pos * 1.0 / _view->document_snapshot_source()->cur_snap_samplerate();
-  _view->_search_pos = search_pos;
-  _view->_search_hit = hit;
-  _view->_search_cursor->set_index(search_pos);
-  _view->_search_cursor->set_colour(hit ? View::Blue : fore);
+  _search_pos = search_pos;
+  _search_hit = hit;
+  _search_cursor->set_index(search_pos);
+  _search_cursor->set_colour(hit ? View::Blue : fore);
 
   int width = _view->get_view_width();
   assert(width);
 
   if (hit) {
-    _view->set_scale_offset(_view->_scale, (time / _view->_scale) - (width / 2));
-    _view->_ruler->update();
+    _view->set_scale_offset(_view->scale(), (time / _view->scale()) - (width / 2));
+    _view->get_ruler()->update();
     _view->viewport_update();
   }
 }
 
-std::list<Cursor *> &ViewCursors::get_cursorList() {
+std::list<std::unique_ptr<Cursor>> &ViewCursors::get_cursorList() {
   if (_view->is_logic_rendering_mode()) {
-    return _view->_logic_cursors;
+    return _logic_cursors;
   } else {
-    return _view->_dso_cursors;
+    return _dso_cursors;
   }
 }
 
@@ -153,9 +167,9 @@ Cursor *ViewCursors::get_cursor_by_index(int index) {
   int dex = 0;
   auto &cursors = get_cursorList();
 
-  for (auto c : cursors) {
+  for (auto &c : cursors) {
     if (dex == index) {
-      return c;
+      return c.get();
     }
     dex++;
   }
@@ -165,28 +179,28 @@ Cursor *ViewCursors::get_cursor_by_index(int index) {
 void ViewCursors::make_cursors_order() {
   int dex = 1;
 
-  for (auto cursor : get_cursorList()) {
+  for (auto &cursor : get_cursorList()) {
     cursor->set_order(dex++);
   }
 
   dex = 1;
-  for (auto cursor : _view->get_xcursorList()) {
+  for (auto &cursor : _view->get_xcursorList()) {
     cursor->set_order(dex++);
   }
 }
 
 void ViewCursors::add_cursor(QColor color, uint64_t sampleIndex) {
   (void)color;
-  Cursor *newCursor = new Cursor(*_view, -1, sampleIndex);
-  get_cursorList().push_back(newCursor);
+  auto newCursor = std::make_unique<Cursor>(*_view, -1, sampleIndex);
+  get_cursorList().push_back(std::move(newCursor));
   make_cursors_order();
   _view->cursor_update();
 }
 
 void ViewCursors::add_cursor(uint64_t sampleIndex) {
   static int lastOrder = 1;
-  Cursor *newCursor = new Cursor(*_view, lastOrder++, sampleIndex);
-  get_cursorList().push_back(newCursor);
+  auto newCursor = std::make_unique<Cursor>(*_view, lastOrder++, sampleIndex);
+  get_cursorList().push_back(std::move(newCursor));
   make_cursors_order();
   _view->cursor_update();
 }
@@ -194,8 +208,13 @@ void ViewCursors::add_cursor(uint64_t sampleIndex) {
 void ViewCursors::del_cursor(Cursor *cursor) {
   assert(cursor);
 
-  get_cursorList().remove(cursor);
-  delete cursor;
+  auto &lst = get_cursorList();
+  for (auto it = lst.begin(); it != lst.end(); ++it) {
+    if (it->get() == cursor) {
+      lst.erase(it);
+      break;
+    }
+  }
   make_cursors_order();
 
   _view->cursor_update();
@@ -203,10 +222,7 @@ void ViewCursors::del_cursor(Cursor *cursor) {
 
 void ViewCursors::clear_cursors() {
   auto &lst = get_cursorList();
-  for (auto c : lst) {
-    delete c;
-  }
-
+  // unique_ptr elements are auto-deleted when the list is cleared.
   lst.clear();
 }
 
@@ -225,17 +241,17 @@ void ViewCursors::set_cursor_middle(int index) {
   }
 
   _view->set_scale_offset(
-      _view->_scale,
+      _view->scale(),
       (*i)->index() /
           (_view->document_snapshot_source()->cur_snap_samplerate() *
-           _view->_scale) -
+           _view->scale()) -
           (width / 2));
 }
 
 void ViewCursors::add_xcursor(double value0, double value1) {
   static int lastXCursorOrder = 1;
-  XCursor *newXCursor = new XCursor(*_view, lastXCursorOrder++, value0, value1);
-  _view->_xcursorList.push_back(newXCursor);
+  auto newXCursor = std::make_unique<XCursor>(*_view, lastXCursorOrder++, value0, value1);
+  _xcursorList.push_back(std::move(newXCursor));
   make_cursors_order();
   _view->xcursor_update();
 }
@@ -243,8 +259,12 @@ void ViewCursors::add_xcursor(double value0, double value1) {
 void ViewCursors::del_xcursor(XCursor *xcursor) {
   assert(xcursor);
 
-  _view->_xcursorList.remove(xcursor);
-  delete xcursor;
+  for (auto it = _xcursorList.begin(); it != _xcursorList.end(); ++it) {
+    if (it->get() == xcursor) {
+      _xcursorList.erase(it);
+      break;
+    }
+  }
   make_cursors_order();
   _view->xcursor_update();
 }
@@ -255,7 +275,7 @@ uint64_t ViewCursors::get_cursor_samples(int index) {
 
   uint64_t ret = 0;
   int curIndex = 0;
-  for (list<Cursor *>::iterator i = lst.begin(); i != lst.end(); i++) {
+  for (auto i = lst.begin(); i != lst.end(); i++) {
     if (index == curIndex) {
       ret = (*i)->index();
     }
@@ -267,7 +287,7 @@ uint64_t ViewCursors::get_cursor_samples(int index) {
 QString ViewCursors::get_cm_time(int index) {
   uint64_t sampleIndex = get_cursor_samples(index);
   uint64_t sampleRate = _view->document_snapshot_source()->cur_snap_samplerate();
-  return _view->_ruler->format_real_time(sampleIndex, sampleRate);
+  return _view->get_ruler()->format_real_time(sampleIndex, sampleRate);
 }
 
 QString ViewCursors::get_cm_delta(int index1, int index2) {
@@ -278,7 +298,7 @@ QString ViewCursors::get_cm_delta(int index1, int index2) {
   uint64_t samples2 = get_cursor_samples(index2);
   uint64_t delta_sample =
       (samples1 > samples2) ? samples1 - samples2 : samples2 - samples1;
-  return _view->_ruler->format_real_time(
+  return _view->get_ruler()->format_real_time(
       delta_sample, _view->document_snapshot_source()->cur_snap_samplerate());
 }
 
@@ -286,7 +306,7 @@ int ViewCursors::get_cursor_index_by_key(uint64_t key) {
   auto &lst = get_cursorList();
 
   int dex = 0;
-  for (auto c : lst) {
+  for (auto &c : lst) {
     if (c->get_key() == key) {
       return dex;
     }
@@ -304,7 +324,7 @@ int ViewCursors::get_cursor_index_by_key(uint64_t key) {
 // set_cursor_position returns false and we silently drop the write — this
 // matches the historical behaviour where cursor positions were View-only.
 void ViewCursors::sync_cursor_position_to_core(TimeMarker *marker) {
-  if (!marker || !_view->_data_source)
+  if (!marker || !_view->data_source())
     return;
 
   // Find the positional index of the marker in the cursor list by pointer
@@ -314,14 +334,14 @@ void ViewCursors::sync_cursor_position_to_core(TimeMarker *marker) {
   auto &lst = get_cursorList();
   int idx = 0;
   bool found = false;
-  for (auto c : lst) {
-    if (c == marker) { found = true; break; }
+  for (auto &c : lst) {
+    if (c.get() == marker) { found = true; break; }
     ++idx;
   }
   if (!found)
     return;
 
-  _view->_data_source->set_cursor_position(idx, marker->index());
+  _view->data_source()->set_cursor_position(idx, marker->index());
 }
 
 // Task C2.7: reconcile the View's rendering cursor list with the Core-layer
@@ -332,10 +352,10 @@ void ViewCursors::sync_cursor_position_to_core(TimeMarker *marker) {
 // by index are left untouched (their position is not overwritten — the user
 // may have dragged them since).
 void ViewCursors::sync_cursors_from_core() {
-  if (!_view->_data_source)
+  if (!_view->data_source())
     return;
 
-  auto core_entries = _view->_data_source->get_cursors();
+  auto core_entries = _view->data_source()->get_cursors();
   auto &view_cursors = get_cursorList();
 
   int core_count = static_cast<int>(core_entries.size());

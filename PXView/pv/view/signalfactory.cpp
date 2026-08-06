@@ -62,7 +62,7 @@ static void apply_model_properties(Signal *signal,
   signal->set_enabled(model->enabled());
   signal->set_visible(model->enabled());
 
-  if (auto *logic_sig = dynamic_cast<LogicSignal *>(signal)) {
+  if (auto *logic_sig = signal->as_logic()) {
     logic_sig->set_trig(model->trig_type());
     // Establish live sync: subsequent SignalModel::set_trig_type() calls
     // will auto-update this LogicSignal's _trig via Qt signal/slot.
@@ -102,9 +102,9 @@ Signal *SignalFactory::create_signal(std::shared_ptr<data::SignalModel> model,
   return signal;
 }
 
-std::vector<Signal *> SignalFactory::create_signals(data::DataSource *source,
+std::vector<std::unique_ptr<Signal>> SignalFactory::create_signals(data::DataSource *source,
                                                     data::DataSource *data_source) {
-  std::vector<Signal *> result;
+  std::vector<std::unique_ptr<Signal>> result;
   if (!source || !data_source)
     return result;
 
@@ -113,13 +113,13 @@ std::vector<Signal *> SignalFactory::create_signals(data::DataSource *source,
   for (auto model : models) {
     Signal *s = create_signal(model, data_source);
     if (s)
-      result.push_back(s);
+      result.push_back(std::unique_ptr<Signal>(s));
   }
   return result;
 }
 
 SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
-    const std::vector<Signal *> &current_signals,
+    const std::vector<std::unique_ptr<Signal>> &current_signals,
     const std::vector<std::shared_ptr<data::SignalModel>> &models) {
   // Empty current + non-empty models → first creation → AllReplaced
   if (current_signals.empty() && !models.empty())
@@ -135,7 +135,7 @@ SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
 
   // Build sets of channel indices
   std::set<int> current_indices;
-  for (auto *sig : current_signals) {
+  for (auto &sig : current_signals) {
     if (sig)
       current_indices.insert(sig->get_index());
   }
@@ -162,7 +162,7 @@ SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
       if (model)
         model_ptrs.insert(model.get());
     }
-    for (auto *sig : current_signals) {
+    for (auto &sig : current_signals) {
       if (!sig)
         continue;
       auto sig_model = sig->model();
@@ -217,14 +217,12 @@ SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
   return AllReplaced;
 }
 
-void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
+void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current_signals,
                                    data::DataSource *source,
                                    data::DataSource *data_source,
                                    SignalChangeEvent event) {
   if (!source || !data_source) {
     if (event == AllReplaced) {
-      for (auto *s : current_signals)
-        delete s;
       current_signals.clear();
     }
     return;
@@ -237,8 +235,7 @@ void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
     // Save UI state from existing signals, recreate all, restore state.
     std::map<int, SignalUiState> saved_state = save_ui_state(current_signals);
 
-    for (auto *s : current_signals)
-      delete s;
+    // unique_ptr auto-deletes all Signal elements on clear().
     current_signals.clear();
 
     current_signals = create_signals(source, data_source);
@@ -255,7 +252,7 @@ void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
     auto *doc = source->get_active_document();
     if (doc && doc->get_signal_config().is_valid) {
       const auto &cfg = doc->get_signal_config();
-      for (auto *sig : current_signals) {
+      for (auto &sig : current_signals) {
         auto it = std::find_if(cfg.channels.begin(), cfg.channels.end(),
                                [&](const data::ChannelConfig &ch) {
                                  return ch.index == sig->get_index();
@@ -277,7 +274,7 @@ void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
     // Create signals for models that have no matching signal yet.
     for (auto model : models) {
       bool exists = false;
-      for (auto *s : current_signals) {
+      for (auto &s : current_signals) {
         if (s->get_index() == model->index()) {
           exists = true;
           break;
@@ -286,43 +283,35 @@ void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
       if (!exists) {
         Signal *new_sig = create_signal(model, data_source);
         if (new_sig)
-          current_signals.push_back(new_sig);
+          current_signals.push_back(std::unique_ptr<Signal>(new_sig));
       }
     }
     break;
   }
 
   case Removed: {
-    // Delete signals whose index no longer exists in the model list.
-    std::vector<Signal *> to_remove;
-    for (auto *s : current_signals) {
-      bool found = false;
-      for (auto model : models) {
-        if (model->index() == s->get_index()) {
-          found = true;
-          break;
-        }
-      }
-      if (!found)
-        to_remove.push_back(s);
-    }
-    for (auto *s : to_remove) {
-      auto it = std::find(current_signals.begin(), current_signals.end(), s);
-      if (it != current_signals.end()) {
-        current_signals.erase(it);
-        delete s;
-      }
-    }
+    // Remove signals whose index no longer exists in the model list.
+    // unique_ptr auto-deletes the Signal when the element is erased.
+    current_signals.erase(
+        std::remove_if(current_signals.begin(), current_signals.end(),
+            [&](std::unique_ptr<Signal> &s) {
+                for (auto model : models) {
+                    if (model->index() == s->get_index())
+                        return false;  // keep
+                }
+                return true;  // remove
+            }),
+        current_signals.end());
     break;
   }
 
   case Modified: {
     // Refresh properties of existing signals from the models.
-    for (auto *s : current_signals) {
+    for (auto &s : current_signals) {
       for (auto model : models) {
         if (model->index() != s->get_index())
           continue;
-        apply_model_properties(s, model);
+        apply_model_properties(s.get(), model);
         break;
       }
     }
@@ -332,9 +321,9 @@ void SignalFactory::update_signals(std::vector<Signal *> &current_signals,
 }
 
 std::map<int, SignalFactory::SignalUiState>
-SignalFactory::save_ui_state(const std::vector<Signal *> &sig_list) {
+SignalFactory::save_ui_state(const std::vector<std::unique_ptr<Signal>> &sig_list) {
   std::map<int, SignalUiState> state;
-  for (auto *s : sig_list) {
+  for (auto &s : sig_list) {
     if (!s)
       continue;
     SignalUiState ui;
@@ -350,9 +339,9 @@ SignalFactory::save_ui_state(const std::vector<Signal *> &sig_list) {
 }
 
 void SignalFactory::restore_ui_state(
-    std::vector<Signal *> &sig_list,
+    std::vector<std::unique_ptr<Signal>> &sig_list,
     const std::map<int, SignalUiState> &saved_state) {
-  for (auto *s : sig_list) {
+  for (auto &s : sig_list) {
     if (!s)
       continue;
     auto it = saved_state.find(s->get_index());

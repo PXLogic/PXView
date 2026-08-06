@@ -38,6 +38,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class DataSource; }
 
 namespace view {
 class DecoderModel;
@@ -63,6 +64,7 @@ private slots:
 
 private:
     SigSession *_session;
+    data::DataSource *_data_src = nullptr;  // Spec v2 Task 9: route DataSource methods through interface
     // View-owned DecoderModel passed in from ProtocolDock (Task 10): the
     // dialog reads/sets the decoder stack on the same instance the dock
     // uses for its QTableView.

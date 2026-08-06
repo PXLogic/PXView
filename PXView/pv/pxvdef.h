@@ -80,11 +80,21 @@ struct ds_device_base_info {
 // --- Glitch filter mode ---
 // (Moved from logicsnapshot.h so sigsession.h can forward-declare
 // LogicSnapshot instead of including the heavy snapshot header.)
-enum GlitchFilterMode {
-    GLITCH_FILTER_BOTH = 0,
-    GLITCH_FILTER_HIGH  = 1,
-    GLITCH_FILTER_LOW   = 2
+// Spec v2 Task 4: changed to enum class with fixed underlying type so
+// filterprocessor.h can forward-declare it without including logicsnapshot.h.
+enum class GlitchFilterMode : int {
+    Both = 0,
+    High = 1,
+    Low  = 2
 };
+
+// 过渡兼容别名（标记 deprecated，后续移除）
+[[deprecated("Use GlitchFilterMode::Both")]]
+inline constexpr GlitchFilterMode GLITCH_FILTER_BOTH = GlitchFilterMode::Both;
+[[deprecated("Use GlitchFilterMode::High")]]
+inline constexpr GlitchFilterMode GLITCH_FILTER_HIGH = GlitchFilterMode::High;
+[[deprecated("Use GlitchFilterMode::Low")]]
+inline constexpr GlitchFilterMode GLITCH_FILTER_LOW = GlitchFilterMode::Low;
 
 // Forward declaration — the actual definition is in <libsigrok/libsigrok.h>.
 struct sr_dev_inst;

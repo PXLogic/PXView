@@ -27,6 +27,7 @@
 
 #include <list>
 #include <vector>
+#include <memory>
 #include <QMainWindow>
 #include <QTranslator> 
 #include "dialogs/dsmessagebox.h"
@@ -44,8 +45,10 @@
 #include "tabcontext.h"
 #include "widgets/slidingdrawer.h"
 #include "widgets/sidebar.h"
+#include <map>
 #include "config/appconfig.h"
 #include "api/types.h"
+#include "data/sessiondocument.h"
 
 class QAction;
 class QMenu;
@@ -90,16 +93,25 @@ namespace view {
 class View;
 }
 
+// Spec v2 Task 2: forward declarations for delegate classes (needed for
+// accessor return types before unique_ptr members are declared below).
+class MainWindowEventDispatcher;
+class SessionEventDispatcher;
+class MainWindowConfigIO;
+class MainWindowSignalConnector;
+class MainWindowFileOps;
+class TabManager;
+class DockManager;
+class MainWindowThemeManager;
+class MainWindowStatusBar;
+class MainWindowShortcutManager;
+
 // removed WidgetInspector fwd decl
 
 //The mainwindow,referenced by MainFrame
 //TODO: create graph view,toolbar,and show device list
 class MainWindow :
     public QMainWindow,
-    public IDataCallback,
-    public ICaptureCallback,
-    public ITriggerCallback,
-    public ISessionStateCallback,
     public IMainForm,
     public ISessionDataGetter,
     public pv::api::IServiceEventListener,
@@ -122,21 +134,25 @@ public:
 public slots: 
     void switchTheme(QString style);
     void restore_dock();
-
-private slots:
-	void on_load_file(QString file_name);
-    void on_open_doc();  
+    // All on_* slots are public because delegate classes
+    // (DockManager / TabManager / ShortcutManager / SignalConnector / FileOps)
+    // connect signals to these from outside MainWindow.
     void on_side_bar_dock_clicked(int index);
     void on_side_bar_action_clicked(int index);
+    void on_tab_changed(int index);
+    void on_tab_moved(int from, int to);
+    void on_tab_detach(int index, QWidget *widget, const QString &title);
+    void on_tab_attached(QWidget *widget, const QString &title);
+    void on_new_tab_requested();
+	void on_load_file(QString file_name);
+    void on_open_doc();  
     void on_screenShot();
     void on_save();
-
     void on_export();
     void on_import_file(QString file_name);
     bool on_load_session(QString name);  
     bool on_store_session(QString name); 
     void on_data_updated();
- 
     void on_session_error();
     void on_signals_changed();
     void on_receive_trigger(quint64 trigger_pos);
@@ -147,12 +163,6 @@ private slots:
     void on_cur_snap_samplerate_changed();
     void on_delay_prop_msg();
     void on_load_device_first();
-    void on_tab_changed(int index);
-    void on_tab_moved(int from, int to);
-    void on_tab_detach(int index, QWidget *widget, const QString &title);
-    void on_tab_attached(QWidget *widget, const QString &title);
-    void on_new_tab_requested();
-
     // Task 1.3: ICaptureCallback methods now emit EventObject signals (cross-
     // thread safe); these on_* slots run on the GUI thread to touch the View.
     void on_update_capture();
@@ -166,10 +176,13 @@ signals:
 public:
     //IMainForm
     void switchLanguage(int language) override;
-    bool able_to_close();    
+    bool able_to_close();
     QWidget* GetBodyView();
+
+    // Phase 2: exposed for SessionEventDispatcher
+    std::map<int, pv::data::ChannelLayoutState> build_channel_layout(pv::view::View *view);
     
-private: 
+public:
 	void setup_ui();
     void retranslateUi(); 
     bool eventFilter(QObject *object, QEvent *event);
@@ -191,7 +204,7 @@ private:
     void update_tab_style(int index);
 
     //json operation
-private:
+public:
     QString gen_config_file_path(bool isNewFormat);
     bool load_config_from_file(QString file);
     bool load_config_from_json(QJsonDocument &doc, bool &haveDecoder);
@@ -204,31 +217,23 @@ private:
     void check_config_file_version(); 
     void load_demo_decoder_config(QString optname);
 
-  
+    // ---- Delegate accessors (Spec v2 Task 2) ----
+    // unique_ptr delegate members are now private; delegates use these.
+    MainWindowConfigIO* config_io() const { return _config_io.get(); }
+    MainWindowSignalConnector* signal_connector() const { return _signal_connector.get(); }
+    MainWindowFileOps* file_ops() const { return _file_ops.get(); }
+    TabManager* tab_manager() const { return _tab_manager.get(); }
+    DockManager* dock_manager() const { return _dock_manager.get(); }
+    MainWindowThemeManager* theme_manager() const { return _theme_manager.get(); }
+    MainWindowStatusBar* status_bar() const { return _status_bar.get(); }
+    MainWindowShortcutManager* shortcut_manager() const { return _shortcut_manager.get(); }
+
+
+public:
+    // Spec v3 Task 6: delay_prop_msg has real logic (set message + start timer)
+    void delay_prop_msg(QString strMsg);
+
 private:
-    //IDataCallback
-    void data_updated() override;
-    void receive_data_len(quint64 len) override;
-    void receive_header() override;
-    void cur_snap_samplerate_changed() override;
-
-    //ICaptureCallback
-    void frame_began() override;
-    void frame_ended() override;
-    void update_capture() override;
-    void show_region(uint64_t start, uint64_t end, bool keep) override;
-    void repeat_hold(int percent) override;
-
-    //ITriggerCallback
-    void receive_trigger(quint64 trigger_pos) override;
-    void show_wait_trigger() override;
-
-    //ISessionStateCallback
-    void session_error() override;
-    void session_save() override;
-    void signals_changed() override;
-    void decode_done() override;
-    void delay_prop_msg(QString strMsg) override;
 
     //ISessionDataGetter
     bool genSessionData(std::string &str) override;
@@ -239,14 +244,17 @@ private:
     //events are simply not consumed.
     void on_service_event(const pv::api::ServiceEventData &data) override;
 
-    //IEventListener (Task 12) — typed event bus consumer. All 41 event structs
-    //have a typed override below. Each override contains its handler body
-    //directly (no int dispatch, no switch). The former per-responsibility
-    //(int,int) helpers and the legacy IMessageListener / DSV_MSG_* /
-    //broadcast_msg / trigger_message infrastructure have been removed.
-    //broadcast<T>() / broadcast_sync<T>() / broadcast_async<T>() are the only
-    //dispatch paths. Overrides for events with no GUI work (CopyToDocDone /
-    //DecodeDone / SignalsChanged / DataUpdated / DeviceConfigUpdated) are empty.
+    // ---- SessionEventDispatcher delegate ----
+    // Phase 2: IEventListener implementation extracted to a delegate class.
+    // All 45 typed on_event overrides live in SessionEventDispatcher.
+    // MainWindow holds a unique_ptr to the dispatcher and forwards the
+    // IEventListener interface to it.
+    std::unique_ptr<class SessionEventDispatcher> _event_dispatcher;
+
+    // IEventListener forwarding — delegates to _event_dispatcher.
+    // These are kept on MainWindow so that EventBus registration still works
+    // (MainWindow is the registered listener). Each just forwards to the
+    // dispatcher's override.
     void on_event(const pv::interface::CaptureStateChanged &) override;
     void on_event(const pv::interface::CaptureOwnerChanged &) override;
     void on_event(const pv::interface::TriggerConfigChanged &) override;
@@ -295,10 +303,103 @@ private:
     void on_event(const pv::interface::StartCollectWorkPrev &) override;
     void on_event(const pv::interface::EndCollectWorkPrev &) override;
 
-private: 
-	pv::ui::DraggableTabWidget *_tab_widget;
-    QList<pv::TabContext*> _tab_contexts;
-    int _current_tab_index;
+    // Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
+    void on_event(const pv::interface::DataLenUpdated &) override;
+    void on_event(const pv::interface::HeaderReceived &) override;
+    void on_event(const pv::interface::CaptureUpdated &) override;
+    void on_event(const pv::interface::ShowRegion &) override;
+    void on_event(const pv::interface::RepeatHold &) override;
+    void on_event(const pv::interface::TriggerReceived &) override;
+    void on_event(const pv::interface::ShowWaitTrigger &) override;
+    void on_event(const pv::interface::SessionError &) override;
+    void on_event(const pv::interface::SaveRequested &) override;
+    void on_event(const pv::interface::DelayedPropMsg &) override;
+    void on_event(const pv::interface::SampleLimitsChanged &) override;
+
+public:
+    // ---- Spec v2 Task 2: Public accessors for delegate classes ----
+    // Member variables are now private; delegates use these accessors.
+
+    // Session / Device
+    SigSession*& session() { return _session; }
+    DeviceAgent*& device_agent() { return _device_agent; }
+
+    // Toolbars
+    toolbars::SamplingBar*& sampling_bar() { return _sampling_bar; }
+    toolbars::TrigBar*& trig_bar() { return _trig_bar; }
+    toolbars::FileBar*& file_bar() { return _file_bar; }
+    toolbars::LogoBar*& logo_bar() { return _logo_bar; }
+    toolbars::TitleBar*& title_bar() { return _title_bar; }
+
+    // UI widgets
+    QWidget*& central_widget() { return _central_widget; }
+    QVBoxLayout*& vertical_layout() { return _vertical_layout; }
+    QWidget*& frame() { return _frame; }
+    dialogs::DSMessageBox*& msg() { return _msg; }
+    EventObject& event_object() { return _event; }
+
+    // State
+    bool& is_auto_switch_device() { return _is_auto_switch_device; }
+    bool& is_save_confirm_msg() { return _is_save_confirm_msg; }
+    QString& pattern_mode() { return _pattern_mode; }
+    QString& lst_title_string() { return _lst_title_string; }
+    QString& title_ext_string() { return _title_ext_string; }
+    high_resolution_clock::time_point& last_key_press_time() { return _last_key_press_time; }
+
+    // Status labels
+    QLabel*& disk_cache_status_label() { return _disk_cache_status_label; }
+    QLabel*& trig_time_label() { return _trig_time_label; }
+    QLabel*& fps_label() { return _fps_label; }
+    QLabel*& sample_period_label() { return _sample_period_label; }
+
+    // Timers / counters
+    DsTimer& delay_prop_msg_timer() { return _delay_prop_msg_timer; }
+    QString& strMsg() { return _strMsg; }
+    QTimer& disk_cache_status_timer() { return _disk_cache_status_timer; }
+    QTimer& fps_timer() { return _fps_timer; }
+    int& acq_count() { return _acq_count; }
+    int& key_value() { return _key_value; }
+    bool& key_vaild() { return _key_vaild; }
+    QTranslator& qtTrans() { return _qtTrans; }
+    QTranslator& myTrans() { return _myTrans; }
+
+    // Menu / categories
+    QMenuBar*& menu_bar() { return _menu_bar; }
+    QMenu*& category_file() { return _category_file; }
+    QMenu*& category_display() { return _category_display; }
+    QMenu*& category_help() { return _category_help; }
+    int& category_file_index() { return _category_file_index; }
+    int& category_display_index() { return _category_display_index; }
+    int& category_help_index() { return _category_help_index; }
+
+    // Methods that remain public
+    void update_sample_period();
+    void MainWindowRibbonHelper();
+    void Ribbon_setupUi();
+    void Ribbon_retranslateUi();
+    void setupQuickAccessBar();
+    void setupFileCategory();
+    void setupDisplayCategory();
+    void setupHelpCategory();
+
+    enum {
+        SIDEBAR_TRIGGER = 0,
+        SIDEBAR_DECODE = 1,
+        SIDEBAR_MEASURE = 2,
+        SIDEBAR_SEARCH = 3,
+        SIDEBAR_FUNCTION = 4,
+        SIDEBAR_OPTIONS = 5,
+        SIDEBAR_MCP = 6,
+        SIDEBAR_LOG = 7,
+        SIDEBAR_RUNSTOP = 8,
+        SIDEBAR_INSTANT = 9
+    };
+
+    // Phase 2: getDockOptions forwarded to DockManager
+    ::DockOptions* getDockOptions();
+
+private:
+    // ---- Member variables (private, Spec v2 Task 2) ----
     dialogs::DSMessageBox   *_msg;
 
 	QWidget                 *_central_widget;
@@ -309,38 +410,6 @@ private:
     toolbars::FileBar       *_file_bar;
     toolbars::LogoBar       *_logo_bar; //help button, on top right
     toolbars::TitleBar      *_title_bar;
-
-
-    QDockWidget             *_protocol_dock;
-    dock::ProtocolDock      *_protocol_widget;
-    QDockWidget             *_trigger_dock;
-    dock::TriggerDock       *_trigger_widget;
-    QDockWidget             *_dso_trigger_dock;
-    dock::DsoTriggerDock    *_dso_trigger_widget;
-    QDockWidget             *_measure_dock;
-    dock::MeasureDock       *_measure_widget;
-    QDockWidget             *_search_dock;
-    dock::SearchDock        *_search_widget;
-    QDockWidget             *_device_options_dock;
-    dock::DeviceOptionsDock *_device_options_widget;
-    QDockWidget             *_log_dock;
-    dock::LogDock           *_log_widget;
-    dock::McpControlDock       *_mcp_control_widget;
-    dock::FunctionDock        *_function_widget;
-    QDockWidget               *_function_dock;
-
-    // Sliding drawer panel
-    widgets::SlidingDrawer  *_sliding_drawer;
-    int _drawer_page_protocol;
-    int _drawer_page_trigger;
-    int _drawer_page_dso_trigger = 0;
-    int _drawer_page_measure;
-    int _drawer_page_search;
-    int _drawer_page_device_options;
-    int _drawer_page_log;
-    int _drawer_page_mcp;
-    int _drawer_page_function;
-    int _drawer_current_page; // -1 = no page open
 
     QTranslator     _qtTrans;
     QTranslator     _myTrans;
@@ -361,41 +430,12 @@ private:
     QLabel          *_trig_time_label;
     QLabel          *_fps_label;
     QLabel          *_sample_period_label;
-    void update_sample_period();
     QTimer          _disk_cache_status_timer;
     QTimer          _fps_timer;
     int             _acq_count;
 
     int         _key_value;
     bool        _key_vaild;
-    // removed _debug_helper
-
-
-    void MainWindowRibbonHelper();
-    void Ribbon_setupUi();
-    void Ribbon_retranslateUi();
-    void setupQuickAccessBar();
-    void setupSideBar();
-    void setupFileCategory();
-    void setupDisplayCategory();
-    void setupHelpCategory();
-
-    widgets::SideBar* _side_bar;
-
-    enum {
-        SIDEBAR_TRIGGER = 0,
-        SIDEBAR_DECODE = 1,
-        SIDEBAR_MEASURE = 2,
-        SIDEBAR_SEARCH = 3,
-        SIDEBAR_FUNCTION = 4,
-        SIDEBAR_OPTIONS = 5,
-        SIDEBAR_MCP = 6,
-        SIDEBAR_LOG = 7,
-        SIDEBAR_RUNSTOP = 8,
-        SIDEBAR_INSTANT = 9
-    };
-
-    ::DockOptions* getDockOptions();
 
     int _category_file_index;
     int _category_display_index;
@@ -405,6 +445,16 @@ private:
     QMenu         *_category_file;
     QMenu         *_category_display;
     QMenu         *_category_help;
+
+    // unique_ptr delegate members (moved from public section)
+    std::unique_ptr<class MainWindowConfigIO> _config_io;
+    std::unique_ptr<class MainWindowSignalConnector> _signal_connector;
+    std::unique_ptr<class MainWindowFileOps> _file_ops;
+    std::unique_ptr<class TabManager> _tab_manager;
+    std::unique_ptr<class DockManager> _dock_manager;
+    std::unique_ptr<class MainWindowThemeManager> _theme_manager;
+    std::unique_ptr<class MainWindowStatusBar> _status_bar;
+    std::unique_ptr<class MainWindowShortcutManager> _shortcut_manager;
 
 };
 

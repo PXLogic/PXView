@@ -38,14 +38,9 @@ static QString get_default_disk_cache_path() {
   return QDir::tempPath() + "/PXView_cache";
 }
 
-CaptureManager::CaptureManager(EventBus *bus, SessionStateContext *state)
-    : _event_bus(bus), _state(state), _noData_cnt(0), _data_lock(false),
-      _data_updated(false), _data_auto_lock(0), _repeat_intvl(1),
-      _repeat_hold_prg(0), _repeat_wait_prog_step(10), _is_instant(false),
-      _work_time_id(0), _capture_times(0), _confirm_store_time_id(0),
-      _rt_refresh_time_id(0), _rt_ck_refresh_time_id(0),
-      _clt_mode(COLLECT_SINGLE), _is_stream_mode(false), _is_action(false),
-      _dso_packet_count(0) {
+CaptureManager::CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord)
+    : _event_bus(bus), _state(state), _coord(coord),
+      _clt_mode(COLLECT_SINGLE) {
   _feed_timer.SetCallback(std::bind(&CaptureManager::feed_timeout, this));
   _repeat_timer.SetCallback(
       std::bind(&CaptureManager::repeat_capture_wait_timeout, this));
@@ -64,16 +59,19 @@ void CaptureManager::capture_init() {
   // reads instant mode. The application-layer _is_instant flag (accessed via
   // is_instant()/set_is_instant()) is the sole source of truth and is used
   // directly by capture logic (e.g. is_repeat_action()).
-  _state->update_capture();
+  _coord->update_capture();
 
-  _state->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
-  _state->set_cur_samplelimits(_state->device_agent().get_sample_limit());
+  // Store samplerate/limits before clear() (these are device properties,
+  // not snapshot state). set_cur_snap_samplerate() will be called again
+  // AFTER clear() to inject the samplerate into the NEW snapshots.
+  const uint64_t dev_samplerate = _state->device_agent().get_sample_rate();
+  const uint64_t dev_samplelimits = _state->device_agent().get_sample_limit();
 
-  _data_updated = false;
-  _state->set_trigger_flag(false);
-  _state->set_trigger_ch(0);
-  _state->set_hw_replied(false);
-  _rt_refresh_time_id = 0;
+  _data_updated.store(false);
+  _coord->set_trigger_flag(false);
+  _coord->set_trigger_ch(0);
+  _coord->set_hw_replied(false);
+  _rt_refresh_time_id.store(0);
 
   // CRITICAL FIX (fork 迁移遗漏): 旧版 fork libsigrok 在 DS_EV_DEVICE_RUNNING
   // 事件中调用 set_receive_data_len(0) 重置 viewport 的 _sample_received 进度，
@@ -81,14 +79,26 @@ void CaptureManager::capture_init() {
   // 无此事件，capture_init() 是 exec_capture() 启动设备前最后的状态重置点，
   // 必须在此重置进度，否则用户在等待触发时会看到残留的 100% 进度。
   // set_receive_len(0) 内部会 start_trigger_timer(333) 并将 _transfer_started=false。
-  _state->set_receive_data_len(0);
-  _rt_ck_refresh_time_id = 0;
-  _noData_cnt = 0;
+  _coord->set_receive_data_len(0);
+  _rt_ck_refresh_time_id.store(0);
+  _noData_cnt.store(0);
 
   data_unlock();
 
-  // Init data container
+  // Init data container — clear() creates fresh snapshots (samplerate=0).
   _state->capture_data()->clear();
+
+  // CRITICAL: set_cur_snap_samplerate MUST be called AFTER clear(), because
+  // clear() replaces the shared_ptr snapshots with new instances. Calling it
+  // before clear() sets the samplerate on the OLD snapshots, which are then
+  // discarded. The new snapshots would have _samplerate=0, causing
+  // AnalogSignal::paint_mid to compute samples_per_pixel=0 → flat-line waveform.
+  // get_logic() has a fallback injection, but get_analog()/get_dso() did not
+  // (fixed in sessiondata.h). This explicit call after clear() is the
+  // authoritative path; the get_*() injection is a safety net.
+  _coord->set_cur_snap_samplerate(dev_samplerate);
+  _coord->set_cur_samplelimits(dev_samplelimits);
+
   _state->capture_data()->get_logic()->set_disk_cache_config(_disk_cache_config);
 
   int mode = _state->device_agent().get_work_mode();
@@ -115,15 +125,15 @@ void CaptureManager::capture_init() {
 }
 
 bool CaptureManager::start_capture(bool instant, data::SessionDocument *owner) {
-  _is_action = true;
+  _is_action.store(true);
   int ret = action_start_capture(instant, owner);
-  _is_action = false;
+  _is_action.store(false);
   return ret;
 }
 
 bool CaptureManager::action_start_capture(bool instant,
                                           data::SessionDocument *owner) {
-  assert(_event_bus && _event_bus->has_callbacks());
+  assert(_event_bus && _event_bus->has_listeners());
 
   pxv_info("Start collect.");
 
@@ -141,6 +151,7 @@ bool CaptureManager::action_start_capture(bool instant,
   if (_state->device_agent().have_instance() == false) {
     pxv_err("Error!No device selected");
     assert(false);
+    return false;
   }
   if (_state->device_status() == ST_RUNNING ||
       _state->device_agent().is_collecting()) {
@@ -148,23 +159,23 @@ bool CaptureManager::action_start_capture(bool instant,
     return false;
   }
 
-  _state->clear_all_decode_task2();
+  _coord->clear_all_decode_task2();
   clear_decode_result();
 
   _state->capture_data()->clear();
   _state->view_data()->clear();
   // 清除毛刺滤波状态(backup 悬垂、active 标志过期),保留 thresholds/modes
   // 供 auto-apply 使用
-  _state->clear_glitch_filter_state_for_capture();
-  _is_stream_mode = false;
-  _capture_times = 0;
-  _dso_packet_count = 0;
+  _coord->clear_glitch_filter_state_for_capture();
+  _is_stream_mode.store(false);
+  _capture_times.store(0);
+  _dso_packet_count.store(0);
 
-  _state->set_capture_data(_state->view_data());
-  _state->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
-  _state->set_cur_samplelimits(_state->device_agent().get_sample_limit());
+  _coord->set_capture_data(_state->view_data());
+  _coord->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
+  _coord->set_cur_samplelimits(_state->device_agent().get_sample_limit());
 
-  _state->set_session_time(QDateTime::currentDateTime());
+  _coord->set_session_time(QDateTime::currentDateTime());
 
   int mode = _state->device_agent().get_work_mode();
   if (mode == LOGIC) {
@@ -174,12 +185,13 @@ bool CaptureManager::action_start_capture(bool instant,
     }
 
     if (_state->device_agent().is_hardware()) {
-      _is_stream_mode = _state->device_agent().is_stream_mode();
-    } else if (_state->device_agent().is_file()) {
-      _is_stream_mode = true;
+      _is_stream_mode.store(_state->device_agent().is_stream_mode());
+    } else if (_state->device_agent().is_demo() ||
+               _state->device_agent().is_file()) {
+      _is_stream_mode.store(true);
     }
 
-    if (is_loop_mode() && !_is_stream_mode) {
+    if (is_loop_mode() && !_is_stream_mode.load()) {
       set_collect_mode(COLLECT_SINGLE); // Reset the capture mode.
     }
 
@@ -190,8 +202,9 @@ bool CaptureManager::action_start_capture(bool instant,
       }
     }
 
-    if (_state->device_agent().is_hardware()) {
-      bool bv = is_loop_mode() && _is_stream_mode;
+    if (_state->device_agent().is_hardware() ||
+        _state->device_agent().is_demo()) {
+      bool bv = is_loop_mode() && _is_stream_mode.load();
       _state->device_agent().set_config_bool(SR_CONF_LOOP_MODE, bv);
     }
   }
@@ -230,9 +243,9 @@ bool CaptureManager::action_start_capture(bool instant,
 
   pxv_info(
       "SigSession::start_capture: _is_stream_mode=%d, disk_cache_enabled=%d",
-      _is_stream_mode, disk_cache_enabled);
+      _is_stream_mode.load(), disk_cache_enabled);
 
-  if (_is_stream_mode && disk_cache_enabled) {
+  if (_is_stream_mode.load() && disk_cache_enabled) {
     _disk_cache_config.enabled = true;
 
     QString cache_path;
@@ -264,9 +277,9 @@ bool CaptureManager::action_start_capture(bool instant,
 
   // update setting
   if (_state->device_agent().is_file())
-    _is_instant = true;
+    _is_instant.store(true);
   else
-    _is_instant = instant;
+    _is_instant.store(instant);
 
   // modernize-core-layer-radical Task 11: pre-broadcast synchronously so
   // MainWindow can commit trigger settings + capture_init + on_state_changed
@@ -277,7 +290,7 @@ bool CaptureManager::action_start_capture(bool instant,
   _event_bus->broadcast_sync<interface::StartCollectWorkPrev>({});
 
   if (exec_capture()) {
-    _work_time_id++;
+    _work_time_id.fetch_add(1);
     // CaptureOwnerGuard manages _is_working + _capture_owner_document +
     // CaptureOwnerChanged broadcast as a single RAII unit. Replaces the
     // manual _is_working=true / _capture_owner_document=... pattern.
@@ -302,32 +315,10 @@ bool CaptureManager::exec_capture() {
     return false;
   }
 
-  // Wait for background copy_data_to_document to complete before
-  // starting a new capture, to prevent source data from being cleared.
-  // In double-buffer mode (bSwapBuffer=true), the copy reads from view_data
-  // while the new capture goes to capture_data (a different buffer), so
-  // there's no conflict and we can skip the wait. This eliminates the
-  // main-thread lag at each capture end in stream mode + repeat mode.
-  bool will_swap_buffer = false;
-  {
-    int mode = _state->device_agent().get_work_mode();
-    if (mode != DSO && mode != ANALOG) {
-      if (is_repeat_mode()) {
-        if (_is_stream_mode) {
-          if (_capture_times > 1)
-            will_swap_buffer = true;
-        } else {
-          will_swap_buffer = true;
-        }
-      }
-    }
-  }
-  if (_state->document_registry()->is_copy_in_progress() && !will_swap_buffer) {
-    pxv_info("Waiting for background copy_data_to_document to complete...");
-    while (_state->document_registry()->is_copy_in_progress()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  }
+  // copy_data_to_document is now zero-copy (shared_ptr sharing, instant).
+  // No need to wait for a background copy thread — is_copy_in_progress()
+  // always returns false. The old wait loop and will_swap_buffer calculation
+  // have been removed.
 
   if (_state->device_agent().have_enabled_channel() == false) {
     QString err_str(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NO_ENABLED_CHANNEL),
@@ -336,8 +327,8 @@ bool CaptureManager::exec_capture() {
     return false;
   }
 
-  _capture_times++;
-  _state->set_is_triged(false);
+  _capture_times.fetch_add(1);
+  _coord->set_is_triged(false);
 
   int mode = _state->device_agent().get_work_mode();
   bool bAddDecoder = false;
@@ -355,6 +346,18 @@ bool CaptureManager::exec_capture() {
     if (is_single_mode()) {
       if (_is_stream_mode)
         bAddDecoder = true;
+      // Single capture must use SINGLE BUFFER (capture_data == view_data).
+      // bSwapBuffer stays false here, so set_capture_data() is never called
+      // below and capture_data would keep pointing at whatever back buffer a
+      // previous repeat-mode run left behind (capture_data != view_data).
+      // The driver then fills capture_data while view_data stays empty.
+      // During the capture that still renders, because is_realtime_refresh()
+      // is true for stream+single and get_logic_snapshot() returns
+      // capture_data. But the moment the capture ends is_working() goes
+      // false, is_realtime_refresh() returns false, and get_logic_snapshot()
+      // falls back to view_data -> empty snapshot -> blank screen.
+      // Pin capture_data to view_data so both phases read the same data.
+      _coord->set_capture_data(_state->view_data());
     } else if (is_repeat_mode()) {
       if (_is_stream_mode) {
         if (_capture_times == 1)
@@ -362,7 +365,20 @@ bool CaptureManager::exec_capture() {
         else
           bSwapBuffer = true;
       } else {
-        bSwapBuffer = true;
+        // Non-stream repeat: use SINGLE BUFFER (capture_data == view_data).
+        // DSView original design: data goes directly into view_data, so the
+        // viewport can show live data during capture via get_logic_snapshot()
+        // which returns view_data->get_logic(). Double buffer would put data
+        // in capture_data while view_data stays empty → blank screen.
+        // Zero-copy shared_ptr makes this safe: copy_data_to_document shares
+        // the snapshot, and view_data->clear() on next capture creates a new
+        // shared_ptr while the document keeps the old one alive.
+        //
+        // bSwapBuffer stays false, so set_capture_data() is not called below.
+        // Pin capture_data to view_data explicitly, otherwise a back buffer
+        // left over from an earlier double-buffered run would still be the
+        // capture target and view_data would never receive data.
+        _coord->set_capture_data(_state->view_data());
       }
     } else if (is_loop_mode()) {
     }
@@ -374,18 +390,21 @@ bool CaptureManager::exec_capture() {
   }
 
   if (bAddDecoder) {
-    _state->clear_all_decode_task2();
+    _coord->clear_all_decode_task2();
     clear_decode_result();
 
-    // CRITICAL: Release the active document's copy of the old mmap data.
-    // copy_data_to_document() shares the mmap via shared_ptr. If we don't
-    // clear the document's LogicSnapshot here, its shared_ptr reference
-    // keeps the old multi-GB mmap alive while a new one is created,
-    // causing memory to double on every capture.
+    // CRITICAL: Release the active document's shared_ptr references to the old
+    // snapshot data. copy_data_to_document() now shares the shared_ptr (zero-copy)
+    // instead of deep-copying. If we don't reset the document's shared_ptrs here,
+    // the old multi-GB mmap stays alive (ref count > 0) while a new one is
+    // created, causing memory to double on every capture.
+    // Note: doc->clear() resets the shared_ptrs (releasing the document's
+    // reference). If SessionData still holds a shared_ptr to the same snapshot
+    // (e.g. view_data), the data stays alive. We must NOT call
+    // doc->get_active_logic()->clear() because that would clear the data
+    // in-place, affecting SessionData's shared snapshot.
     if (_state->document_registry()->get_active_document()) {
-      _state->document_registry()->get_active_document()
-          ->get_active_logic()
-          ->clear();
+      _state->document_registry()->get_active_document()->clear();
     }
   }
 
@@ -393,21 +412,21 @@ bool CaptureManager::exec_capture() {
   if (bSwapBuffer) {
     int buf_index = -1;
     for (int i = 0; i < (int)_state->data_list().size(); i++) {
-      if (_state->data_list()[i] != _state->view_data()) {
+      if (_state->data_list()[i].get() != _state->view_data()) {
         buf_index = i;
         break;
       }
     }
 
     if (buf_index < 0) {
-      _state->data_list().push_back(new SessionData());
+      _state->data_list().push_back(std::make_unique<SessionData>());
       buf_index = (int)_state->data_list().size() - 1;
     }
 
-    _state->set_capture_data(_state->data_list()[buf_index]);
+    _coord->set_capture_data(_state->data_list()[buf_index].get());
     _state->capture_data()->clear();
-    _state->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
-    _state->set_cur_samplelimits(_state->device_agent().get_sample_limit());
+    _coord->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
+    _coord->set_cur_samplelimits(_state->device_agent().get_sample_limit());
   }
 
   capture_init();
@@ -422,7 +441,7 @@ bool CaptureManager::exec_capture() {
   // demo 驱动读取 devc->instant 决定 DSO 单帧/连续采集语义；其他驱动
   // 不支持此 key 时 set_config_bool 静默失败（pxv_dbg 日志），无副作用。
   // 旧注释"driver no longer reads instant mode"是错误的——demo 驱动确实读取。
-  _state->device_agent().set_config_bool(SR_CONF_INSTANT, _is_instant);
+    _state->device_agent().set_config_bool(SR_CONF_INSTANT, _is_instant.load());
 
   // Core→libsigrok 触发配置唯一同步点。在 ds_start_collect 前一次性同步，
   // 消除 TriggerDock/SessionService 各自调 ds_trigger_* 导致的互相覆盖。
@@ -430,7 +449,7 @@ bool CaptureManager::exec_capture() {
   // instant 模式下禁用所有触发（硬件+软件），让 driver 立即采集数据，
   // 恢复旧版 fork 的 instant 语义（"立即采集不等待触发"）。统一在
   // sync_trigger_to_libsigrok 入口处理，避免每个 driver 单独判断 instant。
-  _state->sync_trigger_to_libsigrok(_is_instant);
+  _coord->sync_trigger_to_libsigrok(_is_instant.load());
 
   if (_state->device_agent().start() == false) {
     pxv_err("Start collect error!");
@@ -450,7 +469,7 @@ bool CaptureManager::exec_capture() {
       if (bAddDecoder) {
         // 彻底禁止 Stream 模式下“边采边解”（会导致严重的内存锁竞争和 GUI 渲染卡死）。
         // 采集结束时（收到 RevEndPacket 后），底层的 start_all_decode_tasks() 会自动启动离线解码。
-        if (!_is_stream_mode) {
+        if (!_is_stream_mode.load()) {
           de->set_capture_end_flag(false);
           de->frame_ended();
           _state->add_decode_task(de);
@@ -463,9 +482,9 @@ bool CaptureManager::exec_capture() {
 }
 
 bool CaptureManager::stop_capture() {
-  _is_action = true;
+  _is_action.store(true);
   int ret = action_stop_capture();
-  _is_action = false;
+  _is_action.store(false);
   return ret;
 }
 
@@ -475,8 +494,8 @@ bool CaptureManager::action_stop_capture() {
 
   pxv_info("Stop collect.");
 
-  if (_state->bClose()) {
-    _state->set_is_working(false);
+  if (_coord->bClose()) {
+    _coord->set_is_working(false);
     _repeat_timer.Stop();
     _repeat_wait_prog_timer.Stop();
     _refresh_rt_timer.Stop();
@@ -493,14 +512,14 @@ bool CaptureManager::action_stop_capture() {
   }
 
   if (!wait_upload) {
-    _state->set_is_working(false);
+    _coord->set_is_working(false);
     _repeat_timer.Stop();
     _repeat_wait_prog_timer.Stop();
     _refresh_rt_timer.Stop();
 
-    if (_repeat_hold_prg != 0 && is_repeat_mode()) {
-      _repeat_hold_prg = 0;
-      _state->repeat_hold(_repeat_hold_prg);
+    if (_repeat_hold_prg.load() != 0 && is_repeat_mode()) {
+      _repeat_hold_prg.store(0);
+      _state->repeat_hold(0);
     }
 
     // modernize-core-layer-radical Task 11: pre-broadcast synchronously so
@@ -562,7 +581,7 @@ bool CaptureManager::action_stop_capture() {
 }
 
 void CaptureManager::exit_capture() {
-  _is_instant = false;
+  _is_instant.store(false);
 
   _feed_timer.Stop();
 
@@ -583,7 +602,7 @@ bool CaptureManager::get_capture_status(bool &triggered, int &progress) {
   // always return true and let the out-params convey the state.
   triggered = _state->is_triged();
 
-  const uint64_t sample_limits = _state->cur_samplelimits();
+  const uint64_t sample_limits = _coord->cur_samplelimits();
   if (sample_limits == 0) {
     progress = 0;
     return true;
@@ -626,7 +645,7 @@ void CaptureManager::check_update() {
   if (_state->device_agent().is_collecting() == false)
     return;
 
-  if (_data_updated) {
+  if (_data_updated.load()) {
     // DSO mode: skip data_updated() here — the async DataUpdated event
     // (broadcast_async from feed_in_dso) already drives ViewDataSync::
     // data_updated() on the GUI thread. Calling it again from paintEvent
@@ -634,10 +653,10 @@ void CaptureManager::check_update() {
     // update → paint, causing excessive repaints at 40+ FPS.
     if (_state->device_agent().get_work_mode() != LOGIC &&
         _state->device_agent().get_work_mode() != DSO)
-      _state->data_updated();
+      _coord->data_updated();
 
-    _data_updated = false;
-    _noData_cnt = 0;
+    _data_updated.store(false);
+    _noData_cnt.store(0);
     data_auto_unlock();
   } else {
     if (++_noData_cnt >= (CaptureManager::WaitShowTime / CaptureManager::FeedInterval))
@@ -663,15 +682,15 @@ void CaptureManager::nodata_timeout() {
 void CaptureManager::feed_timeout() {
   data_unlock();
 
-  if (!_data_updated) {
+  if (!_data_updated.load()) {
     if (++_noData_cnt >= (CaptureManager::WaitShowTime / CaptureManager::FeedInterval))
       nodata_timeout();
   }
 }
 
-int CaptureManager::get_repeat_hold() {
+int CaptureManager::get_repeat_hold() const {
   if (_state->is_working() && is_repeat_mode())
-    return _repeat_hold_prg;
+    return _repeat_hold_prg.load();
   else
     return 0;
 }
@@ -689,7 +708,7 @@ void CaptureManager::set_collect_mode(DEVICE_COLLECT_MODE m) {
 
   if (_clt_mode != m) {
     _clt_mode = m;
-    _repeat_hold_prg = 0;
+    _repeat_hold_prg.store(0);
   }
 
   _event_bus->broadcast_async<interface::CollectModeChanged>({});
@@ -699,30 +718,31 @@ void CaptureManager::repeat_capture_wait_timeout() {
   _repeat_timer.Stop();
   _repeat_wait_prog_timer.Stop();
 
-  _repeat_hold_prg = 0;
+  _repeat_hold_prg.store(0);
 
   if (_state->is_working()) {
-    _state->repeat_hold(_repeat_hold_prg);
+    _state->repeat_hold(_repeat_hold_prg.load());
     exec_capture();
   }
 }
 
 void CaptureManager::repeat_wait_prog_timeout() {
-  _repeat_hold_prg -= _repeat_wait_prog_step;
-
-  if (_repeat_hold_prg < 0)
-    _repeat_hold_prg = 0;
+  int val = _repeat_hold_prg.load() - _repeat_wait_prog_step.load();
+  if (val < 0)
+    val = 0;
+  _repeat_hold_prg.store(val);
 
   if (_state->is_working())
-    _state->repeat_hold(_repeat_hold_prg);
+    _state->repeat_hold(val);
 }
 
-void CaptureManager::realtime_refresh_timeout() { _rt_refresh_time_id++; }
+void CaptureManager::realtime_refresh_timeout() { _rt_refresh_time_id.fetch_add(1); }
 
 bool CaptureManager::have_new_realtime_refresh(bool keep) {
-  if (_rt_ck_refresh_time_id != _rt_refresh_time_id) {
+  uint64_t cur = _rt_refresh_time_id.load();
+  if (_rt_ck_refresh_time_id.load() != cur) {
     if (!keep) {
-      _rt_ck_refresh_time_id = _rt_refresh_time_id;
+      _rt_ck_refresh_time_id.store(cur);
     }
     return true;
   }
@@ -738,8 +758,9 @@ void CaptureManager::clear_decode_result() {
 }
 
 bool CaptureManager::is_first_store_confirm() {
-  if (_work_time_id != _confirm_store_time_id) {
-    _confirm_store_time_id = _work_time_id;
+  int cur = _work_time_id.load();
+  if (_confirm_store_time_id.load() != cur) {
+    _confirm_store_time_id.store(cur);
     return true;
   }
   return false;
@@ -755,8 +776,8 @@ void CaptureManager::trig_check_timeout() {
   }
 
   if (get_capture_status(triged, pro) && triged) {
-    _state->set_trig_time(QDateTime::currentDateTime());
-    _state->set_is_triged(true);
+    _coord->set_trig_time(QDateTime::currentDateTime());
+    _coord->set_is_triged(true);
     _trig_check_timer.Stop();
   }
 }
@@ -767,7 +788,7 @@ void CaptureManager::refresh(int holdtime) {
   data_lock();
   _state->view_data()->get_logic()->init();
 
-  _state->clear_all_decode_task2();
+  _coord->clear_all_decode_task2();
   clear_decode_result();
 
   _state->view_data()->get_dso()->init();
@@ -783,41 +804,52 @@ void CaptureManager::refresh(int holdtime) {
 
   _out_timer.TimeOut(holdtime,
                      std::bind(&CaptureManager::feed_timeout, this));
-  _data_updated = true;
+  _data_updated.store(true);
 }
 
-void CaptureManager::data_auto_lock(int lock) { _data_auto_lock = lock; }
+void CaptureManager::data_auto_lock(int lock) { _data_auto_lock.store(lock); }
 
 void CaptureManager::data_auto_unlock() {
-  if (_data_auto_lock > 0)
-    _data_auto_lock--;
-  else if (_data_auto_lock < 0)
-    _data_auto_lock = 0;
+  int val = _data_auto_lock.load();
+  if (val > 0)
+    _data_auto_lock.store(val - 1);
+  else if (val < 0)
+    _data_auto_lock.store(0);
 }
 
-bool CaptureManager::get_data_auto_lock() { return _data_auto_lock != 0; }
+bool CaptureManager::get_data_auto_lock() const { return _data_auto_lock.load() != 0; }
 
-bool CaptureManager::is_realtime_refresh() {
+bool CaptureManager::is_realtime_refresh() const {
+  // After stopping (is_working == false), there is no live capture to
+  // refresh from. Returning false here ensures that get_signal_snapshot()
+  // and get_*_snapshot() fall back to view_data (the last completed
+  // capture's data) instead of capture_data (the back buffer, which was
+  // cleared by the RevEndPacket handler on manual stop in repeat mode).
+  // Without this check, stream-mode + repeat-mode stops would leave the
+  // viewport blank because the snapshot getters returned the cleared
+  // capture_data instead of view_data.
+  if (!_state->is_working())
+    return false;
   if (is_loop_mode())
     return true;
-  if (_is_stream_mode && is_single_mode())
+  if (_is_stream_mode.load() && is_single_mode())
     return true;
-  if (_is_stream_mode && is_repeat_mode())
+  if (_is_stream_mode.load() && is_repeat_mode())
     return true;
   return false;
 }
 
-bool CaptureManager::is_repeating() {
-  return _clt_mode == COLLECT_REPEAT && !_is_instant;
+bool CaptureManager::is_repeating() const {
+  return _clt_mode == COLLECT_REPEAT && !_is_instant.load();
 }
 
-bool CaptureManager::is_single_mode() { return _clt_mode == COLLECT_SINGLE; }
+bool CaptureManager::is_single_mode() const { return _clt_mode == COLLECT_SINGLE; }
 
-bool CaptureManager::is_repeat_mode() { return _clt_mode == COLLECT_REPEAT; }
+bool CaptureManager::is_repeat_mode() const { return _clt_mode == COLLECT_REPEAT; }
 
-bool CaptureManager::is_loop_mode() { return _clt_mode == COLLECT_LOOP; }
+bool CaptureManager::is_loop_mode() const { return _clt_mode == COLLECT_LOOP; }
 
-int CaptureManager::get_collect_mode() { return (int)_clt_mode; }
+int CaptureManager::get_collect_mode() const { return (int)_clt_mode; }
 
 } // namespace core
 } // namespace pv

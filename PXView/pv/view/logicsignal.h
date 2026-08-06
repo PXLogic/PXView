@@ -57,6 +57,12 @@ private:
 public:
     static const int TogMaxScale = 10;
 
+    // Safe narrow-cast: this is a LogicSignal.
+    LogicSignal* as_logic() override { return this; }
+    const LogicSignal* as_logic() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
 public:
     enum LogicSetRegions{
         NONTRIG = 0,
@@ -86,7 +92,12 @@ public:
     }
 
     void set_data(data::LogicSnapshot* data);
-    
+
+    /// Signal override: extracts LogicSnapshot from DataSource
+    void set_data_from_source(data::DataSource *source) override;
+    /// Signal override: sets _data to nullptr
+    void clear_data() override;
+
     inline LogicSetRegions get_trig(){
         return _trig;
     }

@@ -42,6 +42,12 @@ Binding::Binding(){
     _row_num = 0;    
 }
 
+Binding::~Binding(){
+    for (auto p : _properties)
+        delete p;
+    _properties.clear();
+}
+
 void Binding::commit()
 {
     for(auto p : _properties) {

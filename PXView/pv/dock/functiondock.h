@@ -40,6 +40,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class ISignalSource; class IDataSource; }
 
 namespace dock {
 
@@ -74,6 +75,8 @@ private slots:
 
 private:
     SigSession *_session;
+    data::ISignalSource *_signals = nullptr;
+  data::IDataSource *_data = nullptr;
 
     // FFT / Math buttons
     QPushButton *_fft_btn;

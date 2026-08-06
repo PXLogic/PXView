@@ -162,7 +162,7 @@ QString SearchResultModel::format_time(int64_t sample) const {
 // ============================================================================
 
 SearchDock::SearchDock(QWidget *parent, View *view, SigSession *session)
-    : pv::widgets::SmoothScrollArea(parent), _session(session), _view(view),
+    : pv::widgets::SmoothScrollArea(parent), _session(session), _data(session), _signals(session), _view(view),
       _context(nullptr), _widget(nullptr), _pattern_input(nullptr),
       _result_view(nullptr), _result_model(nullptr), _legend_x(nullptr),
       _legend_r(nullptr), _legend_0(nullptr), _legend_f(nullptr),
@@ -350,13 +350,15 @@ void SearchDock::bind_context(TabContext *ctx) {
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+      _data = _session;
+  _signals = _session;
   _view = ctx->view();
   stop_search();
   _results_mutex.lock();
   _search_results.clear();
   _results_mutex.unlock();
   _result_model->clear();
-  _result_model->set_samplerate(_session->cur_snap_samplerate());
+  _result_model->set_samplerate(_data->cur_snap_samplerate());
   _time_search_cur_index = -1;
   if (ctx && ctx->view()) {
     auto &saved = ctx->view()->dock_ui_state().dock_search_pattern;
@@ -382,7 +384,7 @@ void SearchDock::unbind_context() {
 
 void SearchDock::rebuild_pattern() {
   int count = 0;
-  for (auto s : _session->get_signal_models()) {
+  for (auto s : _signals->get_signal_models()) {
     if (s->type() == SR_CHANNEL_LOGIC)
       count++;
   }
@@ -393,7 +395,7 @@ void SearchDock::rebuild_pattern() {
   _pattern_input->set_pattern(_pattern);
 
   std::set<uint16_t> active_indices;
-  for (auto s : _session->get_signal_models()) {
+  for (auto s : _signals->get_signal_models()) {
     if (s->type() == SR_CHANNEL_LOGIC)
       active_indices.insert(s->index());
   }
@@ -415,7 +417,7 @@ void SearchDock::on_pattern_changed() {
 
 void SearchDock::on_device_updated() {
   rebuild_pattern();
-  _result_model->set_samplerate(_session->cur_snap_samplerate());
+  _result_model->set_samplerate(_data->cur_snap_samplerate());
 }
 
 void SearchDock::on_frame_ended() {
@@ -501,7 +503,7 @@ void SearchDock::start_search_async() {
 }
 
 void SearchDock::search_worker() {
-  const auto snapshot = _session->get_snapshot(SR_CHANNEL_LOGIC);
+  const auto snapshot = _data->get_snapshot(SR_CHANNEL_LOGIC);
   if (!snapshot)
     return;
   const auto logic_snapshot = dynamic_cast<data::LogicSnapshot *>(snapshot);
@@ -629,7 +631,7 @@ bool SearchDock::gpu_edge_search_worker(
 }
 
 void SearchDock::do_search() {
-  _result_model->set_samplerate(_session->cur_snap_samplerate());
+  _result_model->set_samplerate(_data->cur_snap_samplerate());
   start_search_async();
 }
 
@@ -758,7 +760,7 @@ int64_t SearchDock::parse_time_text(const QString &text, bool &is_row_index) {
 
   uint64_t samplerate = 0;
   if (_session)
-    samplerate = _session->cur_snap_samplerate();
+    samplerate = _data->cur_snap_samplerate();
 
   if (samplerate == 0)
     return -1;

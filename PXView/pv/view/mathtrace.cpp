@@ -286,8 +286,8 @@ void MathTrace::paint_trace(QPainter &p,
         const double *const values = _math_stack->get_math(start);
         assert(values);
 
-        QPointF *points = new QPointF[sample_count];
-        QPointF *point = points;
+        std::vector<QPointF> points(sample_count);
+        QPointF *point = points.data();
 
         double top = get_view_rect().top();
         double bottom = get_view_rect().bottom();
@@ -307,8 +307,7 @@ void MathTrace::paint_trace(QPainter &p,
             x += pixels_per_sample;
         }
 
-        p.drawPolyline(points, point - points);
-        delete[] points;
+        p.drawPolyline(points.data(), static_cast<int>(point - points.data()));
     }
 }
 
@@ -329,8 +328,8 @@ void MathTrace::paint_envelope(QPainter &p,
     envelope_colour.setAlpha(View::ForeAlpha);
     p.setBrush(envelope_colour);
 
-	QRectF *const rects = new QRectF[e.length];
-	QRectF *rect = rects;
+	std::vector<QRectF> rects(e.length);
+	QRectF *rect = rects.data();
     double top = get_view_rect().top();
     double bottom = get_view_rect().bottom();
 
@@ -361,9 +360,7 @@ void MathTrace::paint_envelope(QPainter &p,
 		*rect++ = QRectF(x, t, rect_w, h);
 	}
 
-	p.drawRects(rects, e.length);
-
-	delete[] rects;
+	p.drawRects(rects.data(), static_cast<int>(e.length));
 }
 
 void MathTrace::paint_type_options(QPainter &p, int right, const QPoint pt, QColor fore)
@@ -441,7 +438,7 @@ void MathTrace::paint_hover_measure(QPainter &p, QColor fore, QColor back)
 
     auto &cursor_list = _view->get_cursorList();
 
-    for (auto cursor : cursor_list) {
+    for (auto &cursor : cursor_list) {
         float pt_value;
         bool bError = false;
 

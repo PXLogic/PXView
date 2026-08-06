@@ -54,7 +54,7 @@ public:
     // ---- Glitch filter API (forwarded by LogicSnapshot) ----
     void apply_glitch_filter(int sig_index, uint32_t threshold,
                              std::function<void(int)> progress_callback,
-                             GlitchFilterMode filter_mode = GLITCH_FILTER_BOTH);
+                             GlitchFilterMode filter_mode = GlitchFilterMode::Both);
     // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds,
                                  std::function<void(int)> progress_callback,

@@ -28,6 +28,7 @@
 #include <libsigrok/libsigrok.h>
 #include <QString>
 #include <QVector>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -127,6 +128,11 @@ public:
     struct sr_session* sr_session() { return _sr_session; }
 
     inline bool is_file() const { return _dev_type == DEV_TYPE_FILELOG; }
+    /* Input module devices (VCD, CSV, binary, Saleae, etc.) have no driver
+     * (sdi->driver == NULL). Data is fed directly via sr_input_send() in
+     * import_file(), so start_capture() must NOT be called for them — it
+     * would clear the already-loaded data and crash in sr_session_start(). */
+    inline bool is_input_module() const { return _driver_name == "input-module"; }
     inline bool is_demo() const { return _dev_type == DEV_TYPE_DEMO; }
     /* Demo devices are treated as hardware to maximize real-device simulation.
      * The demo driver implements the same config keys (OPERATION_MODE,
@@ -248,6 +254,8 @@ public:
     bool get_config_double(int key, double &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
     bool set_config_double(int key, double value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
+    bool get_config_int64(int key, int64_t &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+
     // --- sr_config create/free (fork libsigrok API stub) ---
     // Fork libsigrok exposed ds_new_config / ds_free_config for building
     // sr_config entries to attach to sr_datafeed_meta packets (used by
@@ -347,6 +355,15 @@ private:
     // Tracked devices: scanned (from sr_driver_scan) + file-loaded.
     std::vector<struct sr_dev_inst*> _scanned_sdi;
     std::vector<struct sr_dev_inst*> _file_sdi;
+
+    // Stable file-device handle registry. File handles are assigned from a
+    // monotonic counter (never reused, never reordered) and looked up via
+    // this map. This decouples handle identity from _file_sdi array position,
+    // which previously broke repeated set_file() loads: set_device()->release()
+    // erases the active sdi from _file_sdi, shifting the remaining entries and
+    // invalidating any handle computed as scanned_count + file_index + 1.
+    std::map<ds_device_handle, struct sr_dev_inst*> _file_handles;
+    ds_device_handle _next_file_handle = 0;
 
     // --- App-layer config state (C-class keys, not driver-backed) ---
     // These keys (DISK_CACHE_ENABLE/PATH, STREAM_BUFF/STREAM_MEM_BUFF) are

@@ -26,7 +26,8 @@
 
 #include <cstdint>
 
-#include <QtGlobal>  // quint64
+#include <QtGlobal>
+#include <QElapsedTimer>  // quint64
 
 class QObject;
 class QEvent;
@@ -47,13 +48,11 @@ class View;
 
 // ViewDataSync — delegate for View's data-source / data-document / capture
 // lifecycle data-sync responsibilities. Extracted from the View God-class
-// during Phase J of the modernize-view-layer-v3 spec. All data-sync state
-// (_data_source / _document / _own_signals / _own_lissajous_trace /
-// _time_viewport / _fft_viewport / _device_agent / _viewbottom /
-// _data_updated_timer / _search_hit / _search_pos) still lives on View;
-// this class only owns the *behaviour*. View declares
-// `friend class ViewDataSync;` so the delegate can read and mutate those
-// private members directly.
+// during Phase J of the modernize-view-layer-v3 spec. Data-sync state
+// (_data_source / _document / _back_ready / _data_updated_timer) lives in
+// this class. View declares `friend class ViewDataSync;` so the delegate
+// can access View's private widget members (_time_viewport, _fft_viewport,
+// _viewcenter, _ruler, _device_agent, etc.) and call private helper methods.
 class ViewDataSync {
 public:
   explicit ViewDataSync(View *view) : _view(view) {}
@@ -104,8 +103,31 @@ public:
   bool eventFilter(QObject *object, QEvent *event);
   void resizeEvent(QResizeEvent *event);
 
+  // -- state accessors (for View) ---------------------------------------
+  pv::data::DataSource *data_source_ptr() const { return _data_source; }
+  void set_data_source_ptr(pv::data::DataSource *src) { _data_source = src; }
+  pv::data::SessionDocument *document_ptr() const { return _document; }
+  void set_document_ptr(pv::data::SessionDocument *doc) { _document = doc; }
+  bool back_ready() const { return _back_ready; }
+  void set_back_ready(bool v) { _back_ready = v; }
+  QElapsedTimer &data_updated_timer() { return _data_updated_timer; }
+
 private:
   View *_view;
+
+  pv::data::DataSource *_data_source = nullptr;
+  pv::data::SessionDocument *_document = nullptr;
+  bool _back_ready = false;
+  QElapsedTimer _data_updated_timer;
+
+  // --- DRY helpers (eliminate repeated switch-case boilerplate) ---
+  // Uses Signal::set_data_from_source() polymorphism instead of per-type
+  // static_cast + set_data.
+  void apply_source_to_signals(pv::data::DataSource *source);
+  void clear_all_signal_data();
+  // DSO-specific post-data-refresh: paint_prepare + optional set_scale.
+  void refresh_dso_signal_paint(pv::data::DataSource *source,
+                                 bool set_scale);
 };
 
 } // namespace view

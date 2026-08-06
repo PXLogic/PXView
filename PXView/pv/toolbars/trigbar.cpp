@@ -45,7 +45,7 @@ namespace toolbars {
 
 TrigBar::TrigBar(SigSession *session, QWidget *parent) :
     QToolBar("Trig Bar", parent),
-    _session(session)
+    _session(session), _signals(session)
 {
     _enable = true;
 
@@ -120,7 +120,7 @@ void TrigBar::reload()
     // Lissajous is only meaningful in DSO mode (requires 2+ DSO channels).
     // Hide the action in the function menu for non-DSO modes so users
     // don't accidentally open a dialog that can't produce a figure.
-    int mode = _session->get_device()->get_work_mode();
+    int mode = _signals->device()->get_work_mode();
     _action_lissajous->setVisible(mode == DSO);
 
     update_view_status();

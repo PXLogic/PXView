@@ -58,8 +58,6 @@ static const struct { const char *name; const char *token; } kIconTokenMap[] = {
     {"pwm.svg",            "@icon-special"},
     {"lissajous.svg",      "@icon-accent"},
     {"logo_color.svg",     "@icon-accent"},
-    {"usb2.svg",           "@icon-special"},
-    {"usb3.svg",           "@icon-special"},
     {"demo.svg",           "@icon-special"},
     {"data.svg",           "@icon-special"},
     {"square-la.svg",      "@icon-special"},

@@ -26,10 +26,12 @@
 
 #include <cstdint>
 #include <list>
+#include <memory>
 
 #include <QColor>
 #include <QString>
 
+#include "iview_delegates.h"
 #include "cursor.h"
 #include "xcursor.h"
 
@@ -40,15 +42,35 @@ class View;
 
 // ViewCursors — delegate for View's cursor / xcursor responsibilities.
 // Extracted from the View God-class during Phase E of the
-// modernize-view-layer-v2 spec. All cursor state (_logic_cursors /
-// _dso_cursors / _trig_cursor / _search_cursor / _show_cursors /
-// _show_trig_cursor / _show_search_cursor / _search_pos / _search_hit /
-// _xcursorList / _show_xcursors) still lives on View; this class only owns
-// the *behaviour*. View declares `friend class ViewCursors;` so the delegate
-// can read and mutate those private members directly.
-class ViewCursors {
+// modernize-view-layer-v2 spec. Since the Phase 1 state migration,
+// cursor state (_logic_cursors / _dso_cursors / _trig_cursor /
+// _search_cursor / _show_cursors / _show_trig_cursor /
+// _show_search_cursor / _search_pos / _search_hit / _xcursorList /
+// _show_xcursors) lives here, not on View. View's public cursor API
+// (cursors_shown, trig_cursor_shown, etc.) forwards to this delegate.
+class ViewCursors : public IViewCursors {
 public:
-  explicit ViewCursors(View *view) : _view(view) {}
+  explicit ViewCursors(View *view);
+  ~ViewCursors();
+
+  // Destructor defined in .cpp for unique_ptr complete type requirement.
+  // Phase 4: _trig_cursor and _search_cursor now use std::unique_ptr,
+  // so their deletion is automatic. Container cursors still use manual
+  // deletion pending full container migration.
+
+  // -- visibility queries (IViewCursors overrides) ------------------
+  bool cursors_shown() const override { return _show_cursors; }
+  bool trig_cursor_shown() const override { return _show_trig_cursor; }
+  bool search_cursor_shown() const override { return _show_search_cursor; }
+  bool xcursors_shown() const override { return _show_xcursors; }
+  void set_xcursors_shown(bool show) { _show_xcursors = show; }
+
+  // -- cursor accessors (for View inline accessors) ---------------------
+  Cursor *trig_cursor() { return _trig_cursor.get(); }
+  Cursor *search_cursor() { return _search_cursor.get(); }
+  bool search_hit() const { return _search_hit; }
+  uint64_t search_pos() const { return _search_pos; }
+  std::list<std::unique_ptr<XCursor>> &xcursor_list() { return _xcursorList; }
 
   // -- visibility toggles ------------------------------------------------
   void show_cursors(bool show = true);
@@ -60,8 +82,13 @@ public:
   void set_search_pos(uint64_t search_pos, bool hit);
 
   // -- cursor list access ------------------------------------------------
-  std::list<Cursor *> &get_cursorList();
+  std::list<std::unique_ptr<Cursor>> &get_cursorList();
   Cursor *get_cursor_by_index(int index);
+
+  // -- initialization (called by View constructor) ----------------------
+  // Creates the trigger and search cursors with the given foreground color.
+  // Both start hidden with index -1.
+  void init_cursors(QColor foreColor);
 
   // -- cursor CRUD -------------------------------------------------------
   void make_cursors_order();
@@ -103,6 +130,20 @@ public:
 
 private:
   View *_view;
+
+  // ---- Cursor state (migrated from View) ----
+  bool _show_cursors = false;
+  std::list<std::unique_ptr<Cursor>> _logic_cursors;
+  std::list<std::unique_ptr<Cursor>> _dso_cursors;
+  std::unique_ptr<Cursor> _trig_cursor;
+  bool _show_trig_cursor = false;
+  std::unique_ptr<Cursor> _search_cursor;
+  bool _show_search_cursor = false;
+  uint64_t _search_pos = 0;
+  bool _search_hit = false;
+  bool _show_xcursors = false;
+  std::list<std::unique_ptr<XCursor>> _xcursorList;
+
 };
 
 } // namespace view

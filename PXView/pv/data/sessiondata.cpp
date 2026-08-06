@@ -26,6 +26,9 @@
 namespace pv {
 
 SessionData::SessionData() {
+  _logic = std::make_shared<data::LogicSnapshot>();
+  _analog = std::make_shared<data::AnalogSnapshot>();
+  _dso = std::make_shared<data::DsoSnapshot>();
   _cur_snap_samplerate = 0;
   _cur_samplelimits = 0;
   _trig_pos = 0;
@@ -36,14 +39,31 @@ SessionData::SessionData() {
 }
 
 void SessionData::clear() {
-  logic.clear();
-  analog.clear();
-  dso.clear();
-  _trig_pos = 0;
-  if (_logic_backup) {
-    delete _logic_backup;
-    _logic_backup = nullptr;
+  // Reset to fresh snapshot instances. If SessionDocument also holds a
+  // shared_ptr to the previous snapshot (via copy_data_to_document's
+  // zero-copy share), the previous data stays alive — ref count > 0.
+  // This is the key difference from the old in-place clear(): the document's
+  // data is not affected by this reset.
+  //
+  // Construct-time samplerate injection: new snapshots are created with the
+  // current _cur_snap_samplerate, eliminating the W1 window (clear →
+  // set_cur_snap_samplerate gap) where snapshots temporarily had
+  // _samplerate=0. This prevents AnalogSignal::paint_mid from computing
+  // samples_per_pixel=0 → flat-line waveform.
+  // set_cur_snap_samplerate() called after clear() will update to the
+  // device's current samplerate (which may differ if the user changed it).
+  _logic = std::make_shared<data::LogicSnapshot>();
+  _analog = std::make_shared<data::AnalogSnapshot>();
+  _dso = std::make_shared<data::DsoSnapshot>();
+  if (_cur_snap_samplerate > 0) {
+    const double sr = (double)_cur_snap_samplerate;
+    _logic->set_samplerate(sr);
+    _analog->set_samplerate(sr);
+    _dso->set_samplerate(sr);
   }
+  _trig_pos = 0;
+  // Track B3: unique_ptr auto-releases on reset
+  _logic_backup.reset();
   _glitch_filter_active = false;
   // 架构修复：clear() 不清除 thresholds/modes/auto_apply。
   // 这些是用户配置（滤波面板滑块位置），不是数据。

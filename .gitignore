@@ -139,6 +139,11 @@ sync_to_wsl.cmd
 sync_opensource.ps1
 migrate_to_worktree.ps1
 
+# 版本/生成/迁移辅助脚本(开发辅助,不入库)
+bump_version.ps1
+generate_8b10b.py
+scripts/migrate_driver.py
+
 # 开发文档目录(含分析报告、临时 cpp、分析脚本等)
 devdoc/
 
@@ -172,8 +177,3 @@ python/*.zip
 
 # Windows 资源管理器残留文件
 desktop.ini
-
-# 开发辅助脚本(不入库)
-bump_version.ps1
-generate_8b10b.py
-scripts/migrate_driver.py

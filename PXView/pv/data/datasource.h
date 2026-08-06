@@ -32,6 +32,18 @@
 #include "../api/types.h"  // api::MeasurementValue (for get_measurements return type)
 #include "../core/cursorregistry.h"  // core::CursorEntry (for get_cursors return type)
 
+// Spec v2 Task 8: DataSource now inherits from 5 fine-grained interfaces
+// (IDataSource, ISignalSource, IDecoderHost, ICaptureControl, IMeasureSource).
+// This enables View-layer classes to depend on only the interface they need
+// (ISP), while SigSession (which inherits DataSource) automatically satisfies
+// all 5 interfaces.  DataSource itself remains as the composite fat-interface
+// for backward compatibility; new code should depend on the specific interface.
+#include "idata_source.h"
+#include "isignal_source.h"
+#include "idecoder_host.h"
+#include "icapture_control.h"
+#include "imeasure_source.h"
+
 struct srd_decoder;
 class DecoderStatus;
 class DeviceAgent;  // forward declaration (global namespace); defined in deviceagent.h
@@ -53,9 +65,21 @@ class SessionDocument;
 class TriggerConfig;
 namespace decode { class Decoder; }
 
+// Spec v2 Task 8: DataSource inherits all 5 fine-grained interfaces.
+// Existing methods (some pure, some with default impls) override the
+// pure virtuals from each interface.  SigSession inherits DataSource and
+// therefore satisfies all 5 interfaces — a SigSession* is implicitly
+// convertible to any of IDataSource*/ISignalSource*/IDecoderHost*/
+// ICaptureControl*/IMeasureSource*.
 class DataSource
+    : public IDataSource,
+      public ISignalSource,
+      public IDecoderHost,
+      public ICaptureControl,
+      public IMeasureSource
 {
 public:
+    // virtual ~DataSource() = default; — inherited from interfaces
     virtual ~DataSource() {}
 
     // ---- Device access (Task D4: capability queries / probe config reads
@@ -68,7 +92,7 @@ public:
     //      to return the real device. SessionDocument/SessionSnapshot stubs
     //      inherit the nullptr default (analog signals are only created from
     //      the live session, so this is never null in practice for View signals).
-    virtual DeviceAgent* device() { return nullptr; }
+    virtual DeviceAgent* device() override { return nullptr; }
 
     // ---- New v2 pure-data interface (no view::* types) ----
     virtual std::vector<std::shared_ptr<SignalModel>>& get_signal_models() = 0;
@@ -76,7 +100,7 @@ public:
         SessionDocument *doc = nullptr) = 0;
     virtual std::vector<std::shared_ptr<SpectrumStack>>& get_spectrum_stacks() = 0;
     virtual std::shared_ptr<MathStack> get_math_stack() = 0;
-    virtual LissajousModel* get_lissajous_model() = 0;
+    virtual LissajousModel* get_lissajous_model() override = 0;
 
     // ---- Data access ----
     // cur_snap_samplerate/cur_samplelimits/cur_sampletime/get_trigger_pos
@@ -108,6 +132,10 @@ public:
     virtual bool is_instant() = 0;
     virtual bool have_view_data() = 0;
     virtual bool is_working() = 0;
+    // Capture mode and refresh flags. Default: false (SessionDocument stubs).
+    // SigSession overrides to forward to CaptureManager.
+    virtual bool is_repeat_mode() override { return false; }
+    virtual bool is_realtime_refresh() override { return false; }
     // Repeat-mode hold percentage (0..100). Default 0; SigSession overrides
     // to forward to CaptureManager. Used by ViewStatus to draw the repeat
     // progress bar.
@@ -131,7 +159,7 @@ public:
     // raw `unsigned long long` handle (libsigrok's `ds_device_handle` is a
     // typedef of this) so datasource.h does not need to include libsigrok.h.
     virtual bool switch_work_mode(int mode);
-    virtual void session_save();
+    virtual void session_save() override;
     virtual void close_file(unsigned long long dev_handle);
     virtual bool trigd();
     virtual uint8_t trigd_ch();

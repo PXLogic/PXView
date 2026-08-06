@@ -56,6 +56,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class IDataSource; class ISignalSource; }
 
 namespace view {
 class View;
@@ -170,6 +171,8 @@ signals:
 
 private:
   SigSession *_session;
+  data::IDataSource *_data = nullptr;
+  data::ISignalSource *_signals = nullptr;
   view::View *_view;
   std::map<uint16_t, QString> _pattern;
   TabContext *_context;

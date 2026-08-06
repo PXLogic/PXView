@@ -220,7 +220,7 @@ void DecoderOptionsDlg::load_options_view()
         int num = 1;
         auto &cursor_list = view->get_cursorList();
         
-        for (auto c : cursor_list){
+        for (auto &c : cursor_list){
             //tr
             QString cursor_name = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CURSOR), "Cursor") + 
                                 QString::number(num);

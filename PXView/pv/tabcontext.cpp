@@ -116,8 +116,8 @@ void TabContext::activate()
     if (_document && _document->has_data()) {
         _view->set_data_document(_document);
         auto &sigs = _view->get_own_signals();
-        for (auto sig : sigs) {
-            auto s = dynamic_cast<view::Signal*>(sig);
+        for (auto &sig : sigs) {
+            auto s = sig.get();
             if (s && s->model()) {
                 // Signal::set_enabled() already writes back to SignalModel and sr_channel
                 s->model()->set_enabled(s->enabled());
@@ -170,7 +170,7 @@ void TabContext::deactivate()
         // DockUiState in a later task.)
         std::map<int, data::ChannelLayoutState> channel_layout;
         if (_view) {
-            for (auto *sig : _view->get_own_signals()) {
+            for (auto &sig : _view->get_own_signals()) {
                 data::ChannelLayoutState layout;
                 layout.view_index = sig->get_view_index();
                 layout.v_offset = sig->get_v_offset();

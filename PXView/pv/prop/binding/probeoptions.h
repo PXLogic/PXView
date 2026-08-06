@@ -46,10 +46,10 @@ public:
 
 private:
 
-	static GVariant* config_getter(
+	GVariant* config_getter(
 		const struct sr_channel *probe, int key);
 		
-	static void config_setter(
+	void config_setter(
         	struct sr_channel *probe, int key, GVariant* value);
 
     void bind_bool(const QString &name, const QString label, int key);
@@ -77,7 +77,6 @@ private:
 protected:
 	struct sr_channel *const _probe;
 	DeviceAgent *_device_agent;
-	static DeviceAgent *_static_device_agent;
 };
 
 } // binding

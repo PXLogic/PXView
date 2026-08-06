@@ -189,6 +189,9 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
         // Incomplete headers — wait for more data
         _pending_sockets.insert(socket);
         // Disconnect the current readyRead and connect a one-shot handler
+        // NOTE: Do NOT use Qt::UniqueConnection with lambdas — Qt silently
+        // rejects the connection (prints a warning) and the socket ends up
+        // with no readyRead handler at all, causing it to hang forever.
         disconnect(socket, &QTcpSocket::readyRead, this, &McpTransport::on_ready_read);
         connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
             // Append new data
@@ -225,7 +228,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
             disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
             connect(socket, &QTcpSocket::readyRead, this, &McpTransport::on_ready_read);
             handle_http_request(socket, accumulated);
-        }, Qt::UniqueConnection);
+        });
         socket->setProperty("_http_buffer", data);
         return;
     }
@@ -263,7 +266,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
             disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
             connect(socket, &QTcpSocket::readyRead, this, &McpTransport::on_ready_read);
             handle_http_request(socket, accumulated);
-        }, Qt::UniqueConnection);
+        });
         socket->setProperty("_http_buffer", data);
         return;
     }

@@ -318,6 +318,53 @@ struct CurrentDeviceChangePrev {};
 struct StartCollectWorkPrev {};
 struct EndCollectWorkPrev {};
 
+// --- Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<> ---
+
+// DataLenUpdated — received data length changed (was IDataCallback::receive_data_len).
+struct DataLenUpdated {
+    quint64 length;
+};
+
+// HeaderReceived — capture header received (was IDataCallback::receive_header).
+struct HeaderReceived {};
+
+// CaptureUpdated — capture state updated (was ICaptureCallback::update_capture).
+struct CaptureUpdated {};
+
+// ShowRegion — show a region of the capture (was ICaptureCallback::show_region).
+struct ShowRegion {
+    uint64_t start;
+    uint64_t end;
+    bool keep;
+};
+
+// RepeatHold — repeat-hold progress (was ICaptureCallback::repeat_hold).
+struct RepeatHold {
+    int percent;
+};
+
+// TriggerReceived — trigger fired at given position (was ITriggerCallback::receive_trigger).
+struct TriggerReceived {
+    quint64 trigger_pos;
+};
+
+// ShowWaitTrigger — show wait-trigger UI (was ITriggerCallback::show_wait_trigger).
+struct ShowWaitTrigger {};
+
+// SessionError — session error occurred (was ISessionStateCallback::session_error).
+struct SessionError {};
+
+// SaveRequested — session save requested (was ISessionStateCallback::session_save).
+struct SaveRequested {};
+
+// DelayedPropMsg — delayed property message (was ISessionStateCallback::delay_prop_msg).
+struct DelayedPropMsg {
+    QString message;
+};
+
+// SampleLimitsChanged — sample limits changed (was ICaptureCallback::cur_samplelimits_changed).
+struct SampleLimitsChanged {};
+
 // Note on DataUpdated: modernize-core-layer-radical Task 13 wired the emitter.
 // It is now broadcast directly from DataFeedParser::feed_in_logic /
 // feed_in_dso / feed_in_analog after each successful sample-data feed-in.
@@ -390,6 +437,19 @@ public:
     virtual void on_event(const CurrentDeviceChangePrev &) {}
     virtual void on_event(const StartCollectWorkPrev &) {}
     virtual void on_event(const EndCollectWorkPrev &) {}
+
+    // Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
+    virtual void on_event(const DataLenUpdated &) {}
+    virtual void on_event(const HeaderReceived &) {}
+    virtual void on_event(const CaptureUpdated &) {}
+    virtual void on_event(const ShowRegion &) {}
+    virtual void on_event(const RepeatHold &) {}
+    virtual void on_event(const TriggerReceived &) {}
+    virtual void on_event(const ShowWaitTrigger &) {}
+    virtual void on_event(const SessionError &) {}
+    virtual void on_event(const SaveRequested &) {}
+    virtual void on_event(const DelayedPropMsg &) {}
+    virtual void on_event(const SampleLimitsChanged &) {}
 };
 
 } // namespace interface

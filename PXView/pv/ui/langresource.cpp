@@ -255,6 +255,17 @@ const char* LangResource::get_lang_text(int page_id, const char *str_id, const c
         if (it != _current_page->_res_history.end()){
             return (*it).second.c_str();
         }
+        // History miss on a released dynamic page: the key was never queried
+        // before the page was released (e.g. a toolbar rebuilt while a decoder
+        // options dialog is open). Reload the source files so the lookup can
+        // succeed instead of falling through to a spurious "Can't get language
+        // text" warning. The previously resolved entries stay cached in history.
+        load_page(*_current_page);
+        auto it2 = _current_page->_res.find(key);
+        if (it2 != _current_page->_res.end()){
+            _current_page->_res_history[key] = (*it2).second;
+            return (*it2).second.c_str();
+        }
     }
     else{
         auto it = _current_page->_res.find(key);

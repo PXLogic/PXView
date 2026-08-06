@@ -24,10 +24,11 @@
 // Phase J (modernize-view-layer-v3): signal-group / signal-rebuild /
 // signals-changed layout behaviour extracted from the View God-class.
 // ViewSignalSync is declared a friend of View so it can touch the private
-// signal state (_own_signals / _signal_groups / _rebuild_in_progress /
-// _session / _data_source / _document / _device_agent / _signalHeight /
-// _signalHeightScale / _spanY / _trace_view_map / _time_viewport /
-// _fft_viewport / _vsplitter / _viewport_list / _header / _data_source)
+// signal state (_own_signals lives on ViewSignalSync itself; _session /
+// _data_source / _document / _device_agent / _trace_view_map /
+// _time_viewport / _fft_viewport / _vsplitter / _viewport_list / _header
+// live on View; _signalHeight / _signalHeightScale / _spanY live on
+// ViewLayout — accessed via _view->layout_delegate()->…)
 // directly. Cross-method calls that remain on View (e.g. get_traces,
 // get_work_mode, normalize_layout, header_updated, update_scale_offset,
 // data_updated, mark_derived_traces_dirty, set_data_document,
@@ -78,8 +79,14 @@ using namespace std;
 namespace pv {
 namespace view {
 
+ViewSignalSync::ViewSignalSync(View *view) : _view(view) {}
+
+ViewSignalSync::~ViewSignalSync() {
+  // unique_ptr containers auto-delete all Signal elements.
+}
+
 void ViewSignalSync::compute_signal_groups() {
-  _view->_signal_groups.clear();
+  _signal_groups.clear();
 
   if (!_view->is_logic_rendering_mode()) {
     return;
@@ -162,7 +169,7 @@ void ViewSignalSync::compute_signal_groups() {
   std::vector<DecodeBinding> decode_bindings;
 
   for (auto dt : decode_traces) {
-    DecodeTrace *dtrace = dynamic_cast<DecodeTrace *>(dt);
+    DecodeTrace *dtrace = dt->as_decode();
     if (!dtrace)
       continue;
 
@@ -232,7 +239,7 @@ void ViewSignalSync::compute_signal_groups() {
       }
     }
 
-    _view->_signal_groups.push_back(group);
+    _signal_groups.push_back(group);
   }
 
   std::vector<Trace *> unassigned;
@@ -256,73 +263,66 @@ void ViewSignalSync::compute_signal_groups() {
         group.traces.push_back(unassigned[i]);
       } else {
         // 不连续，创建新组
-        _view->_signal_groups.push_back(group);
+        _signal_groups.push_back(group);
         group = SignalGroup();
         group.group_id = group_id++;
         group.traces.push_back(unassigned[i]);
       }
     }
-    _view->_signal_groups.push_back(group);
+    _signal_groups.push_back(group);
   }
 
-  for (auto &group : _view->_signal_groups) {
+  for (auto &group : _signal_groups) {
     sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
       return a->get_v_offset() < b->get_v_offset();
     });
   }
 }
 
-void ViewSignalSync::signals_changed(const Trace *eventTrace) {
-  _view->mark_derived_traces_dirty();
-  double actualMargin = View::SignalMargin;
-  int total_rows = 0;
-  int label_size = 0;
-  std::vector<Trace *> time_traces;
-  std::vector<Trace *> fft_traces;
-  std::vector<Trace *> traces;
-  std::vector<Trace *> logic_traces;
-  std::vector<Trace *> decoder_traces;
+void ViewSignalSync::sort_signal_groups_by_view_index() {
+  if (!(_view->is_logic_rendering_mode() && !_signal_groups.empty()))
+    return;
 
-  (void)eventTrace;
+  std::vector<size_t> group_order(_signal_groups.size());
+  for (size_t i = 0; i < _signal_groups.size(); i++)
+    group_order[i] = i;
+  sort(group_order.begin(), group_order.end(), [this](size_t a, size_t b) {
+    int minA = INT_MAX, minB = INT_MAX;
+    for (auto gt : _signal_groups[a].traces) {
+      if (gt->get_view_index() >= 0)
+        minA = min(minA, gt->get_view_index());
+    }
+    for (auto gt : _signal_groups[b].traces) {
+      if (gt->get_view_index() >= 0)
+        minB = min(minB, gt->get_view_index());
+    }
+    return minA < minB;
+  });
 
-  compute_signal_groups();
-
-  if (_view->is_logic_rendering_mode() && !_view->_signal_groups.empty()) {
-    std::vector<size_t> group_order(_view->_signal_groups.size());
-    for (size_t i = 0; i < _view->_signal_groups.size(); i++)
-      group_order[i] = i;
-    sort(group_order.begin(), group_order.end(), [this](size_t a, size_t b) {
-      int minA = INT_MAX, minB = INT_MAX;
-      for (auto gt : _view->_signal_groups[a].traces) {
-        if (gt->get_view_index() >= 0)
-          minA = min(minA, gt->get_view_index());
-      }
-      for (auto gt : _view->_signal_groups[b].traces) {
-        if (gt->get_view_index() >= 0)
-          minB = min(minB, gt->get_view_index());
-      }
-      return minA < minB;
-    });
-
-    int new_index = 0;
-    for (size_t gi : group_order) {
-      sort(_view->_signal_groups[gi].traces.begin(),
-           _view->_signal_groups[gi].traces.end(),
-           [](Trace *a, Trace *b) {
-             return a->get_view_index() < b->get_view_index();
-           });
-      for (auto gt : _view->_signal_groups[gi].traces) {
-        gt->set_view_index(new_index++);
-      }
+  int new_index = 0;
+  for (size_t gi : group_order) {
+    sort(_signal_groups[gi].traces.begin(),
+         _signal_groups[gi].traces.end(),
+         [](Trace *a, Trace *b) {
+           return a->get_view_index() < b->get_view_index();
+         });
+    for (auto gt : _signal_groups[gi].traces) {
+      gt->set_view_index(new_index++);
     }
   }
+}
 
+void ViewSignalSync::classify_traces(std::vector<Trace *> &time_traces,
+                                      std::vector<Trace *> &fft_traces,
+                                      std::vector<Trace *> &logic_traces,
+                                      std::vector<Trace *> &decoder_traces) {
+  std::vector<Trace *> traces;
   _view->get_traces(ALL_VIEW, traces);
 
   for (auto t : traces) {
-    if (_view->_trace_view_map[t->get_type()] == TIME_VIEW) {
+    if (_view->trace_view_map()[t->get_type()] == TIME_VIEW) {
       time_traces.push_back(t);
-    } else if (_view->_trace_view_map[t->get_type()] == FFT_VIEW) {
+    } else if (_view->trace_view_map()[t->get_type()] == FFT_VIEW) {
       if (t->enabled())
         fft_traces.push_back(t);
     }
@@ -334,13 +334,7 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
   }
 
   // 兜底：为未分到 signal_groups 的 TIME_VIEW 通道（如 ANALOG/DSO/Lissajous/
-  // Math，在 demo 这种 LOGIC+ANALOG 混合设备上常见）补 view_index。
-  // compute_signal_groups() 只处理纯 LOGIC 模式下的 LOGIC + DECODER trace；
-  // 没有 group 的 trace 保留构造默认 _view_index=-1，导致 signals_changed 后
-  // 在 time_traces 里仍为 -1，被排除在布局之外，UI 看不到这些通道。
-  // 这里在分组流程之后，对 time_traces 里 view_index 仍为 -1 的可见 trace
-  // 按当前最大 view_index + 1 顺序补号，确保所有 time_traces 都有有效的
-  // view_index 进入后续布局循环。
+  // Math）补 view_index。
   {
     int max_view_index = -1;
     for (auto t : time_traces) {
@@ -354,217 +348,196 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
       }
     }
   }
+}
 
+void ViewSignalSync::update_fft_viewport(const std::vector<Trace *> &fft_traces) {
   if (!fft_traces.empty()) {
-    if (!_view->_fft_viewport->isVisible()) {
-      _view->_fft_viewport->setVisible(true);
-      _view->_fft_viewport->clear_measure();
-      _view->_viewport_list.push_back(_view->_fft_viewport);
-      _view->_vsplitter->refresh();
+    if (!_view->fft_viewport()->isVisible()) {
+      _view->fft_viewport()->setVisible(true);
+      _view->fft_viewport()->clear_measure();
+      _view->viewport_list().push_back(_view->fft_viewport());
+      _view->vsplitter_widget()->refresh();
     }
 
     for (auto t : fft_traces) {
       t->set_view(_view);
-      t->set_viewport(_view->_fft_viewport);
-      t->set_totalHeight(_view->_fft_viewport->height());
-      t->set_v_offset(_view->_fft_viewport->geometry().bottom());
+      t->set_viewport(_view->fft_viewport());
+      t->set_totalHeight(_view->fft_viewport()->height());
+      t->set_v_offset(_view->fft_viewport()->geometry().bottom());
     }
   } else {
-    _view->_fft_viewport->setVisible(false);
-    _view->_vsplitter->refresh();
+    _view->fft_viewport()->setVisible(false);
+    _view->vsplitter_widget()->refresh();
 
-    // Find the _fft_viewport in the stack
-    std::list<QWidget *>::iterator iter = _view->_viewport_list.begin();
+    std::list<QWidget *>::iterator iter = _view->viewport_list().begin();
+    for (unsigned int i = 0; i < _view->viewport_list().size(); i++, iter++) {
+      if ((*iter) == _view->fft_viewport())
+        break;
+    }
+    if (iter != _view->viewport_list().end())
+      _view->viewport_list().erase(iter);
+  }
+}
 
-    for (unsigned int i = 0; i < _view->_viewport_list.size(); i++, iter++) {
-      if ((*iter) == _view->_fft_viewport)
+void ViewSignalSync::layout_time_signals(
+    std::vector<Trace *> &time_traces,
+    const std::vector<Trace *> &logic_traces,
+    const std::vector<Trace *> &decoder_traces) {
+  if (time_traces.empty() || !_view->get_time_view())
+    return;
+
+  const double actualMargin = View::SignalMargin;
+  int total_rows = 0;
+  int label_size = 0;
+
+  for (auto t : time_traces) {
+    if (t->as_dso() || t->visible())
+      total_rows += t->rows_size();
+    if (t->rows_size() != 0)
+      label_size++;
+  }
+
+  const double height =
+      (_view->get_time_view()->height() - 2 * actualMargin * label_size) *
+      1.0 / total_rows;
+
+  if (_view->device_agent()->have_instance() == false) {
+    assert(false);
+    return;
+  }
+
+  if (_view->is_logic_rendering_mode()) {
+    _view->layout_delegate()->set_signalHeight(_view->layout_delegate()->signalHeightScale());
+  } else if (_view->get_work_mode() == DSO) {
+    int analog_fixed_height = 0;
+    int analog_rows = 0;
+    for (auto t : time_traces) {
+      if (t->signal_type() == SR_CHANNEL_ANALOG &&
+          t->visible() && t->rows_size() != 0) {
+        if (t->get_own_height() > 0)
+          analog_fixed_height += t->get_own_height();
+        else
+          analog_fixed_height += 48;
+        analog_rows += t->rows_size();
+      }
+    }
+    int dso_rows = total_rows - analog_rows;
+    if (dso_rows > 0) {
+      _view->layout_delegate()->set_signalHeight((_view->header_widget()->height() - View::DsoStatusHeight -
+           _view->horizontalScrollBar()->height() -
+           2 * actualMargin * label_size -
+           analog_fixed_height) *
+          1.0 / dso_rows);
+    } else {
+      _view->layout_delegate()->set_signalHeight((_view->header_widget()->height() - View::DsoStatusHeight -
+           _view->horizontalScrollBar()->height() -
+           2 * actualMargin * label_size) *
+          1.0 / total_rows);
+    }
+  } else {
+    _view->layout_delegate()->set_signalHeight((int)((height <= 0) ? 1 : height));
+  }
+
+  _view->layout_delegate()->set_spanY(_view->layout_delegate()->signalHeight() + 2 * actualMargin);
+  double next_v_offset = actualMargin;
+
+  if (_view->is_logic_rendering_mode()) {
+    std::vector<Trace *> non_logic_traces;
+    for (auto t : time_traces) {
+      if (t->get_type() != SR_CHANNEL_LOGIC &&
+          t->get_type() != SR_CHANNEL_DECODER) {
+        non_logic_traces.push_back(t);
+      }
+    }
+
+    time_traces.clear();
+    std::vector<Trace *> all_traces;
+
+    for (auto t : logic_traces)
+      all_traces.push_back(t);
+
+    for (auto t : non_logic_traces) {
+      if (t->get_view_index() != -1)
+        all_traces.push_back(t);
+      else
+        time_traces.push_back(t);
+    }
+
+    for (auto t : decoder_traces) {
+      if (t->get_view_index() != -1)
+        all_traces.push_back(t);
+      else
+        time_traces.push_back(t);
+    }
+
+    sort(all_traces.begin(), all_traces.end(), View::compare_trace_view_index);
+
+    for (auto t : all_traces)
+      time_traces.push_back(t);
+  }
+
+  int current_group_id = -1;
+
+  for (auto t : time_traces) {
+    t->set_view(_view);
+    t->set_viewport(_view->get_time_view());
+
+    if (t->rows_size() == 0)
+      continue;
+
+    if (!t->as_dso() && !t->visible())
+      continue;
+
+    int trace_group_id = -1;
+    for (auto &group : _signal_groups) {
+      for (auto gt : group.traces) {
+        if (gt == t) {
+          trace_group_id = group.group_id;
+          break;
+        }
+      }
+      if (trace_group_id != -1)
         break;
     }
 
-    // Delete the element
-    if (iter != _view->_viewport_list.end())
-      _view->_viewport_list.erase(iter);
-  }
-
-  if (!time_traces.empty() && _view->_time_viewport) {
-    for (auto t : time_traces) {
-      if (dynamic_cast<DsoSignal *>(t) || t->visible())
-        total_rows += t->rows_size();
-      if (t->rows_size() != 0)
-        label_size++;
+    if (current_group_id != -1 && trace_group_id != current_group_id) {
+      next_v_offset += View::GroupGap + 5;
     }
+    current_group_id = trace_group_id;
 
-    const double height =
-        (_view->_time_viewport->height() - 2 * actualMargin * label_size) *
-        1.0 / total_rows;
-
-    if (_view->_device_agent->have_instance() == false) {
-      assert(false);
-      return;
-    }
-
-    if (_view->is_logic_rendering_mode()) {
-      _view->_signalHeight = _view->_signalHeightScale;
-    } else if (_view->get_work_mode() == DSO) {
-      // PXView's _viewbottom is hidden and overlaid on viewport,
-      // so _header->height() is ~DsoStatusHeight larger than original DSView.
-      // Subtract DsoStatusHeight to match the original signal height.
-      //
-      // ANALOG channels use a fixed height (48px default or own_height) rather
-      // than _signalHeight * rows_size(). Without subtracting their fixed
-      // height from the available space before dividing, DSO channels are
-      // compressed to make room for ANALOG channels, and the total content
-      // height collapses to ≈ viewport height — making the vertical scrollbar
-      // unable to account for ANALOG channel heights (range = 0).
-      int analog_fixed_height = 0;
-      int analog_rows = 0;
-      for (auto t : time_traces) {
-        if (t->signal_type() == SR_CHANNEL_ANALOG &&
-            t->visible() && t->rows_size() != 0) {
-          if (t->get_own_height() > 0)
-            analog_fixed_height += t->get_own_height();
-          else
-            analog_fixed_height += 48; // default analog height
-          analog_rows += t->rows_size();
-        }
-      }
-      int dso_rows = total_rows - analog_rows;
-      if (dso_rows > 0) {
-        _view->_signalHeight =
-            (_view->_header->height() - View::DsoStatusHeight -
-             _view->horizontalScrollBar()->height() -
-             2 * actualMargin * label_size -
-             analog_fixed_height) *
-            1.0 / dso_rows;
-      } else {
-        _view->_signalHeight =
-            (_view->_header->height() - View::DsoStatusHeight -
-             _view->horizontalScrollBar()->height() -
-             2 * actualMargin * label_size) *
-            1.0 / total_rows;
-      }
+    double traceHeight;
+    if (t->get_own_height() > 0) {
+      traceHeight = t->get_own_height();
+    } else if (t->signal_type() == SR_CHANNEL_ANALOG) {
+      traceHeight = 48;
     } else {
-      _view->_signalHeight = (int)((height <= 0) ? 1 : height);
+      traceHeight = _view->layout_delegate()->signalHeight() * t->rows_size();
     }
+    t->set_totalHeight((int)traceHeight);
+    t->set_v_offset(qRound(next_v_offset + 0.5 * traceHeight + actualMargin));
+    next_v_offset += traceHeight + 2 * actualMargin;
 
-    _view->_spanY = _view->_signalHeight + 2 * actualMargin;
-    double next_v_offset = actualMargin;
-
-    if (_view->is_logic_rendering_mode()) {
-      // 保留 time_traces 中所有非 LOGIC、非 DECODER 的 trace（典型如 ANALOG/
-      // DSO/Lissajous/Math）。在 demo 这类 LOGIC+ANALOG 混合设备上，ANALOG
-      // 通道也必须进入 time_traces 布局循环，否则 v_offset 保持构造默认
-      // INT_MAX，UI 看不到该通道。
-      std::vector<Trace *> non_logic_traces;
-
-      for (auto t : time_traces) {
-        if (t->get_type() != SR_CHANNEL_LOGIC &&
-            t->get_type() != SR_CHANNEL_DECODER) {
-          non_logic_traces.push_back(t);
-        }
-      }
-
-      time_traces.clear();
-
-      std::vector<Trace *> all_traces;
-
-      for (auto t : logic_traces) {
-        all_traces.push_back(t);
-      }
-
-      // 非 LOGIC/DECODER 的 time_trace 也按 view_index 排序加入 all_traces
-      for (auto t : non_logic_traces) {
-        if (t->get_view_index() != -1)
-          all_traces.push_back(t);
-        else
-          time_traces.push_back(t);
-      }
-
-      for (auto t : decoder_traces) {
-        if (t->get_view_index() != -1)
-          all_traces.push_back(t);
-        else
-          time_traces.push_back(t);
-      }
-
-      sort(all_traces.begin(), all_traces.end(), View::compare_trace_view_index);
-
-      for (auto t : all_traces) {
-        time_traces.push_back(t);
-      }
-    }
-
-    int current_group_id = -1;
-
-    for (auto t : time_traces) {
-      t->set_view(_view);
-      t->set_viewport(_view->_time_viewport);
-
-      if (t->rows_size() == 0)
-        continue;
-
-      if (!dynamic_cast<DsoSignal *>(t) && !t->visible())
-        continue;
-
-      int trace_group_id = -1;
-      for (auto &group : _view->_signal_groups) {
-        for (auto gt : group.traces) {
-          if (gt == t) {
-            trace_group_id = group.group_id;
-            break;
-          }
-        }
-        if (trace_group_id != -1)
-          break;
-      }
-
-      if (current_group_id != -1 && trace_group_id != current_group_id) {
-        next_v_offset += View::GroupGap + 5;
-      }
-      current_group_id = trace_group_id;
-
-      double traceHeight;
-      if (t->get_own_height() > 0) {
-        traceHeight = t->get_own_height();
-      } else if (t->signal_type() == SR_CHANNEL_ANALOG) {
-        // 模拟通道默认高度 48px
-        traceHeight = 48;
-      } else {
-        traceHeight = _view->_signalHeight * t->rows_size();
-      }
-      t->set_totalHeight((int)traceHeight);
-      t->set_v_offset(qRound(next_v_offset + 0.5 * traceHeight + actualMargin));
-      next_v_offset += traceHeight + 2 * actualMargin;
-
-      if (t->signal_type() == SR_CHANNEL_DSO) {
-        auto sig = dynamic_cast<view::DsoSignal *>(t);
-        // In MSO/LOGIC mode, DSO signals have their own allocated area
-        // (get_view_rect() returns the signal's area, not the full viewport).
-        // DsoStatusHeight overlay only exists in pure DSO mode, so only
-        // subtract it there.
-        if (_view->is_logic_rendering_mode()) {
-          sig->set_scale(sig->get_totalHeight());
-        } else {
-          // PXView's _viewbottom is hidden and overlaid on viewport,
-          // so viewport height is ~DsoStatusHeight larger than original DSView.
-          // Subtract DsoStatusHeight to match the original scale.
-          const int scale_height =
-              sig->get_view_rect().height() - View::DsoStatusHeight;
-          sig->set_scale(scale_height > 0 ? scale_height
-                                          : sig->get_view_rect().height());
-        }
-      } else if (t->signal_type() == SR_CHANNEL_ANALOG) {
-        auto sig = dynamic_cast<view::AnalogSignal *>(t);
+    if (auto *sig = t->as_dso()) {
+      if (_view->is_logic_rendering_mode()) {
         sig->set_scale(sig->get_totalHeight());
+      } else {
+        const int scale_height =
+            sig->get_view_rect().height() - View::DsoStatusHeight;
+        sig->set_scale(scale_height > 0 ? scale_height
+                                          : sig->get_view_rect().height());
       }
+    } else if (auto *sig = t->as_analog()) {
+      sig->set_scale(sig->get_totalHeight());
     }
-    _view->_time_viewport->clear_measure();
-    _view->_data_source->update_dso_data_scale();
   }
+  _view->get_time_view()->clear_measure();
+  _view->data_source()->update_dso_data_scale();
+}
 
+void ViewSignalSync::finalize_signal_layout() {
   _view->normalize_layout();
 
-  for (auto &group : _view->_signal_groups) {
+  for (auto &group : _signal_groups) {
     sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
       return a->get_v_offset() < b->get_v_offset();
     });
@@ -575,23 +548,45 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
   _view->data_updated();
 }
 
+void ViewSignalSync::signals_changed(const Trace *eventTrace) {
+  (void)eventTrace;
+
+  _view->mark_derived_traces_dirty();
+
+  compute_signal_groups();
+
+  sort_signal_groups_by_view_index();
+
+  std::vector<Trace *> time_traces;
+  std::vector<Trace *> fft_traces;
+  std::vector<Trace *> logic_traces;
+  std::vector<Trace *> decoder_traces;
+  classify_traces(time_traces, fft_traces, logic_traces, decoder_traces);
+
+  update_fft_viewport(fft_traces);
+
+  layout_time_signals(time_traces, logic_traces, decoder_traces);
+
+  finalize_signal_layout();
+}
+
 void ViewSignalSync::rebuild_signals_from_config(
     const pv::data::SignalConfig &config) {
   // Re-entrancy guard: if a nested broadcast (e.g. DeviceOptionsUpdated
   // from within this function) triggers on_event → rebuild_signals() →
   // rebuild_signals_from_config() again, abort immediately to prevent
   // infinite recursion / stack overflow.
-  if (_view->_rebuild_in_progress)
+  if (_rebuild_in_progress)
     return;
-  _view->_rebuild_in_progress = true;
+  _rebuild_in_progress = true;
   struct RebuildGuard {
     bool &flag;
     RebuildGuard(bool &f) : flag(f) {}
     ~RebuildGuard() { flag = false; }
-  } _rebuild_guard(_view->_rebuild_in_progress);
+  } _rebuild_guard(_rebuild_in_progress);
 
-  std::vector<Signal *> old_signals = _view->_own_signals;
-  _view->_own_signals.clear();
+std::vector<std::unique_ptr<Signal>> old_signals = std::move(_own_signals);
+_own_signals.clear();
 
   // CRITICAL FIX: 不再用 config.work_mode 一刀切决定 channel_type/Signal 类型。
   // 上游 libsigrok 0.6 demo 设备在 work_mode=LOGIC 下同时存在 LOGIC + DSO
@@ -640,60 +635,50 @@ void ViewSignalSync::rebuild_signals_from_config(
     }
 
     // Set session for the model (so it can call session methods if needed)
-    model->set_session(_view->_session);
+    model->set_session(_view->session_ptr());
 
     Signal *old_signal = nullptr;
-    for (auto os : old_signals) {
+    for (auto &os : old_signals) {
       if (os->get_index() == ch.index && os->signal_type() == ch_type) {
-        old_signal = os;
+        old_signal = os.get();
         break;
       }
     }
 
     Signal *signal = nullptr;
-    pxv_info("rebuild switch: index=%d ch_type=%d (LOGIC=%d DSO=%d ANALOG=%d)",
-             ch.index, ch_type, SR_CHANNEL_LOGIC, SR_CHANNEL_DSO, SR_CHANNEL_ANALOG);
     switch (ch_type) {
     case SR_CHANNEL_LOGIC:
-      pxv_info("rebuild: creating LogicSignal for index=%d", ch.index);
       if (old_signal) {
-        signal = new LogicSignal(static_cast<LogicSignal *>(old_signal),
-                                 nullptr, model, _view->_data_source);
+        signal = new LogicSignal(old_signal->as_logic(),
+                                 nullptr, model, _view->data_source());
       } else {
-        signal = new LogicSignal(nullptr, model, _view->_data_source);
+        signal = new LogicSignal(nullptr, model, _view->data_source());
       }
       break;
     case SR_CHANNEL_DSO:
-      pxv_info("rebuild: creating DsoSignal for index=%d", ch.index);
       if (old_signal) {
         // carry over 旧 _data 快照指针，避免 rebuild 后 set_data 条件重绑
         // (依赖 _document->has_data()) 未命中时 _data 为 nullptr 导致波形消失。
         // 快照由 document/session 持有，old_signal 析构不释放，指针安全。
         // 若后续 set_data 重绑命中，会覆盖为最新 active 快照。
-        signal = new DsoSignal(static_cast<DsoSignal *>(old_signal),
-                               static_cast<DsoSignal *>(old_signal)->data(),
-                               model, _view->_data_source);
+        signal = new DsoSignal(old_signal->as_dso(),
+                               old_signal->as_dso()->data(),
+                               model, _view->data_source());
       } else {
-        signal = new DsoSignal(nullptr, model, _view->_data_source);
+        signal = new DsoSignal(nullptr, model, _view->data_source());
       }
       break;
     case SR_CHANNEL_ANALOG:
-      pxv_info("rebuild: creating AnalogSignal for index=%d", ch.index);
       if (old_signal) {
-        signal = new AnalogSignal(static_cast<AnalogSignal *>(old_signal),
-                                  nullptr, model, _view->_data_source);
+        signal = new AnalogSignal(old_signal->as_analog(),
+                                  nullptr, model, _view->data_source());
       } else {
-        signal = new AnalogSignal(nullptr, model, _view->_data_source);
+        signal = new AnalogSignal(nullptr, model, _view->data_source());
       }
       break;
     default:
       pxv_warn("rebuild: UNKNOWN ch_type=%d for index=%d, no signal created", ch_type, ch.index);
       break;
-    }
-
-    if (signal) {
-      pxv_info("rebuild: created signal index=%d signal_type=%d ptr=%p",
-               ch.index, signal->signal_type(), (void*)signal);
     }
 
     if (signal) {
@@ -722,32 +707,20 @@ void ViewSignalSync::rebuild_signals_from_config(
       } else {
         signal->set_view_index(-1);
       }
-      _view->_own_signals.push_back(signal);
+      _own_signals.push_back(std::unique_ptr<Signal>(signal));
     }
   }
 
-  for (auto sig : old_signals)
-    delete sig;
+// old_signals is a unique_ptr vector — it auto-deletes on scope exit.
 
-  if (_view->_document && _view->_document->has_data()) {
-    for (auto sig : _view->_own_signals) {
-      int type = sig->signal_type();
-      switch (type) {
-      case SR_CHANNEL_LOGIC: {
-        view::LogicSignal *s = static_cast<view::LogicSignal *>(sig);
-        s->set_data(_view->_document->get_active_logic());
-        break;
-      }
-      case SR_CHANNEL_ANALOG: {
-        view::AnalogSignal *s = static_cast<view::AnalogSignal *>(sig);
-        s->set_data(_view->_document->get_active_analog());
-        break;
-      }
-      case SR_CHANNEL_DSO: {
-        view::DsoSignal *s = static_cast<view::DsoSignal *>(sig);
-        s->set_data(_view->_document->get_active_dso());
-        break;
-      }
+  if (_view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr()->has_data()) {
+for (auto &sig : _own_signals) {
+if (auto *s = sig->as_logic()) {
+        s->set_data(_view->data_sync_delegate()->document_ptr()->get_active_logic());
+      } else if (auto *s = sig->as_analog()) {
+        s->set_data(_view->data_sync_delegate()->document_ptr()->get_active_analog());
+      } else if (auto *s = sig->as_dso()) {
+        s->set_data(_view->data_sync_delegate()->document_ptr()->get_active_dso());
       }
     }
   }
@@ -758,61 +731,47 @@ void ViewSignalSync::rebuild_signals_from_config(
 void ViewSignalSync::rebuild_signals() {
   _view->mark_derived_traces_dirty();
 
-  pxv_info("rebuild_signals() ENTRY: data_source=%p document=%p same=%d has_config=%d own_signals=%d",
-           (void*)_view->_data_source, (void*)_view->_document,
-           (int)(_view->_data_source == _view->_document),
-           _view->_document ? (int)_view->_document->has_signal_config() : 0,
-           (int)_view->_own_signals.size());
-
-  if (_view->_data_source == _view->_document && _view->_document &&
-      _view->_document->has_signal_config()) {
-    const auto &config = _view->_document->get_signal_config();
-    // 检查配置的通道数是否与设备当前的通道数匹配
-    // 如果不匹配，说明通道模式已切换，需要从设备重新创建信号
+  if (_view->data_source() == _view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr() &&
+      _view->data_sync_delegate()->document_ptr()->has_signal_config()) {
+    const auto &config = _view->data_sync_delegate()->document_ptr()->get_signal_config();
     int device_ch_count = 0;
-    for (const GSList *l = _view->_device_agent->get_channels(); l;
+    for (const GSList *l = _view->device_agent()->get_channels(); l;
          l = l->next) {
       device_ch_count++;
     }
-    pxv_info("rebuild_signals() branch A: config.channels=%d device_ch=%d",
-             (int)config.channels.size(), device_ch_count);
     if (config.channels.size() == (size_t)device_ch_count) {
-      pxv_info("rebuild_signals() -> calling rebuild_signals_from_config (path A)");
       rebuild_signals_from_config(config);
-      SignalFactory::update_signals(_view->_own_signals, _view->_data_source,
-                                    _view->_data_source,
-                                    SignalFactory::Modified);
+// update_signals with Modified event only updates properties in-place,
+// so it is safe to pass the unique_ptr container directly.
+SignalFactory::update_signals(_own_signals, _view->data_source(),
+_view->data_source(),
+SignalFactory::Modified);
       // Only property changes, no layout needed - use incremental refresh
       signals_modified_refresh();
       return;
     }
   }
 
-  pxv_info("rebuild_signals() -> taking SignalFactory::create_signals path (path B)");
-
-  if (!_view->_data_source)
+  if (!_view->data_source())
     return;
 
   auto created_sigs =
-      SignalFactory::create_signals(_view->_data_source, _view->_data_source);
+      SignalFactory::create_signals(_view->data_source(), _view->data_source());
   if (created_sigs.empty())
     return;
 
-  for (auto sig : _view->_own_signals)
-    delete sig;
-  _view->_own_signals.clear();
+// unique_ptr auto-deletes when cleared
+_own_signals.clear();
 
-  for (auto sig : created_sigs) {
-    // create_signals 新建的信号已使用 Trace 构造函数的默认高度，
-    // 无需在此二次重置。DSO/Analog 的自动高度由 set_data_document 路径处理。
-    _view->_own_signals.push_back(sig);
-  }
+// Move all created signals into _own_signals.
+// create_signals 新建的信号已使用 Trace 构造函数的默认高度，
+// 无需在此二次重置。DSO/Analog 的自动高度由 set_data_document 路径处理。
+_own_signals = std::move(created_sigs);
 
-  for (auto sig : _view->_own_signals) {
-    auto s = dynamic_cast<Signal *>(sig);
-    if (s && s->model()) {
-      s->set_enabled(s->model()->enabled());
-      sig->set_visible(s->model()->enabled());
+for (auto &sig : _own_signals) {
+if (sig && sig->model()) {
+      sig->set_enabled(sig->model()->enabled());
+      sig->set_visible(sig->model()->enabled());
     }
   }
 
@@ -825,14 +784,14 @@ void ViewSignalSync::rebuild_signals() {
   // _session (e.g., before/during capture), and must also restore layout.
   // 当 _document 为 nullptr 时（采集完成后 set_data_document 调用前 rebuild），
   // 从 session.get_active_document() 获取 config，恢复用户拖拽后的通道顺序。
-  pv::data::SessionDocument *restore_doc = _view->_document;
-  if (!restore_doc && _view->_session) {
-    restore_doc = _view->_session->get_active_document();
+  pv::data::SessionDocument *restore_doc = _view->data_sync_delegate()->document_ptr();
+  if (!restore_doc && _view->session_ptr()) {
+    restore_doc = _view->session_ptr()->get_active_document();
   }
   if (restore_doc && restore_doc->has_signal_config()) {
     const auto &cfg = restore_doc->get_signal_config();
     int view_index_seq = 0;
-    for (auto *sig : _view->_own_signals) {
+    for (auto &sig : _own_signals) {
       auto it = std::find_if(cfg.channels.begin(), cfg.channels.end(),
                              [&](const data::ChannelConfig &ch) {
                                return ch.index == sig->get_index();
@@ -851,15 +810,12 @@ void ViewSignalSync::rebuild_signals() {
         } else {
           sig->set_view_index(-1);
         }
-        pxv_info("View::rebuild_signals: restored channel %d from config: view_index=%d, v_offset=%d, own_height=%d",
-                 sig->get_index(), sig->get_view_index(),
-                 sig->get_v_offset(), sig->get_own_height());
       }
     }
   }
 
-  if (_view->_document && _view->_document->has_data()) {
-    _view->set_data_document(_view->_document);
+  if (_view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr()->has_data()) {
+    _view->set_data_document(_view->data_sync_delegate()->document_ptr());
   }
 
   signals_changed(nullptr);
@@ -881,14 +837,12 @@ void ViewSignalSync::on_signals_changed() {
   // signals and creates 0 new ones, clearing the waveform tracks
   // (Header::paintEvent shows traces=1).
 
-  if (!_view->_data_source) {
+  if (!_view->data_source()) {
     pxv_warn("on_signals_changed: no data_source, skipping");
     return;
   }
 
-  auto &models = _view->_data_source->get_signal_models();
-  pxv_info("on_signals_changed: own_signals=%d models=%d",
-           (int)_view->_own_signals.size(), (int)models.size());
+  auto &models = _view->data_source()->get_signal_models();
   //
   // This does NOT directly touch _own_decode_traces / _own_spectrum_traces
   // / _own_math_trace / _own_lissajous_trace. Those are derived traces
@@ -896,15 +850,10 @@ void ViewSignalSync::on_signals_changed() {
   // sync_derived_traces() based on the Stack pointer identity (not the
   // Signal list).
 
-  auto event = SignalFactory::compute_change_event(_view->_own_signals, models);
-  pxv_info("on_signals_changed: event=%d (Added=0 Removed=1 Modified=2 AllReplaced=3)",
-           (int)event);
+  auto event = SignalFactory::compute_change_event(_own_signals, models);
 
-  SignalFactory::update_signals(_view->_own_signals, _view->_data_source,
-                                _view->_data_source, event);
-
-  pxv_info("on_signals_changed: after update_signals, own_signals=%d",
-           (int)_view->_own_signals.size());
+  SignalFactory::update_signals(_own_signals, _view->data_source(),
+                                _view->data_source(), event);
 
   // Dispatch to appropriate layout method based on event type.
   switch (event) {
@@ -1027,35 +976,35 @@ void View::refreshSignalColors() {
 // =============================================================================
 
 void ViewSignalSync::get_traces(int type, std::vector<Trace *> &traces) {
-  assert(_view->_session);
+  assert(_view->session_ptr());
 
-  auto &sigs = _view->_own_signals;
+  auto &sigs = _own_signals;
   auto &decode_sigs = _view->get_own_decode_traces();
   auto &spectrums = _view->get_own_spectrum_traces();
 
-  for (auto t : sigs) {
-    if (type == ALL_VIEW || _view->_trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
+  for (auto &t : sigs) {
+    if (type == ALL_VIEW || _view->trace_view_map()[t->get_type()] == type)
+      traces.push_back(t.get());
   }
-  for (auto t : decode_sigs) {
-    if (type == ALL_VIEW || _view->_trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
-  }
-  for (auto t : spectrums) {
-    if (type == ALL_VIEW || _view->_trace_view_map[t->get_type()] == type)
-      traces.push_back(t);
-  }
+for (auto &t : decode_sigs) {
+if (type == ALL_VIEW || _view->trace_view_map()[t->get_type()] == type)
+traces.push_back(t.get());
+}
+for (auto &t : spectrums) {
+if (type == ALL_VIEW || _view->trace_view_map()[t->get_type()] == type)
+traces.push_back(t.get());
+}
 
   auto lissajous = _view->get_own_lissajous_trace();
   if (lissajous && lissajous->enabled() &&
       (type == ALL_VIEW ||
-       _view->_trace_view_map[lissajous->get_type()] == type)) {
+       _view->trace_view_map()[lissajous->get_type()] == type)) {
     traces.push_back(lissajous);
   }
 
   auto math = _view->get_own_math_trace();
   if (math && math->enabled() &&
-      (type == ALL_VIEW || _view->_trace_view_map[math->get_type()] == type)) {
+      (type == ALL_VIEW || _view->trace_view_map()[math->get_type()] == type)) {
     traces.push_back(math);
   }
 
@@ -1126,25 +1075,24 @@ void ViewSignalSync::normalize_layout() {
   // signals_changed() call — including during waveform height dragging.
   // The final scrollbar position is clamped to the valid range by
   // update_scroll() which is called shortly after via header_updated().
-  _view->_vOffset = max(0, _view->_vOffset + delta);
-  _view->verticalScrollBar()->setSliderPosition(_view->_vOffset);
-  _view->v_scroll_value_changed(_view->_vOffset);
+  _view->layout_delegate()->set_vOffset(max(0, _view->layout_delegate()->vOffset() + delta));
+  _view->verticalScrollBar()->setSliderPosition(_view->layout_delegate()->vOffset());
+  _view->v_scroll_value_changed(_view->layout_delegate()->vOffset());
 }
 
 void ViewSignalSync::zoom_vertical(double steps) {
   int step = 10;
-  int oldHeight = _view->_signalHeightScale;
+  int oldHeight = _view->layout_delegate()->signalHeightScale();
   if (steps > 0)
-    _view->_signalHeightScale += step;
+    _view->layout_delegate()->set_signalHeightScale(_view->layout_delegate()->signalHeightScale() + step);
   else
-    _view->_signalHeightScale -= step;
-  _view->_signalHeightScale =
-      max(View::MinSignalHeight,
-          min(_view->_signalHeightScale, View::MaxSignalHeight));
+    _view->layout_delegate()->set_signalHeightScale(_view->layout_delegate()->signalHeightScale() - step);
+  _view->layout_delegate()->set_signalHeightScale(max(View::MinSignalHeight,
+          min(_view->layout_delegate()->signalHeightScale(), View::MaxSignalHeight)));
 
-  bool heightScaleChanged = (_view->_signalHeightScale != oldHeight);
+  bool heightScaleChanged = (_view->layout_delegate()->signalHeightScale() != oldHeight);
   double scale = (oldHeight > 0)
-                     ? (double)_view->_signalHeightScale / oldHeight
+                     ? (double)_view->layout_delegate()->signalHeightScale() / oldHeight
                      : 1.0;
 
   // When _signalHeightScale is clamped at minimum (i.e. it didn't change),
@@ -1177,13 +1125,13 @@ void ViewSignalSync::zoom_vertical(double steps) {
 }
 
 int ViewSignalSync::headerWidth() {
-  if (_view->_header_collapsed) {
+  if (_view->header_collapsed()) {
     int w = Trace::SquareWidth + 2 * Trace::Margin + 10;
-    _view->setViewportMargins(w, View::RulerHeight, 0, 0);
+    _view->set_viewport_margins(w, _view->rulerHeight(), 0, 0);
     return w;
   }
 
-  int headerWidth = _view->_header->get_nameEditWidth();
+  int headerWidth = _view->header_widget()->get_nameEditWidth();
 
   std::vector<Trace *> traces;
   _view->get_traces(ALL_VIEW, traces);
@@ -1195,7 +1143,7 @@ int ViewSignalSync::headerWidth() {
     }
   }
 
-  _view->setViewportMargins(headerWidth, View::RulerHeight, 0, 0);
+  _view->set_viewport_margins(headerWidth, _view->rulerHeight(), 0, 0);
 
   return headerWidth;
 }
@@ -1209,11 +1157,9 @@ void ViewSignalSync::UpdateTheme() {
   // 时重新应用 @logic-channel-N 主题色,与 AnalogSignal/DsoSignal 对齐。
   std::vector<Trace *> traces;
   _view->get_traces(ALL_VIEW, traces);
-  for (Trace *t : traces) {
-    if (!t || t->get_type() != SR_CHANNEL_LOGIC)
-      continue;
-    auto *logicSig = dynamic_cast<LogicSignal *>(t);
-    if (!logicSig || logicSig->get_index_list().empty())
+for (Trace *t : traces) {
+auto *logicSig = t->as_logic();
+if (!logicSig || logicSig->get_index_list().empty())
       continue;
     int idx = *logicSig->get_index_list().begin() % 8;
     QColor themeColor =
@@ -1228,8 +1174,8 @@ void ViewSignalSync::UpdateTheme() {
   bool ok;
   int h = heightStr.toInt(&ok);
   if (ok && h > 0) {
-    _view->_signalHeightScale = h;
-    _view->_signalHeight = h;
+    _view->layout_delegate()->set_signalHeightScale(h);
+    _view->layout_delegate()->set_signalHeight(h);
 
     std::vector<Trace *> traces;
     _view->get_traces(ALL_VIEW, traces);

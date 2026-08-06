@@ -7,7 +7,9 @@ namespace pv {
 namespace core {
 
 thread_local int EventBus::_broadcast_depth = 0;
-std::thread::id EventBus::_main_thread_id = std::this_thread::get_id();
+// _main_thread_id is default-initialized (std::thread::id{}) and set in
+// the EventBus constructor to ensure it captures the main thread ID.
+std::thread::id EventBus::_main_thread_id;
 
 // ---------------------------------------------------------------------------
 // Custom QEvent subclass for async dispatch.
@@ -64,15 +66,17 @@ public:
 };
 
 EventBus::EventBus() {
-    _async_filter = new AsyncEventFilter();
-    qApp->installEventFilter(_async_filter);
+    // Track A7: Set _main_thread_id in the constructor (NOT static init)
+    // to guarantee it captures the main thread's ID.
+    _main_thread_id = std::this_thread::get_id();
+    _async_filter = std::make_unique<AsyncEventFilter>();
+    qApp->installEventFilter(_async_filter.get());
 }
 
 EventBus::~EventBus() {
     if (_async_filter) {
-        qApp->removeEventFilter(_async_filter);
-        delete _async_filter;
-        _async_filter = nullptr;
+        qApp->removeEventFilter(_async_filter.get());
+        _async_filter.reset();
     }
 }
 
@@ -83,20 +87,12 @@ void EventBus::post_async_dispatch(std::function<void()> fn) {
     QCoreApplication::postEvent(qApp, new AsyncDispatchEvent(std::move(fn)));
 }
 
-void EventBus::add_callback(ISessionCallbackBase *cb) {
-    if (cb)
-        _callbacks.push_back(cb);
-}
-
-void EventBus::remove_callback(ISessionCallbackBase *cb) {
-    auto it = std::find(_callbacks.begin(), _callbacks.end(), cb);
-    if (it != _callbacks.end())
-        _callbacks.erase(it);
-}
+// Spec v2 Task 7: add_callback/remove_callback removed (ISessionCallback abolished)
 
 void EventBus::add_event_listener(interface::IEventListener *l) {
     if (!l)
         return;
+    std::unique_lock<std::shared_mutex> lk(_listeners_mutex);
     if (std::find(_event_listeners.begin(), _event_listeners.end(), l) !=
         _event_listeners.end())
         return;
@@ -104,6 +100,7 @@ void EventBus::add_event_listener(interface::IEventListener *l) {
 }
 
 void EventBus::remove_event_listener(interface::IEventListener *l) {
+    std::unique_lock<std::shared_mutex> lk(_listeners_mutex);
     auto it = std::find(_event_listeners.begin(), _event_listeners.end(), l);
     if (it != _event_listeners.end())
         _event_listeners.erase(it);

@@ -20,14 +20,14 @@
 namespace pv {
 namespace core {
 
-DataFeedParser::DataFeedParser(EventBus *bus, SessionStateContext *state)
-    : _event_bus(bus), _state(state) {}
+DataFeedParser::DataFeedParser(EventBus *bus, ISessionState *state, ISessionCoordination *coord)
+    : _event_bus(bus), _state(state), _coord(coord) {}
 
 DataFeedParser::~DataFeedParser() {}
 
 void DataFeedParser::feed_in_header(const sr_dev_inst *sdi) {
   (void)sdi;
-  _state->receive_header();
+  _coord->receive_header();
 }
 
 void DataFeedParser::feed_in_meta(const sr_dev_inst *sdi,
@@ -60,39 +60,46 @@ void DataFeedParser::feed_in_trigger() {
   // For real DSO hardware (PXLogic), SR_DF_TRIGGER may still be emitted
   // in DSO mode, so we no longer exclude DSO here — the driver query
   // path is harmless if unsupported (returns 0).
-  _state->set_hw_replied(true);
+  _coord->set_hw_replied(true);
 
   // Set trigger flag for ALL modes (including DSO). Previously DSO was
   // excluded, which caused _trigger_flag to stay false → trigd() returns
   // false → paint_prepare() skipped trigger-search → set_trig_hoff(0),
   // and viewport "Trig'd" status display was permanently wrong.
-  _state->set_trigger_flag(true);
+  _coord->set_trigger_flag(true);
 
   // Read the trigger position reported by the driver.
   _state->capture_data()->_trig_pos = _state->device_agent().get_trigger_pos();
 
   // Update trig position for current view.
   if (_state->capture_data() == _state->view_data()) {
-    _state->receive_trigger(_state->capture_data()->_trig_pos);
+    _coord->receive_trigger(_state->capture_data()->_trig_pos);
   }
 }
 
 void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
+  // P2: a non-zero length with a NULL data pointer would make the underlying
+  // LogicSnapshot memcpy into/append from an invalid address → segfault.
+  if (o.length > 0 && o.data == nullptr) {
+    pxv_err("feed_in_logic: length=%llu but data is NULL",
+            (unsigned long long)o.length);
+    return;
+  }
   if (_state->capture_data()->get_logic()->memory_failed()) {
     pxv_err("Unexpected logic packet");
     return;
   }
 
   if (!_state->is_triged() && o.length > 0) {
-    _state->set_is_triged(true);
-    _state->set_trig_time(QDateTime::currentDateTime());
+    _coord->set_is_triged(true);
+    _coord->set_trig_time(QDateTime::currentDateTime());
   }
 
   if (_state->capture_data()->get_logic()->last_ended()) {
     _state->capture_data()->get_logic()->set_loop(
-        _state->capture_manager()->is_loop_mode());
+        _capture_mgr->is_loop_mode());
 
-    bool bNotFree = _state->decode_task_manager()->has_running_tasks() &&
+    bool bNotFree = _decode_mgr->has_running_tasks() &&
                     _state->view_data() == _state->capture_data();
 
     _state->capture_data()->get_logic()->first_payload(
@@ -103,29 +110,29 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     // for logic will be notified. Currently the only user of
     // frame_began is DecoderStack, but in future we need to signal
     // this after both analog and logic sweeps have begun.
-    _state->frame_began();
+    _coord->frame_began();
   } else {
     // Append to the existing data snapshot
     _state->capture_data()->get_logic()->append_payload(o);
   }
 
   if (_state->capture_data()->get_logic()->memory_failed()) {
-    _state->set_error(SessionStateContext::Malloc_err);
-    _state->session_error();
+    _coord->set_error(SessionStateContext::Malloc_err);
+    _coord->session_error();
     return;
   }
 
   // DSO/ANALOG 模式下可能收到 logic packet（demo 驱动始终发送 logic 数据），
   // 但 get_ch_num(SR_CHANNEL_LOGIC) 返回 0 会导致除零异常。
-  const int logic_ch_num = _state->get_ch_num(SR_CHANNEL_LOGIC);
+  const int logic_ch_num = _coord->get_ch_num(SR_CHANNEL_LOGIC);
   if (logic_ch_num > 0) {
-    _state->set_receive_data_len(o.length * 8 / logic_ch_num);
+    _coord->set_receive_data_len(o.length * 8 / logic_ch_num);
   } else {
     // 无 logic 通道时，按字节长度记录接收数据量
-    _state->set_receive_data_len(o.length);
+    _coord->set_receive_data_len(o.length);
   }
 
-  _state->capture_manager()->set_data_updated(true);
+  _capture_mgr->set_data_updated(true);
 
   // modernize-core-layer-radical Task 13: emit DataUpdated typed event.
   // feed_in_logic runs on the libsigrok data-feed thread; use broadcast_async
@@ -135,6 +142,12 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
 }
 
 void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
+  // P2: guard against NULL data with non-zero sample count (memcpy would crash).
+  if (o.num_samples > 0 && o.data == nullptr) {
+    pxv_err("feed_in_analog: num_samples=%llu but data is NULL",
+            (unsigned long long)o.num_samples);
+    return;
+  }
   if (_state->capture_data()->get_analog()->memory_failed()) {
     pxv_err("Unexpected analog packet");
     return; // This analog packet was not expected.
@@ -148,15 +161,15 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
     _state->capture_data()->get_analog()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),
         _state->device_agent().get_channels());
-    _state->frame_began();
+    _coord->frame_began();
   } else {
     // Append to the existing data snapshot
     _state->capture_data()->get_analog()->append_payload(o);
   }
 
   if (_state->capture_data()->get_analog()->memory_failed()) {
-    _state->set_error(SessionStateContext::Malloc_err);
-    _state->session_error();
+    _coord->set_error(SessionStateContext::Malloc_err);
+    _coord->session_error();
     return;
   }
 
@@ -167,9 +180,9 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
   // making the progress bar reach 100% long before the capture finishes.
   const int mode = _state->device_agent().get_work_mode();
   if (mode == ANALOG) {
-    _state->set_receive_data_len(o.num_samples);
+    _coord->set_receive_data_len(o.num_samples);
   }
-  _state->capture_manager()->set_data_updated(true);
+  _capture_mgr->set_data_updated(true);
 
   // modernize-core-layer-radical Task 13: emit DataUpdated (async, worker thread).
   _event_bus->broadcast_async<interface::DataUpdated>({});
@@ -177,14 +190,20 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
 
 void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // Hot-path debug logging removed for performance — was printing 40+ lines/sec
+  // P2: guard against NULL data with non-zero sample count (memcpy would crash).
+  if (o.num_samples > 0 && o.data == nullptr) {
+    pxv_err("feed_in_dso: num_samples=%llu but data is NULL",
+            (unsigned long long)o.num_samples);
+    return;
+  }
   if (_state->capture_data()->get_dso()->memory_failed()) {
     pxv_err("Unexpected dso packet");
     return;
   }
 
   if (!_state->is_triged() && o.num_samples > 0) {
-    _state->set_is_triged(true);
-    _state->set_trig_time(QDateTime::currentDateTime());
+    _coord->set_is_triged(true);
+    _coord->set_trig_time(QDateTime::currentDateTime());
   }
 
   // Record the sample count BEFORE first_payload/append_payload — needed
@@ -198,17 +217,17 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     _state->capture_data()->get_dso()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),
         _state->device_agent().get_channels(),
-        _state->capture_manager()->is_instant(),
-        false /* isFile */);
-    _state->frame_began();
+        _capture_mgr->is_instant(),
+        _state->device_agent().is_file());
+    _coord->frame_began();
   } else {
     // Append to the existing data snapshot
     _state->capture_data()->get_dso()->append_payload(o);
   }
 
   if (_state->capture_data()->get_dso()->memory_failed()) {
-    _state->set_error(SessionStateContext::Malloc_err);
-    _state->session_error();
+    _coord->set_error(SessionStateContext::Malloc_err);
+    _coord->session_error();
     return;
   }
 
@@ -219,8 +238,8 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // is permanently wrong. Also, downstream receive_trigger() is never
   // invoked for DSO mode → horizontal trigger cursor stays stale.
   if (o.trig_flag) {
-    _state->set_trigger_flag(true);
-    _state->set_trigger_ch(o.trig_ch);
+    _coord->set_trigger_flag(true);
+    _coord->set_trigger_ch(o.trig_ch);
 
     // o.trig_offset is the trigger sample offset WITHIN the current DSO
     // packet. Convert to absolute sample index by adding the sample count
@@ -234,7 +253,7 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     // Update trig position for current view (DSO mode has
     // capture_data == view_data, so the receive_trigger path is taken).
     if (_state->capture_data() == _state->view_data()) {
-      _state->receive_trigger(_state->capture_data()->_trig_pos);
+      _coord->receive_trigger(_state->capture_data()->_trig_pos);
     }
   }
 
@@ -245,7 +264,7 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // is incorrect → waveform may render at the wrong scale or not at all.
   const uint64_t cur_samplerate = _state->device_agent().get_sample_rate();
   if (cur_samplerate > 0) {
-    _state->set_cur_snap_samplerate(cur_samplerate);
+    _coord->set_cur_snap_samplerate(cur_samplerate);
   }
 
   // Only track progress for DSO mode. In other modes (LOGIC/MSO/ANALOG)
@@ -254,9 +273,9 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // inflate _sample_received and make the progress bar reach 100% early.
   const int mode = _state->device_agent().get_work_mode();
   if (mode == DSO) {
-    _state->set_receive_data_len(o.num_samples);
+    _coord->set_receive_data_len(o.num_samples);
   }
-  _state->capture_manager()->set_data_updated(true);
+  _capture_mgr->set_data_updated(true);
 
   // modernize-core-layer-radical Task 13: emit DataUpdated (async, worker thread).
   _event_bus->broadcast_async<interface::DataUpdated>({});
@@ -272,14 +291,14 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     pxv_warn("%s", "SigSession::data_feed_in: packet is nullptr");
     return;
   }
-  assert(sdi);
-  assert(packet);
+  // Track C1: redundant assert(sdi)/assert(packet) removed —
+  // already guarded by nullptr checks + early return above.
 
   // Static packet counter removed — was only used by the removed timing log.
 
   ds_lock_guard lock(_state->data_mutex());
 
-  if (_state->capture_manager()->is_data_lock() && packet->type != SR_DF_END)
+  if (_capture_mgr->is_data_lock() && packet->type != SR_DF_END)
     return;
 
   // Upstream sr_datafeed_packet has no `status` field (fork-only).
@@ -292,7 +311,12 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     break;
 
   case SR_DF_META:
-    assert(packet->payload);
+    // P2: assert() is compiled out in Release builds — a NULL payload would
+    // dereference and segfault. Guard with a hard early-return instead.
+    if (!packet->payload) {
+      pxv_err("SR_DF_META packet with NULL payload");
+      break;
+    }
     feed_in_meta(sdi, *(const sr_datafeed_meta *)packet->payload);
     break;
 
@@ -302,23 +326,31 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     break;
 
   case SR_DF_LOGIC:
-    assert(packet->payload);
+    // P2: see above — never trust payload in Release builds.
+    if (!packet->payload) {
+      pxv_err("SR_DF_LOGIC packet with NULL payload");
+      break;
+    }
     feed_in_logic(*(const sr_datafeed_logic *)packet->payload);
     break;
 
   case SR_DF_ANALOG:
-    assert(packet->payload);
+    if (!packet->payload) {
+      pxv_err("SR_DF_ANALOG packet with NULL payload");
+      break;
+    }
     feed_in_analog(*(const sr_datafeed_analog *)packet->payload);
     break;
 
   case SR_DF_DSO:
-    assert(packet->payload);
+    if (!packet->payload) {
+      pxv_err("SR_DF_DSO packet with NULL payload");
+      break;
+    }
     feed_in_dso(*(const sr_datafeed_dso *)packet->payload);
     break;
 
   case SR_DF_END: {
-    pxv_info("------------SR_DF_END packet.");
-
     _state->capture_data()->get_logic()->capture_ended();
     _state->capture_data()->get_dso()->capture_ended();
     _state->capture_data()->get_analog()->capture_ended();
@@ -338,7 +370,22 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     } else {
       _state->frame_ended();
 
-      // 非 LOGIC 模式（DSO/ANALOG/MSO）采集正常完成时，启动解码器。
+      // MSO 模式包含 LOGIC 通道与 ANALOG 通道。LOGIC 模式通过 RevEndPacket 触发
+      // copy_data_to_document + CopyToDocDone + set_data_document 来绑定 analog
+      // 信号的 _data 指针；MSO 模式走本 else 分支，原代码遗漏了 RevEndPacket 广播，
+      // 导致 copy_data_to_document 不执行、analog 信号 _data 恒为 null，
+      // paint_mid() 直接 return，模拟通道波形空白。此处补发 RevEndPacket 复用
+      // on_event(RevEndPacket) 已有的 MSO 处理分支。
+      if (mode == MSO) {
+        _event_bus->broadcast_async<interface::RevEndPacket>({});
+      }
+
+      // 解码器启动策略：
+      //  - MSO 模式：RevEndPacket 路径会在 copy_data_to_document +
+      //    CopyToDocDone 之后由 on_event(CopyToDocDone) 启动解码器，故此处
+      //    不再重复启动，避免重复 start_all_decode_tasks。
+      //  - DSO / ANALOG 模式：无 LOGIC 通道，不触发 RevEndPacket，此处直接
+      //    启动解码器。
       // CaptureOwnerGuard 的释放 + EndCollectWork 广播由 SessionStopped 事件
       // 统一处理（在 DeviceAgent worker 线程的 sr_session_run() 返回后触发），
       // 而不再在 SR_DF_END 时提前释放。SR_DF_END 触发时 libsigrok 的 main
@@ -347,7 +394,9 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       // repeat/loop 模式下也由 SessionStopped 处理，但 SessionStopped 只在
       // _is_working 为 true 时才释放 guard —— repeat 模式每帧的 guard 释放
       // 由 TrigNextCollect / stop_capture 路径负责。
-      _state->decode_task_manager()->start_all_decode_tasks();
+      if (mode != MSO) {
+        _decode_mgr->start_all_decode_tasks();
+      }
 
       // 架构修复：MSO 模式包含 LOGIC 通道，采集完成后若启用 auto-apply
       // 且有保存的 thresholds，则自动重新应用毛刺滤波。

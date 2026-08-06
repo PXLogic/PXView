@@ -49,6 +49,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class ISignalSource; }
 
 namespace view {
     class Cursor;
@@ -150,6 +151,7 @@ public slots:
 
 private:
     SigSession *_session;
+    data::ISignalSource *_signals = nullptr;
     view::View *_view;
     TabContext *_context;
 

@@ -90,7 +90,7 @@ public:
      *                    the SigSession->DataSource migration).
      * @return Vector of created Signal pointers.
      */
-    static std::vector<Signal*> create_signals(data::DataSource *source, data::DataSource *data_source);
+    static std::vector<std::unique_ptr<Signal>> create_signals(data::DataSource *source, data::DataSource *data_source);
 
     /**
      * Compute the change event type by comparing current signals with new models.
@@ -99,7 +99,7 @@ public:
      * @return SignalChangeEvent indicating the type of change.
      */
     static SignalChangeEvent compute_change_event(
-        const std::vector<Signal*> &current_signals,
+        const std::vector<std::unique_ptr<Signal>> &current_signals,
         const std::vector<std::shared_ptr<data::SignalModel>> &models);
 
     /**
@@ -112,7 +112,7 @@ public:
      *                    same object as source).
      * @param event Type of change that triggered the update.
      */
-    static void update_signals(std::vector<Signal*> &current_signals,
+    static void update_signals(std::vector<std::unique_ptr<Signal>> &current_signals,
                                data::DataSource *source,
                                data::DataSource *data_source,
                                SignalChangeEvent event);
@@ -121,12 +121,12 @@ private:
     /**
      * Save UI state from a list of signals.
      */
-    static std::map<int, SignalUiState> save_ui_state(const std::vector<Signal*> &sigs);
+    static std::map<int, SignalUiState> save_ui_state(const std::vector<std::unique_ptr<Signal>> &sigs);
 
     /**
      * Restore UI state to signals based on channel index mapping.
      */
-    static void restore_ui_state(std::vector<Signal*> &sigs,
+    static void restore_ui_state(std::vector<std::unique_ptr<Signal>> &sigs,
                                   const std::map<int, SignalUiState> &saved_state);
 
     /**

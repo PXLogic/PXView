@@ -62,22 +62,30 @@ using namespace std;
 namespace pv {
 namespace view {
 
+ViewGlitchFilter::ViewGlitchFilter(View *view) : _view(view) {}
+
+ViewGlitchFilter::~ViewGlitchFilter() = default;
+
+void ViewGlitchFilter::set_glitch_filter_popup(GlitchFilterPopup *p) {
+  _glitch_filter_popup.reset(p);
+}
+
 void ViewGlitchFilter::on_show_glitch_filter_popup(
     pv::view::LogicSignal *sig) {
   if (!sig)
     return;
-  if (!_view->_glitch_filter_popup)
+  if (!_glitch_filter_popup)
     return;
 
   // 对齐 HTML 原型:弹窗紧贴 name 区右侧 (label-row.right + 8),
   // 垂直方向对齐轨道上界(sig->get_y() - totalHeight/2)。
-  int name_right = _view->_header
-                       ? _view->_header->width() - sig->get_rightWidth()
+  int name_right = _view->header_widget()
+                       ? _view->header_widget()->width() - sig->get_rightWidth()
                        : 0;
   int anchor_x = name_right + 8;
   int anchor_y = sig->get_y() - sig->get_totalHeight() / 2;
-  QPoint anchor = _view->_header
-                      ? _view->_header->mapToGlobal(QPoint(anchor_x, anchor_y))
+  QPoint anchor = _view->header_widget()
+                      ? _view->header_widget()->mapToGlobal(QPoint(anchor_x, anchor_y))
                       : QCursor::pos();
 
   // Keep the popup on screen (assume ~420x500 popup size).
@@ -94,7 +102,7 @@ void ViewGlitchFilter::on_show_glitch_filter_popup(
       anchor.setY(geo.top());
   }
 
-  _view->_glitch_filter_popup->open_for_signal(sig, anchor);
+  _glitch_filter_popup->open_for_signal(sig, anchor);
 }
 
 void ViewGlitchFilter::on_clear_glitch_filter_requested(bool all_channels) {
@@ -102,9 +110,9 @@ void ViewGlitchFilter::on_clear_glitch_filter_requested(bool all_channels) {
   // all_channels flag only affects the toast message. A per-channel clear
   // would require a Core API extension.
   _view->session().clear_glitch_filter();
-  _view->_preview_ranges.clear();
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+  _preview_ranges.clear();
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
   pv::ui::Toast::show(_view,
                       all_channels ? View::tr("已清除所有通道滤波")
                                    : View::tr("已清除通道滤波"),
@@ -125,16 +133,16 @@ void ViewGlitchFilter::on_toggle_invert_requested(
   if (sess.is_signal_invert_active()) {
     sess.clear_signal_invert();
     pv::ui::Toast::show(_view, View::tr("已清除信号取反"), pv::ui::Toast::Info);
-    if (_view->_time_viewport)
-      _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+    if (_view->get_time_view())
+      _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
     return;
   }
 
   // Build the channels vector indexed by enabled-logic-channel ordinal.
   std::vector<LogicSignal *> logic_sigs;
-  for (auto s : _view->_own_signals) {
-    if (s && s->signal_type() == SR_CHANNEL_LOGIC)
-      logic_sigs.push_back(static_cast<LogicSignal *>(s));
+  for (auto &s : _view->get_own_signals()) {
+    if (auto *logic = s->as_logic())
+      logic_sigs.push_back(logic);
   }
   std::vector<bool> channels(logic_sigs.size(), false);
   auto it = std::find(logic_sigs.begin(), logic_sigs.end(), sig);
@@ -146,8 +154,8 @@ void ViewGlitchFilter::on_toggle_invert_requested(
   pv::ui::Toast::show(_view,
                       View::tr("已对通道 %1 取反").arg(sig->get_name()),
                       pv::ui::Toast::Info);
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 void ViewGlitchFilter::on_glitch_preview_changed(pv::view::LogicSignal *sig,
@@ -160,10 +168,10 @@ void ViewGlitchFilter::on_glitch_preview_changed(pv::view::LogicSignal *sig,
     return;
   int sig_index = sig->model() ? sig->model()->index() : 0;
   auto pulses = pv::data::PulseAnalyzer::find_pulses(snap, sig_index);
-  _view->_preview_ranges[sig] =
+  _preview_ranges[sig] =
       pv::data::PulseAnalyzer::preview_filter(pulses, threshold, mode);
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 void ViewGlitchFilter::on_glitch_apply_requested(
@@ -176,15 +184,15 @@ void ViewGlitchFilter::on_glitch_apply_requested(
   // Push the current state onto the undo stack (Task 9 / I4). Capture the
   // prior thresholds/modes BEFORE the new apply so undo_filter() can restore
   // the exact previous state instead of always clearing.
-  View::FilterSnapshot snap;
+  FilterSnapshot snap;
   snap.was_active = sess.is_glitch_filter_active();
   if (snap.was_active) {
     snap.thresholds = sess.glitch_filter_thresholds();
     snap.modes = sess.glitch_filter_modes();
   }
-  _view->_filter_undo_stack.push_back(snap);
-  if (_view->_filter_undo_stack.size() > 20)
-    _view->_filter_undo_stack.erase(_view->_filter_undo_stack.begin());
+  _filter_undo_stack.push_back(snap);
+  if (_filter_undo_stack.size() > 20)
+    _filter_undo_stack.erase(_filter_undo_stack.begin());
 
   // 架构修复：用 channel_index 作 key，与 _ch_index 中的位置无关。
   // 即使 View 层包含禁用通道，Core 层也只处理 _ch_index 中的通道。
@@ -193,7 +201,7 @@ void ViewGlitchFilter::on_glitch_apply_requested(
 
   if (all_channels) {
     // "应用到所有通道"：用新阈值替换全部，不合并已有状态
-    for (auto s : _view->_own_signals) {
+    for (auto &s : _view->get_own_signals()) {
       if (s && s->signal_type() == SR_CHANNEL_LOGIC) {
         int ch_idx = s->model() ? s->model()->index() : -1;
         if (ch_idx >= 0) {
@@ -220,7 +228,7 @@ void ViewGlitchFilter::on_glitch_apply_requested(
   sess.set_glitch_filter(thresholds, modes);
 
   // Clear preview overlay once the real filter is applied.
-  _view->_preview_ranges.clear();
+  _preview_ranges.clear();
 
   if (all_channels) {
     pv::ui::Toast::show(
@@ -237,10 +245,10 @@ void ViewGlitchFilter::on_glitch_apply_requested(
 }
 
 void ViewGlitchFilter::on_glitch_popup_closed() {
-  _view->_preview_ranges.clear();
-  if (_view->_time_viewport) {
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-    _view->_time_viewport->setFocus();
+  _preview_ranges.clear();
+  if (_view->get_time_view()) {
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
+    _view->get_time_view()->setFocus();
   }
 }
 
@@ -252,15 +260,15 @@ void ViewGlitchFilter::on_apply_batch_requested(
   auto &sess = _view->session();
 
   // Push undo snapshot (与单通道 apply 一致的撤销栈逻辑)
-  View::FilterSnapshot snap;
+  FilterSnapshot snap;
   snap.was_active = sess.is_glitch_filter_active();
   if (snap.was_active) {
     snap.thresholds = sess.glitch_filter_thresholds();
     snap.modes = sess.glitch_filter_modes();
   }
-  _view->_filter_undo_stack.push_back(snap);
-  if (_view->_filter_undo_stack.size() > 20)
-    _view->_filter_undo_stack.erase(_view->_filter_undo_stack.begin());
+  _filter_undo_stack.push_back(snap);
+  if (_filter_undo_stack.size() > 20)
+    _filter_undo_stack.erase(_filter_undo_stack.begin());
 
   // 架构修复：用 channel_index 作 key，与 _ch_index 中的位置无关
   std::map<int, uint32_t> thresholds;
@@ -285,7 +293,7 @@ void ViewGlitchFilter::on_apply_batch_requested(
   }
 
   sess.set_glitch_filter(thresholds, modes);
-  _view->_preview_ranges.clear();
+  _preview_ranges.clear();
 
   QString desc;
   if (sigs.size() == 1) {
@@ -312,29 +320,29 @@ void ViewGlitchFilter::on_preview_batch_changed(
       continue;
     int sig_index = sig->model() ? sig->model()->index() : 0;
     auto pulses = pv::data::PulseAnalyzer::find_pulses(snap, sig_index);
-    _view->_preview_ranges[sig] =
+    _preview_ranges[sig] =
         pv::data::PulseAnalyzer::preview_filter(pulses, threshold, mode);
   }
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 const std::vector<pv::data::PulseAnalyzer::Pulse> *
 ViewGlitchFilter::get_preview_ranges(LogicSignal *sig) const {
   if (!sig)
     return nullptr;
-  auto it = _view->_preview_ranges.find(sig);
-  if (it == _view->_preview_ranges.end())
+  auto it = _preview_ranges.find(sig);
+  if (it == _preview_ranges.end())
     return nullptr;
   return &it->second;
 }
 
 void ViewGlitchFilter::undo_filter() {
-  if (_view->_filter_undo_stack.empty())
+  if (_filter_undo_stack.empty())
     return;
   auto &sess = _view->session();
-  View::FilterSnapshot snap = _view->_filter_undo_stack.back();
-  _view->_filter_undo_stack.pop_back();
+  FilterSnapshot snap = _filter_undo_stack.back();
+  _filter_undo_stack.pop_back();
   // I4: restore the prior state captured at apply time. If the filter was
   // active before the now-undone apply, re-apply the previous thresholds/
   // modes; otherwise clear the filter entirely.
@@ -343,9 +351,9 @@ void ViewGlitchFilter::undo_filter() {
   } else {
     sess.clear_glitch_filter();
   }
-  _view->_preview_ranges.clear();
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+  _preview_ranges.clear();
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
   pv::ui::Toast::show(_view, View::tr("已撤销滤波"), pv::ui::Toast::Info);
 }
 
@@ -355,11 +363,11 @@ void ViewGlitchFilter::on_glitch_filter_completed() {
   // LogicSnapshot (filtered pulses are now long pulses; previously-filtered
   // short pulses are gone). Also clear stale preview ranges — the red
   // overlay from get_filtered_ranges() now shows the actual filtered state.
-  _view->_preview_ranges.clear();
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  if (_view->_glitch_filter_popup && _view->_glitch_filter_popup->is_open())
-    _view->_glitch_filter_popup->on_filter_completed();
+  _preview_ranges.clear();
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
+  if (_glitch_filter_popup && _glitch_filter_popup->is_open())
+    _glitch_filter_popup->on_filter_completed();
 }
 
 void ViewGlitchFilter::on_glitch_filter_cleared() {
@@ -367,11 +375,11 @@ void ViewGlitchFilter::on_glitch_filter_cleared() {
   // so it reflects the unfiltered LogicSnapshot, and clear preview ranges so
   // the orange overlay disappears (red overlay already gone because
   // get_filtered_ranges() returns empty after clear_filtered_ranges()).
-  _view->_preview_ranges.clear();
-  if (_view->_time_viewport)
-    _view->_time_viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
-  if (_view->_glitch_filter_popup && _view->_glitch_filter_popup->is_open())
-    _view->_glitch_filter_popup->on_filter_cleared();
+  _preview_ranges.clear();
+  if (_view->get_time_view())
+    _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
+  if (_glitch_filter_popup && _glitch_filter_popup->is_open())
+    _glitch_filter_popup->on_filter_cleared();
 }
 
 } // namespace view

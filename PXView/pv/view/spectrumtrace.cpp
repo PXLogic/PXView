@@ -304,8 +304,8 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
         const double view_off = full_size * _offset;
         const int view_start = floor(view_off);
         const int view_size = full_size*_scale;
-        QPointF *points = new QPointF[samples.size()];
-        QPointF *point = points;
+        std::vector<QPointF> points(samples.size());
+        QPointF *point = points.data();
 
         const bool dc_ignored = _spectrum_stack->dc_ignored();
         const double height = get_view_rect().height();
@@ -316,9 +316,9 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
         double vfactor = 0;
         
         if (_view) {
-            for(auto s : _view->get_own_signals()) {
+            for(auto &s : _view->get_own_signals()) {
                 if (s->signal_type() == SR_CHANNEL_DSO) {
-                    view::DsoSignal *dsoSig = (view::DsoSignal*)s;
+                    view::DsoSignal *dsoSig = (view::DsoSignal*)s.get();
                     if(dsoSig->get_index() == _spectrum_stack->get_index()) {
                         vdiv = dsoSig->get_vDialValue();
                         vfactor = dsoSig->get_factor();
@@ -358,8 +358,7 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
             sample++;
         }while(x<right && sample < samples.size());
 
-        p.drawPolyline(points, point - points);
-        delete[] points;
+        p.drawPolyline(points.data(), static_cast<int>(point - points.data()));
     }
 }
 

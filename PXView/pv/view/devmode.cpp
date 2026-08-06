@@ -133,6 +133,10 @@ DevMode::DevMode(QWidget *parent, SigSession *session) :
 
 DevMode::~DevMode()
 {
+    // Spec v2 Task 6: Unparent QActions before unique_ptr vector destroys them.
+    for (auto &ptr : _owned_mode_actions) {
+        if (ptr) ptr->setParent(nullptr);
+    }
     REMOVE_UI(this);
 }
 
@@ -146,12 +150,12 @@ void DevMode::set_device()
     _bFile = false;
    
    //remove all action object
-    for(std::map<QAction *, const sr_dev_mode *>::const_iterator i = _mode_list.begin();
-        i != _mode_list.end(); i++) {
-        (*i).first->setParent(nullptr);
-        _pop_menu->removeAction((*i).first);
-        delete (*i).first;
+    // Spec v2 Task 6: unique_ptr auto-deletes QActions
+    for (auto &pair : _mode_list) {
+        pair.first->setParent(nullptr);
+        _pop_menu->removeAction(pair.first);
     }
+    _owned_mode_actions.clear();
     _mode_list.clear();
 
     _close_button->setIcon(QIcon());
@@ -166,7 +170,8 @@ void DevMode::set_device()
         auto *mode_name = get_mode_name(mode->mode);
         QString icon_name = QString::fromLocal8Bit(mode_name->_logo);
 
-        QAction *action = new QAction(this);
+        auto action_uptr = std::make_unique<QAction>(this);
+        QAction *action = action_uptr.get();
         action->setIcon(IconCache::Instance().icon(iconPath + "square-" + icon_name));
 
         int md = mode->mode;
@@ -174,6 +179,7 @@ void DevMode::set_device()
 
         connect(action, &QAction::triggered, this, &DevMode::on_mode_change);
 
+        _owned_mode_actions.push_back(std::move(action_uptr));
         _mode_list[action] = mode;
         int cur_mode = _device_agent->get_work_mode();
 

@@ -98,17 +98,32 @@ bool MmapAllocator::configure(bool use_disk_file, const QString& disk_dir, uint6
                     _file_path.toUtf8().constData(), GetLastError());
             return false;
         }
+        // Disk-file-backed mapping: commit all pages (file grows on write).
+        _hMap = CreateFileMappingA(_hFile,
+                                   nullptr,
+                                   PAGE_READWRITE,
+                                   (DWORD)(_total_bytes >> 32),
+                                   (DWORD)(_total_bytes & 0xFFFFFFFF),
+                                   nullptr);
     } else {
         _hFile = INVALID_HANDLE_VALUE; // Page file backed
+        // CRITICAL: Use SEC_RESERVE for anonymous mappings so Windows only
+        // reserves virtual address space WITHOUT charging the system commit
+        // limit for the full size. Without SEC_RESERVE, CreateFileMapping
+        // charges the entire total_bytes against the commit limit upfront,
+        // causing error 1450 for large ring buffers (e.g. 44GB). Pages are
+        // committed on demand via VirtualAlloc(MEM_COMMIT) in prefault_worker
+        // and get_block_data, matching Linux mmap(MAP_ANONYMOUS) behavior.
+        // RLE compression (calc_mipmap frees blocks with no toggles) means
+        // actual physical memory usage is far less than total_bytes.
+        _hMap = CreateFileMappingA(INVALID_HANDLE_VALUE,
+                                   nullptr,
+                                   PAGE_READWRITE | SEC_RESERVE,
+                                   (DWORD)(_total_bytes >> 32),
+                                   (DWORD)(_total_bytes & 0xFFFFFFFF),
+                                   nullptr);
     }
 
-    _hMap = CreateFileMappingA(_hFile,
-                               nullptr,
-                               PAGE_READWRITE,
-                               (DWORD)(_total_bytes >> 32),
-                               (DWORD)(_total_bytes & 0xFFFFFFFF),
-                               nullptr);
-                               
     if (!_hMap) {
         pxv_err("MmapAllocator: CreateFileMapping failed, error %lu", GetLastError());
         if (_hFile != INVALID_HANDLE_VALUE) {
@@ -178,16 +193,50 @@ void* MmapAllocator::get_block_data(int channel, uint64_t block_index, uint64_t 
         return nullptr;
     }
     
-    return (uint8_t*)_base_ptr + global_offset;
+    void *ptr = (uint8_t*)_base_ptr + global_offset;
+
+#ifdef _WIN32
+    // For SEC_RESERVE mappings (anonymous / page-file-backed), pages are
+    // reserved but NOT committed. Commit the block on demand so the caller
+    // can safely write to it. VirtualAlloc(MEM_COMMIT) on already-committed
+    // pages is a no-op, so this is safe if prefault already committed it.
+    // For disk-file-backed mappings (no SEC_RESERVE), pages are already
+    // committed by the file mapping, so skip this.
+    if (_hFile == INVALID_HANDLE_VALUE && _hMap) {
+        void *committed = VirtualAlloc(ptr, block_size, MEM_COMMIT, PAGE_READWRITE);
+        if (!committed) {
+            // MEM_COMMIT failed: system is out of physical memory / commit
+            // limit. Return nullptr so the caller can set _memory_failed
+            // and the user gets a dialog instead of a silent crash.
+            pxv_err("MmapAllocator: VirtualAlloc(MEM_COMMIT) failed for "
+                    "block (ch=%d, idx=%llu), error %lu — system memory exhausted",
+                    channel, (unsigned long long)block_index, GetLastError());
+            return nullptr;
+        }
+    }
+#endif
+
+    return ptr;
 }
 
 bool MmapAllocator::decommit_block(void* ptr, uint64_t size) {
     if (!ptr || !_base_ptr || !is_mmap_address(ptr)) return false;
 
 #ifdef _WIN32
-    // VirtualUnlock 对 file-mapped memory 触发 decommit：dirty page 写回文件后回收 RAM 页。
-    // 失败非致命（如页未 commit），直接忽略。
-    (void)VirtualUnlock(ptr, size);
+    if (_hFile == INVALID_HANDLE_VALUE && _hMap) {
+        // SEC_RESERVE anonymous mapping: decommit physical pages back to OS.
+        // The virtual address range stays reserved, so get_block_data can
+        // re-commit it later via VirtualAlloc(MEM_COMMIT).
+        // VirtualFree(MEM_DECOMMIT) returns pages to the system pool.
+        if (!VirtualFree(ptr, size, MEM_DECOMMIT)) {
+            pxv_warn("MmapAllocator: VirtualFree(MEM_DECOMMIT) failed, error %lu (non-fatal)",
+                     GetLastError());
+        }
+    } else {
+        // Disk-file-backed mapping: VirtualUnlock triggers decommit,
+        // dirty page writes back to file, RAM page is reclaimed.
+        (void)VirtualUnlock(ptr, size);
+    }
     return true;
 #else
     // RAM 页：madvise MADV_DONTNEED 释放页，后续读返回零（匿名映射）。
@@ -285,6 +334,14 @@ void MmapAllocator::prefault_worker() {
         for (int ch = 0; ch < _channel_num; ch++) {
             uint64_t byte_offset = ((uint64_t)ch * _max_blocks_per_channel + block_seq) * _block_size;
             if (byte_offset + _block_size > _total_bytes) break;
+
+#ifdef _WIN32
+            // For SEC_RESERVE anonymous mappings, commit the block before
+            // touching any page. For disk-file-backed mappings, pages are
+            // already committed — VirtualAlloc(MEM_COMMIT) is a no-op.
+            VirtualAlloc((uint8_t*)_base_ptr + byte_offset, _block_size,
+                         MEM_COMMIT, PAGE_READWRITE);
+#endif
 
             // 遍历 block 内所有页写零触发 prefault
             for (uint64_t off = 0; off < _block_size; off += PREFAULT_PAGE_SIZE) {
@@ -404,9 +461,13 @@ void MmapAllocator::decommit_range(uint64_t start_bytes, uint64_t end_bytes) {
     for (uint64_t off = start; off < end; off += PREFAULT_PAGE_SIZE) {
         void* page = (uint8_t*)_base_ptr + off;
 #ifdef _WIN32
-        // VirtualUnlock 对 file-mapped memory 触发 decommit：dirty page 写回文件后回收 RAM 页。
-        // 失败非致命（如页未 commit），直接忽略。
-        (void)VirtualUnlock(page, PREFAULT_PAGE_SIZE);
+        if (_hFile == INVALID_HANDLE_VALUE && _hMap) {
+            // SEC_RESERVE anonymous mapping: decommit physical pages.
+            VirtualFree(page, PREFAULT_PAGE_SIZE, MEM_DECOMMIT);
+        } else {
+            // Disk-file-backed mapping: VirtualUnlock triggers decommit.
+            (void)VirtualUnlock(page, PREFAULT_PAGE_SIZE);
+        }
 #else
         if (madvise(page, PREFAULT_PAGE_SIZE, MADV_DONTNEED) != 0) {
             // 非致命：madvise 失败忽略

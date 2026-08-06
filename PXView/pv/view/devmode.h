@@ -28,6 +28,8 @@
 #include <utility>
 #include <map>
 #include <set>
+#include <memory>
+#include <vector>
 #include <QWidget>
 #include <QPushButton>
 #include <QVector> 
@@ -101,7 +103,8 @@ signals:
 
 private:
     SigSession *_session;
-    std::map <QAction *, const sr_dev_mode *> _mode_list;
+    std::vector<std::unique_ptr<QAction>> _owned_mode_actions; // Spec v2 Task 6: RAII ownership
+    std::map <QAction *, const sr_dev_mode *> _mode_list;  // non-owning lookup
     XToolButton     *_mode_btn;
     QMenu           *_pop_menu;
     QPoint          _mouse_point;

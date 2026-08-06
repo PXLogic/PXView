@@ -43,7 +43,7 @@ namespace dock {
 static const int WellLen = SR_Kn(16);
 
 FunctionDock::FunctionDock(QWidget *parent, SigSession *session)
-    : SmoothScrollArea(parent), _session(session)
+    : SmoothScrollArea(parent), _session(session), _signals(session), _data(session)
 {
     setWidgetResizable(true);
     setFrameShape(QFrame::NoFrame);
@@ -86,7 +86,7 @@ FunctionDock::FunctionDock(QWidget *parent, SigSession *session)
 
     // Build radio buttons from DSO signal models
     if (_session) {
-        for (auto &m : _session->get_signal_models()) {
+        for (auto &m : _signals->get_signal_models()) {
             if (m->type() == SR_CHANNEL_DSO) {
                 QString idx_str = QString::number(m->index());
                 QRadioButton *xr = new QRadioButton(idx_str, _x_group);
@@ -119,7 +119,7 @@ FunctionDock::FunctionDock(QWidget *parent, SigSession *session)
 
     // Restore state from existing LissajousModel
     if (_session) {
-        auto *lisa = _session->get_lissajous_model();
+        auto *lisa = _signals->get_lissajous_model();
         if (lisa) {
             _lisa_enable->setChecked(lisa->enabled());
             _lisa_percent->setValue(lisa->percent());
@@ -139,8 +139,8 @@ FunctionDock::FunctionDock(QWidget *parent, SigSession *session)
     }
 
     // Slider range
-    if (_session && _session->cur_samplelimits() > WellLen) {
-        int min = ceil(WellLen * 100.0 / _session->cur_samplelimits());
+    if (_session && _data->cur_samplelimits() > WellLen) {
+        int min = ceil(WellLen * 100.0 / _data->cur_samplelimits());
         _lisa_percent->setEnabled(true);
         _lisa_percent->setRange(min, 100);
         _lisa_percent->setValue(min);
@@ -186,7 +186,7 @@ void FunctionDock::reload()
     ylay->setContentsMargins(5, 15, 5, 5);
 
     if (_session) {
-        for (auto &m : _session->get_signal_models()) {
+        for (auto &m : _signals->get_signal_models()) {
             if (m->type() == SR_CHANNEL_DSO) {
                 QString idx_str = QString::number(m->index());
                 QRadioButton *xr = new QRadioButton(idx_str, _x_group);
@@ -229,7 +229,7 @@ void FunctionDock::reload()
 
     // Restore state
     if (_session) {
-        auto *lisa = _session->get_lissajous_model();
+        auto *lisa = _signals->get_lissajous_model();
         if (lisa) {
             _lisa_enable->setChecked(lisa->enabled());
             _lisa_percent->setValue(lisa->percent());

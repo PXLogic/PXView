@@ -81,6 +81,8 @@ QString dynamic_widget(QLayout *lay);
   void enable_max_probes();
   void build_dynamic_panel();
   void update_dynamic_panel_visibility(bool visible);
+  void rebuild_bindings();
+  void build_mode_section();
   void try_resize_scroll();
   void channel_checkbox_clicked(QCheckBox *sc);
   void ChannelChecked(int index, QObject *object);
@@ -129,6 +131,7 @@ private:
   std::vector<struct sr_channel *> _dso_channel_list;
   std::vector<bool> _lst_probe_enabled_status;
   SigSession *_session;
+  data::ICaptureControl *_capture = nullptr;
   TabContext *_context;
   QWidget *_sampling_settings_widget;
 };

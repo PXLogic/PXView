@@ -53,6 +53,12 @@ public:
         return _enable;
     }
 
+    // Safe narrow-cast: this is a LissajousTrace.
+    LissajousTrace* as_lissajous() override { return this; }
+    const LissajousTrace* as_lissajous() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
     inline void set_enable(bool enable){
         _enable = enable;
     }

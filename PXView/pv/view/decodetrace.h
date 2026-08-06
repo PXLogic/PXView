@@ -72,6 +72,12 @@ private:
 
   static const int ControlRectWidth = 5;
 
+  // Safe narrow-cast: this is a DecodeTrace.
+  DecodeTrace* as_decode() override { return this; }
+  const DecodeTrace* as_decode() const override { return this; }
+  void accept(TraceVisitor& v) override { v.visit(*this); }
+  void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
   static const QString RegionStart;
   static const QString RegionEnd;
 

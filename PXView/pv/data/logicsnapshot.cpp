@@ -353,6 +353,11 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     if (!mmap_ok) {
         pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed! "
                "Falling back to LeafBlockPool in-memory allocation.");
+        // Set _memory_failed so the user gets a dialog warning that mmap
+        // allocation failed and the system is running in degraded mode
+        // (LeafBlockPool fallback). The datafeedparser checks memory_failed()
+        // after append_payload and triggers session_error() -> dialog.
+        _memory_failed = true;
         // Drop the failed allocator so allocate_block() takes the
         // LeafBlockPool::instance().acquire() fallback path instead of
         // dereferencing an unconfigured (nullptr _base_ptr) allocator.
@@ -434,6 +439,7 @@ void* LogicSnapshot::allocate_block(uint16_t channel, uint64_t index0, uint64_t 
         lbp = LeafBlockPool::instance().acquire(LeafBlockSpace);
         if (lbp == nullptr) {
             pxv_err("LogicSnapshot: Malloc memory failed!");
+            _memory_failed = true;
             return nullptr;
         }
     }

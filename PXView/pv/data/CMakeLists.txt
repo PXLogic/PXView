@@ -13,6 +13,7 @@ add_library(pxview-data STATIC
     snapshot.cpp
     signaldata.cpp
     signalmodel.cpp
+    signallistmodel.cpp
     datasource.cpp
     triggerconfig.cpp
     lissajousmodel.cpp

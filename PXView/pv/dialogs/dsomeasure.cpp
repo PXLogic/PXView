@@ -47,7 +47,7 @@ namespace dialogs {
 DsoMeasure::DsoMeasure(SigSession *session, View &parent,
                        unsigned int position, int last_sig_index) :
     PxDialog((QWidget *)&parent),
-    _session(session),
+    _session(session), _data_src(session),
     _view(parent),
     _position(position),
     _button_box(QDialogButtonBox::Reset | QDialogButtonBox::Cancel,
@@ -61,9 +61,9 @@ DsoMeasure::DsoMeasure(SigSession *session, View &parent,
     _measure_tab->setTabPosition(QTabWidget::West);
     _measure_tab->setUsesScrollButtons(false);
 
-    for(auto s : _view.get_own_signals()) {
+    for(auto &s : _view.get_own_signals()) {
         if (s->signal_type() == SR_CHANNEL_DSO && s->enabled()) {
-            view::DsoSignal *dsoSig = (view::DsoSignal*)s;
+            view::DsoSignal *dsoSig = (view::DsoSignal*)s.get();
             QWidget *measure_widget = new QWidget(this);
             this->add_measure(measure_widget, dsoSig);
             _measure_tab->addTab(measure_widget, QString::number(dsoSig->get_index()));
@@ -165,9 +165,9 @@ void DsoMeasure::accept()
         QVariant id = sc->property("id");
         enum DSO_MEASURE_TYPE ms_type = DSO_MEASURE_TYPE(id.toInt());
         
-        for(auto s : _view.get_own_signals()) {
+        for(auto &s : _view.get_own_signals()) {
             if (s->signal_type() == SR_CHANNEL_DSO) {
-                view::DsoSignal *dsoSig = (view::DsoSignal*)s;
+                view::DsoSignal *dsoSig = (view::DsoSignal*)s.get();
                 if (_measure_tab->currentWidget()->property("index").toInt() == dsoSig->get_index()) {
                     _view.get_viewstatus()->set_measure(_position, false, dsoSig->get_index(), ms_type);
                     break;

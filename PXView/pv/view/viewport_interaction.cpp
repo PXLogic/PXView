@@ -71,17 +71,17 @@ ViewportInteraction::~ViewportInteraction() {}
 void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
   assert(event);
 
-  _viewport->_mouse_down_point = event->position().toPoint();
-  _viewport->_mouse_down_offset = _viewport->_view.offset();
-  _viewport->_drag_strength = 0;
-  _viewport->_elapsed_time.restart();
+  _viewport->mouse_down_point() = event->position().toPoint();
+  _viewport->mouse_down_offset() = _viewport->view().offset();
+  _viewport->drag_strength() = 0;
+  _viewport->elapsed_time().restart();
 
-  if (_viewport->_type == TIME_VIEW &&
-      _viewport->_view.is_logic_rendering_mode()) {
+  if (_viewport->type() == TIME_VIEW &&
+      _viewport->view().is_logic_rendering_mode()) {
     std::vector<Trace *> traces;
-    _viewport->_view.get_traces(TIME_VIEW, traces);
+    _viewport->view().get_traces(TIME_VIEW, traces);
     int mouseY = event->position().toPoint().y() +
-                 _viewport->_view.get_vOffset();
+                 _viewport->view().get_vOffset();
     const int HitBorderMargin = 5;
 
     std::vector<Trace *> enabled_traces;
@@ -95,12 +95,12 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
                         View::SignalMargin;
 
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        _viewport->_action_type = RESIZE_SIGNAL;
-        _viewport->_resize_trace_upper = enabled_traces[i];
-        _viewport->_resize_trace_lower = enabled_traces[i + 1];
-        _viewport->_resize_mouse_down_y = event->position().toPoint().y();
-        _viewport->_resize_upper_height = enabled_traces[i]->get_totalHeight();
-        _viewport->_resize_lower_height =
+        _viewport->action_type() = RESIZE_SIGNAL;
+        _viewport->resize_trace_upper() = enabled_traces[i];
+        _viewport->resize_trace_lower() = enabled_traces[i + 1];
+        _viewport->resize_mouse_down_y() = event->position().toPoint().y();
+        _viewport->resize_upper_height() = enabled_traces[i]->get_totalHeight();
+        _viewport->resize_lower_height() =
             enabled_traces[i + 1]->get_totalHeight();
         return;
       }
@@ -113,35 +113,35 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
                         lastTrace->get_totalHeight() / 2 +
                         View::SignalMargin;
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        _viewport->_action_type = RESIZE_SIGNAL;
-        _viewport->_resize_trace_upper = lastTrace;
-        _viewport->_resize_trace_lower = nullptr;
-        _viewport->_resize_mouse_down_y = event->position().toPoint().y();
-        _viewport->_resize_upper_height = lastTrace->get_totalHeight();
-        _viewport->_resize_lower_height = 0;
+        _viewport->action_type() = RESIZE_SIGNAL;
+        _viewport->resize_trace_upper() = lastTrace;
+        _viewport->resize_trace_lower() = nullptr;
+        _viewport->resize_mouse_down_y() = event->position().toPoint().y();
+        _viewport->resize_upper_height() = lastTrace->get_totalHeight();
+        _viewport->resize_lower_height() = 0;
         return;
       }
     }
   }
 
-  if (_viewport->_action_type == NO_ACTION &&
+  if (_viewport->action_type() == NO_ACTION &&
       event->button() == Qt::RightButton &&
-      _viewport->_view.session().is_stopped_status()) {
-    if (_viewport->_view.is_logic_rendering_mode()) {
+      _viewport->view().session().is_stopped_status()) {
+    if (_viewport->view().is_logic_rendering_mode()) {
       _viewport->set_action(LOGIC_ZOOM);
-    } else if (_viewport->_view.get_work_mode() == DSO) {
-      if (_viewport->_hover_hit) {
-        const int64_t index = _viewport->_view.pixel2index(
+    } else if (_viewport->view().get_work_mode() == DSO) {
+      if (_viewport->hover_hit()) {
+        const int64_t index = _viewport->view().pixel2index(
             event->position().toPoint().x());
-        _viewport->_view.add_cursor(index);
-        _viewport->_view.show_cursors(true);
+        _viewport->view().add_cursor(index);
+        _viewport->view().show_cursors(true);
       }
     }
   }
 
-  if (_viewport->_action_type == NO_ACTION &&
+  if (_viewport->action_type() == NO_ACTION &&
       event->button() == Qt::LeftButton &&
-      _viewport->_view.get_work_mode() == DSO) {
+      _viewport->view().get_work_mode() == DSO) {
 
     // Use the raw event position (without vOffset) for the trigger rect
     // hit test. _mouse_point includes vOffset, but get_trig_rect() returns
@@ -149,12 +149,12 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
     // any vertical scroll makes the T cursor impossible to grab.
     const QPoint clickPos = event->position().toPoint();
 
-    for (auto s : _viewport->_view.get_own_signals()) {
+    for (auto &s : _viewport->view().get_own_signals()) {
       if (s->signal_type() == SR_CHANNEL_DSO && s->enabled()) {
-        DsoSignal *dsoSig = (DsoSignal *)s;
-        QRectF trigRect = dsoSig->get_trig_rect(0, _viewport->_view.get_view_width());
+        DsoSignal *dsoSig = (DsoSignal *)s.get();
+        QRectF trigRect = dsoSig->get_trig_rect(0, _viewport->view().get_view_width());
         if (trigRect.contains(clickPos)) {
-          _viewport->_drag_sig = s;
+          _viewport->drag_sig() = s.get();
           _viewport->set_action(DSO_TRIG_MOVE);
           dsoSig->select(true);
           break;
@@ -163,35 +163,35 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
     }
   }
 
-  if (_viewport->_action_type == NO_ACTION &&
+  if (_viewport->action_type() == NO_ACTION &&
       event->button() == Qt::LeftButton) {
-    if (_viewport->_action_type == NO_ACTION &&
-        _viewport->_view.search_cursor_shown()) {
-      const int64_t searchX = _viewport->_view.index2pixel(
-          _viewport->_view.get_search_cursor()->index());
+    if (_viewport->action_type() == NO_ACTION &&
+        _viewport->view().search_cursor_shown()) {
+      const int64_t searchX = _viewport->view().index2pixel(
+          _viewport->view().get_search_cursor()->index());
 
-      if (_viewport->_view.get_search_cursor()->grabbed()) {
-        _viewport->_view.get_ruler()->rel_grabbed_cursor();
+      if (_viewport->view().get_search_cursor()->grabbed()) {
+        _viewport->view().get_ruler()->rel_grabbed_cursor();
       } else if (qAbs(searchX - event->position().toPoint().x()) <=
                  Viewport::HitCursorMargin) {
-        _viewport->_view.get_ruler()->set_grabbed_cursor(
-            _viewport->_view.get_search_cursor());
+        _viewport->view().get_ruler()->set_grabbed_cursor(
+            _viewport->view().get_search_cursor());
         _viewport->set_action(CURS_MOVE);
       }
     }
 
-    if (_viewport->_action_type == NO_ACTION &&
-        _viewport->_view.cursors_shown()) {
-      auto &cursor_list = _viewport->_view.get_cursorList();
+    if (_viewport->action_type() == NO_ACTION &&
+        _viewport->view().cursors_shown()) {
+      auto &cursor_list = _viewport->view().get_cursorList();
       auto i = cursor_list.begin();
 
       while (i != cursor_list.end()) {
-        const int64_t cursorX = _viewport->_view.index2pixel((*i)->index());
+        const int64_t cursorX = _viewport->view().index2pixel((*i)->index());
         if ((*i)->grabbed()) {
-          _viewport->_view.get_ruler()->rel_grabbed_cursor();
+          _viewport->view().get_ruler()->rel_grabbed_cursor();
         } else if (qAbs(cursorX - event->position().toPoint().x()) <=
                    Viewport::HitCursorMargin) {
-          _viewport->_view.get_ruler()->set_grabbed_cursor(*i);
+          _viewport->view().get_ruler()->set_grabbed_cursor(i->get());
           _viewport->set_action(CURS_MOVE);
           break;
         }
@@ -199,11 +199,11 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
       }
     }
 
-    if (_viewport->_action_type == NO_ACTION &&
-        _viewport->_view.xcursors_shown()) {
-      auto &xcursor_list = _viewport->_view.get_xcursorList();
+    if (_viewport->action_type() == NO_ACTION &&
+        _viewport->view().xcursors_shown()) {
+      auto &xcursor_list = _viewport->view().get_xcursorList();
       auto i = xcursor_list.begin();
-      const QRect xrect = _viewport->_view.get_view_rect();
+      const QRect xrect = _viewport->view().get_view_rect();
 
       while (i != xcursor_list.end()) {
         const double cursorX =
@@ -214,21 +214,21 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
             xrect.top() + (*i)->value(XCursor::XCur_X1) * xrect.height();
 
         if ((*i)->get_close_rect(xrect).contains(
-                _viewport->_view.hover_point())) {
-          _viewport->_view.del_xcursor(*i);
+                _viewport->view().hover_point())) {
+          _viewport->view().del_xcursor(i->get());
           if (xcursor_list.empty())
-            _viewport->_view.show_xcursors(false);
+            _viewport->view().show_xcursors(false);
           break;
         } else if ((*i)->get_map_rect(xrect).contains(
-                       _viewport->_view.hover_point())) {
-          auto &sigs = _viewport->_view.get_own_signals();
+                       _viewport->view().hover_point())) {
+          auto &sigs = _viewport->view().get_own_signals();
           auto s = sigs.begin();
           bool sig_looped = ((*i)->channel() == nullptr);
           bool no_dsoSig = true;
 
           while (true) {
             if ((*s)->signal_type() == SR_CHANNEL_DSO && (*s)->enabled()) {
-              view::DsoSignal *dsoSig = (view::DsoSignal *)(*s);
+              view::DsoSignal *dsoSig = (view::DsoSignal *)s->get();
               no_dsoSig = false;
               if (sig_looped) {
                 (*i)->set_channel(dsoSig);
@@ -251,21 +251,21 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
           break;
         } else if ((*i)->grabbed() != XCursor::XCur_None) {
           (*i)->set_grabbed((*i)->grabbed(), false);
-        } else if (qAbs(cursorX - _viewport->_view.hover_point().x()) <=
+        } else if (qAbs(cursorX - _viewport->view().hover_point().x()) <=
                        Viewport::HitCursorMargin &&
-                   _viewport->_view.hover_point().y() >
+                   _viewport->view().hover_point().y() >
                        min(cursorY0, cursorY1) &&
-                   _viewport->_view.hover_point().y() <
+                   _viewport->view().hover_point().y() <
                        max(cursorY0, cursorY1)) {
           (*i)->set_grabbed(XCursor::XCur_Y, true);
           _viewport->set_action(CURS_MOVE);
           break;
-        } else if (qAbs(cursorY0 - _viewport->_view.hover_point().y()) <=
+        } else if (qAbs(cursorY0 - _viewport->view().hover_point().y()) <=
                    Viewport::HitCursorMargin) {
           (*i)->set_grabbed(XCursor::XCur_X0, true);
           _viewport->set_action(CURS_MOVE);
           break;
-        } else if (qAbs(cursorY1 - _viewport->_view.hover_point().y()) <=
+        } else if (qAbs(cursorY1 - _viewport->view().hover_point().y()) <=
                    Viewport::HitCursorMargin) {
           (*i)->set_grabbed(XCursor::XCur_X1, true);
           _viewport->set_action(CURS_MOVE);
@@ -279,14 +279,14 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
 
 void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
   assert(event);
-  _viewport->_hover_hit = false;
+  _viewport->hover_hit() = false;
 
-  if (_viewport->_action_type == NO_ACTION && _viewport->_type == TIME_VIEW &&
-      _viewport->_view.is_logic_rendering_mode()) {
+  if (_viewport->action_type() == NO_ACTION && _viewport->type() == TIME_VIEW &&
+      _viewport->view().is_logic_rendering_mode()) {
     std::vector<Trace *> traces;
-    _viewport->_view.get_traces(TIME_VIEW, traces);
+    _viewport->view().get_traces(TIME_VIEW, traces);
     int mouseY =
-        event->position().toPoint().y() + _viewport->_view.get_vOffset();
+        event->position().toPoint().y() + _viewport->view().get_vOffset();
     const int HitBorderMargin = 5;
     bool onBorder = false;
 
@@ -321,29 +321,29 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
   }
 
   bool is_drag_action =
-      (_viewport->_action_type == RESIZE_SIGNAL ||
-       _viewport->_action_type == DSO_TRIG_MOVE ||
-       _viewport->_action_type == CURS_MOVE) ||
+      (_viewport->action_type() == RESIZE_SIGNAL ||
+       _viewport->action_type() == DSO_TRIG_MOVE ||
+       _viewport->action_type() == CURS_MOVE) ||
       ((event->buttons() & Qt::LeftButton) &&
-       (_viewport->_type == TIME_VIEW || _viewport->_type == FFT_VIEW));
+       (_viewport->type() == TIME_VIEW || _viewport->type() == FFT_VIEW));
 
   if (is_drag_action) {
-    _viewport->_drag_last_pos = event->position().toPoint();
-    _viewport->_drag_buttons = event->buttons();
-    if (!_viewport->_drag_frame_pending) {
-      _viewport->_drag_frame_pending = true;
+    _viewport->drag_last_pos() = event->position().toPoint();
+    _viewport->drag_buttons() = event->buttons();
+    if (!_viewport->drag_frame_pending()) {
+      _viewport->drag_frame_pending() = true;
       _viewport->applyDragFrame();
-      _viewport->_drag_frame_timer.start(Viewport::DragFrameInterval);
+      _viewport->drag_frame_timer().start(Viewport::DragFrameInterval);
     }
-    _viewport->_mouse_point =
-        event->position().toPoint() + QPoint(0, _viewport->_view.get_vOffset());
+    _viewport->mouse_point() =
+        event->position().toPoint() + QPoint(0, _viewport->view().get_vOffset());
     return;
   }
 
   if (!(event->buttons() | Qt::NoButton)) {
-    if (_viewport->_action_type == DSO_XM_STEP1 ||
-        _viewport->_action_type == DSO_XM_STEP2) {
-      for (auto s : _viewport->_view.get_own_signals()) {
+    if (_viewport->action_type() == DSO_XM_STEP1 ||
+        _viewport->action_type() == DSO_XM_STEP2) {
+      for (auto &s : _viewport->view().get_own_signals()) {
         if (!s->get_view_rect().contains(event->position().toPoint())) {
           _viewport->clear_dso_xm();
         }
@@ -351,12 +351,12 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
       }
     }
 
-    if (_viewport->_action_type == DSO_YM)
-      _viewport->_dso_ym_end = event->position().toPoint().y();
+    if (_viewport->action_type() == DSO_YM)
+      _viewport->dso_ym_end() = event->position().toPoint().y();
   }
 
-  _viewport->_mouse_point =
-      event->position().toPoint() + QPoint(0, _viewport->_view.get_vOffset());
+  _viewport->mouse_point() =
+      event->position().toPoint() + QPoint(0, _viewport->view().get_vOffset());
 
   _viewport->measure();
 
@@ -367,17 +367,17 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
 
 void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
   bool quickScroll = AppConfig::Instance().appOptions.quickScroll;
-  QWidget *topWin = _viewport->_view.window();
+  QWidget *topWin = _viewport->view().window();
   bool isMaxWindow = topWin ? topWin->isMaximized() : false;
 
-  switch (_viewport->_action_type) {
+  switch (_viewport->action_type()) {
   case NO_ACTION: {
     if (event->button() == Qt::LeftButton &&
-        _viewport->_view.session().is_stopped_status()) {
+        _viewport->view().session().is_stopped_status()) {
       // priority 1
       // try to quick scroll view...
       int curX = event->position().toPoint().x();
-      int clickX = _viewport->_mouse_down_point.x();
+      int clickX = _viewport->mouse_down_point().x();
       int moveLong = ABS_VAL(curX - clickX);
       int maxWidth = _viewport->geometry().width();
       float mvk = (float)moveLong / (float)maxWidth;
@@ -391,45 +391,45 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
         }
       }
 
-      if (_viewport->_action_type == NO_ACTION && quickScroll) {
-        const double strength = _viewport->_drag_strength *
+      if (_viewport->action_type() == NO_ACTION && quickScroll) {
+        const double strength = _viewport->drag_strength() *
                                 Viewport::DragTimerInterval * 1.0 /
-                                _viewport->_elapsed_time.elapsed();
-        if (_viewport->_elapsed_time.elapsed() < 200 &&
-            abs(_viewport->_drag_strength) < Viewport::MinorDragOffsetUp &&
+                                _viewport->elapsed_time().elapsed();
+        if (_viewport->elapsed_time().elapsed() < 200 &&
+            abs(_viewport->drag_strength()) < Viewport::MinorDragOffsetUp &&
             abs(strength) > Viewport::MinorDragRateUp) {
-          _viewport->_drag_timer.start(Viewport::DragTimerInterval);
+          _viewport->drag_timer().start(Viewport::DragTimerInterval);
           _viewport->set_action(LOGIC_MOVE);
-        } else if (_viewport->_elapsed_time.elapsed() < 200 &&
+        } else if (_viewport->elapsed_time().elapsed() < 200 &&
                    abs(strength) > Viewport::DragTimerInterval) {
-          _viewport->_drag_strength = strength * 5;
-          _viewport->_drag_timer.start(Viewport::DragTimerInterval);
+          _viewport->drag_strength() = strength * 5;
+          _viewport->drag_timer().start(Viewport::DragTimerInterval);
           _viewport->set_action(LOGIC_MOVE);
         }
       }
 
       // priority 2
-      if (_viewport->_action_type == NO_ACTION) {
-        if (_viewport->_mouse_down_point.x() ==
+      if (_viewport->action_type() == NO_ACTION) {
+        if (_viewport->mouse_down_point().x() ==
             event->position().toPoint().x()) {
-          const auto &sigs = _viewport->_view.get_own_signals();
+          const auto &sigs = _viewport->view().get_own_signals();
 
-          for (auto s : sigs) {
+          for (auto &s : sigs) {
             if (s->signal_type() == SR_CHANNEL_LOGIC) {
-              view::LogicSignal *logicSig = (view::LogicSignal *)s;
+              view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
               if (logicSig->is_by_edge(event->position().toPoint(),
-                                       _viewport->_edge_start, 10)) {
+                                       _viewport->edge_start(), 10)) {
                 _viewport->set_action(LOGIC_JUMP);
-                _viewport->_cur_preX =
-                    _viewport->_view.index2pixel(_viewport->_edge_start);
-                _viewport->_cur_preY = logicSig->get_y();
-                _viewport->_cur_preY_top =
+                _viewport->cur_preX() =
+                    _viewport->view().index2pixel(_viewport->edge_start());
+                _viewport->cur_preY() = logicSig->get_y();
+                _viewport->cur_preY_top() =
                     logicSig->get_y() -
                     qRound(logicSig->get_totalHeight() * 0.5) - 12;
-                _viewport->_cur_preY_bottom =
+                _viewport->cur_preY_bottom() =
                     logicSig->get_y() + logicSig->get_totalHeight() / 2 + 2;
-                _viewport->_cur_aftX = _viewport->_cur_preX;
-                _viewport->_cur_aftY = _viewport->_cur_preY;
+                _viewport->cur_aftX() = _viewport->cur_preX();
+                _viewport->cur_aftY() = _viewport->cur_preY();
 
                 static int times = 0;
                 times++;
@@ -441,16 +441,16 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
       }
 
       // priority 3
-      if (_viewport->_action_type == NO_ACTION) {
-        if (_viewport->_mouse_down_point.x() ==
+      if (_viewport->action_type() == NO_ACTION) {
+        if (_viewport->mouse_down_point().x() ==
             event->position().toPoint().x()) {
-          const auto &sigs = _viewport->_view.get_own_signals();
+          const auto &sigs = _viewport->view().get_own_signals();
 
-          for (auto s : sigs) {
+          for (auto &s : sigs) {
             if (abs(event->position().toPoint().y() - s->get_y()) <
-                _viewport->_view.get_signalHeight()) {
+                _viewport->view().get_signalHeight()) {
               _viewport->set_action(LOGIC_EDGE);
-              _viewport->_edge_start = _viewport->_view.pixel2index(
+              _viewport->edge_start() = _viewport->view().pixel2index(
                   event->position().toPoint().x());
               break;
             }
@@ -462,37 +462,37 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
   }
   case LOGIC_EDGE: {
     _viewport->set_action(NO_ACTION);
-    _viewport->_edge_rising = 0;
-    _viewport->_edge_falling = 0;
+    _viewport->edge_rising() = 0;
+    _viewport->edge_falling() = 0;
     break;
   }
   case LOGIC_JUMP: {
     _viewport->set_action(NO_ACTION);
-    _viewport->_edge_rising = 0;
-    _viewport->_edge_falling = 0;
-    _viewport->_edge_hit = false;
+    _viewport->edge_rising() = 0;
+    _viewport->edge_falling() = 0;
+    _viewport->edge_hit() = false;
     break;
   }
   case LOGIC_MOVE: {
-    if (_viewport->_mouse_down_point == event->position().toPoint()) {
-      _viewport->_drag_strength = 0;
-      _viewport->_drag_timer.stop();
+    if (_viewport->mouse_down_point() == event->position().toPoint()) {
+      _viewport->drag_strength() = 0;
+      _viewport->drag_timer().stop();
       _viewport->set_action(NO_ACTION);
     } else {
-      const double strength = _viewport->_drag_strength *
+      const double strength = _viewport->drag_strength() *
                               Viewport::DragTimerInterval * 1.0 /
-                              _viewport->_elapsed_time.elapsed();
-      if (_viewport->_elapsed_time.elapsed() < 200 &&
-          abs(_viewport->_drag_strength) < Viewport::MinorDragOffsetUp &&
+                              _viewport->elapsed_time().elapsed();
+      if (_viewport->elapsed_time().elapsed() < 200 &&
+          abs(_viewport->drag_strength()) < Viewport::MinorDragOffsetUp &&
           abs(strength) > Viewport::MinorDragRateUp) {
-        _viewport->_drag_timer.start(Viewport::DragTimerInterval);
-      } else if (_viewport->_elapsed_time.elapsed() < 200 &&
+        _viewport->drag_timer().start(Viewport::DragTimerInterval);
+      } else if (_viewport->elapsed_time().elapsed() < 200 &&
                  abs(strength) > Viewport::DragTimerInterval) {
-        _viewport->_drag_strength = strength * 5;
-        _viewport->_drag_timer.start(Viewport::DragTimerInterval);
+        _viewport->drag_strength() = strength * 5;
+        _viewport->drag_timer().start(Viewport::DragTimerInterval);
       } else {
-        _viewport->_drag_strength = 0;
-        _viewport->_drag_timer.stop();
+        _viewport->drag_strength() = 0;
+        _viewport->drag_timer().stop();
         _viewport->set_action(NO_ACTION);
       }
     }
@@ -500,7 +500,7 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
   }
   case LOGIC_ZOOM: {
     const QPoint releasePos = event->position().toPoint();
-    const QPoint downPos = _viewport->_mouse_down_point;
+    const QPoint downPos = _viewport->mouse_down_point();
     const int dx = abs(releasePos.x() - downPos.x());
     const int dy = abs(releasePos.y() - downPos.y());
     const int dragThreshold = 5;
@@ -511,17 +511,17 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
       _viewport->show_logic_contextmenu(releasePos);
     } else if (releasePos.x() != downPos.x()) {
       int64_t newOffset =
-          _viewport->_view.offset() +
+          _viewport->view().offset() +
           (min(releasePos.x(), downPos.x()));
       const double newScale = max(
-          min(_viewport->_view.scale() *
+          min(_viewport->view().scale() *
                   abs(releasePos.x() - downPos.x()) /
-                  _viewport->_view.get_view_width(),
-              _viewport->_view.get_maxscale()),
-          _viewport->_view.get_minscale());
-      newOffset = floor(newOffset * (_viewport->_view.scale() / newScale));
-      if (newScale != _viewport->_view.scale())
-        _viewport->_view.set_scale_offset(newScale, newOffset);
+                  _viewport->view().get_view_width(),
+              _viewport->view().get_maxscale()),
+          _viewport->view().get_minscale());
+      newOffset = floor(newOffset * (_viewport->view().scale() / newScale));
+      if (newScale != _viewport->view().scale())
+        _viewport->view().set_scale_offset(newScale, newOffset);
       _viewport->set_action(NO_ACTION);
     } else {
       _viewport->set_action(NO_ACTION);
@@ -534,36 +534,36 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
 }
 
 void ViewportInteraction::onDsoMouseRelease(QMouseEvent *event) {
-  switch (_viewport->_action_type) {
+  switch (_viewport->action_type()) {
   case NO_ACTION: {
-    if (event->button() == Qt::LeftButton && _viewport->_hover_hit) {
+    if (event->button() == Qt::LeftButton && _viewport->hover_hit()) {
       _viewport->set_action(DSO_YM);
-      _viewport->_dso_ym_valid = true;
-      _viewport->_dso_ym_sig_index = _viewport->_hover_sig_index;
-      _viewport->_dso_ym_sig_value = _viewport->_hover_sig_value;
-      _viewport->_dso_ym_index = _viewport->_hover_index;
-      _viewport->_dso_ym_start = event->position().toPoint().y();
+      _viewport->dso_ym_valid() = true;
+      _viewport->dso_ym_sig_index() = _viewport->hover_sig_index();
+      _viewport->dso_ym_sig_value() = _viewport->hover_sig_value();
+      _viewport->dso_ym_index() = _viewport->hover_index();
+      _viewport->dso_ym_start() = event->position().toPoint().y();
     }
     break;
   }
   case DSO_YM: {
     if (event->button() == Qt::LeftButton) {
-      _viewport->_dso_ym_end = event->position().toPoint().y();
+      _viewport->dso_ym_end() = event->position().toPoint().y();
       _viewport->set_action(NO_ACTION);
     } else if (event->button() == Qt::RightButton) {
       _viewport->set_action(NO_ACTION);
-      _viewport->_dso_ym_valid = false;
+      _viewport->dso_ym_valid() = false;
     }
     break;
   }
   case DSO_TRIG_MOVE: {
-    if (_viewport->_dso_trig_moved && event->button() == Qt::LeftButton) {
-      _viewport->_drag_sig = nullptr;
+    if (_viewport->dso_trig_moved() && event->button() == Qt::LeftButton) {
+      _viewport->drag_sig() = nullptr;
       _viewport->set_action(NO_ACTION);
-      _viewport->_dso_trig_moved = false;
+      _viewport->dso_trig_moved() = false;
 
       std::vector<Trace *> traces;
-      _viewport->_view.get_traces(ALL_VIEW, traces);
+      _viewport->view().get_traces(ALL_VIEW, traces);
 
       for (auto t : traces) {
         t->select(false);
@@ -574,19 +574,19 @@ void ViewportInteraction::onDsoMouseRelease(QMouseEvent *event) {
   case DSO_XM_STEP0: {
     if (event->button() == Qt::LeftButton) {
       _viewport->set_action(DSO_XM_STEP1);
-      _viewport->_dso_xm_valid = true;
+      _viewport->dso_xm_valid() = true;
     }
     break;
   }
   case DSO_XM_STEP1: {
     if (event->button() == Qt::LeftButton) {
-      _viewport->_dso_xm_index[1] =
-          _viewport->_view.pixel2index(event->position().toPoint().x());
+      _viewport->dso_xm_index()[1] =
+          _viewport->view().pixel2index(event->position().toPoint().x());
       const uint64_t max_index =
-          max(_viewport->_dso_xm_index[0], _viewport->_dso_xm_index[1]);
-      _viewport->_dso_xm_index[0] =
-          min(_viewport->_dso_xm_index[0], _viewport->_dso_xm_index[1]);
-      _viewport->_dso_xm_index[1] = max_index;
+          max(_viewport->dso_xm_index()[0], _viewport->dso_xm_index()[1]);
+      _viewport->dso_xm_index()[0] =
+          min(_viewport->dso_xm_index()[0], _viewport->dso_xm_index()[1]);
+      _viewport->dso_xm_index()[1] = max_index;
 
       _viewport->set_action(DSO_XM_STEP2);
     } else if (event->button() == Qt::RightButton) {
@@ -597,19 +597,19 @@ void ViewportInteraction::onDsoMouseRelease(QMouseEvent *event) {
   }
   case DSO_XM_STEP2: {
     if (event->button() == Qt::LeftButton) {
-      _viewport->_dso_xm_index[2] =
-          _viewport->_view.pixel2index(event->position().toPoint().x());
+      _viewport->dso_xm_index()[2] =
+          _viewport->view().pixel2index(event->position().toPoint().x());
       uint64_t max_index =
-          max(_viewport->_dso_xm_index[1], _viewport->_dso_xm_index[2]);
-      _viewport->_dso_xm_index[1] =
-          min(_viewport->_dso_xm_index[1], _viewport->_dso_xm_index[2]);
-      _viewport->_dso_xm_index[2] = max_index;
+          max(_viewport->dso_xm_index()[1], _viewport->dso_xm_index()[2]);
+      _viewport->dso_xm_index()[1] =
+          min(_viewport->dso_xm_index()[1], _viewport->dso_xm_index()[2]);
+      _viewport->dso_xm_index()[2] = max_index;
 
       max_index =
-          max(_viewport->_dso_xm_index[0], _viewport->_dso_xm_index[1]);
-      _viewport->_dso_xm_index[0] =
-          min(_viewport->_dso_xm_index[0], _viewport->_dso_xm_index[1]);
-      _viewport->_dso_xm_index[1] = max_index;
+          max(_viewport->dso_xm_index()[0], _viewport->dso_xm_index()[1]);
+      _viewport->dso_xm_index()[0] =
+          min(_viewport->dso_xm_index()[0], _viewport->dso_xm_index()[1]);
+      _viewport->dso_xm_index()[1] = max_index;
 
       _viewport->set_action(NO_ACTION);
     } else if (event->button() == Qt::RightButton) {
@@ -630,29 +630,29 @@ void ViewportInteraction::onAnalogMouseRelease(QMouseEvent *event) {
 void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
   assert(event);
 
-  _viewport->_drag_frame_timer.stop();
-  if (_viewport->_drag_frame_pending) {
-    _viewport->_drag_frame_pending = false;
-    _viewport->_drag_last_pos = event->position().toPoint();
-    _viewport->_drag_buttons = event->buttons();
+  _viewport->drag_frame_timer().stop();
+  if (_viewport->drag_frame_pending()) {
+    _viewport->drag_frame_pending() = false;
+    _viewport->drag_last_pos() = event->position().toPoint();
+    _viewport->drag_buttons() = event->buttons();
     _viewport->applyDragFrame();
   }
 
-  if (_viewport->_type != TIME_VIEW) {
+  if (_viewport->type() != TIME_VIEW) {
     _viewport->update(UpdateEventType::UPDATE_EV_MS_UP);
     return;
   }
 
-  int mode = _viewport->_view.get_work_mode();
+  int mode = _viewport->view().get_work_mode();
 
-  if (_viewport->_action_type == RESIZE_SIGNAL) {
-    _viewport->_resize_trace_upper = nullptr;
-    _viewport->_resize_trace_lower = nullptr;
+  if (_viewport->action_type() == RESIZE_SIGNAL) {
+    _viewport->resize_trace_upper() = nullptr;
+    _viewport->resize_trace_lower() = nullptr;
     _viewport->set_action(NO_ACTION);
     return;
   }
 
-  if (_viewport->_view.is_logic_rendering_mode()) {
+  if (_viewport->view().is_logic_rendering_mode()) {
     onLogicMouseRelease(event);
   } else if (mode == DSO) {
     onDsoMouseRelease(event);
@@ -660,16 +660,16 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
     onAnalogMouseRelease(event);
   }
 
-  if (_viewport->_action_type == CURS_MOVE) {
-    if (_viewport->_curs_moved && event->button() == Qt::LeftButton) {
+  if (_viewport->action_type() == CURS_MOVE) {
+    if (_viewport->curs_moved() && event->button() == Qt::LeftButton) {
       _viewport->set_action(NO_ACTION);
-      _viewport->_view.get_ruler()->rel_grabbed_cursor();
-      _viewport->_view.cursor_moved();
-      _viewport->_curs_moved = false;
+      _viewport->view().get_ruler()->rel_grabbed_cursor();
+      _viewport->view().cursor_moved();
+      _viewport->curs_moved() = false;
     }
-    if (_viewport->_xcurs_moved && event->button() == Qt::LeftButton) {
+    if (_viewport->xcurs_moved() && event->button() == Qt::LeftButton) {
       _viewport->set_action(NO_ACTION);
-      auto &xcursor_list = _viewport->_view.get_xcursorList();
+      auto &xcursor_list = _viewport->view().get_xcursorList();
       auto i = xcursor_list.begin();
 
       while (i != xcursor_list.end()) {
@@ -677,13 +677,13 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
         i++;
       }
 
-      _viewport->_xcurs_moved = false;
+      _viewport->xcurs_moved() = false;
     }
   }
 
   /*
   // This code block prevents the cursor from moving.
-  if (_viewport->_view.is_logic_rendering_mode() && event->button() == Qt::LeftButton){
+  if (_viewport->view().is_logic_rendering_mode() && event->button() == Qt::LeftButton){
       int clickX = _mouse_down_point.x();
       const int64_t index = _view.pixel2index(clickX);
       const int64_t total = _view.session().get_ring_sample_count();
@@ -700,15 +700,15 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
 void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
   assert(event);
 
-  if (!_viewport->_view.get_view_rect().contains(event->position().toPoint()))
+  if (!_viewport->view().get_view_rect().contains(event->position().toPoint()))
     return;
 
-  if (_viewport->_type == TIME_VIEW &&
-      _viewport->_view.is_logic_rendering_mode()) {
+  if (_viewport->type() == TIME_VIEW &&
+      _viewport->view().is_logic_rendering_mode()) {
     std::vector<Trace *> traces;
-    _viewport->_view.get_traces(TIME_VIEW, traces);
+    _viewport->view().get_traces(TIME_VIEW, traces);
     int mouseY =
-        event->position().toPoint().y() + _viewport->_view.get_vOffset();
+        event->position().toPoint().y() + _viewport->view().get_vOffset();
     const int HitBorderMargin = 5;
 
     std::vector<Trace *> enabled_traces;
@@ -724,7 +724,7 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         enabled_traces[i]->set_own_height(-1);
         enabled_traces[i + 1]->set_own_height(-1);
-        _viewport->_view.signals_changed(nullptr);
+        _viewport->view().signals_changed(nullptr);
         return;
       }
     }
@@ -737,28 +737,28 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
                         View::SignalMargin;
       if (abs(mouseY - traceBottom) < HitBorderMargin) {
         lastTrace->set_own_height(-1);
-        _viewport->_view.signals_changed(nullptr);
+        _viewport->view().signals_changed(nullptr);
         return;
       }
     }
   }
 
-  if (_viewport->_view.is_logic_rendering_mode()) {
+  if (_viewport->view().is_logic_rendering_mode()) {
     if (event->button() == Qt::RightButton) {
-      if (_viewport->_view.scale() == _viewport->_view.get_maxscale())
-        _viewport->_view.set_preScale_preOffset();
+      if (_viewport->view().scale() == _viewport->view().get_maxscale())
+        _viewport->view().set_preScale_preOffset();
       else
-        _viewport->_view.set_scale_offset(
-            _viewport->_view.get_maxscale(), _viewport->_view.get_min_offset());
+        _viewport->view().set_scale_offset(
+            _viewport->view().get_maxscale(), _viewport->view().get_min_offset());
     } else if (event->button() == Qt::LeftButton) {
       bool logic = false;
       uint64_t index;
       uint64_t index0 = 0, index1 = 0, index2 = 0;
 
-      if (_viewport->_view.is_logic_rendering_mode()) {
-        for (auto s : _viewport->_view.get_own_signals()) {
+      if (_viewport->view().is_logic_rendering_mode()) {
+        for (auto &s : _viewport->view().get_own_signals()) {
           if (s->signal_type() == SR_CHANNEL_LOGIC) {
-            view::LogicSignal *logicSig = (view::LogicSignal *)s;
+            view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
             if (logicSig->measure(event->position().toPoint(), index0, index1,
                                   index2)) {
               logic = true;
@@ -768,8 +768,8 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
         }
       }
       const double curX = event->position().toPoint().x();
-      const double curP = _viewport->_view.index2pixel(index0);
-      const double curN = _viewport->_view.index2pixel(index1);
+      const double curP = _viewport->view().index2pixel(index0);
+      const double curN = _viewport->view().index2pixel(index1);
 
       if (logic &&
           (curX - curP < Viewport::SnapMinSpace ||
@@ -779,38 +779,38 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
         else
           index = index1;
       } else {
-        index = _viewport->_view.pixel2index(curX);
+        index = _viewport->view().pixel2index(curX);
       }
 
-      _viewport->_view.add_cursor(index);
-      _viewport->_view.show_cursors(true);
+      _viewport->view().add_cursor(index);
+      _viewport->view().show_cursors(true);
     }
 
     _viewport->update(UpdateEventType::UPDATE_EV_MS_CLICK);
-  } else if (_viewport->_view.get_work_mode() == DSO &&
-             _viewport->_view.session().is_init_status() == false &&
+  } else if (_viewport->view().get_work_mode() == DSO &&
+             _viewport->view().session().is_init_status() == false &&
              event->button() == Qt::LeftButton) {
-    if (_viewport->_dso_xm_valid) {
+    if (_viewport->dso_xm_valid()) {
       _viewport->clear_dso_xm();
       _viewport->measure_updated();
-    } else if (_viewport->_action_type == NO_ACTION) {
-      for (auto s : _viewport->_view.get_own_signals()) {
+    } else if (_viewport->action_type() == NO_ACTION) {
+      for (auto &s : _viewport->view().get_own_signals()) {
         if (s->get_view_rect().contains(event->position().toPoint())) {
-          _viewport->_dso_xm_index[0] = _viewport->_view.pixel2index(
+          _viewport->dso_xm_index()[0] = _viewport->view().pixel2index(
               event->position().toPoint().x());
-          _viewport->_dso_xm_y = event->position().toPoint().y();
+          _viewport->dso_xm_y() = event->position().toPoint().y();
           _viewport->set_action(DSO_XM_STEP0);
         }
         break;
       }
     }
-  } else if (_viewport->_view.get_work_mode() == ANALOG) {
+  } else if (_viewport->view().get_work_mode() == ANALOG) {
     if (event->button() == Qt::LeftButton) {
       uint64_t index;
       const double curX = event->position().toPoint().x();
-      index = _viewport->_view.pixel2index(curX);
-      _viewport->_view.add_cursor(index);
-      _viewport->_view.show_cursors(true);
+      index = _viewport->view().pixel2index(curX);
+      _viewport->view().add_cursor(index);
+      _viewport->view().show_cursors(true);
     }
   }
 }
@@ -818,7 +818,7 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
 void ViewportInteraction::wheelEvent(QWheelEvent *event) {
   assert(event);
 
-  if (_viewport->_view.header_is_draging()) {
+  if (_viewport->view().header_is_draging()) {
     return;
   }
 
@@ -843,35 +843,35 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
     zoom_scale = delta > 0 ? 1.5 : -1.5;
   }
 
-  if (_viewport->_type == FFT_VIEW) {
-    for (auto t : _viewport->_view.get_own_spectrum_traces()) {
+  if (_viewport->type() == FFT_VIEW) {
+    for (auto &t : _viewport->view().get_own_spectrum_traces()) {
       if (t->enabled()) {
         t->zoom(zoom_scale, x);
         break;
       }
     }
-  } else if (_viewport->_type == TIME_VIEW) {
+  } else if (_viewport->type() == TIME_VIEW) {
     static bool bLstTime = false;
 
     if (event->modifiers() & Qt::ControlModifier) {
       double vsteps = delta / 80;
       if (ABS_VAL(delta) <= 80)
         vsteps = delta > 0 ? 1.5 : -1.5;
-      _viewport->_view.zoom_vertical(vsteps);
+      _viewport->view().zoom_vertical(vsteps);
       return;
     }
 
     if (event->modifiers() & Qt::ShiftModifier) {
-      int vOffset = _viewport->_view.get_vOffset();
+      int vOffset = _viewport->view().get_vOffset();
       vOffset -= delta;
       vOffset = max(0, vOffset);
-      _viewport->_view.verticalScrollBar()->setSliderPosition(vOffset);
+      _viewport->view().verticalScrollBar()->setSliderPosition(vOffset);
       return;
     }
 
     if (event->modifiers() & Qt::AltModifier) {
-      _viewport->_view.set_scale_offset(_viewport->_view.scale(),
-                                        _viewport->_view.offset() - delta);
+      _viewport->view().set_scale_offset(_viewport->view().scale(),
+                                        _viewport->view().offset() - delta);
       return;
     }
 
@@ -888,12 +888,12 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
           int64_t cur_time = QDateTime::currentMSecsSinceEpoch();
           if (cur_time - last_time > 50) {
             double scale = delta > 1.5 ? 1 : (delta < -1.5 ? -1 : 0);
-            _viewport->_view.zoom(scale, x);
+            _viewport->view().zoom(scale, x);
             last_time = QDateTime::currentMSecsSinceEpoch();
           }
         }
       } else {
-        _viewport->_view.zoom(-zoom_scale, x);
+        _viewport->view().zoom(-zoom_scale, x);
       }
 #else
       // 性能修复: Windows 路径加 16ms 节流 (60fps 上限)，合并高精度滚轮/触控板
@@ -903,7 +903,7 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
       // (旧值 50ms=20fps, 每 tick 1.5x 跳跃过大, 用户感觉 "卡在分界线")。
       const int64_t cur_ms = QDateTime::currentMSecsSinceEpoch();
       if (cur_ms - _last_wheel_zoom_ms > 16) {
-        _viewport->_view.zoom(zoom_scale, x);
+        _viewport->view().zoom(zoom_scale, x);
         _last_wheel_zoom_ms = cur_ms;
       }
 #endif
@@ -913,15 +913,15 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
 
       // Horizontal scrolling is interpreted as moving left/right
       if (!(event->modifiers() & Qt::ShiftModifier))
-        _viewport->_view.set_scale_offset(_viewport->_view.scale(),
-                                          _viewport->_view.offset() - delta);
+        _viewport->view().set_scale_offset(_viewport->view().scale(),
+                                          _viewport->view().offset() - delta);
     }
   }
 
-  const auto &sigs = _viewport->_view.get_own_signals();
-  for (auto s : sigs) {
+  const auto &sigs = _viewport->view().get_own_signals();
+  for (auto &s : sigs) {
     if (s->signal_type() == SR_CHANNEL_DSO) {
-      view::DsoSignal *dsoSig = (view::DsoSignal *)s;
+      view::DsoSignal *dsoSig = (view::DsoSignal *)s.get();
       dsoSig->auto_end();
     }
   }
@@ -939,14 +939,14 @@ bool ViewportInteraction::gestureEvent(QNativeGestureEvent *event) {
     break;
   case Qt::ZoomNativeGesture: {
     total_scale += event->value() * 2;
-    if (_viewport->_view.zoom(total_scale, _viewport->_view.hover_point().x()))
+    if (_viewport->view().zoom(total_scale, _viewport->view().hover_point().x()))
       total_scale = 0;
   } break;
   case Qt::SmartZoomNativeGesture:
-    _viewport->_view.zoom(-1, _viewport->_view.hover_point().x());
+    _viewport->view().zoom(-1, _viewport->view().hover_point().x());
     break;
   default:
-    return _viewport->QWidget::event(event);
+    return _viewport->forward_event(event);
   }
 
   _viewport->measure();
@@ -954,42 +954,42 @@ bool ViewportInteraction::gestureEvent(QNativeGestureEvent *event) {
 }
 
 void ViewportInteraction::leaveEvent(QEvent *) {
-  _viewport->_mouse_point = QPoint(-1, -1);
+  _viewport->mouse_point() = QPoint(-1, -1);
 
-  if (_viewport->_action_type == LOGIC_EDGE) {
-    _viewport->_edge_rising = 0;
-    _viewport->_edge_falling = 0;
+  if (_viewport->action_type() == LOGIC_EDGE) {
+    _viewport->edge_rising() = 0;
+    _viewport->edge_falling() = 0;
     _viewport->set_action(NO_ACTION);
-  } else if (_viewport->_action_type == LOGIC_JUMP) {
-    _viewport->_edge_rising = 0;
-    _viewport->_edge_falling = 0;
+  } else if (_viewport->action_type() == LOGIC_JUMP) {
+    _viewport->edge_rising() = 0;
+    _viewport->edge_falling() = 0;
     _viewport->set_action(NO_ACTION);
-  } else if (_viewport->_action_type == LOGIC_MOVE) {
-    _viewport->_drag_strength = 0;
-    _viewport->_drag_timer.stop();
+  } else if (_viewport->action_type() == LOGIC_MOVE) {
+    _viewport->drag_strength() = 0;
+    _viewport->drag_timer().stop();
     _viewport->set_action(NO_ACTION);
-  } else if (_viewport->_action_type == DSO_XM_STEP1 ||
-             _viewport->_action_type == DSO_XM_STEP2) {
+  } else if (_viewport->action_type() == DSO_XM_STEP1 ||
+             _viewport->action_type() == DSO_XM_STEP2) {
     _viewport->clear_dso_xm();
-  } else if (_viewport->_action_type == DSO_YM) {
-    _viewport->_dso_ym_valid = false;
+  } else if (_viewport->action_type() == DSO_YM) {
+    _viewport->dso_ym_valid() = false;
     _viewport->set_action(NO_ACTION);
   }
 
   _viewport->clear_measure();
 
   // Hide edge navigation buttons when mouse leaves
-  _viewport->_hover_logic_signal = nullptr;
-  _viewport->_prev_edge_btn->hide();
-  _viewport->_next_edge_btn->hide();
+  _viewport->hover_logic_signal() = nullptr;
+  _viewport->prev_edge_btn()->hide();
+  _viewport->next_edge_btn()->hide();
 }
 
 void ViewportInteraction::keyPressEvent(QKeyEvent *event) {
   // Alt+Left / Alt+Right for edge navigation
   if (event->modifiers() & Qt::AltModifier) {
-    if (_viewport->_hover_logic_signal &&
-        _viewport->_view.is_logic_rendering_mode() &&
-        _viewport->_view.session().is_stopped_status()) {
+    if (_viewport->hover_logic_signal() &&
+        _viewport->view().is_logic_rendering_mode() &&
+        _viewport->view().session().is_stopped_status()) {
       if (event->key() == Qt::Key_Left) {
         navigate_to_edge(EdgeNavButton::Previous);
         return;
@@ -999,24 +999,24 @@ void ViewportInteraction::keyPressEvent(QKeyEvent *event) {
       }
     }
   }
-  _viewport->QWidget::keyPressEvent(event);
+  _viewport->forward_keyPressEvent(event);
 }
 
 LogicSignal *ViewportInteraction::get_hovered_logic_signal(const QPoint &pos) {
-  if (_viewport->_type != TIME_VIEW)
+  if (_viewport->type() != TIME_VIEW)
     return nullptr;
-  if (!_viewport->_view.is_logic_rendering_mode())
+  if (!_viewport->view().is_logic_rendering_mode())
     return nullptr;
-  if (!_viewport->_view.session().is_stopped_status())
+  if (!_viewport->view().session().is_stopped_status())
     return nullptr;
 
-  int mouseY = pos.y() + _viewport->_view.get_vOffset();
-  for (auto s : _viewport->_view.get_own_signals()) {
+  int mouseY = pos.y() + _viewport->view().get_vOffset();
+  for (auto &s : _viewport->view().get_own_signals()) {
     if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
       int sigY = s->get_v_offset();
       int halfH = s->get_totalHeight() / 2 + View::SignalMargin;
       if (abs(mouseY - sigY) < halfH) {
-        return (LogicSignal *)s;
+        return (LogicSignal *)s.get();
       }
     }
   }
@@ -1024,37 +1024,37 @@ LogicSignal *ViewportInteraction::get_hovered_logic_signal(const QPoint &pos) {
 }
 
 void ViewportInteraction::update_edge_nav_buttons() {
-  if (_viewport->_type != TIME_VIEW ||
-      !_viewport->_view.is_logic_rendering_mode() ||
-      !_viewport->_view.session().is_stopped_status()) {
-    _viewport->_prev_edge_btn->hide();
-    _viewport->_next_edge_btn->hide();
-    _viewport->_hover_logic_signal = nullptr;
+  if (_viewport->type() != TIME_VIEW ||
+      !_viewport->view().is_logic_rendering_mode() ||
+      !_viewport->view().session().is_stopped_status()) {
+    _viewport->prev_edge_btn()->hide();
+    _viewport->next_edge_btn()->hide();
+    _viewport->hover_logic_signal() = nullptr;
     return;
   }
 
   QPoint screenPos =
-      _viewport->_mouse_point - QPoint(0, _viewport->_view.get_vOffset());
+      _viewport->mouse_point() - QPoint(0, _viewport->view().get_vOffset());
   LogicSignal *sig = get_hovered_logic_signal(screenPos);
   if (!sig || !sig->data() || sig->data()->empty()) {
-    _viewport->_prev_edge_btn->hide();
-    _viewport->_next_edge_btn->hide();
-    _viewport->_hover_logic_signal = nullptr;
+    _viewport->prev_edge_btn()->hide();
+    _viewport->next_edge_btn()->hide();
+    _viewport->hover_logic_signal() = nullptr;
     return;
   }
 
-  _viewport->_hover_logic_signal = sig;
+  _viewport->hover_logic_signal() = sig;
 
   // Position buttons vertically centered on the signal row
-  int sigY = sig->get_v_offset() - _viewport->_view.get_vOffset();
+  int sigY = sig->get_v_offset() - _viewport->view().get_vOffset();
   int halfH = sig->get_totalHeight() / 2;
   int btnY = sigY - halfH +
-             (sig->get_totalHeight() - _viewport->_prev_edge_btn->height()) / 2;
+             (sig->get_totalHeight() - _viewport->prev_edge_btn()->height()) / 2;
   const int hOffset = 5;
 
-  _viewport->_prev_edge_btn->move(hOffset, btnY);
-  _viewport->_next_edge_btn->move(
-      _viewport->width() - _viewport->_next_edge_btn->width() - hOffset, btnY);
+  _viewport->prev_edge_btn()->move(hOffset, btnY);
+  _viewport->next_edge_btn()->move(
+      _viewport->width() - _viewport->next_edge_btn()->width() - hOffset, btnY);
 
   // Check if previous/next edges exist outside the viewport
   auto *snapshot = sig->data();
@@ -1062,8 +1062,8 @@ void ViewportInteraction::update_edge_nav_buttons() {
   uint64_t end = snapshot->get_ring_sample_count() - 1;
 
   // Get current viewport boundaries in sample indices
-  uint64_t leftIndex = _viewport->_view.pixel2index(0);
-  uint64_t rightIndex = _viewport->_view.pixel2index(_viewport->_view.get_view_width());
+  uint64_t leftIndex = _viewport->view().pixel2index(0);
+  uint64_t rightIndex = _viewport->view().pixel2index(_viewport->view().get_view_width());
 
   // Check previous edge: search backward from the left edge of viewport
   bool hasPrev = false;
@@ -1081,30 +1081,30 @@ void ViewportInteraction::update_edge_nav_buttons() {
     hasNext = snapshot->get_nxt_edge(searchIdx, sample, end, 1, sig_index);
   }
 
-  _viewport->_prev_edge_btn->setEnabled(hasPrev);
-  _viewport->_next_edge_btn->setEnabled(hasNext);
-  _viewport->_prev_edge_btn->setVisible(true);
-  _viewport->_next_edge_btn->setVisible(true);
+  _viewport->prev_edge_btn()->setEnabled(hasPrev);
+  _viewport->next_edge_btn()->setEnabled(hasNext);
+  _viewport->prev_edge_btn()->setVisible(true);
+  _viewport->next_edge_btn()->setVisible(true);
 }
 
 void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
-  if (!_viewport->_hover_logic_signal)
+  if (!_viewport->hover_logic_signal())
     return;
 
-  auto *snapshot = _viewport->_hover_logic_signal->data();
+  auto *snapshot = _viewport->hover_logic_signal()->data();
   if (!snapshot || snapshot->empty())
     return;
 
-  int sig_index = _viewport->_hover_logic_signal->get_index();
+  int sig_index = _viewport->hover_logic_signal()->get_index();
   uint64_t end = snapshot->get_ring_sample_count() - 1;
 
   // Start searching from the viewport edge (consistent with Logic 2:
   // next edge searches from right edge, previous edge searches from left edge)
   uint64_t searchIdx;
   if (dir == EdgeNavButton::Next) {
-    searchIdx = _viewport->_view.pixel2index(_viewport->_view.get_view_width());
+    searchIdx = _viewport->view().pixel2index(_viewport->view().get_view_width());
   } else {
-    searchIdx = _viewport->_view.pixel2index(0);
+    searchIdx = _viewport->view().pixel2index(0);
   }
 
   if (searchIdx > end)
@@ -1123,14 +1123,14 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
     return;
 
   // Move search cursor to the found edge
-  _viewport->_view.show_search_cursor(true);
-  _viewport->_view.get_search_cursor()->set_index(searchIdx);
+  _viewport->view().show_search_cursor(true);
+  _viewport->view().get_search_cursor()->set_index(searchIdx);
 
   // Calculate offset to place the edge at 25% position
   const double time =
-      searchIdx * 1.0 / _viewport->_view.session().cur_snap_samplerate();
-  int viewWidth = _viewport->_view.get_view_width();
-  double scale = _viewport->_view.scale();
+      searchIdx * 1.0 / _viewport->view().session().cur_snap_samplerate();
+  int viewWidth = _viewport->view().get_view_width();
+  double scale = _viewport->view().scale();
 
   int64_t newOffset;
   if (dir == EdgeNavButton::Next) {
@@ -1141,7 +1141,7 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
     newOffset = (int64_t)(time / scale - viewWidth * 0.75);
   }
 
-  _viewport->_view.set_scale_offset(scale, newOffset);
+  _viewport->view().set_scale_offset(scale, newOffset);
 }
 
 } // namespace view

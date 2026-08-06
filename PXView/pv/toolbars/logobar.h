@@ -87,7 +87,8 @@ private slots:
 public:
     bool _enable;
     bool _connected;
-    SigSession* _session;
+    SigSession *_session;
+    
 
     XToolButton _logo_button;
 

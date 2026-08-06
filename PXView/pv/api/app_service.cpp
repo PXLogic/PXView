@@ -200,8 +200,14 @@ Result<void> AppService::connect_device(const std::string& device_id)
         return Result<void>::Fail(ErrorCode::InvalidRequest,
                                   "Device id is empty");
 
-    ds_device_handle handle = static_cast<ds_device_handle>(
-        std::stoull(device_id));
+    ds_device_handle handle;
+    try {
+        handle = static_cast<ds_device_handle>(
+            std::stoull(device_id));
+    } catch (const std::exception&) {
+        return Result<void>::Fail(ErrorCode::InvalidRequest,
+                                  "Invalid device id: not a number");
+    }
 
     if (!session->set_device(handle))
         return Result<void>::Fail(ErrorCode::DeviceError,
@@ -266,15 +272,26 @@ Result<int> AppService::create_session(
         // from the MCP context.
         bool device_already_active = false;
         if (session->get_device() && session->get_device()->have_instance()) {
-            ds_device_handle current_handle = session->get_device()->handle();
-            ds_device_handle requested_handle = static_cast<ds_device_handle>(
-                std::stoull(device_id));
-            device_already_active = (current_handle == requested_handle);
+            try {
+                ds_device_handle current_handle = session->get_device()->handle();
+                ds_device_handle requested_handle = static_cast<ds_device_handle>(
+                    std::stoull(device_id));
+                device_already_active = (current_handle == requested_handle);
+            } catch (const std::exception&) {
+                return Result<int>::Fail(ErrorCode::InvalidRequest,
+                                         "Invalid device id: not a number");
+            }
         }
 
         if (!device_already_active) {
-            ds_device_handle handle = static_cast<ds_device_handle>(
-                std::stoull(device_id));
+            ds_device_handle handle;
+            try {
+                handle = static_cast<ds_device_handle>(
+                    std::stoull(device_id));
+            } catch (const std::exception&) {
+                return Result<int>::Fail(ErrorCode::InvalidRequest,
+                                         "Invalid device id: not a number");
+            }
             if (!session->set_device(handle))
                 return Result<int>::Fail(ErrorCode::DeviceError,
                                          "Failed to connect device");

@@ -37,6 +37,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class DataSource; }
 
 namespace dialogs {
 
@@ -62,6 +63,7 @@ private slots:
 
 private:
     SigSession *_session;
+    data::DataSource *_data_src = nullptr;  // Spec v2 Task 9: route DataSource methods through interface
     uint64_t _sample_limit;
  
     DsComboBox *_len_combobox;

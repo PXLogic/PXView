@@ -27,7 +27,16 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <vector>
 #include <QPoint>
+
+// Phase 4: unique_ptr<MathTrace/LissajousTrace> requires complete types
+// in the header. These includes could be avoided by using the pimpl
+// idiom, but the current trade-off favors compile simplicity.
+#include "mathtrace.h"
+#include "lissajoustrace.h"
+#include "decodetrace.h"
+#include "spectrumtrace.h"
 
 struct srd_decoder;
 class DecoderStatus;
@@ -44,18 +53,22 @@ namespace view {
 
 class View;
 class DecodeTrace;
+class SpectrumTrace;
+class MathTrace;
+class LissajousTrace;
 
 // ViewDerivedTraces — delegate for View's decoder / spectrum / math /
 // lissajous derived-trace responsibilities. Extracted from the View
 // God-class during Phase E of the modernize-view-layer-v2 spec. All
 // derived-trace state (_own_decode_traces / _own_spectrum_traces /
-// _own_math_trace / _own_lissajous_trace / _derived_traces_dirty) still
-// lives on View; this class only owns the *behaviour*. View declares
-// `friend class ViewDerivedTraces;` so the delegate can read and mutate
-// those private members directly.
+// _own_math_trace / _own_lissajous_trace / _derived_traces_dirty) lives
+// in this class. View declares `friend class ViewDerivedTraces;` so the
+// delegate can access View's private widget members and call private
+// helper methods (e.g. mark_derived_traces_dirty, signals_changed).
 class ViewDerivedTraces {
 public:
-  explicit ViewDerivedTraces(View *view) : _view(view) {}
+  explicit ViewDerivedTraces(View *view);
+  ~ViewDerivedTraces();
 
   // -- decoder lifecycle -------------------------------------------------
   bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus,
@@ -71,8 +84,29 @@ public:
   void sync_derived_traces();
   void mark_derived_traces_dirty();
 
+  std::vector<std::unique_ptr<DecodeTrace>> &own_decode_traces() { return _own_decode_traces; }
+  std::vector<std::unique_ptr<SpectrumTrace>> &own_spectrum_traces() { return _own_spectrum_traces; }
+  MathTrace *own_math_trace() { return _own_math_trace.get(); }
+  LissajousTrace *own_lissajous_trace() { return _own_lissajous_trace.get(); }
+  bool derived_traces_dirty() const { return _derived_traces_dirty; }
+  void set_derived_traces_dirty(bool v) { _derived_traces_dirty = v; }
+
+  void set_own_math_trace(MathTrace *t) { _own_math_trace.reset(t); }
+  void set_own_lissajous_trace(LissajousTrace *t) { _own_lissajous_trace.reset(t); }
+
+  // -- cleanup (called by View destructor) ------------------------------
+  // Deletes all View-owned wrapper traces and clears the lists.
+  // This centralizes cleanup so View does not need friend access.
+  void cleanup();
+
 private:
   View *_view;
+
+  std::vector<std::unique_ptr<DecodeTrace>> _own_decode_traces;
+  std::vector<std::unique_ptr<SpectrumTrace>> _own_spectrum_traces;
+  std::unique_ptr<MathTrace> _own_math_trace;
+  std::unique_ptr<LissajousTrace> _own_lissajous_trace;
+  bool _derived_traces_dirty = true;
 };
 
 } // namespace view

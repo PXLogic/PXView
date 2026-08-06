@@ -56,7 +56,7 @@ namespace dialogs {
 
 ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session, pv::view::DecoderModel *decoder_model) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _decoder_model(decoder_model),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this),

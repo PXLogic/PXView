@@ -71,6 +71,12 @@ public:
     static const int HoverPointSize = 2;
     static const int RefreshShort = 200;
 
+    // Safe narrow-cast: this is a DsoSignal.
+    DsoSignal* as_dso() override { return this; }
+    const DsoSignal* as_dso() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
 private:
 	static const QColor SignalColours[4];
     static const int HitCursorMargin = 3;
@@ -127,6 +133,11 @@ public:
 
     void set_data(data::DsoSnapshot *data);
 
+    /// Signal override: extracts DsoSnapshot from DataSource
+    void set_data_from_source(data::DataSource *source) override;
+    /// Signal override: sets _data to nullptr
+    void clear_data() override;
+
     void set_scale(int height);
 
     inline float get_scale(){
@@ -159,8 +170,8 @@ public:
     bool go_vDialPre(bool manul);
     bool go_vDialNext(bool manul); 
 
-    inline dslDial *get_vDial(){
-        return _vDial;
+inline dslDial *get_vDial(){
+return _vDial.get();
     }
 
     uint64_t get_vDialValue();
@@ -316,7 +327,7 @@ private:
     bool _en_lock;
     bool _show;
 
-    dslDial *_vDial;
+    std::unique_ptr<dslDial> _vDial;
     bool _vDialActive;
     uint8_t _acCoupling;
     uint8_t _bits;

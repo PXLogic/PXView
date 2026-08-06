@@ -7,6 +7,9 @@
 #include <vector>
 
 #include "../data/sessiondata.h"
+#include "isession_coordination.h"
+#include "isession_state.h"
+#include "isession_state.h"
 
 namespace pv {
 
@@ -32,7 +35,7 @@ class SessionStateContext;
  */
 class DecodeTaskManager {
 public:
-  DecodeTaskManager(EventBus *bus, SessionStateContext *state);
+  DecodeTaskManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~DecodeTaskManager();
 
   void add_decode_task(std::shared_ptr<data::DecoderStack> stack);
@@ -47,8 +50,11 @@ public:
                                  data::SessionDocument *doc = nullptr);
 
   /// Used by feed_in_logic to check if any decode task is in flight.
-  /// Preserves the existing lock-free read behavior.
-  bool has_running_tasks() const { return !_running_tasks.empty(); }
+  /// Thread-safe: locks _running_tasks_mutex for a consistent read.
+  bool has_running_tasks() const {
+      std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+      return !_running_tasks.empty();
+  }
 
   /// Used by remove_decoder to check if a specific stack is still being
   /// processed by a decode thread. Locks the mutex for a consistent read.
@@ -59,12 +65,8 @@ public:
 
 private:
   EventBus *_event_bus;
-  // Shared session state (signal_models / view_data / document_registry /
-  // bClose / decode_traces() / get_decoder_trace() /
-  // get_trace_index_by_key_handel() / data_updated() / signals_changed())
-  // accessed via SessionStateContext accessors. modernize-core-layer-radical
-  // phase 1 replaced the previous SigSession* + friend-declaration coupling.
-  SessionStateContext *_state;
+  ISessionState *_state;
+  ISessionCoordination *_coord;
 
   mutable std::mutex _running_tasks_mutex;
   std::vector<std::thread> _decode_threads;

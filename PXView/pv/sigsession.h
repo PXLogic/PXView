@@ -135,9 +135,7 @@ public:
   // View layer for device-level capability/probe queries that have no
   // SignalModel getter. Aliases get_device() (single device per session).
   DeviceAgent* device() override { return &_state->device_agent(); }
-  void add_callback(ISessionCallbackBase *callback) { _event_bus->add_callback(callback); }
-  void remove_callback(ISessionCallbackBase *callback) { _event_bus->remove_callback(callback); }
-  void set_callback(ISessionCallbackBase *callback) { add_callback(callback); }
+// Spec v2 Task 7: add_callback/remove_callback/set_callback removed (ISessionCallback abolished)
   bool init(); void uninit(); void Open(); void Close();
   bool set_default_device(); bool set_device(ds_device_handle dev_handle);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
@@ -225,14 +223,14 @@ public:
   bool is_stopped_status() override { return _state->device_status() == ST_STOPPED; }
   void set_collect_mode(DEVICE_COLLECT_MODE m) { _capture_manager->set_collect_mode(m); }
   int get_collect_mode() { return _capture_manager->get_collect_mode(); }
-  bool is_repeat_mode() { return _capture_manager->is_repeat_mode(); }
+  bool is_repeat_mode() override { return _capture_manager->is_repeat_mode(); }
   bool is_single_mode() { return _capture_manager->is_single_mode(); }
   bool is_loop_mode() { return _capture_manager->is_loop_mode(); }
-  bool is_realtime_refresh() { return _capture_manager->is_realtime_refresh(); }
+  bool is_realtime_refresh() override { return _capture_manager->is_realtime_refresh(); }
   bool is_repeating() override { return _capture_manager->is_repeating(); }
-  void session_save() override { dispatch_to<ISessionStateCallback>([](ISessionStateCallback *cb) { cb->session_save(); }); }
-  void show_region(uint64_t start, uint64_t end, bool keep) { dispatch_to<ICaptureCallback>([start, end, keep](ICaptureCallback *cb) { cb->show_region(start, end, keep); }); }
-  void decode_done() override { dispatch_to<ISessionStateCallback>([](ISessionStateCallback *cb) { cb->decode_done(); }); }
+  void session_save() override { broadcast_async<interface::SaveRequested>({}); }
+  void show_region(uint64_t start, uint64_t end, bool keep) { broadcast_async<interface::ShowRegion>({start, end, keep}); }
+  void decode_done() override { broadcast_async<interface::DecodeDone>({}); }
   bool is_saving() { return _state->is_saving(); }
   void set_saving(bool flag) { _state->set_saving(flag); }
   DeviceEventObject *device_event_object() { return &_device_event; }
@@ -242,7 +240,7 @@ public:
   void set_map_zoom(int index) { _state->set_map_zoom(index); }
   int get_map_zoom() override { return _state->map_zoom(); }
   bool is_single_buffer() { return _state->is_single_buffer(); }
-  void update_view() { dispatch_to<IDataCallback>([](IDataCallback *cb) { cb->data_updated(); }); }
+  void update_view() { broadcast_async<interface::DataUpdated>({}); }
   void auto_end() override { _capture_manager->auto_end(); }
   bool have_hardware_data();
   struct ds_device_base_info *get_device_list(int &out_count, int &actived_index);
@@ -337,9 +335,7 @@ public:
 private:
   void set_cur_samplelimits(uint64_t samplelimits); void set_cur_snap_samplerate(uint64_t samplerate);
   void math_disable(); void sync_trigger_to_libsigrok(bool disable_trigger = false);
-  template <typename Iface, typename F>
-    requires std::invocable<F, Iface*>
-  void dispatch_to(F fn) { _event_bus->dispatch_to<Iface>(fn); }
+// Spec v2 Task 7: dispatch_to template removed (ISessionCallback abolished)
   void data_updated(); void set_receive_data_len(quint64 len); void receive_header();
   void cur_snap_samplerate_changed(); void frame_began(); void frame_ended();
   void update_capture(); void repeat_hold(int percent);

@@ -23,28 +23,26 @@
 
 #include "deviceoptions.h"
 
-#define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <QObject>
 #include <cstdint>
+#include <set>
 #include "../bool.h"
 #include "../string.h"
 #include "../double.h"
 #include "../enum.h"
 #include "../int.h"
 #include "../../config/appconfig.h"
+#include "../../gvarptr.h"
 #include "../../log.h"
 #include "../../sigsession.h"
 #include "../../deviceagent.h"
 #include "../../ui/langresource.h"
  
 using namespace std;
-using std::placeholders::_1;
 
 namespace pv {
 namespace prop {
 namespace binding {
-
-DeviceAgent* DeviceOptions::_static_device_agent = nullptr;
 
 DeviceOptions::DeviceOptions(SigSession *session)
 {
@@ -52,7 +50,6 @@ DeviceOptions::DeviceOptions(SigSession *session)
 	gsize num_opts;
 
 	_device_agent = session->get_device();
-	_static_device_agent = _device_agent;
 
     pxv_info("DeviceOptions binding: driver=%s, is_hardware=%d, is_dsl=%d, is_stream=%d",
              _device_agent->driver_name().toUtf8().constData(),
@@ -73,6 +70,8 @@ DeviceOptions::DeviceOptions(SigSession *session)
 
     pxv_info("DeviceOptions binding: num_opts=%zu", num_opts);
 
+	std::set<int> bound_keys;
+
 	for (unsigned int i = 0; i < num_opts; i++) {
 		/* Mask off capability bits (SR_CONF_GET/SET/LIST, top 3 bits) to
 		 * get the bare config key. pxlogic.c now routes DEVICE_OPTIONS through
@@ -81,6 +80,16 @@ DeviceOptions::DeviceOptions(SigSession *session)
 		 * sr_key_info_get only recognizes bare keys.
 		 * SR_CONF_MASK = 0x1fffffff (libsigrok-internal.h, not public). */
 		const int key = (int)(options[i] & 0x1fffffff);
+
+		/* Skip duplicate keys — some drivers may accidentally list the same
+		 * key twice in devopts[] (e.g. with different capability bits),
+		 * which would create duplicate UI controls. */
+		if (bound_keys.count(key)) {
+			pxv_warn("DeviceOptions binding: skipping duplicate key %d "
+				 "(already bound)", key);
+			continue;
+		}
+		bound_keys.insert(key);
 
 		const struct sr_config_info *const info =
 			_device_agent->get_config_info(key);
@@ -170,9 +179,19 @@ DeviceOptions::DeviceOptions(SigSession *session)
 
 		case SR_CONF_RLE:
         case SR_CONF_CLOCK_TYPE:
-        case SR_CONF_CLOCK_EDGE:
 		case SR_CONF_TRIGGER_OUT:
             bind_bool(name, label, key);
+            break;
+
+        case SR_CONF_CLOCK_EDGE:
+            /* If the driver advertises SR_CONF_LIST for CLOCK_EDGE, bind as a
+             * string dropdown (rising/falling) instead of a boolean checkbox.
+             * DSLogic and PXLogic drivers both support the list; older or
+             * upstream-only drivers without LIST fall back to bind_bool. */
+            if (gvar_list)
+                bind_list(name, label, key, gvar_list);
+            else
+                bind_bool(name, label, key);
             break;
         case SR_CONF_PWM0_EN:
             bind_bool(name, "PWM0 EN", key);
@@ -220,7 +239,13 @@ DeviceOptions::DeviceOptions(SigSession *session)
         // implement these. DSL/PXLogic devices already declare
         // SR_CONF_OPERATION_MODE in their devopts and handled by the switch
         // above (bind_list), so we only bind here for non-DSL devices.
-        if (!_device_agent->is_dsl_device()) {
+        /* Only add app-layer OPERATION_MODE if the driver didn't already
+         * declare it in devopts[] (bound_keys check) AND this is not a
+         * DSL device (DSL devices handle it in the driver). Without the
+         * bound_keys check, demo driver (is_dsl_device()==true but also
+         * declares OPERATION_MODE in devopts[]) would get a duplicate. */
+        if (!_device_agent->is_dsl_device() &&
+            bound_keys.count(SR_CONF_OPERATION_MODE) == 0) {
             GVariant *opmode_list = _device_agent->get_config_list(
                 nullptr, SR_CONF_OPERATION_MODE);
             bind_list("operation_mode", "Operation mode",
@@ -247,12 +272,12 @@ DeviceOptions::DeviceOptions(SigSession *session)
 
 GVariant* DeviceOptions::config_getter(int key)
 { 
-	return _static_device_agent->get_config(key);
+	return _device_agent->get_config(key);
 }
 
 void DeviceOptions::config_setter(int key, GVariant* value)
 {
-    _static_device_agent->set_config(key, value);
+    _device_agent->set_config(key, value);
 }
 
 void DeviceOptions::bind_bool(const QString &name, const QString label, int key)
@@ -264,15 +289,17 @@ void DeviceOptions::bind_bool(const QString &name, const QString label, int key)
 		LangResource::Instance()->get_lang_text(STR_PAGE_DSL,
 			label.toLocal8Bit().data(), label.toLocal8Bit().data()));
 	_properties.push_back(
-        new Bool(name, text, bind(config_getter, key),
-			bind(config_setter, key, _1)));
+        new Bool(name, text,
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 void DeviceOptions::bind_string(const QString &name, const QString label, int key)
 {
 	_properties.push_back(
-        new String(name, label, bind(config_getter, key),
-			bind(config_setter, key, _1)));
+        new String(name, label,
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
@@ -280,7 +307,7 @@ void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
 {
 	GVariant *gvar;
 	GVariantIter iter;
-	std::vector< pair<GVariant*, QString> > values;
+	std::vector< pair<GVarPtr, QString> > values;
 
 	if (!gvar_list) {
 		pxv_warn("%s", "DeviceOptions::bind_enum: gvar_list is nullptr");
@@ -293,13 +320,13 @@ void DeviceOptions::bind_enum(const QString &name, const QString label, int key,
 	while ((gvar = g_variant_iter_next_value (&iter)))
 	{
 		QString v = printer(gvar);
-		values.push_back(make_pair(gvar, v));
+		values.push_back(make_pair(GVarPtr(gvar, true), v));
 	}
 
 	_properties.push_back(
         new Enum(name, label, values,
-			bind(config_getter, key),
-			bind(config_setter, key, _1)));
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 void DeviceOptions::bind_int(const QString &name, const QString label, int key, QString suffix,
@@ -307,8 +334,8 @@ void DeviceOptions::bind_int(const QString &name, const QString label, int key, 
 {
 	_properties.push_back(
         new Int(name, label, suffix, range,
-			bind(config_getter, key),
-			bind(config_setter, key, _1)));
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 void DeviceOptions::bind_double(const QString &name, const QString label, int key, QString suffix,
@@ -317,8 +344,8 @@ void DeviceOptions::bind_double(const QString &name, const QString label, int ke
 {
     _properties.push_back(
         new Double(name, label, decimals, suffix, range, step,
-            bind(config_getter, key),
-            bind(config_setter, key, _1)));
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 QString DeviceOptions::print_gvariant(GVariant *const gvar)
@@ -361,11 +388,11 @@ void DeviceOptions::bind_samplerate(const QString &name, const QString label,
 
 		_properties.push_back(
 			//tr
-            new Double(name, label, 0, L_S(STR_PAGE_DLG, S_ID(IDS_DLG_HZ), "Hz"),
+			new Double(name, label, 0, L_S(STR_PAGE_DLG, S_ID(IDS_DLG_HZ), "Hz"),
 				make_pair((double)elements[0], (double)elements[1]),
 						(double)elements[2],
-				bind(samplerate_double_getter),
-				bind(samplerate_double_setter, _1)));
+				[this]() { return samplerate_double_getter(); },
+				[this](GVariant* v) { samplerate_double_setter(v); }));
 
 		g_variant_unref(gvar_list_samplerates);
 	}
@@ -446,7 +473,7 @@ void DeviceOptions::bind_bandwidths(const QString &name, const QString label, in
 
 	bool bw_limit = false;
 	GVariant *gvar;
-	std::vector< pair<GVariant*, QString> > values;
+	std::vector< pair<GVarPtr, QString> > values;
 
 	if (!gvar_list) {
 		pxv_warn("%s", "DeviceOptions::bind_bandwidths: gvar_list is nullptr");
@@ -477,21 +504,21 @@ void DeviceOptions::bind_bandwidths(const QString &name, const QString label, in
 		QString v = QString::fromUtf8(
 			LangResource::Instance()->get_lang_text(STR_PAGE_DSL, strs[i], strs[i]));
 		gvar = g_variant_new_string(strs[i]);
-		values.push_back(make_pair(gvar, v));
+		values.push_back(make_pair(GVarPtr(gvar), v));
 	}
 
 	g_free((gpointer)strs);
 
 	_properties.push_back(
         new Enum(name, label, values,
-			bind(config_getter, key),
-			bind(config_setter, key, _1)));
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 void DeviceOptions::bind_list(const QString &name, const QString label, int key, GVariant *const gvar_list)
 {
 	GVariant *gvar;
-	std::vector< pair<GVariant*, QString> > values;
+	std::vector< pair<GVarPtr, QString> > values;
 
 	if (!gvar_list) {
 		pxv_warn("%s", "DeviceOptions::bind_list: gvar_list is nullptr");
@@ -515,15 +542,15 @@ void DeviceOptions::bind_list(const QString &name, const QString label, int key,
 		QString v = QString::fromUtf8(
 			LangResource::Instance()->get_lang_text(STR_PAGE_DSL, strs[i], strs[i]));
 		gvar = g_variant_new_string(strs[i]);
-		values.push_back(make_pair(gvar, v));
+		values.push_back(make_pair(GVarPtr(gvar), v));
 	}
 
 	g_free((gpointer)strs);
 
 	_properties.push_back(
         new Enum(name, label, values,
-			bind(config_getter, key),
-			bind(config_setter, key, _1)));
+            [this, key]() { return config_getter(key); },
+            [this, key](GVariant* v) { config_setter(key, v); }));
 }
 
 } // binding

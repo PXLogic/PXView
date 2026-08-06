@@ -40,31 +40,40 @@ AnalogSnapshot *SessionDocument::get_analog_snapshot() {
 
 DsoSnapshot *SessionDocument::get_dso_snapshot() { return get_active_dso(); }
 
-LogicSnapshot *SessionDocument::get_active_logic() { return &_logic; }
+LogicSnapshot *SessionDocument::get_active_logic() { return _logic.get(); }
 
-AnalogSnapshot *SessionDocument::get_active_analog() { return &_analog; }
+AnalogSnapshot *SessionDocument::get_active_analog() { return _analog.get(); }
 
-DsoSnapshot *SessionDocument::get_active_dso() { return &_dso; }
+DsoSnapshot *SessionDocument::get_active_dso() { return _dso.get(); }
 
-void SessionDocument::copy_from_logic(LogicSnapshot *src) {
-  if (!src || src->empty())
-    return;
-
-  _logic.copy_from(*src);
+// Zero-copy: share the shared_ptr (increment ref count) instead of deep-copying.
+// The OLD shared_ptr is moved to _pending_* (deferred release) to keep the old
+// snapshot alive until the View rebinds its raw pointers (clear_pending_release).
+void SessionDocument::share_from_logic(std::shared_ptr<LogicSnapshot> src) {
+  _pending_logic = _logic;  // Keep old alive (releases previous pending if any)
+  _logic = std::move(src);
+  // Self-contained: stamp the snapshot with the document samplerate so the
+  // renderer (LogicSignal::paint_mid_align) reads _data->samplerate() correctly
+  // without any external pass-through. The document always knows its samplerate
+  // (set via set_samplerate before sharing), so the snapshot becomes complete here.
+  if (_logic)
+    _logic->set_samplerate((double)_samplerate);
 }
 
-void SessionDocument::copy_from_analog(AnalogSnapshot *src) {
-  if (!src || src->empty())
-    return;
-
-  _analog.copy_from(*src);
+void SessionDocument::share_from_analog(std::shared_ptr<AnalogSnapshot> src) {
+  _pending_analog = _analog;
+  _analog = std::move(src);
 }
 
-void SessionDocument::copy_from_dso(DsoSnapshot *src) {
-  if (!src || src->empty())
-    return;
+void SessionDocument::share_from_dso(std::shared_ptr<DsoSnapshot> src) {
+  _pending_dso = _dso;
+  _dso = std::move(src);
+}
 
-  _dso.copy_from(*src);
+void SessionDocument::clear_pending_release() {
+  _pending_logic.reset();
+  _pending_analog.reset();
+  _pending_dso.reset();
 }
 
 void SessionDocument::set_samplerate(uint64_t rate) { _samplerate = rate; }
@@ -88,21 +97,27 @@ double SessionDocument::get_sampletime() const {
 }
 
 bool SessionDocument::has_data() {
-  return !_logic.empty() || !_analog.empty() || !_dso.empty();
+  return (_logic && !_logic->empty()) ||
+         (_analog && !_analog->empty()) ||
+         (_dso && !_dso->empty());
 }
 
 bool SessionDocument::empty() { return !has_data(); }
 
 void SessionDocument::clear() {
-  _logic.clear();
-  _analog.clear();
-  _dso.clear();
+  // Reset shared_ptrs — releases the document's reference to the snapshot data.
+  // If SessionData still holds a shared_ptr to the same snapshot, the data
+  // stays alive (ref count > 0). This replaces the old in-place _logic.clear()
+  // which would have cleared data shared with SessionData.
+  _logic.reset();
+  _analog.reset();
+  _dso.reset();
+  _pending_logic.reset();
+  _pending_analog.reset();
+  _pending_dso.reset();
   _samplerate = 0;
   _samplelimits = 0;
   _trigger_pos = 0;
-  // Dead storage (_signal_models / _spectrum_stacks / _math_stack /
-  // _lissajous_model / _decoder_model) has been removed; the empty clear
-  // loops and null resets that used to live here are no longer needed.
 }
 
 std::vector<std::shared_ptr<DecoderStack>> &

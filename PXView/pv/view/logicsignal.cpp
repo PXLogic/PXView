@@ -23,6 +23,7 @@
 
 #include "logicsignal.h"
 #include "../config/appconfig.h"
+#include "../data/datasource.h"
 #include "../data/logicsnapshot.h"
 #include "../data/signalmodel.h"
 #include "../pxvdef.h"
@@ -646,6 +647,12 @@ void LogicSignal::paint_mark(QPainter &p, int xstart, int xend, int type) {
 }
 
 void LogicSignal::set_data(data::LogicSnapshot *data) { _data = data; }
+
+void LogicSignal::set_data_from_source(data::DataSource *source) {
+  _data = source ? source->get_logic_snapshot() : nullptr;
+}
+
+void LogicSignal::clear_data() { _data = nullptr; }
 
 } // namespace view
 } // namespace pv

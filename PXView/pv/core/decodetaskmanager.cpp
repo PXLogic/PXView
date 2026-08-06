@@ -18,8 +18,8 @@
 namespace pv {
 namespace core {
 
-DecodeTaskManager::DecodeTaskManager(EventBus *bus, SessionStateContext *state)
-    : _event_bus(bus), _state(state) {}
+DecodeTaskManager::DecodeTaskManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord)
+    : _event_bus(bus), _state(state), _coord(coord) {}
 
 DecodeTaskManager::~DecodeTaskManager() { stop(); }
 
@@ -61,19 +61,12 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
   // R1: snapshot pointers changed, so notify listeners that the data view
   // and the signal list need refreshing. Centralizing the notification here
   // removes the need for callers to manually re-fire these callbacks.
-  _state->data_updated();
-  _state->signals_changed();
+  _coord->data_updated();
+  _coord->signals_changed();
 
-  // [PWMDBG] confirm WHICH data buffer the models were attached to and how
-  // many samples it currently holds (race: decode before buffer swap?)
-  if (data->get_logic()) {
-    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=%p, sample_count=%llu, ring=%llu",
-             (void *)data, (void *)data->get_logic(),
-             (unsigned long long)data->get_logic()->get_sample_count(),
-             (unsigned long long)data->get_logic()->get_ring_sample_count());
-  } else {
-    pxv_info("[PWMDBG] attach_data_to_signal: data=%p, logic=nullptr", (void *)data);
-  }
+  // [PWMDBG] debug logs removed (Track C2)
+  // SignalModels may have been recreated with nullptr snapshots — attach_data_to_signal
+  // ensures valid snapshot pointers before decode threads start.
 }
 
 void DecodeTaskManager::add_decode_task(
@@ -170,9 +163,16 @@ void DecodeTaskManager::decode_single_task(
   if (task->_delete_flag) {
     pxv_info("destroy a decoder in task thread");
 
+    // Track C3: This 100ms sleep covers a race where _delete_flag was just set
+    // by remove_decode_task() on the main thread, and we need to ensure the
+    // flag is visible to all threads before signals_changed() triggers UI
+    // updates that may re-enumerate decoder stacks. A condition_variable or
+    // atomic spin-wait would be more correct, but the current decode thread
+    // model (join-based) makes this sleep a pragmatic workaround that has
+    // not caused issues in practice.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (!_state->bClose()) {
-      _state->signals_changed();
+    if (!_coord->bClose()) {
+      _coord->signals_changed();
     }
   }
 
@@ -202,6 +202,7 @@ void DecodeTaskManager::decode_single_task(
 }
 
 void DecodeTaskManager::start_all_decode_tasks() {
+  // Track C2: [PWMDBG] debug log removed
   // SignalModels may have been recreated (e.g. by reload() during
   // TabContext::activate()) with nullptr snapshot pointers. Re-attach _view_data
   // so do_decode_work() can find a valid snapshot via SignalModel::snapshot().
@@ -211,8 +212,7 @@ void DecodeTaskManager::start_all_decode_tasks() {
   // (single attach instead of N attaches).
   attach_data_to_signal(_state->view_data());
 
-  pxv_info("[PWMDBG] start_all_decode_tasks: stacks=%zu, view_data=%p",
-           _state->decode_traces().size(), (void *)_state->view_data());
+  // Track C2: [PWMDBG] debug log removed
 
   for (auto stack : _state->decode_traces()) {
     stack->set_capture_end_flag(true);
@@ -231,8 +231,7 @@ void DecodeTaskManager::rst_decoder(int index, data::SessionDocument *doc) {
   // decode task and re-adds it.
   auto stack = _state->get_decoder_trace(index, target);
 
-  pxv_info("[PWMDBG] rst_decoder: index=%d, stack=%p", index,
-           stack ? stack.get() : nullptr);
+  // Track C2: [PWMDBG] debug log removed
 
   if (stack) {
     remove_decode_task(stack); // remove old task

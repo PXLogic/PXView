@@ -47,7 +47,7 @@ void SearchEdgeFlagEdit::focusInEvent(QFocusEvent *e)
 
 Search::Search(QWidget *parent, SigSession *session, std::map<uint16_t, QString> pattern) :
     PxDialog(parent),
-    _session(session)
+    _session(session), _data_src(session)
 {
 
     QFont font("Monaco");
@@ -66,7 +66,7 @@ Search::Search(QWidget *parent, SigSession *session, std::map<uint16_t, QString>
 
     int index = 0;
 
-    for(auto s :  _session->get_signal_models()) {
+    for(auto s :  _data_src->get_signal_models()) {
         if (s->type() == SR_CHANNEL_LOGIC) {
             QLineEdit *search_lineEdit = new SearchEdgeFlagEdit(this);
             if (pattern.find(s->index()) != pattern.end())
@@ -125,7 +125,7 @@ std::map<uint16_t, QString> Search::get_pattern()
     std::map<uint16_t, QString> pattern;
 
     int index = 0;
-    for(auto s :_session->get_signal_models()) {
+    for(auto s :_data_src->get_signal_models()) {
         if (s->type() == SR_CHANNEL_LOGIC) {
             pattern[s->index()] = _search_lineEdit_vec[index]->text();
             index++;

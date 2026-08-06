@@ -55,6 +55,12 @@ private:
     static const int HoverPointSize = 2;
     static const uint8_t DefaultBits = 8;
 
+    // Safe narrow-cast: this is an AnalogSignal.
+    AnalogSignal* as_analog() override { return this; }
+    const AnalogSignal* as_analog() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
 public:
     AnalogSignal(data::AnalogSnapshot *data,
                  std::shared_ptr<data::SignalModel> model,
@@ -96,6 +102,11 @@ public:
     }
 
     void set_data(data::AnalogSnapshot *data);
+
+    /// Signal override: extracts AnalogSnapshot from DataSource
+    void set_data_from_source(data::DataSource *source) override;
+    /// Signal override: sets _data to nullptr
+    void clear_data() override;
 
     int get_hw_offset();
     int commit_settings();
@@ -187,10 +198,10 @@ private:
 private:
 	pv::data::AnalogSnapshot *_data;
 
-    QRectF *_rects;
+    std::unique_ptr<QRectF[]> _rects;
     // 性能修复: paint_trace 复用成员缓冲，避免每帧 new/delete QPointF[]。
     // 与 _rects 同生命周期管理 (构造 nullptr / 析构+resize 释放 / 按需扩容)。
-    QPointF *_points;
+    std::unique_ptr<QPointF[]> _points;
     int64_t _points_cap;
 
 	float _scale;

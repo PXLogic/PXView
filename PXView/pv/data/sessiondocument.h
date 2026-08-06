@@ -57,9 +57,22 @@ public:
   LogicSnapshot *get_active_logic();
   AnalogSnapshot *get_active_analog();
   DsoSnapshot *get_active_dso();
-  void copy_from_logic(LogicSnapshot *src);
-  void copy_from_analog(AnalogSnapshot *src);
-  void copy_from_dso(DsoSnapshot *src);
+
+  // Zero-copy ownership sharing: assigns the shared_ptr (increments ref count)
+  // instead of deep-copying the snapshot data. Replaces the old copy_from_*
+  // methods. After sharing, both SessionData and SessionDocument point to the
+  // same underlying snapshot. When SessionData::clear() resets its shared_ptr,
+  // the snapshot stays alive because SessionDocument still holds a reference.
+  void share_from_logic(std::shared_ptr<LogicSnapshot> src);
+  void share_from_analog(std::shared_ptr<AnalogSnapshot> src);
+  void share_from_dso(std::shared_ptr<DsoSnapshot> src);
+
+  // Release the deferred (previous) shared_ptrs. Call this AFTER the View has
+  // rebound its signal raw pointers to the new snapshots (e.g. after
+  // set_data_document completes). Until this is called, the old snapshots
+  // stay alive (ref count > 0), preventing use-after-free on the View's raw
+  // pointers.
+  void clear_pending_release();
 
   void set_samplerate(uint64_t rate);
   uint64_t get_samplerate() const;
@@ -168,9 +181,23 @@ public:
   void set_trigger_config(const data::TriggerConfig &cfg);
 
 private:
-  LogicSnapshot _logic;
-  AnalogSnapshot _analog;
-  DsoSnapshot _dso;
+  // shared_ptr members: enable zero-copy ownership sharing with SessionData.
+  // clear() resets these to nullptr; get_active_*() returns nullptr when reset.
+  // Callers that check has_data() first are safe — has_data() returns false
+  // when all shared_ptrs are null or point to empty snapshots.
+  std::shared_ptr<LogicSnapshot> _logic;
+  std::shared_ptr<AnalogSnapshot> _analog;
+  std::shared_ptr<DsoSnapshot> _dso;
+
+  // Deferred-release: when share_from_* replaces _logic/_analog/_dso, the OLD
+  // shared_ptrs are moved here (not immediately released). This keeps the old
+  // snapshots alive until clear_pending_release() is called, which the View
+  // does AFTER rebinding its raw signal pointers to the new snapshots. Without
+  // this, a paint event between share_from_* and set_data_document would
+  // dereference a dangling pointer (use-after-free).
+  std::shared_ptr<LogicSnapshot> _pending_logic;
+  std::shared_ptr<AnalogSnapshot> _pending_analog;
+  std::shared_ptr<DsoSnapshot> _pending_dso;
   uint64_t _samplerate;
   uint64_t _samplelimits;
   uint64_t _trigger_pos;

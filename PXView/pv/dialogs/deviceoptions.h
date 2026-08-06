@@ -93,6 +93,7 @@ class DeviceAgent;
 namespace pv {
 
 class SigSession;
+namespace data { class DataSource; }
 
 namespace dialogs {
 
@@ -156,6 +157,7 @@ private:
     int     _groupHeight2;
     std::atomic<bool> _isBuilding{false};
     SigSession *_session;
+    data::DataSource *_data_src = nullptr;  // Spec v2 Task 9: route DataSource methods through interface
     DeviceAgent *_device_agent;
     int     _cur_analog_tag_index;
     QString _demo_operation_mode;

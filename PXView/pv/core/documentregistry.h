@@ -10,6 +10,9 @@
 #include <vector>
 
 #include "../data/sessiondocument.h"
+#include "isession_coordination.h"
+#include "isession_state.h"
+#include "isession_state.h"
 
 namespace pv {
 
@@ -71,12 +74,15 @@ public:
     inline size_t doc_index() const { return _doc_index; }
 
   private:
+    // Track C4: Extracted release() method to de-duplicate the cleanup
+    // logic shared between destructor and move-assignment operator.
+    void release();
     DocumentRegistry *_registry;
     size_t _doc_index;
   };
 
 public:
-  DocumentRegistry(EventBus *bus, SessionStateContext *state);
+  DocumentRegistry(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~DocumentRegistry();
 
   // --- Document list management (ownership) ---
@@ -143,10 +149,8 @@ private:
   size_t find_index_for_document(data::SessionDocument *doc) const;
 
   EventBus *_event_bus;
-  // Shared session state (is_working / device_status) accessed via
-  // SessionStateContext accessors. modernize-core-layer-radical phase 1
-  // replaced the previous SigSession* + friend-declaration coupling.
-  SessionStateContext *_state;
+  ISessionState *_state;
+  ISessionCoordination *_coord;
 
   // Document list (owned). Released slots become nullptr but keep their index
   // (marked deletion) so all other indices remain stable.

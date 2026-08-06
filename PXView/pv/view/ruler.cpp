@@ -322,7 +322,7 @@ void Ruler::mousePressEvent(QMouseEvent *event)
             while (i != cursor_list.end()) {
                 const QRect cursor_rect((*i)->get_label_rect(rect(), visible));
                 if ((*i)->get_close_rect(cursor_rect).contains(event->position().toPoint())) {
-                    _view.del_cursor(*i);
+                    _view.del_cursor(i->get());
 
                     if (cursor_list.empty()) {
                         _cursor_sel_visible = false;
@@ -333,7 +333,7 @@ void Ruler::mousePressEvent(QMouseEvent *event)
                 }
 
                 if (cursor_rect.contains(event->position().toPoint())) {
-                    set_grabbed_cursor(*i);
+                    set_grabbed_cursor(i->get());
                     _cursor_sel_visible = false;
                     _cursor_go_visible = false;
                     _hitCursor = true;
@@ -430,7 +430,7 @@ void Ruler::mouseReleaseEvent(QMouseEvent *event)
                     i++;
                 }
 
-                _view.del_cursor(*i);
+                _view.del_cursor(i->get());
             }
 
             if (cursor_list.empty()) {
@@ -604,7 +604,7 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
     auto &cursor_list = _view.get_cursorList();
     bool bWorkStoped = _view.data_source()->is_stopped_status();
 
-    for (auto cursor : cursor_list)
+    for (auto &cursor : cursor_list)
     {
         cursor->paint_label(p, rect(), prefix, bWorkStoped);
     }
@@ -764,7 +764,7 @@ void Ruler::draw_osc_tick_mark(QPainter &p)
     if (!cursor_list.empty()) {
         bool bWorkStoped = _view.data_source()->is_stopped_status();
 
-        for (auto cursor : cursor_list) {
+        for (auto &cursor : cursor_list) {
             cursor->paint_label(p, rect(), prefix, bWorkStoped);
         }
     }
@@ -831,7 +831,7 @@ void Ruler::draw_cursor_sel(QPainter &p)
     if (!cursor_list.empty()) {
         int index = 1;
 
-        for (auto curosr : cursor_list) {
+        for (auto &curosr : cursor_list) {
             const QRectF cursorRect = get_cursor_sel_rect(index);
             p.setPen(QPen(Qt::black, 1, Qt::DotLine));
             p.drawLine(cursorRect.left(), cursorRect.top() + 3,

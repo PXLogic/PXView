@@ -67,6 +67,7 @@ private slots:
     
 private:
     SigSession *_session;
+    data::DataSource *_data_src = nullptr;  // Spec v2 Task 9: route DataSource methods through interface
 
     toolbars::TitleBar *_titlebar;
     QVector<QLineEdit *> _search_lineEdit_vec;

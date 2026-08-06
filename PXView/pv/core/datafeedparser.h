@@ -2,6 +2,9 @@
 #define PXVIEW_CORE_DATAFEEDPARSER_H
 
 #include <libsigrok/libsigrok.h>
+#include "isession_coordination.h"
+#include "isession_state.h"
+#include "isession_state.h"
 
 namespace pv {
 
@@ -9,6 +12,8 @@ namespace core {
 
 class EventBus;
 class SessionStateContext;
+class CaptureManager;
+class DecodeTaskManager;
 
 /**
  * DataFeedParser — owns the data feed callback trampoline and the feed_in_*
@@ -20,10 +25,17 @@ class SessionStateContext;
  * accessing capture_data / view_data / device_agent / is_triged / data_lock
  * / etc.). modernize-core-layer-radical phase 1 replaced the previous
  * SigSession* + friend-declaration coupling.
+ *
+ * Cross-manager coordination (EventBus dispatch + state mutation) goes
+ * through ISessionCoordination* — which is a pure abstraction with no
+ * dependency on concrete manager types. Typed access to CaptureManager /
+ * DecodeTaskManager state is injected directly via set_managers() by
+ * SigSession (CaptureManager is constructed after DataFeedParser), keeping
+ * ISessionCoordination free of any concrete-manager coupling.
  */
 class DataFeedParser {
 public:
-  DataFeedParser(EventBus *bus, SessionStateContext *state);
+  DataFeedParser(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~DataFeedParser();
 
   // Static trampoline registered with libsigrok. user_data is a DataFeedParser*.
@@ -32,7 +44,17 @@ public:
                                     void *user_data);
 
   void data_feed_in(const struct sr_dev_inst *sdi,
-                    const struct sr_datafeed_packet *packet);
+                    const sr_datafeed_packet *packet);
+
+  // SigSession injects the concrete manager pointers after construction
+  // (CaptureManager is built after DataFeedParser). DataFeedParser needs
+  // typed access to these for capture/decode state queries, but this is
+  // NOT routed through ISessionCoordination (which stays concrete-free).
+  void set_managers(CaptureManager *capture_mgr,
+                    DecodeTaskManager *decode_mgr) {
+    _capture_mgr = capture_mgr;
+    _decode_mgr = decode_mgr;
+  }
 
 private:
   void feed_in_header(const sr_dev_inst *sdi);
@@ -43,16 +65,10 @@ private:
   void feed_in_dso(const sr_datafeed_dso &o);
 
   EventBus *_event_bus;
-  // Shared session state (capture_data / view_data / device_agent /
-  // is_triged / trig_time / trigger_flag / trigger_ch / hw_replied /
-  // error / data_mutex / decode_task_manager /
-  // capture_manager / spectrum_stacks / math_stack / receive_header() /
-  // receive_trigger() / frame_began() / frame_ended() / session_error() /
-  // set_receive_data_len() / set_cur_snap_samplerate() / set_session_time() /
-  // data_lock() / get_ch_num()) accessed via SessionStateContext accessors.
-  // modernize-core-layer-radical phase 1 replaced the previous SigSession* +
-  // friend-declaration coupling.
-  SessionStateContext *_state;
+  ISessionState *_state;
+  ISessionCoordination *_coord;
+  CaptureManager *_capture_mgr = nullptr;
+  DecodeTaskManager *_decode_mgr = nullptr;
 };
 
 } // namespace core

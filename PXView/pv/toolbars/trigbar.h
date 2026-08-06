@@ -33,6 +33,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class ISignalSource; }
 
 namespace toolbars {
 
@@ -67,7 +68,8 @@ private slots:
 
 // private:
 public:
-    SigSession  *_session;
+    SigSession *_session;
+    data::ISignalSource *_signals = nullptr;
     bool        _enable;
 
     QMenu       *_function_menu;

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "property.h"
+#include "../gvarptr.h"
 
 class DsComboBox;
 
@@ -39,7 +40,7 @@ class Enum : public Property
     Q_OBJECT;
 
 public:
-    Enum(QString name, QString label, std::vector<std::pair<GVariant*, QString> > values,
+	Enum(QString name, QString label, std::vector<std::pair<GVarPtr, QString> > values,
 		Getter getter, Setter setter);
 
 	virtual ~Enum();
@@ -48,13 +49,21 @@ protected:
     QWidget* get_widget(QWidget *parent, bool auto_commit) override;
 public:
 
+	GVariant* get_value();
+
 	void commit();
+
+	/* Select the combo box item whose GVariant prints to val_str.
+	 * Used by DeviceOptionsDock::set_session() to restore Mode section
+	 * properties from saved JSON state. Calls commit() to write the value
+	 * to the driver. */
+	void select_value(const QString &val_str);
 
 private slots:
     void on_current_item_changed(int);
 
 private:
-	const std::vector< std::pair<GVariant*, QString> > _values;
+	const std::vector< std::pair<GVarPtr, QString> > _values;
 
 	DsComboBox *_selector;
 };

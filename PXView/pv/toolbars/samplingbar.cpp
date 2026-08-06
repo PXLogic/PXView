@@ -128,7 +128,10 @@ SamplingBar::SamplingBar(SigSession *session, QWidget *parent)
   _radio_loop = nullptr;
 
   _session = session;
-  _device_agent = _session->get_device();
+      _signals = _session;
+  _data = _session;
+  _capture = _session;
+  _device_agent = _signals->device();
 
   setMovable(false);
   setContentsMargins(0, 0, 0, 0);
@@ -343,8 +346,11 @@ void SamplingBar::bind_context(TabContext *ctx) {
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+      _signals = _session;
+  _data = _session;
+  _capture = _session;
   _view = ctx->view();
-  _device_agent = _session->get_device();
+  _device_agent = _signals->device();
   set_readonly(!ctx->is_live());
   if (_device_agent && _device_agent->have_instance()) {
     update_device_list();
@@ -912,7 +918,7 @@ void SamplingBar::apply_sample_count(double &hori_res) {
   if (_device_agent->get_work_mode() == DSO) {
     hori_res = commit_hori_res();
 
-    if (_session->have_view_data() == false) {
+    if (_data->have_view_data() == false) {
       _session->apply_samplerate();
     }
   }
@@ -939,7 +945,7 @@ double SamplingBar::get_hori_res() {
 double SamplingBar::hori_knob(int dir) {
   double hori_res = -1;
 
-  if (_session->get_device()->get_work_mode() != DSO) {
+  if (_signals->device()->get_work_mode() != DSO) {
     assert(false);
   }
 
@@ -955,7 +961,7 @@ double SamplingBar::hori_knob(int dir) {
     set_sample_count_index(_sample_count->currentIndex() - 1);
     hori_res = commit_hori_res();
 
-    if (_session->have_view_data() == false) {
+    if (_data->have_view_data() == false) {
       _session->apply_samplerate();
       _session->broadcast_async<interface::SampleRateChanged>({});
     }
@@ -964,7 +970,7 @@ double SamplingBar::hori_knob(int dir) {
     set_sample_count_index(_sample_count->currentIndex() + 1);
     hori_res = commit_hori_res();
 
-    if (_session->have_view_data() == false) {
+    if (_data->have_view_data() == false) {
       _session->apply_samplerate();
       _session->broadcast_async<interface::SampleRateChanged>({});
     }
@@ -1108,8 +1114,8 @@ bool SamplingBar::action_run_stop() {
     return false;
   }
 
-  if (_session->is_working()) {
-    return _session->stop_capture();
+  if (_capture->is_working()) {
+    return _capture->stop_capture();
   }
 
   if (_device_agent->have_instance() == false) {
@@ -1123,12 +1129,12 @@ bool SamplingBar::action_run_stop() {
   // DSO mode deprecated). zero_adj() is a no-op stub.
 
   if (_device_agent->get_work_mode() == LOGIC && _view != nullptr) {
-    if (_session->is_realtime_refresh())
+    if (_capture->is_realtime_refresh())
       _view->auto_set_max_scale();
   }
 
   _is_run_as_instant = false;
-  bool ret = _session->start_capture(false);
+  bool ret = _capture->start_capture(false);
 
   return ret;
 }
@@ -1148,8 +1154,8 @@ bool SamplingBar::action_instant_stop() {
     return false;
   }
 
-  if (_session->is_working()) {
-    return _session->stop_capture();
+  if (_capture->is_working()) {
+    return _capture->stop_capture();
   }
 
   if (_device_agent->have_instance() == false) {
@@ -1163,13 +1169,13 @@ bool SamplingBar::action_instant_stop() {
   // DSO mode deprecated). zero_adj() is a no-op stub.
 
   if (_device_agent->get_work_mode() == LOGIC &&
-      _session->is_realtime_refresh()) {
+      _capture->is_realtime_refresh()) {
     if (_view != nullptr)
       _view->auto_set_max_scale();
   }
 
   _is_run_as_instant = true;
-  bool ret = _session->start_capture(true);
+  bool ret = _capture->start_capture(true);
 
   return ret;
 }
@@ -1182,8 +1188,8 @@ void SamplingBar::on_device_selected() {
     pxv_err("Have no selected device.");
     return;
   }
-  _session->stop_capture();
-  _session->session_save();
+  _capture->stop_capture();
+  _capture->session_save();
 
   ds_device_handle devHandle =
       (ds_device_handle)_device_selector->currentData().toULongLong();
@@ -1399,11 +1405,11 @@ void SamplingBar::update_device_list() {
 void SamplingBar::config_device() {}
 
 void SamplingBar::update_view_status() {
-  int bEnable = _session->is_working() == false;
+  int bEnable = _capture->is_working() == false;
   // 设备未打开时用默认值 LOGIC，避免 _dev_handle nullptr 警告
   int mode = LOGIC;
-  if (_session->get_device()->have_instance()) {
-    mode = _session->get_device()->get_work_mode();
+  if (_signals->device()->have_instance()) {
+    mode = _signals->device()->get_work_mode();
   }
 
   _device_type->setEnabled(bEnable);
@@ -1416,25 +1422,25 @@ void SamplingBar::update_view_status() {
     _radio_loop->setVisible(false);
   }
 
-  if (_session->get_device()->is_file()) {
+  if (_signals->device()->is_file()) {
     _sample_rate->setEnabled(false);
     _sample_count->setEnabled(false);
   } else if (mode == DSO) {
     _sample_rate->setEnabled(false);
     _sample_count->setEnabled(bEnable);
 
-    if (_session->is_working() && _session->is_instant() == false) {
+    if (_capture->is_working() && _capture->is_instant() == false) {
       _sample_count->setEnabled(true);
     }
   } else {
     _sample_rate->setEnabled(bEnable);
     _sample_count->setEnabled(bEnable);
 
-    if (mode == LOGIC && _session->get_device()->is_hardware()) {
+    if (mode == LOGIC && _signals->device()->is_hardware()) {
       /* Task 10/Phase 3: OPERATION_MODE config_get returns a string now;
        * use the int helper that converts "Buffer Mode"/"Stream Mode"/
        * "Internal Test" back to LO_OP_*. */
-      int mode_val = _session->get_device()->get_hardware_operation_mode();
+      int mode_val = _signals->device()->get_hardware_operation_mode();
       if (mode_val == LO_OP_INTEST) {
         _sample_rate->setEnabled(false);
         _sample_count->setEnabled(false);
@@ -1481,7 +1487,7 @@ void SamplingBar::update_mode_icon() {
                : IconCache::Instance().icon(iconPath + name);
   };
 
-  if (_session->is_repeat_mode())
+  if (_capture->is_repeat_mode())
     _mode_button->setIcon(getIcon(REPEAT_ACTION_ICON));
   else if (_session->is_loop_mode())
     _mode_button->setIcon(getIcon(LOOP_ACTION_ICON));
@@ -1508,7 +1514,10 @@ void SamplingBar::device_selected() { _mode_button->click(); }
 
 void SamplingBar::set_context(SigSession *session, pv::view::View *view) {
   _session = session;
-  _device_agent = _session->get_device();
+      _signals = _session;
+  _data = _session;
+  _capture = _session;
+  _device_agent = _signals->device();
   _view = view;
   update_device_list();
   update_sample_rate_list();

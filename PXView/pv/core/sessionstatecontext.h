@@ -11,18 +11,19 @@
 
 #include "cursorregistry.h"
 #include "../data/datasource.h"
-#include "../data/mathstack.h"
 #include "../data/sessiondata.h"
 #include "../data/signalmodel.h"
 #include "../data/triggerconfig.h"
 #include "../deviceagent.h"
 #include "../pxvdef.h"
-#include <libsigrok/libsigrok.h>
+#include "isession_coordination.h"
+#include "isession_state.h"
 
 namespace pv {
 
 namespace data {
 class LissajousModel;
+class MathStack;
 class SessionDocument;
 class SpectrumStack;
 class DecoderStack;
@@ -60,8 +61,12 @@ class FilterProcessor;
  * set by SigSession::init() after the managers are constructed, and remain
  * valid for the lifetime of the SessionStateContext (managers are destroyed
  * before _state in the SigSession destructor).
+ *
+ * Spec v2 Task 10: Implements ISessionCoordination to expose cross-manager
+ * coordination methods via an interface, breaking the circular dependency
+ * between SessionStateContext and its 5 managers.
  */
-class SessionStateContext {
+class SessionStateContext : public ISessionState {
 public:
   /// Error status enum (migrated from SigSession::SESSION_ERROR_STATUS so
   /// SessionStateContext does not need to depend on SigSession). SigSession
@@ -86,6 +91,7 @@ public:
   EventBus *event_bus() { return _event_bus; }
 
   // --- Manager back-pointers (injected by SigSession after construction) ---
+  // Manager setters (inject by SigSession after construction)
   void set_capture_manager(CaptureManager *m) { _capture_manager = m; }
   void set_decode_task_manager(DecodeTaskManager *m) {
     _decode_task_manager = m;
@@ -94,8 +100,8 @@ public:
   void set_document_registry(DocumentRegistry *m) { _document_registry = m; }
   void set_filter_processor(FilterProcessor *m) { _filter_processor = m; }
 
-  CaptureManager *capture_manager() { return _capture_manager; }
-  DecodeTaskManager *decode_task_manager() { return _decode_task_manager; }
+  // capture_manager() / decode_task_manager() are ISessionCoordination overrides
+  // (see Spec v3 Task 5 section below)
   DataFeedParser *data_feed_parser() { return _data_feed_parser; }
   DocumentRegistry *document_registry() { return _document_registry; }
   FilterProcessor *filter_processor() { return _filter_processor; }
@@ -111,8 +117,9 @@ public:
   std::vector<std::shared_ptr<data::SpectrumStack>> &spectrum_stacks() {
     return _spectrum_stacks;
   }
-  data::LissajousModel *lissajous_model() { return _lissajous_model; }
-  void set_lissajous_model(data::LissajousModel *m) { _lissajous_model = m; }
+  // Track B2: LissajousModel owned via unique_ptr
+  data::LissajousModel *lissajous_model() const { return _lissajous_model.get(); }
+  void set_lissajous_model(std::unique_ptr<data::LissajousModel> m);
   const std::shared_ptr<data::MathStack> &math_stack() const {
     return _math_stack;
   }
@@ -120,29 +127,24 @@ public:
     _math_stack = std::move(m);
   }
 
-  // --- Time ---
+  // --- Time (getters only; setters are ISessionCoordination overrides) ---
   QDateTime session_time() const { return _session_time; }
-  void set_session_time(QDateTime t) { _session_time = t; }
   QDateTime trig_time() const { return _trig_time; }
-  void set_trig_time(QDateTime t) { _trig_time = t; }
 
-  // --- Bool state ---
-  bool is_triged() const { return _is_triged; }
-  void set_is_triged(bool v) { _is_triged = v; }
-  bool trigger_flag() const { return _trigger_flag; }
-  void set_trigger_flag(bool v) { _trigger_flag = v; }
-  bool hw_replied() const { return _hw_replied; }
-  void set_hw_replied(bool v) { _hw_replied = v; }
-  bool bClose() const { return _bClose; }
-  void set_bClose(bool v) { _bClose = v; }
-  bool is_saving() const { return _is_saving; }
-  void set_saving(bool v) { _is_saving = v; }
+  // --- Bool state (getters only; setters are ISessionCoordination overrides) ---
+  // Track A5: cross-thread bool flags use std::atomic<bool>
+  bool is_triged() const { return _is_triged.load(); }
+  bool trigger_flag() const { return _trigger_flag.load(); }
+  bool hw_replied() const { return _hw_replied.load(); }
+  void set_bClose(bool v) { _bClose.store(v); }
+  bool is_saving() const { return _is_saving.load(); }
+  void set_saving(bool v) { _is_saving.store(v); }
 
   // --- Numeric state ---
-  uint8_t trigger_ch() const { return _trigger_ch; }
-  void set_trigger_ch(uint8_t v) { _trigger_ch = v; }
+  int trigger_ch() const { return _trigger_ch; }
+  void set_trigger_ch(int v) override { _trigger_ch = static_cast<uint8_t>(v); }
   SESSION_ERROR_STATUS error() const { return _error; }
-  void set_error(SESSION_ERROR_STATUS e) { _error = e; }
+  void set_error(int e) override { _error = static_cast<SESSION_ERROR_STATUS>(e); }
   uint64_t error_pattern() const { return _error_pattern; }
   void set_error_pattern(uint64_t v) { _error_pattern = v; }
   uint64_t save_start() const { return _save_start; }
@@ -152,21 +154,20 @@ public:
   int map_zoom() const { return _map_zoom; }
   void set_map_zoom(int v) { _map_zoom = v; }
 
-  // --- Atomic state ---
+  // --- Atomic state (is_working getter only; setter is ISessionCoordination override) ---
   bool is_working() const { return _is_working.load(); }
-  void set_is_working(bool v) { _is_working.store(v); }
   int device_status() const { return _device_status.load(); }
   void set_device_status(int v) { _device_status.store(v); }
 
   // --- Device ---
   DeviceAgent &device_agent() { return _device_agent; }
 
-  // --- Data buffers ---
+  // --- Data buffers (view_data getter/setter; capture_data getter only, setter is ISessionCoordination override) ---
   SessionData *view_data() { return _view_data; }
   void set_view_data(SessionData *d) { _view_data = d; }
   SessionData *capture_data() { return _capture_data; }
-  void set_capture_data(SessionData *d) { _capture_data = d; }
-  std::vector<SessionData *> &data_list() { return _data_list; }
+  // Track B1: _data_list owns SessionData via unique_ptr
+  std::vector<std::unique_ptr<SessionData>> &data_list() { return _data_list; }
   bool is_single_buffer() const { return _view_data == _capture_data; }
 
   // --- Trigger config ---
@@ -183,18 +184,19 @@ public:
   const CursorRegistry &cursor_registry() const { return _cursor_registry; }
 
   // --- EventBus dispatch helpers (migrated from SigSession private methods)---
-  void data_updated();
-  void set_receive_data_len(quint64 len);
-  void receive_header();
+  // Spec v3 Task 5: notification methods are now ISessionCoordination overrides
+  void data_updated() override;
+  void set_receive_data_len(uint64_t len) override;
+  void receive_header() override;
   void cur_snap_samplerate_changed();
-  void frame_began();
+  void frame_began() override;
   void frame_ended();
-  void update_capture();
+  void update_capture() override;
   void repeat_hold(int percent);
-  void receive_trigger(quint64 trigger_pos);
+  void receive_trigger(uint64_t trigger_pos) override;
   void show_wait_trigger();
-  void signals_changed();
-  void session_error();
+  void signals_changed() override;
+  void session_error() override;
   void delay_prop_msg(QString strMsg);
 
   // --- Cross-manager helpers (migrated from SigSession) ---
@@ -206,20 +208,31 @@ public:
   get_decoder_trace(int index, data::SessionDocument *doc = nullptr);
   int get_trace_index_by_key_handel(void *handel,
                                     data::SessionDocument *doc = nullptr);
-  void clear_all_decode_task2();
-  void add_decode_task(std::shared_ptr<data::DecoderStack> stack);
-  void attach_data_to_signal(SessionData *data);
+  // --- State mutation overrides (Spec v3 Task 5) ---
+  void set_trigger_flag(bool v) override { _trigger_flag.store(v); }
+  void set_hw_replied(bool v) override { _hw_replied.store(v); }
+  void set_capture_data(SessionData *d) override { _capture_data = d; }
+  void set_session_time(QDateTime t) override { _session_time = t; }
+  void set_is_working(bool v) override { _is_working.store(v); }
+  void set_is_triged(bool v) override { _is_triged.store(v); }
+  void set_trig_time(QDateTime t) override { _trig_time = t; }
+  bool bClose() const override { return _bClose.load(); }
+
+  // --- ISessionCoordination overrides (Spec v2 Task 10) ---
+  void clear_all_decode_task2() override;
+  void add_decode_task(std::shared_ptr<data::DecoderStack> stack) override;
+  void attach_data_to_signal(SessionData *data) override;
   // Core→libsigrok 触发配置唯一同步点。
   // disable_trigger=true 时（instant 模式）清除 session 上的 sr_trigger，
   // 让所有 driver（demo/pxlogic/fx2lafw）都不等待触发，立即采集数据。
   // 这是统一入口，避免在每个 driver 内部单独判断 instant 标志。
-  void sync_trigger_to_libsigrok(bool disable_trigger = false);
-  void clear_glitch_filter_state_for_capture();
-  uint16_t get_ch_num(int type);
-  uint64_t cur_samplelimits();
-  uint64_t cur_snap_samplerate();
-  void set_cur_snap_samplerate(uint64_t samplerate);
-  void set_cur_samplelimits(uint64_t samplelimits);
+  void sync_trigger_to_libsigrok(bool disable_trigger = false) override;
+  void clear_glitch_filter_state_for_capture() override;
+  uint16_t get_ch_num(int type) override;
+  uint64_t cur_samplelimits() override;
+  uint64_t cur_snap_samplerate() override;
+  void set_cur_snap_samplerate(uint64_t samplerate) override;
+  void set_cur_samplelimits(uint64_t samplelimits) override;
 
   // --- Decode-stack handle id generator (kept on state for centralized
   // access by both SigSession::add_decoder and DecodeTaskManager) ---
@@ -239,13 +252,18 @@ private:
 
   std::vector<std::shared_ptr<data::SignalModel>> _signal_models;
   std::vector<std::shared_ptr<data::SpectrumStack>> _spectrum_stacks;
-  data::LissajousModel *_lissajous_model = nullptr;
+  // Track B2: LissajousModel owned via unique_ptr
+  std::unique_ptr<data::LissajousModel> _lissajous_model;
   std::shared_ptr<data::MathStack> _math_stack = nullptr;
 
   QDateTime _session_time, _trig_time;
 
-  bool _is_triged = false, _trigger_flag = false, _hw_replied = false;
-  bool _bClose = false, _is_saving = false;
+  // Track A5: cross-thread bool flags use std::atomic<bool>
+  std::atomic<bool> _is_triged{false};
+  std::atomic<bool> _trigger_flag{false};
+  std::atomic<bool> _hw_replied{false};
+  std::atomic<bool> _bClose{false};
+  std::atomic<bool> _is_saving{false};
 
   uint8_t _trigger_ch = 0;
   SESSION_ERROR_STATUS _error = No_err;
@@ -260,7 +278,8 @@ private:
 
   SessionData *_view_data = nullptr;
   SessionData *_capture_data = nullptr;
-  std::vector<SessionData *> _data_list;
+  // Track B1: data buffers owned via unique_ptr
+  std::vector<std::unique_ptr<SessionData>> _data_list;
 
   data::TriggerConfig _trigger_config;
 

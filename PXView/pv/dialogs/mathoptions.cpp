@@ -44,7 +44,7 @@ namespace dialogs {
 
 MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
@@ -84,7 +84,7 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     src2_layout->setContentsMargins(5, 15, 5, 5);
     type_layout->setContentsMargins(5, 15, 5, 5);
 
-    for(auto m : _session->get_signal_models()) {
+    for(auto m : _data_src->get_signal_models()) {
         if (m->type() == SR_CHANNEL_DSO) {
             QString index_str = QString::number(m->index());
             QRadioButton *xradio = new QRadioButton(index_str, _src1_group);
@@ -101,7 +101,7 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     _src2_group->setLayout(src2_layout);
 
 
-    auto math = _session->get_math_stack();
+    auto math = _data_src->get_math_stack();
     if (math) {
         // TODO: adapt — MathStack no longer exposes enabled()/src1()/src2();
         // these were UI state owned by view::MathTrace. Default the

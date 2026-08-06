@@ -42,7 +42,7 @@ namespace dialogs {
 
 FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
@@ -69,7 +69,7 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     _dbv_combobox = new DsComboBox(this);
  
     // setup _ch_combobox
-    for(auto m : _session->get_signal_models()) {
+    for(auto m : _data_src->get_signal_models()) {
         if (m->type() == SR_CHANNEL_DSO) {
             _ch_combobox->addItem(QString::fromStdString(m->name()), QVariant::fromValue(m->index()));
         }
@@ -157,7 +157,7 @@ FftOptions::FftOptions(QWidget *parent, SigSession *session) :
     }
 
     // load current settings
-    for(auto stack : _session->get_spectrum_stacks()) {
+    for(auto stack : _data_src->get_spectrum_stacks()) {
         // TODO: adapt — SpectrumStack no longer carries the enabled UI flag;
         // assume the first stack is the active one. The view_mode and
         // dbv_range UI state were owned by view::SpectrumTrace and are no
@@ -245,7 +245,7 @@ void FftOptions::accept()
 
     QDialog::accept();
 
-   for(auto stack : _session->get_spectrum_stacks()) {
+   for(auto stack : _data_src->get_spectrum_stacks()) {
         if (stack->get_index() == _ch_combobox->currentData().toInt()) {
             stack->set_dc_ignore(_dc_checkbox->isChecked());
             stack->set_sample_num(_len_combobox->currentData().toULongLong());
@@ -256,7 +256,7 @@ void FftOptions::accept()
             // (void)_view_combobox->currentData().toUInt();
             // (void)_dbv_combobox->currentData().toInt();
 
-            if (_session->is_stopped_status() && _en_checkbox->isChecked()){
+            if (_data_src->is_stopped_status() && _en_checkbox->isChecked()){
                 stack->calc_fft();
             }
             break;

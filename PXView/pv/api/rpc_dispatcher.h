@@ -12,7 +12,7 @@ public:
 
     JsonRpcResponse handle_request(const JsonRpcRequest& req) override;
 
-    // MCP tool schema definitions
+    // MCP tool schema definitions — 61 tool schemas in tool_schemas.inc
     static nlohmann::json get_tool_schemas();
 
 private:
@@ -86,6 +86,7 @@ private:
     JsonRpcResponse on_get_analyzer_options(int id, const nlohmann::json& params);
     JsonRpcResponse on_export_raw_data_csv(int id, const nlohmann::json& params);
     JsonRpcResponse on_export_raw_data_binary(int id, const nlohmann::json& params);
+    JsonRpcResponse on_export_raw_data(int id, const nlohmann::json& params);
     JsonRpcResponse on_export_data_table_csv(int id, const nlohmann::json& params);
     JsonRpcResponse on_get_capture_status(int id, const nlohmann::json& params);
     JsonRpcResponse on_get_channels(int id, const nlohmann::json& params);

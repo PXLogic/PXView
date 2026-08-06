@@ -42,7 +42,7 @@ namespace dialogs {
 
 ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::DecoderModel *decoder_model) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _decoder_model(decoder_model),
     _button_box(QDialogButtonBox::Ok,
         Qt::Horizontal, this)
@@ -50,7 +50,7 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
     _map_zoom_combobox = new DsComboBox(this);
     _map_zoom_combobox->addItem(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_FIT_TO_WINDOW), "Fit to Window"));
     _map_zoom_combobox->addItem(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_FIXED), "Fixed"));
-    int cur_map_zoom = _session->get_map_zoom();
+    int cur_map_zoom = _data_src->get_map_zoom();
 
     if (cur_map_zoom >= _map_zoom_combobox->count())
         _map_zoom_combobox->setCurrentIndex(0);
@@ -60,7 +60,7 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
     connect(_map_zoom_combobox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ProtocolList::on_set_map_zoom);
 
     _protocol_combobox = new DsComboBox(this);
-    auto &decode_sigs = _session->get_decoder_stacks();
+    auto &decode_sigs = _data_src->get_decoder_stacks();
     int index = 0;
 
     for(auto d : decode_sigs) {
@@ -132,7 +132,7 @@ void ProtocolList::set_protocol(int index)
     _show_label_list.clear();
 
     pv::data::DecoderStack *decoder_stack = nullptr;
-    const auto &decode_sigs = _session->get_decoder_stacks();
+    const auto &decode_sigs = _data_src->get_decoder_stacks();
     int cur_index = 0;
 
     for(auto d : decode_sigs) {
@@ -174,7 +174,7 @@ void ProtocolList::on_row_check(bool show)
     int index = id.toInt();
 
     pv::data::DecoderStack *decoder_stack = nullptr;
-    const auto &decode_sigs = _session->get_decoder_stacks();
+    const auto &decode_sigs = _data_src->get_decoder_stacks();
     int cur_index = 0;
 
     for(auto d : decode_sigs) {

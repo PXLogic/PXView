@@ -32,6 +32,7 @@
 #include <cstdint>
 #include "selectableitem.h"
 #include "dsldial.h"
+#include "trace_visitor.h"
 
 class QFormLayout;
 
@@ -40,6 +41,13 @@ namespace view {
 
 class View;
 class Viewport;
+class LogicSignal;
+class DsoSignal;
+class AnalogSignal;
+class DecodeTrace;
+class SpectrumTrace;
+class MathTrace;
+class LissajousTrace;
 
 //base class
 class Trace : public SelectableItem
@@ -285,6 +293,37 @@ public:
      * @return Returns the rectangle of the signal label.
      */
     QRectF get_rect(const char *s, int y, int right);
+
+    /**
+     * Safe narrow-cast methods — return this if the trace is of the
+     * requested type, nullptr otherwise. Eliminates all dynamic_cast/
+     * static_cast in consumer code.
+     */
+    virtual LogicSignal* as_logic() { return nullptr; }
+    virtual DsoSignal* as_dso() { return nullptr; }
+    virtual AnalogSignal* as_analog() { return nullptr; }
+    virtual DecodeTrace* as_decode() { return nullptr; }
+    virtual SpectrumTrace* as_spectrum() { return nullptr; }
+    virtual MathTrace* as_math() { return nullptr; }
+    virtual LissajousTrace* as_lissajous() { return nullptr; }
+
+    /**
+     * Const variants for read-only contexts.
+     */
+    virtual const LogicSignal* as_logic() const { return nullptr; }
+    virtual const DsoSignal* as_dso() const { return nullptr; }
+    virtual const AnalogSignal* as_analog() const { return nullptr; }
+    virtual const DecodeTrace* as_decode() const { return nullptr; }
+    virtual const SpectrumTrace* as_spectrum() const { return nullptr; }
+    virtual const MathTrace* as_math() const { return nullptr; }
+    virtual const LissajousTrace* as_lissajous() const { return nullptr; }
+
+    /**
+     * Visitor accept for multi-type dispatch.
+     * Default implementation does nothing (base Trace is abstract).
+     */
+    virtual void accept(TraceVisitor&) {}
+    virtual void accept(ConstTraceVisitor&) const {}
 
     virtual int rows_size();
 

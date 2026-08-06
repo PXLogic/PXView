@@ -4,13 +4,19 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <cstdint>
 
-// GlitchFilterMode is a global unscoped enum defined here; cannot be
-// forward-declared without a fixed underlying type.
-#include "../data/logicsnapshot.h"
+// Spec v2 Task 4/5: GlitchFilterMode is now an enum class with fixed
+// underlying type (int), so it can be forward-declared here without
+// including the heavy logicsnapshot.h header.
+enum class GlitchFilterMode : int;
+
+#include "isession_coordination.h"
+#include "isession_state.h"
+#include "isession_state.h"
 
 namespace pv {
 
@@ -32,7 +38,7 @@ class SessionStateContext;
  */
 class FilterProcessor {
 public:
-  FilterProcessor(EventBus *bus, SessionStateContext *state);
+  FilterProcessor(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~FilterProcessor();
 
   // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
@@ -54,10 +60,8 @@ private:
   void signal_invert_task(const std::vector<bool> channels);
 
   EventBus *_event_bus;
-  // Shared session state (view_data / device_agent / data_updated())
-  // accessed via SessionStateContext accessors. modernize-core-layer-radical
-  // phase 1 replaced the previous SigSession* + friend-declaration coupling.
-  SessionStateContext *_state;
+  ISessionState *_state;
+  ISessionCoordination *_coord;
 
   // modernize-core-layer-final Task 5: RAII-managed background threads.
   // unique_ptr replaces raw std::thread* + manual new/delete. The destructor
@@ -66,9 +70,12 @@ private:
   std::unique_ptr<std::thread> _glitch_filter_thread;
   std::atomic<bool> _glitch_filter_running;
   // 架构修复：滤波运行中排队最近一次请求，不再静默丢弃
-  bool _has_pending_glitch = false;
+  // Track A4: pending data protected by _pending_mutex; _has_pending_glitch
+  // uses std::atomic<bool> as a fast flag, but map data still needs mutex.
+  std::atomic<bool> _has_pending_glitch{false};
   std::map<int, uint32_t> _pending_glitch_thresholds;
   std::map<int, GlitchFilterMode> _pending_glitch_modes;
+  std::mutex _pending_mutex;
   std::unique_ptr<std::thread> _signal_invert_thread;
   std::atomic<bool> _signal_invert_running;
 };

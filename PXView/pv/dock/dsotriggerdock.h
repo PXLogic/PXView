@@ -42,6 +42,7 @@
 namespace pv {
 
 class SigSession;
+namespace data { class ISignalSource; }
 
 namespace dock {
 
@@ -90,6 +91,7 @@ private slots:
 
 private:
     SigSession *_session;
+    data::ISignalSource *_signals = nullptr;
 
     QWidget *_widget;
 

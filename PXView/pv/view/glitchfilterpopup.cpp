@@ -498,7 +498,7 @@ void GlitchFilterPopup::open_for_signal(LogicSignal* sig, const QPoint& anchor_p
     // 架构修复：也检查 thresholds 非空但 active=false 的情况
     // （从 .pxl 文件恢复配置后 active=false 但 thresholds 已恢复）
     uint32_t initial_threshold = _recommended_threshold;
-    GlitchFilterMode initial_mode = GLITCH_FILTER_BOTH;
+    GlitchFilterMode initial_mode = GlitchFilterMode::Both;
     auto &sess = _view.session();
     const auto &saved_th = sess.glitch_filter_thresholds();
     const auto &saved_md = sess.glitch_filter_modes();
@@ -607,7 +607,7 @@ void GlitchFilterPopup::open_for_batch(const std::vector<LogicSignal*>& sigs, co
     // 一致,则恢复该共同值;否则回退到推荐阈值 + BOTH 模式(避免误用某通道值)。
     // 架构修复：也检查 thresholds 非空但 active=false（从 .pxl 恢复配置）
     uint32_t initial_threshold = _recommended_threshold;
-    GlitchFilterMode initial_mode = GLITCH_FILTER_BOTH;
+    GlitchFilterMode initial_mode = GlitchFilterMode::Both;
     auto &sess = _view.session();
     const auto &th = sess.glitch_filter_thresholds();
     const auto &md = sess.glitch_filter_modes();
@@ -619,14 +619,14 @@ void GlitchFilterPopup::open_for_batch(const std::vector<LogicSignal*>& sigs, co
         bool first = true;
         bool consistent = true;
         uint32_t common_th = 0;
-        GlitchFilterMode common_md = GLITCH_FILTER_BOTH;
+        GlitchFilterMode common_md = GlitchFilterMode::Both;
         for (auto *s : sigs) {
             int ch_idx = s->model() ? s->model()->index() : -1;
             if (ch_idx < 0) continue;
             auto tit = th.find(ch_idx);
             auto mit = md.find(ch_idx);
             uint32_t t = (tit != th.end()) ? tit->second : 0;
-            GlitchFilterMode m = (mit != md.end()) ? mit->second : GLITCH_FILTER_BOTH;
+            GlitchFilterMode m = (mit != md.end()) ? mit->second : GlitchFilterMode::Both;
             if (first) {
                 first = false;
                 // clamp 到滑块范围

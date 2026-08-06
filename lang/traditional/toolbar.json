@@ -114,7 +114,7 @@
     {
         "id": "IDS_TOOLBAR_DISPLAY_LISSAJOUS",
         "text": "李薩如圖"
-    },  
+    },
     {
         "id": "IDS_TOOLBAR_DISPLAY_THEMES_DARK",
         "text": "暗黑"
@@ -122,7 +122,7 @@
     {
         "id": "IDS_TOOLBAR_DISPLAY_THEMES_LIGHT",
         "text": "清新"
-    },   
+    },
     {
         "id": "IDS_TOOLBAR_DISPLAY_OPTIONS",
         "text": "選項"
@@ -226,5 +226,9 @@
     {
         "id": "IDS_TOOLBAR_CAPTURE_MODE_ROW",
         "text": "擷取模式"
+    },
+    {
+        "id": "IDS_TOOLBAR_TIMEBASE",
+        "text": "時基"
     }
 ]

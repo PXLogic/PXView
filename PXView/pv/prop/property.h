@@ -77,8 +77,9 @@ public:
 	virtual bool labeled_widget();
 
     virtual GVariant* get_value();
+    virtual void set_value(GVariant *value) { (void)value; }
 
-	virtual void commit() = 0;
+    virtual void commit() = 0;
 
 signals:
     void committed();

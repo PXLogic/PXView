@@ -462,11 +462,11 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                                  : (int)mark_end;
 
           if (_view) {
-            for (auto s : _view->get_own_signals()) {
-              int binded_index = dec->binded_probe_index(probe);
+for (auto &s : _view->get_own_signals()) {
+int binded_index = dec->binded_probe_index(probe);
               if ((s->get_index() == binded_index) &&
                   s->signal_type() == SR_CHANNEL_LOGIC) {
-                view::LogicSignal *logicSig = (view::LogicSignal *)s;
+                view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
                 logicSig->paint_mark(p, start, mark_end_int, type / 100);
                 break;
               }

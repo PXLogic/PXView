@@ -47,6 +47,12 @@ public:
         DSO_VDIAL,
     };
 
+    // Safe narrow-cast: this is a MathTrace.
+    MathTrace* as_math() override { return this; }
+    const MathTrace* as_math() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
 public:
     MathTrace(bool enable, std::shared_ptr<pv::data::MathStack> math_stack,
               view::DsoSignal *dsoSig1,

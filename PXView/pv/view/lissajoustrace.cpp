@@ -130,8 +130,8 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
         if (sample_count == 0)
             return;
 
-        QPointF *points = new QPointF[sample_count];
-        QPointF *point = points;
+        std::vector<QPointF> points(sample_count);
+        QPointF *point = points.data();
 
         if (_xIndex >= channel_num || _yIndex >= channel_num) {
             p.setPen(view::View::Red);
@@ -152,9 +152,8 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
             }
 
             p.setPen(view::View::Blue);
-            p.drawPolyline(points, point - points);
+            p.drawPolyline(points.data(), static_cast<int>(point - points.data()));
         }
-        delete[] points;
     }
 }
 

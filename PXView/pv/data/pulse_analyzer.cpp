@@ -166,15 +166,15 @@ std::vector<PulseAnalyzer::Pulse> PulseAnalyzer::preview_filter(
 
         bool match = false;
         switch (mode) {
-        case GLITCH_FILTER_BOTH:
+        case GlitchFilterMode::Both:
             // 不区分基准电平,所有窄脉冲均滤除
             match = true;
             break;
-        case GLITCH_FILTER_HIGH:
+        case GlitchFilterMode::High:
             // 高基准上的低毛刺:脉冲电平为低(false)
             match = (p.level == false);
             break;
-        case GLITCH_FILTER_LOW:
+        case GlitchFilterMode::Low:
             // 低基准上的高毛刺:脉冲电平为高(true)
             match = (p.level == true);
             break;

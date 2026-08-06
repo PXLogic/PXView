@@ -78,11 +78,11 @@ namespace dock {
 const int TriggerDock::MinTrigPosition = 1;
 
 TriggerDock::TriggerDock(QWidget *parent, SigSession *session)
-    : pv::widgets::SmoothScrollArea(parent), _session(session),
+    : pv::widgets::SmoothScrollArea(parent), _session(session), _signals(session), _capture(session),
       _context(nullptr) {
   _cur_ch_num = 16;
-  if (_session->get_device()->have_instance()) {
-    _session->get_device()->get_config_int16(SR_CONF_TOTAL_CH_NUM, _cur_ch_num);
+  if (_signals->device()->have_instance()) {
+    _signals->device()->get_config_int16(SR_CONF_TOTAL_CH_NUM, _cur_ch_num);
   }
 
   _serial_hex_label = nullptr;
@@ -244,9 +244,9 @@ void TriggerDock::simple_trigger() {
 }
 
 void TriggerDock::adv_trigger() {
-  if (_session->get_device()->is_hardware_logic()) {
+  if (_signals->device()->is_hardware_logic()) {
     // SR_CONF_STREAM fork key deleted — use DeviceAgent typed wrapper.
-    bool stream = _session->get_device()->is_stream_mode();
+    bool stream = _signals->device()->is_stream_mode();
 
     if (stream) {
       QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STREAM_NO_AD_TRIGGER),
@@ -256,7 +256,7 @@ void TriggerDock::adv_trigger() {
     } else {
       widget_enable(0);
     }
-  } else if (_session->get_device()->is_file() == false) {
+  } else if (_signals->device()->is_file() == false) {
     QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_AD_TRIGGER_NEED_HARDWARE),
                        "Advanced Trigger need DSLogic Hardware Support!"));
     MsgBox::Show(strMsg);
@@ -306,12 +306,12 @@ void TriggerDock::device_updated() {
   // position-fixed (maxRange = 1).
   bool stream = false;
   uint8_t maxRange;
-  int mode = _session->get_device()->get_work_mode();
+  int mode = _signals->device()->get_work_mode();
   int ch_num;
 
   if (mode == LOGIC) {
     // SR_CONF_STREAM deleted — use DeviceAgent::is_stream_mode() instead.
-    stream = _session->get_device()->is_stream_mode();
+    stream = _signals->device()->is_stream_mode();
 
     _adv_radioButton->setEnabled(!stream);
     _position_spinBox->setEnabled(!stream);
@@ -328,13 +328,13 @@ void TriggerDock::device_updated() {
     _position_spinBox->setRange(MinTrigPosition, maxRange);
     _position_slider->setRange(MinTrigPosition, maxRange);
 
-    if (_session->get_device()->is_virtual() || stream) {
+    if (_signals->device()->is_virtual() || stream) {
       _simple_radioButton->setChecked(true);
       simple_trigger();
     }
   }
 
-  bool ret = _session->get_device()->get_config_int16(SR_CONF_TOTAL_CH_NUM, ch_num);
+  bool ret = _signals->device()->get_config_int16(SR_CONF_TOTAL_CH_NUM, ch_num);
   if (ret) {
     if (ch_num != _cur_ch_num) {
       _cur_ch_num = ch_num;
@@ -499,7 +499,7 @@ void TriggerDock::update_view() {}
 QJsonObject TriggerDock::get_session() {
   // Task 8.5: serialize from Core TriggerConfig (the canonical state) instead
   // of reading UI controls directly. Original JSON key names are preserved.
-  const auto &cfg = _session->trigger_config();
+  const auto &cfg = _signals->trigger_config();
   QJsonObject trigSes;
   trigSes["advTriggerMode"] = cfg.adv_enabled();
   trigSes["triggerPos"] = cfg.trigger_pos();
@@ -682,7 +682,7 @@ void TriggerDock::refresh_ui_from_core() {
   // Task 6: 纯 UI 刷新——从 Core TriggerConfig 重新填充所有触发控件。
   // View 层不再解析 .pxc trigger 段 JSON；反序列化由 Core from_json 完成，
   // 本方法只负责把 Core 状态映射到 QWidget 控件。
-  const auto &tcfg = _session->trigger_config();
+  const auto &tcfg = _signals->trigger_config();
   _position_slider->setValue(tcfg.trigger_pos());
   stages_comboBox->setCurrentIndex(tcfg.stage_count() - 1);
   _adv_tabWidget->setCurrentIndex(tcfg.adv_tab_index());
@@ -1271,8 +1271,8 @@ void TriggerDock::try_commit_trigger() {
   AppConfig &app = AppConfig::Instance();
   int num = 0;
 
-  int mode = _session->get_device()->get_work_mode();
-  bool bInstant = _session->is_instant();
+  int mode = _signals->device()->get_work_mode();
+  bool bInstant = _capture->is_instant();
 
   // ds_trigger_reset() removed: sync_trigger_to_libsigrok() in start_capture
   // is now the single sync point that resets + pushes _trigger_config to
@@ -1287,15 +1287,15 @@ void TriggerDock::try_commit_trigger() {
 
     if (has_view) {
       auto &sigs = _context->view()->get_own_signals();
-      for (auto s : sigs) {
+      for (auto &s : sigs) {
         if (s->signal_type() == SR_CHANNEL_LOGIC) {
-          view::LogicSignal *logicSig = (view::LogicSignal *)s;
+          view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
           if (logicSig->commit_trig())
             num++;
         }
       }
     } else {
-      auto &sigs = _session->get_signal_models();
+      auto &sigs = _signals->get_signal_models();
       for (auto s : sigs) {
         if (s->type() == SR_CHANNEL_LOGIC) {
           if (s->commit_trig())
@@ -1328,15 +1328,15 @@ void TriggerDock::try_commit_trigger() {
       if (msg.mBox()->clickedButton() == cancelButton) {
         if (has_view) {
           auto &sigs = _context->view()->get_own_signals();
-          for (auto s : sigs) {
+          for (auto &s : sigs) {
             if (s->signal_type() == SR_CHANNEL_LOGIC) {
-              view::LogicSignal *logicSig = (view::LogicSignal *)s;
+              view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
               logicSig->set_trig(view::LogicSignal::NONTRIG);
               logicSig->commit_trig();
             }
           }
         } else {
-          auto &sigs = _session->get_signal_models();
+          auto &sigs = _signals->get_signal_models();
           for (auto s : sigs) {
             if (s->type() == SR_CHANNEL_LOGIC) {
               s->set_trig_type(data::SignalModel::NONTRIG);
@@ -1464,6 +1464,8 @@ void TriggerDock::bind_context(TabContext *ctx) {
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+      _signals = _session;
+  _capture = _session;
   if (ctx && ctx->view()) {
     auto &saved = ctx->view()->dock_ui_state().dock_trigger_session;
     if (!saved.isEmpty()) {

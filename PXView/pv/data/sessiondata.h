@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "analogsnapshot.h"
@@ -52,13 +53,30 @@ namespace pv {
 class SessionData {
 public:
   SessionData();
-  data::LogicSnapshot *get_logic() { return &logic; }
-  data::AnalogSnapshot *get_analog() { return &analog; }
-  data::DsoSnapshot *get_dso() { return &dso; }
+  // Raw pointer getters (pure read — no side effects).
+  // Samplerate is injected at construction time in clear(), not on every
+  // access. This eliminates the W1 window (clear → set_cur_snap_samplerate
+  // gap) where snapshots temporarily had _samplerate=0.
+  data::LogicSnapshot *get_logic() { return _logic.get(); }
+  data::AnalogSnapshot *get_analog() { return _analog.get(); }
+  data::DsoSnapshot *get_dso() { return _dso.get(); }
+
+  // Shared_ptr getters — for zero-copy ownership sharing with SessionDocument.
+  // The caller (copy_data_to_document) copies the shared_ptr, incrementing the
+  // ref count. When SessionData::clear() resets its shared_ptr, the underlying
+  // snapshot stays alive because SessionDocument still holds a reference.
+  std::shared_ptr<data::LogicSnapshot> logic_shared() { return _logic; }
+  std::shared_ptr<data::AnalogSnapshot> analog_shared() { return _analog; }
+  std::shared_ptr<data::DsoSnapshot> dso_shared() { return _dso; }
+
+  /// Reset to fresh snapshot instances, injecting the current samplerate
+  /// at construction time. This prevents the _samplerate=0 window that
+  /// caused analog/DSO flat-line waveforms.
   void clear();
 
   uint64_t _cur_snap_samplerate, _cur_samplelimits, _trig_pos;
-  data::LogicSnapshot *_logic_backup;
+  // Track B3: _logic_backup owned via unique_ptr (was raw pointer)
+  std::unique_ptr<data::LogicSnapshot> _logic_backup;
   bool _glitch_filter_active, _signal_invert_active;
   bool _glitch_filter_auto_apply = false;  // 采集后自动重新应用滤波
   bool _show_glitch_filter_overlay = true; // 显示波形轨道红色滤波提示叠加层
@@ -68,9 +86,12 @@ public:
   std::vector<bool> _signal_invert_channels;
 
 private:
-  data::LogicSnapshot logic;
-  data::AnalogSnapshot analog;
-  data::DsoSnapshot dso;
+  // shared_ptr enables zero-copy ownership sharing with SessionDocument.
+  // clear() resets these to fresh instances; if SessionDocument also holds
+  // a shared_ptr to the old snapshot, the old data stays alive (ref count > 0).
+  std::shared_ptr<data::LogicSnapshot> _logic;
+  std::shared_ptr<data::AnalogSnapshot> _analog;
+  std::shared_ptr<data::DsoSnapshot> _dso;
 };
 
 } // namespace pv

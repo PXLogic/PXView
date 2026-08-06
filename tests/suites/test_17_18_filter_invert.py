@@ -1,0 +1,91 @@
+"""
+test_17_18_filter_invert.py - Glitch filter and signal invert tests.
+"""
+
+import pytest
+
+from mcp_client import McpClient, McpError
+from helpers.capture_helper import do_timed_capture
+
+pytestmark = pytest.mark.p1
+
+
+class TestGlitchFilter:
+
+    def test_set_glitch_filter(self, mcp: McpClient, device_id: str,
+                               cleanup_after_test):
+        """set_glitch_filter enables filter on channels."""
+        mcp.connect_device(device_id)
+        mcp.set_glitch_filter(channels=[0], threshold=10)
+
+    def test_get_glitch_filter_config(self, mcp: McpClient, device_id: str,
+                                      cleanup_after_test):
+        """get_glitch_filter_config returns config."""
+        mcp.connect_device(device_id)
+        config = mcp.get_glitch_filter_config()
+        assert isinstance(config, dict)
+
+    def test_clear_glitch_filter(self, mcp: McpClient, device_id: str,
+                                 cleanup_after_test):
+        """clear_glitch_filter removes filter."""
+        mcp.connect_device(device_id)
+        mcp.set_glitch_filter(channels=[0], threshold=10)
+        mcp.clear_glitch_filter()
+
+    def test_glitch_filter_per_channel(self, mcp: McpClient, device_id: str,
+                                       cleanup_after_test):
+        """Per-channel thresholds and modes."""
+        mcp.connect_device(device_id)
+        mcp.set_glitch_filter(channels=[0, 1],
+                              thresholds=[5, 10],
+                              modes=[0, 1])
+
+    def test_glitch_filter_with_capture(self, mcp: McpClient, device_id: str,
+                                        cleanup_after_test):
+        """Glitch filter doesn't break capture."""
+        mcp.connect_device(device_id)
+        mcp.set_glitch_filter(channels=[0], threshold=5)
+        status = do_timed_capture(mcp, device_id, channels=[0],
+                                  sample_rate=1000000, duration_seconds=0.3)
+        assert status["state"] in ("completed", "idle")
+        mcp.clear_glitch_filter()
+
+
+class TestSignalInvert:
+
+    def test_set_signal_invert(self, mcp: McpClient, device_id: str,
+                               cleanup_after_test):
+        """set_signal_invert inverts channels."""
+        mcp.connect_device(device_id)
+        mcp.set_signal_invert(channels=[0])
+
+    def test_get_signal_invert_config(self, mcp: McpClient, device_id: str,
+                                      cleanup_after_test):
+        """get_signal_invert_config returns config."""
+        mcp.connect_device(device_id)
+        config = mcp.get_signal_invert_config()
+        assert isinstance(config, dict)
+
+    def test_clear_signal_invert(self, mcp: McpClient, device_id: str,
+                                 cleanup_after_test):
+        """clear_signal_invert removes inversion."""
+        mcp.connect_device(device_id)
+        mcp.set_signal_invert(channels=[0])
+        mcp.clear_signal_invert()
+
+    def test_signal_invert_multi_channel(self, mcp: McpClient, device_id: str,
+                                         cleanup_after_test):
+        """Signal invert on multiple channels."""
+        mcp.connect_device(device_id)
+        mcp.set_signal_invert(channels=[0, 1, 2])
+        mcp.clear_signal_invert()
+
+    def test_signal_invert_with_capture(self, mcp: McpClient, device_id: str,
+                                        cleanup_after_test):
+        """Signal invert doesn't break capture."""
+        mcp.connect_device(device_id)
+        mcp.set_signal_invert(channels=[0])
+        status = do_timed_capture(mcp, device_id, channels=[0],
+                                  sample_rate=1000000, duration_seconds=0.3)
+        assert status["state"] in ("completed", "idle")
+        mcp.clear_signal_invert()

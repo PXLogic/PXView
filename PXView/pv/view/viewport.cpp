@@ -291,6 +291,14 @@ void Viewport::keyPressEvent(QKeyEvent *event) {
   _interaction->keyPressEvent(event);
 }
 
+void Viewport::forward_keyPressEvent(QKeyEvent *event) {
+  QWidget::keyPressEvent(event);
+}
+
+bool Viewport::forward_event(QEvent *event) {
+  return QWidget::event(event);
+}
+
 bool Viewport::gestureEvent(QNativeGestureEvent *event) {
   return _interaction->gestureEvent(event);
 }
@@ -439,9 +447,9 @@ void Viewport::measure() {
   if (_type == TIME_VIEW) {
     const uint64_t sample_rate = _view.session().cur_snap_samplerate();
 
-    for (auto s : _view.get_own_signals()) {
+    for (auto &s : _view.get_own_signals()) {
       if (s->signal_type() == SR_CHANNEL_LOGIC) {
-        view::LogicSignal *logicSig = (view::LogicSignal *)s;
+        view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
 
         if (_action_type == NO_ACTION) {
           if (logicSig->measure(_mouse_point, _cur_sample, _nxt_sample,
@@ -512,7 +520,7 @@ void Viewport::measure() {
           }
         }
       } else if (s->signal_type() == SR_CHANNEL_DSO) {
-        view::DsoSignal *dsoSig = (view::DsoSignal *)s;
+        view::DsoSignal *dsoSig = (view::DsoSignal *)s.get();
         if (s->enabled()) {
           if (_measure_en && dsoSig->measure(_view.hover_point())) {
             _measure_type = DSO_VALUE;
@@ -521,7 +529,7 @@ void Viewport::measure() {
           }
         }
       } else if (s->signal_type() == SR_CHANNEL_ANALOG) {
-        view::AnalogSignal *analogSig = (view::AnalogSignal *)s;
+        view::AnalogSignal *analogSig = (view::AnalogSignal *)s.get();
         if (s->enabled()) {
           if (_measure_en && analogSig->measure(_view.hover_point())) {
             _measure_type = DSO_VALUE;
@@ -540,7 +548,7 @@ void Viewport::measure() {
       }
     }
   } else if (_type == FFT_VIEW) {
-    for (auto t : _view.get_own_spectrum_traces()) {
+    for (auto &t : _view.get_own_spectrum_traces()) {
       if (t->enabled()) {
         t->measure(_mouse_point);
       }

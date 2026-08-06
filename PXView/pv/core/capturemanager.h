@@ -12,6 +12,9 @@
 #include "../data/sessiondata.h"
 #include "../dstimer.h"
 #include "../pxvdef.h" // DEVICE_COLLECT_MODE / DEVICE_STATUS_TYPE
+#include "isession_coordination.h"
+#include "isession_state.h"
+#include "isession_state.h"
 
 namespace pv {
 
@@ -52,7 +55,7 @@ public:
   static constexpr int FeedInterval = 50;
   static constexpr int WaitShowTime = 500;
 
-  CaptureManager(EventBus *bus, SessionStateContext *state);
+  CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~CaptureManager();
 
   // --- Capture lifecycle ---
@@ -75,27 +78,27 @@ public:
   // derivation replaces them. Always returns true; triggered/progress convey
   // the state (used by the sidebar arc text and MCP get_capture_status).
   bool get_capture_status(bool &triggered, int &progress);
-  int get_repeat_hold();
+  int get_repeat_hold() const;
   bool is_first_store_confirm();
-  bool is_realtime_refresh();
+  bool is_realtime_refresh() const;
   bool have_new_realtime_refresh(bool keep);
-  bool is_repeating();
-  bool is_single_mode();
-  bool is_repeat_mode();
-  bool is_loop_mode();
-  int get_collect_mode();
+  bool is_repeating() const;
+  bool is_single_mode() const;
+  bool is_repeat_mode() const;
+  bool is_loop_mode() const;
+  int get_collect_mode() const;
   void set_collect_mode(DEVICE_COLLECT_MODE m);
 
-  inline bool is_instant() { return _is_instant; }
-  inline void set_is_instant(bool v) { _is_instant = v; }
-  inline bool is_stream_mode() { return _is_stream_mode; }
-  inline void set_is_stream_mode(bool v) { _is_stream_mode = v; }
-  inline bool is_action() { return _is_action; }
-  inline double get_repeat_intvl() { return _repeat_intvl; }
-  inline void set_repeat_intvl(double interval) { _repeat_intvl = interval; }
-  inline void set_repeat_hold_prg(int v) { _repeat_hold_prg = v; }
-  inline void set_repeat_wait_prog_step(int v) { _repeat_wait_prog_step = v; }
-  inline int capture_times() const { return _capture_times; }
+  inline bool is_instant() const { return _is_instant.load(); }
+  inline void set_is_instant(bool v) { _is_instant.store(v); }
+  inline bool is_stream_mode() const { return _is_stream_mode.load(); }
+  inline void set_is_stream_mode(bool v) { _is_stream_mode.store(v); }
+  inline bool is_action() const { return _is_action.load(); }
+  inline double get_repeat_intvl() const { return _repeat_intvl.load(); }
+  inline void set_repeat_intvl(double interval) { _repeat_intvl.store(interval); }
+  inline void set_repeat_hold_prg(int v) { _repeat_hold_prg.store(v); }
+  inline void set_repeat_wait_prog_step(int v) { _repeat_wait_prog_step.store(v); }
+  inline int capture_times() const { return _capture_times.load(); }
   // DsTimer Start/Stop are non-const, so expose typed wrapper methods
   // instead of leaking mutable refs to the timer sub-objects.
   inline void start_repeat_timer(int ms) { _repeat_timer.Start(ms); }
@@ -105,19 +108,19 @@ public:
   inline void stop_trig_check_timer() { _trig_check_timer.Stop(); }
 
   inline void clear_store_confirm_flag() {
-    _confirm_store_time_id = _work_time_id;
+    _confirm_store_time_id.store(_work_time_id.load());
   }
 
   // --- Data lock state (migrated from SigSession) ---
-  inline bool is_data_lock() { return _data_lock; }
-  inline void data_lock() { _data_lock = true; }
-  inline void data_unlock() { _data_lock = false; }
+  inline bool is_data_lock() const { return _data_lock.load(); }
+  inline void data_lock() { _data_lock.store(true); }
+  inline void data_unlock() { _data_lock.store(false); }
   void data_auto_lock(int lock);
   void data_auto_unlock();
-  bool get_data_auto_lock();
+  bool get_data_auto_lock() const;
 
-  inline void set_data_updated(bool v) { _data_updated = v; }
-  inline uint64_t dso_packet_count() const { return _dso_packet_count; }
+  inline void set_data_updated(bool v) { _data_updated.store(v); }
+  inline uint64_t dso_packet_count() const { return _dso_packet_count.load(); }
   inline void inc_dso_packet_count() { ++_dso_packet_count; }
 
   // --- Decode result clearing (tightly coupled with capture start) ---
@@ -142,17 +145,10 @@ public:
 
 private:
   EventBus *_event_bus;
-  // Shared session state (device_agent / capture_data / view_data /
-  // signal_models / document_registry / is_working / device_status /
-  // is_triged / trigger_flag / bClose / data_mutex / decode_traces() /
-  // attach_data_to_signal() / sync_trigger_to_libsigrok() /
-  // clear_all_decode_task2() / add_decode_task() / set_cur_snap_samplerate() /
-  // set_cur_samplelimits() / set_session_time() / update_capture() /
-  // repeat_hold() / clear_glitch_filter_state_for_capture() / get_ch_num() /
-  // cur_samplelimits()) is accessed via SessionStateContext accessors.
-  // modernize-core-layer-radical phase 1 broke the SigSession circular
-  // dependency.
-  SessionStateContext *_state;
+  // Shared session state accessed via SessionStateContext accessors.
+  ISessionState *_state;
+  // Cross-manager coordination accessed via interface (Spec v3 Task 5)
+  ISessionCoordination *_coord;
 
   data::DiskCacheConfig _disk_cache_config;
 
@@ -163,25 +159,25 @@ private:
   DsTimer _refresh_rt_timer;
   DsTimer _trig_check_timer;
 
-  int _noData_cnt;
-  bool _data_lock;
-  bool _data_updated;
-  int _data_auto_lock;
+  std::atomic<int> _noData_cnt;
+  std::atomic<bool> _data_lock;
+  std::atomic<bool> _data_updated;
+  std::atomic<int> _data_auto_lock;
 
-  double _repeat_intvl; // The progress wait timer interval.
-  int _repeat_hold_prg; // The time sleep progress
-  int _repeat_wait_prog_step;
-  bool _is_instant;
-  int _work_time_id;
-  int _capture_times;
-  int _confirm_store_time_id;
-  uint64_t _rt_refresh_time_id;
-  uint64_t _rt_ck_refresh_time_id;
-  DEVICE_COLLECT_MODE _clt_mode;
-  bool _is_stream_mode;
+  std::atomic<double> _repeat_intvl; // The progress wait timer interval.
+  std::atomic<int> _repeat_hold_prg; // The time sleep progress
+  std::atomic<int> _repeat_wait_prog_step;
+  std::atomic<bool> _is_instant;
+  std::atomic<int> _work_time_id;
+  std::atomic<int> _capture_times;
+  std::atomic<int> _confirm_store_time_id;
+  std::atomic<uint64_t> _rt_refresh_time_id;
+  std::atomic<uint64_t> _rt_ck_refresh_time_id;
+  DEVICE_COLLECT_MODE _clt_mode; // main-thread-only (set in action_start_capture)
+  std::atomic<bool> _is_stream_mode;
 
-  bool _is_action;
-  uint64_t _dso_packet_count;
+  std::atomic<bool> _is_action;
+  std::atomic<uint64_t> _dso_packet_count;
 
   // External access to the fields above is via public accessors only
   // (no friend declarations). SigSession / DataFeedParser call accessor

@@ -94,24 +94,15 @@ const QString View::Unknown_Str = "########";
 
 View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
            QWidget *parent)
-    : QScrollArea(parent), _sampling_bar(sampling_bar), _scale(10),
-      _preScale(1e-6), _maxscale(1e9), _minscale(1e-15), _offset(0),
-      _preOffset(0), _vOffset(0), _signalHeightScale(MaxHeightUnit),
-      _lastWidth(-1), _updating_scroll(false), _trig_hoff(0),
-      _show_cursors(false), _search_hit(false), _show_xcursors(false),
-      _hover_point(-1, -1), _dso_auto(true), _show_lissajous(false),
-      _back_ready(false) {
-  _trig_cursor = nullptr;
-  _search_cursor = nullptr;
-
+    : QScrollArea(parent), _sampling_bar(sampling_bar),
+      _trig_hoff(0),
+      _hover_point(-1, -1), _dso_auto(true), _show_lissajous(false) {
   _session = session;
-  _data_source = session;
-  _document = nullptr;
   _device_agent = session->device();
 
   // Phase E: initialise the three delegate classes. Must happen before any
   // call that forwards through the inline facades (e.g. headerWidth() →
-  // get_traces() → get_own_decode_traces() → sync_derived_traces()).
+  // get_traces() → get_derived->_own_decode_traces() → sync_derived_traces()).
   _layout = std::make_unique<ViewLayout>(this);
   _cursors = std::make_unique<ViewCursors>(this);
   _derived = std::make_unique<ViewDerivedTraces>(this);
@@ -121,6 +112,13 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _signal_sync = std::make_unique<ViewSignalSync>(this);
   _glitch_filter = std::make_unique<ViewGlitchFilter>(this);
   _data_sync = std::make_unique<ViewDataSync>(this);
+
+  // The data source must be assigned only after every delegate exists.
+  // During construction we set the fields directly instead of going through
+  // set_data_source(), because that path calls rebuild_signals() and updates
+  // the viewports, none of which are created yet at this point.
+  _data_sync->set_data_source_ptr(session);
+  _data_sync->set_document_ptr(nullptr);
 
   // Visible-range debounce timer: coalesce bursts of scale/offset/resize
   // changes into a single visible_range_changed() emission so listeners
@@ -214,16 +212,10 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _ruler->setObjectName("ViewArea_ruler");
   _header->setObjectName("ViewArea_header");
 
-  QColor fore(QWidget::palette().color(QWidget::foregroundRole()));
-  fore.setAlpha(View::BackAlpha);
+QColor fore(QWidget::palette().color(QWidget::foregroundRole()));
+fore.setAlpha(View::BackAlpha);
 
-  _show_trig_cursor = false;
-  _trig_cursor = new Cursor(*this, -1, 0);
-  _trig_cursor->set_colour(View::LightRed);
-  _show_search_cursor = false;
-  _search_pos = 0;
-  _search_cursor = new Cursor(*this, -1, _search_pos);
-  _search_cursor->set_colour(fore);
+  _cursors->init_cursors(fore);
 
   connect(_time_viewport, &Viewport::measure_updated, this,
           &View::on_measure_updated);
@@ -244,27 +236,28 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   connect(_devmode, &DevMode::header_collapse_changed, this,
           &View::on_header_collapse_changed);
   connect(_devmode, &DevMode::mode_change_requested, this,
-          [this](int mode) { _data_source->switch_work_mode(mode); });
+          [this](int mode) { _data_sync->data_source_ptr()->switch_work_mode(mode); });
   connect(_devmode, &DevMode::stop_capture_requested, this,
-          [this]() { _data_source->stop_capture(); });
+          [this]() { _data_sync->data_source_ptr()->stop_capture(); });
   connect(_devmode, &DevMode::save_session_requested, this,
-          [this]() { _data_source->session_save(); });
+          [this]() { _data_sync->data_source_ptr()->session_save(); });
   connect(_devmode, &DevMode::close_file_requested, this,
-          [this](ds_device_handle dev_handle) { _data_source->close_file(dev_handle); });
+          [this](ds_device_handle dev_handle) { _data_sync->data_source_ptr()->close_file(dev_handle); });
 
   // Glitch filter popup (View-owned). Created up-front and reused via
   // open_for_signal() so the histogram cache persists across open/close.
-  _glitch_filter_popup = new GlitchFilterPopup(*this, this);
-  _glitch_filter_popup->hide();
-  connect(_glitch_filter_popup, &GlitchFilterPopup::preview_changed, this,
+  auto *popup = new GlitchFilterPopup(*this, this);
+  popup->hide();
+  _glitch_filter->set_glitch_filter_popup(popup);
+  connect(popup, &GlitchFilterPopup::preview_changed, this,
           &View::on_glitch_preview_changed);
-  connect(_glitch_filter_popup, &GlitchFilterPopup::apply_requested, this,
+  connect(popup, &GlitchFilterPopup::apply_requested, this,
           &View::on_glitch_apply_requested);
-  connect(_glitch_filter_popup, &GlitchFilterPopup::closed, this,
+  connect(popup, &GlitchFilterPopup::closed, this,
           &View::on_glitch_popup_closed);
-  connect(_glitch_filter_popup, &GlitchFilterPopup::apply_batch_requested, this,
+  connect(popup, &GlitchFilterPopup::apply_batch_requested, this,
           &View::on_apply_batch_requested);
-  connect(_glitch_filter_popup, &GlitchFilterPopup::preview_batch_changed, this,
+  connect(popup, &GlitchFilterPopup::preview_batch_changed, this,
           &View::on_preview_batch_changed);
 
   ADD_UI(this);
@@ -277,8 +270,9 @@ View::~View() {
   // to prevent callbacks on partially-destroyed View
   disconnect(_header, nullptr, this, nullptr);
   disconnect(_devmode, nullptr, this, nullptr);
-  if (_glitch_filter_popup) {
-    disconnect(_glitch_filter_popup, nullptr, this, nullptr);
+  auto *gfp = _glitch_filter->glitch_filter_popup();
+  if (gfp) {
+    disconnect(gfp, nullptr, this, nullptr);
   }
   _header->removeEventFilter(this);
   _ruler->removeEventFilter(this);
@@ -286,42 +280,23 @@ View::~View() {
   _time_viewport->removeEventFilter(this);
   _fft_viewport->removeEventFilter(this);
 
-  for (auto sig : _own_signals)
-    delete sig;
-  _own_signals.clear();
+// unique_ptr in _own_signals auto-deletes all Signal elements.
+_signal_sync->own_signals().clear();
   // Drop preview-range cache keys (LogicSignal pointers now dangling).
-  _preview_ranges.clear();
+  _glitch_filter->clear_preview_ranges();
 
   // Clean up View-owned wrapper traces (these wrap Core layer Stack/Model
   // objects and are owned by the View, not by the data source).
-  for (auto dt : _own_decode_traces)
-    delete dt;
-  _own_decode_traces.clear();
+  _derived->cleanup();
 
-  for (auto st : _own_spectrum_traces)
-    delete st;
-  _own_spectrum_traces.clear();
+// Destroy the glitch filter popup (View-owned QWidget). Qt would also
+// delete it as a child widget, but explicit reset here guarantees the
+// closed() signal cannot fire mid-destruction. unique_ptr in ViewGlitchFilter
+// handles deletion via set_glitch_filter_popup(nullptr).
+_glitch_filter->set_glitch_filter_popup(nullptr);
 
-  if (_own_math_trace) {
-    delete _own_math_trace;
-    _own_math_trace = nullptr;
-  }
-
-  if (_own_lissajous_trace) {
-    delete _own_lissajous_trace;
-    _own_lissajous_trace = nullptr;
-  }
-
-  // Destroy the glitch filter popup (View-owned QWidget). Qt would also
-  // delete it as a child widget, but explicit deletion here guarantees the
-  // closed() signal cannot fire mid-destruction.
-  if (_glitch_filter_popup) {
-    delete _glitch_filter_popup;
-    _glitch_filter_popup = nullptr;
-  }
-
-  DESTROY_OBJECT(_trig_cursor);
-  DESTROY_OBJECT(_search_cursor);
+  // Cursor state (trig/search cursors included) is now fully owned and
+  // cleaned up by ViewCursors' destructor. No cross-class deletion needed.
   REMOVE_UI(this);
 }
 
@@ -397,7 +372,7 @@ QColor View::get_trace_card_color(Trace *trace) {
 
 void View::timebase_changed() { _data_sync->timebase_changed(); }
 
-void View::set_preScale_preOffset() { set_scale_offset(_preScale, _preOffset); }
+void View::set_preScale_preOffset() { set_scale_offset(_layout->preScale(), _layout->preOffset()); }
 
 void View::schedule_visible_range_notify() {
   if (_viewport_change_timer) {
@@ -440,7 +415,7 @@ void View::receive_trigger(quint64 trig_pos1) {
 void View::set_trig_pos(int percent) {
   uint64_t index = document_snapshot_source()->cur_samplelimits() * percent / 100;
 
-  if (_data_source->have_view_data() == false || _data_source->is_working()) {
+  if (_data_sync->data_source_ptr()->have_view_data() == false || _data_sync->data_source_ptr()->is_working()) {
     set_trig_cursor_posistion(index);
   }
 }
@@ -487,7 +462,7 @@ void View::resizeEvent(QResizeEvent *event) {
 }
 
 void View::v_scroll_value_changed(int value) {
-  _vOffset = value;
+  _layout->set_vOffset(value);
   _header->update();
   viewport_update();
 }
@@ -553,8 +528,8 @@ void View::on_state_changed(bool stop) {
 QRect View::get_view_rect() { return _data_sync->get_view_rect(); }
 
 int View::get_work_mode() const {
-  if (_document && _document->has_signal_config()) {
-    return _document->get_signal_config().work_mode;
+  if (_data_sync->document_ptr() && _data_sync->document_ptr()->has_signal_config()) {
+    return _data_sync->document_ptr()->get_signal_config().work_mode;
   }
   return _device_agent->get_work_mode();
 }
@@ -628,8 +603,8 @@ void View::clear() {
   // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能为 nullptr，
   // 此时 work_mode 查询会失败。用 document 配置或默认值（非 DSO）避免警告刷屏。
   int mode = LOGIC;
-  if (_document && _document->has_signal_config()) {
-    mode = _document->get_signal_config().work_mode;
+  if (_data_sync->document_ptr() && _data_sync->document_ptr()->has_signal_config()) {
+    mode = _data_sync->document_ptr()->get_signal_config().work_mode;
   } else if (_device_agent && _device_agent->have_instance()) {
     mode = _device_agent->get_work_mode();
   }
@@ -644,8 +619,8 @@ void View::clear() {
 void View::reconstruct() {
   // 同上：设备切换早期避免查询设备
   int mode = LOGIC;
-  if (_document && _document->has_signal_config()) {
-    mode = _document->get_signal_config().work_mode;
+  if (_data_sync->document_ptr() && _data_sync->document_ptr()->has_signal_config()) {
+    mode = _data_sync->document_ptr()->get_signal_config().work_mode;
   } else if (_device_agent && _device_agent->have_instance()) {
     mode = _device_agent->get_work_mode();
   }
@@ -808,7 +783,7 @@ void View::h_scroll_value_changed(int value) { _layout->h_scroll_value_changed(v
 void View::show_cursors(bool show) { _cursors->show_cursors(show); }
 void View::show_trig_cursor(bool show) { _cursors->show_trig_cursor(show); }
 void View::show_search_cursor(bool show) { _cursors->show_search_cursor(show); }
-std::list<Cursor *> &View::get_cursorList() { return _cursors->get_cursorList(); }
+std::list<std::unique_ptr<Cursor>> &View::get_cursorList() { return _cursors->get_cursorList(); }
 void View::add_cursor(QColor color, uint64_t sampleIndex) { _cursors->add_cursor(color, sampleIndex); }
 void View::add_cursor(uint64_t sampleIndex) { _cursors->add_cursor(sampleIndex); }
 void View::del_cursor(Cursor *cursor) { _cursors->del_cursor(cursor); }

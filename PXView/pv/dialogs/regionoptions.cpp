@@ -39,7 +39,7 @@ const QString RegionOptions::RegionEnd = QT_TR_NOOP("End");
 
 RegionOptions::RegionOptions(view::View *view, SigSession *session, QWidget *parent) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _view(view),
     _button_box(QDialogButtonBox::Ok,
         Qt::Horizontal, this)
@@ -84,7 +84,7 @@ RegionOptions::RegionOptions(view::View *view, SigSession *session, QWidget *par
 
 void RegionOptions::set_region()
 {
-    const uint64_t last_samples = _session->cur_samplelimits() - 1;
+    const uint64_t last_samples = _data_src->cur_samplelimits() - 1;
     const int index1 = _start_comboBox->currentIndex();
     const int index2 = _end_comboBox->currentIndex();
     uint64_t start, end;

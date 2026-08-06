@@ -113,6 +113,20 @@ public:
     void set_colour(QColor colour) override;
 
     /**
+     * Sets the signal's data snapshot from a DataSource.
+     * Each subclass implements this to extract the correct snapshot type
+     * (Logic/Analog/DSO) from the source, eliminating switch-case boilerplate
+     * in ViewDataSync.
+     */
+    virtual void set_data_from_source(data::DataSource *source) = 0;
+
+    /**
+     * Clears the signal's data snapshot (sets to nullptr).
+     * Subclass implements with its specific snapshot type.
+     */
+    virtual void clear_data() = 0;
+
+    /**
      * Accessor for the Core-layer SignalModel that backs this view::Signal.
      * External consumers (DecoderOptionsDlg, etc.) should use this instead of
      * the deprecated probe() accessor.

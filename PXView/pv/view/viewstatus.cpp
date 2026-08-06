@@ -90,9 +90,9 @@ void ViewStatus::paintEvent(QPaintEvent *)
             int sig_index = std::get<1>(_mrects[i]);
             view::DsoSignal *dsoSig = nullptr;
 
-            for(auto s : _view.get_own_signals()) {
+            for(auto &s : _view.get_own_signals()) {
                 if (s->signal_type() == SR_CHANNEL_DSO && s->enabled()) {
-                    dsoSig = (view::DsoSignal*)s;
+                    dsoSig = (view::DsoSignal*)s.get();
                     if (sig_index == dsoSig->get_index())
                         break;
                     else
@@ -274,9 +274,9 @@ void ViewStatus::load_session(QJsonArray measure_array, int version)
         if (version >= 3){
             Signal *trace = nullptr;
 
-            for(auto s : _view.get_own_signals()){
+            for(auto &s : _view.get_own_signals()){
                 if (s->get_name().toInt() == sig_index){
-                    trace = s;
+                    trace = s.get();
                     break;
                 }
             }

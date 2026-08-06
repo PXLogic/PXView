@@ -50,7 +50,7 @@ namespace pv {
 namespace dock {
 
 DsoTriggerDock::DsoTriggerDock(QWidget *parent, SigSession *session)
-    : pv::widgets::SmoothScrollArea(parent), _session(session), _context(nullptr) {
+    : pv::widgets::SmoothScrollArea(parent), _session(session), _signals(session), _context(nullptr) {
   this->setWidgetResizable(true);
   _widget = new QWidget(this);
 
@@ -240,9 +240,9 @@ void DsoTriggerDock::auto_trig(int index) {
 void DsoTriggerDock::pos_changed(int pos) {
   int ret;
   /* SR_CONF_HORIZ_TRIGGERPOS is SR_T_FLOAT in hwdriver.c — must use double. */
-  ret = _session->get_device()->set_config_double(SR_CONF_HORIZ_TRIGGERPOS, (double)pos);
+  ret = _signals->device()->set_config_double(SR_CONF_HORIZ_TRIGGERPOS, (double)pos);
   if (!ret) {
-    if (_session->get_device()->is_hardware() || true) {
+    if (_signals->device()->is_hardware() || true) {
       QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_HOR_TRI_POS_FAIL),
                          "Change horiz trigger position failed!"));
 
@@ -269,7 +269,7 @@ void DsoTriggerDock::hold_changed(int hold) {
 
   holdoff = _holdoff_slider->value() *
             _holdoff_comboBox->currentData().toDouble() / 10;
-  ret = _session->get_device()->set_config_uint64(SR_CONF_TRIGGER_HOLDOFF,
+  ret = _signals->device()->set_config_uint64(SR_CONF_TRIGGER_HOLDOFF,
                                                   holdoff);
 
   if (!ret) {
@@ -281,7 +281,7 @@ void DsoTriggerDock::hold_changed(int hold) {
 
 void DsoTriggerDock::margin_changed(int margin) {
   int ret;
-  ret = _session->get_device()->set_config_byte(SR_CONF_TRIGGER_MARGIN, margin);
+  ret = _signals->device()->set_config_byte(SR_CONF_TRIGGER_MARGIN, margin);
   if (!ret) {
     QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_SENSITIVITY_FAIL),
                        "Change trigger value sensitivity failed!"));
@@ -306,7 +306,7 @@ void DsoTriggerDock::source_changed() {
 
   pxv_info("Set DSO trig type:%d", id);
 
-  ret = _session->get_device()->set_config_byte(SR_CONF_TRIGGER_SOURCE, id);
+  ret = _signals->device()->set_config_byte(SR_CONF_TRIGGER_SOURCE, id);
   if (!ret) {
     QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_SOURCE_FAIL),
                        "Change trigger source failed!"));
@@ -321,15 +321,15 @@ void DsoTriggerDock::check_setting() {
     _ch0a1_radioButton->setChecked(false);
     _ch0o1_radioButton->setChecked(false);
 
-    _session->get_device()->set_config_byte(SR_CONF_TRIGGER_SOURCE,
+    _signals->device()->set_config_byte(SR_CONF_TRIGGER_SOURCE,
                                             int(DSO_TRIGGER_AUTO));
   }
 }
 
 bool DsoTriggerDock::check_trig_channel() {
   int id = _source_group->checkedId();
-  bool b0 = _session->get_device()->channel_is_enable(0);
-  bool b1 = _session->get_device()->channel_is_enable(1);
+  bool b0 = _signals->device()->channel_is_enable(0);
+  bool b1 = _signals->device()->channel_is_enable(1);
 
   if (DSO_TRIGGER_CH0 == id && !b0) {
     pxv_err("ERROR: The trigger channel is disabled");
@@ -349,7 +349,7 @@ void DsoTriggerDock::channel_changed(int ch) {
   (void)ch;
   int ret;
 
-  ret = _session->get_device()->set_config_byte(
+  ret = _signals->device()->set_config_byte(
       SR_CONF_TRIGGER_CHANNEL, int(_channel_comboBox->currentData().toInt()));
   if (!ret) {
     QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_CHANNEL_FAIL),
@@ -362,7 +362,7 @@ void DsoTriggerDock::type_changed() {
   int id = _type_group->checkedId();
   int ret;
 
-  ret = _session->get_device()->set_config_byte(SR_CONF_TRIGGER_SLOPE, id);
+  ret = _signals->device()->set_config_byte(SR_CONF_TRIGGER_SLOPE, id);
   if (!ret) {
     QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_TYPE_FAIL),
                        "Change trigger type failed!"));
@@ -371,16 +371,16 @@ void DsoTriggerDock::type_changed() {
 }
 
 void DsoTriggerDock::device_change() {
-  bool bDisable = _session->get_device()->is_file();
+  bool bDisable = _signals->device()->is_file();
   _position_spinBox->setDisabled(bDisable);
   _position_slider->setDisabled(bDisable);
 }
 
 void DsoTriggerDock::update_view() {
-  bool bDisable = _session->get_device()->is_file();
+  bool bDisable = _signals->device()->is_file();
   bool ret;
 
-  if (_session->get_device()->is_demo()) {
+  if (_signals->device()->is_demo()) {
     bDisable = true;
   }
 
@@ -401,12 +401,12 @@ void DsoTriggerDock::update_view() {
   _position_spinBox->setDisabled(bDisable);
   _position_slider->setDisabled(bDisable);
 
-  if (_session->get_device()->is_demo()) {
+  if (_signals->device()->is_demo()) {
     _position_spinBox->setDisabled(false);
     _position_slider->setDisabled(false);
   }
 
-  if (_session->get_device()->is_file()) {
+  if (_signals->device()->is_file()) {
     return;
   }
 
@@ -415,11 +415,11 @@ void DsoTriggerDock::update_view() {
 
   // TRIGGERPOS (SR_T_FLOAT → double)
   double dpos;
-  if (_session->get_device()->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dpos)) {
+  if (_signals->device()->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dpos)) {
     _position_slider->setValue((int)dpos);
   }
 
-  if (_session->get_device()->get_config_byte(SR_CONF_TRIGGER_SOURCE, src)) {
+  if (_signals->device()->get_config_byte(SR_CONF_TRIGGER_SOURCE, src)) {
     _source_group->button(src)->setChecked(true);
   }
 
@@ -428,13 +428,13 @@ void DsoTriggerDock::update_view() {
              &DsoTriggerDock::channel_changed);
   _channel_comboBox->clear();
 
-  for (auto s : _session->get_signal_models()) {
+  for (auto s : _signals->get_signal_models()) {
     if (s->type() == SR_CHANNEL_DSO) {
       _channel_comboBox->addItem(QString::fromStdString(s->name()),
                                  QVariant::fromValue(s->index()));
     }
   }
-  ret = _session->get_device()->get_config_byte(SR_CONF_TRIGGER_CHANNEL, src);
+  ret = _signals->device()->get_config_byte(SR_CONF_TRIGGER_CHANNEL, src);
   if (ret) {
     for (int i = 0; i < _channel_comboBox->count(); i++) {
       if (src == _channel_comboBox->itemData(i).toInt()) {
@@ -446,7 +446,7 @@ void DsoTriggerDock::update_view() {
   connect(_channel_comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &DsoTriggerDock::channel_changed);
 
-  ret = _session->get_device()->get_config_byte(SR_CONF_TRIGGER_SLOPE, slope);
+  ret = _signals->device()->get_config_byte(SR_CONF_TRIGGER_SLOPE, slope);
   if (ret) {
     _type_group->button(slope)->setChecked(true);
   }
@@ -457,7 +457,7 @@ void DsoTriggerDock::update_view() {
              &DsoTriggerDock::hold_changed);
 
   uint64_t holdoff;
-  ret = _session->get_device()->get_config_uint64(SR_CONF_TRIGGER_HOLDOFF,
+  ret = _signals->device()->get_config_uint64(SR_CONF_TRIGGER_HOLDOFF,
                                                   holdoff);
   if (ret) {
     auto v = holdoff * 10.0;
@@ -488,7 +488,7 @@ void DsoTriggerDock::update_view() {
              &DsoTriggerDock::margin_changed);
 
   int margin;
-  ret = _session->get_device()->get_config_byte(SR_CONF_TRIGGER_MARGIN, margin);
+  ret = _signals->device()->get_config_byte(SR_CONF_TRIGGER_MARGIN, margin);
   if (ret) {
     _margin_slider->setValue(margin);
   }
@@ -531,14 +531,14 @@ void DsoTriggerDock::set_session(QJsonObject &obj) {
     auto btn = _source_group->button(src);
     if (btn)
       btn->setChecked(true);
-    _session->get_device()->set_config_byte(SR_CONF_TRIGGER_SOURCE, src);
+    _signals->device()->set_config_byte(SR_CONF_TRIGGER_SOURCE, src);
   }
   if (obj.contains("triggerSlope")) {
     int slope = obj["triggerSlope"].toInt();
     auto btn = _type_group->button(slope);
     if (btn)
       btn->setChecked(true);
-    _session->get_device()->set_config_byte(SR_CONF_TRIGGER_SLOPE, slope);
+    _signals->device()->set_config_byte(SR_CONF_TRIGGER_SLOPE, slope);
   }
   if (obj.contains("holdoffUnit")) {
     _holdoff_comboBox->setCurrentIndex(obj["holdoffUnit"].toInt());
@@ -566,6 +566,7 @@ void DsoTriggerDock::bind_context(TabContext *ctx) {
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+      _signals = _session;
   if (ctx && ctx->view()) {
     auto &saved = ctx->view()->dock_ui_state().dock_dso_trigger_session;
     if (!saved.isEmpty()) {

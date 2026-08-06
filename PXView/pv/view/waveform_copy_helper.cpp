@@ -276,14 +276,14 @@ std::pair<uint64_t, uint64_t> WaveformCopyHelper::resolve_cursor_range(View &vie
     uint64_t left_edge = view.pixel2index(0);
     uint64_t right_edge = view.pixel2index(view_width);
 
-    std::list<Cursor*> &cursors = view.get_cursorList();
+    auto &cursors = view.get_cursorList();
 
     bool has_left = false;
     bool has_right = false;
     uint64_t left_index = 0;
     uint64_t right_index = 0;
 
-    for (auto *cursor : cursors) {
+    for (auto &cursor : cursors) {
         if (!cursor)
             continue;
         uint64_t idx = cursor->get_index();
@@ -325,14 +325,14 @@ LogicSignal* WaveformCopyHelper::hit_test_signal(View &view, int click_x, int cl
 {
     (void)click_x;
     int mouseY = click_y + view.get_vOffset();
-    for (auto *s : view.get_own_signals()) {
+    for (auto &s : view.get_own_signals()) {
         if (!s)
             continue;
         if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
             int sigY = s->get_v_offset();
             int halfH = s->get_totalHeight() / 2 + View::SignalMargin;
             if (std::abs(mouseY - sigY) < halfH)
-                return dynamic_cast<LogicSignal*>(s);
+                return s->as_logic();
         }
     }
     return nullptr;
@@ -342,13 +342,13 @@ DecodeTrace* WaveformCopyHelper::hit_test_decode_trace(View &view, int click_x, 
 {
     (void)click_x;
     int mouseY = click_y + view.get_vOffset();
-    for (auto *t : view.get_own_decode_traces()) {
+    for (auto &t : view.get_own_decode_traces()) {
         if (!t || !t->enabled())
             continue;
         int sigY = t->get_v_offset();
         int halfH = t->get_totalHeight() / 2 + View::SignalMargin;
         if (std::abs(mouseY - sigY) < halfH)
-            return t;
+            return t.get();
     }
     return nullptr;
 }
@@ -360,7 +360,7 @@ DecodeTrace* WaveformCopyHelper::find_decoder_for_signal(View &view, LogicSignal
 
     int sig_index = signal->get_index();
 
-    for (auto *dt : view.get_own_decode_traces()) {
+    for (auto &dt : view.get_own_decode_traces()) {
         if (!dt)
             continue;
         auto stack = dt->decoder();
@@ -372,7 +372,7 @@ DecodeTrace* WaveformCopyHelper::find_decoder_for_signal(View &view, LogicSignal
             auto probes = decoder->binded_probe_list();
             for (auto *probe : probes) {
                 if (decoder->binded_probe_index(probe) == sig_index)
-                    return dt;
+                    return dt.get();
             }
         }
     }
@@ -401,12 +401,12 @@ std::vector<LogicSignal*> WaveformCopyHelper::collect_decoder_input_signals(View
         }
     }
 
-    for (auto *s : view.get_own_signals()) {
+    for (auto &s : view.get_own_signals()) {
         if (!s)
             continue;
         if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
             if (channel_indices.count(s->get_index()))
-                result.push_back(dynamic_cast<LogicSignal*>(s));
+                result.push_back(s->as_logic());
         }
     }
 
@@ -416,11 +416,11 @@ std::vector<LogicSignal*> WaveformCopyHelper::collect_decoder_input_signals(View
 std::vector<LogicSignal*> WaveformCopyHelper::collect_all_logic_signals(View &view)
 {
     std::vector<LogicSignal*> result;
-    for (auto *s : view.get_own_signals()) {
+    for (auto &s : view.get_own_signals()) {
         if (!s)
             continue;
         if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled())
-            result.push_back(dynamic_cast<LogicSignal*>(s));
+            result.push_back(s->as_logic());
     }
     return result;
 }
@@ -461,11 +461,11 @@ QString WaveformCopyHelper::format_range(View &view, int click_x, int click_y, S
         }
 
         // Part 2: All decoder annotations
-        auto traces = view.get_own_decode_traces();
-        for (auto *dt : traces) {
+auto &traces = view.get_own_decode_traces();
+for (auto &dt : traces) {
             if (!dt || !dt->enabled())
                 continue;
-            QString ann = format_decoder_annotations(dt, start, end);
+            QString ann = format_decoder_annotations(dt.get(), start, end);
             if (!ann.isEmpty()) {
                 if (!result.isEmpty())
                     result += "\n";

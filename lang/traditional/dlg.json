@@ -63,7 +63,6 @@
         "id": "IDS_DLG_MCP_COPY",
         "text": "複製"
     },
-
     {
         "id": "IDS_DLG_LOG_NO_FILE",
         "text": "未找到日誌檔案。"
@@ -399,7 +398,7 @@
     {
         "id": "IDS_DLG_EXPORTING",
         "text": "匯出中..."
-    },  
+    },
     {
         "id": "IDS_DLG_DONT_CONNECT_PROBES",
         "text": "不要連接任何探頭!"
@@ -591,7 +590,7 @@
     {
         "id": "IDS_DLG_SERIAL_TRIGGER",
         "text": "串列觸發"
-    },   
+    },
     {
         "id": "IDS_DLG_STAGE_TRIGGER",
         "text": "多級觸發"
@@ -599,7 +598,7 @@
     {
         "id": "IDS_DLG_SERIAL_NOTE_LABEL",
         "text": "X: 不關心\n0: 低電平\n1: 高電平\nR: 上升沿\nF: 下降沿\nC: 上升/下降沿"
-    },  
+    },
     {
         "id": "IDS_DLG_DATA_BITS",
         "text": "資料位"
@@ -711,7 +710,7 @@
     {
         "id": "IDS_DLG_FALLING",
         "text": "下降沿: "
-    },   
+    },
     {
         "id": "IDS_DLG_Edges_1",
         "text": "總邊沿: "
@@ -1907,5 +1906,33 @@
     {
         "id": "IDS_DLG_PATTERN_TRIANGLE",
         "text": "三角波"
+    },
+    {
+        "id": "IDS_DLG_DATA_OUT_OFF_RANGE",
+        "text": "數據超出範圍"
+    },
+    {
+        "id": "IDS_FFT_MODE_LINEARRSM",
+        "text": "線性 RMS"
+    },
+    {
+        "id": "IDS_FFT_WINDOW_BLACKMAN",
+        "text": "Blackman"
+    },
+    {
+        "id": "IDS_FFT_WINDOW_FLATTOP",
+        "text": "平頂"
+    },
+    {
+        "id": "IDS_FFT_WINDOW_HAMMING",
+        "text": "Hamming"
+    },
+    {
+        "id": "IDS_FFT_WINDOW_HANN",
+        "text": "Hann"
+    },
+    {
+        "id": "IDS_FFT_WINDOW_RECTANGLE",
+        "text": "矩形"
     }
 ]

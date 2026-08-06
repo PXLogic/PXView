@@ -49,7 +49,6 @@ public:
   void paintCursors(QPainter &p);
   void paintSignals(QPainter &p, QColor fore, QColor back);
   void paintProgress(QPainter &p, QColor fore, QColor back);
-  void paintMeasure(QPainter &p, QColor fore, QColor back);
 
 private:
   Viewport *_viewport;

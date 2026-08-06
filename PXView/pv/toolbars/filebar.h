@@ -78,7 +78,9 @@ private slots:
     void on_actionCapture_triggered();
 
 public:
-    SigSession* _session;
+    SigSession *_session;
+    data::ISignalSource *_signals = nullptr;
+  data::ICaptureControl *_capture = nullptr;
 
     // XToolButton _file_button;
     QMenu   *_menu;

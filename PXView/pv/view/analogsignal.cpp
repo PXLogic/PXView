@@ -24,6 +24,7 @@
 #include "../view/analogsignal.h"
 #include "../config/appconfig.h"
 #include "../data/analogsnapshot.h"
+#include "../data/datasource.h"
 #include "../data/signalmodel.h"
 #include "../pxvdef.h"
 #include "../log.h"
@@ -83,7 +84,7 @@ const float AnalogSignal::EnvelopeThreshold = 0.0f;
 AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
-    : Signal(model, data_source), _data(data), _rects(nullptr), _points(nullptr),
+    : Signal(model, data_source), _data(data),
       _points_cap(0), _cached_hw_offset(model ? model->hw_offset() : 128), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(1.0f) {
@@ -137,7 +138,7 @@ AnalogSignal::AnalogSignal(view::AnalogSignal *s,
                            pv::data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
-    : Signal(*s, model, data_source), _data(data), _rects(nullptr), _points(nullptr),
+    : Signal(*s, model, data_source), _data(data),
       _points_cap(0), _cached_hw_offset(s->_cached_hw_offset), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(s->_float_scale) {
@@ -159,15 +160,9 @@ AnalogSignal *AnalogSignal::clone() const {
 }
 
 AnalogSignal::~AnalogSignal() {
-  if (_rects) {
-    delete[] _rects;
-    _rects = nullptr;
-  }
-  if (_points) {
-    delete[] _points;
-    _points = nullptr;
-    _points_cap = 0;
-  }
+  _rects.reset();
+  _points.reset();
+  _points_cap = 0;
 }
 
 int AnalogSignal::get_hw_offset() {
@@ -429,15 +424,9 @@ double AnalogSignal::get_zero_ratio() {
  * Event
  **/
 void AnalogSignal::resize() {
-  if (_rects) {
-    delete[] _rects;
-    _rects = nullptr;
-  }
-  if (_points) {
-    delete[] _points;
-    _points = nullptr;
-    _points_cap = 0;
-  }
+  _rects.reset();
+  _points.reset();
+  _points_cap = 0;
 }
 
 /**
@@ -606,12 +595,10 @@ void AnalogSignal::paint_trace(
     // 性能修复: 复用成员缓冲 _points，避免每帧 new/delete。
     // 仅当现有容量不足时才重新分配 (类比 paint_envelope 对 _rects 的处理)。
     if (!_points || _points_cap < sample_count) {
-      if (_points)
-        delete[] _points;
       _points_cap = sample_count;
-      _points = new QPointF[_points_cap];
+      _points.reset(new QPointF[_points_cap]);
     }
-    QPointF *points = _points;
+    QPointF *points = _points.get();
     QPointF *point = points;
     uint64_t yindex = start_index;
 
@@ -702,11 +689,10 @@ void AnalogSignal::paint_per_pixel(
 
   // Reuse member rect buffer.
   if (!_rects || _points_cap < pixel_width) {
-    if (_rects) delete[] _rects;
     _points_cap = pixel_width + 10;
-    _rects = new QRectF[_points_cap];
+    _rects.reset(new QRectF[_points_cap]);
   }
-  QRectF *r = _rects;
+  QRectF *r = _rects.get();
 
   // Helper: read a single sample value at ring index and map to screen Y.
   auto read_sample_y = [&](uint64_t ring_idx) -> float {
@@ -835,9 +821,9 @@ void AnalogSignal::paint_envelope(
   p.setBrush(_colour);
 
   if (!_rects)
-    _rects = new QRectF[width + 10];
+    _rects.reset(new QRectF[width + 10]);
 
-  QRectF *rect = _rects;
+  QRectF *rect = _rects.get();
   int px = -1, pre_px;
   float y_min = zeroY, y_max = zeroY, pre_y_min = zeroY, pre_y_max = zeroY;
   int pcnt = 0;
@@ -912,7 +898,7 @@ void AnalogSignal::paint_envelope(
     x += scale_pixels_per_samples;
   }
 
-  p.drawRects(_rects, pcnt);
+  p.drawRects(_rects.get(), pcnt);
 }
 
 void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
@@ -1004,7 +990,15 @@ QString AnalogSignal::get_voltage(double v, int p, bool scaled) {
                         : QString::number(v, 'f', p) + "m" + mapUnit;
 }
 
-void AnalogSignal::set_data(data::AnalogSnapshot *data) { _data = data; }
+void AnalogSignal::set_data(data::AnalogSnapshot *data) {
+  _data = data;
+}
+
+void AnalogSignal::set_data_from_source(data::DataSource *source) {
+  _data = source ? source->get_analog_snapshot() : nullptr;
+}
+
+void AnalogSignal::clear_data() { _data = nullptr; }
 
 } // namespace view
 } // namespace pv

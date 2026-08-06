@@ -47,9 +47,9 @@ public:
 
 private:
 
-	static GVariant* config_getter(int key);
+	GVariant* config_getter(int key);
 
-	static void config_setter(int key, GVariant* value);
+	void config_setter(int key, GVariant* value);
 
     void bind_bool(const QString &name, const QString label, int key);
 
@@ -73,9 +73,9 @@ private:
 
 	static QString print_samplerate(GVariant *const gvar);
 
-	static GVariant* samplerate_double_getter();
+	GVariant* samplerate_double_getter();
 
-	static void samplerate_double_setter(GVariant *value);
+	void samplerate_double_setter(GVariant *value);
 
 	static QString print_timebase(GVariant *const gvar);
 
@@ -88,7 +88,6 @@ static QString print_pattern(GVariant *const gvar);
 
 private:
 	DeviceAgent *_device_agent;
-	static DeviceAgent *_static_device_agent;
  
 };
 

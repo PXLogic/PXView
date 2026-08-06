@@ -32,7 +32,7 @@
         "text": "触发前采样比例"
     },
     {
-        "id": "Run Length Encoding",
+        "id": "Run length encoding",
         "text": "RLE编码"
     },
     {
@@ -136,7 +136,7 @@
         "text": "RLE硬件压缩"
     },
     {
-        "id": "Bandwidth Limit",
+        "id": "Bandwidth limit",
         "text": "带宽限制"
     },
     {
@@ -244,7 +244,63 @@
         "text": "缓存路径"
     },
     {
+        "id": "Clock type",
+        "text": "时钟类型"
+    },
+    {
         "id": "Pattern",
+        "text": "波形"
+    },
+    {
+        "id": "rising",
+        "text": "上升沿"
+    },
+    {
+        "id": "falling",
+        "text": "下降沿"
+    },
+    {
+        "id": "Close",
+        "text": "关闭"
+    },
+    {
+        "id": "1.8V",
+        "text": "1.8V"
+    },
+    {
+        "id": "2.5V",
+        "text": "2.5V"
+    },
+    {
+        "id": "3.3V",
+        "text": "3.3V"
+    },
+    {
+        "id": "5.0V",
+        "text": "5.0V"
+    },
+    {
+        "id": "电压/格",
+        "text": "电压/格"
+    },
+    {
+        "id": "耦合",
+        "text": "耦合"
+    },
+    {
+        "id": "对应单位",
+        "text": "对应单位"
+    },
+    {
+        "id": "对应最小值",
+        "text": "对应最小值"
+    },
+    {
+        "id": "对应最大值",
+        "text": "对应最大值"
+    },
+    {
+        "id": "波形",
         "text": "波形"
     }
 ]

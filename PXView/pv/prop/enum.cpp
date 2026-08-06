@@ -35,28 +35,23 @@ namespace pv {
 namespace prop {
 
 Enum::Enum(QString name, QString label,
-    std::vector<pair<GVariant*, QString> > values,
+    std::vector<pair<GVarPtr, QString> > values,
     Getter getter, Setter setter) :
     Property(name, label, getter, setter),
-	_values(values),
+	_values(std::move(values)),
 	_selector(nullptr)
 {
-    for (std::vector< pair<GVariant*, QString> >::const_iterator i =
-        _values.begin(); i != _values.end(); i++)
-        g_variant_ref((*i).first);
 }
 
 Enum::~Enum()
 {
-	for (unsigned int i = 0; i < _values.size(); i++){
-        if (_values[i].first)
-            g_variant_unref(_values[i].first);
-	}
-
-	if (_selector != nullptr){
+	// Only delete _selector if it has no Qt parent. If it was parented
+	// to a widget (e.g. a dock), Qt's parent-child mechanism will delete
+	// it automatically. Deleting it here as well would cause a double-free.
+	if (_selector != nullptr && _selector->parent() == nullptr){
 		delete _selector;
-		_selector = nullptr;
 	}
+	_selector = nullptr;
 }
 
 QWidget* Enum::get_widget(QWidget *parent, bool auto_commit)
@@ -76,10 +71,10 @@ QWidget* Enum::get_widget(QWidget *parent, bool auto_commit)
 	_selector->setObjectName("dock_content");
 
 	for (unsigned int i = 0; i < _values.size(); i++) {
-		const pair<GVariant*, QString> &v = _values[i];
-        _selector->addItem(v.second, QVariant::fromValue((void*)v.first));
+		const pair<GVarPtr, QString> &v = _values[i];
+		_selector->addItem(v.second, QVariant::fromValue(v.first));
 		
-		if (value && g_variant_compare(v.first, value) == 0)
+		if (value && g_variant_compare(v.first.get(), value) == 0)
 			_selector->setCurrentIndex(i);
 	}
 
@@ -106,13 +101,40 @@ void Enum::commit()
 	if (index < 0)
 		return;
 
-	_setter((GVariant*)_selector->itemData(index).value<void*>());
+	_setter(qvariant_cast<GVarPtr>(_selector->itemData(index)).get());
 	emit committed();
+}
+
+GVariant* Enum::get_value()
+{
+	return _getter ? _getter() : nullptr;
 }
 
 void Enum::on_current_item_changed(int)
 {
     commit();
+}
+
+void Enum::select_value(const QString &val_str)
+{
+    if (!_selector)
+        return;
+
+    for (unsigned int i = 0; i < _values.size(); i++) {
+        GVariant *gvar = _values[i].first.get();
+        if (!gvar)
+            continue;
+        gchar *text = g_variant_print(gvar, FALSE);
+        QString printed = QString::fromUtf8(text);
+        g_free(text);
+        if (printed == val_str) {
+            _selector->setCurrentIndex(i);
+            commit();
+            return;
+        }
+    }
+    pxv_warn("Enum::select_value: no match for '%s' in property '%s'",
+             val_str.toUtf8().constData(), name().toUtf8().constData());
 }
 
 } // prop

@@ -55,6 +55,12 @@ private:
     static const QString FreqPrefixes[9];
     static const int FirstSIPrefixPower;
     static const int LastSIPrefixPower;
+    // Safe narrow-cast: this is a SpectrumTrace.
+    SpectrumTrace* as_spectrum() override { return this; }
+    const SpectrumTrace* as_spectrum() const override { return this; }
+    void accept(TraceVisitor& v) override { v.visit(*this); }
+    void accept(ConstTraceVisitor& v) const override { v.visit(*this); }
+
     static const int Pricision;
     static const int FreqMinorDivNum;
     static const int TickHeight;

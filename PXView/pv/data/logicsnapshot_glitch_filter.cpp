@@ -308,14 +308,14 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
       if (pulse_len <= threshold) {
         bool should_filter = false;
         switch (filter_mode) {
-        case GLITCH_FILTER_BOTH:
+        case GlitchFilterMode::Both:
           should_filter = true;
           break;
-        case GLITCH_FILTER_HIGH:
+        case GlitchFilterMode::High:
           // Only filter when accepted_level is HIGH (remove low pulses on high level)
           should_filter = accepted_level == true;
           break;
-        case GLITCH_FILTER_LOW:
+        case GlitchFilterMode::Low:
           // Only filter when accepted_level is LOW (remove high pulses on low level)
           should_filter = accepted_level == false;
           break;
@@ -435,7 +435,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
     int ch_idx = _host->_ch_index[i];
     auto it = thresholds.find(ch_idx);
     if (it != thresholds.end() && it->second > 0) {
-      GlitchFilterMode mode = GLITCH_FILTER_BOTH;
+      GlitchFilterMode mode = GlitchFilterMode::Both;
       auto mit = filter_modes.find(ch_idx);
       if (mit != filter_modes.end())
         mode = mit->second;

@@ -21,7 +21,6 @@
  */
 
 #include "probeoptions.h"
-#define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <QObject>
 #include <cstdint>
 #include "../bool.h"
@@ -29,25 +28,22 @@
 #include "../enum.h"
 #include "../int.h"
 #include "../../config/appconfig.h"
+#include "../../gvarptr.h"
 #include "../../log.h"
 #include "../../sigsession.h"
 #include "../../ui/langresource.h"
 
 using namespace std;
-using std::placeholders::_1;
 
 namespace pv {
 namespace prop {
 namespace binding {
-
-DeviceAgent* ProbeOptions::_static_device_agent = nullptr;
 
 ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
     Binding(),
 	_probe(probe)
 {
     _device_agent = session->get_device();
-    _static_device_agent = _device_agent;
 
     /* Pre-check: only query SR_CONF_PROBE_CONFIGS if the device actually
      * advertises it in SR_CONF_DEVICE_OPTIONS. PXLogic and most upstream
@@ -134,21 +130,22 @@ break;
 
 GVariant* ProbeOptions::config_getter(const struct sr_channel *probe, int key)
 {
-    if (!_static_device_agent)
+    if (!_device_agent)
         return nullptr;
-    return _static_device_agent->get_config(key, probe, nullptr);
+    return _device_agent->get_config(key, probe, nullptr);
 }
 
 void ProbeOptions::config_setter(struct sr_channel *probe, int key, GVariant* value)
 {
-    _static_device_agent->set_config(key, value, probe, nullptr);
+    _device_agent->set_config(key, value, probe, nullptr);
 }
 
 void ProbeOptions::bind_bool(const QString &name, const QString label, int key)
 {
 	_properties.push_back(
-        new Bool(name, label, bind(config_getter, _probe, key),
-            bind(config_setter, _probe, key, _1)));
+        new Bool(name, label,
+            [this, key]() { return config_getter(_probe, key); },
+            [this, key](GVariant* v) { config_setter(_probe, key, v); }));
 }
 
 void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
@@ -156,7 +153,7 @@ void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
 {
 	GVariant *gvar;
 	GVariantIter iter;
-	std::vector< pair<GVariant*, QString> > values;
+	std::vector< pair<GVarPtr, QString> > values;
 
 	if (!gvar_list) {
 		pxv_warn("%s", "ProbeOptions::bind_enum: gvar_list is nullptr");
@@ -166,12 +163,12 @@ void ProbeOptions::bind_enum(const QString &name, const QString label, int key,
 
 	g_variant_iter_init (&iter, gvar_list);
 	while ((gvar = g_variant_iter_next_value (&iter)))
-		values.push_back(make_pair(gvar, printer(gvar)));
+		values.push_back(make_pair(GVarPtr(gvar, true), printer(gvar)));
 
 	_properties.push_back(
         new Enum(name, label, values,
-            bind(config_getter, _probe, key),
-            bind(config_setter,  _probe, key, _1)));
+            [this, key]() { return config_getter(_probe, key); },
+            [this, key](GVariant* v) { config_setter(_probe, key, v); }));
 }
 
 void ProbeOptions::bind_int(const QString &name, const QString label, int key, QString suffix,
@@ -179,8 +176,8 @@ void ProbeOptions::bind_int(const QString &name, const QString label, int key, Q
 {
 	_properties.push_back(
         new Int(name, label, suffix, range,
-            bind(config_getter,  _probe, key),
-            bind(config_setter,  _probe, key, _1)));
+            [this, key]() { return config_getter(_probe, key); },
+            [this, key](GVariant* v) { config_setter(_probe, key, v); }));
 }
 
 void ProbeOptions::bind_double(const QString &name, const QString label, int key, QString suffix,
@@ -189,8 +186,8 @@ void ProbeOptions::bind_double(const QString &name, const QString label, int key
 {
     _properties.push_back(
         new Double(name, label, decimals, suffix, range, step,
-            bind(config_getter,  _probe, key),
-            bind(config_setter,  _probe, key, _1)));
+            [this, key]() { return config_getter(_probe, key); },
+            [this, key](GVariant* v) { config_setter(_probe, key, v); }));
 }
 
 void ProbeOptions::bind_vdiv(const QString &name, const QString label,

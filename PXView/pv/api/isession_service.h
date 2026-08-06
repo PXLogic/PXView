@@ -97,6 +97,7 @@ public:
         const std::string& operation_mode = "",
         const std::string& buffer_options = "",
         const std::string& digital_filter = "",
+        const std::string& pattern = "",
         int capture_ratio = -1,
         double repeat_interval_seconds = 0.0,
         uint64_t sample_count = 0) = 0;
@@ -275,6 +276,13 @@ public:
         const std::string& filepath,
         const std::string& analyzer_id,
         int radix_type = 0,
+        bool iso8601_timestamp = false) = 0;
+    virtual Result<void> export_raw_data(
+        const std::string& format,
+        const std::string& directory,
+        const std::vector<int32_t>& digital_channels,
+        const std::vector<int32_t>& analog_channels,
+        int analog_downsample_ratio = 1,
         bool iso8601_timestamp = false) = 0;
 
     // 19. View control

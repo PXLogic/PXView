@@ -38,7 +38,11 @@
 #include "../ui/uimanager.h"
 #include "dock_ui_state.h"
 #include "view_cursors.h"
+#include "view_data_sync.h"
+#include "view_derived_traces.h"
 #include "view_glitch_filter.h"
+#include "view_layout.h"
+#include "view_signal_sync.h"
 
 // Forward declarations (replaces the former includes of signal.h, viewport.h,
 // cursor.h, xcursor.h, viewstatus.h, view_derived_traces.h, view_layout.h,
@@ -102,16 +106,10 @@ class XCursor;
 class ViewStatus;
 class Signal;
 
-// Phase K forward declarations for the unique_ptr delegate types. Full
-// definitions live in view_layout.h / view_data_sync.h /
-// view_derived_traces.h / view_signal_sync.h, which are
-// included by view.cpp (and by other TUs that touch the delegate types
-// directly). view_cursors.h is included directly above because Cursor /
-// XCursor are used by too many TUs as complete types.
-class ViewLayout;
-class ViewDataSync;
-class ViewDerivedTraces;
-class ViewSignalSync;
+// Phase K: delegate types are now fully included above (view_layout.h,
+// view_cursors.h, view_data_sync.h, view_derived_traces.h,
+// view_signal_sync.h, view_glitch_filter.h) so that inline accessors in
+// View can reach their member variables directly.
 
 struct SignalGroup {
   int group_id;
@@ -171,7 +169,7 @@ public:
 
   // ---- Data source / document binding ----
   void set_data_source(pv::data::DataSource *source);
-  inline pv::data::DataSource* data_source() { return _data_source; }
+  inline pv::data::DataSource* data_source() { return _data_sync->data_source_ptr(); }
   void set_data_document(pv::data::SessionDocument *doc);
   void clone_signals_for_document(pv::data::SessionDocument *doc);
   void set_signal_data_from_source(pv::data::DataSource *source);
@@ -194,26 +192,61 @@ public:
   inline SigSession &session() { return *_session; }
 
   /**
+   * Phase 8 (Testability): Returns the IViewLayout interface for this View's
+   * layout delegate. Delegates that only need layout state (scale, offset,
+   * signal height, scroll, etc.) should accept IViewLayout* instead of View*
+   * so they can be unit-tested with a MockViewLayout.
+   */
+  inline IViewLayout *view_layout_interface() { return _layout.get(); }
+
+  /**
+   * Phase 8 (Testability): Returns the IViewCursors interface for this View's
+   * cursor delegate. Rendering code that only needs cursor visibility state
+   * should accept IViewCursors* instead of View*.
+   */
+  inline IViewCursors *view_cursors_interface() { return _cursors.get(); }
+
+  /**
+   * Phase 8 (Testability): Returns the IViewSignalStore interface for this
+   * View's signal-sync delegate. Rendering code that only needs signal
+   * count/rebuild state should accept IViewSignalStore* instead of View*.
+   */
+  inline IViewSignalStore *view_signal_store_interface() {
+    return _signal_sync.get();
+  }
+
+  /**
    * Returns the view time scale in seconds per pixel.
    */
-  inline double scale() { return _scale; }
+  inline double scale() { return _layout->scale(); }
 
-  inline double get_minscale() { return _minscale; }
+  /**
+   * @brief Minimum allowed time scale (seconds per pixel).
+   */
+  inline double get_minscale() { return _layout->minscale(); }
 
-  inline double get_maxscale() { return _maxscale; }
+  /**
+   * @brief Maximum allowed time scale (seconds per pixel).
+   */
+  inline double get_maxscale() { return _layout->maxscale(); }
 
   void auto_set_max_scale();
 
   /**
    * Returns the pixels offset of the left edge of the view
    */
-  inline int64_t offset() { return _offset; }
+  inline int64_t offset() { return _layout->offset(); }
 
   /**
-   * trigger position fix
+   * @brief Trigger horizontal offset in fractional pixels.
+   * Aligns the trigger cursor with the actual trigger point in the waveform.
    */
   inline double trig_hoff() { return _trig_hoff; }
 
+  /**
+   * @brief Set the trigger horizontal offset.
+   * @param hoff The new trigger offset in fractional pixels.
+   */
   inline void set_trig_hoff(double hoff) { _trig_hoff = hoff; }
 
   int64_t get_min_offset();
@@ -242,18 +275,18 @@ public:
   /**
    * Returns true if cursors are displayed. false otherwise.
    */
-  inline bool cursors_shown() { return _show_cursors; }
+  inline bool cursors_shown() { return _cursors->cursors_shown(); }
 
-  inline bool trig_cursor_shown() { return _show_trig_cursor; }
+  inline bool trig_cursor_shown() { return _cursors->trig_cursor_shown(); }
 
-  inline bool search_cursor_shown() { return _show_search_cursor; }
+  inline bool search_cursor_shown() { return _cursors->search_cursor_shown(); }
 
   /**
    * Shows or hides the cursors.
    */
   void show_cursors(bool show = true);
 
-  inline const QPoint &hover_point() { return _hover_point; }
+  inline QPoint& hover_point() { return _hover_point; }
 
   void normalize_layout();
 
@@ -262,21 +295,21 @@ public:
   void show_search_cursor(bool show = true);
 
   // ---- Vertical layout ----
-  inline int get_spanY() { return _spanY; }
+  inline int get_spanY() { return _layout->spanY(); }
 
-  inline int get_signalHeight() { return _signalHeight; }
+  inline int get_signalHeight() { return _layout->signalHeight(); }
 
-  inline int get_vOffset() { return _vOffset; }
-  inline void set_vOffset(int offset) { _vOffset = offset; }
+  inline int get_vOffset() { return _layout->vOffset(); }
+  inline void set_vOffset(int offset) { _layout->set_vOffset(offset); }
   void zoom_vertical(double steps);
   void compute_signal_groups();
   inline const std::vector<SignalGroup> &get_signal_groups() {
-    return _signal_groups;
+    return _signal_sync->signal_groups();
   }
   QColor get_group_card_color();
   QColor get_group_card_color(int group_index);
   QColor get_trace_card_color(Trace *trace);
-  void set_group_card_color(QColor color) { _group_card_color = color; }
+  void set_group_card_color(QColor color) { _signal_sync->set_group_card_color(color); }
   bool is_colored_card_mode();
 
   int headerWidth();
@@ -287,7 +320,7 @@ public:
   /*
    * cursorList
    */
-  std::list<Cursor *> &get_cursorList();
+  std::list<std::unique_ptr<Cursor>> &get_cursorList();
 
   void add_cursor(QColor color, uint64_t sampleIndex);
   void add_cursor(uint64_t sampleIndex);
@@ -298,7 +331,7 @@ public:
   void clear_cursors();
   void set_cursor_middle(int index);
 
-  inline Cursor *get_trig_cursor() { return _trig_cursor; }
+  inline Cursor *get_trig_cursor() { return _cursors->trig_cursor(); }
 
   Cursor *get_cursor_by_index(int index);
 
@@ -312,24 +345,24 @@ public:
   // while headless appear once the View is created.
   void sync_cursors_from_core();
 
-  inline Cursor *get_search_cursor() { return _search_cursor; }
+  inline Cursor *get_search_cursor() { return _cursors->search_cursor(); }
 
-  inline bool get_search_hit() { return _search_hit; }
+  inline bool get_search_hit() { return _cursors->search_hit(); }
 
   void set_search_pos(uint64_t search_pos, bool hit);
 
-  inline uint64_t get_search_pos() { return _search_pos; }
+  inline uint64_t get_search_pos() { return _cursors->search_pos(); }
 
   void scroll_to_logic_last_data_time();
 
   /*
    * horizental cursors
    */
-  inline bool xcursors_shown() { return _show_xcursors; }
+  inline bool xcursors_shown() { return _cursors->xcursors_shown(); }
 
-  inline void show_xcursors(bool show) { _show_xcursors = show; }
+  inline void show_xcursors(bool show) { _cursors->set_xcursors_shown(show); }
 
-  inline std::list<XCursor *> &get_xcursorList() { return _xcursorList; }
+  inline std::list<std::unique_ptr<XCursor>> &get_xcursorList() { return _cursors->xcursor_list(); }
 
   // ---- Viewport update ----
   void set_update(Viewport *viewport, bool need_update);
@@ -365,9 +398,9 @@ public:
   /*
    * back paint status
    */
-  inline bool back_ready() { return _back_ready; }
+  inline bool back_ready() { return _data_sync->back_ready(); }
 
-  inline void set_back(bool ready) { _back_ready = ready; }
+  inline void set_back(bool ready) { _data_sync->set_back_ready(ready); }
 
   /*
    * untils
@@ -454,7 +487,7 @@ public:
    */
   bool rst_decoder_by_key_handel(void *handel, QPoint anchor = QPoint());
 
-  inline std::vector<Signal *> &get_own_signals() { return _own_signals; }
+  inline std::vector<std::unique_ptr<Signal>> &get_own_signals() { return _signal_sync->own_signals(); }
 
   /**
    * View-owned wrapper lists for derived trace types.
@@ -464,21 +497,21 @@ public:
    * Synced lazily via sync_derived_traces() when the underlying data
    * source changes.
    */
-  inline std::vector<DecodeTrace *> &get_own_decode_traces() {
+  inline std::vector<std::unique_ptr<DecodeTrace>> &get_own_decode_traces() {
     sync_derived_traces();
-    return _own_decode_traces;
+    return _derived->own_decode_traces();
   }
-  inline std::vector<SpectrumTrace *> &get_own_spectrum_traces() {
+  inline std::vector<std::unique_ptr<SpectrumTrace>> &get_own_spectrum_traces() {
     sync_derived_traces();
-    return _own_spectrum_traces;
+    return _derived->own_spectrum_traces();
   }
   inline MathTrace *get_own_math_trace() {
     sync_derived_traces();
-    return _own_math_trace;
+    return _derived->own_math_trace();
   }
   inline LissajousTrace *get_own_lissajous_trace() {
     sync_derived_traces();
-    return _own_lissajous_trace;
+    return _derived->own_lissajous_trace();
   }
   void sync_derived_traces();
   void mark_derived_traces_dirty();
@@ -516,14 +549,10 @@ public:
    * exact previous state: if was_active==true, set_glitch_filter(thresholds,
    * modes) is called; if was_active==false, clear_glitch_filter() is called.
    */
-  struct FilterSnapshot {
-    std::map<int, uint32_t> thresholds;
-    std::map<int, GlitchFilterMode> modes;
-    bool was_active;
-  };
+  using FilterSnapshot = ViewGlitchFilter::FilterSnapshot;
 
   void undo_filter();
-  bool can_undo_filter() const { return !_filter_undo_stack.empty(); }
+  bool can_undo_filter() const { return !_glitch_filter->filter_undo_empty(); }
 
   /**
    * Forwards glitch filter completion/clearing notifications (originating
@@ -653,7 +682,6 @@ signals:
 
 private slots:
   void h_scroll_value_changed(int value);
-  void v_scroll_value_changed(int value);
 
   void on_traces_moved();
   void on_measure_updated();
@@ -674,19 +702,48 @@ private slots:
   void on_preview_batch_changed(const std::vector<pv::view::LogicSignal *> &sigs,
                                 uint32_t threshold, GlitchFilterMode mode);
 
+public:
+  // ---- Internal accessors for delegate classes ----
+  // Phase 2: Replaced friend declarations with public accessor methods.
+  // Delegates (ViewLayout, ViewCursors, etc.) hold a View* pointer and
+  // call these accessors instead of directly touching private members.
+  inline Viewport* fft_viewport() { return _fft_viewport; }
+  inline Header* header_widget() { return _header; }
+  inline DevMode* devmode_widget() { return _devmode; }
+  inline QWidget* viewcenter_widget() { return _viewcenter; }
+  inline ViewStatus* viewstatus_widget() { return _viewbottom; }
+  inline QSplitter* vsplitter_widget() { return _vsplitter; }
+  inline DeviceAgent* device_agent() { return _device_agent; }
+  inline pv::toolbars::SamplingBar* sampling_bar() { return _sampling_bar; }
+  inline std::list<QWidget*>& viewport_list() { return _viewport_list; }
+  inline std::map<int,int>& trace_view_map() { return _trace_view_map; }
+  inline bool header_collapsed() const { return _header_collapsed; }
+  inline bool destroying() const { return _destroying; }
+  inline void set_destroying(bool v) { _destroying = v; }
+  inline Viewport* active_viewport() { return _active_viewport; }
+  inline void set_active_viewport(Viewport* vp) { _active_viewport = vp; }
+  inline ViewLayout* layout_delegate() { return _layout.get(); }
+  inline ViewDataSync* data_sync_delegate() { return _data_sync.get(); }
+  void schedule_visible_range_notify();
+  inline int maxScrollValue() const { return MaxScrollValue; }
+  inline SigSession* session_ptr() { return _session; }
+  inline int rulerHeight() const { return RulerHeight; }
+  inline void set_viewport_margins(int left, int top, int right, int bottom) {
+    setViewportMargins(left, top, right, bottom);
+  }
+  void v_scroll_value_changed(int value);
+
+  // ---- Internal helpers (public for delegate access) ----
+  void get_scroll_layout(int64_t &length, int64_t &offset);
+  void update_scroll();
+  void update_margins();
+  void set_scale(double scale);
+  void set_trig_cursor_posistion(uint64_t percent);
+  void make_cursors_order();
+  void clear();
+  void reconstruct();
+
 private:
-  // ---- Friends (delegates touch View's private state directly) ----
-  // Phase E delegates — friend classes so they can touch View's private
-  // state (_scale / _offset / _own_decode_traces / _trig_cursor / …)
-  // directly. Each delegate owns *behaviour*; the state still lives on View.
-  friend class ViewLayout;
-  friend class ViewCursors;
-  friend class ViewDerivedTraces;
-  // Phase J delegates — signal-sync / glitch-filter / data-sync behaviour
-  // extracted from the View God-class during modernize-view-layer-v3.
-  friend class ViewSignalSync;
-  friend class ViewGlitchFilter;
-  friend class ViewDataSync;
 
   // ---- Private static constants ----
   static const int LabelMarginWidth;
@@ -694,17 +751,7 @@ private:
   static const int MaxScrollValue;
   static const int MaxHeightUnit;
 
-  // ---- Internal helpers (delegate to ViewLayout / ViewCursors) ----
-  void get_scroll_layout(int64_t &length, int64_t &offset);
-  void update_scroll();
-  void update_margins();
-  void set_scale(double scale);
-
-  void set_trig_cursor_posistion(uint64_t percent);
-  void make_cursors_order();
-
-  void clear();
-  void reconstruct();
+  // ---- Event handlers (private) ----
   bool eventFilter(QObject *object, QEvent *event);
   bool viewportEvent(QEvent *e);
   void paintEvent(QPaintEvent *event);
@@ -712,9 +759,8 @@ private:
   void scrollContentsBy(int dx, int dy);
 
   // Restart the visible-range debounce timer. Repeated calls while the
-  // timer is already running restart it (QTimer::start semantics), so only
   // the last call in a burst of drag/zoom events fires visible_range_changed.
-  void schedule_visible_range_notify();
+  // (Declaration in public section above for delegate access.)
 
   // ---- Delegate members (Phase E + J) ----
   std::unique_ptr<ViewLayout> _layout;
@@ -726,25 +772,10 @@ private:
 
   // ---- Session / data source ----
   SigSession *_session;
-  pv::data::DataSource *_data_source;
-  pv::data::SessionDocument *_document;
   pv::toolbars::SamplingBar *_sampling_bar;
   DockUiState _dock_ui_state;
-  // Re-entrancy guard for rebuild_signals_from_config(). Set while a rebuild
-  // is in progress so a nested broadcast (e.g. DeviceOptionsUpdated) cannot
-  // recurse into another rebuild and stack-overflow. The RAII guard in
-  // rebuild_signals_from_config() resets it on all exit paths.
-  bool _rebuild_in_progress = false;
 
   // ---- View-owned signal/trace wrappers ----
-  std::vector<Signal *> _own_signals;
-  // View-owned wrapper traces for derived types. Synced lazily from the
-  // Core layer's Stack/Model objects via sync_derived_traces().
-  std::vector<DecodeTrace *> _own_decode_traces;
-  std::vector<SpectrumTrace *> _own_spectrum_traces;
-  MathTrace *_own_math_trace = nullptr;
-  LissajousTrace *_own_lissajous_trace = nullptr;
-  bool _derived_traces_dirty = true;
 
   // ---- Viewport / widgets ----
   QWidget *_viewcenter;
@@ -761,31 +792,8 @@ private:
   bool _header_collapsed;
 
   // ---- Scale / offset ----
-  /// The view time scale in seconds per pixel.
-  double _scale;
-  double _preScale;
-  double _maxscale;
-  double _minscale;
-  /// DSO user zoom factor (1.0 = fit one frame to viewport width).
-  /// DSO mode update_scale_offset() forces _scale = cur_view_time/width
-  /// every frame (called from data_updated()). To let the user zoom in
-  /// and pan horizontally like LOGIC mode, we keep this factor separate
-  /// and reapply it: _scale = base_scale * _dso_zoom_factor. zoom() only
-  /// mutates this factor; data frames re-derive _scale from it. Reset to
-  /// 1.0 on mode change (ViewDataSync::mode_changed).
-  double _dso_zoom_factor = 1.0;
-
-  /// The pixels offset of the left edge of the view
-  int64_t _offset;
-  int64_t _preOffset;
-  int _spanY;
-  int _signalHeight;
-  int _vOffset;
-  int _signalHeightScale;
-  int _lastWidth;
-  std::vector<SignalGroup> _signal_groups;
-  QColor _group_card_color;
-  bool _updating_scroll;
+  // Scale/offset/signal-height state migrated to ViewLayout delegate.
+  double _trig_hoff;
 
   // ---- Visible-range notify debounce ----
   // Single-shot 100ms timer coalescing bursts of scale/offset/resize changes
@@ -793,41 +801,19 @@ private:
   // QObject) so it is destroyed automatically.
   QTimer *_viewport_change_timer = nullptr;
 
-  // trigger position fix
-  double _trig_hoff;
+  // (trigger position fix _trig_hoff is declared above in the layout section)
 
   // ---- Cursors ----
-  bool _show_cursors;
-  std::list<Cursor *> _logic_cursors;
-  std::list<Cursor *> _dso_cursors;
-  Cursor *_trig_cursor;
-  bool _show_trig_cursor;
-  Cursor *_search_cursor;
-  bool _show_search_cursor;
-  uint64_t _search_pos;
-  bool _search_hit;
-
-  bool _show_xcursors;
-  std::list<XCursor *> _xcursorList;
+  // Cursor state migrated to ViewCursors delegate (Phase 1).
 
   // ---- Misc ----
   QPoint _hover_point;
 
   bool _dso_auto;
   bool _show_lissajous;
-  bool _back_ready;
   bool _destroying = false;
   DeviceAgent *_device_agent;
-  QElapsedTimer _data_updated_timer;
 
-  // ---- Glitch filter popup (View-owned, Task 7) ----
-  GlitchFilterPopup *_glitch_filter_popup = nullptr;
-  // Per-signal cached preview ranges (orange overlay) while the popup is open.
-  std::map<LogicSignal *, std::vector<pv::data::PulseAnalyzer::Pulse>>
-      _preview_ranges;
-  // Undo stack for glitch filter applications (Task 9). Accessed only on the
-  // GUI thread (slots + Ctrl+Z handler), so no synchronization needed.
-  std::vector<FilterSnapshot> _filter_undo_stack;
 };
 
 } // namespace view

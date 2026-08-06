@@ -22,10 +22,10 @@
 #include <libsigrokdecode.h>
 
 #include "decoderoptions.h"
-#define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
 #include "../../data/decoderstack.h"
 #include "../../data/decode/decoder.h"
+#include "../../gvarptr.h"
 #include "../../log.h"
 #include "../double.h"
 #include "../enum.h"
@@ -36,7 +36,6 @@
 #include <stdexcept>
 
 using namespace std;
-using std::placeholders::_1;
  
 namespace pv {
 namespace prop {
@@ -87,10 +86,12 @@ DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_s
 
 		const QString name = QString::fromUtf8(desc_str);
 
-		const Property::Getter getter = bind(
-			&DecoderOptions::getter, this, opt->id);
-		const Property::Setter setter = bind(
-			&DecoderOptions::setter, this, opt->id, _1);
+		const Property::Getter getter = [this, opt]() {
+			return this->getter(opt->id);
+		};
+		const Property::Setter setter = [this, opt](GVariant *v) {
+			this->setter(opt->id, v);
+		};
 
 		Property *prop = nullptr;
 
@@ -113,7 +114,7 @@ Property* DecoderOptions::bind_enum(
 	const QString &name, const srd_decoder_option *option,
 	Property::Getter getter, Property::Setter setter)
 {
-    std::vector<std::pair<GVariant*, QString> > values;
+    std::vector<std::pair<GVarPtr, QString> > values;
 	for (GSList *l = option->values; l; l = l->next) {
 		GVariant *const var = (GVariant*)l->data;
 		if (!var) {
@@ -121,7 +122,7 @@ Property* DecoderOptions::bind_enum(
 			continue;
 		}
 		assert(var);
-		values.push_back(make_pair(var, print_gvariant(var)));
+		values.push_back(make_pair(GVarPtr(var), print_gvariant(var)));
 	}
 
     return new Enum(name, name, values, getter, setter);

@@ -55,6 +55,7 @@ struct DecoderInfoItem {
 namespace pv {
 
 class SigSession;
+namespace data { class ISignalSource; class IDecoderHost; class ICaptureControl; }
 
 namespace data {
 namespace decode {
@@ -164,6 +165,9 @@ private slots:
 
 private:
   SigSession *_session;
+  data::ISignalSource *_signals = nullptr;
+  data::IDecoderHost *_decoder_host = nullptr;
+  data::ICaptureControl *_capture = nullptr;
   view::View *_view;
   TabContext *_context;
   QSortFilterProxyModel _model_proxy;

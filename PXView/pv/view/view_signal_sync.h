@@ -25,7 +25,11 @@
 #define PXVIEW_PV_VIEW_VIEW_SIGNAL_SYNC_H
 
 #include <cstdint>
+#include <memory>
 #include <vector>
+#include <QColor>
+
+#include "iview_delegates.h"
 
 class QColor;
 class QString;
@@ -41,17 +45,22 @@ namespace view {
 
 class View;
 class Trace;
+class Signal;
+
+struct SignalGroup;
 
 // ViewSignalSync — delegate for View's signal-group / signal-rebuild /
 // signals-changed layout responsibilities. Extracted from the View
-// God-class during Phase J of the modernize-view-layer-v3 spec. All
-// signal state (_own_signals / _signal_groups / _rebuild_in_progress)
-// still lives on View; this class only owns the *behaviour*. View
-// declares `friend class ViewSignalSync;` so the delegate can read and
-// mutate those private members directly.
-class ViewSignalSync {
+// God-class during Phase J of the modernize-view-layer-v3 spec. Signal
+// state (_own_signals / _signal_groups / _rebuild_in_progress /
+// _group_card_color) lives here. Signal height state (_spanY /
+// _signalHeight / _signalHeightScale) lives on ViewLayout (migrated
+// from View in Phase 1). View declares `friend class ViewSignalSync;`
+// so the delegate can access View's private widget members and layout state.
+class ViewSignalSync : public IViewSignalStore {
 public:
-  explicit ViewSignalSync(View *view) : _view(view) {}
+  explicit ViewSignalSync(View *view);
+  ~ViewSignalSync();
 
   // -- signal grouping ---------------------------------------------------
   void compute_signal_groups();
@@ -87,8 +96,35 @@ public:
   QColor get_trace_card_color(Trace *trace);
   bool is_colored_card_mode();
 
+  std::vector<std::unique_ptr<Signal>> &own_signals() { return _own_signals; }
+  std::vector<SignalGroup> &signal_groups() { return _signal_groups; }
+  QColor group_card_color() const { return _group_card_color; }
+  void set_group_card_color(QColor c) { _group_card_color = c; }
+  bool rebuild_in_progress() const override { return _rebuild_in_progress; }
+  void set_rebuild_in_progress(bool v) { _rebuild_in_progress = v; }
+
+  // -- IViewSignalStore overrides ----------------------------------------
+  size_t signal_count() const override { return _own_signals.size(); }
+
 private:
   View *_view;
+
+  std::vector<std::unique_ptr<Signal>> _own_signals;
+  std::vector<SignalGroup> _signal_groups;
+  QColor _group_card_color;
+  bool _rebuild_in_progress = false;
+
+  // --- signals_changed() split helpers (was 300-line God-method) ---
+  void sort_signal_groups_by_view_index();
+  void classify_traces(std::vector<Trace *> &time_traces,
+                        std::vector<Trace *> &fft_traces,
+                        std::vector<Trace *> &logic_traces,
+                        std::vector<Trace *> &decoder_traces);
+  void update_fft_viewport(const std::vector<Trace *> &fft_traces);
+  void layout_time_signals(std::vector<Trace *> &time_traces,
+                            const std::vector<Trace *> &logic_traces,
+                            const std::vector<Trace *> &decoder_traces);
+  void finalize_signal_layout();
 };
 
 } // namespace view

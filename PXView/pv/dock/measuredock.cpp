@@ -65,7 +65,7 @@ public:
 };
 
 MeasureDock::MeasureDock(QWidget *parent, View *view, SigSession *session)
-    : pv::widgets::SmoothScrollArea(parent), _session(session), _view(view),
+    : pv::widgets::SmoothScrollArea(parent), _session(session), _signals(session), _view(view),
       _context(nullptr) {
   _widget = new QWidget(this);
 
@@ -273,6 +273,7 @@ void MeasureDock::bind_context(TabContext *ctx) {
   assert(ctx);
   _context = ctx;
   _session = ctx->session();
+      _signals = _session;
   set_view(ctx->view());
   reload();
   if (ctx && ctx->view()) {
@@ -283,7 +284,7 @@ void MeasureDock::bind_context(TabContext *ctx) {
     auto &edge_rows = ctx->view()->dock_ui_state().dock_measure_edge_rows;
 
     if ((dist_rows.size() > 0 || edge_rows.size() > 0) &&
-        _session->get_device() && _session->get_device()->have_instance()) {
+        _signals->device() && _signals->device()->have_instance()) {
       auto mode_rows = get_mode_rows();
 
       if (mode_rows) {
@@ -325,8 +326,8 @@ void MeasureDock::bind_context(TabContext *ctx) {
 }
 
 void MeasureDock::unbind_context() {
-  if (_context && _context->view() && _session && _session->get_device() &&
-      _session->get_device()->have_instance()) {
+  if (_context && _context->view() && _session && _signals->device() &&
+      _signals->device()->have_instance()) {
     _context->view()->dock_ui_state().dock_measure_fen_enabled =
         _fen_checkBox->isChecked();
 
@@ -436,7 +437,7 @@ void MeasureDock::reStyle() {
 }
 
 void MeasureDock::reload() {
-  bool isLogic = _session->get_device()->get_work_mode() == LOGIC;
+  bool isLogic = _signals->device()->get_work_mode() == LOGIC;
   _edge_section->setVisible(isLogic);
   _edge_sep->setVisible(isLogic);
 
@@ -937,10 +938,10 @@ void MeasureDock::update_edge() {
       uint64_t rising_edges;
       uint64_t falling_edges;
 
-      for (auto s : _view->get_own_signals()) {
+      for (auto &s : _view->get_own_signals()) {
         if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled() &&
             s->get_index() == inf.box->currentText().toInt()) {
-          view::LogicSignal *logicSig = (view::LogicSignal *)s;
+          view::LogicSignal *logicSig = (view::LogicSignal *)s.get();
 
           if (logicSig->edges(_view->get_cursor_samples(inf.cursor2 - 1),
                               _view->get_cursor_samples(inf.cursor1 - 1),
@@ -1015,7 +1016,7 @@ QComboBox *MeasureDock::create_probe_selector(QWidget *parent) {
 void MeasureDock::update_probe_selector(QComboBox *selector) {
   selector->clear();
 
-  for (auto s : _view->get_own_signals()) {
+  for (auto &s : _view->get_own_signals()) {
     if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
       selector->addItem(QString::number(s->get_index()));
     }
@@ -1095,7 +1096,7 @@ void MeasureDock::build_cursor_pannel() {
       QString cur_pos = _view->get_cm_time(cursor_dex) + "/" +
                         QString::number(_view->get_cursor_samples(cursor_dex));
       row.info_label->setText(cur_pos);
-      row.cursor = (*it);
+      row.cursor = it->get();
       index++;
       cursor_dex++;
     }
@@ -1122,7 +1123,7 @@ void MeasureDock::build_cursor_pannel() {
       QString cur_pos = _view->get_cm_time(cursor_dex) + "/" +
                         QString::number(_view->get_cursor_samples(cursor_dex));
       row.info_label->setText(cur_pos);
-      row.cursor = (*it);
+      row.cursor = it->get();
       index++;
       cursor_dex++;
     }
@@ -1169,7 +1170,7 @@ void MeasureDock::build_cursor_pannel() {
     connect(cursor_pushButton, &QPushButton::clicked, this,
             &MeasureDock::goto_cursor);
 
-    cursor_opt_info inf = {del_btn, cursor_pushButton, curpos_label, (*it)};
+    cursor_opt_info inf = {del_btn, cursor_pushButton, curpos_label, it->get()};
     mode_rows->_opt_row_list.push_back(inf);
 
     index++;
@@ -1250,7 +1251,7 @@ void MeasureDock::adjust_form_size(QWidget *wid) {
 }
 
 row_list_item *MeasureDock::get_mode_rows() {
-  int mode = _session->get_device()->get_work_mode();
+  int mode = _signals->device()->get_work_mode();
   int dex = 0;
 
   if (mode == LOGIC) {

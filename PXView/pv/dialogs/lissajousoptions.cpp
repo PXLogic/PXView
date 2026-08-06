@@ -45,7 +45,7 @@ namespace dialogs {
 
 LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     PxDialog(parent),
-    _session(session),
+    _session(session), _data_src(session),
     _button_box(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         Qt::Horizontal, this)
 {
@@ -65,8 +65,8 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     _percent = new QSlider(Qt::Horizontal, this);
     _percent->setRange(100, 100);
     _percent->setEnabled(false);
-    if (_session->cur_samplelimits() > WellLen) {
-        int min = ceil(WellLen*100.0/_session->cur_samplelimits());
+    if (_data_src->cur_samplelimits() > WellLen) {
+        int min = ceil(WellLen*100.0/_data_src->cur_samplelimits());
         _percent->setEnabled(true);
         _percent->setRange(min, 100);
         _percent->setValue(min);
@@ -80,7 +80,7 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     xlayout->setContentsMargins(5, 15, 5, 5);
     ylayout->setContentsMargins(5, 15, 5, 5);
 
-    for(auto m : _session->get_signal_models()) {
+    for(auto m : _data_src->get_signal_models()) {
         if (m->type() == SR_CHANNEL_DSO) {
             QString index_str = QString::number(m->index());
             QRadioButton *xradio = new QRadioButton(index_str, _x_group);
@@ -97,7 +97,7 @@ LissajousOptions::LissajousOptions(SigSession *session, QWidget *parent) :
     _y_group->setLayout(ylayout);
 
 
-    auto lissajous = _session->get_lissajous_model();
+    auto lissajous = _data_src->get_lissajous_model();
     if (lissajous) {
         _enable->setChecked(lissajous->enabled());
         _percent->setValue(lissajous->percent());

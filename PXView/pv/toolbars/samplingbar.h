@@ -162,7 +162,10 @@ namespace pv
 
         // private:
         public:
-            SigSession          *_session;
+            SigSession *_session;
+            data::ISignalSource *_signals = nullptr;
+  data::IDataSource *_data = nullptr;
+  data::ICaptureControl *_capture = nullptr;
             QLabel              *_device_type_label;
             XToolButton         *_device_type;
             DsComboBox          *_device_selector;
