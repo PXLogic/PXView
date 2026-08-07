@@ -160,6 +160,7 @@ jobs:
 
       - name: Build and Install Web UI
         run: |
+          export PATH="/c/Program Files/nodejs:$PATH"
           cd build && ninja install-webui
 
       - name: Build PXView
@@ -797,6 +798,7 @@ jobs:
 
       - name: Build and Install Web UI
         run: |
+          export PATH="/c/Program Files/nodejs:$PATH"
           cd build && ninja install-webui
 
       - name: Build PXView

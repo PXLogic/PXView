@@ -52,7 +52,7 @@ find_program(NPM_EXECUTABLE npm)
 if(NPM_EXECUTABLE)
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html
-        COMMAND ${NPM_EXECUTABLE} install
+        COMMAND ${NPM_EXECUTABLE} install --registry=https://registry.npmjs.org/
         COMMAND ${NPM_EXECUTABLE} run build
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/web
         COMMENT "Building Vite web client..."
