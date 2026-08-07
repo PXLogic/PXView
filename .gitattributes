@@ -1,0 +1,3 @@
+# NSIS installer script must preserve UTF-8 BOM for correct Chinese character encoding
+# Setting to binary to prevent Git from stripping the BOM during checkout on Windows
+window_nisi.nsi binary
