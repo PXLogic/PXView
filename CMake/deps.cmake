@@ -26,16 +26,48 @@ link_directories(${GLIB_LIBDIR})
 #===============================================================================
 #= python3
 #-------------------------------------------------------------------------------
+# On MSYS2/MinGW (GitHub Actions windows-2022 runners pre-install python.org
+# MSVC Python at C:/hostedtoolcache/), CMake's find_package(Python3) would find
+# the MSVC build first (via registry + PATH), linking PXView.exe against
+# python314.dll (MSVC naming). The MinGW build produces libpython3.14.dll
+# instead. Mixing them causes "python314.dll not found" at runtime because
+# package.sh only copies MinGW DLLs.
+#
+# Fix: in MSYS2 environments, force CMake to find the MinGW Python by:
+# 1. Setting Python3_FIND_REGISTRY=NEVER (skip Windows registry search)
+# 2. Setting Python3_ROOT_DIR to the MinGW prefix (/mingw64 or /mingw32)
+# This ensures PXView.exe links against libpython3.XX.dll (MinGW naming),
+# which copy-deps.sh will bundle correctly.
 
-if(POLICY CMP0148)
-	cmake_policy(SET CMP0148 NEW)
+if(DEFINED ENV{MSYSTEM})
+	# MSYS2/MinGW environment detected
+	set(Python3_FIND_REGISTRY NEVER)
+	if(EXISTS "/mingw64/bin/python3.exe")
+		set(Python3_ROOT_DIR "/mingw64")
+	elseif(EXISTS "/mingw32/bin/python3.exe")
+		set(Python3_ROOT_DIR "/mingw32")
+	endif()
+	message(STATUS "MSYS2 environment detected (MSYSTEM=$ENV{MSYSTEM})")
+	message(STATUS "Forcing MinGW Python: Python3_ROOT_DIR=${Python3_ROOT_DIR}")
 endif()
+
 find_package(Python3 COMPONENTS Interpreter Development)
 
 if (Python3_FOUND)
 	message("----- python3:")
 	message(STATUS "	 includes:" ${Python3_INCLUDE_DIRS})
 	message(STATUS "	 libraries:" ${Python3_LIBRARIES})
+	# Diagnostic: verify we got the MinGW Python, not python.org MSVC build
+	if(DEFINED ENV{MSYSTEM})
+		get_filename_component(_py_lib_dir "${Python3_LIBRARIES}" DIRECTORY)
+		if(_py_lib_dir MATCHES "hostedtoolcache|Python3[0-9]+\\\\libs")
+			message(FATAL_ERROR "FATAL: CMake found python.org MSVC Python at ${Python3_LIBRARIES} "
+				"instead of MinGW Python. PXView.exe would link against python314.dll "
+				"(MSVC build) which is not available at runtime. "
+				"Check Python3_ROOT_DIR=${Python3_ROOT_DIR}")
+		endif()
+		message(STATUS "	 [OK] MinGW Python confirmed (not python.org MSVC build)")
+	endif()
 	include_directories(${Python3_INCLUDE_DIRS})
 	set(PY_LIB ${Python3_LIBRARIES})
 else()

@@ -823,6 +823,47 @@ jobs:
           chmod +x window/copy-deps.sh
           bash window/package.sh
 
+      - name: Verify Python DLL in package
+        run: |
+          echo "=== Verifying Python runtime in package/ ==="
+          # Check for MinGW Python DLL (libpython3.XX.dll — correct naming)
+          PY_DLL=$(ls package/libpython3*.dll 2>/dev/null | head -1)
+          if [ -z "$PY_DLL" ]; then
+            # Check for python.org MSVC Python DLL (python3XX.dll — wrong)
+            MSVC_DLL=$(ls package/python3*.dll 2>/dev/null | grep -v python3._pth | head -1)
+            if [ -n "$MSVC_DLL" ]; then
+              echo "ERROR: Found python.org MSVC Python DLL: $MSVC_DLL"
+              echo "       PXView.exe was linked against MSVC Python, not MinGW Python."
+              echo "       Check deps.cmake MSYS2 detection and CMake configure output."
+              exit 1
+            fi
+            echo "ERROR: No Python DLL found in package/"
+            echo "Available DLLs:"
+            ls package/*.dll 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "OK: Python DLL found: $(basename $PY_DLL)"
+
+          # Check for Python stdlib (encodings module is required for startup)
+          PY_VER=$(echo "$PY_DLL" | grep -oE '3\.[0-9]+')
+          if [ -d "package/lib/python${PY_VER}/encodings" ]; then
+            echo "OK: Python stdlib found (lib/python${PY_VER}/encodings/ exists)"
+          else
+            echo "ERROR: Python stdlib not found or encodings module missing"
+            echo "Expected: package/lib/python${PY_VER}/encodings/"
+            echo "Contents of package/lib/:"
+            ls -la package/lib/ 2>/dev/null || echo "  package/lib/ does not exist"
+            exit 1
+          fi
+
+          # Check for libffi (required by _ctypes.pyd)
+          if [ -f "package/libffi-8.dll" ] || [ -f "package/libffi-7.dll" ]; then
+            echo "OK: libffi DLL found"
+          else
+            echo "WARNING: libffi DLL not found (ctypes may fail)"
+          fi
+          echo "=== Python runtime verification passed ==="
+
       - name: Create NSIS installer
         shell: pwsh
         run: |

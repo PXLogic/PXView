@@ -129,14 +129,48 @@ bool AppControl::Init()
     pxv_info("DBG: srd_log_set_context done");
 
 #if defined(_WIN32)
-    // Set Python home to application directory for embedded Python
+    // Set Python home to application directory for embedded Python.
+    //
+    // Two layouts are supported:
+    // 1. Legacy: python3XX.zip in the app directory (python.org embeddable)
+    // 2. MSYS2: lib/python3.X/ stdlib copied from MinGW (no zip file)
+    //
+    // For layout 2, PYTHONHOME must point to the app directory itself
+    // (the parent of lib/), so Python finds lib/python3.X/encodings/__init__.py
     QString pythonHome = QCoreApplication::applicationDirPath();
     QDir pydir(pythonHome);
+    bool pyHomeSet = false;
+
+    // Method 1: Check for python3XX.zip (legacy embeddable layout)
     QStringList zipFiles = pydir.entryList(QStringList() << "python*.zip", QDir::Files);
     if (!zipFiles.isEmpty()) {
         const wchar_t *pyhome = reinterpret_cast<const wchar_t*>(pythonHome.utf16());
         srd_set_python_home(pyhome);
-        pxv_info("Set Python home to: %s", pythonHome.toUtf8().data());
+        pxv_info("Set Python home to: %s (python*.zip detected)", pythonHome.toUtf8().data());
+        pyHomeSet = true;
+    }
+
+    // Method 2: Check for lib/python3.X/ directory (MSYS2 MinGW stdlib layout)
+    if (!pyHomeSet) {
+        QDir libDir(pythonHome + "/lib");
+        QStringList pyDirs = libDir.entryList(QStringList() << "python3.*", QDir::Dirs, QDir::Name);
+        if (!pyDirs.isEmpty()) {
+            // Verify encodings module exists (critical for Python startup)
+            if (libDir.exists(pyDirs.first() + "/encodings")) {
+                const wchar_t *pyhome = reinterpret_cast<const wchar_t*>(pythonHome.utf16());
+                srd_set_python_home(pyhome);
+                pxv_info("Set Python home to: %s (lib/%s/ detected, encodings OK)",
+                         pythonHome.toUtf8().data(), pyDirs.first().toUtf8().data());
+                pyHomeSet = true;
+            } else {
+                pxv_info("WARNING: lib/%s/ found but encodings module missing",
+                         pyDirs.first().toUtf8().data());
+            }
+        }
+    }
+
+    if (!pyHomeSet) {
+        pxv_info("WARNING: No Python stdlib found in app directory, using system Python");
     }
 #if defined(DEBUG_INFO)
     //able run debug with qtcreator
