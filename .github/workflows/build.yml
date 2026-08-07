@@ -158,9 +158,9 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
-      - name: Build and Install Web UI (optional)
+      - name: Build and Install Web UI
         run: |
-          cd build && ninja install-webui || echo "WARNING: Web UI skipped"
+          cd build && ninja install-webui
 
       - name: Build PXView
         run: cd build && ninja -j $(nproc)
@@ -792,11 +792,12 @@ jobs:
           mkdir -p build && cd build
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=../install.dir
+            -DCMAKE_INSTALL_PREFIX=../install.dir \
+            -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd"
 
-      - name: Build and Install Web UI (optional)
+      - name: Build and Install Web UI
         run: |
-          cd build && ninja install-webui || echo "WARNING: Web UI skipped"
+          cd build && ninja install-webui
 
       - name: Build PXView
         run: cd build && ninja -j $(nproc)
