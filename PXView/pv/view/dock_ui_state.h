@@ -81,7 +81,7 @@ struct DockUiState {
     dock_sample_limit = 0;
     dock_collect_mode = 0;
     dock_search_pattern.clear();
-    dock_measure_fen_enabled = false;
+    dock_measure_fen_enabled = true;
     dock_measure_dist_rows = QJsonArray();
     dock_measure_edge_rows = QJsonArray();
     dock_trigger_session = QJsonObject();
