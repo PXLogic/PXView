@@ -1224,9 +1224,9 @@ free_data();
   _unit_size = src._unit_size;
   _unit_bytes = src._unit_bytes;
   _unit_pitch = src._unit_pitch;
-  _memory_failed = src._memory_failed;
-  _last_ended = src._last_ended;
-  _samplerate = src._samplerate;
+  _memory_failed = src._memory_failed.load();
+  _last_ended = src._last_ended.load();
+  _samplerate = src._samplerate.load();
   _ch_index = src._ch_index;
 
   _byte_fraction = src._byte_fraction;

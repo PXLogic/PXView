@@ -64,6 +64,8 @@ public:
 
     // --- Business objects ---
     virtual std::vector<std::shared_ptr<data::SignalModel>> &signal_models() = 0;
+    // TS-2 fix: thread-safe snapshot for callers that don't hold the mutex.
+    virtual std::vector<std::shared_ptr<data::SignalModel>> signal_models_snapshot() = 0;
     virtual std::vector<std::shared_ptr<data::SpectrumStack>> &spectrum_stacks() = 0;
     virtual data::LissajousModel *lissajous_model() const = 0;
     virtual void set_lissajous_model(std::unique_ptr<data::LissajousModel> m) = 0;

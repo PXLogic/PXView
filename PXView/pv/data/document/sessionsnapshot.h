@@ -60,8 +60,15 @@ public:
     double cur_sampletime() override;
     double cur_snap_sampletime() override;
     data::LogicSnapshot* get_logic_snapshot() override;
+    // MS-5 fix: override _shared variants so callers (e.g. LogicSignal::set_data_from_source)
+    // get a valid shared_ptr that keeps the snapshot alive. Previously these inherited the
+    // DataSource default (return nullptr), causing _data_ref to be empty and _data to be
+    // a dangling raw pointer after the SessionSnapshot released the snapshot.
+    std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override { return _logic; }
     data::AnalogSnapshot* get_analog_snapshot() override;
+    std::shared_ptr<data::AnalogSnapshot> get_analog_snapshot_shared() override { return _analog; }
     data::DsoSnapshot* get_dso_snapshot() override;
+    std::shared_ptr<data::DsoSnapshot> get_dso_snapshot_shared() override { return _dso; }
     data::Snapshot* get_snapshot(int type) override;
     uint64_t get_trigger_pos() override;
 
@@ -97,9 +104,9 @@ public:
     void copy_from_analog(data::AnalogSnapshot *src);
     void copy_from_dso(data::DsoSnapshot *src);
 
-    inline LogicSnapshot* get_logic() { return &_logic; }
-    inline AnalogSnapshot* get_analog() { return &_analog; }
-    inline DsoSnapshot* get_dso() { return &_dso; }
+    inline LogicSnapshot* get_logic() { return _logic.get(); }
+    inline AnalogSnapshot* get_analog() { return _analog.get(); }
+    inline DsoSnapshot* get_dso() { return _dso.get(); }
 
     inline QDateTime timestamp() const { return _timestamp; }
     inline void set_timestamp(const QDateTime &ts) { _timestamp = ts; }
@@ -114,9 +121,12 @@ private:
     uint64_t _samplelimits;
     uint64_t _trig_pos;
 
-    LogicSnapshot _logic;
-    AnalogSnapshot _analog;
-    DsoSnapshot _dso;
+    // MS-5 fix: changed from value members to shared_ptr so that
+    // get_*_snapshot_shared() can return a valid shared_ptr. This matches
+    // the pattern used by SessionData and SessionDocument.
+    std::shared_ptr<LogicSnapshot> _logic;
+    std::shared_ptr<AnalogSnapshot> _analog;
+    std::shared_ptr<DsoSnapshot> _dso;
 
     std::vector<std::shared_ptr<SignalModel>> _signal_models;
     std::vector<std::shared_ptr<DecoderStack>> _decoder_stacks;

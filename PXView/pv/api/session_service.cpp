@@ -2172,7 +2172,7 @@ std::vector<DecoderInstance> SessionService::get_active_decoders() const {
         std::string display_name;
         auto &dec_list = stack->stack();
         if (!dec_list.empty()) {
-            auto *root_dec = dec_list.front();
+            auto *root_dec = dec_list.front().get();
             if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
                 display_name = root_dec->decoder()->name;
         }
@@ -2235,7 +2235,7 @@ Result<std::string> SessionService::add_decoder(
             // Apply options to the new sub-decoder
             auto &stack = decoder_stack->stack();
             if (!stack.empty()) {
-                auto *sub_dec = stack.back(); // the newly added decoder
+                auto *sub_dec = stack.back().get(); // the newly added decoder
 
                 for (const auto &opt : options) {
                     GVariant *val = nullptr;
@@ -2512,9 +2512,9 @@ Result<std::string> SessionService::add_decoder(
         {
             auto &stack = decoder_stack->stack();
             if (!stack.empty()) {
-                auto *root_decoder = stack.front();
+auto *root_decoder = stack.front().get();
 
-                // Apply options with correct GVariant types (matching DecoderOptions binding)
+// Apply options with correct GVariant types (matching DecoderOptions binding)
                 for (const auto &opt : options) {
                     GVariant *val = nullptr;
                     bool found_type = false;
@@ -3605,7 +3605,7 @@ Result<void> SessionService::export_decoder_table(
         std::string analyzer_name;
         auto &dec_list = decoder_stack->stack();
         if (!dec_list.empty()) {
-            auto *root_dec = dec_list.front();
+            auto *root_dec = dec_list.front().get();
             if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
                 analyzer_name = root_dec->decoder()->name;
         }
@@ -4332,8 +4332,8 @@ Result<void> SessionService::reconfigure_decoder(
             return Result<void>::Fail(ErrorCode::DecoderError,
                                       "Decoder stack has no root decoder");
 
-        auto *root_decoder = dec_list.front();
-        if (!root_decoder || !root_decoder->decoder())
+auto *root_decoder = dec_list.front().get();
+if (!root_decoder || !root_decoder->decoder())
             return Result<void>::Fail(ErrorCode::DecoderError,
                                       "Invalid root decoder");
 

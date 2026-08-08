@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QEvent>
 #include <atomic>
+#include <cassert>
 #include <memory>
 #include <shared_mutex>
 #include <thread>
@@ -89,6 +90,12 @@ public:
     // Shares the same thread_local _broadcast_depth re-entrancy guard as
     // broadcast().
     template <typename EventType> void broadcast_sync(const EventType &ev) {
+        // MS-3 fix: enforce the main-thread contract at runtime. If called
+        // from a worker thread, the listeners (which are View-layer QObjects)
+        // would be touched from a non-GUI thread, causing Qt asserts or
+        // undefined behavior. The assert is debug-only (NDEBUG in release).
+        assert(on_main_thread() &&
+               "broadcast_sync must be called on the main thread");
         std::shared_lock<std::shared_mutex> lk(_listeners_mutex);
         ++_broadcast_depth;
         if (_broadcast_depth > 1) {

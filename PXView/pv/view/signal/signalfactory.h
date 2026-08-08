@@ -76,11 +76,14 @@ public:
 
     /**
      * Create a single Signal from a SignalModel.
+     * MS-4 fix: returns unique_ptr to enforce ownership transfer at the
+     * type level. Callers cannot accidentally leak the Signal by forgetting
+     * to wrap it in unique_ptr.
      * @param model The SignalModel to create from.
      * @param data_source The DataSource for data/snapshot access.
-     * @return The created Signal, or nullptr if type is unknown.
+     * @return The created Signal (owned by unique_ptr), or nullptr if type is unknown.
      */
-    static Signal* create_signal(std::shared_ptr<data::SignalModel> model, data::DataSource *data_source);
+    static std::unique_ptr<Signal> create_signal(std::shared_ptr<data::SignalModel> model, data::DataSource *data_source);
 
     /**
      * Create all signals from a DataSource's signal models.

@@ -71,7 +71,7 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
         QString display_name;
         auto &dec_list = d->stack();
         if (!dec_list.empty()) {
-            auto *root_dec = dec_list.front();
+            auto *root_dec = dec_list.front().get();
             if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
                 display_name = QString::fromUtf8(root_dec->decoder()->name);
         }

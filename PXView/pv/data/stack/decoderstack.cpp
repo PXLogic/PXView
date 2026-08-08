@@ -259,7 +259,7 @@ decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
     std::lock_guard<std::mutex> lock(_output_mutex);
     auto iter = _rows.find(row);
     if (iter != _rows.end())
-        return (*iter).second;
+        return (*iter).second.get();
     return nullptr;
 }
 

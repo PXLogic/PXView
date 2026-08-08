@@ -164,7 +164,7 @@ bool StoreSession::save_start()
     }
 
     std::set<int> type_set;
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         type_set.insert(m->type());
     }
 
@@ -259,7 +259,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
     int ret = SR_ERR;
     int num;
 
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         if (m->enabled() && logic_snapshot->has_data(m->index()))
             to_save_probes++;
     }
@@ -311,7 +311,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
         _unit_count.store(end_index / 8 * to_save_probes);
     }
 
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models)
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models2 = _session->get_signal_models_snapshot(); for(auto m : _sm_models2)
     {
         auto ch_type = m->type();
         if (ch_type == SR_CHANNEL_LOGIC) {
@@ -401,7 +401,7 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
     // 导致 MakeChunkName 生成的 chunk name 与 save_logic 生成的重名（如 L-0/0），
     // AddFromBuffer 因此返回失败，触发 "Failed to create zip file" 错误。
     int ch_type = -1;
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         if (m->type() == SR_CHANNEL_ANALOG) {
             ch_type = (int)m->type();
             break;
@@ -491,7 +491,7 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
     int ch_num = dso_snapshot->get_channel_num();
     _unit_count.store(size * ch_num);
 
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models)
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models)
     {
         if (m->type() == SR_CHANNEL_DSO) {
             int ch_index = m->index();
@@ -781,7 +781,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
 
         // Find matching SignalModel by probe->index for fork field replacements.
         std::shared_ptr<data::SignalModel> matched_model;
-        std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+        std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
             if (m && m->index() == probe->index) {
                 matched_model = m;
                 break;
@@ -857,7 +857,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
 bool StoreSession::export_start()
 {
     std::set<int> type_set;
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         if (!_export_channels.empty()) {
             if (std::find(_export_channels.begin(), _export_channels.end(), m->index()) == _export_channels.end()) {
                 continue;
@@ -1180,7 +1180,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             if (blk > end_block && end_block > 0)
                 break;
 
-            std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+            std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
                 if (!_export_channels.empty() && std::find(_export_channels.begin(), _export_channels.end(), m->index()) == _export_channels.end()) {
                     continue;
                 }
@@ -1270,7 +1270,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
             int ch = 0;
             // Make the cross data buffer.
-           std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models)
+           std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models)
             {
                 if (m->type() != SR_CHANNEL_DSO)
                     continue;
@@ -1331,7 +1331,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
         /* Build channel list for analog meaning (all enabled analog channels) */
         GSList *analog_ch_list = nullptr;
-        std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+        std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
             if (m->type() == SR_CHANNEL_ANALOG) {
                 for (GSList *l = _session->get_device()->get_channels(); l; l = l->next) {
                     struct sr_channel *ch = (struct sr_channel *)l->data;
@@ -1634,7 +1634,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                 const srd_decoder *const d = dec->decoder();
                 QJsonObject options_obj;
 
-                if (dec == decoder_list.front()) {
+                if (dec == decoder_list.front().get()) {
                     std::map<const srd_channel*, int> probe_map;
                     // Load the mandatory channels
                     for(l = d->channels; l; l = l->next) {
@@ -1994,7 +1994,7 @@ QString StoreSession::MakeExportFile(bool bDlg)
 bool StoreSession::IsLogicDataType()
 {
     std::set<int> type_set;
-    std::vector<std::shared_ptr<data::SignalModel>> _sm_models; { std::shared_lock<std::shared_mutex> _sm_lock(_session->signal_models_mutex()); _sm_models = _session->get_signal_models(); } for(auto m : _sm_models) {
+    std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         type_set.insert((int)m->type());
     }
 

@@ -51,15 +51,18 @@ enum BlockState : uint32_t
     BlockState_Overwritten = 2
 };
 
+// MS-2 fix: default member initializers ensure that vector::resize()
+// value-initializes new entries to safe defaults even if a future code
+// change switches to reserve()+push_back() or raw allocation.
 struct BlockIndexEntry
 {
-    uint64_t disk_offset;
-    BlockState block_state;
+    uint64_t disk_offset = 0;
+    BlockState block_state = BlockState_Empty;
 };
 
 struct ChannelIndex
 {
-    uint64_t block_count;
+    uint64_t block_count = 0;
     std::vector<BlockIndexEntry> entries;
 };
 

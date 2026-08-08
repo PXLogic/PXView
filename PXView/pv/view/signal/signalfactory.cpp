@@ -75,7 +75,7 @@ static void apply_model_properties(Signal *signal,
   }
 }
 
-Signal *SignalFactory::create_signal(std::shared_ptr<data::SignalModel> model,
+std::unique_ptr<Signal> SignalFactory::create_signal(std::shared_ptr<data::SignalModel> model,
                                      data::DataSource *data_source) {
   if (!model || !data_source) {
     return nullptr;
@@ -99,7 +99,8 @@ Signal *SignalFactory::create_signal(std::shared_ptr<data::SignalModel> model,
   }
 
   apply_model_properties(signal, model);
-  return signal;
+  // MS-4 fix: wrap in unique_ptr at the factory — callers receive ownership.
+  return std::unique_ptr<Signal>(signal);
 }
 
 std::vector<std::unique_ptr<Signal>> SignalFactory::create_signals(data::DataSource *source,
@@ -111,9 +112,9 @@ std::vector<std::unique_ptr<Signal>> SignalFactory::create_signals(data::DataSou
   auto models = source->get_signal_models_snapshot();
   result.reserve(models.size());
   for (auto model : models) {
-    Signal *s = create_signal(model, data_source);
+    auto s = create_signal(model, data_source);
     if (s)
-      result.push_back(std::unique_ptr<Signal>(s));
+      result.push_back(std::move(s));
   }
   return result;
 }
@@ -281,9 +282,9 @@ void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current
         }
       }
       if (!exists) {
-        Signal *new_sig = create_signal(model, data_source);
+        auto new_sig = create_signal(model, data_source);
         if (new_sig)
-          current_signals.push_back(std::unique_ptr<Signal>(new_sig));
+          current_signals.push_back(std::move(new_sig));
       }
     }
     break;
