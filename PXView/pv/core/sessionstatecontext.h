@@ -119,6 +119,13 @@ public:
   std::vector<std::shared_ptr<data::SignalModel>> &signal_models() {
     return _signal_models;
   }
+  // TS-2 fix: thread-safe snapshot — copies the vector under a shared_lock
+  // so callers don't need to manually acquire the mutex. Safe from any
+  // thread. Prefer this over signal_models() when you only need to iterate.
+  std::vector<std::shared_ptr<data::SignalModel>> signal_models_snapshot() {
+    std::shared_lock<std::shared_mutex> lk(_signal_models_mutex);
+    return _signal_models;
+  }
   std::shared_mutex &signal_models_mutex() { return _signal_models_mutex; }
   std::vector<std::shared_ptr<data::SpectrumStack>> &spectrum_stacks() {
     return _spectrum_stacks;

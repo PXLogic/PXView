@@ -96,6 +96,12 @@ public:
 
     // ---- New v2 pure-data interface (no view::* types) ----
     virtual std::vector<std::shared_ptr<SignalModel>>& get_signal_models() = 0;
+    // TS-2 fix: thread-safe snapshot — default implementation returns a copy
+    // of get_signal_models() without locking (for stub subclasses that have
+    // no mutex). SigSession overrides with a real shared_lock-protected copy.
+    virtual std::vector<std::shared_ptr<SignalModel>> get_signal_models_snapshot() override {
+        return get_signal_models();
+    }
     virtual std::vector<std::shared_ptr<DecoderStack>>& get_decoder_stacks(
         SessionDocument *doc = nullptr) = 0;
     virtual std::vector<std::shared_ptr<SpectrumStack>>& get_spectrum_stacks() = 0;

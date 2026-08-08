@@ -305,7 +305,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
   pv::TabContext *ctx = _wnd->current_context();
   pv::data::SessionDocument *doc = ctx ? ctx->document() : nullptr;
   if (doc) {
-    doc->save_signal_config(_wnd->session()->get_signal_models(),
+    doc->save_signal_config(_wnd->session()->get_signal_models_snapshot(),
                             build_channel_layout(_wnd->current_view()),
                             build_channel_colours(_wnd->current_view()));
     QJsonObject sig_cfg = doc->signal_config_to_json();

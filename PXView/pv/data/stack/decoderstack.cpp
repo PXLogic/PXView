@@ -89,8 +89,8 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _options_changed = false;
   _no_memory = false;
   _mark_index = -1;
-  _decoder_status = decoder_status;
-  _stask_stauts = nullptr;
+  _decoder_status.reset(decoder_status);
+  _stask_stauts = nullptr;  // shared_ptr<decode_task_status> — null init
   _is_capture_end = true;
   _snapshot.reset();
   _progress.store(0);
@@ -98,26 +98,25 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _result_count.store(0);
   _owner_document = nullptr;
 
-  _stack.push_back(new decode::Decoder(dec));
+  // TS-3 fix: use make_unique for exception safety — if build_row() throws,
+  // the unique_ptr automatically frees the Decoder.
+  _stack.push_back(std::make_unique<decode::Decoder>(dec));
 
   build_row();
 }
 
 DecoderStack::~DecoderStack() {
-  // release resource talbe
-  DESTROY_OBJECT(_decoder_status);
+  // TS-3 fix: unique_ptr handles all deletion — no manual delete needed.
+  // _decoder_status is freed by unique_ptr destructor.
+  // _rows elements are freed by unique_ptr destructors when _rows.clear() runs.
+  // _stack elements are freed by unique_ptr destructors when _stack.clear() runs.
 
-  // release source
+  // Clear row data (annotations) before the RowData objects are freed.
   for (auto &kv : _rows) {
-    kv.second->clear(); // destory all annotations
-    delete kv.second;
+    if (kv.second)
+      kv.second->clear();
   }
   _rows.clear();
-
-  // Decoder
-  for (auto *p : _stack) {
-    delete p;
-  }
   _stack.clear();
 
   _rows_gshow.clear();
@@ -125,13 +124,12 @@ DecoderStack::~DecoderStack() {
   _class_rows.clear();
 }
 
-void DecoderStack::add_sub_decoder(decode::Decoder *decoder) {
+void DecoderStack::add_sub_decoder(std::unique_ptr<decode::Decoder> decoder) {
   if (!decoder) {
     pxv_warn("%s", "DecoderStack::add_sub_decoder: decoder is nullptr");
     return;
   }
-  assert(decoder);
-  _stack.push_back(decoder);
+  _stack.push_back(std::move(decoder));
   build_row();
   _options_changed = true;
 }
@@ -140,13 +138,12 @@ void DecoderStack::remove_sub_decoder(Decoder *decoder) {
   // Find the decoder in the stack
   auto iter = _stack.begin();
   for (unsigned int i = 0; i < _stack.size(); i++, iter++)
-    if ((*iter) == decoder)
+    if (iter->get() == decoder)
       break;
 
-  // Delete the element
+  // Erase the element — unique_ptr auto-deletes the Decoder.
   if (iter != _stack.end()) {
     _stack.erase(iter);
-    delete decoder;
   }
 
   build_row();
@@ -156,7 +153,8 @@ void DecoderStack::remove_sub_decoder(Decoder *decoder) {
 void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
   Decoder *decoder = nullptr;
 
-  for (auto d : _stack) {
+  for (auto &up : _stack) {
+    auto d = up.get();
     if (d->get_dec_handel() == dec) {
       decoder = d;
       break;
@@ -173,15 +171,16 @@ void DecoderStack::build_row() {
   // the decode thread, UI-thread read methods) don't see a half-rebuilt map.
   std::lock_guard<std::mutex> lock(_output_mutex);
 
-  // release source
+  // release source — unique_ptr handles deletion of old RowData objects.
   for (auto &kv : _rows) {
-    kv.second->clear(); // destory all annotations
-    delete kv.second;
+    if (kv.second)
+      kv.second->clear();
   }
   _rows.clear();
 
   // Add classes
-  for (auto dec : _stack) {
+  for (auto &up : _stack) {
+    auto dec = up.get();
     const srd_decoder *const decc = dec->decoder();
     assert(dec->decoder());
 
@@ -190,7 +189,7 @@ void DecoderStack::build_row() {
     // Add a row for the decoder if it doesn't have a row list
     if (!decc->annotation_rows) {
       const Row row(decc);
-      _rows[row] = new decode::RowData();
+      _rows[row] = std::make_unique<decode::RowData>();
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
@@ -218,7 +217,7 @@ void DecoderStack::build_row() {
       const Row row(decc, ann_row, order);
 
       // Add a new empty row data object
-      _rows[row] = new decode::RowData();
+      _rows[row] = std::make_unique<decode::RowData>();
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
@@ -437,8 +436,12 @@ void DecoderStack::init() {
 
 void DecoderStack::stop_decode_work() {
   // set the flag to exit from task thread
-  if (_stask_stauts) {
-    _stask_stauts->_bStop = true;
+  // atomic_load so that if do_decode_work() on the decode thread is
+  // simultaneously replacing _stask_stauts, we still get a valid shared_ptr
+  // copy (the old object stays alive until our copy is released).
+  auto status = std::atomic_load(&_stask_stauts);
+  if (status) {
+    status->_bStop = true;
   }
   _decode_state.store(Stopped, std::memory_order_release);
 }
@@ -459,7 +462,8 @@ void DecoderStack::begin_decode_work() {
 }
 
 bool DecoderStack::check_required_probes() {
-  for (auto dec : _stack) {
+  for (auto &up : _stack) {
+    auto dec = up.get();
     if (!dec->have_required_probes()) {
       return false;
     }
@@ -470,12 +474,19 @@ bool DecoderStack::check_required_probes() {
 
 void DecoderStack::do_decode_work() {
   // set the flag to exit from task thread
-  if (_stask_stauts) {
-    _stask_stauts->_bStop = true;
+  // atomic_load/store so that concurrent stop_decode_work() on another
+  // thread can safely read the old shared_ptr while we replace it.
+  auto old = std::atomic_load(&_stask_stauts);
+  if (old) {
+    old->_bStop = true;
   }
-  _stask_stauts = new decode_task_status();
-  _stask_stauts->_bStop = false;
-  _stask_stauts->_decoder = this;
+  auto new_status = std::make_shared<decode_task_status>();
+  new_status->_bStop = false;
+  new_status->_decoder = this;
+  std::atomic_store(&_stask_stauts, new_status);
+  // old shared_ptr is released here — the object is freed only if no
+  // concurrent stop_decode_work() holds a copy. This fixes the leak where
+  // the previous raw-new object was never deleted.
   _decoder_status->clear(); // clear old items
 
   if (!_options_changed) {
@@ -497,7 +508,8 @@ void DecoderStack::do_decode_work() {
     }
     pxv_err("ERROR:%s", error_message().toStdString().c_str());
     // Diagnostic: log which decoder has missing required probes
-    for (auto dec : _stack) {
+    for (auto &up : _stack) {
+      auto dec = up.get();
       if (!dec->have_required_probes()) {
         pxv_err("ERROR:Decoder %p is missing required probes", dec);
       }
@@ -516,7 +528,8 @@ void DecoderStack::do_decode_work() {
   pxv_info("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
            models_snapshot.size());
 
-  for (auto dec : _stack) {
+  for (auto &up : _stack) {
+    auto dec = up.get();
     if (dec->have_probes()) {
       int probe_idx = dec->first_probe_index();
       pxv_info("DecoderStack::do_decode_work: decoder %p has probes, first_probe_index=%d, checking %zu signal_models",
@@ -541,7 +554,7 @@ void DecoderStack::do_decode_work() {
       if (_snapshot != nullptr)
         break;
     } else {
-      pxv_info("DecoderStack::do_decode_work: decoder %p has no probes, skipping", dec);
+      pxv_info("DecoderStack::do_decode_work: decoder %p has no probes, skipping", up.get());
     }
   }
 
@@ -585,7 +598,7 @@ uint64_t DecoderStack::get_max_sample_count() {
 void DecoderStack::decode_data(const uint64_t decode_start,
                                const uint64_t decode_end,
                                srd_session *const session) {
-  decode_task_status *status = _stask_stauts;
+  decode_task_status *status = _stask_stauts.get();
 
   // uint8_t *chunk = nullptr;
   uint64_t last_cnt = 0;
@@ -805,7 +818,8 @@ void DecoderStack::execute_decode_stack() {
   _sample_count.store(_snapshot->get_sample_count());
 
   // Create the decoders
-  for (auto dec : _stack) {
+  for (auto &up : _stack) {
+    auto dec = up.get();
     srd_decoder_inst *const di = dec->create_decoder_inst(session);
 
     if (!di) {
@@ -851,7 +865,7 @@ void DecoderStack::execute_decode_stack() {
                            g_variant_new_uint64((uint64_t)_samplerate));
 
   srd_pd_output_callback_add(session, SRD_OUTPUT_ANN,
-                             DecoderStack::annotation_callback, _stask_stauts);
+                             DecoderStack::annotation_callback, _stask_stauts.get());
 
   char *error = nullptr;
   int srd_ret = srd_session_start(session, &error);
@@ -909,7 +923,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     d->_ann_dropped_stop++;
     return;
   }
-  if (d->_decoder_status == nullptr) {
+  if (!d->_decoder_status) {
     pxv_err("decode task was deleted.");
     return;
   }
@@ -919,7 +933,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     return;
   }
 
-  Annotation *a = new Annotation(pdata, d->_decoder_status);
+  Annotation *a = new Annotation(pdata, d->_decoder_status.get());
   if (a == nullptr) {
     d->_no_memory = true;
     return;
@@ -980,8 +994,9 @@ void DecoderStack::frame_ended() {
     const uint64_t limit = _session->get_ring_sample_count();
     const uint64_t last_samples = limit > 0 ? limit - 1 : 0;
 
-    for (auto dec : _stack) {
-      uint64_t start = dec->decode_start();
+  for (auto &up : _stack) {
+    auto dec = up.get();
+    uint64_t start = dec->decode_start();
       uint64_t end = dec->decode_end();
       const uint64_t raw_start = start;
       const uint64_t raw_end = end;
@@ -1030,7 +1045,7 @@ int64_t DecoderStack::get_mark_index() { return _mark_index; }
 
 const char *DecoderStack::get_root_decoder_id() {
   if (_stack.size() > 0) {
-    decode::Decoder *dec = _stack.front();
+    decode::Decoder *dec = _stack.front().get();
     return dec->decoder()->id;
   }
   return nullptr;

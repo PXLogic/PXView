@@ -1102,7 +1102,13 @@ void SigSession::set_cur_samplelimits(uint64_t samplelimits) {
 
 std::vector<std::shared_ptr<data::SignalModel>> &
 SigSession::get_signal_models() {
-  return _state->signal_models();
+return _state->signal_models();
+}
+
+// TS-2 fix: thread-safe snapshot for callers that don't hold the mutex.
+std::vector<std::shared_ptr<data::SignalModel>>
+SigSession::get_signal_models_snapshot() {
+return _state->signal_models_snapshot();
 }
 
 void SigSession::init_signals() {
@@ -1633,7 +1639,7 @@ bool SigSession::add_decoder(
 
     // add sub decoder
     for (auto sub : sub_decoders) {
-      decoder_stack->add_sub_decoder(sub);
+      decoder_stack->add_sub_decoder(std::unique_ptr<decode::Decoder>(sub));
     }
 
     if (sub_decoders.size() > 0) {
@@ -2479,7 +2485,7 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
   if (!dso || dso->empty())
     return result;
 
-  auto &signal_models = get_signal_models();
+  auto signal_models = get_signal_models_snapshot();
 
   // Step 1: compute raw MeasurementResult list (max/min/rms/mean per channel)
   auto raw_results = core::MeasureCalculator::compute(

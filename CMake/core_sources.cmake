@@ -14,7 +14,9 @@
 # in AGENTS.md "## Core/View Responsibility Boundary".
 #
 # Forbidden View subdirectories (do NOT add any file from these to PXVIEW_CORE_SOURCES):
-#   PXView/pv/view/                  View container, Signal/Trace subclasses, viewport, cursor, dso_measure
+#   PXView/pv/view/                  View container, Signal/Trace subclasses, viewport, cursor, renderer, component
+#   PXView/pv/mainwindow/            MainWindow + delegates (config_io/dock_manager/tab_manager/etc.) + AppControl + MainFrame
+#   PXView/pv/platform/              Windows-specific: WinNativeWidget/WinShadow/WinTaskbarProgress (WIN32 only)
 #   PXView/pv/dialogs/               DecoderOptionsDlg and other dialogs
 #   PXView/pv/dock/                  MeasureDock/TriggerDock/SearchDock/ProtocolDock/etc.
 #   PXView/pv/toolbars/              SamplingBar/TrigBar/FileBar/LogoBar/TitleBar
@@ -22,14 +24,8 @@
 #   PXView/pv/ui/                    Ui utilities: msgbox/toast/dscombobox/dsspinbox/etc.
 #   PXView/pv/prop/                  Property editors + binding/
 #
-# Forbidden View top-level files (do NOT add to PXVIEW_CORE_SOURCES):
-#   PXView/pv/mainwindow.*           QMainWindow
-#   PXView/pv/tabcontext.*           Per-tab View/Session/Document binding
-#   PXView/pv/mainframe.*            Main frame container
-#   PXView/pv/submainframe.*         Sub-frame container
-#   PXView/pv/winnativewidget.*      Windows native widget (WIN32 only)
-#   PXView/pv/winshadow.*            Windows window shadow (WIN32 only)
-#   PXView/pv/wintaskbarprogress.*   Windows taskbar progress (WIN32 only)
+# NOTE: There are no longer any top-level .cpp/.h files directly under PXView/pv/.
+# All files have been moved into subdirectories during the directory restructuring.
 set(PXVIEW_CORE_SOURCES
     # Core session/orchestration
     PXView/pv/base/log.cpp

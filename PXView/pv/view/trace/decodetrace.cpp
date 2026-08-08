@@ -262,7 +262,8 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   uint64_t end_sample =
       (uint64_t)max((right + pixels_offset) * samples_per_pixel, 0.0);
 
-  for (auto dec : _decoder_stack->stack()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
     start_sample = max(dec->decode_start(), start_sample);
     uint64_t d_end = dec->decode_end();
     if (d_end == 0) d_end = UINT64_MAX;
@@ -283,7 +284,8 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
   assert(_decoder_stack);
 
-  for (auto dec : _decoder_stack->stack()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
     if (dec->shown()) {
       const std::map<const pv::data::decode::Row, bool> rows =
           _decoder_stack->get_rows_gshow();
@@ -444,8 +446,9 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
     draw_range(a, p, fill, outline, text_color, h, start, end, y, fore, back);
 
     if ((a.type() / 100 == 2) && (end - start > 20)) {
-      for (auto dec : _decoder_stack->stack()) {
-        auto probes = dec->binded_probe_list();
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
+    auto probes = dec->binded_probe_list();
 
         for (auto probe : probes) {
           int type = dec->get_channel_type(probe);
@@ -743,7 +746,8 @@ int DecodeTrace::rows_size() {
   using pv::data::decode::Decoder;
   int size = 0;
 
-  for (auto dec : _decoder_stack->stack()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
     if (dec->shown()) {
       auto rows = _decoder_stack->get_rows_gshow();
 
@@ -831,8 +835,9 @@ bool DecodeTrace::create_popup(bool isnew, QPoint anchor) {
     if (QDialog::Accepted == dlg_ret) {
       dlg.apply_setting();
 
-      for (auto dec : _decoder_stack->stack()) {
-        if (dec->commit() || _decoder_stack->options_changed()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
+    if (dec->commit() || _decoder_stack->options_changed()) {
           _decoder_stack->set_options_changed(true);
           ret = true;
         }

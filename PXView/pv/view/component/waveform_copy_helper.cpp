@@ -225,7 +225,7 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
     QString protocol = "Unknown";
     auto &decoder_list = stack->stack();
     if (!decoder_list.empty()) {
-        auto *first_decoder = decoder_list.front();
+        auto *first_decoder = decoder_list.front().get();
         if (first_decoder) {
             const srd_decoder *srd_dec = first_decoder->get_dec_handel();
             if (srd_dec && srd_dec->name)
@@ -371,7 +371,8 @@ DecodeTrace* WaveformCopyHelper::find_decoder_for_signal(View &view, LogicSignal
         auto stack = dt->decoder();
         if (!stack)
             continue;
-        for (auto *decoder : stack->stack()) {
+        for (auto &up : stack->stack()) {
+            auto decoder = up.get();
             if (!decoder)
                 continue;
             auto probes = decoder->binded_probe_list();
@@ -395,7 +396,8 @@ std::vector<LogicSignal*> WaveformCopyHelper::collect_decoder_input_signals(View
         return result;
 
     std::set<int> channel_indices;
-    for (auto *decoder : stack->stack()) {
+    for (auto &up : stack->stack()) {
+        auto decoder = up.get();
         if (!decoder)
             continue;
         auto probes = decoder->binded_probe_list();

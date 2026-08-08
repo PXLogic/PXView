@@ -351,8 +351,9 @@ void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 
     int dex = 0;
  
-    for(auto dec : _trace->decoder()->stack()) 
+    for(auto &up : _trace->decoder()->stack()) 
     { 
+        auto dec = up.get();
         ++dex;
         QWidget *panel = new QWidget(container);
         QFormLayout *form = new QFormLayout();
@@ -464,7 +465,8 @@ void DecoderOptionsDlg::update_decode_range()
         decode_end = tmp;
     }
   
-    for(auto dec : _trace->decoder()->stack()) {
+    for(auto &up : _trace->decoder()->stack()) {
+        auto dec = up.get();
         dec->set_decode_region(decode_start, decode_end);
     }
 }
@@ -571,8 +573,9 @@ void DecoderOptionsDlg::create_decoder_form(
 
 void DecoderOptionsDlg::commit_probes()
 { 
-    for(auto dec : _trace->decoder()->stack()){
-		commit_decoder_probes(dec);
+    for(auto &up : _trace->decoder()->stack()){
+        auto dec = up.get();
+        commit_decoder_probes(dec);
     }
 }
 

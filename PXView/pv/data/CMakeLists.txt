@@ -63,9 +63,9 @@ target_link_libraries(pxview-data PRIVATE
     -lglib-2.0
 )
 
-# Expose PXView/ as include path so data .cpp files can resolve relative
-# includes (../sigsession.h, ../deviceagent.h, ../log.h, ../ui/langresource.h,
-# ../config/appconfig.h, ../utility/array.h, ../dsvdef.h, etc.).
+# Expose PXView/ as include path so data .cpp files can resolve
+# includes (pv/session/sigsession.h, pv/session/deviceagent.h, pv/base/log.h, pv/ui/langresource.h,
+# pv/config/appconfig.h, pv/utility/array.h, pv/base/pxvdef.h, etc.).
 target_include_directories(pxview-data PUBLIC
     ${CMAKE_SOURCE_DIR}/PXView
 )

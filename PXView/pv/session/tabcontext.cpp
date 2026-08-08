@@ -180,7 +180,7 @@ void TabContext::deactivate()
         }
         // R2: 传入 SignalModel 列表，保存 Logic 通道 trig_type
         // UI 布局状态经 channel_layout 持久化到 ChannelConfig
-        _document->save_signal_config(_session->get_signal_models(),
+        _document->save_signal_config(_session->get_signal_models_snapshot(),
                                       channel_layout);
     }
     _state = HISTORICAL;

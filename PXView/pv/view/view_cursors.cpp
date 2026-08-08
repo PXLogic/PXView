@@ -101,7 +101,7 @@ void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
   if (trig_cfg.mode() != pv::data::TriggerConfig::Simple) {
     trigger_enabled = true;
   } else {
-    for (const auto &m : _view->data_source()->get_signal_models()) {
+    for (const auto &m : _view->data_source()->get_signal_models_snapshot()) {
       if (m && m->type() == SR_CHANNEL_LOGIC &&
           m->trig_type() != pv::data::SignalModel::NONTRIG) {
         trigger_enabled = true;

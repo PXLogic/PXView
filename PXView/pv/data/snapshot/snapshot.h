@@ -26,6 +26,7 @@
 
 #include <mutex>
 #include <vector>
+#include <atomic>
 
 namespace pv {
 namespace data {
@@ -88,8 +89,14 @@ public:
      
 
 protected:
+    // TS-4 fix: Callers MUST hold _mutex when calling free_data().
+    // This establishes a happens-before with concurrent readers
+    // (get_sample_count, empty, etc.) that also acquire _mutex.
     virtual void free_data();
 
+    // TS-4 fix: Callers MUST hold _mutex when calling sample_count().
+    // This is a non-locking accessor for subclass use under _mutex
+    // protection. Public callers should use get_sample_count() instead.
     inline uint64_t sample_count(){
         return _sample_count;
     }
@@ -109,9 +116,14 @@ protected:
 	int         _unit_size;
     uint8_t     _unit_bytes;
     uint16_t    _unit_pitch;
-    bool        _memory_failed;
-    bool        _last_ended;
-    double      _samplerate;
+    // std::atomic: these fields are read by inline accessors (memory_failed(),
+    // last_ended(), samplerate()) without holding _mutex, and written by
+    // capture_ended() / set_samplerate() / subclass init without lock.
+    // Atomic prevents data-race UB. operator= and implicit conversion keep
+    // existing code (_memory_failed = true, if (_memory_failed), etc.) working.
+    std::atomic<bool>   _memory_failed;
+    std::atomic<bool>   _last_ended;
+    std::atomic<double> _samplerate;
 protected:
     bool        _is_float = false;  // 上游 encoding->is_float：paint_trace 需用 reinterpret_cast<float*>
 };

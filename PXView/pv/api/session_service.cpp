@@ -2222,8 +2222,8 @@ Result<std::string> SessionService::add_decoder(
             auto decoder_stack = parent_stack;
 
             // Create the new sub-decoder and add it to the parent stack
-            auto *new_decoder = new data::decode::Decoder(dec);
-            decoder_stack->add_sub_decoder(new_decoder);
+            auto new_decoder = std::make_unique<data::decode::Decoder>(dec);
+            decoder_stack->add_sub_decoder(std::move(new_decoder));
 
             // Store the custom label on the DecoderStack so exports and
             // list_analyzers can distinguish multiple instances of the same

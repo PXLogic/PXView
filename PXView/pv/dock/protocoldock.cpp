@@ -1263,7 +1263,7 @@ void ProtocolDock::OnProtocolVisibilityChanged(void *handle) {
       auto stack = static_cast<pv::data::DecoderStack *>(lay->_trace);
       if (stack) {
         if (!stack->stack().empty()) {
-          auto root_dec = stack->stack().front();
+          auto root_dec = stack->stack().front().get();
           bool current_shown = root_dec->shown();
           bool new_shown = !current_shown;
           root_dec->show(new_shown);

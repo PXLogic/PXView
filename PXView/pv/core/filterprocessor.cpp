@@ -136,16 +136,25 @@ void FilterProcessor::glitch_filter_task(
     _state->view_data()->get_logic()->clear_filtered_ranges();
   }
 
-  // If signal invert is active, apply invert before glitch filter
-  if (_state->view_data()->_signal_invert_active) {
+  // If signal invert is active, apply invert before glitch filter.
+  // Lock to safely read _signal_invert_active and _signal_invert_channels,
+  // then release before the slow invert_channel loop.
+  bool has_invert = false;
+  std::vector<bool> channels_copy;
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    has_invert = _state->view_data()->_signal_invert_active;
+    channels_copy = _state->view_data()->_signal_invert_channels;
+  }
+  if (has_invert) {
     int ch_idx = 0;
     for (const GSList *l = _state->device_agent().get_channels(); l;
          l = l->next) {
       sr_channel *const probe = (sr_channel *)l->data;
       if (probe->type != SR_CHANNEL_LOGIC)
         continue;
-      if (ch_idx < (int)_state->view_data()->_signal_invert_channels.size() &&
-          _state->view_data()->_signal_invert_channels[ch_idx]) {
+      if (ch_idx < (int)channels_copy.size() &&
+          channels_copy[ch_idx]) {
         _state->view_data()->get_logic()->invert_channel(probe->index);
       }
       ch_idx++;
@@ -159,9 +168,14 @@ void FilterProcessor::glitch_filter_task(
       },
       filter_modes);
 
-  _state->view_data()->_glitch_filter_active = true;
-  _state->view_data()->_glitch_filter_thresholds = thresholds;
-  _state->view_data()->_glitch_filter_modes = filter_modes;
+  // Lock to safely write _glitch_filter_active/_thresholds/_modes —
+  // the main thread (View layer) may concurrently read these for rendering.
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    _state->view_data()->_glitch_filter_active = true;
+    _state->view_data()->_glitch_filter_thresholds = thresholds;
+    _state->view_data()->_glitch_filter_modes = filter_modes;
+  }
 
   _event_bus->broadcast_async<interface::GlitchFilterCompleted>({});
   _coord->data_updated();
@@ -255,6 +269,7 @@ void FilterProcessor::clear_glitch_filter() {
 }
 
 bool FilterProcessor::is_glitch_filter_active() {
+  std::lock_guard<std::mutex> lk(_state->view_data()->_filter_state_mutex);
   return _state->view_data()->_glitch_filter_active;
 }
 
@@ -326,15 +341,29 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
     ch_idx++;
   }
 
-  // If glitch filter is active, re-apply on the inverted data
-  if (_state->view_data()->_glitch_filter_active) {
+  // If glitch filter is active, re-apply on the inverted data.
+  // Lock to safely read glitch filter state, then release before the
+  // slow apply_glitch_filter_all call.
+  bool has_gf = false;
+  std::map<int, uint32_t> gf_th_copy;
+  std::map<int, GlitchFilterMode> gf_md_copy;
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    has_gf = _state->view_data()->_glitch_filter_active;
+    gf_th_copy = _state->view_data()->_glitch_filter_thresholds;
+    gf_md_copy = _state->view_data()->_glitch_filter_modes;
+  }
+  if (has_gf) {
     _state->view_data()->get_logic()->apply_glitch_filter_all(
-        _state->view_data()->_glitch_filter_thresholds, nullptr,
-        _state->view_data()->_glitch_filter_modes);
+        gf_th_copy, nullptr, gf_md_copy);
   }
 
-  _state->view_data()->_signal_invert_active = true;
-  _state->view_data()->_signal_invert_channels = channels;
+  // Lock to safely write _signal_invert_active/_signal_invert_channels.
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    _state->view_data()->_signal_invert_active = true;
+    _state->view_data()->_signal_invert_channels = channels;
+  }
   _signal_invert_running = false;
 
   _event_bus->broadcast_async<interface::SignalInvertCompleted>({});
@@ -370,6 +399,7 @@ void FilterProcessor::clear_signal_invert() {
 }
 
 bool FilterProcessor::is_signal_invert_active() {
+  std::lock_guard<std::mutex> lk(_state->view_data()->_filter_state_mutex);
   return _state->view_data()->_signal_invert_active;
 }
 

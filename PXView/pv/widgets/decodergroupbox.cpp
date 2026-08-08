@@ -70,7 +70,8 @@ DecoderGroupBox::DecoderGroupBox(data::DecoderStack *decoder_stack,
   (void)d;
 
   _index = 0;
-  for (auto dec : _decoder_stack->stack()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
     if (dec == _dec)
       break;
     _index++;
@@ -137,9 +138,10 @@ void DecoderGroupBox::tog_icon() {
   if (index == -1) {
     int i = _index;
 
-    for (auto dec : _decoder_stack->stack()) {
-      if (i-- == 0) {
-        dec->show(!dec->shown());
+for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
+    if (i-- == 0) {
+      dec->show(!dec->shown());
         sc->setIcon(IconCache::Instance().icon(
             dec->shown() ? iconPath + "/shown.svg" : iconPath + "/hidden.svg"));
         break;
@@ -163,7 +165,8 @@ void DecoderGroupBox::tog_icon() {
 
 void DecoderGroupBox::on_del_stack() {
   int i = _index;
-  for (auto dec : _decoder_stack->stack()) {
+  for (auto &up : _decoder_stack->stack()) {
+    auto dec = up.get();
     if (i-- == 0) {
       del_stack(dec);
       break;

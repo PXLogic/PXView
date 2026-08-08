@@ -159,6 +159,9 @@ public:
   bool get_capture_status(bool &triggered, int &progress) { return _capture_manager->get_capture_status(triggered, progress); }
   void clear_store_confirm_flag() { _capture_manager->clear_store_confirm_flag(); }
   std::vector<std::shared_ptr<data::SignalModel>> &get_signal_models() override;
+  // TS-2 fix: thread-safe snapshot — locks signal_models_mutex() (shared)
+  // and returns a value copy. Safe from any thread.
+  std::vector<std::shared_ptr<data::SignalModel>> get_signal_models_snapshot() override;
   /// Mutex protecting the signal_models vector. Non-UI thread callers
   /// (decode thread, save/export thread) must hold a shared_lock before
   /// iterating; writers (init_signals) hold a unique_lock.

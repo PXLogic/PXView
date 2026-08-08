@@ -84,19 +84,39 @@ LogicSnapshot::~LogicSnapshot() {
 void LogicSnapshot::free_data() {
   // Clear the mmap slot bitmap via the writer (it owns _mmap_slot_written).
   _disk_cache_writer->clear_all_mmap_slots();
-  _mmap_alloc.reset();
 
   Snapshot::free_data();
 
-  // With mmap, all data is in the mmapped file/memory.
-  // We don't need to release individual LeafBlocks back to LeafBlockPool,
-  // except for those that were manually allocated (e.g., if fallback happened, but ideally none).
+  // Return non-mmap leaf blocks to LeafBlockPool before discarding _ch_data.
+  // When mmap allocation succeeds, all lbp pointers are mmap-backed and are
+  // freed by _mmap_alloc.reset() below. But when mmap configure fails and the
+  // code falls back to LeafBlockPool::acquire(), those blocks are NOT mmap-backed
+  // and must be explicitly returned — otherwise they leak (the swap below would
+  // discard the only references to them).
+  // NOTE: the is_mmap_address check must happen BEFORE _mmap_alloc.reset(),
+  // because after reset() the allocator is null and the mmap region is unmapped.
   for (auto &iter : _ch_data) {
+    for (auto &rn : iter) {
+      for (int k = 0; k < (int)Scale; k++) {
+        if (rn.lbp[k] != nullptr) {
+          // If the pointer is NOT in the mmap region, it came from
+          // LeafBlockPool — return it.
+          if (!_mmap_alloc || !_mmap_alloc->is_mmap_address(rn.lbp[k])) {
+            LeafBlockPool::instance().release(rn.lbp[k]);
+          }
+          rn.lbp[k] = nullptr;
+        }
+      }
+    }
     std::vector<struct RootNode> void_vector;
     iter.swap(void_vector);
   }
   _ch_data.clear();
   _sample_count = 0;
+
+  // Now safe to release the mmap allocator — all non-mmap blocks have been
+  // returned to LeafBlockPool, and mmap-backed blocks are unmapped by reset().
+  _mmap_alloc.reset();
 
   for (void *p : _free_block_list) {
     LeafBlockPool::instance().release(p);
@@ -1459,7 +1479,11 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   assert(start_sample <= end_sample);
 
   start_sample += _loop_offset;
-  _ring_sample_count += _loop_offset;
+  // Note: previously _ring_sample_count was temporarily modified here
+  // (_ring_sample_count += _loop_offset) and restored later. This was
+  // unnecessary — all calculations use the local `sample_count` captured
+  // above — and dangerous: early-return paths skipped the restoration,
+  // permanently corrupting _ring_sample_count. Removed.
 
   int order = get_ch_order(sig_index);
   if (order == -1 || (unsigned int)order >= _ch_data.size()) {
@@ -1481,8 +1505,6 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
                (index1 << LeafBlockPower) + ~(~0ULL << LeafBlockPower);
 
   end_sample = min(end_sample + 1, sample_count);
-
-  _ring_sample_count -= _loop_offset;
 
   if (index0 >= _ch_data[order].size()) {
     static int s_warn_cnt2 = 0;

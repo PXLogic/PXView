@@ -264,7 +264,7 @@ void ProtocolExp::save_proc()
     QString decoder_name;
     auto &dec_list = decoder_stack->stack();
     if (!dec_list.empty()) {
-        auto *root_dec = dec_list.front();
+        auto *root_dec = dec_list.front().get();
         if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
             decoder_name = QString::fromUtf8(root_dec->decoder()->name);
     }

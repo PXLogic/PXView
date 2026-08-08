@@ -69,7 +69,7 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
   // Update each SignalModel's snapshot pointer so consumers of SignalModel
   // can access the most recent snapshot data. The void* type is resolved
   // based on SignalModel::type().
-  for (auto m : _state->signal_models()) {
+  for (auto m : _state->signal_models_snapshot()) {
     switch (m->type()) {
     case SR_CHANNEL_LOGIC:
       m->set_snapshot(data->logic_shared());

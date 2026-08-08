@@ -94,13 +94,18 @@ public:
 
 	virtual ~DecoderStack();
 
-    inline std::list<decode::Decoder*>& stack(){
+    // TS-3 fix: _stack now owns decoders via unique_ptr. stack() returns
+    // a reference to the unique_ptr list. Callers iterate with
+    // `for (auto &up : stack()) { auto dec = up.get(); ... }` or access
+    // front/back via `.get()`. This eliminates manual delete in the
+    // destructor and prevents leaks if build_row() throws after push_back.
+    inline std::list<std::unique_ptr<decode::Decoder>>& stack(){
         return _stack;
     }
 
     const char* get_root_decoder_id();
 
-	void add_sub_decoder(decode::Decoder *decoder);
+	void add_sub_decoder(std::unique_ptr<decode::Decoder> decoder);
     void remove_sub_decoder(decode::Decoder *decoder);
     void remove_decoder_by_handel(const srd_decoder *dec);
     
@@ -171,7 +176,7 @@ public:
     }
 
     inline void *get_key_handel(){
-        return _decoder_status;
+        return _decoder_status.get();
     }
 
     inline bool is_capture_end(){
@@ -235,10 +240,12 @@ signals:
     void decode_done();
   
 private: 
-	std::list<decode::Decoder*> _stack;
+	// TS-3 fix: _stack owns decoders via unique_ptr — no manual delete needed.
+	std::list<std::unique_ptr<decode::Decoder>> _stack;
     std::shared_ptr<pv::data::LogicSnapshot> _snapshot;
   
-    std::map<const decode::Row, decode::RowData*>   _rows;
+    // TS-3 fix: _rows owns RowData via unique_ptr — no manual delete needed.
+    std::map<const decode::Row, std::unique_ptr<decode::RowData>>   _rows;
     std::map<const decode::Row, bool>       _rows_gshow;
     std::map<const decode::Row, bool>       _rows_lshow;
     std::map<std::pair<const srd_decoder*, int>, decode::Row> _class_rows;
@@ -252,12 +259,13 @@ private:
     std::atomic<bool> _no_memory{false};
     int64_t         _mark_index;
 
-    DecoderStatus   *_decoder_status;
+    // TS-3 fix: _decoder_status owned via unique_ptr — no DESTROY_OBJECT needed.
+    std::unique_ptr<DecoderStatus> _decoder_status;
     QString         _error_message;
     int64_t	        _samples_decoded;
     std::atomic<uint64_t> _sample_count{0};
  
-    decode_task_status  *_stask_stauts;    
+    std::shared_ptr<decode_task_status> _stask_stauts;    
     mutable std::mutex _output_mutex; 
     bool            _is_capture_end;
     std::atomic<int> _progress{0};

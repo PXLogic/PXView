@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 #include "pv/data/snapshot/analogsnapshot.h"
 #include "pv/data/snapshot/dsosnapshot.h"
@@ -84,6 +85,11 @@ public:
   std::map<int, uint32_t> _glitch_filter_thresholds;
   std::map<int, GlitchFilterMode> _glitch_filter_modes;
   std::vector<bool> _signal_invert_channels;
+
+  // Mutex protects _glitch_filter_active/_thresholds/_modes and
+  // _signal_invert_active/_channels from concurrent access by the
+  // FilterProcessor worker thread (writer) and main thread (reader).
+  mutable std::mutex _filter_state_mutex;
 
 private:
   // shared_ptr enables zero-copy ownership sharing with SessionDocument.

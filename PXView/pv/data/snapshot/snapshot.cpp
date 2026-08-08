@@ -55,6 +55,17 @@ Snapshot::~Snapshot()
 
 void Snapshot::free_data()
 {
+    // TS-4 fix: Callers MUST hold _mutex when calling free_data().
+    // All current callers (LogicSnapshot::clear, first_payload, copy_from)
+    // already acquire _mutex before calling this method. The destructor
+    // (~Snapshot) calls it without locking, which is safe because no
+    // concurrent access is possible (the object is being destroyed after
+    // all shared_ptr references are released).
+    // Previously these fields were written without any locking documentation,
+    // making it unclear whether concurrent readers (e.g. decode thread calling
+    // get_sample_count()) were safe. The protocol is now explicit: callers
+    // must hold _mutex, and concurrent readers (get_sample_count, empty, etc.)
+    // also acquire _mutex, establishing a happens-before relationship.
     _capacity = 0;
     _sample_count = 0;
     _total_sample_count = 0;

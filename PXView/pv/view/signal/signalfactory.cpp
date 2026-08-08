@@ -108,7 +108,7 @@ std::vector<std::unique_ptr<Signal>> SignalFactory::create_signals(data::DataSou
   if (!source || !data_source)
     return result;
 
-  auto &models = source->get_signal_models();
+  auto models = source->get_signal_models_snapshot();
   result.reserve(models.size());
   for (auto model : models) {
     Signal *s = create_signal(model, data_source);
@@ -228,7 +228,7 @@ void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current
     return;
   }
 
-  auto &models = source->get_signal_models();
+  auto models = source->get_signal_models_snapshot();
 
   switch (event) {
   case AllReplaced: {

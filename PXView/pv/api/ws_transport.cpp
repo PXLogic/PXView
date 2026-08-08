@@ -9,6 +9,7 @@
 #include <QHostAddress>
 #include <QThread>
 #include <QDateTime>
+#include <QPointer>
 #include <cstring>
 
 namespace pv::api {
@@ -449,15 +450,21 @@ void WsTransport::push_viewport_data(QWebSocket* client, ViewportSubscription& s
 void WsTransport::send_binary_to_client(QWebSocket* client, const std::vector<uint8_t>& payload)
 {
     if (!pv::core::EventBus::on_main_thread()) {
-        // Marshal to main thread
-        auto* client_ptr = client;
+        // Marshal to main thread. Use QPointer to guard against the client
+        // being destroyed (deleteLater processed) before the lambda runs.
+        QPointer<QWebSocket> guard(client);
         auto payload_copy = payload;
         pv::core::EventBus::post_async_dispatch(
-            [this, client_ptr, payload_copy = std::move(payload_copy)]() {
-                send_binary_to_client(client_ptr, payload_copy);
+            [this, guard, payload_copy = std::move(payload_copy)]() {
+                if (guard)
+                    send_binary_to_client(guard, payload_copy);
             });
         return;
     }
+
+    // On main thread — QPointer guarantees the client hasn't been deleted.
+    if (!client)
+        return;
 
     QByteArray bin_data(reinterpret_cast<const char*>(payload.data()),
                        static_cast<int>(payload.size()));
@@ -485,10 +492,18 @@ void WsTransport::send_to_clients(const QString& msg)
 void WsTransport::send_to_client(QWebSocket* client, const QString& msg)
 {
     if (!pv::core::EventBus::on_main_thread()) {
+        // Marshal to main thread. Use QPointer to guard against the client
+        // being destroyed (deleteLater processed) before the lambda runs.
+        QPointer<QWebSocket> guard(client);
         pv::core::EventBus::post_async_dispatch(
-            [this, client, msg]() { send_to_client(client, msg); });
+            [this, guard, msg]() {
+                if (guard)
+                    send_to_client(guard, msg);
+            });
         return;
     }
+    if (!client)
+        return;
     client->sendTextMessage(msg);
 }
 

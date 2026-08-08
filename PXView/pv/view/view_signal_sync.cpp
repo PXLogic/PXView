@@ -178,7 +178,8 @@ void ViewSignalSync::compute_signal_groups() {
 
     auto decoder_stack = dtrace->decoder();
     if (decoder_stack) {
-      for (auto decoder : decoder_stack->stack()) {
+      for (auto &up : decoder_stack->stack()) {
+        auto decoder = up.get();
         auto probe_list = decoder->binded_probe_list();
         for (auto probe : probe_list) {
           int binded_index = decoder->binded_probe_index(probe);
@@ -842,7 +843,7 @@ void ViewSignalSync::on_signals_changed() {
     return;
   }
 
-  auto &models = _view->data_source()->get_signal_models();
+  auto models = _view->data_source()->get_signal_models_snapshot();
   //
   // This does NOT directly touch _own_decode_traces / _own_spectrum_traces
   // / _own_math_trace / _own_lissajous_trace. Those are derived traces
