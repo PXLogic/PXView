@@ -69,6 +69,12 @@ private:
   // `delete` calls remain in the .cpp.
   std::unique_ptr<std::thread> _glitch_filter_thread;
   std::atomic<bool> _glitch_filter_running;
+  // S1/H2 fix: mutex protects the launch path (check _running + create thread)
+  // so concurrent callers cannot both see _running==false and create
+  // duplicate threads. Also prevents the self-join deadlock: when the task
+  // thread recursively calls set_glitch_filter(), it holds this mutex, and
+  // the join check can detect that _glitch_filter_thread is itself.
+  std::mutex _glitch_launch_mutex;
   // 架构修复：滤波运行中排队最近一次请求，不再静默丢弃
   // Track A4: pending data protected by _pending_mutex; _has_pending_glitch
   // uses std::atomic<bool> as a fast flag, but map data still needs mutex.
@@ -78,6 +84,8 @@ private:
   std::mutex _pending_mutex;
   std::unique_ptr<std::thread> _signal_invert_thread;
   std::atomic<bool> _signal_invert_running;
+  // H2 fix: same TOCTOU protection for signal invert launch path
+  std::mutex _signal_invert_launch_mutex;
 };
 
 } // namespace core

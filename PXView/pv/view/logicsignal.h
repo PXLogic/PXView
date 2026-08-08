@@ -144,7 +144,8 @@ private:
     void paint_mid_align(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample);
 
 private:
-	pv::data::LogicSnapshot* _data;
+	std::shared_ptr<pv::data::LogicSnapshot> _data_ref; // keeps snapshot alive (prevents use-after-free)
+    pv::data::LogicSnapshot* _data;
     std::vector< std::pair<uint16_t, bool> > _cur_edges;
     std::vector<std::pair<bool, bool>> _cur_pulses;
     LogicSetRegions _trig;

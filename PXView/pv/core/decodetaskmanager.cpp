@@ -12,6 +12,7 @@
 #include "../log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <memory>
 
@@ -24,17 +25,41 @@ DecodeTaskManager::DecodeTaskManager(EventBus *bus, ISessionState *state, ISessi
 DecodeTaskManager::~DecodeTaskManager() { stop(); }
 
 void DecodeTaskManager::stop() {
-  // Join all decode threads before destruction. The threads are owned by
-  // this manager. Called from SigSession::Close() after clear_all_documents_
-  // decoders() has already requested stop_decode_work() on every stack.
-  for (auto &t : _decode_threads) {
+  // P0-2 fix: request stop on all running tasks BEFORE joining, so decode
+  // threads actually exit their work loops. Without this, join() would wait
+  // indefinitely for a decoder that's still processing data.
+  {
+    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+    for (auto &stack : _running_tasks) {
+      if (stack)
+        stack->stop_decode_work();
+    }
+  }
+
+  // P0-1A fix: "lock-swap-unlock-join" pattern. We must NOT hold
+  // _running_tasks_mutex while calling join(), because the worker threads
+  // need to acquire it in decode_single_task() to finish their cleanup.
+  // Holding the lock during join() creates a classic deadlock:
+  //   main thread: holds lock → join → waits for worker
+  //   worker thread: waits for lock → can never finish
+  // The fix: atomically swap the thread vector out under the lock, then
+  // release the lock and join outside the critical section.
+  std::vector<std::thread> threads_to_join;
+  {
+    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+    threads_to_join.swap(_decode_threads);
+  }
+  // Join outside the lock — workers can now acquire it to finish cleanup.
+  for (auto &t : threads_to_join) {
     if (t.joinable())
       t.join();
   }
-  _decode_threads.clear();
 
-  std::lock_guard<std::mutex> lock(_running_tasks_mutex);
-  _running_tasks.clear();
+  // After all threads are joined, clear _running_tasks.
+  {
+    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+    _running_tasks.clear();
+  }
 }
 
 void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
@@ -78,6 +103,16 @@ void DecodeTaskManager::add_decode_task(
   // start_all_decode_tasks() and rst_decoder().
   attach_data_to_signal(_state->view_data());
 
+  // L-2 fix: create the thread object BEFORE entering the critical section.
+  // Creating a std::thread starts the OS thread immediately, and the new
+  // thread will try to acquire _running_tasks_mutex in decode_single_task().
+  // If we create it while holding the lock, the new thread blocks until we
+  // release — unnecessary contention, especially when batch-starting N
+  // decoders. By creating the thread first and then moving it into the
+  // vector under the lock, we avoid this.
+  std::thread new_thread(
+      &DecodeTaskManager::decode_single_task, this, stack);
+
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     // 防止重复添加:RevEndPacket 和 CopyToDocDone 都会调用
@@ -88,14 +123,18 @@ void DecodeTaskManager::add_decode_task(
         pxv_info("DecodeTaskManager::add_decode_task: stack %p already "
                  "running, skip duplicate",
                  stack.get());
+        // Thread was already started — must join or detach before discarding.
+        // Since the task is a duplicate, the thread will quickly exit when it
+        // sees the task is already running. Detach is safe here because the
+        // shared_ptr keeps the DecoderStack alive, and the thread will just
+        // check _running_tasks, find itself absent, and exit.
+        new_thread.detach();
         return;
       }
     }
     _running_tasks.push_back(stack);
+    _decode_threads.push_back(std::move(new_thread));
   }
-
-  _decode_threads.push_back(
-      std::thread(&DecodeTaskManager::decode_single_task, this, stack));
 }
 
 void DecodeTaskManager::remove_decode_task(
@@ -114,6 +153,7 @@ bool DecodeTaskManager::is_task_running(
 }
 
 void DecodeTaskManager::clear_all_decode_task(int &runningDex) {
+  // Phase 1: request all decoders to stop (under lock).
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     for (auto stack : _running_tasks) {
@@ -135,12 +175,19 @@ void DecodeTaskManager::clear_all_decode_task(int &runningDex) {
     }
   }
 
-  for (auto &t : _decode_threads) {
+  // Phase 2: P0-1A fix — swap threads out under lock, then join WITHOUT
+  // holding the lock. Worker threads need the lock to finish cleanup.
+  std::vector<std::thread> threads_to_join;
+  {
+    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+    threads_to_join.swap(_decode_threads);
+  }
+  for (auto &t : threads_to_join) {
     if (t.joinable())
       t.join();
   }
-  _decode_threads.clear();
 
+  // Phase 3: clear _running_tasks after all threads are joined.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     _running_tasks.clear();
@@ -163,19 +210,24 @@ void DecodeTaskManager::decode_single_task(
   if (task->_delete_flag) {
     pxv_info("destroy a decoder in task thread");
 
-    // Track C3: This 100ms sleep covers a race where _delete_flag was just set
-    // by remove_decode_task() on the main thread, and we need to ensure the
-    // flag is visible to all threads before signals_changed() triggers UI
-    // updates that may re-enumerate decoder stacks. A condition_variable or
-    // atomic spin-wait would be more correct, but the current decode thread
-    // model (join-based) makes this sleep a pragmatic workaround that has
-    // not caused issues in practice.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (!_coord->bClose()) {
-      _coord->signals_changed();
-    }
+    // L-1 fix: the previous std::atomic_thread_fence was a no-op (no paired
+    // atomic load/store). Instead of a fence + direct call (which has a
+    // TOCTOU window on bClose()), we post signals_changed() to the main
+    // thread via post_async_dispatch. The main thread will execute it after
+    // any pending close operations, so the session state is consistent.
+    pv::core::EventBus::post_async_dispatch([coord = _coord]() {
+      if (coord && !coord->bClose()) {
+        coord->signals_changed();
+      }
+    });
   }
 
+  // P0-1B fix: do NOT detach/erase ourselves from _decode_threads. The
+  // previous code detached the current thread and erased it from the
+  // vector, which meant stop()/clear_all_decode_task() could never join it.
+  // The detached thread would then continue accessing _state/_event_bus
+  // after they were destroyed. Instead, we only remove the task from
+  // _running_tasks and let the thread be joined by the stop() path.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     auto it = std::find(_running_tasks.begin(), _running_tasks.end(), task);

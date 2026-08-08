@@ -24,6 +24,8 @@
 #include <QUrl>
 #include <QFrame>
 #include <QTextEdit>
+#include <QTimer>
+#include <QEventLoop>
 
 namespace pv {
 namespace dock {
@@ -278,7 +280,17 @@ void McpControlDock::on_restart_mcp()
     if (!transport)
         return;
 
+    // Graceful restart: stop() now properly cleans up all SSE clients and
+    // pending sockets before destroying the QTcpServer, preventing
+    // use-after-free when on_service_event fires during restart.
     transport->stop();
+
+    // Brief delay to let the OS release the listening port and let any
+    // pending socket disconnected signals propagate through the event loop.
+    QEventLoop loop;
+    QTimer::singleShot(500, &loop, &QEventLoop::quit);
+    loop.exec();
+
     transport->start();
     refresh_status();
 }

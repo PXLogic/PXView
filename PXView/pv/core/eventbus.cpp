@@ -69,11 +69,18 @@ EventBus::EventBus() {
     // Track A7: Set _main_thread_id in the constructor (NOT static init)
     // to guarantee it captures the main thread's ID.
     _main_thread_id = std::this_thread::get_id();
+    // M-3 fix: set _alive = true ONCE in the constructor. Previously,
+    // broadcast_async() set it to true on every call, which meant any
+    // post-destruction call would re-enable it and defeat the guard.
+    _alive.store(true, std::memory_order_release);
     _async_filter = std::make_unique<AsyncEventFilter>();
     qApp->installEventFilter(_async_filter.get());
 }
 
 EventBus::~EventBus() {
+    // M-3 fix: set _alive to false with release ordering so that any
+    // acquire-load in a posted lambda sees false after this point.
+    _alive.store(false, std::memory_order_release);
     if (_async_filter) {
         qApp->removeEventFilter(_async_filter.get());
         _async_filter.reset();

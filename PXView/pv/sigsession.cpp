@@ -1925,6 +1925,16 @@ void SigSession::on_event(const interface::DeviceOptionsUpdated &) {
 
 void SigSession::on_event(const interface::TrigNextCollect &) {
   if (_state->is_working() && is_repeat_mode()) {
+    // Note: We do NOT call clear_all_decode_task() here. The decoder SIGSEGV
+    // is now prevented by two other fixes:
+    // 1. first_payload() reuses the MmapAllocator (no UnmapViewOfFile) in
+    //    repeat mode, so decoder's di->inbuf pointers stay valid.
+    // 2. LogicSignal holds a shared_ptr (_data_ref) to the Snapshot, preventing
+    //    use-after-free on the main thread.
+    // Stopping decode threads here caused: (a) decode results lost on each
+    // repeat, (b) 5-6s main-thread freeze from thread join, (c) blank screen
+    // on first stop because decode was killed before completion.
+
     if (_capture_manager->get_repeat_intvl() > 0) {
       _capture_manager->set_repeat_hold_prg(100);
       _capture_manager->start_repeat_timer(_capture_manager->get_repeat_intvl() * 1000);
@@ -1986,9 +1996,17 @@ void SigSession::on_event(const interface::RevEndPacket &) {
       AppConfig &app = AppConfig::Instance();
       bool swapBackBufferAlways = app.appOptions.swapBackBufferAlways;
       if (!swapBackBufferAlways && !_state->is_working() && _capture_manager->capture_times() > 1) {
-        bAddDecoder = false;
-        bSwapBuffer = false;
-        _state->capture_data()->clear();
+        if (_capture_manager->is_stream_mode()) {
+          // Stream mode: capture_data is a separate back buffer. Discard it
+          // on stop to free memory. Keep the previous view_data as-is.
+          bAddDecoder = false;
+          bSwapBuffer = false;
+          _state->capture_data()->clear();
+        }
+        // Non-stream mode: capture_data == view_data. Do NOT clear — the user
+        // expects to see the last capture's data when they stop. Also keep
+        // bAddDecoder=true (from line 1986) so decoders process the last
+        // capture.
       }
     }
 
@@ -2360,6 +2378,13 @@ data::LogicSnapshot *SigSession::get_logic_snapshot() {
       _state->capture_data() != _state->view_data())
     return _state->capture_data()->get_logic();
   return _state->view_data()->get_logic();
+}
+
+std::shared_ptr<data::LogicSnapshot> SigSession::get_logic_snapshot_shared() {
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->logic_shared();
+  return _state->view_data()->logic_shared();
 }
 
 data::AnalogSnapshot *SigSession::get_analog_snapshot() {

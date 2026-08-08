@@ -1,0 +1,92 @@
+# Clang-Tidy configuration for DSView/PXView
+# ==================================================
+# This file is used when ENABLE_CLANG_TIDY=ON is passed to CMake.
+# It configures static analysis checks tailored to the crash patterns
+# found in this project (see devdoc/crash-analysis-and-prevention-guide.md).
+#
+# Usage:
+#   cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_CLANG_TIDY=ON ..
+#   make
+#
+# To run clang-tidy standalone on a single file:
+#   clang-tidy -p build.dir PXView/pv/data/logicsnapshot.cpp
+#
+# To auto-fix issues:
+#   clang-tidy -p build.dir --fix PXView/pv/data/logicsnapshot.cpp
+
+# --- Check selection ---
+# Strategy: enable broad categories, then suppress noisy/false-positive checks.
+# Focus on the crash categories from the analysis:
+#   A (35%): race condition / shared memory → clang-analyzer
+#   B (20%): use-after-free → clang-analyzer-cplusplus
+#   D (10%): mmap decommit → bugprone
+#   F ( 7%): bounds/null/div-zero → bugprone
+Checks:
+  # --- Static analyzer (most valuable for this project) ---
+  '-clang-analyzer-*',
+  'clang-analyzer-core.*',           # null dereference, uninitialized value
+  'clang-analyzer-cplusplus.*',      # use-after-free, dangling pointer, new/delete
+  'clang-analyzer-unix.*',           # malloc/free, VLA, API usage
+  'clang-analyzer-optin.*',         # optional checks (performance-critical)
+
+  # --- Bugprone (common bug patterns) ---
+  'bugprone-*',
+  '-bugprone-narrowing-conversions',       # too noisy with Qt size types
+  '-bugprone-sizeof-expression',           # common in C-style mmap code
+  '-bugprone-easily-swappable-parameters', # too noisy for C-style APIs
+  '-bugprone-reserved-identifier',         # MSYS2/MinGW system headers
+  '-bugprone-suspicious-include',          # project uses non-standard includes
+
+  # --- Misc (style + correctness) ---
+  'misc-*',
+  '-misc-non-private-member-variables-in-classes', # Qt style uses public members
+  '-misc-use-anonymous-namespace',                # too noisy
+  '-misc-include-cleaner',                        # requires compile_commands.json
+  '-misc-header-include-cycle',                   # too slow for large codebase
+
+  # --- Performance (lightweight, catches important issues) ---
+  'performance-*',
+  '-performance-avoid-const-or-ref-data-members', # Qt signal/slot needs some
+
+  # --- Readability (minimal, only high-value checks) ---
+  'readability-nonexistent-member-interpreter-check',
+  'readability-simplify-boolean-expr',
+  'readability-braces-around-statements',
+  'readability-else-after-return',
+
+  # --- Modernize (selective) ---
+  'modernize-use-nullptr',
+  'modernize-use-override',
+  'modernize-use-using',
+
+# --- Header filter ---
+# Only analyze project headers, not system/Qt/boost headers.
+HeaderFilterRegex: 'PXView/|libsigrokdecode/|common/'
+
+# --- Warnings as errors ---
+# Don't treat clang-tidy warnings as errors (too noisy during initial adoption).
+WarningsAsErrors: ''
+
+# --- Analysis options ---
+# Limit analysis depth to avoid timeouts on large translation units.
+CheckOptions:
+  - key:   clang-analyzer-cplusplus.AllocationInlining
+    value: true
+  - key:   clang-analyzer-cplusplus.SmartPtrModeling
+    value: true
+  - key:   clang-analyzer-core.CheckNullPointerBeforeDereference
+    value: true
+  - key:   clang-analyzer-optin.cplusplus.UninitializedObject:Pointers
+    value: true
+  - key:   clang-analyzer-optin.cplusplus.VirtualCall
+    value: true
+  # Inline max steps: large functions (append_cross_payload ~300 lines) need more
+  - key:   clang-analyzer-core.AnalysisInlineMaxFunctionSize
+    value: 500
+  # CFG scope: deep function call chains (decode → wait → find_match → ...)
+  - key:   clang-analyzer.core.AnalysisDepth
+    value: 20
+
+# --- Inherit parent config ---
+# Don't inherit from parent directories (avoid picking up system configs).
+InheritParentConfig: false

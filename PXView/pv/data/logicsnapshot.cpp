@@ -295,18 +295,33 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     // will hand out fresh zeroed blocks for the new capture — and the old
     // blocks remain valid in the pool until recycled, so any concurrent
     // reader holding a reference to them via free_decode_lpb is safe.
+    //
+    // CRITICAL FIX (SIGSEGV in repeat mode): Do NOT call push_to_free_list
+    // here. push_to_free_list calls decommit_block on mmap-backed blocks,
+    // which uses VirtualFree(MEM_DECOMMIT) to return physical pages to the
+    // OS. In repeat mode, the decoder thread from the PREVIOUS capture may
+    // still be running (it was started by CopyToDocDone and hasn't been
+    // stopped yet — clear_all_decode_task2 only runs on the NEXT
+    // RevEndPacket). The decoder holds raw pointers (di->inbuf) into these
+    // leaf blocks via get_samples(). If we decommit the pages here, the
+    // decoder thread hits decommitted virtual memory → SIGSEGV in
+    // term_matches (instance.c:1213).
+    //
+    // Instead, just reset the metadata (tog/first/last) and leave the lbp
+    // pointers intact. The new capture's allocate_block() will find the
+    // existing blocks and return them immediately (no zeroing, no
+    // reallocation). The new capture's append_*_payload will overwrite the
+    // old data in-place. The decoder may read a mix of old and new data,
+    // but: (1) it won't crash, and (2) its results will be discarded when
+    // the next RevEndPacket calls clear_all_decode_task2.
     for (auto &iter : _ch_data) {
       for (auto &iter_rn : iter) {
         iter_rn.tog = 0;
         iter_rn.first = 0;
         iter_rn.last = 0;
-
-        for (int j = 0; j < 64; j++) {
-          if (iter_rn.lbp[j] != nullptr) {
-            push_to_free_list(iter_rn.lbp[j]);
-            iter_rn.lbp[j] = nullptr;
-          }
-        }
+        // Leaf block pointers (lbp[]) are intentionally NOT freed and NOT
+        // set to nullptr. They remain committed for safe concurrent decoder
+        // access. allocate_block() will reuse them in-place.
       }
     }
   }
@@ -321,6 +336,18 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
   // 下次 capture 的 _ring_sample_count += _loop_offset 会从错误基址开始。
   _loop_offset = 0;
 
+  // CRITICAL FIX (SIGSEGV): Both branches above freed leaf blocks via
+  // push_to_free_list, which calls decommit_block on mmap-backed blocks,
+  // returning physical pages to the OS. However _dest_ptr may still point
+  // into a now-decommitted virtual address range. If the previous capture
+  // ended mid-chunk (_ch_fraction != 0 || _byte_fraction != 0), the next
+  // append_cross_payload's bit-align phase would dereference _dest_ptr and
+  // hit decommitted pages -> SIGSEGV. Reset all bit-align state here.
+  _dest_ptr = nullptr;
+  _ch_fraction = 0;
+  _byte_fraction = 0;
+  _last_ended = true;
+
   for (unsigned int i = 0; i < _channel_num; i++) {
     _last_sample[i] = 0;
     _last_calc_count[i] = 0;
@@ -333,45 +360,74 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
            _disk_cache_writer->disk_cache_config().enabled, _ch_data.size());
 
   if (_channel_num > 0) {
-    // Create and configure MmapAllocator
-    _mmap_alloc = std::make_shared<MmapAllocator>();
+    // CRITICAL FIX (SIGSEGV in repeat mode): Only create a new MmapAllocator
+    // if there isn't one already. In repeat mode (else branch above, config
+    // unchanged), _mmap_alloc still points to the old allocator. Replacing it
+    // with a new one would destroy the old shared_ptr → MmapAllocator
+    // destructor calls UnmapViewOfFile → the entire old mmap region is
+    // unmapped. The decoder thread from the previous capture (still running,
+    // started by CopyToDocDone) holds raw pointers (di->inbuf) into the old
+    // mmap → SIGSEGV in term_matches (instance.c:1238).
+    //
+    // In the if branch (config changed), free_data() already reset
+    // _mmap_alloc to nullptr, so a new allocator is created. On the very
+    // first call, _mmap_alloc is also nullptr (initialized in constructor).
+    if (!_mmap_alloc) {
+      // Create and configure MmapAllocator
+      _mmap_alloc = std::make_shared<MmapAllocator>();
 
-    // Calculate total required memory based on total_sample_count + padding
-    // For loop mode, _total_sample_count is the size of the ring buffer.
-    _max_blocks_per_channel = (_total_sample_count / LeafBlockSamples) + 16;
-    uint64_t total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
+      // Calculate total required memory based on total_sample_count + padding
+      // For loop mode, _total_sample_count is the size of the ring buffer.
+      _max_blocks_per_channel = (_total_sample_count / LeafBlockSamples) + 16;
+      uint64_t total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
 
-    bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
-    QString disk_dir = QString::fromStdString(_disk_cache_writer->disk_cache_config().cache_path);
-    auto _mmap_t0 = std::chrono::steady_clock::now();
-    bool mmap_ok = _mmap_alloc->configure(use_disk, disk_dir, total_bytes,
-                                          LeafBlockSpace, _max_blocks_per_channel, _channel_num);
-    auto _mmap_t1 = std::chrono::steady_clock::now();
-    pxv_info("first_payload TIMING: MmapAllocator::configure=%lldms (total_bytes=%llu, ok=%d)",
-      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_mmap_t1 - _mmap_t0).count(),
-      (unsigned long long)total_bytes, (int)mmap_ok);
-    if (!mmap_ok) {
-        pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed! "
-               "Falling back to LeafBlockPool in-memory allocation.");
-        // Set _memory_failed so the user gets a dialog warning that mmap
-        // allocation failed and the system is running in degraded mode
-        // (LeafBlockPool fallback). The datafeedparser checks memory_failed()
-        // after append_payload and triggers session_error() -> dialog.
-        _memory_failed = true;
-        // Drop the failed allocator so allocate_block() takes the
-        // LeafBlockPool::instance().acquire() fallback path instead of
-        // dereferencing an unconfigured (nullptr _base_ptr) allocator.
-        _disk_cache_writer->clear_all_mmap_slots();
-        _mmap_alloc.reset();
+      bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
+      QString disk_dir = QString::fromStdString(_disk_cache_writer->disk_cache_config().cache_path);
+      auto _mmap_t0 = std::chrono::steady_clock::now();
+      bool mmap_ok = _mmap_alloc->configure(use_disk, disk_dir, total_bytes,
+                                            LeafBlockSpace, _max_blocks_per_channel, _channel_num);
+      auto _mmap_t1 = std::chrono::steady_clock::now();
+      pxv_info("first_payload TIMING: MmapAllocator::configure=%lldms (total_bytes=%llu, ok=%d)",
+        (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_mmap_t1 - _mmap_t0).count(),
+        (unsigned long long)total_bytes, (int)mmap_ok);
+      if (!mmap_ok) {
+          pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed! "
+                 "Falling back to LeafBlockPool in-memory allocation.");
+          // Set _memory_failed so the user gets a dialog warning that mmap
+          // allocation failed and the system is running in degraded mode
+          // (LeafBlockPool fallback). The datafeedparser checks memory_failed()
+          // after append_payload and triggers session_error() -> dialog.
+          _memory_failed = true;
+          // Drop the failed allocator so allocate_block() takes the
+          // LeafBlockPool::instance().acquire() fallback path instead of
+          // dereferencing an unconfigured (nullptr _base_ptr) allocator.
+          _disk_cache_writer->clear_all_mmap_slots();
+          _mmap_alloc.reset();
+      } else {
+          // 设置 loop mode（loop mode 禁用 trailing decommit，保留所有数据在 RAM）
+          _mmap_alloc->set_loop_mode(_is_loop);
+          // 等待 prefault 线程完成初始 4 blocks 超前（4 * 16ch * 2MB = 128MB）
+          auto _pf_t0 = std::chrono::steady_clock::now();
+          _mmap_alloc->wait_prefault_initial_blocks(4);
+          auto _pf_t1 = std::chrono::steady_clock::now();
+          pxv_info("first_payload TIMING: wait_prefault_initial_blocks(4)=%lldms",
+            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count());
+      }
     } else {
-        // 设置 loop mode（loop mode 禁用 trailing decommit，保留所有数据在 RAM）
-        _mmap_alloc->set_loop_mode(_is_loop);
-        // 等待 prefault 线程完成初始 4 blocks 超前（4 * 16ch * 2MB = 128MB）
-        auto _pf_t0 = std::chrono::steady_clock::now();
-        _mmap_alloc->wait_prefault_initial_blocks(4);
-        auto _pf_t1 = std::chrono::steady_clock::now();
-        pxv_info("first_payload TIMING: wait_prefault_initial_blocks(4)=%lldms",
-          (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count());
+// Reusing existing MmapAllocator (repeat mode, config unchanged).
+// The mmap region stays mapped — decoder threads from the previous
+// capture can safely read from it while the new capture overwrites
+// data in-place. No need to re-configure: same total_sample_count,
+// channel_num, and disk_cache_config.
+//
+// IMPORTANT: Do NOT restart the prefault thread here. All pages are
+// already committed from the previous capture. The prefault worker
+// writes zeros to every page (to force page-table entries), which
+// would overwrite the previous capture's data. Since the UI renders
+// from the same mmap (view_data == capture_data in non-stream repeat
+// mode), zeroing the blocks causes a blank screen on stop.
+_mmap_alloc->stop_prefault();
+pxv_info("first_payload: reusing existing MmapAllocator (repeat mode, prefault not restarted)");
     }
   }
 
@@ -505,10 +561,20 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
       move_first_node_to_last();
       _loop_offset -= LeafBlockSamples * Scale;
       _lst_free_block_index = 0;
+      // Invalidate stale _dest_ptr: move_first_node_to_last decommits all
+      // Scale leaf blocks in root node 0. append_payload_impl does not use
+      // _dest_ptr directly (it uses ch_lbp[]), but reset for safety in case
+      // a future format switch reuses the stale pointer.
+      _dest_ptr = nullptr;
+      _ch_fraction = 0;
+      _byte_fraction = 0;
     } else {
       int free_count = _loop_offset / LeafBlockSamples;
       if (free_count > _lst_free_block_index) {
         free_head_blocks(free_count);
+        _dest_ptr = nullptr;
+        _ch_fraction = 0;
+        _byte_fraction = 0;
       }
     }
   }
@@ -774,6 +840,9 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   assert(logic.data);
   assert(_channel_num > 0);
 
+  // Defensive: assert() is a no-op in Release — guard against null data.
+  if (!logic.data || _channel_num == 0) return;
+
   if (logic.length == 0) return;
 
   // Cross data must be chunk-aligned: each chunk is (channel_num * 8) bytes
@@ -815,10 +884,23 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
       move_first_node_to_last();
       _loop_offset -= LeafBlockSamples * Scale;
       _lst_free_block_index = 0;
+      // move_first_node_to_last freed all Scale leaf blocks in root node 0
+      // via push_to_free_list -> decommit_block. If _dest_ptr pointed into
+      // any of those blocks it is now dangling. Invalidate bit-align state
+      // so the bit-align phase is skipped (the freed data is discarded in
+      // loop mode anyway).
+      _dest_ptr = nullptr;
+      _ch_fraction = 0;
+      _byte_fraction = 0;
     } else {
       int free_count = _loop_offset / LeafBlockSamples;
       if (free_count > _lst_free_block_index) {
         free_head_blocks(free_count);
+        // free_head_blocks decommits specific leaf blocks in root node 0.
+        // _dest_ptr may point into one of them. Invalidate bit-align state.
+        _dest_ptr = nullptr;
+        _ch_fraction = 0;
+        _byte_fraction = 0;
       }
     }
   }
@@ -1023,6 +1105,11 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
   // ---- Tail phase: residual bytes (len < 8) ----
   if (len > 0) {
+    if (_dest_ptr == nullptr) {
+      pxv_err("append_cross_payload: _dest_ptr nullptr in tail phase, "
+              "dropping %llu residual bytes", (unsigned long long)len);
+      return;
+    }
     uint8_t *src_ptr = (uint8_t *)end_read_ptr - len;
     _byte_fraction += (uint8_t)len;
 
@@ -1098,11 +1185,16 @@ void LogicSnapshot::capture_ended() {
 }
 
 void LogicSnapshot::copy_from(const LogicSnapshot &src) {
-  std::lock_guard<std::mutex> lock(_mutex);
+std::lock_guard<std::mutex> lock(_mutex);
 
-  const_cast<LogicSnapshot &>(src).ensure_all_blocks_hot();
+// H4 fix: drain the async writer before free_data() resets _mmap_alloc.
+// Without this, the async worker could still be accessing the old mmap
+// allocator through _owner->_mmap_alloc while free_data() resets it.
+_disk_cache_writer->drain_and_join();
 
-  free_data();
+const_cast<LogicSnapshot &>(src).ensure_all_blocks_hot();
+
+free_data();
 
   _capacity = src._capacity;
   _channel_num = src._channel_num;
@@ -1332,7 +1424,14 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
 
   if (*((uint64_t *)level3_ptr) != 0) {
     _ch_data[order][index0].tog |= 1ULL << index1;
-  } else if (isEnd) {
+  } else if (isEnd && _able_free) {
+    // Only free (decommit) constant-value leaf blocks when _able_free is
+    // true. When false (repeat mode, decoder still running on the same
+    // shared snapshot), the decoder thread holds raw pointers (di->inbuf)
+    // into these mmap leaf blocks. Decommitting them via push_to_free_list
+    // → VirtualFree(MEM_DECOMMIT) would cause SIGSEGV in the decoder thread
+    // (instance.c:update_old_pins_array). Instead, keep the block mapped;
+    // allocate_block() will reuse it in-place for the next capture.
     push_to_free_list(_ch_data[order][index0].lbp[index1]);
 
     _ch_data[order][index0].lbp[index1] = nullptr;

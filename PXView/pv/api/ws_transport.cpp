@@ -45,9 +45,19 @@ void WsTransport::stop()
     if (!_server)
         return;
 
+    // L2 fix: disconnect signals before clearing clients to prevent
+    // on_client_disconnected from being called during shutdown with
+    // a stale iterator.
+    disconnect(_server, &QWebSocketServer::newConnection,
+               this, &WsTransport::on_new_connection);
+
     {
         std::lock_guard<std::mutex> lock(_clients_mutex);
         for (auto* client : _clients) {
+            disconnect(client, &QWebSocket::textMessageReceived,
+                       this, &WsTransport::on_text_message);
+            disconnect(client, &QWebSocket::disconnected,
+                       this, &WsTransport::on_client_disconnected);
             client->close();
             client->deleteLater();
         }

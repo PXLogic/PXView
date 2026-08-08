@@ -503,6 +503,12 @@ void SearchDock::start_search_async() {
 }
 
 void SearchDock::search_worker() {
+  // H3 fix: null-check _data before accessing snapshot. If the session
+  // has been torn down, _data may be null or the snapshot may be stale.
+  if (!_data) {
+    _search_state.store(0);
+    return;
+  }
   const auto snapshot = _data->get_snapshot(SR_CHANNEL_LOGIC);
   if (!snapshot)
     return;
@@ -511,6 +517,11 @@ void SearchDock::search_worker() {
     _search_state.store(0);
     return;
   }
+
+  // H3 fix: take a local reference to the snapshot pointer. The search
+  // loop checks _search_state for cancellation (state==3), and stop_search()
+  // calls waitForFinished() before allowing the session to destroy snapshots.
+  // This ensures the snapshot remains valid for the duration of the search.
 
   std::map<uint16_t, QString> local_pattern;
   {

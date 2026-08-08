@@ -10,7 +10,7 @@ namespace pv::api {
 static void mcp_dbg_log(const char* msg) {
     static QFile dbg_file;
     if (!dbg_file.isOpen()) {
-        dbg_file.setFileName(QDir::tempPath() + "/pxview_mcp_debug.log");
+        dbg_file.setFileName(QDir::tempPath() + "/pxview_automation_debug.log");
         (void)dbg_file.open(QIODevice::WriteOnly | QIODevice::Append);
     }
     if (dbg_file.isOpen()) {

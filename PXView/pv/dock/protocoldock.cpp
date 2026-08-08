@@ -46,19 +46,17 @@
 #include "../ui/langresource.h"
 #include "../ui/msgbox.h"
 #include <QFormLayout>
-#include <QFuture>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QObject>
 #include <QPainter>
-#include <QProgressDialog>
-#include <QRegularExpression>
 #include <QScrollBar>
 #include <QSizePolicy>
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTableWidgetItem>
-#include <QtConcurrent/QtConcurrent>
+#include <QApplication>
+#include <QClipboard>
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -214,7 +212,12 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _ann_search_edit->setFixedHeight(_pre_button->sizeHint().height());
 
   _table_view = new QTableView(bot_panel);
-  _table_view->setModel(_decoder_model);
+  // Use the proxy model as the table's model so that setFilterFixedString
+  // in search_done() actually filters the displayed rows in real time.
+  _model_proxy.setSourceModel(_decoder_model);
+  _model_proxy.setFilterKeyColumn(-1); // search across all columns
+  _model_proxy.setFilterCaseSensitivity(Qt::CaseInsensitive);
+  _table_view->setModel(&_model_proxy);
   _table_view->setObjectName("dock_protocol_table_view");
   _table_view->setShowGrid(false);
   _table_view->horizontalHeader()->setStretchLastSection(true);
@@ -240,6 +243,34 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
 
   connect(_table_view, &QAbstractItemView::entered, this,
           &ProtocolDock::on_table_hover);
+
+  // Right-click context menu for copy operations.
+  _table_view->setContextMenuPolicy(Qt::CustomContextMenu);
+  _table_context_menu = new QMenu(_table_view);
+  _copy_cell_action = _table_context_menu->addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_CELL), "Copy Cell"));
+  _copy_row_action = _table_context_menu->addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ROW), "Copy Row"));
+  _copy_column_action = _table_context_menu->addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_COLUMN), "Copy Column"));
+  _copy_all_action = _table_context_menu->addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ALL), "Copy All"));
+  _table_context_menu->addSeparator();
+  _select_all_action = _table_context_menu->addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SELECT_ALL), "Select All"));
+
+  connect(_table_view, &QWidget::customContextMenuRequested, this,
+          &ProtocolDock::on_table_context_menu);
+  connect(_copy_cell_action, &QAction::triggered, this,
+          &ProtocolDock::copy_cell);
+  connect(_copy_row_action, &QAction::triggered, this,
+          &ProtocolDock::copy_row);
+  connect(_copy_column_action, &QAction::triggered, this,
+          &ProtocolDock::copy_column);
+  connect(_copy_all_action, &QAction::triggered, this,
+          &ProtocolDock::copy_all);
+  connect(_select_all_action, &QAction::triggered, this,
+          &ProtocolDock::select_all_rows);
 
   _matchs_title_label = new QLabel();
   _matchs_title_label->setObjectName("dock_label");
@@ -301,8 +332,13 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   connect(_pro_type_combo, QOverload<int>::of(&QComboBox::activated), this,
           &ProtocolDock::show_protocol_select);
 
-  connect(_ann_search_edit, &QLineEdit::editingFinished, this,
-          &ProtocolDock::search_changed);
+  // Real-time filtering: debounce text changes and trigger search_done.
+  _search_timer = new QTimer(this);
+  _search_timer->setSingleShot(true);
+  _search_timer->setInterval(300);
+  connect(_search_timer, &QTimer::timeout, this, &ProtocolDock::search_done);
+  connect(_ann_search_edit, &QLineEdit::textChanged, this,
+          &ProtocolDock::on_search_text_changed);
 
   connect(_follow_viewport_btn, &QPushButton::toggled, this,
           &ProtocolDock::on_follow_viewport_toggled);
@@ -344,7 +380,8 @@ void ProtocolDock::bind_context(TabContext *ctx) {
                &ProtocolDock::on_visible_range_changed);
   }
   _view = ctx->view();
-  _table_view->setModel(_decoder_model);
+  // Table already uses _model_proxy (set in constructor); just ensure
+  // the proxy's source is the current tab's decoder model.
   _model_proxy.setSourceModel(_decoder_model);
   rebuild_protocol_layers();
   update_view_status();
@@ -401,6 +438,22 @@ void ProtocolDock::retranslateUi() {
       STR_PAGE_DLG, S_ID(IDS_DLG_FOLLOW_VIEWPORT),
       "List follows waveform visible range"));
   _pro_keyword_edit->ResetText();
+
+  if (_copy_cell_action)
+    _copy_cell_action->setText(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_CELL), "Copy Cell"));
+  if (_copy_row_action)
+    _copy_row_action->setText(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ROW), "Copy Row"));
+  if (_copy_column_action)
+    _copy_column_action->setText(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_COLUMN), "Copy Column"));
+  if (_copy_all_action)
+    _copy_all_action->setText(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ALL), "Copy All"));
+  if (_select_all_action)
+    _select_all_action->setText(
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SELECT_ALL), "Select All"));
 }
 
 void ProtocolDock::reStyle() {
@@ -766,7 +819,9 @@ void ProtocolDock::update_model() {
     if (index >= decode_sigs.size())
       decoder_model->setDecoderStack(decode_sigs.at(0).get());
   }
-  _model_proxy.setSourceModel(decoder_model);
+  // Proxy source is already set; no need to reset it here.
+  // setDecoderStack() triggers beginResetModel/endResetModel on the
+  // decoder model, which the proxy picks up automatically.
   search_done();
   resize_table_view(decoder_model);
 }
@@ -813,21 +868,32 @@ void ProtocolDock::resize_table_view(view::DecoderModel *decoder_model) {
 }
 
 void ProtocolDock::item_clicked(const QModelIndex &index) {
-  pv::view::DecoderModel *decoder_model = _decoder_model;
+  if (!index.isValid())
+    return;
 
+  // Map proxy index to source (DecoderModel) index for annotation lookup.
+  QModelIndex source_index = _model_proxy.mapToSource(index);
+  if (!source_index.isValid())
+    return;
+
+  pv::view::DecoderModel *decoder_model = _decoder_model;
   auto decoder_stack = decoder_model->getDecoderStack();
 
+  // Track which column the user clicked for navigation (nav_table_view,
+  // on_visible_range_changed).
+  _nav_column = source_index.column();
+
   if (decoder_stack) {
-    // When visible-range slicing is active, index.row() is a sliced (0-based)
-    // row number. Map it back to the full-list row number before querying
-    // the DecoderStack.
-    uint64_t query_row = index.row();
+    // When visible-range slicing is active, source_index.row() is a sliced
+    // (0-based) row number. Map it back to the full-list row number before
+    // querying the DecoderStack.
+    uint64_t query_row = source_index.row();
     if (decoder_model->visible_start_row() >= 0) {
-      query_row = (uint64_t)(decoder_model->visible_start_row() + index.row());
+      query_row = (uint64_t)(decoder_model->visible_start_row() + source_index.row());
     }
 
     pv::data::decode::Annotation ann;
-    if (decoder_stack->list_annotation(&ann, index.column(), query_row)) {
+    if (decoder_stack->list_annotation(&ann, source_index.column(), query_row)) {
       const auto &decode_sigs = _decoder_host->get_decoder_stacks();
 
       for (auto d : decode_sigs) {
@@ -846,45 +912,6 @@ void ProtocolDock::item_clicked(const QModelIndex &index) {
   }
 
   _table_view->resizeRowToContents(index.row());
-  if (index.column() != _model_proxy.filterKeyColumn()) {
-    _model_proxy.setFilterKeyColumn(index.column());
-    _model_proxy.setSourceModel(decoder_model);
-    search_done();
-  }
-  QModelIndex filterIndex = _model_proxy.mapFromSource(index);
-  if (filterIndex.isValid()) {
-    _cur_search_index = filterIndex.row();
-  } else {
-    if (_model_proxy.rowCount() == 0) {
-      _cur_search_index = -1;
-    } else {
-      uint64_t up = 0;
-      uint64_t dn = _model_proxy.rowCount() - 1;
-      do {
-        uint64_t md = (up + dn) / 2;
-        QModelIndex curIndex = _model_proxy.mapToSource(
-            _model_proxy.index(md, _model_proxy.filterKeyColumn()));
-        if (index.row() == curIndex.row()) {
-          _cur_search_index = md;
-          break;
-        } else if (md == up) {
-          if (curIndex.row() < index.row() && up < dn) {
-            QModelIndex nxtIndex = _model_proxy.mapToSource(
-                _model_proxy.index(md + 1, _model_proxy.filterKeyColumn()));
-            if (nxtIndex.row() < index.row())
-              md++;
-          }
-          _cur_search_index =
-              md + ((curIndex.row() < index.row()) ? 0.5 : -0.5);
-          break;
-        } else if (curIndex.row() < index.row()) {
-          up = md;
-        } else if (curIndex.row() > index.row()) {
-          dn = md;
-        }
-      } while (1);
-    }
-  }
 }
 
 void ProtocolDock::column_resize(int index, int old_size, int new_size) {
@@ -913,232 +940,120 @@ void ProtocolDock::nav_table_view() {
   pv::view::DecoderModel *decoder_model = _decoder_model;
 
   auto decoder_stack = decoder_model->getDecoderStack();
-  if (decoder_stack) {
-    uint64_t offset =
-        _view->offset() * (decoder_stack->samplerate() * _view->scale());
-    std::map<const pv::data::decode::Row, bool> rows =
-        decoder_stack->get_rows_lshow();
-    int column = _model_proxy.filterKeyColumn();
-    for (std::map<const pv::data::decode::Row, bool>::const_iterator i =
-             rows.begin();
-         i != rows.end(); i++) {
-      if ((*i).second && column-- == 0) {
-        row_index = decoder_stack->get_annotation_index((*i).first, offset);
-        break;
-      }
+  if (!decoder_stack)
+    return;
+
+  uint64_t offset =
+      _view->offset() * (decoder_stack->samplerate() * _view->scale());
+  std::map<const pv::data::decode::Row, bool> rows =
+      decoder_stack->get_rows_lshow();
+  int column = _nav_column;
+  for (std::map<const pv::data::decode::Row, bool>::const_iterator i =
+           rows.begin();
+       i != rows.end(); i++) {
+    if ((*i).second && column-- == 0) {
+      row_index = decoder_stack->get_annotation_index((*i).first, offset);
+      break;
     }
-    QModelIndex index = _model_proxy.mapToSource(
-        _model_proxy.index(row_index, _model_proxy.filterKeyColumn()));
+  }
 
-    if (index.isValid()) {
+  // Convert full-list annotation index to source model row.
+  int64_t source_row = (int64_t)row_index;
+  if (decoder_model->visible_start_row() >= 0) {
+    source_row = (int64_t)row_index - decoder_model->visible_start_row();
+  }
 
-      pv::data::decode::Annotation ann;
+  if (source_row < 0 || source_row >= decoder_model->rowCount(QModelIndex()))
+    return;
 
-      if (decoder_stack->list_annotation(&ann, index.column(), index.row())) {
-        _table_view->scrollTo(index);
-        _table_view->setCurrentIndex(index);
+  QModelIndex source_index = decoder_model->index(source_row, _nav_column);
+  QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
 
-        const auto &decode_sigs = _decoder_host->get_decoder_stacks();
+  if (proxy_index.isValid()) {
+    pv::data::decode::Annotation ann;
 
-        for (auto d : decode_sigs) {
-          d->set_mark_index(-1);
-        }
+    if (decoder_stack->list_annotation(&ann, _nav_column, row_index)) {
+      _table_view->scrollTo(proxy_index);
+      _table_view->setCurrentIndex(proxy_index);
 
-        decoder_stack->set_mark_index((ann.start_sample() + ann.end_sample()) /
-                                      2);
-        _view->set_all_update(true);
-        _view->update();
+      const auto &decode_sigs = _decoder_host->get_decoder_stacks();
+
+      for (auto d : decode_sigs) {
+        d->set_mark_index(-1);
       }
+
+      decoder_stack->set_mark_index((ann.start_sample() + ann.end_sample()) /
+                                    2);
+      _view->set_all_update(true);
+      _view->update();
     }
   }
 }
 
 void ProtocolDock::search_pre() {
-  search_update();
-  // now the proxy only contains rows that match the name
-  // let's take the pre one and map it to the original model
-  if (_model_proxy.rowCount() == 0) {
+  // Navigate to the previous row in the filtered results.
+  int row_count = _model_proxy.rowCount();
+  if (row_count == 0) {
     _table_view->scrollToTop();
     _table_view->clearSelection();
     _matchs_label->setText(QString::number(0));
     _cur_search_index = -1;
     return;
   }
-  int i = 0;
-  uint64_t rowCount = _model_proxy.rowCount();
-  QModelIndex matchingIndex;
-  pv::view::DecoderModel *decoder_model = _decoder_model;
-
-  auto decoder_stack = decoder_model->getDecoderStack();
-  do {
-    _cur_search_index--;
-    if (_cur_search_index <= -1 || _cur_search_index >= _model_proxy.rowCount())
-      _cur_search_index = _model_proxy.rowCount() - 1;
-
-    matchingIndex = _model_proxy.mapToSource(_model_proxy.index(
-        ceil(_cur_search_index), _model_proxy.filterKeyColumn()));
-    if (!decoder_stack || !matchingIndex.isValid())
-      break;
-    i = 1;
-    uint64_t row = matchingIndex.row() + 1;
-    uint64_t col = matchingIndex.column();
-    pv::data::decode::Annotation ann;
-    bool ann_valid = false;
-
-    while (i < _str_list.size()) {
-      QString nxt = _str_list.at(i);
-
-      do {
-        ann_valid = decoder_stack->list_annotation(&ann, col, row);
-        row++;
-      } while (ann_valid && !ann.is_numberic());
-
-      if (ann_valid) {
-        QString source = ann.annotations().at(0);
-        if (source.contains(nxt))
-          i++;
-        else
-          break;
-      } else {
-        break;
-      }
-    }
-  } while (i < _str_list.size() && --rowCount);
-
-  if (i >= _str_list.size() && matchingIndex.isValid()) {
-    _table_view->scrollTo(matchingIndex);
-    _table_view->setCurrentIndex(matchingIndex);
-    _table_view->clicked(matchingIndex);
-  } else {
-    _table_view->scrollToTop();
-    _table_view->clearSelection();
-    _matchs_label->setText(QString::number(0));
-    _cur_search_index = -1;
+  _cur_search_index--;
+  if (_cur_search_index < 0)
+    _cur_search_index = row_count - 1;
+  QModelIndex idx = _model_proxy.index(_cur_search_index, 0);
+  if (idx.isValid()) {
+    _table_view->scrollTo(idx);
+    _table_view->setCurrentIndex(idx);
+    _table_view->clicked(idx); // trigger item_clicked → show_region → viewport jump
   }
 }
 
 void ProtocolDock::search_nxt() {
-  search_update();
-  // now the proxy only contains rows that match the name
-  // let's take the pre one and map it to the original model
-  if (_model_proxy.rowCount() == 0) {
+  // Navigate to the next row in the filtered results.
+  int row_count = _model_proxy.rowCount();
+  if (row_count == 0) {
     _table_view->scrollToTop();
     _table_view->clearSelection();
     _matchs_label->setText(QString::number(0));
     _cur_search_index = -1;
     return;
   }
-
-  int i = 0;
-  uint64_t rowCount = _model_proxy.rowCount();
-  QModelIndex matchingIndex;
-  pv::view::DecoderModel *decoder_model = _decoder_model;
-  auto decoder_stack = decoder_model->getDecoderStack();
-
-  if (decoder_stack == nullptr) {
-    pxv_err("decoder_stack is nullptr");
-    return;
-  }
-
-  do {
-    _cur_search_index++;
-    if (_cur_search_index < 0 || _cur_search_index >= _model_proxy.rowCount())
-      _cur_search_index = 0;
-
-    matchingIndex = _model_proxy.mapToSource(_model_proxy.index(
-        floor(_cur_search_index), _model_proxy.filterKeyColumn()));
-
-    if (!matchingIndex.isValid())
-      break;
-
-    i = 1;
-    uint64_t row = matchingIndex.row() + 1;
-    uint64_t col = matchingIndex.column();
-    pv::data::decode::Annotation ann;
-    bool ann_valid = false;
-
-    while (i < _str_list.size()) {
-      QString nxt = _str_list.at(i);
-
-      do {
-        ann_valid = decoder_stack->list_annotation(&ann, col, row);
-        row++;
-      } while (ann_valid && !ann.is_numberic());
-
-      if (ann_valid) {
-        QString source = ann.annotations().at(0);
-        if (source.contains(nxt))
-          i++;
-        else
-          break;
-      } else {
-        break;
-      }
-    }
-  } while (i < _str_list.size() && --rowCount);
-
-  if (i >= _str_list.size() && matchingIndex.isValid()) {
-    _table_view->scrollTo(matchingIndex);
-    _table_view->setCurrentIndex(matchingIndex);
-    _table_view->clicked(matchingIndex);
-  } else {
-    _table_view->scrollToTop();
-    _table_view->clearSelection();
-    _matchs_label->setText(QString::number(0));
-    _cur_search_index = -1;
+  _cur_search_index++;
+  if (_cur_search_index >= row_count)
+    _cur_search_index = 0;
+  QModelIndex idx = _model_proxy.index(_cur_search_index, 0);
+  if (idx.isValid()) {
+    _table_view->scrollTo(idx);
+    _table_view->setCurrentIndex(idx);
+    _table_view->clicked(idx); // trigger item_clicked → show_region → viewport jump
   }
 }
 
 void ProtocolDock::search_done() {
   QString str = _ann_search_edit->text().trimmed();
-  QRegularExpression rx("(-)");
-  _str_list = str.split(rx);
-  _model_proxy.setFilterFixedString(_str_list.first());
-  if (_str_list.size() > 1)
-    _matchs_label->setText("...");
-  else
-    _matchs_label->setText(QString::number(_model_proxy.rowCount()));
+  // Filter the proxy model across all columns. The table view uses the
+  // proxy as its model, so this immediately hides non-matching rows.
+  _model_proxy.setFilterFixedString(str);
+  _matchs_label->setText(QString::number(_model_proxy.rowCount()));
+  _cur_search_index = -1;
+}
+
+void ProtocolDock::on_search_text_changed(const QString &text) {
+  (void)text;
+  // Show pending indicator while the debounce timer is running.
+  _matchs_label->setText("...");
+  _search_timer->start(); // fires search_done() after 300ms of inactivity
 }
 
 void ProtocolDock::search_changed() {
-  _search_edited = true;
-  _matchs_label->setText("...");
+  // Legacy stub: real-time filtering is handled by on_search_text_changed.
 }
 
 void ProtocolDock::search_update() {
-  if (!_search_edited)
-    return;
-
-  pv::view::DecoderModel *decoder_model = _decoder_model;
-
-  auto decoder_stack = decoder_model->getDecoderStack();
-  if (!decoder_stack)
-    return;
-
-  if (decoder_stack->list_annotation_size(_model_proxy.filterKeyColumn()) >
-      ProgressRows) {
-    QFuture<void> future;
-    future = QtConcurrent::run([&] { search_done(); });
-    Qt::WindowFlags flags = Qt::CustomizeWindowHint;
-    QProgressDialog dlg(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SEARCHING), "Searching..."),
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CANCEL), "Cancel"), 0, 0, this, flags);
-    dlg.setWindowModality(Qt::WindowModal);
-    dlg.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint |
-                       Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
-                       Qt::WindowMaximizeButtonHint);
-    dlg.setCancelButton(nullptr);
-
-    QFutureWatcher<void> watcher;
-    connect(&watcher, &QFutureWatcher<void>::finished, &dlg,
-            &QProgressDialog::cancel);
-    watcher.setFuture(future);
-
-    dlg.exec();
-  } else {
-    search_done();
-  }
-  _search_edited = false;
+  // Legacy stub: real-time filtering is handled by on_search_text_changed.
 }
 
 //-------------------IProtocolItemLayerCallback
@@ -1440,6 +1355,94 @@ void ProtocolDock::on_table_hover(const QModelIndex &index) {
   _table_view->viewport()->update();
 }
 
+void ProtocolDock::on_table_context_menu(const QPoint &pos) {
+  QModelIndex index = _table_view->indexAt(pos);
+  _context_menu_index = index;
+
+  bool has_valid_index = index.isValid();
+  int row_count = _model_proxy.rowCount(QModelIndex());
+  int col_count = _model_proxy.columnCount(QModelIndex());
+
+  _copy_cell_action->setEnabled(has_valid_index);
+  _copy_row_action->setEnabled(has_valid_index && col_count > 0);
+  _copy_column_action->setEnabled(has_valid_index && row_count > 0);
+  _copy_all_action->setEnabled(row_count > 0 && col_count > 0);
+  _select_all_action->setEnabled(row_count > 0);
+
+  _table_context_menu->exec(_table_view->viewport()->mapToGlobal(pos));
+}
+
+void ProtocolDock::copy_cell() {
+  if (!_context_menu_index.isValid())
+    return;
+  // _context_menu_index is a proxy index; use the proxy model to get data.
+  QVariant data = _model_proxy.data(_context_menu_index, Qt::DisplayRole);
+  if (data.isValid()) {
+    QApplication::clipboard()->setText(data.toString());
+  }
+}
+
+void ProtocolDock::copy_row() {
+  if (!_context_menu_index.isValid())
+    return;
+  int row = _context_menu_index.row();
+  int col_count = _model_proxy.columnCount(QModelIndex());
+  QStringList cells;
+  for (int col = 0; col < col_count; col++) {
+    QModelIndex idx = _model_proxy.index(row, col);
+    QVariant data = _model_proxy.data(idx, Qt::DisplayRole);
+    cells << (data.isValid() ? data.toString() : QString(""));
+  }
+  QApplication::clipboard()->setText(cells.join("\t"));
+}
+
+void ProtocolDock::copy_column() {
+  if (!_context_menu_index.isValid())
+    return;
+  int col = _context_menu_index.column();
+  int row_count = _model_proxy.rowCount(QModelIndex());
+  QStringList cells;
+  for (int row = 0; row < row_count; row++) {
+    QModelIndex idx = _model_proxy.index(row, col);
+    QVariant data = _model_proxy.data(idx, Qt::DisplayRole);
+    cells << (data.isValid() ? data.toString() : QString(""));
+  }
+  QApplication::clipboard()->setText(cells.join("\n"));
+}
+
+void ProtocolDock::copy_all() {
+  int row_count = _model_proxy.rowCount(QModelIndex());
+  int col_count = _model_proxy.columnCount(QModelIndex());
+  if (row_count == 0 || col_count == 0)
+    return;
+
+  // Build header row from model headerData.
+  QStringList headers;
+  for (int col = 0; col < col_count; col++) {
+    QVariant header = _model_proxy.headerData(col, Qt::Horizontal, Qt::DisplayRole);
+    headers << (header.isValid() ? header.toString() : QString(""));
+  }
+
+  QStringList lines;
+  lines << headers.join("\t");
+
+  for (int row = 0; row < row_count; row++) {
+    QStringList cells;
+    for (int col = 0; col < col_count; col++) {
+      QModelIndex idx = _model_proxy.index(row, col);
+      QVariant data = _model_proxy.data(idx, Qt::DisplayRole);
+      cells << (data.isValid() ? data.toString() : QString(""));
+    }
+    lines << cells.join("\t");
+  }
+
+  QApplication::clipboard()->setText(lines.join("\n"));
+}
+
+void ProtocolDock::select_all_rows() {
+  _table_view->selectAll();
+}
+
 bool ProtocolDock::eventFilter(QObject *obj, QEvent *event) {
   if (obj == _table_view->viewport() && event->type() == QEvent::Leave) {
     if (_hover_delegate && _hover_delegate->_hover_row != -1) {
@@ -1500,11 +1503,11 @@ void ProtocolDock::on_visible_range_changed() {
     return;
   }
 
-  // Locate the protocol row currently selected by the proxy's
-  // filterKeyColumn (same algorithm as nav_table_view).
+  // Locate the protocol row currently selected by the navigation column
+  // (set by clicking a table cell in item_clicked).
   std::map<const pv::data::decode::Row, bool> rows =
       decoder_stack->get_rows_lshow();
-  int column = _model_proxy.filterKeyColumn();
+  int column = _nav_column;
   bool found_row = false;
   pv::data::decode::Row target_row;
   for (auto it = rows.begin(); it != rows.end(); ++it) {
@@ -1543,12 +1546,13 @@ void ProtocolDock::on_visible_range_changed() {
   if (_jumping_to_row && _jumping_target_row >= start_idx &&
       _jumping_target_row < end_idx) {
     int sliced_row = (int)(_jumping_target_row - start_idx);
-    QModelIndex new_index = _decoder_model->index(
-        sliced_row, _model_proxy.filterKeyColumn());
-    if (new_index.isValid()) {
+    QModelIndex source_index = _decoder_model->index(
+        sliced_row, _nav_column);
+    QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
+    if (proxy_index.isValid()) {
       _table_view->blockSignals(true);
-      _table_view->setCurrentIndex(new_index);
-      _table_view->scrollTo(new_index);
+      _table_view->setCurrentIndex(proxy_index);
+      _table_view->scrollTo(proxy_index);
       _table_view->blockSignals(false);
     }
   }

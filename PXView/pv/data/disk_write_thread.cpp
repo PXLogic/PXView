@@ -87,6 +87,9 @@ void DiskWriteThread::stop()
             return;
         _stopping = true;
         _cv.notify_one();
+        // S2 fix: also wake any submit() caller blocked on _cv_full so it
+        // can observe _stopping and return instead of blocking forever.
+        _cv_full.notify_all();
     }
 
     if (_thread.joinable())
@@ -101,6 +104,8 @@ void DiskWriteThread::stop()
             _queue.pop();
         }
         _running = false;
+        // S2 fix: wake any straggler submit() that was blocked on _cv_full.
+        _cv_full.notify_all();
     }
 
     pxv_info("DiskWriteThread: stopped");
@@ -119,9 +124,11 @@ void DiskWriteThread::submit(WriteTask task)
         if (!_running)
             return;
 
-        _cv_full.wait(lock, [this]() { return _queue.size() < 50 || !_running; });
+        // S2 fix: add _stopping to the wait predicate so submit() returns
+        // promptly when stop() is called, instead of blocking forever.
+        _cv_full.wait(lock, [this]() { return _queue.size() < 50 || !_running || _stopping; });
 
-        if (!_running)
+        if (!_running || _stopping)
             return;
 
         // No malloc/memcpy here. We take ownership of the task and will call on_complete.

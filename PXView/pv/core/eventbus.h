@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QCoreApplication>
 #include <QEvent>
+#include <atomic>
 #include <memory>
 #include <shared_mutex>
 #include <thread>
@@ -119,9 +120,15 @@ public:
     // avoids creating QThreadData on worker threads entirely.
     template <typename EventType> void broadcast_async(const EventType &ev) {
         // Capture event by value to avoid dangling references.
-        // `this` is safe — EventBus outlives all worker threads (owned by
-        // SigSession unique_ptr, destroyed after device threads join).
+        // M-3 fix: _alive is set to true ONCE in the constructor and false in
+        // the destructor. We do NOT write it here (the previous code did
+        // _alive.store(true) on every call, which would re-enable it after
+        // destruction if a worker thread called broadcast_async post-destruction,
+        // defeating the guard entirely). The lambda uses acquire ordering to
+        // establish a happens-before with the destructor's release store.
         post_async_dispatch([this, ev]() {
+            if (!_alive.load(std::memory_order_acquire))
+                return;
             broadcast(ev);
         });
     }
@@ -150,6 +157,8 @@ private:
     std::vector<interface::IEventListener *> _event_listeners;
     mutable std::shared_mutex _listeners_mutex;
     static thread_local int _broadcast_depth;
+    // H5 fix: atomic alive flag checked by broadcast_async lambdas.
+    std::atomic<bool> _alive{false};
     // Cached main thread ID — initialized in the EventBus constructor (NOT
     // via static initialization) to guarantee it's set on the main thread.
     static std::thread::id _main_thread_id;

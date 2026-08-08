@@ -47,6 +47,9 @@ public:
     // 线程 join 后返回，保证调用方可以安全地写入 mmap 区域。
     void stop_prefault();
 
+    // 启动 prefault 后台线程（用于 first_payload 复用 allocator 时重启 prefault）。
+    void start_prefault();
+
     void set_loop_mode(bool is_loop);
 
 private:
@@ -85,11 +88,14 @@ private:
     static constexpr uint64_t TRAILING_DECHECK_BEHIND_BLOCKS = 16;
 
     void prefault_worker();
-    void start_prefault();
-    // stop_prefault() 已提升为 public，供 copy_from 等外部调用方使用
     void decommit_range(uint64_t start_bytes, uint64_t end_bytes);
     // 遍历所有 channel，对 block_seq 对应的 block 调用 decommit_range。
     void decommit_block_seq_all_channels(uint64_t block_seq);
+
+    // M3 fix: track the background file-deletion thread so it can be joined
+    // in the destructor instead of detached. This prevents cache file leaks
+    // if the process exits before the detached thread completes.
+    std::thread _file_delete_thread;
 };
 
 } // namespace data

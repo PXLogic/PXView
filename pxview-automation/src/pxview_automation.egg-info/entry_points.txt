@@ -1,0 +1,2 @@
+[console_scripts]
+pxview-cli = pxview_automation.cli:main

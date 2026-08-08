@@ -1934,5 +1934,25 @@
     {
         "id": "IDS_FFT_WINDOW_RECTANGLE",
         "text": "矩形"
+    },
+    {
+        "id": "IDS_DLG_COPY_CELL",
+        "text": "複製儲存格"
+    },
+    {
+        "id": "IDS_DLG_COPY_ROW",
+        "text": "複製列"
+    },
+    {
+        "id": "IDS_DLG_COPY_COLUMN",
+        "text": "複製欄"
+    },
+    {
+        "id": "IDS_DLG_COPY_ALL",
+        "text": "複製全部"
+    },
+    {
+        "id": "IDS_DLG_SELECT_ALL",
+        "text": "全選"
     }
 ]

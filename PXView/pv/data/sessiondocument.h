@@ -51,6 +51,7 @@ public:
   ~SessionDocument();
 
   LogicSnapshot *get_logic_snapshot() override;
+std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _logic; }
   AnalogSnapshot *get_analog_snapshot() override;
   DsoSnapshot *get_dso_snapshot() override;
 

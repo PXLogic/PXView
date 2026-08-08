@@ -195,12 +195,11 @@ bool CaptureManager::action_start_capture(bool instant,
       set_collect_mode(COLLECT_SINGLE); // Reset the capture mode.
     }
 
-    if (is_loop_mode() && _state->device_agent().is_demo()) {
-      QString opt_mode = _state->device_agent().get_demo_operation_mode();
-      if (opt_mode != "random") {
-        set_collect_mode(COLLECT_SINGLE);
-      }
-    }
+    /* Removed: demo-specific loop+pattern restriction that forced COLLECT_SINGLE
+     * when pattern != "random". pxlogic has no such restriction — loop mode
+     * should work with any pattern for test consistency. The demo driver's
+     * loop_mode now skips limit_samples entirely (matching pxlogic's is_loop=1),
+     * so all patterns stream correctly in loop mode. */
 
     if (_state->device_agent().is_hardware() ||
         _state->device_agent().is_demo()) {

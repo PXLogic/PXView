@@ -2968,7 +2968,7 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
     {
         static QFile s_dbg;
         if (!s_dbg.isOpen()) {
-            s_dbg.setFileName(QDir::tempPath() + "/pxview_mcp_debug.log");
+            s_dbg.setFileName(QDir::tempPath() + "/pxview_automation_debug.log");
             (void)s_dbg.open(QIODevice::WriteOnly | QIODevice::Append);
         }
         if (s_dbg.isOpen()) {

@@ -40,10 +40,12 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QMenu>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QTableView>
 #include <QVBoxLayout>
+#include <QTimer>
 #include <list>
 #include <mutex>
 #include <vector>
@@ -153,12 +155,19 @@ private slots:
   void nav_table_view();
   void item_clicked(const QModelIndex &index);
   void on_table_hover(const QModelIndex &index);
+  void on_table_context_menu(const QPoint &pos);
+  void copy_cell();
+  void copy_row();
+  void copy_column();
+  void copy_all();
+  void select_all_rows();
   void column_resize(int index, int old_size, int new_size);
   void search_pre();
   void search_nxt();
   void search_done();
   void search_changed();
   void search_update();
+  void on_search_text_changed(const QString &text);
   void show_protocol_select();
   void on_follow_viewport_toggled(bool checked);
   void on_visible_range_changed();
@@ -208,6 +217,16 @@ private:
   mutable std::mutex _search_mutex;
   bool _search_edited;
 
+  // Debounce timer for real-time filtering: fires 300ms after the user
+  // stops typing, then calls search_done() to update the proxy filter.
+  QTimer *_search_timer = nullptr;
+
+  // Navigation column (set by clicking a table cell). Used by
+  // nav_table_view and on_visible_range_changed to determine which
+  // decode row to query. Kept separate from _model_proxy.filterKeyColumn()
+  // which is set to -1 (all columns) for filtering.
+  int _nav_column = 0;
+
   // "List follows viewport" toggle state (default ON). When ON,
   // on_visible_range_changed slices DecoderModel to the viewport's visible
   // sample range. _jumping_to_row is set during item_clicked → show_region
@@ -218,6 +237,16 @@ private:
   bool _follow_viewport = true;
   bool _jumping_to_row = false;
   int64_t _jumping_target_row = -1;
+
+  // Right-click context menu on the protocol table.
+  QMenu *_table_context_menu = nullptr;
+  QAction *_copy_cell_action = nullptr;
+  QAction *_copy_row_action = nullptr;
+  QAction *_copy_column_action = nullptr;
+  QAction *_copy_all_action = nullptr;
+  QAction *_select_all_action = nullptr;
+  // The cell index that was right-clicked (mapped to source model).
+  QModelIndex _context_menu_index;
 };
 
 } // namespace dock

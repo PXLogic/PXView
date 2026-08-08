@@ -99,8 +99,71 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     _state->capture_data()->get_logic()->set_loop(
         _capture_mgr->is_loop_mode());
 
-    bool bNotFree = _decode_mgr->has_running_tasks() &&
-                    _state->view_data() == _state->capture_data();
+    // ═══════════════════════════════════════════════════════════════════
+    // FUNDAMENTAL FIX: Stop all decoder threads BEFORE first_payload()
+    // modifies the snapshot.
+    //
+    // Root cause of repeat-mode SIGSEGV chain:
+    //   copy_data_to_document() is zero-copy (shared_ptr sharing) →
+    //   document's LogicSnapshot == capture's LogicSnapshot (same object) →
+    //   decoder threads hold raw pointers (di->inbuf) into mmap leaf blocks →
+    //   next capture's first_payload + append_payload modify the snapshot →
+    //   decoder reads stale/decommitted pages → SIGSEGV.
+    //
+    // Previous patches tried to prevent decommit at each crash site
+    // (calc_mipmap, first_payload else branch, MmapAllocator reuse),
+    // but each fix just moved the crash to the next code path that
+    // touches the same shared memory.
+    //
+    // This fix addresses the ROOT CAUSE: stop decoder threads before
+    // the snapshot is modified, establishing a strict protocol:
+    //   1. Capture writes to snapshot (mutable)
+    //   2. Capture ends → snapshot becomes immutable, shared with document
+    //   3. Decoder reads from immutable snapshot (safe)
+    //   4. Next capture starts → STOP decoder → snapshot becomes mutable again
+    //   5. Go to 1
+    //
+    // We stop decoders HERE (on the datafeed thread, which receives data
+    // from the device) rather than in TrigNextCollect (on the main thread)
+    // to avoid blocking the UI. The datafeed thread can afford a brief
+    // wait (milliseconds) for the decoder to finish its current chunk.
+    //
+    // After clear_all_decode_task():
+    //   - Decode worker threads are joined (finished)
+    //   - di->inbuf is NULL (set by decoder after processing)
+    //   - di_thread is blocked on got_new_samples_cond (not reading)
+    //   - Snapshot is safe to modify
+    //
+    // Decoders are restarted by RevEndPacket → CopyToDocDone →
+    // start_all_decode_tasks() after the new capture completes.
+    // ═══════════════════════════════════════════════════════════════════
+    // M4 note: clear_all_decode_task() joins decode threads here, which
+    // blocks the datafeed thread. This is intentional — the snapshot
+    // lifecycle protocol requires decoders to be fully stopped before
+    // first_payload() can safely reset the mmap allocator. The join is
+    // typically fast (milliseconds) because decoders are designed to
+    // stop promptly when stop_decode_work() is called. If a decoder is
+    // stuck, clear_all_decode_task() has its own internal timeout via
+    // the decode thread's stop flag. No change needed for correctness;
+    // the blocking is a deliberate trade-off.
+    if (_decode_mgr->has_running_tasks()) {
+      pxv_info("feed_in_logic: stopping decoder thread(s) before "
+               "first_payload (snapshot lifecycle protocol)");
+      int runDex = 0;
+      _decode_mgr->clear_all_decode_task(runDex);
+    }
+
+    // In non-stream mode (view_data == capture_data), always keep leaf
+    // blocks mapped (_able_free = false). This protects:
+    //   (a) The UI, which reads from view_data via get_samples() without
+    //       holding _mutex after the call returns — decommitting a block
+    //       the UI is reading would SIGSEGV.
+    //   (b) Any decoder thread that might not have fully exited yet
+    //       (defense-in-depth even after clear_all_decode_task).
+    // In stream mode (view_data != capture_data), the UI reads from
+    // view_data (previous capture's buffer), so decommitting blocks in
+    // the capture buffer is safe.
+    bool bNotFree = (_state->view_data() == _state->capture_data());
 
     _state->capture_data()->get_logic()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),

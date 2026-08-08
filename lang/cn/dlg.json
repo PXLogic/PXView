@@ -1942,5 +1942,25 @@
     {
         "id": "IDS_FFT_WINDOW_RECTANGLE",
         "text": "矩形"
+    },
+    {
+        "id": "IDS_DLG_COPY_CELL",
+        "text": "复制单元格"
+    },
+    {
+        "id": "IDS_DLG_COPY_ROW",
+        "text": "复制行"
+    },
+    {
+        "id": "IDS_DLG_COPY_COLUMN",
+        "text": "复制列"
+    },
+    {
+        "id": "IDS_DLG_COPY_ALL",
+        "text": "复制全部"
+    },
+    {
+        "id": "IDS_DLG_SELECT_ALL",
+        "text": "全选"
     }
 ]

@@ -93,7 +93,37 @@ bool McpTransport::start()
 
 void McpTransport::stop()
 {
+    // 1. Clean up SSE clients first to prevent on_service_event from
+    //    writing to sockets that are about to be destroyed.
+    {
+        std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+        for (auto* socket : _sse_clients) {
+            if (socket) {
+                // L3 fix: disconnect signals before abort to prevent
+                // any queued slot invocations from touching the socket.
+                disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
+                disconnect(socket, &QTcpSocket::disconnected, socket, nullptr);
+                socket->abort();
+                delete socket;
+            }
+        }
+        _sse_clients.clear();
+    }
+
+    // 2. Clean up pending sockets (half-read HTTP requests)
+    for (auto* socket : _pending_sockets) {
+        if (socket) {
+            disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
+            socket->abort();
+            delete socket;
+        }
+    }
+    _pending_sockets.clear();
+
+    // 3. Now safe to destroy the server
     if (_server) {
+        disconnect(_server, &QTcpServer::newConnection,
+                   this, &McpTransport::on_new_connection);
         _server->close();
         delete _server;
         _server = nullptr;
@@ -147,10 +177,25 @@ void McpTransport::on_service_event(const ServiceEventData& data)
     // is request/response); they will see the updated state on their next
     // request.
     std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+    // Build a list of alive sockets, and prune dead ones in a single pass
+    // to prevent use-after-free if a socket was disconnected but not yet
+    // removed from _sse_clients.
+    QList<QTcpSocket*> alive_sockets;
+    QSet<QTcpSocket*> dead_sockets;
     for (auto* socket : _sse_clients) {
         if (socket && socket->state() == QAbstractSocket::ConnectedState) {
-            send_sse_event(socket, "event", payload);
+            alive_sockets.append(socket);
+        } else {
+            dead_sockets.insert(socket);
         }
+    }
+    // Remove dead sockets from the set so we never touch them again
+    for (auto* s : dead_sockets) {
+        _sse_clients.remove(s);
+    }
+    // Send only to verified-alive sockets
+    for (auto* socket : alive_sockets) {
+        send_sse_event(socket, "event", payload);
     }
 }
 

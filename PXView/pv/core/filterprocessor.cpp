@@ -27,13 +27,26 @@ void FilterProcessor::stop() {
   //
   // modernize-core-layer-final Task 5: threads are now held by unique_ptr.
   // No manual delete — reset() releases the thread object after join().
-  _glitch_filter_running = false;
+  //
+  // M-2 fix: acquire the launch mutexes so that if a task thread is in the
+  // middle of a recursive set_glitch_filter()/set_signal_invert() call,
+  // we wait for it to finish launching (or queuing the pending request)
+  // before we set _running=false and join. This closes the TOCTOU window
+  // where stop() sets _running=false concurrently with the task thread
+  // setting it back to true.
+  {
+    std::lock_guard<std::mutex> lk(_glitch_launch_mutex);
+    _glitch_filter_running = false;
+  }
   if (_glitch_filter_thread) {
     if (_glitch_filter_thread->joinable())
       _glitch_filter_thread->join();
     _glitch_filter_thread.reset();
   }
-  _signal_invert_running = false;
+  {
+    std::lock_guard<std::mutex> lk(_signal_invert_launch_mutex);
+    _signal_invert_running = false;
+  }
   if (_signal_invert_thread) {
     if (_signal_invert_thread->joinable())
       _signal_invert_thread->join();
@@ -44,6 +57,14 @@ void FilterProcessor::stop() {
 void FilterProcessor::set_glitch_filter(
     const std::map<int, uint32_t> &thresholds,
     const std::map<int, GlitchFilterMode> &filter_modes) {
+  // S1/H2 fix: lock the launch mutex for the entire check-and-create path.
+  // This prevents two callers from both seeing _running==false and creating
+  // duplicate threads. It also prevents the self-join deadlock: when the
+  // task thread recursively calls set_glitch_filter() at the end of
+  // glitch_filter_task(), it holds this mutex, and we detect that
+  // _glitch_filter_thread is the calling thread via get_id() comparison.
+  std::lock_guard<std::mutex> launch_lk(_glitch_launch_mutex);
+
   if (_glitch_filter_running) {
     // 架构修复：不再静默丢弃，排队最近一次请求，滤波完成后自动执行
     // Track A4: protect pending data with _pending_mutex
@@ -70,9 +91,21 @@ void FilterProcessor::set_glitch_filter(
   _glitch_filter_running = true;
   _event_bus->broadcast_async<interface::GlitchFilterStarted>({});
 
+  // S1 fix: if the thread pointer is the calling thread itself (recursive
+  // call from glitch_filter_task), reset it WITHOUT joining — joining
+  // oneself is undefined behavior (resource_deadlock_would_occur).
   if (_glitch_filter_thread) {
-    _glitch_filter_thread->join();
-    _glitch_filter_thread.reset();
+    if (_glitch_filter_thread->get_id() == std::this_thread::get_id()) {
+      // This is a recursive call from the task thread itself. The thread
+      // object is about to go out of scope when we reassign, but it's
+      // joinable. We must detach (not join) to avoid self-join UB.
+      _glitch_filter_thread->detach();
+      _glitch_filter_thread.reset();
+    } else {
+      if (_glitch_filter_thread->joinable())
+        _glitch_filter_thread->join();
+      _glitch_filter_thread.reset();
+    }
   }
 
   _glitch_filter_thread = std::make_unique<std::thread>(
@@ -129,14 +162,16 @@ void FilterProcessor::glitch_filter_task(
   _state->view_data()->_glitch_filter_active = true;
   _state->view_data()->_glitch_filter_thresholds = thresholds;
   _state->view_data()->_glitch_filter_modes = filter_modes;
-  _glitch_filter_running = false;
 
   _event_bus->broadcast_async<interface::GlitchFilterCompleted>({});
   _coord->data_updated();
 
-  // 架构修复：如果有排队的 pending 请求，立即执行
-  // Track A4: read pending data under _pending_mutex
-  if (_has_pending_glitch.load()) {
+  // M-1 fix: process pending requests in a LOOP within the SAME thread,
+  // instead of recursively calling set_glitch_filter() (which created a
+  // new thread and detached the current one, causing the old thread to
+  // escape ownership and potentially access destroyed data after stop()).
+  // By looping here, the thread object stays unique and joinable by stop().
+  while (_has_pending_glitch.load()) {
     std::map<int, uint32_t> pend_th;
     std::map<int, GlitchFilterMode> pend_md;
     {
@@ -149,10 +184,47 @@ void FilterProcessor::glitch_filter_task(
         _has_pending_glitch.store(false);
       }
     }
-    if (!pend_th.empty()) {
-      set_glitch_filter(pend_th, pend_md);
+    if (pend_th.empty())
+      break;
+
+    // Re-run the filter with the pending parameters directly — no new
+    // thread, no recursive set_glitch_filter() call.
+    if (_state->view_data()->_logic_backup) {
+      _state->view_data()->get_logic()->copy_from(
+          *_state->view_data()->_logic_backup);
     }
+    if (_state->view_data()->get_logic()) {
+      _state->view_data()->get_logic()->clear_filtered_ranges();
+    }
+    // Re-apply signal invert if active
+    if (_state->view_data()->_signal_invert_active) {
+      int ch_idx = 0;
+      for (const GSList *l = _state->device_agent().get_channels(); l;
+           l = l->next) {
+        sr_channel *const probe = (sr_channel *)l->data;
+        if (probe->type != SR_CHANNEL_LOGIC)
+          continue;
+        if (ch_idx < (int)_state->view_data()->_signal_invert_channels.size() &&
+            _state->view_data()->_signal_invert_channels[ch_idx]) {
+          _state->view_data()->get_logic()->invert_channel(probe->index);
+        }
+        ch_idx++;
+      }
+    }
+    _state->view_data()->get_logic()->apply_glitch_filter_all(
+        pend_th,
+        [this](int progress) {
+          _event_bus->broadcast_async<interface::GlitchFilterProgress>({progress});
+        },
+        pend_md);
+    _state->view_data()->_glitch_filter_thresholds = pend_th;
+    _state->view_data()->_glitch_filter_modes = pend_md;
+
+    _event_bus->broadcast_async<interface::GlitchFilterCompleted>({});
+    _coord->data_updated();
   }
+
+  _glitch_filter_running = false;
 }
 
 void FilterProcessor::clear_glitch_filter() {
@@ -187,6 +259,9 @@ bool FilterProcessor::is_glitch_filter_active() {
 }
 
 void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
+  // H2 fix: lock the launch mutex to prevent TOCTOU race on the launch path.
+  std::lock_guard<std::mutex> launch_lk(_signal_invert_launch_mutex);
+
   if (_signal_invert_running)
     return;
 
@@ -207,8 +282,14 @@ void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
   _event_bus->broadcast_async<interface::SignalInvertStarted>({});
 
   if (_signal_invert_thread) {
-    _signal_invert_thread->join();
-    _signal_invert_thread.reset();
+    if (_signal_invert_thread->get_id() == std::this_thread::get_id()) {
+      _signal_invert_thread->detach();
+      _signal_invert_thread.reset();
+    } else {
+      if (_signal_invert_thread->joinable())
+        _signal_invert_thread->join();
+      _signal_invert_thread.reset();
+    }
   }
 
   _signal_invert_thread =

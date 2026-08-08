@@ -26,6 +26,31 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 #===============================================================================
+#= Sanitizer + Static Analysis Options (Debug mode)
+#-------------------------------------------------------------------------------
+# Usage:
+#   cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON   ..
+#   cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_TSAN=ON   ..   (Linux/macOS only)
+#   cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_UBSAN=ON  ..
+#   cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_CLANG_TIDY=ON ..
+#
+# Combinations:
+#   ASan + UBSan: OK (both are compatible)
+#   ASan + TSan:  FATAL ERROR (mutually exclusive)
+#   TSan + UBSan: OK
+#   Clang-Tidy:   independent (static analysis, no runtime overhead)
+#
+# Platform constraints:
+#   Windows/MinGW: ASan ✓, UBSan ✓, TSan ✗ (not supported)
+#   Linux:         ASan ✓, UBSan ✓, TSan ✓
+#   macOS:         ASan ✓, UBSan ✓, TSan ✓
+#-------------------------------------------------------------------------------
+option(ENABLE_ASAN      "Enable AddressSanitizer (UAF, buffer overflow, etc.)" OFF)
+option(ENABLE_TSAN      "Enable ThreadSanitizer (data race detection)" OFF)
+option(ENABLE_UBSAN     "Enable UndefinedBehaviorSanitizer (UB detection)" OFF)
+option(ENABLE_CLANG_TIDY "Enable Clang-Tidy static analysis (requires clang-tidy in PATH)" OFF)
+
+#===============================================================================
 #= decoder_test option
 #-------------------------------------------------------------------------------
 option(BUILD_DECODER_TEST "Build the C decoder test program" OFF)

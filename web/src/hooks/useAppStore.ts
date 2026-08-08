@@ -94,8 +94,8 @@ interface AppState {
   regenerateMessage: (msgId: string) => Promise<void>;
 }
 
-const CHAT_STORAGE_KEY = 'pxview-mcp-sessions';
-const CURRENT_SESSION_KEY = 'pxview-mcp-current-session';
+const CHAT_STORAGE_KEY = 'pxview-automation-sessions';
+const CURRENT_SESSION_KEY = 'pxview-automation-current-session';
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -140,7 +140,7 @@ function debouncedSaveSessions(sessions: Record<string, ChatSession>, currentId:
 
 function loadSettings(): AppSettings {
   try {
-    const saved = localStorage.getItem('pxview-mcp-settings');
+    const saved = localStorage.getItem('pxview-automation-settings');
     if (saved) {
         const parsed = JSON.parse(saved);
         if (!parsed.systemPrompt) parsed.systemPrompt = DEFAULT_SYSTEM_PROMPT;
@@ -158,7 +158,7 @@ function loadSettings(): AppSettings {
 }
 
 function saveSettings(settings: AppSettings) {
-  localStorage.setItem('pxview-mcp-settings', JSON.stringify(settings));
+  localStorage.setItem('pxview-automation-settings', JSON.stringify(settings));
 }
 
 let mcpClient: McpClient | null = null;
@@ -217,6 +217,9 @@ export const useAppStore = create<AppState>((set, get) => {
         const tools = await mcpClient.listTools();
         set({ mcpConnected: true, mcpTools: tools });
 
+        let pollErrorCount = 0;
+        const MAX_POLL_ERRORS = 3;
+
         const fetchDevices = async () => {
           if (!mcpClient) return;
           try {
@@ -224,6 +227,7 @@ export const useAppStore = create<AppState>((set, get) => {
             const text = result.content?.[0]?.text;
             if (text) {
               const devices = JSON.parse(text);
+              pollErrorCount = 0; // Reset on success
               if (devices.length > 0) {
                 const activeDev = devices.find((d: any) => d.is_active) || devices[0];
                 let mode = 'Logic';
@@ -249,7 +253,16 @@ export const useAppStore = create<AppState>((set, get) => {
               }
             }
 
-          } catch {}
+          } catch (err: any) {
+            pollErrorCount++;
+            if (pollErrorCount >= MAX_POLL_ERRORS) {
+              // Server appears to be down — trigger reconnect
+              if (devicePollTimer) { clearInterval(devicePollTimer); devicePollTimer = null; }
+              if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
+              set({ mcpConnected: false });
+              get().attemptReconnect();
+            }
+          }
         };
 
         const fetchStatus = async () => {
@@ -259,6 +272,7 @@ export const useAppStore = create<AppState>((set, get) => {
             const statusText = statusResult.content?.[0]?.text;
             if (statusText) {
               const statusData = JSON.parse(statusText);
+              pollErrorCount = 0; // Reset on success
               let newStatus: 'idle' | 'capturing' | 'completed' = 'idle';
               if (statusData.state === 1 || statusData.state === 2 || statusData.state === 3) {
                 newStatus = 'capturing';
@@ -267,7 +281,9 @@ export const useAppStore = create<AppState>((set, get) => {
               }
               set({ captureStatus: newStatus });
             }
-          } catch {}
+          } catch (err: any) {
+            // Errors are tracked by fetchDevices to avoid double-counting
+          }
         };
 
         await fetchDevices();
@@ -693,10 +709,13 @@ export const useAppStore = create<AppState>((set, get) => {
     setCaptureProgress: (progress) => set({ captureProgress: progress }),
 
     attemptReconnect: async () => {
-      // (unchanged)
       const { settings, reconnectStatus, mcpConnected } = get();
       if (reconnectStatus === 'reconnecting') return;
       if (mcpConnected) return;
+
+      // Clean up any orphaned poll timers from the previous connection
+      if (devicePollTimer) { clearInterval(devicePollTimer); devicePollTimer = null; }
+      if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
 
       set({ reconnectStatus: 'reconnecting', mcpConnected: false });
 
@@ -714,6 +733,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
           const tools = await newClient.listTools();
 
+          let reconPollErrorCount = 0;
+          const MAX_RECON_POLL_ERRORS = 3;
+
           const fetchDevices = async () => {
             if (!mcpClient) return;
             try {
@@ -721,6 +743,7 @@ export const useAppStore = create<AppState>((set, get) => {
               const text = result.content?.[0]?.text;
               if (text) {
                 const devices = JSON.parse(text);
+                reconPollErrorCount = 0;
                 if (devices.length > 0) {
                   const activeDev = devices.find((d: any) => d.is_active) || devices[0];
                   let mode = 'Logic';
@@ -745,7 +768,15 @@ export const useAppStore = create<AppState>((set, get) => {
                   set({ deviceInfo: null });
                 }
               }
-            } catch {}
+            } catch (err: any) {
+              reconPollErrorCount++;
+              if (reconPollErrorCount >= MAX_RECON_POLL_ERRORS) {
+                if (devicePollTimer) { clearInterval(devicePollTimer); devicePollTimer = null; }
+                if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
+                set({ mcpConnected: false, reconnectStatus: 'idle' });
+                get().attemptReconnect();
+              }
+            }
           };
 
           const fetchStatus = async () => {
@@ -755,6 +786,7 @@ export const useAppStore = create<AppState>((set, get) => {
               const statusText = statusResult.content?.[0]?.text;
               if (statusText) {
                 const statusData = JSON.parse(statusText);
+                reconPollErrorCount = 0;
                 let newStatus: 'idle' | 'capturing' | 'completed' = 'idle';
                 if (statusData.state === 1 || statusData.state === 2 || statusData.state === 3) {
                   newStatus = 'capturing';
@@ -763,7 +795,9 @@ export const useAppStore = create<AppState>((set, get) => {
                 }
                 set({ captureStatus: newStatus });
               }
-            } catch {}
+            } catch (err: any) {
+              // Errors tracked by fetchDevices to avoid double-counting
+            }
           };
 
           await fetchDevices();

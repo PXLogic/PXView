@@ -112,6 +112,10 @@ public:
     virtual double cur_sampletime();
     virtual double cur_snap_sampletime() = 0;
     virtual data::LogicSnapshot* get_logic_snapshot() = 0;
+    // Shared-pointer variant for lifetime safety: callers that store a raw
+    // pointer (e.g. LogicSignal::_data) can also hold the shared_ptr to
+    // prevent use-after-free when the document releases its reference.
+    virtual std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() { return nullptr; }
     virtual data::AnalogSnapshot* get_analog_snapshot() = 0;
     virtual data::DsoSnapshot* get_dso_snapshot() = 0;
     virtual data::Snapshot* get_snapshot(int type) = 0;

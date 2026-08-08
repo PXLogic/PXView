@@ -646,13 +646,14 @@ void LogicSignal::paint_mark(QPainter &p, int xstart, int xend, int type) {
   }
 }
 
-void LogicSignal::set_data(data::LogicSnapshot *data) { _data = data; }
+void LogicSignal::set_data(data::LogicSnapshot *data) { _data = data; _data_ref.reset(); }
 
 void LogicSignal::set_data_from_source(data::DataSource *source) {
-  _data = source ? source->get_logic_snapshot() : nullptr;
+    _data_ref = source ? source->get_logic_snapshot_shared() : nullptr;
+    _data = source ? source->get_logic_snapshot() : nullptr;
 }
 
-void LogicSignal::clear_data() { _data = nullptr; }
+void LogicSignal::clear_data() { _data = nullptr; _data_ref.reset(); }
 
 } // namespace view
 } // namespace pv

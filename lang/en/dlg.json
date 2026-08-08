@@ -1938,5 +1938,25 @@
     {
         "id": "IDS_FFT_WINDOW_RECTANGLE",
         "text": "Rectangle"
+    },
+    {
+        "id": "IDS_DLG_COPY_CELL",
+        "text": "Copy Cell"
+    },
+    {
+        "id": "IDS_DLG_COPY_ROW",
+        "text": "Copy Row"
+    },
+    {
+        "id": "IDS_DLG_COPY_COLUMN",
+        "text": "Copy Column"
+    },
+    {
+        "id": "IDS_DLG_COPY_ALL",
+        "text": "Copy All"
+    },
+    {
+        "id": "IDS_DLG_SELECT_ALL",
+        "text": "Select All"
     }
 ]

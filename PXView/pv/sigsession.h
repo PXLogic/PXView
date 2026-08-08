@@ -183,6 +183,7 @@ public:
   uint8_t trigd_ch() override { return _state->trigger_ch(); }
   data::Snapshot *get_snapshot(int type) override;
   data::LogicSnapshot *get_logic_snapshot() override;
+std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   data::AnalogSnapshot *get_analog_snapshot() override;
   data::DsoSnapshot *get_dso_snapshot() override;
   // Task C1.5: DSO measurement computation via core::MeasureCalculator.

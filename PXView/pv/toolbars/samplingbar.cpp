@@ -1295,7 +1295,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
     }
     break;
   case COLLECT_REPEAT:
-    if (_device_agent->is_stream_mode() || _device_agent->is_demo()) {
+    if (_device_agent->is_stream_mode()) {
       _session->set_repeat_intvl(0.1);
       _session->set_collect_mode(COLLECT_REPEAT);
     } else {
@@ -1334,7 +1334,7 @@ void SamplingBar::on_collect_mode() {
     _session->set_collect_mode(COLLECT_SINGLE);
     // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
   } else if (act == _action_repeat) {
-    if (_device_agent->is_stream_mode() || _device_agent->is_demo()) {
+    if (_device_agent->is_stream_mode()) {
       _session->set_repeat_intvl(0.1);
       _session->set_collect_mode(COLLECT_REPEAT);
     } else {

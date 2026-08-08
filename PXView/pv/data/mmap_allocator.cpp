@@ -67,7 +67,13 @@ MmapAllocator::MmapAllocator()
 }
 
 MmapAllocator::~MmapAllocator() {
-    clear();
+clear();
+// M3 fix: join the file-delete thread to ensure the cache file is actually
+// deleted before the allocator is destroyed. Previously this was detached,
+// which could leak cache files if the process exited before the detached
+// thread completed.
+if (_file_delete_thread.joinable())
+_file_delete_thread.join();
 }
 
 bool MmapAllocator::configure(bool use_disk_file, const QString& disk_dir, uint64_t total_bytes,
@@ -298,7 +304,12 @@ void MmapAllocator::clear() {
     if (!file_to_delete.isEmpty()) {
         // 在主线程把 QString 转换为 std::string，避免 detached 线程触碰任何 Qt API。
         const std::string path_to_delete = file_to_delete.toStdString();
-        std::thread([path_to_delete]() {
+        // M3 fix: join any previous file-delete thread before starting a new one.
+        if (_file_delete_thread.joinable())
+            _file_delete_thread.join();
+        // M3 fix: store the thread instead of detaching so the destructor
+        // can join it, preventing cache file leaks on process exit.
+        _file_delete_thread = std::thread([path_to_delete]() {
             namespace fs = std::filesystem;
             std::error_code ec;
             // 用带 error_code 的重载避免抛异常。
@@ -312,7 +323,7 @@ void MmapAllocator::clear() {
                 pxv_err("MmapAllocator: Failed to background-delete cache file %s (ec=%d: %s)",
                         path_to_delete.c_str(), ec.value(), ec.message().c_str());
             }
-        }).detach();
+        });
     }
 }
 
