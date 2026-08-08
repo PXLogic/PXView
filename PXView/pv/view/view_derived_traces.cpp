@@ -123,11 +123,17 @@ bool ViewDerivedTraces::add_decoder(
   // 4. Mark derived traces NOT dirty since we just synced manually.
   _derived_traces_dirty = false;
 
-  // 5. Broadcast first so that SigSession::on_event(DeviceOptionsUpdated)
-  //    can run reload() before we start the decode task.
+  // 5. Broadcast DeviceOptionsUpdated so SigSession::on_event triggers reload()
+  //    to sync channel state. Note: broadcast_async is ASYNC — reload() runs
+  //    in the NEXT event loop iteration, AFTER start_all_decode_tasks() below.
+  //    This creates a race where reload() recreates SignalModels with nullptr
+  //    snapshots while decode threads are already running. The fix is in
+  //    reload() itself: it now sets snapshot pointers on the new models
+  //    immediately after creating them, so decode threads always find valid
+  //    snapshots regardless of timing.
   _view->session().broadcast_async<interface::DeviceOptionsUpdated>({});
 
-  // 6. Now start the decode task after reload() has completed.
+  // 6. Start the decode task for all decoders (including the newly added one).
   if (!silent && _view->data_source()->have_view_data()) {
     _view->data_source()->start_all_decode_tasks();
   }

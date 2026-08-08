@@ -57,6 +57,7 @@
 #include <QTableWidgetItem>
 #include <QApplication>
 #include <QClipboard>
+#include <QGuiApplication>
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -182,6 +183,12 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _bot_title_label = new QLabel(bot_panel);
   _bot_title_label->setObjectName("dock_label");
 
+  // Multi-decoder inline switch combo (Phase 3)
+  _decoder_combo = new DsComboBox(bot_panel);
+  _decoder_combo->setObjectName("dock_content");
+  _decoder_combo->setFixedHeight(28);
+  _decoder_combo->setMinimumWidth(80);
+
   QHBoxLayout *bot_title_layout = new QHBoxLayout();
   bot_title_layout->setSpacing(2);
   bot_title_layout->addWidget(_bot_set_button);
@@ -190,23 +197,31 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   bot_title_layout->addWidget(_dn_nav_button);
   bot_title_layout->addWidget(_follow_viewport_btn);
 
+  // Inline search bar: combo + [◀] [search box] [▶]
   _pre_button = new QPushButton(bot_panel);
   _pre_button->setObjectName("dock_content");
-  _ann_search_button = new QPushButton(bot_panel);
-  _ann_search_button->setObjectName("dock_content");
   _nxt_button = new QPushButton(bot_panel);
   _nxt_button->setObjectName("dock_content");
-  _ann_search_edit = new PopupLineEdit(bot_panel);
+  _ann_search_edit = new QLineEdit(bot_panel);
+  _ann_search_edit->setClearButtonEnabled(true);
+  _ann_search_edit->setObjectName("dock_content");
 
-  _ann_search_button->setFixedWidth(_ann_search_button->height());
-  _ann_search_button->setDisabled(true);
+  QHBoxLayout *search_bar_layout = new QHBoxLayout();
+  search_bar_layout->setSpacing(2);
+  search_bar_layout->addWidget(_pre_button);
+  search_bar_layout->addWidget(_decoder_combo);
+  search_bar_layout->addWidget(_ann_search_edit, 1);
+  search_bar_layout->addWidget(_nxt_button);
 
-  QHBoxLayout *ann_search_layout = new QHBoxLayout();
-  ann_search_layout->setSpacing(2);
-  ann_search_layout->addWidget(_pre_button);
-  ann_search_layout->addWidget(_ann_search_button);
-  ann_search_layout->addWidget(_ann_search_edit, 1);
-  ann_search_layout->addWidget(_nxt_button);
+  _matchs_title_label = new QLabel(bot_panel);
+  _matchs_title_label->setObjectName("dock_label");
+  _matchs_label = new QLabel(bot_panel);
+  _matchs_label->setObjectName("dock_label");
+  _matchs_label->setText("0");
+  QHBoxLayout *match_layout = new QHBoxLayout();
+  match_layout->addWidget(_matchs_title_label, 0, Qt::AlignLeft);
+  match_layout->addWidget(_matchs_label, 0, Qt::AlignLeft);
+  match_layout->addStretch(1);
 
   _pro_keyword_edit->setFixedHeight(_pro_add_button->sizeHint().height());
   _ann_search_edit->setFixedHeight(_pre_button->sizeHint().height());
@@ -222,6 +237,8 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _table_view->setShowGrid(false);
   _table_view->horizontalHeader()->setStretchLastSection(true);
   _table_view->horizontalHeader()->setHighlightSections(false);
+  _table_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+  _table_view->horizontalHeader()->setSortIndicatorShown(false);
   _table_view->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   _table_view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 
@@ -229,10 +246,10 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
 
   _table_view->verticalHeader()->setVisible(false);
   _table_view->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-  _table_view->verticalHeader()->setDefaultSectionSize(36);
+  _table_view->verticalHeader()->setDefaultSectionSize(28);
   _table_view->setFrameShape(QFrame::StyledPanel);
   _table_view->setSelectionBehavior(QAbstractItemView::SelectRows);
-  _table_view->setSelectionMode(QAbstractItemView::SingleSelection);
+  _table_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
   _table_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
   _table_view->setMouseTracking(true);
 
@@ -272,18 +289,9 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   connect(_select_all_action, &QAction::triggered, this,
           &ProtocolDock::select_all_rows);
 
-  _matchs_title_label = new QLabel();
-  _matchs_title_label->setObjectName("dock_label");
-  _matchs_label = new QLabel();
-  _matchs_label->setObjectName("dock_label");
-  QHBoxLayout *match_layout = new QHBoxLayout();
-  match_layout->addWidget(_matchs_title_label, 0, Qt::AlignLeft);
-  match_layout->addWidget(_matchs_label, 0, Qt::AlignLeft);
-  match_layout->addStretch(1);
-
   QVBoxLayout *bot_layout = new QVBoxLayout();
   bot_layout->addLayout(bot_title_layout);
-  bot_layout->addLayout(ann_search_layout);
+  bot_layout->addLayout(search_bar_layout);
   bot_layout->addLayout(match_layout);
   bot_layout->addWidget(_table_view);
   bot_panel->setLayout(bot_layout);
@@ -339,6 +347,25 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   connect(_search_timer, &QTimer::timeout, this, &ProtocolDock::search_done);
   connect(_ann_search_edit, &QLineEdit::textChanged, this,
           &ProtocolDock::on_search_text_changed);
+
+  // Enter = next match, Shift+Enter = previous match
+  connect(_ann_search_edit, &QLineEdit::returnPressed, this, [this]() {
+    if (QGuiApplication::queryKeyboardModifiers() & Qt::ShiftModifier)
+      search_pre();
+    else
+      search_nxt();
+  });
+
+  // Header right-click: column show/hide menu
+  _table_view->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(_table_view->horizontalHeader(), &QWidget::customContextMenuRequested,
+          this, &ProtocolDock::on_header_context_menu);
+
+  // Decoder combo switch: use currentIndexChanged instead of activated
+  // so it fires reliably even when the selection is changed programmatically
+  // (activated only fires on user popup interaction, which can miss some cases).
+  connect(_decoder_combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &ProtocolDock::on_decoder_combo_changed);
 
   connect(_follow_viewport_btn, &QPushButton::toggled, this,
           &ProtocolDock::on_follow_viewport_toggled);
@@ -470,8 +497,6 @@ void ProtocolDock::reStyle() {
   _dn_nav_button->setIcon(IconCache::Instance().icon(iconPath + "/nav.svg"));
   _pre_button->setIcon(IconCache::Instance().icon(iconPath + "/pre.svg"));
   _nxt_button->setIcon(IconCache::Instance().icon(iconPath + "/next.svg"));
-  _ann_search_button->setIcon(
-      IconCache::Instance().icon(iconPath + "/search.svg"));
   _follow_viewport_btn->setIcon(
       IconCache::Instance().icon(iconPath + "/display.svg"));
 
@@ -803,57 +828,123 @@ void ProtocolDock::update_model() {
   pv::view::DecoderModel *decoder_model = _decoder_model;
   const auto &decode_sigs = _decoder_host->get_decoder_stacks();
 
-  if (decode_sigs.size() == 0)
+  // Update decoder combo: "All" at index 0, individual decoders after.
+  _decoder_combo->blockSignals(true);
+  _decoder_combo->clear();
+  _decoder_combo->addItem(QStringLiteral("All"));
+  int current_combo_index = 0; // default to "All"
+  for (size_t i = 0; i < decode_sigs.size(); i++) {
+    auto &stack = decode_sigs[i];
+    auto &decoders = stack->stack();
+    QString name;
+    if (!decoders.empty())
+      name = QString(decoders.back()->decoder()->name);
+    else
+      name = QString("Decoder %1").arg(i);
+    _decoder_combo->addItem(name);
+    if (decoder_model->getDecoderStack() == stack.get())
+      current_combo_index = (int)(i + 1); // +1 for "All" offset
+  }
+  _decoder_combo->blockSignals(false);
+
+  if (decode_sigs.size() == 0) {
     decoder_model->setDecoderStack(nullptr);
-  else if (!decoder_model->getDecoderStack())
+    current_combo_index = 0;
+  } else if (!decoder_model->getDecoderStack()) {
+    // No stack selected yet: default to first decoder (single-stack,
+    // fast O(1) path). User can switch to "All" via combo if desired.
     decoder_model->setDecoderStack(decode_sigs.at(0).get());
-  else {
+    current_combo_index = 1; // first decoder after "All"
+  } else if (decoder_model->isMultiStackMode()) {
+    // Already in "All" mode
+    if (decoder_model->stackCount() != (int)decode_sigs.size()) {
+      // Stack count changed: full rebuild (prefix sums + column map, O(stacks))
+      std::vector<pv::data::DecoderStack *> stacks;
+      for (auto &s : decode_sigs)
+        stacks.push_back(s.get());
+      decoder_model->setAllStacks(stacks);
+    }
+    // else: no rebuild needed — rowCount reads list_annotation_size()
+    // on demand, and viewport following rebuilds _visible_merged lazily.
+    current_combo_index = 0;
+  } else {
+    // Find the currently selected single stack
     unsigned int index = 0;
+    bool found = false;
     for (auto d : decode_sigs) {
       if (d.get() == decoder_model->getDecoderStack()) {
         decoder_model->setDecoderStack(d.get());
+        current_combo_index = (int)(index + 1); // +1 for "All" offset
+        found = true;
         break;
       }
       index++;
     }
-    if (index >= decode_sigs.size())
+    if (!found) {
       decoder_model->setDecoderStack(decode_sigs.at(0).get());
+      current_combo_index = 1;
+    }
   }
-  // Proxy source is already set; no need to reset it here.
-  // setDecoderStack() triggers beginResetModel/endResetModel on the
-  // decoder model, which the proxy picks up automatically.
+
+  // Sync combo selection
+  _decoder_combo->blockSignals(true);
+  _decoder_combo->setCurrentIndex(current_combo_index);
+  _decoder_combo->blockSignals(false);
+
   search_done();
   resize_table_view(decoder_model);
 }
 
 void ProtocolDock::resize_table_view(view::DecoderModel *decoder_model) {
-  if (decoder_model->getDecoderStack()) {
-    int column_count = decoder_model->columnCount(QModelIndex()) - 1;
+  bool has_data = decoder_model->getDecoderStack() ||
+                  decoder_model->isMultiStackMode();
+  if (has_data) {
+    int column_count = decoder_model->columnCount(QModelIndex());
     int row_count = decoder_model->rowCount(QModelIndex());
+    QFontMetrics fm(_table_view->font());
+    QFontMetrics hfm(_table_view->horizontalHeader()->font());
 
     if (row_count < 500) {
       for (int i = 0; i < column_count; i++) {
-        _table_view->resizeColumnToContents(i);
-        if (_table_view->columnWidth(i) > 200)
-          _table_view->setColumnWidth(i, 200);
+        // Start with header text width.
+        QVariant hdr = decoder_model->headerData(i, Qt::Horizontal,
+                                                  Qt::DisplayRole);
+        int best = fm.height(); // minimum sensible width
+        if (hdr.isValid())
+          best = std::max(best, hfm.boundingRect(hdr.toString()).width() + 20);
+        // Then scan data rows.
+        int max_scan = std::min(row_count, 200);
+        for (int r = 0; r < max_scan; r++) {
+          QModelIndex idx = decoder_model->index(r, i);
+          QString text = decoder_model->data(idx, Qt::DisplayRole).toString();
+          int w = fm.boundingRect(text).width() + 20;
+          if (w > best)
+            best = w;
+        }
+        if (best > 300)
+          best = 300;
+        _table_view->setColumnWidth(i, best);
       }
     } else {
-      // Scan only the first 200 rows to estimate column width for large models,
-      // preventing UI freeze
-      QFontMetrics fm(_table_view->font());
-      int max_scan = row_count < 200 ? row_count : 200;
+      // Large model: scan only first 200 rows, but always check header.
+      int max_scan = 200;
       for (int col = 0; col < column_count; col++) {
-        int max_width = 50;
+        // Header width as baseline.
+        QVariant hdr = decoder_model->headerData(col, Qt::Horizontal,
+                                                 Qt::DisplayRole);
+        int max_width = fm.height();
+        if (hdr.isValid())
+          max_width = std::max(max_width,
+                               hfm.boundingRect(hdr.toString()).width() + 20);
         for (int row = 0; row < max_scan; row++) {
           QModelIndex idx = decoder_model->index(row, col);
           QString text = decoder_model->data(idx, Qt::DisplayRole).toString();
           int width = fm.boundingRect(text).width() + 20;
-          if (width > max_width) {
+          if (width > max_width)
             max_width = width;
-          }
         }
-        if (max_width > 200)
-          max_width = 200;
+        if (max_width > 300)
+          max_width = 300;
         _table_view->setColumnWidth(col, max_width);
       }
     }
@@ -877,23 +968,28 @@ void ProtocolDock::item_clicked(const QModelIndex &index) {
     return;
 
   pv::view::DecoderModel *decoder_model = _decoder_model;
-  auto decoder_stack = decoder_model->getDecoderStack();
 
-  // Track which column the user clicked for navigation (nav_table_view,
-  // on_visible_range_changed).
-  _nav_column = source_index.column();
+  // Map model row to the owning decoder stack and row-within-stack.
+  // This handles both single-stack and multi-stack (All) modes.
+  pv::data::DecoderStack *decoder_stack = nullptr;
+  uint64_t query_row = 0;
+  decoder_model->mapRowToStack(source_index.row(), decoder_stack, query_row);
+
+  // In multi-stack mode, _nav_column is always 0 (annotation column 0).
+  // In single-stack mode, subtract PRESET_COLUMN_COUNT from the model column.
+  int ann_col;
+  if (decoder_model->isMultiStackMode()) {
+    ann_col = 0;
+  } else {
+    ann_col = source_index.column() - pv::view::DecoderModel::PRESET_COLUMN_COUNT;
+    if (ann_col < 0)
+      ann_col = 0;
+  }
+  _nav_column = ann_col;
 
   if (decoder_stack) {
-    // When visible-range slicing is active, source_index.row() is a sliced
-    // (0-based) row number. Map it back to the full-list row number before
-    // querying the DecoderStack.
-    uint64_t query_row = source_index.row();
-    if (decoder_model->visible_start_row() >= 0) {
-      query_row = (uint64_t)(decoder_model->visible_start_row() + source_index.row());
-    }
-
     pv::data::decode::Annotation ann;
-    if (decoder_stack->list_annotation(&ann, source_index.column(), query_row)) {
+    if (decoder_stack->list_annotation(&ann, ann_col, query_row)) {
       const auto &decode_sigs = _decoder_host->get_decoder_stacks();
 
       for (auto d : decode_sigs) {
@@ -919,7 +1015,9 @@ void ProtocolDock::column_resize(int index, int old_size, int new_size) {
   (void)old_size;
   (void)new_size;
   pv::view::DecoderModel *decoder_model = _decoder_model;
-  if (decoder_model->getDecoderStack()) {
+  bool has_data = decoder_model->getDecoderStack() ||
+                  decoder_model->isMultiStackMode();
+  if (has_data) {
     int top_row = _table_view->rowAt(0);
     int bom_row = _table_view->rowAt(_table_view->height());
     if (bom_row >= top_row && top_row >= 0) {
@@ -936,9 +1034,60 @@ void ProtocolDock::export_table_view() {
 }
 
 void ProtocolDock::nav_table_view() {
-  uint64_t row_index = 0;
   pv::view::DecoderModel *decoder_model = _decoder_model;
 
+  // ===== Multi-stack (All) mode: binary search the merged list =====
+  if (decoder_model->isMultiStackMode()) {
+    const auto &decode_sigs = _decoder_host->get_decoder_stacks();
+    if (decode_sigs.empty())
+      return;
+
+    uint64_t samplerate = decode_sigs[0]->samplerate();
+    if (samplerate == 0)
+      return;
+
+    // Compute the viewport center sample position.
+    double scale = _view->scale();
+    int64_t offset = _view->offset();
+    int viewport_width = _view->viewport()->width();
+    if (viewport_width <= 0)
+      return;
+    uint64_t center_sample = (uint64_t)((double)(offset + viewport_width / 2)
+                                        * (double)samplerate * scale);
+
+    // Binary search the merged list for the closest entry.
+    int model_row = decoder_model->findRowBySample(center_sample);
+    if (model_row < 0 || model_row >= decoder_model->rowCount(QModelIndex()))
+      return;
+
+    QModelIndex source_index = decoder_model->index(model_row, 0);
+    QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
+    if (proxy_index.isValid()) {
+      _table_view->scrollTo(proxy_index);
+      _table_view->setCurrentIndex(proxy_index);
+
+      const auto &decode_sigs2 = _decoder_host->get_decoder_stacks();
+      for (auto d : decode_sigs2)
+        d->set_mark_index(-1);
+
+      pv::data::DecoderStack *target_stack = nullptr;
+      uint64_t row_in_stack = 0;
+      decoder_model->mapRowToStack(model_row, target_stack, row_in_stack);
+      if (target_stack) {
+        pv::data::decode::Annotation ann;
+        if (target_stack->list_annotation(&ann, 0, row_in_stack)) {
+          target_stack->set_mark_index(
+              (ann.start_sample() + ann.end_sample()) / 2);
+        }
+      }
+      _view->set_all_update(true);
+      _view->update();
+    }
+    return;
+  }
+
+  // ===== Single-stack mode =====
+  uint64_t row_index = 0;
   auto decoder_stack = decoder_model->getDecoderStack();
   if (!decoder_stack)
     return;
@@ -957,7 +1106,6 @@ void ProtocolDock::nav_table_view() {
     }
   }
 
-  // Convert full-list annotation index to source model row.
   int64_t source_row = (int64_t)row_index;
   if (decoder_model->visible_start_row() >= 0) {
     source_row = (int64_t)row_index - decoder_model->visible_start_row();
@@ -966,7 +1114,8 @@ void ProtocolDock::nav_table_view() {
   if (source_row < 0 || source_row >= decoder_model->rowCount(QModelIndex()))
     return;
 
-  QModelIndex source_index = decoder_model->index(source_row, _nav_column);
+  QModelIndex source_index = decoder_model->index(source_row,
+      _nav_column + pv::view::DecoderModel::PRESET_COLUMN_COUNT);
   QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
 
   if (proxy_index.isValid()) {
@@ -1034,8 +1183,6 @@ void ProtocolDock::search_nxt() {
 
 void ProtocolDock::search_done() {
   QString str = _ann_search_edit->text().trimmed();
-  // Filter the proxy model across all columns. The table view uses the
-  // proxy as its model, so this immediately hides non-matching rows.
   _model_proxy.setFilterFixedString(str);
   _matchs_label->setText(QString::number(_model_proxy.rowCount()));
   _cur_search_index = -1;
@@ -1469,6 +1616,45 @@ void ProtocolDock::on_visible_range_changed() {
     return;
   }
 
+  // ===== Multi-stack (All) mode: binary search the merged list =====
+  if (_decoder_model->isMultiStackMode()) {
+    const auto &decode_sigs = _decoder_host->get_decoder_stacks();
+    if (decode_sigs.empty())
+      return;
+
+    uint64_t samplerate = decode_sigs[0]->samplerate();
+    if (samplerate == 0)
+      return;
+
+    int viewport_width = _view->viewport()->width();
+    if (viewport_width <= 0)
+      return;
+
+    double scale = _view->scale();
+    int64_t offset = _view->offset();
+    double samples_per_pixel = (double)samplerate * scale;
+    double start_sample_d = (double)offset * samples_per_pixel;
+    double end_sample_d = (double)(offset + viewport_width) * samples_per_pixel;
+    if (start_sample_d < 0)
+      start_sample_d = 0;
+    if (end_sample_d < 0)
+      end_sample_d = 0;
+
+    uint64_t start_sample = (uint64_t)start_sample_d;
+    uint64_t end_sample = (uint64_t)end_sample_d;
+    if (end_sample <= start_sample)
+      return;
+
+    // Binary search the merged list by sample range.
+    _decoder_model->set_visible_range_by_samples(start_sample, end_sample);
+
+    if (_jumping_to_row) {
+      QTimer::singleShot(150, this, [this]() { _jumping_to_row = false; });
+    }
+    return;
+  }
+
+  // ===== Single-stack mode =====
   auto decoder_stack = _decoder_model->getDecoderStack();
   if (!decoder_stack) {
     return;
@@ -1484,8 +1670,6 @@ void ProtocolDock::on_visible_range_changed() {
     return;
   }
 
-  // Reuse nav_table_view's sample-range computation:
-  //   offset (pixels) * samplerate (samples/s) * scale (s/pixel) = samples
   double scale = _view->scale();
   int64_t offset = _view->offset();
   double samples_per_pixel = (double)samplerate * scale;
@@ -1503,8 +1687,6 @@ void ProtocolDock::on_visible_range_changed() {
     return;
   }
 
-  // Locate the protocol row currently selected by the navigation column
-  // (set by clicking a table cell in item_clicked).
   std::map<const pv::data::decode::Row, bool> rows =
       decoder_stack->get_rows_lshow();
   int column = _nav_column;
@@ -1526,8 +1708,6 @@ void ProtocolDock::on_visible_range_changed() {
   int64_t start_idx = (int64_t)range.first;
   int64_t end_idx = (int64_t)range.second;
 
-  // mark_index exemption: keep the marked annotation row visible so the
-  // user doesn't lose their selection after a jump.
   int64_t mark = decoder_stack->get_mark_index();
   if (mark >= 0) {
     uint64_t mark_row_u = decoder_stack->get_annotation_index(target_row, mark);
@@ -1541,13 +1721,11 @@ void ProtocolDock::on_visible_range_changed() {
 
   _decoder_model->set_visible_range(start_idx, end_idx);
 
-  // If we're in the middle of an item_clicked → show_region jump, restore
-  // the selection that was lost when set_visible_range reset the model.
   if (_jumping_to_row && _jumping_target_row >= start_idx &&
       _jumping_target_row < end_idx) {
     int sliced_row = (int)(_jumping_target_row - start_idx);
     QModelIndex source_index = _decoder_model->index(
-        sliced_row, _nav_column);
+        sliced_row, _nav_column + pv::view::DecoderModel::PRESET_COLUMN_COUNT);
     QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
     if (proxy_index.isValid()) {
       _table_view->blockSignals(true);
@@ -1557,12 +1735,110 @@ void ProtocolDock::on_visible_range_changed() {
     }
   }
 
-  // Clear the jump guard shortly after; the show_region → view change →
-  // visible_range_changed chain completes within ~100ms (debounce) + one
-  // event loop tick. 150ms covers it with margin.
   if (_jumping_to_row) {
     QTimer::singleShot(150, this, [this]() { _jumping_to_row = false; });
   }
+}
+
+//-------------------AnnotationProxyModel
+
+bool AnnotationProxyModel::filterAcceptsRow(
+    int source_row, const QModelIndex &source_parent) const {
+  QString filter = filterRegularExpression().pattern();
+  if (filter.isEmpty())
+    return true; // no filter: accept all rows
+
+  QAbstractItemModel *src = sourceModel();
+  if (!src)
+    return true;
+
+  int cols = src->columnCount(source_parent);
+  // Skip preset columns (Start=0, Duration=1); only search annotation data
+  // columns (index >= PRESET_COLUMN_COUNT).
+  for (int col = pv::view::DecoderModel::PRESET_COLUMN_COUNT; col < cols;
+       col++) {
+    QModelIndex idx = src->index(source_row, col, source_parent);
+    QString text = src->data(idx, Qt::DisplayRole).toString();
+    if (text.contains(filter, Qt::CaseInsensitive))
+      return true;
+  }
+  return false;
+}
+
+//-------------------Key navigation
+
+void ProtocolDock::keyPressEvent(QKeyEvent *event) {
+  if (event->modifiers() == Qt::ControlModifier &&
+      event->key() == Qt::Key_F) {
+    _ann_search_edit->setFocus();
+    _ann_search_edit->selectAll();
+    return;
+  }
+  if (event->key() == Qt::Key_Escape && _ann_search_edit->hasFocus()) {
+    _ann_search_edit->clear();
+    _ann_search_edit->clearFocus();
+    return;
+  }
+  pv::widgets::SmoothScrollArea::keyPressEvent(event);
+}
+
+//-------------------Header context menu (column show/hide)
+
+void ProtocolDock::on_header_context_menu(const QPoint &pos) {
+  int col_count = _model_proxy.columnCount();
+  if (col_count <= 0)
+    return;
+
+  QMenu menu(this);
+  for (int i = 0; i < col_count; i++) {
+    QVariant header =
+        _model_proxy.headerData(i, Qt::Horizontal, Qt::DisplayRole);
+    QString name = header.toString();
+    if (name.isEmpty())
+      continue;
+
+    QAction *action = menu.addAction(name);
+    action->setCheckable(true);
+    action->setChecked(!_table_view->isColumnHidden(i));
+    const int col = i;
+    connect(action, &QAction::toggled, this, [this, col](bool checked) {
+      _table_view->setColumnHidden(col, !checked);
+    });
+  }
+  menu.exec(_table_view->horizontalHeader()->mapToGlobal(pos));
+}
+
+//-------------------Decoder combo switch
+
+void ProtocolDock::on_decoder_combo_changed(int index) {
+  const auto &decode_sigs = _decoder_host->get_decoder_stacks();
+
+  // Index 0 = "All" mode; index 1+ = individual decoder (index-1).
+  if (index == 0) {
+    // Multi-stack mode: show all decoders' annotations.
+    std::vector<pv::data::DecoderStack *> stacks;
+    for (auto &s : decode_sigs)
+      stacks.push_back(s.get());
+    _decoder_model->setAllStacks(stacks);
+  } else {
+    int stack_idx = index - 1; // offset by "All"
+    if (stack_idx < 0 || stack_idx >= (int)decode_sigs.size())
+      return;
+    _decoder_model->setDecoderStack(decode_sigs[stack_idx].get());
+  }
+
+  // Clear visible range — different decoders have different sample ranges.
+  _decoder_model->clear_visible_range();
+
+  // Force the proxy model to re-evaluate its filter mapping against the
+  // new source model contents.
+  _model_proxy.invalidate();
+
+  // Reset the table view to clear stale selection/scroll state.
+  _table_view->reset();
+
+  search_done();
+  resize_table_view(_decoder_model);
 }
 
 } // namespace dock

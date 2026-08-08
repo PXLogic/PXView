@@ -1295,6 +1295,25 @@ void SigSession::init_signals() {
   _state->signal_models() = models;
   make_channels_view_index();
 
+  // After recreating SignalModels, immediately set snapshot pointers from
+  // the current view data. Same rationale as reload(): without this, decode
+  // threads that are already running will see nullptr snapshots.
+  if (_state->view_data()) {
+    for (auto &m : _state->signal_models()) {
+      switch (m->type()) {
+      case SR_CHANNEL_LOGIC:
+        m->set_snapshot(_state->view_data()->get_logic());
+        break;
+      case SR_CHANNEL_ANALOG:
+        m->set_snapshot(_state->view_data()->get_analog());
+        break;
+      case SR_CHANNEL_DSO:
+        m->set_snapshot(_state->view_data()->get_dso());
+        break;
+      }
+    }
+  }
+
   spectrum_rebuild();
   lissajous_disable();
   math_disable();
@@ -1476,6 +1495,29 @@ void SigSession::reload() {
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
     _state->signal_models() = models;
     make_channels_view_index();
+
+    // CRITICAL: After recreating SignalModels, immediately set snapshot
+    // pointers from the current view data. Without this, decode threads
+    // that are already running (e.g., started by start_all_decode_tasks()
+    // before this reload() was triggered via an async DeviceOptionsUpdated
+    // event) will see nullptr snapshots and fail with "required channels
+    // have not been specified". This is the root cause of the race condition
+    // where adding a decoder causes other decoders to intermittently fail.
+    if (_state->view_data()) {
+      for (auto &m : _state->signal_models()) {
+        switch (m->type()) {
+        case SR_CHANNEL_LOGIC:
+          m->set_snapshot(_state->view_data()->get_logic());
+          break;
+        case SR_CHANNEL_ANALOG:
+          m->set_snapshot(_state->view_data()->get_analog());
+          break;
+        case SR_CHANNEL_DSO:
+          m->set_snapshot(_state->view_data()->get_dso());
+          break;
+        }
+      }
+    }
   } else if (mode == LOGIC || mode == ANALOG || mode == DSO || mode == MSO) {
     pxv_info("ERROR: Unable to create any channel in reload(). channels is empty or all skipped.");
     clear_signals();

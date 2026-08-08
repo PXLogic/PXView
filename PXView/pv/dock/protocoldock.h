@@ -44,6 +44,8 @@
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QTableView>
+#include <QLineEdit>
+#include <QKeyEvent>
 #include <QVBoxLayout>
 #include <QTimer>
 #include <list>
@@ -73,6 +75,14 @@ class DecoderModel;
 namespace dock {
 
 class RowHoverDelegate;
+
+// Proxy model that excludes the preset Start / Duration columns (indices 0 and 1)
+// from text filtering. Only annotation data columns (index >= 2) are searched.
+class AnnotationProxyModel : public QSortFilterProxyModel {
+protected:
+  bool filterAcceptsRow(int source_row,
+                        const QModelIndex &source_parent) const override;
+};
 
 class ProtocolDock : public pv::widgets::SmoothScrollArea,
                      public IProtocolItemLayerCallback,
@@ -145,6 +155,9 @@ signals:
 public slots:
   void update_model();
 
+protected:
+  void keyPressEvent(QKeyEvent *event) override;
+
 private slots:
   void on_add_protocol();
   void on_del_all_protocol();
@@ -171,6 +184,8 @@ private slots:
   void show_protocol_select();
   void on_follow_viewport_toggled(bool checked);
   void on_visible_range_changed();
+  void on_header_context_menu(const QPoint &pos);
+  void on_decoder_combo_changed(int index);
 
 private:
   SigSession *_session;
@@ -179,7 +194,7 @@ private:
   data::ICaptureControl *_capture = nullptr;
   view::View *_view;
   TabContext *_context;
-  QSortFilterProxyModel _model_proxy;
+  AnnotationProxyModel _model_proxy;
   // View-owned DecoderModel (purify-architecture-concepts Task 10): was
   // previously a Core singleton exposed via SigSession::get_decoder_model().
   // ProtocolDock now owns it as a QObject child (Qt parent ownership handles
@@ -194,7 +209,7 @@ private:
   RowHoverDelegate *_hover_delegate;
   QPushButton *_pre_button;
   QPushButton *_nxt_button;
-  PopupLineEdit *_ann_search_edit;
+  QLineEdit *_ann_search_edit;
   QLabel *_matchs_label;
   QLabel *_matchs_title_label;
   QLabel *_bot_title_label;
@@ -207,8 +222,8 @@ private:
   QPushButton *_bot_set_button;
   QPushButton *_bot_save_button;
   QPushButton *_dn_nav_button;
-  QPushButton *_ann_search_button;
   QPushButton *_follow_viewport_btn;
+  DsComboBox *_decoder_combo;
   std::vector<DecoderInfoItem *> _decoderInfoList;
   KeywordLineEdit *_pro_keyword_edit;
   QString _selected_protocol_id;
