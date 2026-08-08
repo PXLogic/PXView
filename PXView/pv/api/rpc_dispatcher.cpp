@@ -1,7 +1,10 @@
 #include "rpc_dispatcher.h"
+#include "binary_codec.h"
+#include <algorithm>
 #include <QFile>
 #include <QDir>
 #include <QCoreApplication>
+#include <QDateTime>
 #include "PXView/config.h"
 
 namespace pv::api {
@@ -591,6 +594,12 @@ JsonRpcResponse RpcDispatcher::handle_request(const JsonRpcRequest& req) {
     if (req.method == "get_work_mode")            return on_get_work_mode(req.id, params);
     if (req.method == "get_signal_list")          return on_get_signal_list(req.id, params);
     if (req.method == "find_next_edge")           return on_find_next_edge(req.id, params);
+
+    // ---- P1-3: Batch operations ----
+    if (req.method == "batch_call")               return on_batch_call(req.id, params);
+
+    // ---- P0-3: Binary viewport data ----
+    if (req.method == "get_viewport_binary")      return on_get_viewport_binary(req.id, params);
 
     return error_resp(req.id, static_cast<int>(ErrorCode::InvalidRequest),
                       "Unknown method: " + req.method);
@@ -2237,6 +2246,191 @@ JsonRpcResponse RpcDispatcher::on_find_next_edge(int id, const json& params) {
     bool rising = params.value("rising", true);
     auto r = session->find_next_edge(from, channel, rising);
     return wrap_result(id, r);
+}
+
+// ============================================================================
+// P1-3: Batch call — execute multiple JSON-RPC calls in one request
+// ============================================================================
+
+JsonRpcResponse RpcDispatcher::on_batch_call(int id, const json& params) {
+    if (!params.contains("calls") || !params["calls"].is_array())
+        return error_resp(id, static_cast<int>(ErrorCode::InvalidRequest),
+                          "Missing 'calls' array parameter");
+
+    json results = json::array();
+
+    for (const auto& call : params["calls"]) {
+        std::string method = call.value("method", "");
+        json call_params = call.value("params", json::object());
+
+        // Build a sub-request and dispatch through ourselves
+        JsonRpcRequest sub_req;
+        sub_req.method = method;
+        sub_req.params_json = call_params.dump();
+        sub_req.id = id;  // Use parent id; the result is extracted inline
+
+        JsonRpcResponse sub_resp = handle_request(sub_req);
+
+        json result_entry;
+        if (sub_resp.success) {
+            result_entry["success"] = true;
+            if (!sub_resp.result_json.empty()) {
+                result_entry["result"] = json::parse(sub_resp.result_json);
+            } else {
+                result_entry["result"] = nullptr;
+            }
+        } else {
+            result_entry["success"] = false;
+            if (!sub_resp.error_json.empty()) {
+                result_entry["error"] = json::parse(sub_resp.error_json);
+            } else {
+                result_entry["error"] = {{"code", -1}, {"message", "Unknown error"}};
+            }
+        }
+        results.push_back(result_entry);
+    }
+
+    return success_resp(id, results);
+}
+
+// ============================================================================
+// P0-3: Binary viewport data — return waveform data as a binary frame
+// ============================================================================
+
+JsonRpcResponse RpcDispatcher::on_get_viewport_binary(int id, const json& params) {
+    auto session = app_svc_->get_active_session();
+    if (!session)
+        return error_resp(id, static_cast<int>(ErrorCode::MissingDevice),
+                          "No active session");
+
+    // Parse parameters
+    uint64_t start_sample = params.value("start_sample", uint64_t(0));
+    uint64_t end_sample = params.value("end_sample", uint64_t(0));
+    int32_t width_px = params.value("width", 1920);
+    std::string data_type = params.value("type", std::string("logic"));
+
+    // Channel list
+    std::vector<int16_t> channels;
+    if (params.contains("channels") && params["channels"].is_array()) {
+        for (const auto& ch : params["channels"]) {
+            channels.push_back(ch.get<int16_t>());
+        }
+    }
+    if (channels.empty()) {
+        // Default to channel 0
+        channels.push_back(0);
+    }
+
+    // Build signal mask
+    uint16_t signal_mask = 0;
+    for (int16_t ch : channels) {
+        if (ch >= 0 && ch < 16)
+            signal_mask |= (1 << ch);
+    }
+
+    uint32_t timestamp_ms = static_cast<uint32_t>(
+        QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+
+    JsonRpcResponse resp;
+    resp.id = id;
+    resp.success = true;
+    resp.is_binary = true;
+    resp.binary_content_type = "application/octet-stream";
+
+    if (data_type == "logic") {
+        // Fetch logic samples and encode as edge data
+        std::vector<std::vector<std::pair<uint64_t, uint8_t>>> edges_per_channel(16);
+
+        for (int16_t ch : channels) {
+            if (ch < 0 || ch >= 16)
+                continue;
+
+            std::vector<uint8_t> raw_data;
+            std::vector<int16_t> ch_vec = {ch};
+            auto r = session->get_logic_samples(start_sample, end_sample, ch_vec, raw_data);
+
+            if (r && !raw_data.empty()) {
+                // Convert raw samples to edges (transition detection)
+                uint8_t prev = raw_data[0] ? 1 : 0;
+                edges_per_channel[ch].push_back({start_sample, prev});
+
+                for (size_t i = 1; i < raw_data.size(); ++i) {
+                    uint8_t cur = raw_data[i] ? 1 : 0;
+                    if (cur != prev) {
+                        edges_per_channel[ch].push_back(
+                            {start_sample + i, cur});
+                        prev = cur;
+                    }
+                }
+            }
+        }
+
+        resp.binary_payload = BinaryCodec::encode_logic_edges(
+            timestamp_ms, start_sample, edges_per_channel, signal_mask);
+
+        json result_header = {
+            {"binary", true},
+            {"frame_type", "logic_edges"},
+            {"start_sample", start_sample},
+            {"signal_mask", signal_mask},
+            {"size", resp.binary_payload.size()}
+        };
+        resp.result_json = result_header.dump();
+    } else {
+        // Analog/DSO envelope data
+        std::vector<std::vector<float>> envelopes_per_channel(16);
+
+        for (int16_t ch : channels) {
+            if (ch < 0 || ch >= 16)
+                continue;
+
+            std::vector<float> raw_data;
+            if (data_type == "analog") {
+                auto r = session->get_analog_samples(start_sample, end_sample, ch, raw_data);
+                (void)r;
+            } else {
+                // DSO
+                auto r = session->get_dso_samples(start_sample, end_sample, ch, raw_data);
+                (void)r;
+            }
+
+            if (!raw_data.empty()) {
+                // Simple envelope: compute min/max pairs at a downsample rate
+                uint32_t total_samples = static_cast<uint32_t>(raw_data.size());
+                uint32_t target_pairs = static_cast<uint32_t>(width_px);
+                if (target_pairs == 0) target_pairs = 1920;
+                uint32_t scale = (total_samples + target_pairs - 1) / target_pairs;
+                if (scale == 0) scale = 1;
+
+                for (uint32_t i = 0; i < total_samples; i += scale) {
+                    float mn = raw_data[i];
+                    float mx = raw_data[i];
+                    uint32_t end_j = std::min(i + scale, total_samples);
+                    for (uint32_t j = i + 1; j < end_j; ++j) {
+                        if (raw_data[j] < mn) mn = raw_data[j];
+                        if (raw_data[j] > mx) mx = raw_data[j];
+                    }
+                    envelopes_per_channel[ch].push_back(mn);
+                    envelopes_per_channel[ch].push_back(mx);
+                }
+            }
+        }
+
+        // Use a scale of 1 for now (the real scale depends on sample rate / width)
+        resp.binary_payload = BinaryCodec::encode_analog_envelope(
+            timestamp_ms, start_sample, 1, envelopes_per_channel, signal_mask);
+
+        json result_header = {
+            {"binary", true},
+            {"frame_type", "analog_envelope"},
+            {"start_sample", start_sample},
+            {"signal_mask", signal_mask},
+            {"size", resp.binary_payload.size()}
+        };
+        resp.result_json = result_header.dump();
+    }
+
+    return resp;
 }
 
 } // namespace pv::api

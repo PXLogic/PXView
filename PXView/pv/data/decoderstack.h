@@ -209,6 +209,14 @@ public:
     inline void set_handle_id(uint64_t id) { _handle_id = id; }
     inline void bump_version() { _version++; }
 
+    // Custom user-facing label for this decoder stack. Set by the View
+    // layer (ProtocolDock) or the API layer (SessionService::add_decoder)
+    // when the user provides a custom name. Used in exports and list_analyzers
+    // to distinguish multiple instances of the same decoder (e.g. two SPI
+    // decoders can be labelled "CH2.SPI" and "CH3.SPI").
+    inline QString label() const { return _label; }
+    inline void set_label(const QString &label) { _label = label; }
+
     // Set by callers (e.g. SigSession) to mark a stack for asynchronous
     // deletion by the decode thread. Mirrors the legacy
     // view::DecodeTrace::_delete_flag mechanism.
@@ -257,6 +265,8 @@ private:
     uint64_t        _ann_dropped_stop = 0;
     uint64_t        _ann_dropped_mem = 0;
     uint64_t        _ann_dropped_row = 0;
+
+    QString         _label; // custom user-facing label for this decoder stack
 
 	friend class DecoderStackTest::TwoDecoderStack;
 };

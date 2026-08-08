@@ -2292,14 +2292,14 @@ void SigSession::set_trace_name(std::shared_ptr<data::SignalModel> model,
 }
 
 void SigSession::set_decoder_row_label(int index, QString label) {
-  // TODO: Previously this delegated to set_trace_name() on a view::DecodeTrace,
-  // which called view::Trace::set_name() and (for decoder traces) updated
-  // DecoderPannel item name. DecoderStack has no set_name() method; a new
-  // mechanism for naming decoders (e.g. storing the label on DecoderStack)
-  // is required. The View layer/DecoderPannel should be updated to manage
-  // decoder display names directly.
-  (void)index;
-  (void)label;
+  // Set the custom label on the DecoderStack at the given index so that
+  // export functions and list_analyzers can distinguish multiple instances
+  // of the same decoder (e.g. "SPI(CH2.SPI)" vs "SPI(CH3.SPI)").
+  auto &stacks = get_decoder_stacks();
+  if (index >= 0 && index < (int)stacks.size()) {
+    if (stacks[index])
+      stacks[index]->set_label(label);
+  }
 }
 
 std::shared_ptr<data::SignalModel>

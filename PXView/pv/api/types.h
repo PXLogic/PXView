@@ -393,7 +393,68 @@ struct AnalyzerExportConfig {
 struct ServiceEventData {
     ServiceEvent                          event = ServiceEvent::ErrorOccurred;
     std::map<std::string, std::string>    params;
+    // P0-2: Versioned state — global monotonically increasing version number
+    // and millisecond timestamp. Set by SessionService::broadcast_event() so
+    // that WS/MCP clients can detect stale state and deduplicate notifications.
+    uint64_t                              version = 0;
+    int64_t                               timestamp_ms = 0;
 };
+
+// ---- P0-1: Topic mapping for selective subscription ----
+// Maps ServiceEvent values to topic strings. Clients that call subscribe()
+// with a set of topics will only receive notifications whose topic matches.
+// The special topic "all" (or no subscription at all) receives everything.
+inline const char* service_event_topic(ServiceEvent ev) {
+    switch (ev) {
+    // Capture-related
+    case ServiceEvent::CaptureStateChanged:  return "capture_state";
+    case ServiceEvent::CaptureProgress:      return "capture_progress";
+    case ServiceEvent::DataUpdated:          return "data_updated";
+    case ServiceEvent::TriggerReceived:      return "trigger";
+    case ServiceEvent::FrameBegan:           return "frame";
+    case ServiceEvent::FrameEnded:           return "frame";
+    // Device-related
+    case ServiceEvent::DeviceListUpdated:    return "device_list";
+    case ServiceEvent::DeviceModeChanged:    return "device";
+    case ServiceEvent::DeviceConfigChanged:  return "device";
+    case ServiceEvent::DeviceDetached:       return "device";
+    case ServiceEvent::NewUsbDevice:         return "device_list";
+    // Signal processing
+    case ServiceEvent::GlitchFilterStarted:   return "glitch_filter";
+    case ServiceEvent::GlitchFilterProgress:   return "glitch_filter";
+    case ServiceEvent::GlitchFilterCompleted: return "glitch_filter";
+    case ServiceEvent::GlitchFilterCleared:   return "glitch_filter";
+    case ServiceEvent::SignalInvertStarted:    return "signal_invert";
+    case ServiceEvent::SignalInvertCompleted:  return "signal_invert";
+    case ServiceEvent::SignalInvertCleared:    return "signal_invert";
+    // Decoder-related
+    case ServiceEvent::DecodeDone:           return "decode";
+    case ServiceEvent::DecoderAdded:         return "decoder";
+    case ServiceEvent::DecoderRemoved:       return "decoder";
+    case ServiceEvent::DecodeProgress:       return "decode_progress";
+    // Config-related
+    case ServiceEvent::SampleConfigChanged:  return "sample_config";
+    case ServiceEvent::ChannelConfigChanged:  return "channel_config";
+    case ServiceEvent::TriggerConfigChanged:  return "trigger_config";
+    // File ops
+    case ServiceEvent::SaveComplete:         return "file_op";
+    case ServiceEvent::LoadComplete:         return "file_op";
+    case ServiceEvent::ExportComplete:        return "file_op";
+    // Signals
+    case ServiceEvent::SignalsChanged:       return "signals";
+    // View
+    case ServiceEvent::ViewShowRegion:       return "view";
+    case ServiceEvent::ViewZoomFit:          return "view";
+    case ServiceEvent::ViewZoomIn:           return "view";
+    case ServiceEvent::ViewZoomOut:          return "view";
+    case ServiceEvent::ViewCursorAdded:      return "view";
+    case ServiceEvent::ViewCursorRemoved:    return "view";
+    case ServiceEvent::ViewCursorsCleared:   return "view";
+    // Errors
+    case ServiceEvent::ErrorOccurred:        return "error";
+    default:                                  return "misc";
+    }
+}
 
 // ---- Interface ----
 

@@ -163,6 +163,15 @@ private:
     JsonRpcResponse on_get_work_mode(int id, const nlohmann::json& params);
     JsonRpcResponse on_get_signal_list(int id, const nlohmann::json& params);
     JsonRpcResponse on_find_next_edge(int id, const nlohmann::json& params);
+
+    // ---- P1-3: Batch operation ----
+    JsonRpcResponse on_batch_call(int id, const nlohmann::json& params);
+
+    // ---- P0-3: Binary viewport data ----
+    // Returns a binary frame containing logic edge or analog envelope data
+    // for the specified viewport range. The response is sent as a JSON text
+    // frame followed by a binary WebSocket frame.
+    JsonRpcResponse on_get_viewport_binary(int id, const nlohmann::json& params);
 };
 
 } // namespace pv::api

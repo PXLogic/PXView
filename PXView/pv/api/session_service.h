@@ -420,6 +420,9 @@ private:
     mutable std::mutex _wait_mutex;
     std::condition_variable _wait_cv;
 
+    // P0-2: Global state version counter for versioned notifications
+    mutable uint64_t _state_version_counter = 0;
+
     // MCP-dedicated document. phase 2: ownership is held by DocumentRegistry;
     // SessionService stores only the owning index (SIZE_MAX == none). Created
     // via DocumentRegistry::create_api_document() (called from AppService) and

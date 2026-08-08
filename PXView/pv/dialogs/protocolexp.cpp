@@ -34,6 +34,7 @@
 
 #include "../sigsession.h"
 #include "../data/decoderstack.h"
+#include "../data/decode/decoder.h"
 #include "../data/decode/row.h"
 #include "../data/decode/annotation.h"
 #include "../view/decodetrace.h"
@@ -257,6 +258,21 @@ void ProtocolExp::save_proc()
         sort(annotations_arr[i].begin(), annotations_arr[i].end(), compare_ann_index);  
         row_inf_arr[i].read_index = 0;
     }
+
+    // Derive decoder name + custom label for the export header so multiple
+    // instances of the same decoder can be distinguished (e.g. "SPI(CH2.SPI)").
+    QString decoder_name;
+    auto &dec_list = decoder_stack->stack();
+    if (!dec_list.empty()) {
+        auto *root_dec = dec_list.front();
+        if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
+            decoder_name = QString::fromUtf8(root_dec->decoder()->name);
+    }
+    QString custom_label = decoder_stack->label();
+    if (!custom_label.isEmpty())
+        decoder_name += "(" + custom_label + ")";
+    if (!decoder_name.isEmpty())
+        out << "# Decoder: " << decoder_name << "\n";
 
     //title
     QString title_str;

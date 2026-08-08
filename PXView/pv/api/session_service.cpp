@@ -402,14 +402,18 @@ bool SessionService::is_gui_mode() {
 }
 
 void SessionService::broadcast_event(
-    ServiceEvent event, const std::map<std::string, std::string> &params) const {
-    std::lock_guard<std::mutex> lock(_listeners_mutex);
-    ServiceEventData data;
-    data.event = event;
-    data.params = params;
-    for (auto *listener : _listeners) {
-        listener->on_service_event(data);
-    }
+ServiceEvent event, const std::map<std::string, std::string> &params) const {
+std::lock_guard<std::mutex> lock(_listeners_mutex);
+ServiceEventData data;
+data.event = event;
+data.params = params;
+// P0-2: Versioned state — assign a monotonically increasing version number
+// and a millisecond timestamp so WS/MCP clients can detect stale state
+data.version = ++_state_version_counter;
+data.timestamp_ms = QDateTime::currentMSecsSinceEpoch();
+for (auto *listener : _listeners) {
+listener->on_service_event(data);
+}
 }
 
 ChannelType SessionService::sr_channel_type_to_api(int sr_type) const {
@@ -2162,9 +2166,9 @@ std::vector<DecoderInstance> SessionService::get_active_decoders() const {
         const char *root_id = stack->get_root_decoder_id();
         inst.decoder_id = root_id ? root_id : "";
 
-        // Derive display name from the root decoder's name. DecoderStack no
-        // longer has a Trace::get_name() since the de-view-ification; the
-        // srd_decoder's name field is the canonical protocol name.
+        // Derive display name from the root decoder's name. If a custom label
+        // is set on the stack, append it in parentheses so multiple instances
+        // of the same decoder can be distinguished (e.g. "SPI(CH2.SPI)").
         std::string display_name;
         auto &dec_list = stack->stack();
         if (!dec_list.empty()) {
@@ -2172,6 +2176,9 @@ std::vector<DecoderInstance> SessionService::get_active_decoders() const {
             if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
                 display_name = root_dec->decoder()->name;
         }
+        QString custom_label = stack->label();
+        if (!custom_label.isEmpty())
+            display_name += "(" + custom_label.toStdString() + ")";
         inst.display_name = display_name;
 
         result.push_back(inst);
@@ -2218,15 +2225,11 @@ Result<std::string> SessionService::add_decoder(
             auto *new_decoder = new data::decode::Decoder(dec);
             decoder_stack->add_sub_decoder(new_decoder);
 
-            // Label application: DecoderStack has no set_name method (it was
-            // a Trace property in the view layer). Custom labels for stacked
-            // decoders are not yet supported by the core layer; the View
-            // layer is responsible for tracking display names. We log the
-            // intent here so that callers can debug label-related issues.
+            // Store the custom label on the DecoderStack so exports and
+            // list_analyzers can distinguish multiple instances of the same
+            // decoder (e.g. "0:SPI(CH2.SPI)" vs "1:SPI(CH3.SPI)").
             if (!label.empty()) {
-                pxv_info("add_decoder: stacked decoder label '%s' requested but "
-                         "DecoderStack has no set_name() method (TODO)",
-                         label.c_str());
+                decoder_stack->set_label(QString::fromStdString(label));
             }
 
             // Apply options to the new sub-decoder
@@ -2499,12 +2502,11 @@ Result<std::string> SessionService::add_decoder(
             return Result<std::string>::Fail(ErrorCode::DecoderError,
                                              "No decoder stack created");
 
-        // Custom label: DecoderStack has no set_name method (label management
-        // was a Trace/view concern). Log the intent; the View layer is
-        // responsible for tracking display names.
+        // Store the custom label on the DecoderStack so exports and
+        // list_analyzers can distinguish multiple instances of the same
+        // decoder (e.g. "0:SPI(CH2.SPI)" vs "1:SPI(CH3.SPI)").
         if (!label.empty()) {
-            pxv_info("add_decoder: label '%s' requested but DecoderStack has "
-                     "no set_name() method (TODO)", label.c_str());
+            decoder_stack->set_label(QString::fromStdString(label));
         }
 
         {
@@ -3596,7 +3598,10 @@ Result<void> SessionService::export_decoder_table(
         if (!decoder_stack)
             continue;
 
-        // Derive analyzer name from the root decoder's name (srd_decoder.name)
+        // Derive analyzer name from the root decoder's name (srd_decoder.name).
+        // If a custom label is set on the stack, append it in parentheses so
+        // multiple instances of the same decoder can be distinguished, e.g.
+        // "SPI(CH2.SPI)" vs "SPI(CH3.SPI)".
         std::string analyzer_name;
         auto &dec_list = decoder_stack->stack();
         if (!dec_list.empty()) {
@@ -3604,6 +3609,9 @@ Result<void> SessionService::export_decoder_table(
             if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
                 analyzer_name = root_dec->decoder()->name;
         }
+        QString custom_label = decoder_stack->label();
+        if (!custom_label.isEmpty())
+            analyzer_name += "(" + custom_label.toStdString() + ")";
         int row_count = decoder_stack->list_rows_size();
 
         for (int row = 0; row < row_count; row++) {

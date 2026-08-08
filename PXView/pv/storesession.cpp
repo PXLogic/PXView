@@ -1510,14 +1510,13 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
         }
         
         dec_obj["version"] = DEOCDER_CONFIG_VERSION;
-        // TODO: adapt — DecoderStack no longer carries a UI label; the
-        // label was previously read from the view::DecodeTrace. Use the
-        // first decoder's id as a fallback label.
-        if (!decoderList.empty()) {
-            dec_obj["label"] = QString(decoderList.front()->decoder()->id);
-        } else {
-            dec_obj["label"] = QString();
+        // Save the custom label from the DecoderStack. If no custom label
+        // is set, fall back to the first decoder's id.
+        QString saved_label = stack->label();
+        if (saved_label.isEmpty() && !decoderList.empty()) {
+            saved_label = QString(decoderList.front()->decoder()->id);
         }
+        dec_obj["label"] = saved_label;
         dec_obj["stacked decoders"] = stack_array;
         // TODO: adapt — view_index is UI state owned by view::DecodeTrace;
         // DecoderStack does not expose it. Persist 0 for now and let the

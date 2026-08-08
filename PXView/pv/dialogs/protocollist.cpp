@@ -28,6 +28,7 @@
 
 #include "../sigsession.h"
 #include "../data/decoderstack.h"
+#include "../data/decode/decoder.h"
 #include "../data/decode/row.h"
 #include "../view/decodetrace.h"
 #include "../view/decodermodel.h"
@@ -64,9 +65,22 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
     int index = 0;
 
     for(auto d : decode_sigs) {
-        // TODO: adapt — DecoderStack no longer exposes a UI label; use the
-        // root decoder id as the display name.
-        _protocol_combobox->addItem(QString::fromUtf8(d->get_root_decoder_id()));
+        // Build a display name from the root decoder's name + custom label
+        // (if set) so multiple instances of the same decoder can be
+        // distinguished in the dropdown (e.g. "SPI(CH2.SPI)").
+        QString display_name;
+        auto &dec_list = d->stack();
+        if (!dec_list.empty()) {
+            auto *root_dec = dec_list.front();
+            if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
+                display_name = QString::fromUtf8(root_dec->decoder()->name);
+        }
+        QString custom_label = d->label();
+        if (!custom_label.isEmpty())
+            display_name += "(" + custom_label + ")";
+        if (display_name.isEmpty())
+            display_name = QString::fromUtf8(d->get_root_decoder_id());
+        _protocol_combobox->addItem(display_name);
         if (decoder_model->getDecoderStack() == d.get())
             _protocol_combobox->setCurrentIndex(index);
         index++;

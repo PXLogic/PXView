@@ -219,7 +219,9 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
     if (start >= end)
         return QString();
 
-    // Extract protocol name from the first decoder in the stack
+    // Extract protocol name from the first decoder in the stack.
+    // If a custom label is set, append it in parentheses so multiple
+    // instances of the same decoder can be distinguished.
     QString protocol = "Unknown";
     auto &decoder_list = stack->stack();
     if (!decoder_list.empty()) {
@@ -230,6 +232,9 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
                 protocol = QString::fromUtf8(srd_dec->name);
         }
     }
+    QString custom_label = stack->label();
+    if (!custom_label.isEmpty())
+        protocol += "(" + custom_label + ")";
 
     // Metadata header
     QString result;
