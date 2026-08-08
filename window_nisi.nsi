@@ -10,7 +10,7 @@ Unicode true
 ; PRODUCT_VERSION can be overridden from the command line:
 ;   makensis /DPRODUCT_VERSION=1.5.4 window_nisi.nsi
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.5.6"
+  !define PRODUCT_VERSION "1.5.7"
 !endif
 !define PRODUCT_PUBLISHER "pxview"
 !define PRODUCT_WEB_SITE "http://www.pxview.com"

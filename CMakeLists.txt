@@ -1,4 +1,4 @@
-##
+﻿##
 ## This file is part of the PXView project.
 ##
 ## Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
@@ -32,7 +32,7 @@ set(DS_DESCRIPTION "A GUI for instruments of PXTOOL")
 
 set(DS_VERSION_MAJOR 1)
 set(DS_VERSION_MINOR 5)
-set(DS_VERSION_MICRO 6)
+set(DS_VERSION_MICRO 7)
 set(DS_VERSION_STRING  ${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO})
 
 configure_file (
