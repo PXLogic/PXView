@@ -243,8 +243,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
           sessionVar[info->name] =
               QJsonValue::fromVariant(g_variant_get_int16(gvar));
         else {
-          pxv_err("Unkown config info type:%d", info->datatype);
-          assert(false);
+          pxv_err("Unknown config info type:%d", info->datatype);
         }
         g_variant_unref(gvar);
       }
@@ -293,8 +292,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
           else if (info->datatype == SR_T_LIST)
             sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int16(gvar));
           else {
-            pxv_err("Unkown config info type:%d", info->datatype);
-            assert(false);
+            pxv_err("Unknown config info type:%d", info->datatype);
           }
           g_variant_unref(gvar);
         }
@@ -366,7 +364,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
 bool MainWindowConfigIO::save_config_to_file(QString name) {
   if (name == "") {
     pxv_err("Session file name is empty.");
-    assert(false);
+    return false;
   }
 
   std::string file_name = pv::path::ToUnicodePath(name);
@@ -411,7 +409,7 @@ bool MainWindowConfigIO::genSessionData(std::string &str) {
 bool MainWindowConfigIO::load_config_from_file(QString file) {
   if (file == "") {
     pxv_err("File name is empty.");
-    assert(false);
+    return false;
   }
 
   _wnd->dock_manager()->protocol_widget()->del_all_protocol();
@@ -898,7 +896,7 @@ QJsonDocument MainWindowConfigIO::get_config_json_from_data_file(QString file,
 
   if (file == "") {
     pxv_err("File name is empty.");
-    assert(false);
+    return sessionDoc;
   }
 
   auto f_name = pv::path::ConvertPath(file);
@@ -934,7 +932,7 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
 
   if (file == "") {
     pxv_err("File name is empty.");
-    assert(false);
+    return QJsonArray();
   }
 
   auto f_name = path::ConvertPath(file);

@@ -92,7 +92,7 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _decoder_status = decoder_status;
   _stask_stauts = nullptr;
   _is_capture_end = true;
-  _snapshot = nullptr;
+  _snapshot.reset();
   _progress.store(0);
   _is_decoding.store(false);
   _result_count.store(0);
@@ -422,7 +422,7 @@ void DecoderStack::init() {
     _error_message = QString();
   }
   _no_memory = false;
-  _snapshot = nullptr;
+  _snapshot.reset();
   _result_count.store(0);
   _ann_dropped_stop.store(0);
   _ann_dropped_mem.store(0);
@@ -485,7 +485,7 @@ void DecoderStack::do_decode_work() {
 
   init();
 
-  _snapshot = nullptr;
+  _snapshot.reset();
 
   pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
 
@@ -529,11 +529,11 @@ void DecoderStack::do_decode_work() {
 
         pxv_info("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
                  m->index(), (int)m->type(), (int)SR_CHANNEL_LOGIC,
-                 m->snapshot(), index_match, type_match, snapshot_ok);
+                 m->snapshot().get(), index_match, type_match, snapshot_ok);
 
         if (index_match && type_match) {
-          _snapshot = (pv::data::LogicSnapshot*)m->snapshot();
-          pxv_info("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot);
+          _snapshot = std::static_pointer_cast<pv::data::LogicSnapshot>(m->snapshot());
+          pxv_info("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot.get());
           if (_snapshot != nullptr)
             break;
         }
@@ -799,7 +799,7 @@ void DecoderStack::execute_decode_stack() {
 
   if (session == nullptr) {
     pxv_err("Failed to call srd_session_new()");
-    assert(false);
+    return;
   }
 
   _sample_count.store(_snapshot->get_sample_count());
@@ -911,7 +911,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
   if (d->_decoder_status == nullptr) {
     pxv_err("decode task was deleted.");
-    assert(false);
+    return;
   }
 
   if (d->_no_memory) {

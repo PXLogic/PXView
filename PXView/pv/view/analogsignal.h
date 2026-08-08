@@ -197,6 +197,7 @@ private:
 
 private:
 	pv::data::AnalogSnapshot *_data;
+std::shared_ptr<pv::data::AnalogSnapshot> _data_ref; // keeps snapshot alive (prevents use-after-free)
 
     std::unique_ptr<QRectF[]> _rects;
     // 性能修复: paint_trace 复用成员缓冲，避免每帧 new/delete QPointF[]。

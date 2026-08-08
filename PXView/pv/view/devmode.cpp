@@ -215,7 +215,7 @@ void DevMode::paintEvent(QPaintEvent*)
 void DevMode::on_mode_change()
 {
     if (_device_agent->have_instance() == false){
-        assert(false);
+        pxv_warn("DevMode::on_mode_change: no device instance");
         return;
     }
 
@@ -257,7 +257,7 @@ void DevMode::on_mode_change()
 void DevMode::on_close()
 {
    if (_device_agent->have_instance() == false){
-        assert(false);
+        pxv_warn("DevMode::on_close: no device instance");
         return;
     }
 
@@ -314,7 +314,7 @@ const struct dev_mode_name* DevMode::get_mode_name(int mode)
         if (mode == o._mode){
             return &o;
     }
-    assert(false);
+    pxv_warn("DevMode::find_mode: mode not found in list");
     return nullptr;
 }
 

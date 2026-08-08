@@ -44,7 +44,8 @@ void DsTimer::TimeOut(int millsec, CALLBACL_FUNC f)
 void DsTimer::TimeOut(int millsec)
 {
     if (_call == nullptr){
-        assert(false);
+        pxv_warn("DsTimer::TimeOut: _call is nullptr");
+        return;
     }
     QTimer::singleShot(millsec, this, &DsTimer::on_timeout);
 }

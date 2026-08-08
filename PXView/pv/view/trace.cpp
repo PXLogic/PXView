@@ -130,7 +130,7 @@ void Trace::set_name(QString name)
 int Trace::get_index()
 {
     if(_index_list.size() == 0){
-        assert(false);
+        pxv_warn("Trace::get_index: _index_list is empty, returning 0");
         return 0;
     }
 
@@ -140,7 +140,7 @@ int Trace::get_index()
 void Trace::set_index_list(const std::list<int> &index_list)
 {
     if (index_list.size() == 0){
-        assert(false);
+        pxv_warn("Trace::set_index_list: index_list is empty, ignoring");
         return;
     }
 

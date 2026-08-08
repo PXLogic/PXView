@@ -222,12 +222,12 @@ double DsoMeasure::get_voltage(uint64_t index) {
 
 QString DsoMeasure::get_voltage(double v, int p, bool scaled) {
   if (_signal->_vDial == nullptr) {
-    assert(false);
+    pxv_warn("DsoMeasure::get_voltage: _vDial is nullptr");
     return QString("--");
   }
 
   if (_signal->get_view_rect().height() == 0) {
-    assert(false);
+    pxv_warn("DsoMeasure::get_voltage: view rect height is 0");
     return QString("--");
   }
 

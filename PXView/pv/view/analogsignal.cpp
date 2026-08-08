@@ -992,13 +992,15 @@ QString AnalogSignal::get_voltage(double v, int p, bool scaled) {
 
 void AnalogSignal::set_data(data::AnalogSnapshot *data) {
   _data = data;
+  _data_ref.reset();
 }
 
 void AnalogSignal::set_data_from_source(data::DataSource *source) {
+  _data_ref = source ? source->get_analog_snapshot_shared() : nullptr;
   _data = source ? source->get_analog_snapshot() : nullptr;
 }
 
-void AnalogSignal::clear_data() { _data = nullptr; }
+void AnalogSignal::clear_data() { _data = nullptr; _data_ref.reset(); }
 
 } // namespace view
 } // namespace pv

@@ -322,6 +322,7 @@ private:
 
 private:
     pv::data::DsoSnapshot *_data;
+std::shared_ptr<pv::data::DsoSnapshot> _data_ref; // keeps snapshot alive (prevents use-after-free)
 	float _scale;
     float _stop_scale = 1;
     bool _en_lock;

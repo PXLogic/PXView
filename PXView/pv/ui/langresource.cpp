@@ -225,7 +225,6 @@ const char* LangResource::get_lang_text(int page_id, const char *str_id, const c
 
     if (*str_id == '\0' || *default_str == '\0'){
         pxv_err("LangResource::get_lang_text(), param is empty.");
-        assert(false);
     }
 
     if (_current_page == nullptr || _current_page->_id != page_id){

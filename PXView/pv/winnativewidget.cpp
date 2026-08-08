@@ -95,8 +95,8 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
     RegisterClassEx(&wcx);
     if (FAILED(RegisterClassEx(&wcx)))
     {
-        pxv_info("ERROR: can't register window class");
-        assert(false);
+        pxv_err("ERROR: can't register window class");
+        return;
     }
  
     _hWnd = CreateWindow(L"PXViewWindowClass", L"PXView",
@@ -107,8 +107,8 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
 
     if (!_hWnd)
     {
-        pxv_info("ERROR: can't create naitive window");
-        assert(false);
+        pxv_err("ERROR: can't create native window");
+        return;
     }
     
     SetWindowLongPtr(_hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));

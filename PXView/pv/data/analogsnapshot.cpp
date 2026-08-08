@@ -528,8 +528,11 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
 
 const uint8_t* AnalogSnapshot::get_samples(int64_t start_sample)
 {
-	assert(start_sample >= 0);
-    assert(start_sample < (int64_t)get_sample_count());
+	if (start_sample < 0 || start_sample >= (int64_t)get_sample_count()) {
+		pxv_warn("AnalogSnapshot::get_samples: start_sample %lld out of range (count=%llu)",
+		         (long long)start_sample, (unsigned long long)get_sample_count());
+		return nullptr;
+	}
 
     return (uint8_t*)_data + start_sample * _unit_bytes * _channel_num;
 }
@@ -537,8 +540,18 @@ const uint8_t* AnalogSnapshot::get_samples(int64_t start_sample)
 void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
     uint64_t start, int64_t count, float min_length, int probe_index)
 {
-    assert(count >= 0);
-	assert(min_length > 0);
+    if (count < 0) {
+        pxv_warn("AnalogSnapshot::get_envelope_section: negative count %lld, aborting",
+                 (long long)count);
+        s.length = 0;
+        return;
+    }
+    if (min_length <= 0) {
+        pxv_warn("AnalogSnapshot::get_envelope_section: non-positive min_length %f, aborting",
+                 min_length);
+        s.length = 0;
+        return;
+    }
 
     const unsigned int min_level = max((int)floorf(logf(min_length) /
             LogEnvelopeScaleFactor) - 1, 0);

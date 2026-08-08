@@ -760,7 +760,6 @@ QString GetAppDataDir()
     }
 
     pxv_err("Data directory is not exists: ../share/PXView");
-    assert(false);
     return QString();
 #else
 

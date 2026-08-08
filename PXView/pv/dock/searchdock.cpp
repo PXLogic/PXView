@@ -21,6 +21,7 @@
  */
 
 #include "searchdock.h"
+#include <QPointer>
 #include "../data/logicsnapshot.h"
 #include "../data/snapshot.h"
 #include "../sigsession.h"
@@ -498,7 +499,12 @@ void SearchDock::start_search_async() {
   _time_search_cur_index = -1;
 
   _search_state.store(1);
-  _search_future = QtConcurrent::run([this]() { search_worker(); });
+  QPointer<SearchDock> guard(this);
+  _search_future = QtConcurrent::run([guard]() {
+    if (!guard)
+      return;
+    guard->search_worker();
+  });
   _search_watcher.setFuture(_search_future);
 }
 

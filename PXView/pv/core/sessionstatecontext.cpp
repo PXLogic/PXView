@@ -134,7 +134,7 @@ SessionStateContext::get_decoder_trace(int index, data::SessionDocument *doc) {
   if (index >= 0 && index < (int)traces.size()) {
     return traces[index];
   }
-  assert(false);
+  pxv_warn("SessionStateContext::get_decoder_trace_by_index: index out of range");
   return nullptr;
 }
 

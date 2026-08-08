@@ -402,7 +402,7 @@ void ViewSignalSync::layout_time_signals(
       1.0 / total_rows;
 
   if (_view->device_agent()->have_instance() == false) {
-    assert(false);
+    pxv_warn("ViewSignalSync::compute_layout: no device instance, skipping layout");
     return;
   }
 

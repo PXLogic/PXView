@@ -117,7 +117,15 @@ public:
     // prevent use-after-free when the document releases its reference.
     virtual std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() { return nullptr; }
     virtual data::AnalogSnapshot* get_analog_snapshot() = 0;
+    // Shared-pointer variant for lifetime safety: callers that store a raw
+    // pointer (e.g. AnalogSignal::_data) can also hold the shared_ptr to
+    // prevent use-after-free when the document releases its reference.
+    virtual std::shared_ptr<data::AnalogSnapshot> get_analog_snapshot_shared() { return nullptr; }
     virtual data::DsoSnapshot* get_dso_snapshot() = 0;
+    // Shared-pointer variant for lifetime safety: callers that store a raw
+    // pointer (e.g. DsoSignal::_data) can also hold the shared_ptr to
+    // prevent use-after-free when the document releases its reference.
+    virtual std::shared_ptr<data::DsoSnapshot> get_dso_snapshot_shared() { return nullptr; }
     virtual data::Snapshot* get_snapshot(int type) = 0;
     virtual uint64_t get_trigger_pos();
 

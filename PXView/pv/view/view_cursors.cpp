@@ -229,8 +229,11 @@ void ViewCursors::clear_cursors() {
 void ViewCursors::set_cursor_middle(int index) {
   auto &lst = get_cursorList();
   int size = lst.size();
-  (void)size;
-  assert(index < size);
+  if (index < 0 || index >= size) {
+    pxv_warn("ViewCursors::set_cursor_middle: index %d out of range (size=%d)",
+             index, size);
+    return;
+  }
 
   int width = _view->get_view_width();
 
@@ -271,7 +274,11 @@ void ViewCursors::del_xcursor(XCursor *xcursor) {
 
 uint64_t ViewCursors::get_cursor_samples(int index) {
   auto &lst = get_cursorList();
-  assert(index < (int)lst.size());
+  if (index < 0 || index >= (int)lst.size()) {
+    pxv_warn("ViewCursors::get_cursor_samples: index %d out of range (size=%d)",
+             index, (int)lst.size());
+    return 0;
+  }
 
   uint64_t ret = 0;
   int curIndex = 0;

@@ -946,7 +946,8 @@ double SamplingBar::hori_knob(int dir) {
   double hori_res = -1;
 
   if (_signals->device()->get_work_mode() != DSO) {
-    assert(false);
+    pxv_warn("SamplingBar::hori_knob: not in DSO mode, returning -1");
+    return -1;
   }
 
   pxv_info("[DEBUG-DSO] hori_knob: dir=%d currentIndex=%d count=%d",

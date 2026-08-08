@@ -26,6 +26,7 @@
 #include <libsigrokdecode.h>
 #include <list>
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <QObject>
 #include <QString>
@@ -235,7 +236,7 @@ signals:
   
 private: 
 	std::list<decode::Decoder*> _stack;
-	pv::data::LogicSnapshot *_snapshot;
+    std::shared_ptr<pv::data::LogicSnapshot> _snapshot;
   
     std::map<const decode::Row, decode::RowData*>   _rows;
     std::map<const decode::Row, bool>       _rows_gshow;

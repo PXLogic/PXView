@@ -53,7 +53,9 @@ public:
   LogicSnapshot *get_logic_snapshot() override;
 std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _logic; }
   AnalogSnapshot *get_analog_snapshot() override;
+  std::shared_ptr<AnalogSnapshot> get_analog_snapshot_shared() override { return _analog; }
   DsoSnapshot *get_dso_snapshot() override;
+  std::shared_ptr<DsoSnapshot> get_dso_snapshot_shared() override { return _dso; }
 
   LogicSnapshot *get_active_logic();
   AnalogSnapshot *get_active_analog();

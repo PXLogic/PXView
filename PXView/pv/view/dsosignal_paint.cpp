@@ -227,7 +227,10 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const double pixels_offset = offset;
     const double samplerate = _data->samplerate();
 
-    assert(samplerate > 0);
+    if (samplerate <= 0) {
+        pxv_warn("DsoSignal::paint_mid: samplerate <= 0, skipping paint");
+        return;
+    }
 
     const int64_t last_sample =
         max((int64_t)(_data->get_sample_count() - 1), (int64_t)0);

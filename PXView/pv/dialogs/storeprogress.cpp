@@ -127,7 +127,11 @@ void StoreProgress::closeEvent(QCloseEvent* event)
     _store_session->session()->set_saving(false);
     _store_session->session()->broadcast_async<interface::SaveComplete>({});
 
-    delete this;
+    // Use deleteLater() instead of delete this — Qt processes it at the end
+    // of the current event loop iteration, so no code after closeEvent returns
+    // can access the destroyed object. This is the idiomatic Qt pattern for
+    // self-deleting dialogs.
+    this->deleteLater();
 }
 
 void StoreProgress::keyPressEvent(QKeyEvent *event)

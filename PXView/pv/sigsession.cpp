@@ -1305,13 +1305,13 @@ void SigSession::init_signals() {
     for (auto &m : _state->signal_models()) {
       switch (m->type()) {
       case SR_CHANNEL_LOGIC:
-        m->set_snapshot(_state->view_data()->get_logic());
+        m->set_snapshot(_state->view_data()->logic_shared());
         break;
       case SR_CHANNEL_ANALOG:
-        m->set_snapshot(_state->view_data()->get_analog());
+        m->set_snapshot(_state->view_data()->analog_shared());
         break;
       case SR_CHANNEL_DSO:
-        m->set_snapshot(_state->view_data()->get_dso());
+        m->set_snapshot(_state->view_data()->dso_shared());
         break;
       }
     }
@@ -1510,13 +1510,13 @@ void SigSession::reload() {
       for (auto &m : _state->signal_models()) {
         switch (m->type()) {
         case SR_CHANNEL_LOGIC:
-          m->set_snapshot(_state->view_data()->get_logic());
+          m->set_snapshot(_state->view_data()->logic_shared());
           break;
         case SR_CHANNEL_ANALOG:
-          m->set_snapshot(_state->view_data()->get_analog());
+          m->set_snapshot(_state->view_data()->analog_shared());
           break;
         case SR_CHANNEL_DSO:
-          m->set_snapshot(_state->view_data()->get_dso());
+          m->set_snapshot(_state->view_data()->dso_shared());
           break;
         }
       }

@@ -121,7 +121,11 @@ int SpectrumTrace::view_mode()
 
 void SpectrumTrace::set_view_mode(unsigned int mode)
 {
-    assert(mode < sizeof(FFT_ViewMode)/sizeof(FFT_ViewMode[0]));
+    if (mode >= sizeof(FFT_ViewMode)/sizeof(FFT_ViewMode[0])) {
+        pxv_warn("SpectrumTrace::set_view_mode: mode %u out of range (max=%zu), clamping",
+                 mode, sizeof(FFT_ViewMode)/sizeof(FFT_ViewMode[0]));
+        mode = sizeof(FFT_ViewMode)/sizeof(FFT_ViewMode[0]) - 1;
+    }
     _view_mode = mode;
 }
 

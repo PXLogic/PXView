@@ -1348,7 +1348,8 @@ bool ProtocolDock::protocol_sort_callback(const DecoderInfoItem *o1,
 
 QString ProtocolDock::parse_protocol_id(const char *id) {
   if (id == nullptr || *id == 0) {
-    assert(false);
+    pxv_warn("ProtocolDock::parse_protocol_id: id is null or empty");
+    return QString();
   }
   char buf[25];
   strncpy(buf, id, sizeof(buf) - 1);

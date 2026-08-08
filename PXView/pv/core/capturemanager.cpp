@@ -150,7 +150,6 @@ bool CaptureManager::action_start_capture(bool instant,
   // Check that a device instance has been selected.
   if (_state->device_agent().have_instance() == false) {
     pxv_err("Error!No device selected");
-    assert(false);
     return false;
   }
   if (_state->device_status() == ST_RUNNING ||

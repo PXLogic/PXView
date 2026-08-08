@@ -21,6 +21,7 @@
  */
 
 #include "signalmodel.h"
+#include "snapshot.h"
 
 #include "../sigsession.h"
 #include "../deviceagent.h"
@@ -289,7 +290,7 @@ void SignalModel::set_hw_offset(double offset) {
 void SignalModel::set_glitch_filter_enabled(bool enabled) { _glitch_filter_enabled = enabled; }
 void SignalModel::set_glitch_filter_width(int width) { _glitch_filter_width = width; }
 void SignalModel::set_signal_invert_enabled(bool enabled) { _signal_invert_enabled = enabled; }
-void SignalModel::set_snapshot(void *snapshot) { _snapshot = snapshot; }
+void SignalModel::set_snapshot(std::shared_ptr<Snapshot> snapshot) { _snapshot = snapshot; }
 
 void SignalModel::commit_to_device()
 {

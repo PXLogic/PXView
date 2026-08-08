@@ -24,6 +24,7 @@
 #define PXVIEW_PV_DATA_SIGNALMODEL_H
 
 #include <string>
+#include <memory>
 
 #include <libsigrok/libsigrok.h>
 #include <QObject>
@@ -33,6 +34,8 @@ namespace pv {
 class SigSession;  // forward declaration — Core layer; full include in .cpp
 
 namespace data {
+
+class Snapshot;  // forward declaration — shared_ptr<Snapshot> member below
 
 class SignalModel : public QObject
 {
@@ -135,8 +138,13 @@ public:
     void set_signal_invert_enabled(bool enabled);
 
     // ---- Snapshot association ----
-    inline void *snapshot() const { return _snapshot; }
-    void set_snapshot(void *snapshot);
+    // Returns a shared_ptr to the associated snapshot. The shared_ptr keeps
+    // the snapshot alive as long as any SignalModel (or DecoderStack) holds
+    // a reference, preventing use-after-free when SessionData::clear()
+    // resets its own shared_ptr. Callers that need the typed snapshot
+    // (e.g. LogicSnapshot*) use std::static_pointer_cast.
+    inline std::shared_ptr<Snapshot> snapshot() const { return _snapshot; }
+    void set_snapshot(std::shared_ptr<Snapshot> snapshot);
 
     // ---- Device/session binding (Core layer only) ----
     // Injected by SigSession::init_signals() / reload() so the model can
@@ -192,7 +200,7 @@ private:
 
     bool                _signal_invert_enabled;
 
-    void               *_snapshot;
+    std::shared_ptr<Snapshot> _snapshot;  // shared ownership — prevents UAF
 
     // Weak references — see set_session() / set_sr_channel().
     SigSession         *_session = nullptr;

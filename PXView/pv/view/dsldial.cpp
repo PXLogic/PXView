@@ -100,7 +100,11 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
         displayIndex++;
     }
 
-    assert((qsizetype)displayIndex < _unit.count());
+    if ((qsizetype)displayIndex >= _unit.count()) {
+        pxv_warn("DslDial: displayIndex %d out of range (count=%lld), clamping",
+                 displayIndex, (long long)_unit.count());
+        displayIndex = _unit.count() - 1;
+    }
    
     pText = QString::number(displayValue) + _unit[displayIndex] + "/div";
 
@@ -125,7 +129,11 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
 
 void dslDial::set_sel(uint64_t sel)
 {
-    assert(sel < _div);
+    if (sel >= _div) {
+        pxv_warn("dslDial::set_sel: sel %llu >= _div %llu, clamping",
+                 (unsigned long long)sel, (unsigned long long)_div);
+        sel = _div - 1;
+    }
 
     _sel = sel;
 }
@@ -169,7 +177,8 @@ uint64_t dslDial::get_max()
 uint64_t dslDial::get_value()
 {    
     if (_sel >= (uint64_t)_value.count()){
-        assert(false);
+        pxv_warn("dslDial::get_value: _sel %llu >= count %lld, returning 0",
+                 (unsigned long long)_sel, (long long)_value.count());
         return 0;
     }
 
@@ -178,13 +187,21 @@ uint64_t dslDial::get_value()
 
 uint64_t dslDial::get_value(uint64_t i)
 {
-    assert(i < _div);
+    if (i >= _div) {
+        pxv_warn("dslDial::get_value: index %llu >= _div %llu, returning 0",
+                 (unsigned long long)i, (unsigned long long)_div);
+        return 0;
+    }
     return _value[i];
 }
 
 void dslDial::set_value(uint64_t value)
 {
-    assert(_value.contains(value));
+    if (!_value.contains(value)) {
+        pxv_warn("dslDial::set_value: value %llu not in list, ignoring",
+                 (unsigned long long)value);
+        return;
+    }
     _sel = _value.indexOf(value, 0);
 }
 

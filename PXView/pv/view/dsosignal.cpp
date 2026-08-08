@@ -790,13 +790,14 @@ QRectF DsoSignal::get_rect(DsoSetRegions type, int y, int right) {
     return QRectF(0, 0, 0, 0);
 }
 
-void DsoSignal::set_data(data::DsoSnapshot *data) { _data = data; }
+void DsoSignal::set_data(data::DsoSnapshot *data) { _data = data; _data_ref.reset(); }
 
 void DsoSignal::set_data_from_source(data::DataSource *source) {
+  _data_ref = source ? source->get_dso_snapshot_shared() : nullptr;
   _data = source ? source->get_dso_snapshot() : nullptr;
 }
 
-void DsoSignal::clear_data() { _data = nullptr; }
+void DsoSignal::clear_data() { _data = nullptr; _data_ref.reset(); }
 
 } // namespace view
 } // namespace pv

@@ -72,13 +72,13 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
   for (auto m : _state->signal_models()) {
     switch (m->type()) {
     case SR_CHANNEL_LOGIC:
-      m->set_snapshot(data->get_logic());
+      m->set_snapshot(data->logic_shared());
       break;
     case SR_CHANNEL_ANALOG:
-      m->set_snapshot(data->get_analog());
+      m->set_snapshot(data->analog_shared());
       break;
     case SR_CHANNEL_DSO:
-      m->set_snapshot(data->get_dso());
+      m->set_snapshot(data->dso_shared());
       break;
     }
   }

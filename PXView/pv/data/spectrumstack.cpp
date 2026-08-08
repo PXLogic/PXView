@@ -21,6 +21,7 @@
 
 #include "spectrumstack.h"
 #include <cmath>
+#include <memory>
 #include "dsosnapshot.h"
 #include "../sigsession.h"
 #include "../view/dsosignal.h"
@@ -135,12 +136,14 @@ void SpectrumStack::calc_fft()
     _spectrum_state = Running;
     // Get the dso data
     pv::data::DsoSnapshot *data = nullptr;
+    std::shared_ptr<pv::data::DsoSnapshot> data_snap;
     std::shared_ptr<pv::data::SignalModel> model;
 
     for(auto m : _session->get_signal_models()) {
         if (m->type() == SR_CHANNEL_DSO) {
             if (m->index() == _index && m->enabled()) {
-                data = (pv::data::DsoSnapshot*)m->snapshot();
+                data_snap = std::static_pointer_cast<pv::data::DsoSnapshot>(m->snapshot());
+                data = data_snap.get();
                 model = m;
                 break;
             }

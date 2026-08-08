@@ -23,9 +23,9 @@
 #include <libsigrokdecode.h>
 
 #include <vector>
-#include <cassert>
 #include <stdexcept>
 
+#include "../../log.h"
 #include "annotation.h"
 #include "annotationrestable.h"
 #include <cstring>
@@ -142,7 +142,7 @@ const std::vector<QString>& Annotation::annotations() const
 
 	//resItem.str_number_hex must be not nullptr
 	if (resItem.str_number_hex[0] == 0){
-		assert(false);
+		pxv_warn("Annotation: str_number_hex is empty");
 	}
  
 	 if (resItem.cur_display_format !=  _status->m_format){

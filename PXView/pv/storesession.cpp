@@ -372,7 +372,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
                         && start_index == 0
                         && end_index == 0){
                     pxv_err("Read block data error!");
-                    assert(false);
+                    break;
                 }
 
                 if (need_malloc)
@@ -1826,8 +1826,10 @@ double StoreSession::get_integer(GVariant *var)
         val = g_variant_get_int64(var);
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
         val = g_variant_get_uint64(var);
-    else
-        assert(false);
+    else {
+        pxv_err("StoreSession: unsupported GVariant type for uint64 conversion");
+        val = 0;
+    }
 
     return val;
 }

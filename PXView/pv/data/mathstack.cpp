@@ -22,6 +22,7 @@
 #include "mathstack.h"
 #include <cmath>
 #include <cassert>
+#include <memory>
 
 #include  "dsosnapshot.h"
 #include  "signalmodel.h"
@@ -117,7 +118,6 @@ MathStack::MathStack(pv::SigSession *session,
     if (m1 == nullptr || m2 == nullptr){
         pxv_info("ERROR: MathStack::MathStack, DSO SignalModel not found for "
                  "ch1=%d or ch2=%d.", ch1_index, ch2_index);
-        assert(false);
     }
 }
 
@@ -413,7 +413,7 @@ void MathStack::calc_math(uint64_t mathFactor)
     if (!m1->enabled() || !m2->enabled())
         return;
 
-    auto data = static_cast<DsoSnapshot*>(m1->snapshot());
+    auto data = std::static_pointer_cast<DsoSnapshot>(m1->snapshot());
     if (data == nullptr || data->empty() || _math.size() < _total_sample_num)
         return;
 

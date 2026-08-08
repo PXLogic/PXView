@@ -40,10 +40,12 @@
 #include <QTabWidget>
 #include <QThreadPool>
 #include <QToolButton>
+#include <QPointer>
 #include <cassert>
 
 #include "../appcontrol.h"
 #include "../config/appconfig.h"
+#include "../core/eventbus.h"
 #include "../data/sessiondocument.h"
 #include "../deviceagent.h"
 #include "../pxvdef.h"
@@ -687,18 +689,27 @@ void DeviceOptionsDock::mode_check_timeout() {
   if (_device_agent->is_hardware()) {
     DeviceAgent *agent = _device_agent;
     QString saved_opt_mode = _opt_mode;
-    QThreadPool::globalInstance()->start([this, agent, saved_opt_mode]() {
+    // Use QPointer to safely handle dock destruction while the async task
+    // is still running. If the dock is destroyed before the functor executes,
+    // the QPointer will be null and the functor is a no-op.
+    // post_async_dispatch uses QCoreApplication::postEvent (not
+    // QMetaObject::invokeMethod) to avoid creating QThreadData on the
+    // worker thread, which can SIGSEGV on thread exit (Windows).
+    QPointer<DeviceOptionsDock> guard(this);
+    QThreadPool::globalInstance()->start([guard, agent, saved_opt_mode]() {
       QString mode;
       bool got_mode = agent->get_config_string(SR_CONF_OPERATION_MODE, mode);
       if (!got_mode || mode == saved_opt_mode)
         return;
 
-      QMetaObject::invokeMethod(this, [this, mode]() {
-        if (_isBuilding)
+      pv::core::EventBus::post_async_dispatch([guard, mode]() {
+        if (!guard)
           return;
-        _opt_mode = mode;
-        build_dynamic_panel();
-        try_resize_scroll();
+        if (guard->_isBuilding)
+          return;
+        guard->_opt_mode = mode;
+        guard->build_dynamic_panel();
+        guard->try_resize_scroll();
       });
     });
 

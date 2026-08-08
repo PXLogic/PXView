@@ -358,17 +358,26 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
     (void)end_sample;
     std::lock_guard<std::mutex> lock(_mutex);
 
-	assert(start_sample >= 0);
-    assert(start_sample < (int64_t)_sample_count);
-    assert(end_sample >= 0);
-    assert(end_sample < (int64_t)_sample_count);
-    assert(start_sample <= end_sample);
+    if (start_sample < 0 || start_sample >= (int64_t)_sample_count) {
+        pxv_warn("DsoSnapshot::get_samples: start_sample %lld out of range (count=%llu)",
+                 (long long)start_sample, (unsigned long long)_sample_count);
+        return nullptr;
+    }
+    if (end_sample < 0 || end_sample >= (int64_t)_sample_count) {
+        pxv_warn("DsoSnapshot::get_samples: end_sample %lld out of range (count=%llu)",
+                 (long long)end_sample, (unsigned long long)_sample_count);
+        return nullptr;
+    }
+    if (start_sample > end_sample) {
+        pxv_warn("DsoSnapshot::get_samples: start %lld > end %lld",
+                 (long long)start_sample, (long long)end_sample);
+        return nullptr;
+    }
 
     int order = get_ch_order(ch_index);
 
     if (order == -1){
         pxv_err("The channel index is not exist:%d", ch_index);
-        assert(false);
         return nullptr;
     }
 
@@ -387,8 +396,16 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
 void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
     uint64_t start, uint64_t end, float min_length, int probe_index)
 {
-	assert(end <= get_sample_count());
-	assert(start <= end);
+	if (end > get_sample_count()) {
+		pxv_warn("DsoSnapshot::get_envelope_section: end %llu > sample_count %llu, clamping",
+		         (unsigned long long)end, (unsigned long long)get_sample_count());
+		end = get_sample_count();
+	}
+	if (start > end) {
+		pxv_warn("DsoSnapshot::get_envelope_section: start %llu > end %llu, clamping",
+		         (unsigned long long)start, (unsigned long long)end);
+		start = end;
+	}
 	assert(min_length > 0);
 
     const int order = get_ch_order(probe_index);
@@ -620,7 +637,8 @@ bool DsoSnapshot::get_max_min_value(uint8_t &maxv, uint8_t &minv, int chan_index
     }
 
     if (chan_index < 0 || chan_index >= (int)_ch_data.size()){
-        assert(false);
+        pxv_err("DsoSnapshot::get_data_range: chan_index %d out of range (size=%zu)", chan_index, _ch_data.size());
+        return false;
     }
 
     uint8_t *p = _ch_data[chan_index];

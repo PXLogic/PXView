@@ -450,7 +450,11 @@ void ViewDataSync::capture_init() {
 }
 
 void ViewDataSync::show_region(uint64_t start, uint64_t end, bool keep) {
-  assert(start <= end);
+  if (start > end) {
+    pxv_warn("ViewDataSync::show_region: start %llu > end %llu, swapping",
+             (unsigned long long)start, (unsigned long long)end);
+    std::swap(start, end);
+  }
 
   int width = _view->get_view_width();
   if (width == 0) {
