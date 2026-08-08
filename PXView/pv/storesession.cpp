@@ -67,16 +67,18 @@ namespace pv {
 
 StoreSession::StoreSession(SigSession *session) :
 	_session(session),
-    _outModule(nullptr),
-	_units_stored(0),
-    _unit_count(0),
-    _has_error(false),
-    _canceled(false)
+    _outModule(nullptr)
 { 
     _sessionDataGetter = nullptr;
     _start_index = 0;
     _end_index = 0;
     _is_busy = false;
+}
+
+void StoreSession::set_error(const QString &err)
+{
+    std::lock_guard<std::mutex> lk(_error_mutex);
+    _error = err;
 }
 
 StoreSession::~StoreSession()
@@ -98,13 +100,14 @@ void StoreSession::get_progress(uint64_t *writed, uint64_t *total)
         return;
     }
 
-    *writed = _units_stored;
-    *total = _unit_count;
+    *writed = _units_stored.load();
+    *total = _unit_count.load();
 }
 
-const QString& StoreSession::error()
-{ 
-	return _error;
+QString StoreSession::error()
+{
+    std::lock_guard<std::mutex> lk(_error_mutex);
+    return _error;
 }
 
 void StoreSession::wait()
@@ -154,7 +157,7 @@ bool StoreSession::save_start()
     assert(_sessionDataGetter);
     if (!_sessionDataGetter) {
         pxv_warn("StoreSession::save_start called with no _sessionDataGetter.");
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save."));
         return false;
     }
 
@@ -170,12 +173,12 @@ bool StoreSession::save_start()
     }
 
     if (type_set.size() == 0) {
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save."));
         return false;
     }
 
     if (_file_name == ""){
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR3), "No file name.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR3), "No file name."));
         return false;
     }
 
@@ -191,7 +194,7 @@ bool StoreSession::save_start()
     }
     if (!snapshot) {
         pxv_warn("StoreSession::save_start: no snapshot with data found.");
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR2), "No data to save."));
         return false;
     }
 
@@ -204,17 +207,17 @@ bool StoreSession::save_start()
     _sessionDataGetter->genSessionData(session_data);
 
     if (meta_data.empty()) {
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR4), "Generate temp file data failed.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR4), "Generate temp file data failed."));
         QFile::remove(_file_name);
         return false;
     }
     if (decoder_data.empty()){
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR5), "Generate decoder file data failed.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR5), "Generate decoder file data failed."));
         QFile::remove(_file_name);
         return false;
     }
     if (session_data.empty()){
-        _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR6), "Generate session file data failed.");
+        set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR6), "Generate session file data failed."));
         QFile::remove(_file_name);
         return false;
     }
@@ -228,18 +231,18 @@ bool StoreSession::save_start()
             || !m_zipDoc.AddFromBuffer("session", session_data.c_str(), session_data.size())
         )
         {
-            _has_error = true;
-            _error = m_zipDoc.GetError();
+            _has_error.store(true);
+            set_error(m_zipDoc.GetError());
         }
         else
         {
             if (_thread.joinable()) _thread.join();
             _thread = std::thread(&StoreSession::save_proc, this, snapshot);
-            return !_has_error;
+            return !_has_error.load();
         }
     }
     else{
-         _error = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR7), "Generate zip file failed.");
+         set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR7), "Generate zip file failed."));
     }
 
     QFile::remove(_file_name);
@@ -259,7 +262,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
             to_save_probes++;
     }
 
-    _unit_count = logic_snapshot->get_ring_sample_count() / 8 * to_save_probes;
+    _unit_count.store(logic_snapshot->get_ring_sample_count() / 8 * to_save_probes);
     num = logic_snapshot->get_block_num();
 
     uint64_t start_index = _start_index;
@@ -271,7 +274,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
 
     if (start_index > logic_snapshot->get_ring_sample_count()){
         pxv_err("ERROR:the start curosr is invalid!");
-        _units_stored = -1;
+        _units_stored.store((uint64_t)-1);
         progress_updated();
         return;
     }
@@ -297,13 +300,13 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
     }
 
     if (start_index > 0 && end_index > 0){
-        _unit_count = (end_index - start_index) / 8 * to_save_probes;
+        _unit_count.store((end_index - start_index) / 8 * to_save_probes);
     }
     else if (start_index > 0){
-        _unit_count = (logic_snapshot->get_ring_sample_count() - start_index) / 8 * to_save_probes;
+        _unit_count.store((logic_snapshot->get_ring_sample_count() - start_index) / 8 * to_save_probes);
     }
     else if (end_index > 0){
-        _unit_count = end_index / 8 * to_save_probes;
+        _unit_count.store(end_index / 8 * to_save_probes);
     }
 
     for(auto m : _session->get_signal_models())
@@ -341,9 +344,9 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                 if (need_malloc) {
                     buf = (uint8_t *)malloc(size);
                     if (buf == nullptr) {
-                        _has_error = true;
-                        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1), 
-                                    "Failed to create zip file. Malloc error.");
+                        _has_error.store(true);
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
+            "Failed to create zip file. Malloc error."));
                     } else {
                         memset(buf, sample ? 0xff : 0x0, size);
                     }
@@ -353,19 +356,19 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                 ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)buf, size) ? SR_OK : -1;
 
                 if (ret != SR_OK) {
-                    if (!_has_error) {
-                        _has_error = true;
-                        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2), 
-                                    "Failed to create zip file. Please check write permission of this path.");
+                    if (!_has_error.load()) {
+                        _has_error.store(true);
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
+            "Failed to create zip file. Please check write permission of this path."));
                     }
                     progress_updated();
-                    if (_has_error)
+                    if (_has_error.load())
                         QFile::remove(_file_name);
                     return;
                 }
-                _units_stored += size;
+                _units_stored.fetch_add(size);
 
-                if (_units_stored > _unit_count 
+                if (_units_stored.load() > _unit_count.load() 
                         && start_index == 0
                         && end_index == 0){
                     pxv_err("Read block data error!");
@@ -409,9 +412,9 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
 
     if (ch_type != -1) {
         num = analog_snapshot->get_block_num();
-        _unit_count = analog_snapshot->get_sample_count() *
-                        analog_snapshot->get_unit_bytes() *
-                        analog_snapshot->get_channel_num();
+_unit_count.store(analog_snapshot->get_sample_count() *
+                    analog_snapshot->get_unit_bytes() *
+                    analog_snapshot->get_channel_num());
         uint8_t *buf = nullptr;
         uint8_t *buf_start = nullptr;
 
@@ -421,16 +424,16 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
 
         buf_start = (uint8_t *)analog_snapshot->get_data();
 
-        const uint8_t *buf_end = buf_start + _unit_count;
+        const uint8_t *buf_end = buf_start + _unit_count.load();
 
         for (int i = 0; !_canceled && i < num; i++) {
             const uint64_t size = analog_snapshot->get_block_size(i);
             if ((buf + size) > buf_end) {
                 uint8_t *tmp = (uint8_t *)malloc(size);
                 if (tmp == nullptr) {
-                    _has_error = true;
-                    _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1), 
-                                "Failed to create zip file. Malloc error.");
+                    _has_error.store(true);
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
+            "Failed to create zip file. Malloc error."));
                 } else {
                     memcpy(tmp, buf, buf_end-buf);
                     memcpy(tmp+(buf_end-buf), buf_start, buf+size-buf_end);
@@ -457,17 +460,17 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
             }
 
             if (ret != SR_OK) {
-                if (!_has_error) {
-                    _has_error = true;
-                    _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2), 
-                            "Failed to create zip file. Please check write permission of this path.");
+                if (!_has_error.load()) {
+                    _has_error.store(true);
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
+            "Failed to create zip file. Please check write permission of this path."));
                 }
                 progress_updated();
-                if (_has_error)
+                if (_has_error.load())
                     QFile::remove(_file_name);
                 return;
             }
-            _units_stored += size;
+            _units_stored.fetch_add(size);
             progress_updated();
         }
     }
@@ -484,7 +487,7 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
  
     uint64_t size = dso_snapshot->get_sample_count();
     int ch_num = dso_snapshot->get_channel_num();
-    _unit_count = size * ch_num;
+    _unit_count.store(size * ch_num);
 
     for(auto m : _session->get_signal_models())
     {
@@ -503,18 +506,18 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
             ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)data_buffer, size) ? SR_OK : -1;
 
             if (ret != SR_OK) {
-                if (!_has_error) {
-                    _has_error = true;
-                    _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2), 
-                            "Failed to create zip file. Please check write permission of this path.");
+                if (!_has_error.load()) {
+                    _has_error.store(true);
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
+            "Failed to create zip file. Please check write permission of this path."));
                 }
                 progress_updated();
-                if (_has_error)
+                if (_has_error.load())
                     QFile::remove(_file_name);
                 return;
             }
 
-            _units_stored += size;
+            _units_stored.fetch_add(size);
             progress_updated();
         }
     }
@@ -561,7 +564,7 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
     }
 
     // MSO 模式：如果传入的是 logic，但还有 analog 数据，也一并保存
-    if (dynamic_cast<data::LogicSnapshot*>(snapshot) && !_canceled && !_has_error) {
+    if (dynamic_cast<data::LogicSnapshot*>(snapshot) && !_canceled && !_has_error.load()) {
         auto analog = _session->get_snapshot(SR_CHANNEL_ANALOG);
         if (analog && !analog->empty()) {
             auto analog_snap = dynamic_cast<data::AnalogSnapshot*>(analog);
@@ -570,7 +573,7 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
         }
     }
     // MSO 模式：如果传入的是 analog，但还有 logic 数据，也一并保存
-    if (dynamic_cast<data::AnalogSnapshot*>(snapshot) && !_canceled && !_has_error) {
+    if (dynamic_cast<data::AnalogSnapshot*>(snapshot) && !_canceled && !_has_error.load()) {
         auto logic = _session->get_snapshot(SR_CHANNEL_LOGIC);
         if (logic && !logic->empty()) {
             auto logic_snap = dynamic_cast<data::LogicSnapshot*>(logic);
@@ -585,15 +588,15 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
     // 此前 save_logic/save_analog/save_dso 各自末尾都调用 Close/Release，
     // 导致 MSO 模式下第一个 save 函数关闭 zip 后，后续 save 函数的 AddFromBuffer 必然失败，
     // 触发 "Failed to create zip file. Please check write permission of this path." 错误。
-    if (_canceled || _has_error) {
+    if (_canceled.load() || _has_error.load()) {
         QFile::remove(_file_name);
     }
     else {
         bool bret = m_zipDoc.Close();
         m_zipDoc.Release();
         if (!bret) {
-            _has_error = true;
-            _error = m_zipDoc.GetError();
+            _has_error.store(true);
+            set_error(m_zipDoc.GetError());
             QFile::remove(_file_name);
         }
     }
@@ -865,11 +868,11 @@ bool StoreSession::export_start()
     }
 
     if (type_set.size() > 1) {
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1), 
-                "PXView does not currently support\nfile export for multiple data types.");
+set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1),
+                "PXView does not currently support\nfile export for multiple data types."));
         return false;
     } else if (type_set.size() == 0) {
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save."));
         return false;
     }
 
@@ -877,17 +880,17 @@ bool StoreSession::export_start()
     if (!snapshot) {
         // Don't dereference a nullptr snapshot (the original `assert(snapshot)`
         // is a no-op in Release builds and would crash on the next line).
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save."));
         return false;
     }
     // Check we have data
     if (snapshot->empty()) {
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save."));
         return false;
     }
 
     if (_file_name == ""){
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR3), "No set file name.");
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR3), "No set file name."));
         return false;
     }
 
@@ -913,13 +916,13 @@ bool StoreSession::export_start()
         // `_error.clear(); return false;` here, which wiped the "Invalid
         // export format" message set just above and left callers with an
         // empty error string. Return immediately so the message survives.
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR4), "Invalid export format.");
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR4), "Invalid export format."));
         return false;
     }
 
     if (_thread.joinable()) _thread.join();
     _thread = std::thread(&StoreSession::export_proc, this, snapshot);
-    return !_has_error;
+    return !_has_error.load();
 }
 
 void StoreSession::export_proc(data::Snapshot *snapshot)
@@ -941,8 +944,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     assert(snapshot);
     if (!snapshot) {
         pxv_warn("StoreSession::export_exec called with nullptr snapshot.");
-        _has_error = true;
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save.");
+        _has_error.store(true);
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR2), "No data to save."));
         return;
     }
 
@@ -962,8 +965,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     } else if ((analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot))) {
         channel_type = SR_CHANNEL_ANALOG;
     } else {
-        _has_error = true;
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR1), "data type don't support.");
+        _has_error.store(true);
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR1), "data type don't support."));
         return;
     }
 
@@ -984,9 +987,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                                                    _file_name.toUtf8().data());
     if (!output) {
         pxv_err("Failed to init export module (sr_output_new returned nullptr).");
-        _has_error = true;
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR4),
-                     "Failed to init export module.");
+        _has_error.store(true);
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR4),
+                     "Failed to init export module."));
         g_hash_table_destroy(params);
         return;
     }
@@ -1031,9 +1034,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     QFile file(_file_name);
     if (!file.open(QIODevice::WriteOnly | (is_binary_output ? QIODevice::OpenModeFlag(0) : QIODevice::Text))) {
         pxv_err("Failed to open export file: %s", _file_name.toUtf8().data());
-        _has_error = true;
-        _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR3),
-                     "Failed to open export file.");
+        _has_error.store(true);
+        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR3),
+                     "Failed to open export file."));
         sr_output_free(output);
         g_hash_table_destroy(params);
         return;
@@ -1108,7 +1111,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         // get_ring_sample_count(), which can be short by up to one byte's
         // worth of samples. This keeps the saved byte count consistent with
         // the binary export path and makes the load→save round-trip lossless.
-        _unit_count = logic_snapshot->get_sample_count();
+        _unit_count.store(logic_snapshot->get_sample_count());
         int blk_num = logic_snapshot->get_block_num();
         bool sample;
         std::vector<uint8_t *> buf_vec;
@@ -1123,7 +1126,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
         if (start_index > logic_snapshot->get_ring_sample_count()){
             pxv_err("ERROR:the start curosr is invalid!");
-            _units_stored = -1;
+            _units_stored.store((uint64_t)-1);
             progress_updated();
             return;
         }
@@ -1139,13 +1142,13 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         }
 
         if (start_index > 0 && end_index > 0){
-            _unit_count = (end_index - start_index);
+            _unit_count.store((end_index - start_index));
         }
         else if (start_index > 0){
-            _unit_count = (logic_snapshot->get_ring_sample_count() - start_index);
+            _unit_count.store((logic_snapshot->get_ring_sample_count() - start_index));
         }
         else if (end_index > 0){
-            _unit_count = end_index;
+            _unit_count.store(end_index);
         }
 
         // Total bytes that must be written per channel (= ceil(unit_count/8)).
@@ -1153,7 +1156,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         // the last block would be dropped, shifting every following block on
         // reload and corrupting the round-trip. Clamp the final block to the
         // exact remaining byte count.
-        uint64_t total_out_bytes = (_unit_count + 7) / 8;
+        uint64_t total_out_bytes = (_unit_count.load() + 7) / 8;
         uint64_t written_bytes = 0;
 
         for (int blk = 0; !_canceled  &&  blk < blk_num; blk++) {
@@ -1200,8 +1203,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     size = buf_sample_num - i;
                 uint8_t *xbuf = (uint8_t *)malloc(size * unitsize);
                 if (xbuf == nullptr) {
-                    _has_error = true;
-                    _error = L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed.");
+                    _has_error.store(true);
+                    set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed."));
                     return;
                 }                
                 memset(xbuf, 0, size * unitsize);
@@ -1230,7 +1233,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     g_string_free(data_out,TRUE);
                 }
 
-                _units_stored += size;
+                _units_stored.fetch_add(size);
                 if (xbuf)
                     free(xbuf);
                 progress_updated();
@@ -1238,7 +1241,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         }
     }
     else if (channel_type == SR_CHANNEL_DSO) {
-        _unit_count = snapshot->get_sample_count(); 
+        _unit_count.store(snapshot->get_sample_count()); 
         unsigned int usize = 8192;
         unsigned int size = usize;
         struct sr_datafeed_dso dp;
@@ -1259,9 +1262,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         _session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, bits);
         dp.sample_bits = bits ? bits : 8;
 
-        for(uint64_t i = 0; !_canceled && i < _unit_count; i+=usize){
-            if(_unit_count - i < usize)
-                size = _unit_count - i;
+        for(uint64_t i = 0; !_canceled.load() && i < _unit_count.load(); i+=usize){
+            if(_unit_count.load() - i < usize)
+                size = _unit_count.load() - i;
 
             int ch = 0;
             // Make the cross data buffer.
@@ -1300,7 +1303,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 g_string_free(data_out,TRUE);
             }
 
-            _units_stored += size;
+            _units_stored.fetch_add(size);
             progress_updated();
         }
 
@@ -1310,8 +1313,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         }
 
     } else if (channel_type == SR_CHANNEL_ANALOG) {
-        _unit_count = snapshot->get_sample_count();
-        uint64_t unit_count = _unit_count;
+        _unit_count.store(snapshot->get_sample_count());
+        uint64_t unit_count = _unit_count.load();
         void* data_buffer = analog_snapshot->get_data();
         unsigned int usize = 8192;        
         struct sr_datafeed_analog ap;
@@ -1409,7 +1412,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     g_string_free(data_out,TRUE);
                 }           
 
-                _units_stored += size;
+                _units_stored.fetch_add(size);
                 progress_updated();
 
                // pxv_info("size:%llu;_units_stored:%llu", size, _units_stored);

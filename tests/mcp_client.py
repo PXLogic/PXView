@@ -23,6 +23,24 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Union
 
+# ------------------------------------------------------------------
+# Force-disable all HTTP proxies for this module.
+#
+# On Windows (especially GitHub Actions runners), Python's urllib
+# falls back to getproxies_registry() when HTTP_PROXY is not set in
+# the environment.  This reads the Windows registry for proxy settings,
+# and the NO_PROXY environment variable is NOT consulted in that code
+# path (only proxy_bypass_environment checks NO_PROXY).  As a result,
+# requests to 127.0.0.1 may be routed through a system proxy and fail.
+#
+# Installing an opener with an empty ProxyHandler({}) at module import
+# time guarantees that urlopen() never uses a proxy, regardless of
+# registry or environment settings.
+# ------------------------------------------------------------------
+_no_proxy_handler = urllib.request.ProxyHandler({})
+_urllib_opener = urllib.request.build_opener(_no_proxy_handler)
+urllib.request.install_opener(_urllib_opener)
+
 
 def _to_windows_path(path: str) -> str:
     """Convert a MSYS2/Cygwin-style path to a Windows-native path.
@@ -84,9 +102,9 @@ class McpClient:
         self._request_id = 0
         self._connected = False
         self._tools: List[Dict[str, Any]] = []
-        # Disable proxy for localhost to avoid PowerShell/system proxy interference
-        import os
-        os.environ["NO_PROXY"] = os.environ.get("NO_PROXY", "") + ",127.0.0.1,localhost"
+        # Proxy bypass is handled at module level via ProxyHandler({})
+        # (see top of file).  The NO_PROXY env var approach was insufficient
+        # on Windows because urllib falls back to registry proxy settings.
 
     # ---- Low-level transport ----
 

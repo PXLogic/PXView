@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
+#include <shared_mutex>
 
 #include "../pxvdef.h"
 #include "../log.h"
@@ -83,8 +84,8 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   assert(decoder_status);
 
   _samples_decoded = 0;
-  _sample_count = 0;
-  _decode_state = Stopped;
+  _sample_count.store(0);
+  _decode_state.store(Stopped);
   _options_changed = false;
   _no_memory = false;
   _mark_index = -1;
@@ -92,9 +93,9 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _stask_stauts = nullptr;
   _is_capture_end = true;
   _snapshot = nullptr;
-  _progress = 0;
-  _is_decoding = false;
-  _result_count = 0;
+  _progress.store(0);
+  _is_decoding.store(false);
+  _result_count.store(0);
   _owner_document = nullptr;
 
   _stack.push_back(new decode::Decoder(dec));
@@ -168,6 +169,10 @@ void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
 }
 
 void DecoderStack::build_row() {
+  // Protect the map rebuild so concurrent readers (annotation_callback on
+  // the decode thread, UI-thread read methods) don't see a half-rebuilt map.
+  std::lock_guard<std::mutex> lock(_output_mutex);
+
   // release source
   for (auto &kv : _rows) {
     kv.second->clear(); // destory all annotations
@@ -244,6 +249,7 @@ int64_t DecoderStack::samples_decoded() {
 void DecoderStack::get_annotation_subset(
     std::vector<pv::data::decode::Annotation *> &dest, const Row &row,
     uint64_t start_sample, uint64_t end_sample) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     (*iter).second->get_annotation_subset(dest, start_sample, end_sample);
@@ -251,6 +257,7 @@ void DecoderStack::get_annotation_subset(
 
 decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
 {
+    std::lock_guard<std::mutex> lock(_output_mutex);
     auto iter = _rows.find(row);
     if (iter != _rows.end())
         return (*iter).second;
@@ -259,6 +266,7 @@ decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
 
 uint64_t DecoderStack::get_annotation_index(const Row &row,
                                             uint64_t start_sample) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   uint64_t index = 0;
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -269,6 +277,7 @@ uint64_t DecoderStack::get_annotation_index(const Row &row,
 
 std::pair<size_t, size_t> DecoderStack::get_visible_range(
     const Row &row, uint64_t start_sample, uint64_t end_sample) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   std::pair<size_t, size_t> range{0, 0};
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -278,6 +287,7 @@ std::pair<size_t, size_t> DecoderStack::get_visible_range(
 }
 
 uint64_t DecoderStack::get_max_annotation(const Row &row) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     return (*iter).second->get_max_annotation();
@@ -286,6 +296,7 @@ uint64_t DecoderStack::get_max_annotation(const Row &row) {
 }
 
 uint64_t DecoderStack::get_min_annotation(const Row &row) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     return (*iter).second->get_min_annotation();
@@ -294,6 +305,7 @@ uint64_t DecoderStack::get_min_annotation(const Row &row) {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   std::map<const decode::Row, bool> rows_gshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
            _rows_gshow.begin();
@@ -304,6 +316,7 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   std::map<const decode::Row, bool> rows_lshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
            _rows_lshow.begin();
@@ -314,6 +327,7 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
 }
 
 void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   std::map<const decode::Row, bool>::const_iterator iter =
       _rows_gshow.find(row);
   if (iter != _rows_gshow.end()) {
@@ -322,6 +336,7 @@ void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
 }
 
 void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   std::map<const decode::Row, bool>::const_iterator iter =
       _rows_lshow.find(row);
   if (iter != _rows_lshow.end()) {
@@ -330,6 +345,7 @@ void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
 }
 
 bool DecoderStack::has_annotations(const Row &row) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     if (0 == (*iter).second->get_max_sample())
@@ -356,6 +372,7 @@ uint64_t DecoderStack::list_annotation_size() {
 }
 
 uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second)
@@ -368,6 +385,7 @@ uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
 
 bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
                                    uint16_t row_index, uint64_t col_index) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second) {
@@ -381,6 +399,7 @@ bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
 }
 
 bool DecoderStack::list_row_title(int row, QString &title) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second) {
@@ -396,15 +415,18 @@ bool DecoderStack::list_row_title(int row, QString &title) {
 void DecoderStack::clear() { init(); }
 
 void DecoderStack::init() {
-  _sample_count = 0;
+  _sample_count.store(0);
   _samples_decoded = 0;
-  _error_message = QString();
+  {
+    std::lock_guard<std::mutex> lk(_output_mutex);
+    _error_message = QString();
+  }
   _no_memory = false;
   _snapshot = nullptr;
-  _result_count = 0;
-  _ann_dropped_stop = 0;
-  _ann_dropped_mem = 0;
-  _ann_dropped_row = 0;
+  _result_count.store(0);
+  _ann_dropped_stop.store(0);
+  _ann_dropped_mem.store(0);
+  _ann_dropped_row.store(0);
 
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     (*i).second->clear();
@@ -418,19 +440,22 @@ void DecoderStack::stop_decode_work() {
   if (_stask_stauts) {
     _stask_stauts->_bStop = true;
   }
-  _decode_state = Stopped;
+  _decode_state.store(Stopped, std::memory_order_release);
 }
 
 void DecoderStack::begin_decode_work() {
   // 防御性检查:若已有解码线程在运行(RevEndPacket 与 CopyToDocDone 竞态,
   // 或 add_decode_task 重复添加遗漏),直接返回避免状态被覆盖。
   // assert 在 Release 下是空操作,必须显式 if 检查 + early return。
-  if (_decode_state != Stopped)
+  if (_decode_state.load(std::memory_order_acquire) != Stopped)
     return;
-  _error_message = "";
-  _decode_state = Running;
+  {
+    std::lock_guard<std::mutex> lk(_output_mutex);
+    _error_message = "";
+  }
+  _decode_state.store(Running, std::memory_order_release);
   do_decode_work();
-  _decode_state = Stopped;
+  _decode_state.store(Stopped, std::memory_order_release);
 }
 
 bool DecoderStack::check_required_probes() {
@@ -465,9 +490,12 @@ void DecoderStack::do_decode_work() {
   pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
 
   if (!check_required_probes()) {
-    _error_message =
-        QString::fromStdString(s_kRequiredChannelsMissing);
-    pxv_err("ERROR:%s", _error_message.toStdString().c_str());
+    {
+      std::lock_guard<std::mutex> lk(_output_mutex);
+      _error_message =
+          QString::fromStdString(s_kRequiredChannelsMissing);
+    }
+    pxv_err("ERROR:%s", error_message().toStdString().c_str());
     // Diagnostic: log which decoder has missing required probes
     for (auto dec : _stack) {
       if (!dec->have_required_probes()) {
@@ -477,16 +505,24 @@ void DecoderStack::do_decode_work() {
     return;
   }
 
+  // Take a snapshot of signal_models under a shared_lock so concurrent
+  // writers (init_signals on the UI thread) cannot invalidate our iterators.
+  std::vector<std::shared_ptr<data::SignalModel>> models_snapshot;
+  {
+    std::shared_lock<std::shared_mutex> lk(_session->signal_models_mutex());
+    models_snapshot = _session->get_signal_models();
+  }
+
   pxv_info("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
-           _session->get_signal_models().size());
+           models_snapshot.size());
 
   for (auto dec : _stack) {
     if (dec->have_probes()) {
       int probe_idx = dec->first_probe_index();
       pxv_info("DecoderStack::do_decode_work: decoder %p has probes, first_probe_index=%d, checking %zu signal_models",
-               dec, probe_idx, _session->get_signal_models().size());
+               dec, probe_idx, models_snapshot.size());
 
-      for (auto m : _session->get_signal_models()) {
+      for (auto m : models_snapshot) {
         bool index_match = (m->index() == probe_idx);
         bool type_match = (m->type() == SR_CHANNEL_LOGIC);
         bool snapshot_ok = (m->snapshot() != nullptr);
@@ -510,9 +546,12 @@ void DecoderStack::do_decode_work() {
   }
 
   if (_snapshot == nullptr) {
-    _error_message =
-        QString::fromStdString(s_kRequiredChannelsMissing);
-    pxv_err("ERROR:%s", _error_message.toStdString().c_str());
+    {
+      std::lock_guard<std::mutex> lk(_output_mutex);
+      _error_message =
+          QString::fromStdString(s_kRequiredChannelsMissing);
+    }
+    pxv_err("ERROR:%s", error_message().toStdString().c_str());
     pxv_err("ERROR:Failed to find matching LogicSnapshot for any decoder probe");
     return;
   }
@@ -533,6 +572,7 @@ void DecoderStack::do_decode_work() {
 }
 
 uint64_t DecoderStack::get_max_sample_count() {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   uint64_t max_sample_count = 0;
 
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
@@ -587,9 +627,9 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   bool bCheckEnd = false;
   uint64_t end_index = decode_end;
 
-  _progress = 0;
+  _progress.store(0);
   uint64_t sended_len = 0;
-  _is_decoding = true;
+  _is_decoding.store(true);
 
   void *lbp_array[35];
 
@@ -654,8 +694,11 @@ void DecoderStack::decode_data(const uint64_t decode_start,
             }
           }
         } else {
-          _error_message =
-              QString::fromStdString(s_kChannelsNotEnabled);
+          {
+            std::lock_guard<std::mutex> lk(_output_mutex);
+            _error_message =
+                QString::fromStdString(s_kChannelsNotEnabled);
+          }
           return;
         }
       }
@@ -672,7 +715,10 @@ void DecoderStack::decode_data(const uint64_t decode_start,
                          chunk_const.data(), chunk_end - i, &error) != SRD_OK) {
 
       if (error) {
-        _error_message = QString::fromLocal8Bit(error);
+        {
+          std::lock_guard<std::mutex> lk(_output_mutex);
+          _error_message = QString::fromLocal8Bit(error);
+        }
         pxv_err("Failed to call srd_session_send:%s", error);
         g_free(error);
         error = nullptr;
@@ -683,7 +729,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     }
 
     sended_len += chunk_end - i;
-    _progress = (int)(sended_len * 100 / end_index);
+    _progress.store((int)(sended_len * 100 / end_index));
 
     i = chunk_end;
 
@@ -707,8 +753,8 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     entry_cnt++;
   }
 
-  _progress = 100;
-  _is_decoding = false;
+  _progress.store(100);
+  _is_decoding.store(false);
 
   // Final progress notification via postEvent (not direct signal emit) — see above.
   _session->event_bus_post([this]() { new_decode_data(); });
@@ -718,7 +764,10 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     srd_session_end(session, &error);
 
     if (error != nullptr) {
-      _error_message = QString::fromLocal8Bit(error);
+      {
+        std::lock_guard<std::mutex> lk(_output_mutex);
+        _error_message = QString::fromLocal8Bit(error);
+      }
       pxv_err("Failed to call srd_session_end:%s", error);
     }
   }
@@ -753,16 +802,18 @@ void DecoderStack::execute_decode_stack() {
     assert(false);
   }
 
-  // Get the intial sample count
-  _sample_count = _snapshot->get_sample_count();
+  _sample_count.store(_snapshot->get_sample_count());
 
   // Create the decoders
   for (auto dec : _stack) {
     srd_decoder_inst *const di = dec->create_decoder_inst(session);
 
     if (!di) {
-      _error_message =
-          QString::fromStdString(s_kCreateDecoderInstanceFailed);
+      {
+        std::lock_guard<std::mutex> lk(_output_mutex);
+        _error_message =
+            QString::fromStdString(s_kCreateDecoderInstanceFailed);
+      }
       srd_session_destroy(session);
       return;
     }
@@ -809,7 +860,10 @@ void DecoderStack::execute_decode_stack() {
     // need a lot time
     decode_data(decode_start, decode_end, session);
   } else if (error != nullptr) {
-    _error_message = QString::fromLocal8Bit(error);
+    {
+      std::lock_guard<std::mutex> lk(_output_mutex);
+      _error_message = QString::fromLocal8Bit(error);
+    }
   }
 
   // Destroy the session
@@ -882,30 +936,41 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
   assert(decc);
 
-  auto row_iter = d->_rows.end();
+  // Protect _rows/_class_rows lookups AND push_annotation against concurrent
+  // build_row() on the UI thread. The lock must be held during push_annotation
+  // because build_row() deletes RowData objects — releasing the lock before
+  // push_annotation would leave target_row dangling.
+  // Lock order: _output_mutex -> _visitor_mutex (inside push_annotation) is
+  // consistent with build_row() -> RowData::clear().
+  {
+    std::lock_guard<std::mutex> lk(d->_output_mutex);
 
-  // Try looking up the sub-row of this class
-  const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
-      d->_class_rows.find(make_pair(decc, a->format()));
-  if (r != d->_class_rows.end())
-    row_iter = d->_rows.find((*r).second);
-  else {
-    // Failing that, use the decoder as a key
-    row_iter = d->_rows.find(Row(decc));
+    auto row_iter = d->_rows.end();
+
+    // Try looking up the sub-row of this class
+    const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
+        d->_class_rows.find(make_pair(decc, a->format()));
+    if (r != d->_class_rows.end())
+      row_iter = d->_rows.find((*r).second);
+    else {
+      // Failing that, use the decoder as a key
+      row_iter = d->_rows.find(Row(decc));
+    }
+
+    if (row_iter == d->_rows.end()) {
+      // Row not found — map may have been rebuilt by build_row(). Drop the
+      // annotation rather than crashing on the assert.
+      pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
+              a->format());
+      d->_ann_dropped_row++;
+      delete a;
+      return;
+    }
+
+    // Add the annotation while still holding _output_mutex
+    if (!(*row_iter).second->push_annotation(a))
+      d->_no_memory = true;
   }
-
-  assert(row_iter != d->_rows.end());
-  if (row_iter == d->_rows.end()) {
-    pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
-            a->format());
-    d->_ann_dropped_row++;
-    assert(0);
-    return;
-  }
-
-  // Add the annotation
-  if (!(*row_iter).second->push_annotation(a))
-    d->_no_memory = true;
 }
 
 void DecoderStack::frame_ended() {
@@ -941,6 +1006,7 @@ void DecoderStack::frame_ended() {
 }
 
 int DecoderStack::list_rows_size() {
+  std::lock_guard<std::mutex> lock(_output_mutex);
   int rows_size = 0;
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);

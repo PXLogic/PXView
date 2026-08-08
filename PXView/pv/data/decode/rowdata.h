@@ -48,8 +48,14 @@ public:
 
   bool push_annotation(Annotation *a);
 
-  inline uint64_t get_annotation_size() { return _item_count; }
-  inline uint64_t get_annotation_capacity() { return _annotations.capacity(); }
+  inline uint64_t get_annotation_size() {
+    std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
+    return _item_count;
+  }
+  inline uint64_t get_annotation_capacity() {
+    std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
+    return _annotations.capacity();
+  }
 
   bool get_annotation(pv::data::decode::Annotation *ann, uint64_t index);
 

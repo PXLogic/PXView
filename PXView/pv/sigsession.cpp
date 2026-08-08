@@ -1291,8 +1291,11 @@ void SigSession::init_signals() {
   }
 
   clear_signals();
-  std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
-  _state->signal_models() = models;
+  {
+    std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
+    std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
+    _state->signal_models() = models;
+  }
   make_channels_view_index();
 
   // After recreating SignalModels, immediately set snapshot pointers from
@@ -2295,6 +2298,8 @@ void SigSession::clear_signals() {
   _state->set_math_stack(nullptr);
 
   _state->signal_models().clear();
+  // (signal_models_mutex not needed here — all callers are on the UI thread
+  // during session teardown, and no decode/save threads are running.)
 }
 
 std::shared_ptr<data::SignalModel> SigSession::get_signal_by_index(int index) {

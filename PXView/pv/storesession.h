@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <string>
 #include <thread>  
+#include <atomic>
+#include <mutex>
 #include <QObject>
 #include <libsigrok/libsigrok.h> 
 
@@ -58,7 +60,7 @@ public:
 	~StoreSession();
     SigSession* session();
     void get_progress(uint64_t *writed, uint64_t *total);
-	const QString& error();
+	QString error();
     bool save_start();
     bool export_start();
 	void wait();
@@ -73,6 +75,8 @@ private:
     void export_proc(pv::data::Snapshot *snapshot);
     void export_exec(pv::data::Snapshot *snapshot);
     bool decoders_gen(std::string &str);
+    /// Thread-safe setter for the error string.
+    void set_error(const QString &err);
  
 
 public:    
@@ -152,10 +156,11 @@ private:
 	std::thread     _thread;
     const struct sr_output_module* _outModule;
  
-	uint64_t        _units_stored;
-	uint64_t        _unit_count;
-    bool            _has_error;
+	std::atomic<uint64_t> _units_stored{0};
+	std::atomic<uint64_t> _unit_count{0};
+    std::atomic<bool> _has_error{false};
 	QString         _error;
+    std::mutex      _error_mutex;
     std::atomic<bool> _canceled{false};
     ZipMaker        m_zipDoc;  
     uint64_t        _start_index;

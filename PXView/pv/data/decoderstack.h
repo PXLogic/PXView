@@ -147,7 +147,7 @@ public:
 	uint64_t get_max_sample_count();
 
     inline bool IsRunning(){
-        return _decode_state == Running;
+        return _decode_state.load(std::memory_order_acquire) == Running;
     }
  
 	void begin_decode_work();
@@ -164,8 +164,9 @@ public:
     int64_t get_mark_index();
     void frame_ended();
 
-    inline QString error_message(){ 
-	    return _error_message;
+    inline QString error_message(){
+        std::lock_guard<std::mutex> lock(_output_mutex);
+        return _error_message;
     }
 
     inline void *get_key_handel(){
@@ -179,21 +180,21 @@ public:
     inline void set_capture_end_flag(bool isEnd){
         _is_capture_end = isEnd;
         if (!isEnd){
-            _progress = 0;
-            _is_decoding = false;
+            _progress.store(0);
+            _is_decoding.store(false);
         }
     }
 
     inline int get_progress(){
         //if (!_is_decoding && _progress == 0)
           //  return -1;
-        return _progress;
+        return _progress.load(std::memory_order_relaxed);
     }
 
     bool check_required_probes();
 
     inline uint64_t get_result_count(){
-        return _result_count;
+        return _result_count.load(std::memory_order_relaxed);
     }
 
     void set_owner_document(data::SessionDocument *doc) { _owner_document = doc; }
@@ -245,7 +246,7 @@ private:
     data::SessionDocument *_owner_document;
     uint64_t        _handle_id = 0;
     uint64_t        _version = 0;
-    decode_state    _decode_state;
+    std::atomic<decode_state> _decode_state;
     std::atomic<bool> _options_changed{false};
     std::atomic<bool> _no_memory{false};
     int64_t         _mark_index;
@@ -253,18 +254,18 @@ private:
     DecoderStatus   *_decoder_status;
     QString         _error_message;
     int64_t	        _samples_decoded;
-    uint64_t        _sample_count; 
+    std::atomic<uint64_t> _sample_count{0};
  
     decode_task_status  *_stask_stauts;    
     mutable std::mutex _output_mutex; 
     bool            _is_capture_end;
-    int             _progress;
-    bool            _is_decoding;
-    uint64_t        _result_count;
+    std::atomic<int> _progress{0};
+    std::atomic<bool> _is_decoding{false};
+    std::atomic<uint64_t> _result_count{0};
     // [PWMDBG] diagnostics: annotations dropped in annotation_callback()
-    uint64_t        _ann_dropped_stop = 0;
-    uint64_t        _ann_dropped_mem = 0;
-    uint64_t        _ann_dropped_row = 0;
+    std::atomic<uint64_t> _ann_dropped_stop{0};
+    std::atomic<uint64_t> _ann_dropped_mem{0};
+    std::atomic<uint64_t> _ann_dropped_row{0};
 
     QString         _label; // custom user-facing label for this decoder stack
 

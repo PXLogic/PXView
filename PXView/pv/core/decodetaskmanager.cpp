@@ -123,12 +123,14 @@ void DecodeTaskManager::add_decode_task(
         pxv_info("DecodeTaskManager::add_decode_task: stack %p already "
                  "running, skip duplicate",
                  stack.get());
-        // Thread was already started — must join or detach before discarding.
-        // Since the task is a duplicate, the thread will quickly exit when it
-        // sees the task is already running. Detach is safe here because the
-        // shared_ptr keeps the DecoderStack alive, and the thread will just
-        // check _running_tasks, find itself absent, and exit.
-        new_thread.detach();
+        // Thread was already started — add it to _decode_threads so that
+        // stop()/clear_all_decode_task() will join it. Previously this used
+        // detach(), which left the thread accessing `this` (DecodeTaskManager*)
+        // after potential destruction — a use-after-free risk. The thread
+        // will quickly exit because begin_decode_work() returns immediately
+        // when _decode_state != Stopped, and decode_single_task() will find
+        // the task absent from _running_tasks.
+        _decode_threads.push_back(std::move(new_thread));
         return;
       }
     }

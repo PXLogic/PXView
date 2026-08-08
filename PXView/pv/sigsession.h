@@ -33,6 +33,7 @@
 #include <memory>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -158,6 +159,10 @@ public:
   bool get_capture_status(bool &triggered, int &progress) { return _capture_manager->get_capture_status(triggered, progress); }
   void clear_store_confirm_flag() { _capture_manager->clear_store_confirm_flag(); }
   std::vector<std::shared_ptr<data::SignalModel>> &get_signal_models() override;
+  /// Mutex protecting the signal_models vector. Non-UI thread callers
+  /// (decode thread, save/export thread) must hold a shared_lock before
+  /// iterating; writers (init_signals) hold a unique_lock.
+  std::shared_mutex &signal_models_mutex() { return _state->signal_models_mutex(); }
   bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus, std::list<pv::data::decode::Decoder *> &sub_decoders, std::shared_ptr<data::DecoderStack> &out_stack, data::SessionDocument *doc = nullptr) override;
   int get_trace_index_by_key_handel(void *handel, data::SessionDocument *doc = nullptr);
   void remove_decoder(int index, data::SessionDocument *doc = nullptr);

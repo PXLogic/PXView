@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 #include "cursorregistry.h"
@@ -111,9 +112,14 @@ public:
   std::mutex &sampling_mutex() { return *_sampling_mutex; }
 
   // --- Business objects ---
+  // signal_models() returns the live vector reference. Callers that access
+  // it from non-UI threads (decode thread, save/export thread) MUST hold a
+  // shared_lock on signal_models_mutex() for the duration of their access.
+  // Writers (init_signals, reload) MUST hold a unique_lock.
   std::vector<std::shared_ptr<data::SignalModel>> &signal_models() {
     return _signal_models;
   }
+  std::shared_mutex &signal_models_mutex() { return _signal_models_mutex; }
   std::vector<std::shared_ptr<data::SpectrumStack>> &spectrum_stacks() {
     return _spectrum_stacks;
   }
@@ -251,6 +257,7 @@ private:
   std::unique_ptr<std::mutex> _data_mutex;
 
   std::vector<std::shared_ptr<data::SignalModel>> _signal_models;
+  std::shared_mutex _signal_models_mutex;
   std::vector<std::shared_ptr<data::SpectrumStack>> _spectrum_stacks;
   // Track B2: LissajousModel owned via unique_ptr
   std::unique_ptr<data::LissajousModel> _lissajous_model;
