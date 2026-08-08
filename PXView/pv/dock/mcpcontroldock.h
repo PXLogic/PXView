@@ -12,7 +12,7 @@
 
 #include <QList>
 #include <QWidget>
-#include "../ui/uimanager.h"
+#include "pv/ui/uimanager.h"
 
 class QLabel;
 class QPushButton;

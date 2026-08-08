@@ -14,9 +14,9 @@
 // including the heavy logicsnapshot.h header.
 enum class GlitchFilterMode : int;
 
-#include "isession_coordination.h"
-#include "isession_state.h"
-#include "isession_state.h"
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

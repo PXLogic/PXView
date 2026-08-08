@@ -25,8 +25,8 @@
 #include <cassert>
 #include <cmath>
 
-#include "../ui/dsspinbox.h"
-#include "int.h"
+#include "pv/ui/dsspinbox.h"
+#include "pv/prop/int.h"
 
 using std::optional;
 using namespace std;

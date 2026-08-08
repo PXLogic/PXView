@@ -8,13 +8,13 @@
 #include <memory>
 #include <vector>
 
-#include "../data/disk_cache_config.h"
-#include "../data/sessiondata.h"
-#include "../dstimer.h"
-#include "../pxvdef.h" // DEVICE_COLLECT_MODE / DEVICE_STATUS_TYPE
-#include "isession_coordination.h"
-#include "isession_state.h"
-#include "isession_state.h"
+#include "pv/data/cache/disk_cache_config.h"
+#include "pv/data/document/sessiondata.h"
+#include "pv/base/dstimer.h"
+#include "pv/base/pxvdef.h" // DEVICE_COLLECT_MODE / DEVICE_STATUS_TYPE
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

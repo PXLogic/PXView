@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-#include "slidingdrawer.h"
+#include "pv/widgets/slidingdrawer.h"
 
 #include <QApplication>
 #include <QTimer>
@@ -25,7 +25,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #ifndef NDEBUG
-#include "../log.h"
+#include "pv/base/log.h"
 #endif
 
 namespace pv {

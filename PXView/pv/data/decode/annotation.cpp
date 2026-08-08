@@ -25,17 +25,17 @@
 #include <vector>
 #include <stdexcept>
 
-#include "../../log.h"
-#include "annotation.h"
-#include "annotationrestable.h"
+#include "pv/base/log.h"
+#include "pv/data/decode/annotation.h"
+#include "pv/data/decode/annotationrestable.h"
 #include <cstring>
 #include <cassert>
 #include <cstring>
 #include <cstdlib>
 
-#include "../../config/appconfig.h"
-#include "decoderstatus.h"
-#include "../../pxvdef.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/decode/decoderstatus.h"
+#include "pv/base/pxvdef.h"
  
 
 namespace pv {

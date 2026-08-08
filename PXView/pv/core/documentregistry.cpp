@@ -1,11 +1,11 @@
-#include "documentregistry.h"
+#include "pv/core/documentregistry.h"
 
-#include "eventbus.h"
-#include "sessionstatecontext.h"
-#include "../data/decoderstack.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../sigsession.h"
+#include "pv/core/eventbus.h"
+#include "pv/core/sessionstatecontext.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
 
 #include <algorithm>
 

@@ -24,27 +24,27 @@
 // Phase E (modernize-view-layer-v2): decoder / spectrum / math / lissajous
 // derived-trace behaviour extracted from the View God-class.
 
-#include "view_derived_traces.h"
+#include "pv/view/view_derived_traces.h"
 
 #include <algorithm>
 #include <memory>
 
-#include "view.h"
+#include "pv/view/view.h"
 
-#include "../data/decode/decoder.h"
-#include "../data/decode/decoderstatus.h"
-#include "../data/decoderstack.h"
-#include "../data/lissajousmodel.h"
-#include "../data/spectrumstack.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../sigsession.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/decode/decoderstatus.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/stack/lissajousmodel.h"
+#include "pv/data/stack/spectrumstack.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
 
-#include "decodetrace.h"
-#include "dsosignal.h"
-#include "lissajoustrace.h"
-#include "mathtrace.h"
-#include "spectrumtrace.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/view/trace/lissajoustrace.h"
+#include "pv/view/trace/mathtrace.h"
+#include "pv/view/trace/spectrumtrace.h"
 
 using namespace std;
 

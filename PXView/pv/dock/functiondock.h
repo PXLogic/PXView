@@ -34,8 +34,8 @@
 #include <QVBoxLayout>
 #include <QGridLayout>
 
-#include "../ui/uimanager.h"
-#include "../widgets/smoothscrollarea.h"
+#include "pv/ui/uimanager.h"
+#include "pv/widgets/smoothscrollarea.h"
 
 namespace pv {
 

@@ -24,7 +24,7 @@
 
 #include <vector>
 
-#include "annotation.h"
+#include "pv/data/decode/annotation.h"
 
 struct srd_decoder;
 struct srd_decoder_annotation_row;

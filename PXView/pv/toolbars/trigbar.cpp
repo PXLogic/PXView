@@ -20,25 +20,25 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "trigbar.h"
+#include "pv/toolbars/trigbar.h"
 
 #include <QMenu>
 #include <QBitmap>
 #include <QPainter>
 #include <QEvent>
 
-#include "../sigsession.h"
-#include "../dialogs/fftoptions.h"
-#include "../dialogs/lissajousoptions.h"
-#include "../dialogs/mathoptions.h"
-#include "../view/trace.h"
-#include "../dialogs/applicationpardlg.h"
-#include "../ui/langresource.h"
-#include "../config/appconfig.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../ui/iconcache.h"
-#include "../pxvdef.h"
+#include "pv/session/sigsession.h"
+#include "pv/dialogs/fftoptions.h"
+#include "pv/dialogs/lissajousoptions.h"
+#include "pv/dialogs/mathoptions.h"
+#include "pv/view/trace/trace.h"
+#include "pv/dialogs/applicationpardlg.h"
+#include "pv/ui/langresource.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/iconcache.h"
+#include "pv/base/pxvdef.h"
 
 namespace pv {
 namespace toolbars {

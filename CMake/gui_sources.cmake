@@ -8,25 +8,25 @@
 set(PXVIEW_GUI_SOURCES
     PXView/main.cpp
     PXView/application.cpp
-    PXView/pv/appcontrol.cpp
-    PXView/pv/mainwindow.cpp
-    PXView/pv/mainwindow_config_io.cpp
-    PXView/pv/mainwindow_event_dispatcher.cpp
-    PXView/pv/mainwindow_dock_manager.cpp
-    PXView/pv/mainwindow_tab_manager.cpp
-    PXView/pv/mainwindow_theme_manager.cpp
-    PXView/pv/mainwindow_status_bar.cpp
-    PXView/pv/mainwindow_shortcut_manager.cpp
-    PXView/pv/mainwindow_signal_connector.cpp
-    PXView/pv/mainwindow_file_ops.cpp
-    PXView/pv/mainframe.cpp
-    PXView/pv/submainframe.cpp
+    PXView/pv/mainwindow/appcontrol.cpp
+    PXView/pv/mainwindow/mainwindow.cpp
+    PXView/pv/mainwindow/config_io.cpp
+    PXView/pv/mainwindow/event_dispatcher.cpp
+    PXView/pv/mainwindow/dock_manager.cpp
+    PXView/pv/mainwindow/tab_manager.cpp
+    PXView/pv/mainwindow/theme_manager.cpp
+    PXView/pv/mainwindow/status_bar.cpp
+    PXView/pv/mainwindow/shortcut_manager.cpp
+    PXView/pv/mainwindow/signal_connector.cpp
+    PXView/pv/mainwindow/file_ops.cpp
+    PXView/pv/mainwindow/mainframe.cpp
+    PXView/pv/mainwindow/submainframe.cpp
     # View layer rendering objects
-    PXView/pv/view/viewport.cpp
-    PXView/pv/view/viewport_painter.cpp
-    PXView/pv/view/viewport_interaction.cpp
-    PXView/pv/view/viewport_drag.cpp
-    PXView/pv/view/edge_nav_button.cpp
+    PXView/pv/view/viewport/viewport.cpp
+    PXView/pv/view/renderer/viewport_painter.cpp
+    PXView/pv/view/viewport/viewport_interaction.cpp
+    PXView/pv/view/viewport/viewport_drag.cpp
+    PXView/pv/view/component/edge_nav_button.cpp
     PXView/pv/view/view.cpp
     PXView/pv/view/view_layout.cpp
     PXView/pv/view/view_cursors.cpp
@@ -34,33 +34,33 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/view/view_signal_sync.cpp
     PXView/pv/view/view_glitch_filter.cpp
     PXView/pv/view/view_data_sync.cpp
-    PXView/pv/view/render_pass.cpp
-    PXView/pv/view/timemarker.cpp
-    PXView/pv/view/signal.cpp
-    PXView/pv/view/signalfactory.cpp
-    PXView/pv/view/ruler.cpp
-    PXView/pv/view/header.cpp
-    PXView/pv/view/cursor.cpp
-    PXView/pv/view/logicsignal.cpp
-    PXView/pv/view/analogsignal.cpp
-    PXView/pv/view/dsosignal.cpp
-PXView/pv/view/dsosignal_paint.cpp
-    PXView/pv/view/dso_trigger_config.cpp
-    PXView/pv/view/dso_measure.cpp
-    PXView/pv/view/dsldial.cpp
-    PXView/pv/view/trace.cpp
-    PXView/pv/view/selectableitem.cpp
-    PXView/pv/view/decodetrace.cpp
-    PXView/pv/view/decodermodel.cpp
-    PXView/pv/view/mathtrace.cpp
-    PXView/pv/view/spectrumtrace.cpp
-    PXView/pv/view/lissajoustrace.cpp
-    PXView/pv/view/devmode.cpp
-    PXView/pv/view/viewstatus.cpp
-    PXView/pv/view/xcursor.cpp
-    PXView/pv/view/pulsehistogramwidget.cpp
-    PXView/pv/view/glitchfilterpopup.cpp
-    PXView/pv/view/waveform_copy_helper.cpp
+    PXView/pv/view/renderer/render_pass.cpp
+    PXView/pv/view/cursor/timemarker.cpp
+    PXView/pv/view/signal/signal.cpp
+    PXView/pv/view/signal/signalfactory.cpp
+    PXView/pv/view/component/ruler.cpp
+    PXView/pv/view/component/header.cpp
+    PXView/pv/view/cursor/cursor.cpp
+    PXView/pv/view/signal/logicsignal.cpp
+    PXView/pv/view/signal/analogsignal.cpp
+    PXView/pv/view/signal/dsosignal.cpp
+PXView/pv/view/signal/dsosignal_paint.cpp
+    PXView/pv/view/component/dso_trigger_config.cpp
+    PXView/pv/view/component/dso_measure.cpp
+    PXView/pv/view/component/dsldial.cpp
+    PXView/pv/view/trace/trace.cpp
+    PXView/pv/view/trace/selectableitem.cpp
+    PXView/pv/view/trace/decodetrace.cpp
+    PXView/pv/view/trace/decodermodel.cpp
+    PXView/pv/view/trace/mathtrace.cpp
+    PXView/pv/view/trace/spectrumtrace.cpp
+    PXView/pv/view/trace/lissajoustrace.cpp
+    PXView/pv/view/component/devmode.cpp
+    PXView/pv/view/component/viewstatus.cpp
+    PXView/pv/view/cursor/xcursor.cpp
+    PXView/pv/view/component/pulsehistogramwidget.cpp
+    PXView/pv/view/component/glitchfilterpopup.cpp
+    PXView/pv/view/component/waveform_copy_helper.cpp
     # Toolbars
     PXView/pv/toolbars/samplingbar.cpp
     PXView/pv/toolbars/trigbar.cpp
@@ -155,31 +155,31 @@ endif()
 # Windows-specific QT source files
 if(WIN32)
 	list(APPEND PXVIEW_GUI_SOURCES
-		PXView/pv/winnativewidget.cpp
-		PXView/pv/winshadow.cpp
-		PXView/pv/wintaskbarprogress.cpp
+		PXView/pv/platform/winnativewidget.cpp
+		PXView/pv/platform/winshadow.cpp
+		PXView/pv/platform/wintaskbarprogress.cpp
 	)
 	list(APPEND PXView_HEADERS
-		PXView/pv/wintaskbarprogress.h
+		PXView/pv/platform/wintaskbarprogress.h
 	)
 	endif ()
 
 set(PXView_HEADERS
     PXView/mystyle.h
-    PXView/pv/log.h
-    PXView/pv/sigsession.h
-    PXView/pv/sessionmanager.h
+    PXView/pv/base/log.h
+    PXView/pv/session/sigsession.h
+    PXView/pv/session/sessionmanager.h
     PXView/pv/interface/icontextaware.h
-    PXView/pv/mainwindow.h
-    PXView/pv/mainwindow_config_io.h
-    PXView/pv/mainwindow_event_dispatcher.h
-    PXView/pv/mainwindow_dock_manager.h
-    PXView/pv/mainwindow_tab_manager.h
-    PXView/pv/mainwindow_theme_manager.h
-    PXView/pv/mainwindow_status_bar.h
-    PXView/pv/mainwindow_shortcut_manager.h
-    PXView/pv/mainwindow_signal_connector.h
-    PXView/pv/mainwindow_file_ops.h
+    PXView/pv/mainwindow/mainwindow.h
+    PXView/pv/mainwindow/config_io.h
+    PXView/pv/mainwindow/event_dispatcher.h
+    PXView/pv/mainwindow/dock_manager.h
+    PXView/pv/mainwindow/tab_manager.h
+    PXView/pv/mainwindow/theme_manager.h
+    PXView/pv/mainwindow/status_bar.h
+    PXView/pv/mainwindow/shortcut_manager.h
+    PXView/pv/mainwindow/signal_connector.h
+    PXView/pv/mainwindow/file_ops.h
     PXView/pv/dialogs/deviceoptions.h
     PXView/pv/prop/property.h
     PXView/pv/prop/int.h
@@ -187,19 +187,19 @@ set(PXView_HEADERS
     PXView/pv/prop/double.h
     PXView/pv/prop/bool.h
     PXView/pv/toolbars/samplingbar.h
-    PXView/pv/view/viewport.h
-    PXView/pv/view/viewport_painter.h
-    PXView/pv/view/viewport_interaction.h
-    PXView/pv/view/viewport_drag.h
-    PXView/pv/view/render_pass.h
+    PXView/pv/view/viewport/viewport.h
+    PXView/pv/view/renderer/viewport_painter.h
+    PXView/pv/view/viewport/viewport_interaction.h
+    PXView/pv/view/viewport/viewport_drag.h
+    PXView/pv/view/renderer/render_pass.h
     PXView/pv/view/iview_delegates.h
-    PXView/pv/view/edge_nav_button.h
+    PXView/pv/view/component/edge_nav_button.h
     PXView/pv/view/view.h
     PXView/pv/view/dock_ui_state.h
-    PXView/pv/view/timemarker.h
-    PXView/pv/view/ruler.h
-    PXView/pv/view/header.h
-    PXView/pv/view/cursor.h
+    PXView/pv/view/cursor/timemarker.h
+    PXView/pv/view/component/ruler.h
+    PXView/pv/view/component/header.h
+    PXView/pv/view/cursor/cursor.h
     PXView/pv/toolbars/trigbar.h
     PXView/pv/toolbars/filebar.h
     PXView/pv/dock/protocoldock.h
@@ -214,29 +214,29 @@ set(PXView_HEADERS
     PXView/pv/toolbars/logobar.h
     PXView/pv/dialogs/about.h
     PXView/pv/dialogs/search.h
-    PXView/pv/view/trace.h
-    PXView/pv/view/selectableitem.h
-    PXView/pv/data/decoderstack.h
-    PXView/pv/view/decodetrace.h
-    PXView/pv/view/decodermodel.h
+    PXView/pv/view/trace/trace.h
+    PXView/pv/view/trace/selectableitem.h
+    PXView/pv/data/stack/decoderstack.h
+    PXView/pv/view/trace/decodetrace.h
+    PXView/pv/view/trace/decodermodel.h
     PXView/pv/widgets/fakelineedit.h
     PXView/pv/widgets/searchpatterninput.h
     PXView/pv/widgets/decodermenu.h
     PXView/pv/widgets/decodergroupbox.h
     PXView/pv/prop/string.h
     PXView/pv/dialogs/storeprogress.h
-    PXView/pv/storesession.h
-    PXView/pv/view/devmode.h
+    PXView/pv/session/storesession.h
+    PXView/pv/view/component/devmode.h
     PXView/pv/dialogs/dsomeasure.h
     PXView/pv/dialogs/protocollist.h
     PXView/pv/dialogs/protocolexp.h
     PXView/pv/dialogs/fftoptions.h
-    PXView/pv/data/mathstack.h
-    PXView/pv/view/mathtrace.h
-    PXView/pv/view/viewstatus.h
+    PXView/pv/data/stack/mathstack.h
+    PXView/pv/view/trace/mathtrace.h
+    PXView/pv/view/component/viewstatus.h
     PXView/pv/toolbars/titlebar.h
-    PXView/pv/mainframe.h
-    PXView/pv/submainframe.h
+    PXView/pv/mainwindow/mainframe.h
+    PXView/pv/mainwindow/submainframe.h
     PXView/pv/widgets/border.h
     PXView/pv/widgets/slidingdrawer.h
     PXView/pv/widgets/smoothscrollbar.h
@@ -249,36 +249,36 @@ set(PXView_HEADERS
     PXView/pv/dialogs/pxdialog.h
     PXView/pv/dialogs/interval.h
     PXView/pv/dialogs/lissajousoptions.h
-    PXView/pv/view/lissajoustrace.h
-    PXView/pv/view/spectrumtrace.h
-    PXView/pv/data/spectrumstack.h
+    PXView/pv/view/trace/lissajoustrace.h
+    PXView/pv/view/trace/spectrumtrace.h
+    PXView/pv/data/stack/spectrumstack.h
     PXView/pv/data/datasource.h
-    PXView/pv/data/signalmodel.h
-    PXView/pv/data/signallistmodel.h
-    PXView/pv/data/sessionsnapshot.h
-    PXView/pv/data/sessiondocument.h
+    PXView/pv/data/model/signalmodel.h
+    PXView/pv/data/model/signallistmodel.h
+    PXView/pv/data/document/sessionsnapshot.h
+    PXView/pv/data/document/sessiondocument.h
     PXView/pv/dialogs/mathoptions.h
     PXView/pv/dialogs/regionoptions.h
-    PXView/pv/view/xcursor.h
-    PXView/pv/view/pulsehistogramwidget.h
-    PXView/pv/view/glitchfilterpopup.h
-    PXView/pv/view/waveform_copy_helper.h
-    PXView/pv/view/signal.h
-    PXView/pv/view/logicsignal.h
-    PXView/pv/view/analogsignal.h
-    PXView/pv/view/dsosignal.h
-    PXView/pv/view/dso_trigger_config.h
-    PXView/pv/view/dso_measure.h
+    PXView/pv/view/cursor/xcursor.h
+    PXView/pv/view/component/pulsehistogramwidget.h
+    PXView/pv/view/component/glitchfilterpopup.h
+    PXView/pv/view/component/waveform_copy_helper.h
+    PXView/pv/view/signal/signal.h
+    PXView/pv/view/signal/logicsignal.h
+    PXView/pv/view/signal/analogsignal.h
+    PXView/pv/view/signal/dsosignal.h
+    PXView/pv/view/component/dso_trigger_config.h
+    PXView/pv/view/component/dso_measure.h
     PXView/pv/dock/protocoldock.h
-    PXView/pv/data/decoderstack.h
-    PXView/pv/view/decodetrace.h
+    PXView/pv/data/stack/decoderstack.h
+    PXView/pv/view/trace/decodetrace.h
     PXView/pv/widgets/decodergroupbox.h
     PXView/pv/widgets/decodermenu.h
     PXView/pv/config/appconfig.h
-    PXView/pv/appcontrol.h
-    PXView/pv/dstimer.h
-    PXView/pv/eventobject.h
-    PXView/pv/ZipMaker.h
+    PXView/pv/mainwindow/appcontrol.h
+    PXView/pv/base/dstimer.h
+    PXView/pv/base/eventobject.h
+    PXView/pv/base/ZipMaker.h
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h
     PXView/pv/dock/protocolitemlayer.h
@@ -286,7 +286,7 @@ set(PXView_HEADERS
     PXView/pv/ui/toast.h
     PXView/pv/ui/dscombobox.h
     PXView/pv/ui/dsspinbox.h
-    PXView/pv/pxvdef.h
+    PXView/pv/base/pxvdef.h
     PXView/pv/dialogs/applicationpardlg.h
     PXView/pv/dock/keywordlineedit.h
     PXView/pv/dock/searchcombobox.h
@@ -294,14 +294,14 @@ set(PXView_HEADERS
     PXView/pv/utility/encoding.h
     PXView/pv/utility/path.h
     PXView/pv/utility/array.h
-    PXView/pv/deviceagent.h
+    PXView/pv/session/deviceagent.h
     PXView/pv/ui/fn.h
     PXView/pv/ui/xtoolbutton.h
     PXView/pv/ui/draggabletabbar.h
     PXView/pv/ui/draggabletabwidget.h
     PXView/pv/ui/iconcache.h
     PXView/pv/ui/widgetinspector.h
-    PXView/pv/tabcontext.h
+    PXView/pv/session/tabcontext.h
     PXView/pv/api/session_service.h
     PXView/pv/api/app_service.h
     PXView/pv/api/rpc_dispatcher.h
@@ -313,37 +313,37 @@ set(PXView_HEADERS
 # Windows-specific QT headers
 if(WIN32)
 	list(APPEND PXView_HEADERS
-		PXView/pv/winnativewidget.h
-		PXView/pv/winshadow.h
+		PXView/pv/platform/winnativewidget.h
+		PXView/pv/platform/winshadow.h
 	)
 endif ()
 
 set(PXView_HEADERS_NO_MOC
-    PXView/pv/log.h
-    PXView/pv/sigsession.h
-    PXView/pv/sessionmanager.h
+    PXView/pv/base/log.h
+    PXView/pv/session/sigsession.h
+    PXView/pv/session/sessionmanager.h
     PXView/pv/interface/icontextaware.h
     PXView/pv/data/datasource.h
-    PXView/pv/data/sessionsnapshot.h
-    PXView/pv/data/sessiondocument.h
+    PXView/pv/data/document/sessionsnapshot.h
+    PXView/pv/data/document/sessiondocument.h
     PXView/pv/config/appconfig.h
-    PXView/pv/appcontrol.h
-    PXView/pv/ZipMaker.h
+    PXView/pv/mainwindow/appcontrol.h
+    PXView/pv/base/ZipMaker.h
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h
     PXView/pv/ui/msgbox.h
-    PXView/pv/pxvdef.h
+    PXView/pv/base/pxvdef.h
     PXView/pv/utility/encoding.h
     PXView/pv/utility/path.h
     PXView/pv/utility/array.h
-    PXView/pv/deviceagent.h
+    PXView/pv/session/deviceagent.h
     PXView/pv/ui/fn.h
     PXView/pv/ui/iconcache.h
-    PXView/pv/tabcontext.h
+    PXView/pv/session/tabcontext.h
 )
 
 if(WIN32)
-    list(APPEND PXView_HEADERS_NO_MOC PXView/pv/winnativewidget.h)
+    list(APPEND PXView_HEADERS_NO_MOC PXView/pv/platform/winnativewidget.h)
 endif()
 
 list(REMOVE_ITEM PXView_HEADERS ${PXView_HEADERS_NO_MOC})

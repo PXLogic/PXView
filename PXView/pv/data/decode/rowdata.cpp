@@ -25,7 +25,7 @@
 #include <cmath>
 #include <mutex>
 
-#include "rowdata.h"
+#include "pv/data/decode/rowdata.h"
 
 using std::max;
 using std::min;

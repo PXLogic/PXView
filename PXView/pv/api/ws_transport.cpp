@@ -1,10 +1,10 @@
-#include "ws_transport.h"
+#include "pv/api/ws_transport.h"
 
-#include "binary_codec.h"
+#include "pv/api/binary_codec.h"
 
 #include <nlohmann/json.hpp>
 
-#include "../core/eventbus.h"
+#include "pv/core/eventbus.h"
 #include <QCoreApplication>
 #include <QHostAddress>
 #include <QThread>

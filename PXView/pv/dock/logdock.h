@@ -33,10 +33,10 @@
 #include <QComboBox>
 #include <QTimer>
 
-#include "../interface/icontextaware.h"
-#include "../ui/dscombobox.h"
-#include "../ui/uimanager.h"
-#include "../widgets/smoothscrollarea.h"
+#include "pv/interface/icontextaware.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/ui/uimanager.h"
+#include "pv/widgets/smoothscrollarea.h"
 #include <log/xlog.h>
 
 namespace pv {

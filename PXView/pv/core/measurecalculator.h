@@ -29,9 +29,9 @@
 
 #include <QString>
 
-#include "../api/types.h"        // api::MeasurementValue (Core-layer API type)
-#include "../data/signalmodel.h" // data::SignalModel (Core-layer channel model)
-#include "../pxvdef.h"           // DSO_MS_* / DS_CONF_DSO_VDIVS
+#include "pv/api/types.h"        // api::MeasurementValue (Core-layer API type)
+#include "pv/data/model/signalmodel.h" // data::SignalModel (Core-layer channel model)
+#include "pv/base/pxvdef.h"           // DSO_MS_* / DS_CONF_DSO_VDIVS
 
 namespace pv {
 

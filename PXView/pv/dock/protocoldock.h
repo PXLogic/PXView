@@ -25,16 +25,16 @@
 
 #include <libsigrokdecode.h>
 
-#include "../interface/icallbacks.h"
-#include "../interface/icontextaware.h"
-#include "../ui/uimanager.h"
-#include "../ui/xtoolbutton.h"
-#include "../widgets/smoothscrollarea.h"
-#include "keywordlineedit.h"
-#include "protocolitemlayer.h"
-#include "searchcombobox.h"
-#include "../ui/dscombobox.h"
-#include "../view/decodermodel.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/interface/icontextaware.h"
+#include "pv/ui/uimanager.h"
+#include "pv/ui/xtoolbutton.h"
+#include "pv/widgets/smoothscrollarea.h"
+#include "pv/dock/keywordlineedit.h"
+#include "pv/dock/protocolitemlayer.h"
+#include "pv/dock/searchcombobox.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/view/trace/decodermodel.h"
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>

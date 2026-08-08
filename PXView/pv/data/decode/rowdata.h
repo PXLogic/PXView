@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-#include "annotation.h"
+#include "pv/data/decode/annotation.h"
 
 namespace pv {
 namespace data {

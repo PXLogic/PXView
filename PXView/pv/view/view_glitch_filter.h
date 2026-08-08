@@ -29,8 +29,8 @@
 #include <memory>
 #include <vector>
 
-#include "../data/logicsnapshot.h"  // GlitchFilterMode
-#include "../data/pulse_analyzer.h"
+#include "pv/data/snapshot/logicsnapshot.h"  // GlitchFilterMode
+#include "pv/data/pulse_analyzer.h"
 
 namespace pv {
 namespace view {

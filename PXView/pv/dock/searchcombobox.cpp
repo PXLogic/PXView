@@ -20,11 +20,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "searchcombobox.h"
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../ui/dockfonts.h"
-#include "../ui/fn.h"
+#include "pv/dock/searchcombobox.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/fn.h"
 #include <QHBoxLayout>
 #include <QLibrary>
 #include <QLineEdit>

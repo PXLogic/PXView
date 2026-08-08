@@ -32,7 +32,7 @@
 #   PXView/pv/wintaskbarprogress.*   Windows taskbar progress (WIN32 only)
 set(PXVIEW_CORE_SOURCES
     # Core session/orchestration
-    PXView/pv/log.cpp
+    PXView/pv/base/log.cpp
     PXView/pv/core/eventbus.cpp
     PXView/pv/core/sessionstatecontext.cpp
     PXView/pv/core/filterprocessor.cpp
@@ -42,15 +42,15 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/core/capturemanager.cpp
     PXView/pv/core/measurecalculator.cpp  # Task C1.9: DSO measurement computation (Core layer)
     PXView/pv/core/cursorregistry.cpp     # Task C2.8: cursor position state (Core layer)
-    PXView/pv/sigsession.cpp
-    PXView/pv/sessionmanager.cpp
-    PXView/pv/deviceagent.cpp
-    PXView/pv/dstimer.cpp
-    PXView/pv/eventobject.cpp
-    PXView/pv/pxvdef.cpp
-    PXView/pv/ZipMaker.cpp
-    PXView/pv/storesession.cpp
-    PXView/pv/tabcontext.cpp
+    PXView/pv/session/sigsession.cpp
+    PXView/pv/session/sessionmanager.cpp
+    PXView/pv/session/deviceagent.cpp
+    PXView/pv/base/dstimer.cpp
+    PXView/pv/base/eventobject.cpp
+    PXView/pv/base/pxvdef.cpp
+    PXView/pv/base/ZipMaker.cpp
+    PXView/pv/session/storesession.cpp
+    PXView/pv/session/tabcontext.cpp
     # NOTE: data/*.cpp live in pv/data/CMakeLists.txt (pxview-data STATIC lib)
     # API/remote-control layer (SessionService, transports, RPC dispatcher)
     PXView/pv/api/session_service.cpp

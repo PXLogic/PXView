@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "searchpatterninput.h"
+#include "pv/widgets/searchpatterninput.h"
 
 #include <QPainter>
 #include <QKeyEvent>
@@ -28,9 +28,9 @@
 #include <QFocusEvent>
 #include <QFontMetrics>
 #include <QApplication>
-#include "../log.h"
-#include "../config/appconfig.h"
-#include "../ui/dockfonts.h"
+#include "pv/base/log.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/dockfonts.h"
 
 namespace pv {
 namespace widgets {

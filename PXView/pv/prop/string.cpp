@@ -28,9 +28,9 @@
 #include <QHBoxLayout>
 #include <QToolButton>
 
-#include "../config/appconfig.h"
-#include "../ui/iconcache.h"
-#include "string.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/iconcache.h"
+#include "pv/prop/string.h"
 
 namespace pv {
 namespace prop {

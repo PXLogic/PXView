@@ -1,20 +1,20 @@
-#include "capturemanager.h"
+#include "pv/core/capturemanager.h"
 
-#include "eventbus.h"
-#include "documentregistry.h"
-#include "sessionstatecontext.h"
-#include "../sigsession.h"  // SessionData full definition + ds_lock_guard typedef
-#include "../data/decoderstack.h"
-#include "../data/sessiondocument.h"
-#include "../data/signalmodel.h"
-#include "../data/spectrumstack.h"
-#include "../data/mathstack.h"
-#include "../data/lissajousmodel.h"
-#include "../log.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
-#include "../utility/path.h"
-#include "../config/appconfig.h"
+#include "pv/core/eventbus.h"
+#include "pv/core/documentregistry.h"
+#include "pv/core/sessionstatecontext.h"
+#include "pv/session/sigsession.h"  // SessionData full definition + ds_lock_guard typedef
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/data/stack/spectrumstack.h"
+#include "pv/data/stack/mathstack.h"
+#include "pv/data/stack/lissajousmodel.h"
+#include "pv/base/log.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/utility/path.h"
+#include "pv/config/appconfig.h"
 
 #include <QDateTime>
 #include <QDir>

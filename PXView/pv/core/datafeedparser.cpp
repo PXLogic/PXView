@@ -1,18 +1,18 @@
-#include "datafeedparser.h"
+#include "pv/core/datafeedparser.h"
 
-#include "capturemanager.h"
-#include "decodetaskmanager.h"
-#include "documentregistry.h"
-#include "eventbus.h"
-#include "filterprocessor.h"
-#include "sessionstatecontext.h"
-#include "../sigsession.h"  // SessionData full definition
-#include "../data/analogsnapshot.h"
-#include "../data/dsosnapshot.h"
-#include "../data/logicsnapshot.h"
-#include "../data/mathstack.h"
-#include "../data/spectrumstack.h"
-#include "../log.h"
+#include "pv/core/capturemanager.h"
+#include "pv/core/decodetaskmanager.h"
+#include "pv/core/documentregistry.h"
+#include "pv/core/eventbus.h"
+#include "pv/core/filterprocessor.h"
+#include "pv/core/sessionstatecontext.h"
+#include "pv/session/sigsession.h"  // SessionData full definition
+#include "pv/data/snapshot/analogsnapshot.h"
+#include "pv/data/snapshot/dsosnapshot.h"
+#include "pv/data/snapshot/logicsnapshot.h"
+#include "pv/data/stack/mathstack.h"
+#include "pv/data/stack/spectrumstack.h"
+#include "pv/base/log.h"
 
 #include <QDateTime>
 #include <cassert>

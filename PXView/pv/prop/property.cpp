@@ -21,7 +21,7 @@
  */
 
 
-#include "property.h"
+#include "pv/prop/property.h"
 
 namespace pv {
 namespace prop {

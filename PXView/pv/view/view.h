@@ -34,15 +34,15 @@
 #include <QScrollArea>
 #include <QTimer>
 
-#include "../data/pulse_analyzer.h"
-#include "../ui/uimanager.h"
-#include "dock_ui_state.h"
-#include "view_cursors.h"
-#include "view_data_sync.h"
-#include "view_derived_traces.h"
-#include "view_glitch_filter.h"
-#include "view_layout.h"
-#include "view_signal_sync.h"
+#include "pv/data/pulse_analyzer.h"
+#include "pv/ui/uimanager.h"
+#include "pv/view/dock_ui_state.h"
+#include "pv/view/view_cursors.h"
+#include "pv/view/view_data_sync.h"
+#include "pv/view/view_derived_traces.h"
+#include "pv/view/view_glitch_filter.h"
+#include "pv/view/view_layout.h"
+#include "pv/view/view_signal_sync.h"
 
 // Forward declarations (replaces the former includes of signal.h, viewport.h,
 // cursor.h, xcursor.h, viewstatus.h, view_derived_traces.h, view_layout.h,

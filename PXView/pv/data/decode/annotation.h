@@ -27,7 +27,7 @@
 
 #include <QString>
 #include <vector>
-#include "annotation_pool.h"
+#include "pv/data/decode/annotation_pool.h"
 
 class AnnotationResTable;
 class DecoderStatus;

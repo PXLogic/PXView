@@ -27,8 +27,8 @@
 #include <utility>
 #include <vector>
 
-#include "property.h"
-#include "../gvarptr.h"
+#include "pv/prop/property.h"
+#include "pv/base/gvarptr.h"
 
 class DsComboBox;
 

@@ -10,31 +10,31 @@
 # directly into the executable. Qt6::Core is the only direct link needed
 # here (matches pxview-utility/pxview-config convention).
 add_library(pxview-data STATIC
-    snapshot.cpp
-    signaldata.cpp
-    signalmodel.cpp
-    signallistmodel.cpp
+    snapshot/snapshot.cpp
+    model/signaldata.cpp
+    model/signalmodel.cpp
+    model/signallistmodel.cpp
     datasource.cpp
     triggerconfig.cpp
-    lissajousmodel.cpp
-    logicsnapshot.cpp
-    logicsnapshot_diskcache_writer.cpp
-    logicsnapshot_glitch_filter.cpp
+    stack/lissajousmodel.cpp
+    snapshot/logicsnapshot.cpp
+    snapshot/logicsnapshot_diskcache_writer.cpp
+    snapshot/logicsnapshot_glitch_filter.cpp
     pulse_analyzer.cpp
     pulse_analyzer.h
-    dsosnapshot.cpp
-    analogsnapshot.cpp
-    sessionsnapshot.cpp
-    sessiondata.cpp
-    sessiondocument.cpp
-    signalconfigstore.cpp
-    decoderstack.cpp
-    mathstack.cpp
-    spectrumstack.cpp
-    disk_buffer_manager.cpp
-    disk_write_thread.cpp
-    disk_read_cache.cpp
-    mmap_allocator.cpp
+    snapshot/dsosnapshot.cpp
+    snapshot/analogsnapshot.cpp
+    document/sessionsnapshot.cpp
+    document/sessiondata.cpp
+    document/sessiondocument.cpp
+    model/signalconfigstore.cpp
+    stack/decoderstack.cpp
+    stack/mathstack.cpp
+    stack/spectrumstack.cpp
+    cache/disk_buffer_manager.cpp
+    cache/disk_write_thread.cpp
+    cache/disk_read_cache.cpp
+    cache/mmap_allocator.cpp
     decode/rowdata.cpp
     decode/row.cpp
     decode/decoder.cpp

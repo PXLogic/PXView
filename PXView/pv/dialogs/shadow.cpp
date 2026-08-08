@@ -21,7 +21,7 @@
  */
 
 
-#include "shadow.h"
+#include "pv/dialogs/shadow.h"
 #include <QPainter>
 
 QT_BEGIN_NAMESPACE

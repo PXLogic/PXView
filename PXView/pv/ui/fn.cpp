@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "fn.h"
-#include "dockfonts.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
@@ -39,8 +39,8 @@
 #include <QWidget>
 #include <cassert>
 
-#include "../config/appconfig.h"
-#include "../ui/xtoolbutton.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/xtoolbutton.h"
 
 namespace ui {
 

@@ -9,10 +9,10 @@
 #include <thread>
 #include <vector>
 
-#include "../data/sessiondocument.h"
-#include "isession_coordination.h"
-#include "isession_state.h"
-#include "isession_state.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

@@ -20,20 +20,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "dsotriggerdock.h"
-#include "../config/appconfig.h"
-#include "../data/sessiondocument.h"
-#include "../dialogs/dsmessagebox.h"
-#include "../log.h"
-#include "../sigsession.h"
-#include "../tabcontext.h"
-#include "../ui/dockfonts.h"
-#include "../ui/fn.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
-#include "../view/dsosignal.h"
-#include "../view/view.h"
-#include "keywordlineedit.h"
+#include "pv/dock/dsotriggerdock.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/dialogs/dsmessagebox.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
+#include "pv/session/tabcontext.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/view/view.h"
+#include "pv/dock/keywordlineedit.h"
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>

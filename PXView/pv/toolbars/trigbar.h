@@ -27,8 +27,8 @@
 #include <QToolBar>
 #include <QAction>
 #include <QMenu>
-#include "../interface/icallbacks.h"
-#include "../ui/uimanager.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/ui/uimanager.h"
 
 namespace pv {
 

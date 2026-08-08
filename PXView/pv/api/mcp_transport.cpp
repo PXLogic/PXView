@@ -1,8 +1,8 @@
-#include "mcp_transport.h"
+#include "pv/api/mcp_transport.h"
 
 #include <nlohmann/json.hpp>
 
-#include "../core/eventbus.h"
+#include "pv/core/eventbus.h"
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QFile>

@@ -29,13 +29,13 @@
 #include <QUrl>
 #include <cassert>
 
-#include "../config/appconfig.h"
-#include "../dialogs/about.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../ui/iconcache.h"
-#include "../ui/langresource.h"
-#include "logobar.h"
+#include "pv/config/appconfig.h"
+#include "pv/dialogs/about.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/iconcache.h"
+#include "pv/ui/langresource.h"
+#include "pv/toolbars/logobar.h"
 
 namespace pv {
 namespace toolbars {

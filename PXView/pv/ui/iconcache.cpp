@@ -1,4 +1,4 @@
-#include "iconcache.h"
+#include "pv/ui/iconcache.h"
 #include "pv/config/appconfig.h"
 #include <QPainter>
 #include <QColor>

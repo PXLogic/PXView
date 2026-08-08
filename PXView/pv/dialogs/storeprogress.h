@@ -25,9 +25,9 @@
  
 #include <QProgressBar>
 #include <QTimer>
-#include "../storesession.h"
-#include "../dialogs/pxdialog.h" 
-#include "../interface/icallbacks.h"
+#include "pv/session/storesession.h"
+#include "pv/dialogs/pxdialog.h" 
+#include "pv/interface/icallbacks.h"
 
 class QTextEdit;
 class QRadioButton;

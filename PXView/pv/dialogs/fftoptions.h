@@ -30,9 +30,9 @@
 #include <QLabel>
 #include <QCheckBox> 
  
-#include "../toolbars/titlebar.h"
-#include "pxdialog.h"
-#include "../ui/dscombobox.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/dialogs/pxdialog.h"
+#include "pv/ui/dscombobox.h"
 
 namespace pv {
 

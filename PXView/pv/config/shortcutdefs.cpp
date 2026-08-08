@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "shortcutdefs.h"
-#include "../ui/langresource.h"
+#include "pv/config/shortcutdefs.h"
+#include "pv/ui/langresource.h"
 
 namespace pv {
 

@@ -28,7 +28,7 @@
 // document_snapshot_source) go through _view->… so the public View API is
 // unchanged.
 
-#include "view_cursors.h"
+#include "pv/view/view_cursors.h"
 
 #include <cassert>
 #include <list>
@@ -36,14 +36,14 @@
 #include <QPalette>
 #include <QWidget>
 
-#include "view.h"
-#include "ruler.h"
+#include "pv/view/view.h"
+#include "pv/view/component/ruler.h"
 
-#include "../config/appconfig.h"
-#include "../data/datasource.h"
-#include "../data/signalmodel.h"
-#include "../deviceagent.h"
-#include "../sigsession.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/datasource.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/session/deviceagent.h"
+#include "pv/session/sigsession.h"
 
 using namespace std;
 

@@ -20,14 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "protocolitemlayer.h"
-#include "../config/appconfig.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../ui/dockfonts.h"
+#include "pv/dock/protocolitemlayer.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/ui/dockfonts.h"
 #include <cassert>
 #include <stdexcept>
-#include "../ui/iconcache.h"
+#include "pv/ui/iconcache.h"
 
 namespace pv {
 namespace dock {

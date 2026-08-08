@@ -25,7 +25,7 @@
 
 #include <QCheckBox>
 
-#include "bool.h"
+#include "pv/prop/bool.h"
 
 using namespace std;
 

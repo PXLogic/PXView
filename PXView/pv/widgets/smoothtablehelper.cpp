@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-#include "smoothtablehelper.h"
+#include "pv/widgets/smoothtablehelper.h"
 
 #include <QHeaderView>
 #include <QScrollBar>

@@ -8,18 +8,18 @@
 #include <QDateTime>
 #include <QString>
 
-#include "eventbus.h"
-#include "../data/sessiondata.h"
-#include "../data/sessiondocument.h"
-#include "../data/signalmodel.h"
-#include "../data/triggerconfig.h"
-#include "../data/lissajousmodel.h"
-#include "../data/spectrumstack.h"
-#include "../data/mathstack.h"
-#include "../data/decoderstack.h"
-#include "cursorregistry.h"
-#include "../deviceagent.h"
-#include "isession_coordination.h"
+#include "pv/core/eventbus.h"
+#include "pv/data/document/sessiondata.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/data/triggerconfig.h"
+#include "pv/data/stack/lissajousmodel.h"
+#include "pv/data/stack/spectrumstack.h"
+#include "pv/data/stack/mathstack.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/core/cursorregistry.h"
+#include "pv/session/deviceagent.h"
+#include "pv/core/isession_coordination.h"
 
 namespace pv {
 

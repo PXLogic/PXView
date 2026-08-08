@@ -19,20 +19,20 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
-#include "dsmessagebox.h"
-#include "shadow.h"
+#include "pv/dialogs/dsmessagebox.h"
+#include "pv/dialogs/shadow.h"
 
 #include <QObject>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QVBoxLayout>
 #include <QAbstractButton>
-#include "../pxvdef.h"
-#include "../ui/langresource.h"
-#include "../config/appconfig.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../ui/popupdlglist.h"
+#include "pv/base/pxvdef.h"
+#include "pv/ui/langresource.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/popupdlglist.h"
 
 namespace pv {
 namespace dialogs {

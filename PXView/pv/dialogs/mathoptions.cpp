@@ -20,21 +20,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "mathoptions.h"
+#include "pv/dialogs/mathoptions.h"
 #include <QCheckBox>
 #include <QVariant>
 #include <QLabel>
 #include <QTabBar>
 #include <QBitmap>
 
-#include "../sigsession.h"
-#include "../view/view.h"
-#include "../view/mathtrace.h"
-#include "../data/mathstack.h"
-#include "../ui/langresource.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../config/appconfig.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/view.h"
+#include "pv/view/trace/mathtrace.h"
+#include "pv/data/stack/mathstack.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/config/appconfig.h"
 
 using namespace std;
 using namespace pv::view;

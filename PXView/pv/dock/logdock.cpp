@@ -20,16 +20,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "logdock.h"
+#include "pv/dock/logdock.h"
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../log.h"
-#include "../ui/dockfonts.h"
-#include "../ui/dscombobox.h"
-#include "../ui/fn.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/log.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
 
 #include <QCheckBox>
 #include <QDesktopServices>

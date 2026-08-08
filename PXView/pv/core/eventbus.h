@@ -12,9 +12,9 @@
 #include <vector>
 #include <concepts>
 
-#include "../interface/icallbacks.h"
-#include "../interface/events.h"
-#include "../log.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/interface/events.h"
+#include "pv/base/log.h"
 
 namespace pv {
 namespace core {

@@ -34,7 +34,7 @@
 // data_updated, mark_derived_traces_dirty, set_data_document,
 // viewport_update) go through _view->… so the public View API is unchanged.
 
-#include "view_signal_sync.h"
+#include "pv/view/view_signal_sync.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,32 +47,32 @@
 #include <QColor>
 #include <QScrollBar>
 
-#include "view.h"
+#include "pv/view/view.h"
 
-#include "../config/appconfig.h"
-#include "../data/decode/decoder.h"
-#include "../data/decoderstack.h"
-#include "../data/sessiondocument.h"
-#include "../data/signalconfigstore.h"
-#include "../data/signalmodel.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../sigsession.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalconfigstore.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
 
-#include "analogsignal.h"
-#include "decodetrace.h"
-#include "dsosignal.h"
-#include "header.h"
-#include "lissajoustrace.h"
-#include "logicsignal.h"
-#include "mathtrace.h"
-#include "signal.h"
-#include "signalfactory.h"
-#include "spectrumtrace.h"
-#include "trace.h"
-#include "viewport.h"
-#include "viewstatus.h"
-#include "../widgets/hoversplitter.h"
+#include "pv/view/signal/analogsignal.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/view/component/header.h"
+#include "pv/view/trace/lissajoustrace.h"
+#include "pv/view/signal/logicsignal.h"
+#include "pv/view/trace/mathtrace.h"
+#include "pv/view/signal/signal.h"
+#include "pv/view/signal/signalfactory.h"
+#include "pv/view/trace/spectrumtrace.h"
+#include "pv/view/trace/trace.h"
+#include "pv/view/viewport/viewport.h"
+#include "pv/view/component/viewstatus.h"
+#include "pv/widgets/hoversplitter.h"
 
 using namespace std;
 

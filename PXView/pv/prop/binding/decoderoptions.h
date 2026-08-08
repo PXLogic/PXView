@@ -22,11 +22,11 @@
 #ifndef PXVIEW_PV_PROP_BINDING_DECODEROPTIONS_H
 #define PXVIEW_PV_PROP_BINDING_DECODEROPTIONS_H
 
-#include "binding.h"
+#include "pv/prop/binding/binding.h"
 #include <memory>
 #include <QFont>
 
-#include "../property.h"
+#include "pv/prop/property.h"
 
 struct srd_decoder_option;
 

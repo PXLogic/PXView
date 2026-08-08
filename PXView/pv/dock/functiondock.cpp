@@ -20,22 +20,22 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "functiondock.h"
+#include "pv/dock/functiondock.h"
 
 #include <QHBoxLayout>
 #include <QIcon>
 #include <cmath>
 
-#include "../sigsession.h"
-#include "../data/lissajousmodel.h"
-#include "../data/signalmodel.h"
-#include "../dialogs/fftoptions.h"
-#include "../dialogs/mathoptions.h"
-#include "../ui/langresource.h"
-#include "../ui/dockfonts.h"
-#include "../config/appconfig.h"
-#include "../pxvdef.h"
-#include "../log.h"
+#include "pv/session/sigsession.h"
+#include "pv/data/stack/lissajousmodel.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/dialogs/fftoptions.h"
+#include "pv/dialogs/mathoptions.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
 
 namespace pv {
 namespace dock {

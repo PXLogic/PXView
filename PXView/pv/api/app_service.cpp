@@ -14,14 +14,14 @@
  * GNU General Public License for more details.
  */
 
-#include "app_service.h"
-#include "session_service.h"
-#include "../appcontrol.h"
-#include "../sigsession.h"
-#include "../core/documentregistry.h"
-#include "../deviceagent.h"
-#include "../config/appconfig.h"
-#include "../data/sessiondocument.h"
+#include "pv/api/app_service.h"
+#include "pv/api/session_service.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/session/sigsession.h"
+#include "pv/core/documentregistry.h"
+#include "pv/session/deviceagent.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/document/sessiondocument.h"
 
 #include <libsigrok/libsigrok.h>
 #include <algorithm>

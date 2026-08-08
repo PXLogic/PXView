@@ -28,7 +28,7 @@
 
 #include <optional>
 
-#include "property.h"
+#include "pv/prop/property.h"
 
 namespace pv {
 namespace ui {

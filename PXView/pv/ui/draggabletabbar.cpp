@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "draggabletabbar.h"
+#include "pv/ui/draggabletabbar.h"
 
 #include <QMouseEvent>
 #include <QApplication>
@@ -31,7 +31,7 @@
 #include <QStyleOption>
 #include <QStylePainter>
 
-#include "../config/appconfig.h"
+#include "pv/config/appconfig.h"
 
 namespace pv {
 namespace ui {

@@ -21,7 +21,7 @@
  */
 
 #include <libsigrokdecode.h>
-#include "decodermenu.h"
+#include "pv/widgets/decodermenu.h"
 #include <cassert>
 
 namespace pv {

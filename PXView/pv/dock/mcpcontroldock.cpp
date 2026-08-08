@@ -7,12 +7,12 @@
  * (at your option) any later version.
  */
 
-#include "mcpcontroldock.h"
-#include "../appcontrol.h"
-#include "../api/mcp_transport.h"
-#include "../config/appconfig.h"
-#include "../ui/langresource.h"
-#include "../ui/dockfonts.h"
+#include "pv/dock/mcpcontroldock.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/api/mcp_transport.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/dockfonts.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>

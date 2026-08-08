@@ -31,9 +31,9 @@
 #include <QColor>
 #include <QString>
 
-#include "iview_delegates.h"
-#include "cursor.h"
-#include "xcursor.h"
+#include "pv/view/iview_delegates.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/view/cursor/xcursor.h"
 
 namespace pv {
 namespace view {

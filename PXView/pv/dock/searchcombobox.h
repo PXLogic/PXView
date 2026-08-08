@@ -23,7 +23,7 @@
 #ifndef SEARCHCOMBOBOX_H
 #define SEARCHCOMBOBOX_H
 
-#include "../widgets/smoothscrollarea.h"
+#include "pv/widgets/smoothscrollarea.h"
 #include <QDialog>
 #include <QEvent>
 #include <QMouseEvent>

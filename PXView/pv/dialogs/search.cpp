@@ -20,12 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "search.h"
-#include "../view/logicsignal.h"
+#include "pv/dialogs/search.h"
+#include "pv/view/signal/logicsignal.h"
 #include <cassert>
 #include <QRegularExpressionValidator>
 #include <QTimer>
-#include "../ui/langresource.h"
+#include "pv/ui/langresource.h"
  
 
 namespace pv {

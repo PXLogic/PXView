@@ -33,13 +33,13 @@
 #include <QVBoxLayout>
 #include <vector>
 
-#include "../deviceagent.h"
-#include "../dialogs/deviceoptions.h"
-#include "../interface/icontextaware.h"
-#include "../prop/binding/deviceoptions.h"
-#include "../prop/binding/probeoptions.h"
-#include "../sigsession.h"
-#include "../ui/uimanager.h"
+#include "pv/session/deviceagent.h"
+#include "pv/dialogs/deviceoptions.h"
+#include "pv/interface/icontextaware.h"
+#include "pv/prop/binding/deviceoptions.h"
+#include "pv/prop/binding/probeoptions.h"
+#include "pv/session/sigsession.h"
+#include "pv/ui/uimanager.h"
 
 namespace pv {
 

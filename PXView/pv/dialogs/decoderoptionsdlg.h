@@ -34,7 +34,7 @@ class QFormLayout;
 
 struct srd_channel;
 
-#include "pxdialog.h"
+#include "pv/dialogs/pxdialog.h"
 
 namespace pv {
     namespace data{

@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "../api/types.h"  // api::MeasurementValue
-#include "../core/cursorregistry.h"  // core::CursorEntry
+#include "pv/api/types.h"  // api::MeasurementValue
+#include "pv/core/cursorregistry.h"  // core::CursorEntry
 
 namespace pv {
 namespace data {

@@ -20,25 +20,25 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "searchdock.h"
+#include "pv/dock/searchdock.h"
 #include <QPointer>
-#include "../data/logicsnapshot.h"
-#include "../data/snapshot.h"
-#include "../sigsession.h"
-#include "../view/logicsignal.h"
-#include "../view/view.h"
-#include "../widgets/smoothtablehelper.h"
+#include "pv/data/snapshot/logicsnapshot.h"
+#include "pv/data/snapshot/snapshot.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/signal/logicsignal.h"
+#include "pv/view/view.h"
+#include "pv/widgets/smoothtablehelper.h"
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../data/sessiondocument.h"
-#include "../log.h"
-#include "../tabcontext.h"
-#include "../ui/dockfonts.h"
-#include "../ui/fn.h"
-#include "../ui/iconcache.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/base/log.h"
+#include "pv/session/tabcontext.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/iconcache.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QObject>

@@ -31,10 +31,10 @@
 #include <QCheckBox>
 #include <QRadioButton>
 #include <QSlider>
-#include "../view/dsosignal.h"
-#include "../toolbars/titlebar.h"
-#include "pxdialog.h"
-#include "../ui/uimanager.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/dialogs/pxdialog.h"
+#include "pv/ui/uimanager.h"
 
 namespace pv {
 

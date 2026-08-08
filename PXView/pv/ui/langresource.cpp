@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "langresource.h"
+#include "pv/ui/langresource.h"
 #include <stddef.h>
-#include "../log.h"
-#include "../config/appconfig.h"
+#include "pv/base/log.h"
+#include "pv/config/appconfig.h"
 #include <QFile>
 #include <QByteArray>
 #include <QJsonParseError>

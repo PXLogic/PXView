@@ -1,15 +1,15 @@
-#include "decodetaskmanager.h"
+#include "pv/core/decodetaskmanager.h"
 
-#include "documentregistry.h"
-#include "eventbus.h"
-#include "sessionstatecontext.h"
-#include "../sigsession.h"  // SessionData full definition
-#include "../data/decoderstack.h"
-#include "../data/sessiondocument.h"
-#include "../data/signalmodel.h"
-#include "../data/logicsnapshot.h"
-#include "../interface/events.h"
-#include "../log.h"
+#include "pv/core/documentregistry.h"
+#include "pv/core/eventbus.h"
+#include "pv/core/sessionstatecontext.h"
+#include "pv/session/sigsession.h"  // SessionData full definition
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/data/snapshot/logicsnapshot.h"
+#include "pv/interface/events.h"
+#include "pv/base/log.h"
 
 #include <algorithm>
 #include <atomic>

@@ -20,14 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "regionoptions.h"
+#include "pv/dialogs/regionoptions.h"
  
-#include "../sigsession.h"
-#include "../view/cursor.h"
-#include "../view/view.h"
-#include "../eventobject.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/view/view.h"
+#include "pv/base/eventobject.h"
 
-#include "../ui/langresource.h"
+#include "pv/ui/langresource.h"
 
 using namespace std;
 

@@ -20,18 +20,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "probeoptions.h"
+#include "pv/prop/binding/probeoptions.h"
 #include <QObject>
 #include <cstdint>
-#include "../bool.h"
-#include "../double.h"
-#include "../enum.h"
-#include "../int.h"
-#include "../../config/appconfig.h"
-#include "../../gvarptr.h"
-#include "../../log.h"
-#include "../../sigsession.h"
-#include "../../ui/langresource.h"
+#include "pv/prop/bool.h"
+#include "pv/prop/double.h"
+#include "pv/prop/enum.h"
+#include "pv/prop/int.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/gvarptr.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
+#include "pv/ui/langresource.h"
 
 using namespace std;
 

@@ -21,18 +21,18 @@
 
 #include <libsigrokdecode.h>
 
-#include "decoderoptions.h"
+#include "pv/prop/binding/decoderoptions.h"
 
-#include "../../data/decoderstack.h"
-#include "../../data/decode/decoder.h"
-#include "../../gvarptr.h"
-#include "../../log.h"
-#include "../double.h"
-#include "../enum.h"
-#include "../int.h"
-#include "../string.h"
-#include "../../ui/langresource.h"
-#include "../../config/appconfig.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/base/gvarptr.h"
+#include "pv/base/log.h"
+#include "pv/prop/double.h"
+#include "pv/prop/enum.h"
+#include "pv/prop/int.h"
+#include "pv/prop/string.h"
+#include "pv/ui/langresource.h"
+#include "pv/config/appconfig.h"
 #include <stdexcept>
 
 using namespace std;

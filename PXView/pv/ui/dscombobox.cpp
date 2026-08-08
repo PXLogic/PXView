@@ -1,13 +1,13 @@
-#include "dscombobox.h"
+#include "pv/ui/dscombobox.h"
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QVBoxLayout>
 #include <QScrollBar>
 #include <QLibrary>
-#include "../config/appconfig.h"
-#include "../ui/dockfonts.h"
-#include "../widgets/smoothscrollarea.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/widgets/smoothscrollarea.h"
 
 #ifdef WIN32
 #include <windows.h>

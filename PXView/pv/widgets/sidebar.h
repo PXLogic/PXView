@@ -10,8 +10,8 @@
 #ifndef PXVIEW_PV_WIDGETS_SIDEBAR_H
 #define PXVIEW_PV_WIDGETS_SIDEBAR_H
 
-#include "../ui/uimanager.h"
-#include "sidebarbutton.h"
+#include "pv/ui/uimanager.h"
+#include "pv/widgets/sidebarbutton.h"
 #include <QList>
 #include <QParallelAnimationGroup>
 #include <QPropertyAnimation>

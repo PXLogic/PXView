@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "decodergroupbox.h"
-#include "../data/decode/decoder.h"
-#include "../data/decode/row.h"
-#include "../data/decoderstack.h"
+#include "pv/widgets/decodergroupbox.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/decode/row.h"
+#include "pv/data/stack/decoderstack.h"
 #include <libsigrokdecode.h>
 
 
@@ -34,9 +34,9 @@
 #include <QVBoxLayout>
 #include <QVariant>
 
-#include "../config/appconfig.h"
+#include "pv/config/appconfig.h"
 
-#include "../ui/iconcache.h"
+#include "pv/ui/iconcache.h"
 #include <cassert>
 
 

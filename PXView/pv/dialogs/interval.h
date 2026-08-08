@@ -29,9 +29,9 @@
 #include <QSlider>
 #include <QDialogButtonBox>
 
-#include "../sigsession.h"
-#include "../toolbars/titlebar.h"
-#include "pxdialog.h"
+#include "pv/session/sigsession.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/dialogs/pxdialog.h"
 
 namespace pv {
 namespace dialogs {

@@ -10,15 +10,15 @@
 #include <shared_mutex>
 #include <vector>
 
-#include "cursorregistry.h"
-#include "../data/datasource.h"
-#include "../data/sessiondata.h"
-#include "../data/signalmodel.h"
-#include "../data/triggerconfig.h"
-#include "../deviceagent.h"
-#include "../pxvdef.h"
-#include "isession_coordination.h"
-#include "isession_state.h"
+#include "pv/core/cursorregistry.h"
+#include "pv/data/datasource.h"
+#include "pv/data/document/sessiondata.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/data/triggerconfig.h"
+#include "pv/session/deviceagent.h"
+#include "pv/base/pxvdef.h"
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

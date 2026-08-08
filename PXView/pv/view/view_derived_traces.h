@@ -33,10 +33,10 @@
 // Phase 4: unique_ptr<MathTrace/LissajousTrace> requires complete types
 // in the header. These includes could be avoided by using the pimpl
 // idiom, but the current trade-off favors compile simplicity.
-#include "mathtrace.h"
-#include "lissajoustrace.h"
-#include "decodetrace.h"
-#include "spectrumtrace.h"
+#include "pv/view/trace/mathtrace.h"
+#include "pv/view/trace/lissajoustrace.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/trace/spectrumtrace.h"
 
 struct srd_decoder;
 class DecoderStatus;

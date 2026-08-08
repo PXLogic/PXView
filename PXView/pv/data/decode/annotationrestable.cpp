@@ -20,12 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "annotationrestable.h"
+#include "pv/data/decode/annotationrestable.h"
 #include <cassert>
 #include <cstdlib> 
 #include <cmath>
-#include "../../log.h"
-#include "../../pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/base/pxvdef.h"
  
 const char g_bin_cvt_table[] = "0000000100100011010001010110011110001001101010111100110111101111";
  

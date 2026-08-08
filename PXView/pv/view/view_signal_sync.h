@@ -29,7 +29,7 @@
 #include <vector>
 #include <QColor>
 
-#include "iview_delegates.h"
+#include "pv/view/iview_delegates.h"
 
 class QColor;
 class QString;

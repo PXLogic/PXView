@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "deviceoptionsdock.h"
+#include "pv/dock/deviceoptionsdock.h"
 
 #include <QAbstractButton>
 #include <QComboBox>
@@ -43,25 +43,25 @@
 #include <QPointer>
 #include <cassert>
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../core/eventbus.h"
-#include "../data/sessiondocument.h"
-#include "../deviceagent.h"
-#include "../pxvdef.h"
-#include "../interface/icallbacks.h"
-#include "../log.h"
-#include "../prop/enum.h"
-#include "../prop/property.h"
-#include "../prop/string.h"
-#include "../sigsession.h"
-#include "../tabcontext.h"
-#include "../ui/dockfonts.h"
-#include "../ui/fn.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
-#include "../ui/toast.h"
-#include "../view/view.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/core/eventbus.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/session/deviceagent.h"
+#include "pv/base/pxvdef.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/base/log.h"
+#include "pv/prop/enum.h"
+#include "pv/prop/property.h"
+#include "pv/prop/string.h"
+#include "pv/session/sigsession.h"
+#include "pv/session/tabcontext.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/ui/toast.h"
+#include "pv/view/view.h"
 
 
 using namespace std;

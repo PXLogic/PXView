@@ -1,5 +1,5 @@
-#include "rpc_dispatcher.h"
-#include "binary_codec.h"
+#include "pv/api/rpc_dispatcher.h"
+#include "pv/api/binary_codec.h"
 #include <algorithm>
 #include <QFile>
 #include <QDir>
@@ -354,7 +354,7 @@ RpcDispatcher::RpcDispatcher(IAppService* app_svc)
 
 json RpcDispatcher::get_tool_schemas() {
     return json::array({
-#include "tool_schemas.inc"
+#include "pv/api/tool_schemas.inc"
     });
 }
 

@@ -21,19 +21,19 @@
  */
 
 
-#include "pxdialog.h"
-#include "shadow.h"
+#include "pv/dialogs/pxdialog.h"
+#include "pv/dialogs/shadow.h"
 
 #include <QObject>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QVBoxLayout>
 #include <QAbstractButton>
-#include "../pxvdef.h"
-#include "../config/appconfig.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../ui/popupdlglist.h"
+#include "pv/base/pxvdef.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/popupdlglist.h"
 
 namespace pv {
 namespace dialogs {

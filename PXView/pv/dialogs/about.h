@@ -26,7 +26,7 @@
 #define PXVIEW_PV_ABOUT_H
 
 #include <QLabel>
-#include "pxdialog.h"
+#include "pv/dialogs/pxdialog.h"
 
   
 namespace pv {

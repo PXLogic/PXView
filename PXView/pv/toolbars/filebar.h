@@ -28,10 +28,10 @@
 #include <QAction>
 #include <QMenu>
 
-#include "../sigsession.h" 
-#include "../interface/icallbacks.h"
-#include "../ui/xtoolbutton.h"
-#include "../ui/uimanager.h"
+#include "pv/session/sigsession.h" 
+#include "pv/interface/icallbacks.h"
+#include "pv/ui/xtoolbutton.h"
+#include "pv/ui/uimanager.h"
 
 namespace pv {
 namespace toolbars {

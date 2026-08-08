@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "decoderoptionsdlg.h"
+#include "pv/dialogs/decoderoptionsdlg.h"
 #include <libsigrokdecode.h>
 #include <QScrollArea>
 #include <QDialogButtonBox>
@@ -37,23 +37,23 @@
 #include <QEvent>
 #include <QMouseEvent>
 #include <QEventLoop>
-#include "../ui/popupdlglist.h"
+#include "pv/ui/popupdlglist.h"
 
-#include "../data/decoderstack.h"
-#include "../prop/binding/decoderoptions.h"
-#include "../data/decode/decoder.h"
-#include "../ui/dscombobox.h"
-#include "../view/logicsignal.h"
-#include "../sigsession.h"
-#include "../view/view.h"
-#include "../view/cursor.h"
-#include "../widgets/decodergroupbox.h"
-#include "../view/decodetrace.h"
-#include "../ui/msgbox.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/prop/binding/decoderoptions.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/view/signal/logicsignal.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/view.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/widgets/decodergroupbox.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/ui/msgbox.h"
 
-#include "../ui/langresource.h"
-#include "../config/appconfig.h"
-#include "../ui/dockfonts.h"
+#include "pv/ui/langresource.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/dockfonts.h"
 
 namespace pv {
 namespace dialogs {

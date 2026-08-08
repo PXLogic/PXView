@@ -20,12 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "draggabletabwidget.h"
-#include "draggabletabbar.h"
-#include "../submainframe.h"
-#include "../config/appconfig.h"
-#include "../sessionmanager.h"
-#include "../tabcontext.h"
+#include "pv/ui/draggabletabwidget.h"
+#include "pv/ui/draggabletabbar.h"
+#include "pv/mainwindow/submainframe.h"
+#include "pv/config/appconfig.h"
+#include "pv/session/sessionmanager.h"
+#include "pv/session/tabcontext.h"
 
 #include <QPushButton>
 #include <QHBoxLayout>

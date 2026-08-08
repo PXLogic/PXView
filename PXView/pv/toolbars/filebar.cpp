@@ -27,15 +27,15 @@
 #include <deque>
 #include <QApplication>
 
-#include "filebar.h"
-#include "../ui/msgbox.h"
-#include "../ui/dockfonts.h"
-#include "../config/appconfig.h"
-#include "../utility/path.h"
-#include "../ui/langresource.h"
-#include "../log.h"
-#include "../ui/fn.h"
-#include "../ui/iconcache.h"
+#include "pv/toolbars/filebar.h"
+#include "pv/ui/msgbox.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/config/appconfig.h"
+#include "pv/utility/path.h"
+#include "pv/ui/langresource.h"
+#include "pv/base/log.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/iconcache.h"
 #include <libsigrok/libsigrok.h>
 #include <QFileInfo>
 

@@ -7,10 +7,10 @@
  * (at your option) any later version.
  */
 
-#include "sidebar.h"
-#include "../config/appconfig.h"
-#include "../ui/langresource.h"
-#include "../ui/dockfonts.h"
+#include "pv/widgets/sidebar.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/dockfonts.h"
 #include <QFrame>
 #include <QIcon>
 #include <QPainter>

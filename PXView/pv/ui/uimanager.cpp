@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "uimanager.h"
-#include "iconcache.h"
+#include "pv/ui/uimanager.h"
+#include "pv/ui/iconcache.h"
 #include <cassert>
 
 UiManager::UiManager()

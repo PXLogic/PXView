@@ -4,7 +4,7 @@
 #include <QFont>
 #include <QApplication>
 #include <QFontDatabase>
-#include "../config/appconfig.h"
+#include "pv/config/appconfig.h"
 
 // ATK QML font.pixelSize reference:
 //   Panel main title (e.g. "测量", "设置"):  18px

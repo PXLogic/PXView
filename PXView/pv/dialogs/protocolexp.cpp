@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "protocolexp.h"
+#include "pv/dialogs/protocolexp.h"
   
 #include <QFormLayout>
 #include <QListWidget>
@@ -32,21 +32,21 @@
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
 
-#include "../sigsession.h"
-#include "../data/decoderstack.h"
-#include "../data/decode/decoder.h"
-#include "../data/decode/row.h"
-#include "../data/decode/annotation.h"
-#include "../view/decodetrace.h"
-#include "../view/decodermodel.h"
-#include "../eventobject.h"
-#include "../config/appconfig.h"
-#include "../pxvdef.h"
-#include "../utility/encoding.h"
-#include "../utility/path.h"
-#include "../log.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
+#include "pv/session/sigsession.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/decode/row.h"
+#include "pv/data/decode/annotation.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/trace/decodermodel.h"
+#include "pv/base/eventobject.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/pxvdef.h"
+#include "pv/utility/encoding.h"
+#include "pv/utility/path.h"
+#include "pv/base/log.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
 
 #define EXPORT_DEC_ROW_COUNT_MAX 20
 

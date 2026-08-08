@@ -1,7 +1,7 @@
 #include <libsigrokdecode.h>
-#include "decoder.h"
+#include "pv/data/decode/decoder.h"
 #include <cassert>
-#include "../../log.h"
+#include "pv/base/log.h"
 
 namespace pv {
 namespace data {

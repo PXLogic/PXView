@@ -26,7 +26,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QString>
-#include "../ui/dscombobox.h"
+#include "pv/ui/dscombobox.h"
 
 class DecoderStatus;
  

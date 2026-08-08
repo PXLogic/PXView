@@ -21,7 +21,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "deviceoptions.h"
+#include "pv/dialogs/deviceoptions.h"
 
 #include <QDoubleSpinBox>
 #include <QGuiApplication>
@@ -35,16 +35,16 @@
 #include <cassert>
 
 
-#include "../config/appconfig.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../prop/property.h"
-#include "../sigsession.h"
-#include "../ui/dockfonts.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
-#include "../ui/toast.h"
-#include "dsmessagebox.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/prop/property.h"
+#include "pv/session/sigsession.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/ui/toast.h"
+#include "pv/dialogs/dsmessagebox.h"
 
 
 using namespace std;

@@ -2,9 +2,9 @@
 #define PXVIEW_CORE_DATAFEEDPARSER_H
 
 #include <libsigrok/libsigrok.h>
-#include "isession_coordination.h"
-#include "isession_state.h"
-#include "isession_state.h"
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

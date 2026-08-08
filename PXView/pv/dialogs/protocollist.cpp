@@ -20,21 +20,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "protocollist.h"
+#include "pv/dialogs/protocollist.h"
 
 
 #include <QFormLayout>
 #include <QListWidget>
 
-#include "../sigsession.h"
-#include "../data/decoderstack.h"
-#include "../data/decode/decoder.h"
-#include "../data/decode/row.h"
-#include "../view/decodetrace.h"
-#include "../view/decodermodel.h"
-#include "../eventobject.h"
+#include "pv/session/sigsession.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/decode/row.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/trace/decodermodel.h"
+#include "pv/base/eventobject.h"
 
-#include "../ui/langresource.h"
+#include "pv/ui/langresource.h"
 
 using namespace std;
 

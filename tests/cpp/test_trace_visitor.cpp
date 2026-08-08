@@ -16,7 +16,7 @@
 
 #include <gtest/gtest.h>
 
-#include "pv/view/trace_visitor.h"
+#include "pv/view/trace/trace_visitor.h"
 
 using pv::view::TraceVisitor;
 using pv::view::ConstTraceVisitor;

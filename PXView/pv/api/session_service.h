@@ -20,13 +20,13 @@
 
 #pragma once
 
-#include "isession_service.h"
+#include "pv/api/isession_service.h"
 #include <QtGlobal>
 #include <QString>
 #include <cstddef>
 #include <cstdint>
-#include "../interface/icallbacks.h"
-#include "../interface/events.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/interface/events.h"
 
 #include <condition_variable>
 #include <mutex>

@@ -20,13 +20,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "msgbox.h"
-#include "../dialogs/dsmessagebox.h"
+#include "pv/ui/msgbox.h"
+#include "pv/dialogs/dsmessagebox.h"
 #include <cassert>
 #include <QMessageBox>
-#include "../pxvdef.h"
-#include "../appcontrol.h"
-#include "langresource.h"
+#include "pv/base/pxvdef.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/ui/langresource.h"
 
 //QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
 //QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes|QMessageBox::No);

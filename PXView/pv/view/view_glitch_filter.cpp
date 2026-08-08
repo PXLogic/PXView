@@ -30,7 +30,7 @@
 // public View API is unchanged. tr() is invoked as View::tr() to keep the
 // original translation context; Toast::show parent is _view (a QWidget*).
 
-#include "view_glitch_filter.h"
+#include "pv/view/view_glitch_filter.h"
 
 #include <algorithm>
 #include <vector>
@@ -41,21 +41,21 @@
 #include <QRect>
 #include <QScreen>
 
-#include "view.h"
+#include "pv/view/view.h"
 
-#include "../data/decode/decoder.h"
-#include "../data/decoderstack.h"
-#include "../data/pulse_analyzer.h"
-#include "../pxvdef.h"
-#include "../sigsession.h"
-#include "../ui/toast.h"
+#include "pv/data/decode/decoder.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/data/pulse_analyzer.h"
+#include "pv/base/pxvdef.h"
+#include "pv/session/sigsession.h"
+#include "pv/ui/toast.h"
 
-#include "decodetrace.h"
-#include "glitchfilterpopup.h"
-#include "header.h"
-#include "logicsignal.h"
-#include "signal.h"
-#include "viewport.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/component/glitchfilterpopup.h"
+#include "pv/view/component/header.h"
+#include "pv/view/signal/logicsignal.h"
+#include "pv/view/signal/signal.h"
+#include "pv/view/viewport/viewport.h"
 
 using namespace std;
 

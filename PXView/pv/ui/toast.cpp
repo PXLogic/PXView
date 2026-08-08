@@ -9,7 +9,7 @@
  * (at your option) any later version.
  */
 
-#include "toast.h"
+#include "pv/ui/toast.h"
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QTimer>
@@ -19,8 +19,8 @@
 #include <QScreen>
 #include <QIcon>
 #include <QGraphicsOpacityEffect>
-#include "../config/appconfig.h"
-#include "iconcache.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/iconcache.h"
 
 namespace pv {
 namespace ui {

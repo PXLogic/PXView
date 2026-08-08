@@ -59,7 +59,7 @@
 #include <QString>
 #include <vector>
 
-#include "../data/triggerconfig.h"  // for pv::data::TriggerConfig (complete type)
+#include "pv/data/triggerconfig.h"  // for pv::data::TriggerConfig (complete type)
 
 // The Windows SDK (shobjidl.h / objbase.h) defines `interface` as a
 // preprocessor macro for COM interface declarations. This conflicts with the

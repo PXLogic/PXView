@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "lissajousoptions.h"
+#include "pv/dialogs/lissajousoptions.h"
 #include <QCheckBox>
 #include <QVariant>
 #include <QLabel>
@@ -28,14 +28,14 @@
 #include <QBitmap>
 #include <cmath>
 
-#include "../sigsession.h"
-#include "../data/lissajousmodel.h"
-#include "../view/view.h"
-#include "../view/lissajoustrace.h"
-#include "../ui/langresource.h"
-#include "../ui/fn.h"
-#include "../ui/dockfonts.h"
-#include "../config/appconfig.h"
+#include "pv/session/sigsession.h"
+#include "pv/data/stack/lissajousmodel.h"
+#include "pv/view/view.h"
+#include "pv/view/trace/lissajoustrace.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/config/appconfig.h"
 
 using namespace std;
 using namespace pv::view;

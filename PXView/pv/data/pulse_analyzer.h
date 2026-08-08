@@ -28,7 +28,7 @@
 #include <map>
 #include <vector>
 
-#include "logicsnapshot.h"
+#include "pv/data/snapshot/logicsnapshot.h"
 
 namespace pv {
 namespace data {

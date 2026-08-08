@@ -1,10 +1,10 @@
-#include "filterprocessor.h"
+#include "pv/core/filterprocessor.h"
 
-#include "eventbus.h"
-#include "sessionstatecontext.h"
-#include "../sigsession.h"  // SessionData full definition
-#include "../data/logicsnapshot.h"
-#include "../log.h"
+#include "pv/core/eventbus.h"
+#include "pv/core/sessionstatecontext.h"
+#include "pv/session/sigsession.h"  // SessionData full definition
+#include "pv/data/snapshot/logicsnapshot.h"
+#include "pv/base/log.h"
 
 #include <libsigrok/libsigrok.h>
 

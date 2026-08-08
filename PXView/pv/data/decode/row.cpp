@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "row.h"
+#include "pv/data/decode/row.h"
 
 #include <libsigrokdecode.h>
 #include <cassert>

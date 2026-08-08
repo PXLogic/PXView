@@ -25,9 +25,9 @@
 
 #include <QAbstractItemView>
 
-#include "enum.h"
-#include "../ui/dscombobox.h"
-#include "../log.h"
+#include "pv/prop/enum.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/base/log.h"
 
 using namespace std;
 

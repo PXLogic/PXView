@@ -26,7 +26,7 @@
 
 #include <cstdint>
 
-#include "iview_delegates.h"
+#include "pv/view/iview_delegates.h"
 
 namespace pv {
 namespace view {

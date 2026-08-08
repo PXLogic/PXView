@@ -29,8 +29,8 @@
 #include <QVBoxLayout>
 #include <QDialogButtonBox>
 
-#include "../toolbars/titlebar.h"
-#include "../interface/icallbacks.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/interface/icallbacks.h"
 
 class QDialogButtonBox;
  

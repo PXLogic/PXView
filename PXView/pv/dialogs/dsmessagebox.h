@@ -26,7 +26,7 @@
 #include <QWidget>
 #include <QMessageBox>
 #include <QVBoxLayout>
-#include "../toolbars/titlebar.h"
+#include "pv/toolbars/titlebar.h"
 
 namespace pv {
 namespace dialogs {

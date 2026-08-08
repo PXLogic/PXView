@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "path.h"
+#include "pv/utility/path.h"
 #ifdef _WIN32
 #include <QStringEncoder>
-#include "../log.h"
+#include "pv/base/log.h"
 #include <cstring>
 #endif
 

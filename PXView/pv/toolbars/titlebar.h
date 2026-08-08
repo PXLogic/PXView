@@ -31,8 +31,8 @@
 #include <QWidgetAction>
 #include <QStackedWidget>
 
-#include "../interface/icallbacks.h"
-#include "../ui/uimanager.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/ui/uimanager.h"
 
 
 class QHBoxLayout;

@@ -20,11 +20,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "keywordlineedit.h"
-#include "../config/appconfig.h"
-#include "../log.h"
-#include "../ui/dockfonts.h"
-#include "../ui/langresource.h"
+#include "pv/dock/keywordlineedit.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/log.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/langresource.h"
 #include <QHBoxLayout>
 #include <QTimer>
 

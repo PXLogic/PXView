@@ -25,8 +25,8 @@
 #include <QFormLayout>
 #include <QLabel>
 
-#include "../property.h"
-#include "binding.h"
+#include "pv/prop/property.h"
+#include "pv/prop/binding/binding.h"
  
 
 namespace pv {

@@ -24,7 +24,7 @@
 #ifndef PXVIEW_PV_PROP_BOOL_H
 #define PXVIEW_PV_PROP_BOOL_H
 
-#include "property.h"
+#include "pv/prop/property.h"
 
 class QCheckBox;
 

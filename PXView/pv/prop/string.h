@@ -22,7 +22,7 @@
 #ifndef PXVIEW_PV_PROP_STRING_H
 #define PXVIEW_PV_PROP_STRING_H
 
-#include "property.h"
+#include "pv/prop/property.h"
 
 class QLineEdit;
 class QToolButton;

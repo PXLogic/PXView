@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "storeprogress.h"
-#include "../sigsession.h"
+#include "pv/dialogs/storeprogress.h"
+#include "pv/session/sigsession.h"
 #include <QCloseEvent>
 #include <QGridLayout>
 #include <QDialogButtonBox>
@@ -31,14 +31,14 @@
 #include <QRadioButton>
 #include <QComboBox>
 #include <QFormLayout>
-#include "../ui/msgbox.h"
-#include "../config/appconfig.h"
-#include "../interface/icallbacks.h"
-#include "../log.h"
-#include "../view/view.h"
-#include "../view/cursor.h"
-#include "../ui/langresource.h"
-#include "../ui/dscombobox.h"
+#include "pv/ui/msgbox.h"
+#include "pv/config/appconfig.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/base/log.h"
+#include "pv/view/view.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/dscombobox.h"
 
 namespace pv {
 namespace dialogs {

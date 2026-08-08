@@ -39,11 +39,11 @@
 #include <QTimer> 
 #include <QWidget>
 #include <vector> 
-#include "../prop/binding/deviceoptions.h"
-#include "../prop/binding/probeoptions.h"
-#include "../toolbars/titlebar.h"
-#include "../dialogs/pxdialog.h"
-#include "../ui/dscombobox.h"
+#include "pv/prop/binding/deviceoptions.h"
+#include "pv/prop/binding/probeoptions.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/dialogs/pxdialog.h"
+#include "pv/ui/dscombobox.h"
 
 class QScrollArea;
 

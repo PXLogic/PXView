@@ -7,9 +7,9 @@
  * (at your option) any later version.
  */
 
-#include "sidebarbutton.h"
-#include "../config/appconfig.h"
-#include "../ui/dockfonts.h"
+#include "pv/widgets/sidebarbutton.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/dockfonts.h"
 #include <QIcon>
 #include <QMouseEvent>
 #include <QPainter>

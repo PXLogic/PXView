@@ -23,8 +23,8 @@
 
 #include <cassert>
 
-#include "../ui/dsspinbox.h"
-#include "double.h"
+#include "pv/ui/dsspinbox.h"
+#include "pv/prop/double.h"
 
 using namespace std;
 

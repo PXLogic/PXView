@@ -29,8 +29,8 @@
 #include <memory>
 #include <list>
 
-#include "../api/types.h"  // api::MeasurementValue (for get_measurements return type)
-#include "../core/cursorregistry.h"  // core::CursorEntry (for get_cursors return type)
+#include "pv/api/types.h"  // api::MeasurementValue (for get_measurements return type)
+#include "pv/core/cursorregistry.h"  // core::CursorEntry (for get_cursors return type)
 
 // Spec v2 Task 8: DataSource now inherits from 5 fine-grained interfaces
 // (IDataSource, ISignalSource, IDecoderHost, ICaptureControl, IMeasureSource).
@@ -38,11 +38,11 @@
 // (ISP), while SigSession (which inherits DataSource) automatically satisfies
 // all 5 interfaces.  DataSource itself remains as the composite fat-interface
 // for backward compatibility; new code should depend on the specific interface.
-#include "idata_source.h"
-#include "isignal_source.h"
-#include "idecoder_host.h"
-#include "icapture_control.h"
-#include "imeasure_source.h"
+#include "pv/data/idata_source.h"
+#include "pv/data/isignal_source.h"
+#include "pv/data/idecoder_host.h"
+#include "pv/data/icapture_control.h"
+#include "pv/data/imeasure_source.h"
 
 struct srd_decoder;
 class DecoderStatus;

@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "measurecalculator.h"
+#include "pv/core/measurecalculator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -28,11 +28,11 @@
 #include <cstring>
 #include <vector>
 
-#include "../data/dsosnapshot.h"
-#include "../data/sessiondata.h"
-#include "../data/signalmodel.h"
-#include "../pxvdef.h"
-#include "../log.h"
+#include "pv/data/snapshot/dsosnapshot.h"
+#include "pv/data/document/sessiondata.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
 
 namespace pv {
 namespace core {

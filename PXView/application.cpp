@@ -30,7 +30,7 @@
 #include <QMetaObject>
 #include <QPointer>
 #ifndef NDEBUG
-#include "pv/log.h"
+#include "pv/base/log.h"
 #endif
 
 Application::Application(int &argc, char **argv):

@@ -5,7 +5,7 @@
  * ... (License header omitted for brevity) ...
  */
 
-#include "titlebar.h"
+#include "pv/toolbars/titlebar.h"
 #include <QAction>
 #include <QApplication>
 #include <QEvent>
@@ -26,14 +26,14 @@
 #include <QVBoxLayout>
 #include <cassert>
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../ui/langresource.h"
-#include "../ui/dockfonts.h"
-#include "../pxvdef.h"
-#include "../log.h"
-#include "../ui/fn.h"
-#include "../ui/iconcache.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/log.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/iconcache.h"
 
 namespace pv {
 namespace toolbars {

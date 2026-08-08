@@ -29,7 +29,7 @@
 
 #include <QString>
 #include <libsigrok/libsigrok.h> 
-#include "binding.h" 
+#include "pv/prop/binding/binding.h" 
 
 class DeviceAgent;
 

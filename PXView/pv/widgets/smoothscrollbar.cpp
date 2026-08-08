@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-#include "smoothscrollbar.h"
+#include "pv/widgets/smoothscrollbar.h"
 
 #include <QWheelEvent>
 

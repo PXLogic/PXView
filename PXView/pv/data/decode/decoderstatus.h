@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "annotationrestable.h"
+#include "pv/data/decode/annotationrestable.h"
 
 class DecoderStatus
 {

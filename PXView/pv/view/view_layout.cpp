@@ -27,7 +27,7 @@
 // widgets (_header / _ruler / _viewcenter / _time_viewport) are still
 // accessed via _view->… because they are View-owned QWidgets.
 
-#include "view_layout.h"
+#include "pv/view/view_layout.h"
 
 #include <cassert>
 #include <cmath>
@@ -35,16 +35,16 @@
 
 #include <QDebug>
 #include <QScrollBar>
-#include "../log.h"
+#include "pv/base/log.h"
 
-#include "view.h"
-#include "viewport.h"
-#include "devmode.h"
-#include "header.h"
-#include "ruler.h"
-#include "../data/datasource.h"
-#include "../sigsession.h"
-#include "../toolbars/samplingbar.h"
+#include "pv/view/view.h"
+#include "pv/view/viewport/viewport.h"
+#include "pv/view/component/devmode.h"
+#include "pv/view/component/header.h"
+#include "pv/view/component/ruler.h"
+#include "pv/data/datasource.h"
+#include "pv/session/sigsession.h"
+#include "pv/toolbars/samplingbar.h"
 
 using namespace std;
 

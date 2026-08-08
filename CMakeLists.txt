@@ -166,7 +166,7 @@ target_include_directories(pxview-core PUBLIC
 # PCH for pxview-core: use the same PCH header directly (not REUSE_FROM,
 # which would create a circular dependency since PXView links pxview-core).
 target_precompile_headers(pxview-core PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/common_pch.h
+	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/base/common_pch.h
 )
 
 #===============================================================================
@@ -259,7 +259,7 @@ endif()
 set_source_files_properties(${common_SOURCES} ${libsigrokdecode_SOURCES}
 	PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 target_precompile_headers(${PROJECT_NAME} PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/common_pch.h
+	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/base/common_pch.h
 )
 if(CMAKE_UNITY_BUILD)
 	set_target_properties(${PROJECT_NAME} PROPERTIES

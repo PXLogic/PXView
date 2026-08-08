@@ -24,4 +24,4 @@
 // This .cpp is kept for CMake source-list compatibility (it compiles to
 // an empty translation unit since array.h has no non-inline declarations).
 
-#include "array.h"
+#include "pv/utility/array.h"

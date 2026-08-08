@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "applicationpardlg.h"
+#include "pv/dialogs/applicationpardlg.h"
 #include <QPainter>
-#include "../ui/widgetinspector.h"
-#include "pxdialog.h"
+#include "pv/ui/widgetinspector.h"
+#include "pv/dialogs/pxdialog.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
@@ -66,14 +66,14 @@
 #include <algorithm>
 #include <vector>
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../config/shortcutdefs.h"
-#include "../log.h"
-#include "../sigsession.h"
-#include "../ui/dscombobox.h"
-#include "../ui/langresource.h"
-#include "../ui/uimanager.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/config/shortcutdefs.h"
+#include "pv/base/log.h"
+#include "pv/session/sigsession.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/uimanager.h"
 
 ShortcutKeyCapture::ShortcutKeyCapture(QWidget *parent)
     : QLineEdit(parent), m_capturing(false) {

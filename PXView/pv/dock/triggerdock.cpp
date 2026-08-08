@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "triggerdock.h"
-#include "../dialogs/dsmessagebox.h"
-#include "../sigsession.h"
-#include "../view/view.h"
+#include "pv/dock/triggerdock.h"
+#include "pv/dialogs/dsmessagebox.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/view.h"
 
 
 #include <QApplication>
@@ -42,19 +42,19 @@
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 
-#include "../appcontrol.h"
-#include "../config/appconfig.h"
-#include "../data/decode/annotationrestable.h"
-#include "../data/sessiondocument.h"
-#include "../data/triggerconfig.h"
-#include "../deviceagent.h"
-#include "../log.h"
-#include "../tabcontext.h"
-#include "../ui/dockfonts.h"
-#include "../ui/fn.h"
-#include "../ui/langresource.h"
-#include "../ui/msgbox.h"
-#include "../view/logicsignal.h"
+#include "pv/mainwindow/appcontrol.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/decode/annotationrestable.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/triggerconfig.h"
+#include "pv/session/deviceagent.h"
+#include "pv/base/log.h"
+#include "pv/session/tabcontext.h"
+#include "pv/ui/dockfonts.h"
+#include "pv/ui/fn.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/view/signal/logicsignal.h"
 
 
 // Split a combined "ext32 lower" trigger value (32 space-separated tokens) into

@@ -6,10 +6,10 @@
 #include <thread>
 #include <vector>
 
-#include "../data/sessiondata.h"
-#include "isession_coordination.h"
-#include "isession_state.h"
-#include "isession_state.h"
+#include "pv/data/document/sessiondata.h"
+#include "pv/core/isession_coordination.h"
+#include "pv/core/isession_state.h"
+#include "pv/core/isession_state.h"
 
 namespace pv {
 

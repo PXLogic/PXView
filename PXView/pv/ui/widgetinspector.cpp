@@ -1,4 +1,4 @@
-#include "widgetinspector.h"
+#include "pv/ui/widgetinspector.h"
 
 #include <QApplication>
 #include <QMouseEvent>

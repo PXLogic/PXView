@@ -20,14 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "appconfig.h" 
+#include "pv/config/appconfig.h" 
 #include <QApplication>
 #include <QSettings>
 #include <QLocale>
 #include <QDir> 
 #include <cassert>
 #include <QStandardPaths>
-#include "../log.h"
+#include "pv/base/log.h"
   
 #define MAX_PROTOCOL_FORMAT_LIST 15
 

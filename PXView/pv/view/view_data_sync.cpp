@@ -32,7 +32,7 @@
 // set_search_pos, set_update, headerWidth, update_margins, update_scroll,
 // update_scale_offset, viewport_update).
 
-#include "view_data_sync.h"
+#include "pv/view/view_data_sync.h"
 
 #include <algorithm>
 #include <cmath>
@@ -44,27 +44,27 @@
 #include <QResizeEvent>
 #include <QtGlobal>
 
-#include "view.h"
+#include "pv/view/view.h"
 
-#include "../config/appconfig.h"
-#include "../data/datasource.h"
-#include "../data/sessiondocument.h"
-#include "../data/signalmodel.h"
-#include "../pxvdef.h"
-#include "../sigsession.h"
-#include "../toolbars/samplingbar.h"
+#include "pv/config/appconfig.h"
+#include "pv/data/datasource.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/base/pxvdef.h"
+#include "pv/session/sigsession.h"
+#include "pv/toolbars/samplingbar.h"
 
-#include "analogsignal.h"
-#include "dsosignal.h"
-#include "header.h"
-#include "logicsignal.h"
-#include "lissajoustrace.h"
-#include "mathtrace.h"
-#include "ruler.h"
-#include "signal.h"
-#include "signalfactory.h"
-#include "viewport.h"
-#include "viewstatus.h"
+#include "pv/view/signal/analogsignal.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/view/component/header.h"
+#include "pv/view/signal/logicsignal.h"
+#include "pv/view/trace/lissajoustrace.h"
+#include "pv/view/trace/mathtrace.h"
+#include "pv/view/component/ruler.h"
+#include "pv/view/signal/signal.h"
+#include "pv/view/signal/signalfactory.h"
+#include "pv/view/viewport/viewport.h"
+#include "pv/view/component/viewstatus.h"
 
 using namespace std;
 

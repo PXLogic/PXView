@@ -20,13 +20,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "popupdlglist.h"
+#include "pv/ui/popupdlglist.h"
 #include <QGuiApplication>
 #include <QScreen>
 #include <QWindow>
 #include <QTimer>
 
-#include "../log.h"
+#include "pv/base/log.h"
 
 namespace{
     std::vector<PopuDlgItem> g_popup_dlg_list;

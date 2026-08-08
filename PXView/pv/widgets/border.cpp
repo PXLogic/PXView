@@ -20,13 +20,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "border.h"
-#include "../mainframe.h"
+#include "pv/widgets/border.h"
+#include "pv/mainwindow/mainframe.h"
  
 #include <QPainter>
 #include <QLinearGradient>
 #include <QRadialGradient>
-#include "../config/appconfig.h"
+#include "pv/config/appconfig.h"
 
 namespace pv {
 namespace widgets {

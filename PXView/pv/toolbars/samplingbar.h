@@ -23,7 +23,7 @@
 #ifndef PXVIEW_PV_TOOLBARS_SAMPLINGBAR_H
 #define PXVIEW_PV_TOOLBARS_SAMPLINGBAR_H
 
-#include "../sigsession.h"
+#include "pv/session/sigsession.h"
 
 #include <cstdint>
 #include <list>
@@ -32,11 +32,11 @@
 #include <QToolBar> 
 #include <QAction>
 #include <QMenu>
-#include "../ui/dscombobox.h"
-#include "../interface/icallbacks.h"
-#include "../ui/xtoolbutton.h"
-#include "../ui/uimanager.h"
-#include "../interface/icontextaware.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/ui/xtoolbutton.h"
+#include "pv/ui/uimanager.h"
+#include "pv/interface/icontextaware.h"
 #include <QLabel>
 
 struct st_dev_inst;

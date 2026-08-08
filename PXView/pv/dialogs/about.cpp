@@ -22,7 +22,7 @@
  */
 
 
-#include "about.h"
+#include "pv/dialogs/about.h"
 
 #include <QPixmap>
 #include <QApplication>
@@ -32,10 +32,10 @@
 #include <QTextStream>
 #include <QScrollBar>
   
-#include "../config/appconfig.h"
-#include "../pxvdef.h"
-#include "../utility/encoding.h"
-#include "../ui/langresource.h"
+#include "pv/config/appconfig.h"
+#include "pv/base/pxvdef.h"
+#include "pv/utility/encoding.h"
+#include "pv/ui/langresource.h"
 
 
 

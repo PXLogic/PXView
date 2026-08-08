@@ -1,6 +1,6 @@
 #pragma once
-#include "types.h"
-#include "isession_service.h"
+#include "pv/api/types.h"
+#include "pv/api/isession_service.h"
 
 namespace pv::api {
 

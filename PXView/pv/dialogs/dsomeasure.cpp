@@ -20,10 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "dsomeasure.h"
-#include "../sigsession.h"
-#include "../view/view.h"
-#include "../view/viewstatus.h"
+#include "pv/dialogs/dsomeasure.h"
+#include "pv/session/sigsession.h"
+#include "pv/view/view.h"
+#include "pv/view/component/viewstatus.h"
 
 #include <QCheckBox>
 #include <QVariant>
@@ -32,11 +32,11 @@
 #include <QTabBar>
 #include <QBitmap>
  
-#include "../pxvdef.h"
-#include "../eventobject.h"
+#include "pv/base/pxvdef.h"
+#include "pv/base/eventobject.h"
 
-#include "../ui/langresource.h"
-#include "../ui/xtoolbutton.h"
+#include "pv/ui/langresource.h"
+#include "pv/ui/xtoolbutton.h"
 
 using namespace std;
 using namespace pv::view;

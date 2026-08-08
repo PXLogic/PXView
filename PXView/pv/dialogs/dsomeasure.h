@@ -29,9 +29,9 @@
 #include <QTabWidget>
  
 
-#include "../view/dsosignal.h"
-#include "../toolbars/titlebar.h"
-#include "pxdialog.h"
+#include "pv/view/signal/dsosignal.h"
+#include "pv/toolbars/titlebar.h"
+#include "pv/dialogs/pxdialog.h"
 
 namespace pv {
 

@@ -39,12 +39,12 @@
 #include <QScrollArea>
 #include <vector>
 
-#include "../ui/dscombobox.h"
-#include "../widgets/smoothscrollarea.h"
-#include "../interface/icallbacks.h"
-#include "../ui/xtoolbutton.h"
-#include "../ui/uimanager.h"
-#include "../interface/icontextaware.h"
+#include "pv/ui/dscombobox.h"
+#include "pv/widgets/smoothscrollarea.h"
+#include "pv/interface/icallbacks.h"
+#include "pv/ui/xtoolbutton.h"
+#include "pv/ui/uimanager.h"
+#include "pv/interface/icontextaware.h"
 
 namespace pv {
 
