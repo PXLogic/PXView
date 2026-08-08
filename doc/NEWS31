@@ -7,6 +7,96 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
   
+    PXView V1.5.7修改
+    时间：2026年8月9日
+    变更如下：
+
+    【新功能】
+    *新增二进制编解码器（BinaryCodec），支持高效的波形数据传输，包含逻辑边沿编码、模拟/DSO包络编码和视口重置帧
+    *实现WebSocket订阅机制，支持主题订阅/取消订阅、视口订阅/更新/取消，客户端可按需接收特定类型的事件
+    *实现版本化状态通知，每次状态变更分配单调递增版本号和时间戳，客户端可检测过期状态
+    *新增视口数据定时推送（约30fps），WebSocket客户端订阅视口后自动接收增量波形数据
+    *新增批量RPC调用接口（batch_call），单次请求可执行多个JSON-RPC调用，减少网络往返延迟
+    *新增二进制视口数据获取接口（get_viewport_binary），支持以二进制帧返回逻辑边沿或模拟包络数据
+    *新增解码器自定义标签功能，支持为同类型解码器的多个实例设置区分标签（如"SPI(CH2.SPI)"），标签在协议列表、导出文件、MCP API中统一显示
+    *协议解码列表新增"All"模式，支持多解码器同时显示，按时间排序合并所有注解
+    *协议解码列表新增解码器切换下拉框，支持在单个解码器和所有解码器视图间快速切换
+    *协议解码列表新增Ctrl+F搜索快捷键，Enter键跳转下一个匹配，Shift+Enter跳转上一个
+    *协议解码表头新增右键菜单，支持显示/隐藏列
+
+    【问题修复】
+    *修复多解码器并发时的空指针竞态问题：在reload()和init_signals()中创建SignalModel后立即设置快照指针，解决添加解码器时其他解码器间歇性失败的问题
+    *默认启用Dock测量功能（dock_measure_fen_enabled从false改为true）
+    *优化协议表格列宽计算逻辑，同时考虑表头文字宽度和数据内容宽度
+
+    【重构】
+    *重构协议解码列表UI：替换PopupLineEdit为标准QLineEdit，添加清空按钮，优化搜索栏布局
+    *重构搜索过滤器为AnnotationProxyModel，仅在注解数据列中进行文本匹配，排除预设的Start/Duration列
+    *优化表格选择模式为多选（ExtendedSelection），调整默认行高为28px适配UI设计
+    *DecoderModel新增多栈（All）模式架构，使用前缀和实现O(stacks)顺序行映射，可见范围使用惰性合并排序
+    *DecoderModel新增Start和Duration预设列，显示注解起始时间和持续时间
+
+--------------------------------------------------------------------------------
+
+    PXView V1.5.6修改
+    时间：2026年8月8日
+    变更如下：
+
+    【新功能】
+    *发布pxview-automation Python自动化包，包含CLI命令行工具和三层API（低层McpClient、高层PXView、CLI），封装全部61个MCP工具，零运行时依赖
+    *新增协议表格右键菜单功能，支持复制单元格、复制行、复制列、复制全部和全选操作
+    *新增多语言翻译：复制单元格、复制行、复制列、复制全部、全选（简体中文、英文、繁体中文）
+    *新增Clang-Tidy静态分析配置文件（.clang-tidy），针对项目崩溃模式配置检查规则
+    *新增ASAN/TSAN/UBSAN编译选项，支持AddressSanitizer、ThreadSanitizer、UndefinedBehaviorSanitizer运行时检查
+    *新增ASAN/TSAN构建脚本（build-debug-asan.sh）
+
+    【问题修复】
+    *修复重复采集模式下的SIGSEGV崩溃：在first_payload中停止解码线程后再修改快照，建立严格的快照生命周期协议（可变→不可变→可变）
+    *修复重复采集模式下MmapAllocator重建导致的SIGSEGV：复用现有MmapAllocator而非创建新的，避免UnmapViewOfFile使解码线程的裸指针失效
+    *修复重复采集模式下leaf block decommit导致的SIGSEGV：first_payload中不再释放leaf block，保留映射供并发解码线程安全访问
+    *修复calc_mipmap中decommit常量值leaf block导致的SIGSEGV：仅在_able_free为true时才decommit，保护解码线程的裸指针
+    *修复first_payload中_dest_ptr悬垂指针导致的SIGSEGV：重置位对齐状态（_dest_ptr/_ch_fraction/_byte_fraction/_last_ended）
+    *修复append_cross_payload中move_first_node_to_last和free_head_blocks后_dest_ptr悬垂：在所有decommit操作后重置位对齐状态
+    *修复append_cross_payload尾部阶段_dest_ptr为空时崩溃：新增空指针防御检查
+    *修复DiskWriteThread::stop()中submit()永久阻塞：在等待谓词中加入_stopping条件，并通知_cv_full唤醒阻塞的submit()调用
+    *修复MmapAllocator文件删除线程泄漏：将detached线程改为可join线程，在析构函数中join确保缓存文件实际删除
+    *修复McpTransport::stop()中SSE客户端和pending socket的use-after-free：先断开信号再abort和delete，最后销毁server
+    *修复McpTransport::on_service_event中对已断开socket的use-after-free：单次遍历中分离存活和死掉的socket
+    *修复WsTransport::stop()中on_client_disconnected的stale iterator问题：先断开信号再清理客户端
+    *修复DecodeTaskManager::stop()中的死锁：采用"lock-swap-unlock-join"模式，不在持锁状态下join工作线程
+    *修复DecodeTaskManager::add_decode_task()中的锁竞争：先创建线程再移入向量，避免新线程阻塞
+    *修复DecodeTaskManager::decode_single_task()中的自detach问题：不再detach当前线程，由stop()路径统一join
+    *修复EventBus::broadcast_async()的alive标志被重复设true的问题：仅在构造函数设true、析构函数设false，lambda中用acquire序检查
+    *修复FilterProcessor::set_glitch_filter()中的自join死锁：检测递归调用时detach而非join，引入launch mutex防止TOCTOU竞态
+    *修复FilterProcessor::glitch_filter_task()中的递归创建线程问题：改为在循环中处理pending请求，不再递归调用set_glitch_filter()
+    *修复FilterProcessor::set_signal_invert()中的TOCTOU竞态：引入launch mutex保护启动路径
+    *修复SearchDock::search_worker()中的空指针访问：新增_data空指针防御检查
+    *修复LogicSignal的use-after-free：新增shared_ptr引用（_data_ref）保持快照生命周期，防止主线程访问已释放的快照
+    *修复非流模式停止采集后画面空白问题：非流模式不再clear capture_data，保留最后一次采集数据供查看
+    *修复MCP重启时的资源释放竞态：graceful restart先stop清理所有客户端，再延迟500ms释放端口后start
+    *移除demo设备循环采集限制，demo设备支持所有图案模式的循环采集
+    *修复采样栏重复模式对demo设备的限制：移除is_demo()判断，demo设备与硬件设备一致处理
+
+    【性能优化】
+    *移除release构建中的调试符号（-g）编译选项，减小二进制体积并加快编译速度
+    *优化WebSocket和RPC服务端的资源释放顺序，减少shutdown时的竞态窗口
+
+    【重构】
+    *重构Windows MSYS2/MinGW Python运行时检测和打包逻辑：强制在MSYS2环境下使用MinGW Python，避免错误链接python.org MSVC Python
+    *改进appcontrol.cpp的Python路径设置，支持MSYS2的lib/python3.X/ stdlib布局
+    *重构copy-deps.sh脚本，添加参数校验、错误处理和计数输出
+    *重写package.sh的Python依赖处理逻辑，修复版本检测和stdlib复制
+    *移除MSYS2/MinGW Python的遗留处理代码，简化构建和打包流程
+
+    【构建与CI】
+    *修复Web UI构建时npm源和node路径问题：指定官方npm源，添加nodejs执行路径到环境变量
+    *CI构建Web UI从可选改为必需，构建失败则CI失败
+    *CI新增Python DLL和stdlib校验步骤，检查MinGW Python正确链接和encodings模块存在
+    *为NSIS安装脚本配置.gitattributes二进制属性，防止Git移除UTF-8 BOM
+    *更新Web包名称为pxview-automation-web
+
+--------------------------------------------------------------------------------
+  
     PXView V1.5.5修改
     时间：2026年8月7日
     变更如下：
