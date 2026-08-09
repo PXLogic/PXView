@@ -411,6 +411,38 @@ bool DecoderStack::list_row_title(int row, QString &title) {
   return 0;
 }
 
+bool DecoderStack::list_row_description(int row, QString &desc) {
+  std::lock_guard<std::mutex> lock(_output_mutex);
+  for (auto i = _rows.begin(); i != _rows.end(); i++) {
+    auto iter = _rows_lshow.find((*i).first);
+    if (iter != _rows_lshow.end() && (*iter).second) {
+      if (row-- == 0) {
+        desc = (*i).first.description();
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+QString DecoderStack::auto_label() const {
+  if (_stack.empty() || !_session)
+    return QString();
+  auto *dec = _stack.front().get();
+  if (!dec || !dec->have_probes())
+    return QString();
+  int probe_idx = dec->first_probe_index();
+  if (probe_idx < 0)
+    return QString();
+  std::shared_lock<std::shared_mutex> lk(_session->signal_models_mutex());
+  const auto &models = _session->get_signal_models();
+  for (auto &m : models) {
+    if (m && m->index() == probe_idx)
+      return QString::fromStdString(m->name());
+  }
+  return QString();
+}
+
 void DecoderStack::clear() { init(); }
 
 void DecoderStack::init() {

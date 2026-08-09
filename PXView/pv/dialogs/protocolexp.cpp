@@ -269,6 +269,8 @@ void ProtocolExp::save_proc()
             decoder_name = QString::fromUtf8(root_dec->decoder()->name);
     }
     QString custom_label = decoder_stack->label();
+    if (custom_label.isEmpty())
+        custom_label = decoder_stack->auto_label();
     if (!custom_label.isEmpty())
         decoder_name += "(" + custom_label + ")";
     if (!decoder_name.isEmpty())

@@ -76,6 +76,8 @@ ProtocolList::ProtocolList(QWidget *parent, SigSession *session, pv::view::Decod
                 display_name = QString::fromUtf8(root_dec->decoder()->name);
         }
         QString custom_label = d->label();
+        if (custom_label.isEmpty())
+            custom_label = d->auto_label();
         if (!custom_label.isEmpty())
             display_name += "(" + custom_label + ")";
         if (display_name.isEmpty())

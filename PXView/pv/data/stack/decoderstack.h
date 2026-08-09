@@ -147,6 +147,7 @@ public:
 
 
     bool list_row_title(int row, QString &title);
+    bool list_row_description(int row, QString &desc);
 	 
 	void clear();
     void init();
@@ -223,6 +224,12 @@ public:
     // decoders can be labelled "CH2.SPI" and "CH3.SPI").
     inline QString label() const { return _label; }
     inline void set_label(const QString &label) { _label = label; }
+
+    // Auto-generate a display label from the first bound channel name
+    // (e.g. "CH1"). Used when no custom label has been set, so that
+    // multiple instances of the same decoder type can still be
+    // distinguished (e.g. "PWM(CH1)" vs "PWM(CH2)").
+    QString auto_label() const;
 
     // Set by callers (e.g. SigSession) to mark a stack for asynchronous
     // deletion by the decode thread. Mirrors the legacy

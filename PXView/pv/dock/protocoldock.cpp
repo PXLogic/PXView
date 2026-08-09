@@ -693,9 +693,12 @@ void ProtocolDock::rebuild_protocol_layers() {
     QString protocolName(decoders.back()->decoder()->name);
     QString protocolId(decoders.back()->decoder()->id);
 
-    // Append custom label to distinguish multiple instances of the same
-    // decoder type (e.g., "I2C(CH2.I2C)").
+    // Distinguish instances:
+    // 1. If custom label exists: use "Name(label)"
+    // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
     QString lbl = stack->label();
+    if (lbl.isEmpty())
+      lbl = stack->auto_label();
     if (!lbl.isEmpty())
       protocolName += "(" + lbl + ")";
 
@@ -847,9 +850,12 @@ void ProtocolDock::update_model() {
       name = QString(decoders.back()->decoder()->name);
     else
       name = QString("Decoder %1").arg(i);
-    // Append custom label to distinguish multiple instances of the same
-    // decoder type (e.g., "I2C(CH2.I2C)").
+    // Distinguish instances:
+    // 1. If custom label exists: use "Name(label)"
+    // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
     QString lbl = stack->label();
+    if (lbl.isEmpty())
+      lbl = stack->auto_label();
     if (!lbl.isEmpty())
       name += "(" + lbl + ")";
     _decoder_combo->addItem(name);

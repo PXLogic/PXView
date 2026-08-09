@@ -2177,6 +2177,8 @@ std::vector<DecoderInstance> SessionService::get_active_decoders() const {
                 display_name = root_dec->decoder()->name;
         }
         QString custom_label = stack->label();
+        if (custom_label.isEmpty())
+            custom_label = stack->auto_label();
         if (!custom_label.isEmpty())
             display_name += "(" + custom_label.toStdString() + ")";
         inst.display_name = display_name;
@@ -3610,6 +3612,8 @@ Result<void> SessionService::export_decoder_table(
                 analyzer_name = root_dec->decoder()->name;
         }
         QString custom_label = decoder_stack->label();
+        if (custom_label.isEmpty())
+            custom_label = decoder_stack->auto_label();
         if (!custom_label.isEmpty())
             analyzer_name += "(" + custom_label.toStdString() + ")";
         int row_count = decoder_stack->list_rows_size();

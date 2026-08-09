@@ -112,17 +112,20 @@ void DecoderModel::buildColumnMap()
         else
             prefix = QString("Dec%1").arg(si);
 
-        // Append custom label to distinguish multiple instances of the same
-        // decoder type (e.g., "I2C(CH2.I2C):Address/Data").
-        QString custom_label = s->label();
-        if (!custom_label.isEmpty())
-            prefix += "(" + custom_label + ")";
+        // Distinguish instances:
+        // 1. If custom label exists: use "Name(label)"
+        // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
+        QString lbl = s->label();
+        if (lbl.isEmpty())
+            lbl = s->auto_label();
+        if (!lbl.isEmpty())
+            prefix += "(" + lbl + ")";
 
         int row_count = s->list_rows_size();
         for (int r = 0; r < row_count; r++) {
-            QString title;
-            if (s->list_row_title(r, title) && !title.isEmpty())
-                _column_headers.push_back(prefix + ":" + title);
+            QString desc;
+            if (s->list_row_description(r, desc) && !desc.isEmpty())
+                _column_headers.push_back(prefix + ":" + desc);
             else
                 _column_headers.push_back(prefix + ":" + QString::number(r));
             _column_map.push_back({si, r});

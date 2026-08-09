@@ -233,6 +233,8 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
         }
     }
     QString custom_label = stack->label();
+    if (custom_label.isEmpty())
+        custom_label = stack->auto_label();
     if (!custom_label.isEmpty())
         protocol += "(" + custom_label + ")";
 

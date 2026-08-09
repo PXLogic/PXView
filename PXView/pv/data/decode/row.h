@@ -61,6 +61,11 @@ public:
 
 	QString title_id() const;
 
+    // Returns just the row description (e.g. "Address/data") without the
+    // decoder name prefix. Used by DecoderModel::buildColumnMap to avoid
+    // duplicating the decoder name in column headers.
+    QString description() const;
+
     bool operator<(const Row &other)const;
 
 private:
