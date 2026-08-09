@@ -112,6 +112,12 @@ void DecoderModel::buildColumnMap()
         else
             prefix = QString("Dec%1").arg(si);
 
+        // Append custom label to distinguish multiple instances of the same
+        // decoder type (e.g., "I2C(CH2.I2C):Address/Data").
+        QString custom_label = s->label();
+        if (!custom_label.isEmpty())
+            prefix += "(" + custom_label + ")";
+
         int row_count = s->list_rows_size();
         for (int r = 0; r < row_count; r++) {
             QString title;

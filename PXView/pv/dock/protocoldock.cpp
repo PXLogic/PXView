@@ -693,6 +693,12 @@ void ProtocolDock::rebuild_protocol_layers() {
     QString protocolName(decoders.back()->decoder()->name);
     QString protocolId(decoders.back()->decoder()->id);
 
+    // Append custom label to distinguish multiple instances of the same
+    // decoder type (e.g., "I2C(CH2.I2C)").
+    QString lbl = stack->label();
+    if (!lbl.isEmpty())
+      protocolName += "(" + lbl + ")";
+
     ProtocolItemLayer *layer =
         new ProtocolItemLayer(_top_panel, protocolName, this);
     _protocol_lay_items.push_back(layer);
@@ -841,6 +847,11 @@ void ProtocolDock::update_model() {
       name = QString(decoders.back()->decoder()->name);
     else
       name = QString("Decoder %1").arg(i);
+    // Append custom label to distinguish multiple instances of the same
+    // decoder type (e.g., "I2C(CH2.I2C)").
+    QString lbl = stack->label();
+    if (!lbl.isEmpty())
+      name += "(" + lbl + ")";
     _decoder_combo->addItem(name);
     if (decoder_model->getDecoderStack() == stack.get())
       current_combo_index = (int)(i + 1); // +1 for "All" offset
@@ -850,13 +861,11 @@ void ProtocolDock::update_model() {
   if (decode_sigs.size() == 0) {
     decoder_model->setDecoderStack(nullptr);
     current_combo_index = 0;
-  } else if (!decoder_model->getDecoderStack()) {
-    // No stack selected yet: default to first decoder (single-stack,
-    // fast O(1) path). User can switch to "All" via combo if desired.
-    decoder_model->setDecoderStack(decode_sigs.at(0).get());
-    current_combo_index = 1; // first decoder after "All"
   } else if (decoder_model->isMultiStackMode()) {
-    // Already in "All" mode
+    // Already in "All" mode — preserve it across decode progress updates.
+    // This check must come before the !getDecoderStack() check because
+    // setAllStacks() sets _decoder_stack to nullptr, so getDecoderStack()
+    // returns nullptr in multi-stack mode.
     if (decoder_model->stackCount() != (int)decode_sigs.size()) {
       // Stack count changed: full rebuild (prefix sums + column map, O(stacks))
       std::vector<pv::data::DecoderStack *> stacks;
@@ -867,6 +876,11 @@ void ProtocolDock::update_model() {
     // else: no rebuild needed — rowCount reads list_annotation_size()
     // on demand, and viewport following rebuilds _visible_merged lazily.
     current_combo_index = 0;
+  } else if (!decoder_model->getDecoderStack()) {
+    // No stack selected yet: default to first decoder (single-stack,
+    // fast O(1) path). User can switch to "All" via combo if desired.
+    decoder_model->setDecoderStack(decode_sigs.at(0).get());
+    current_combo_index = 1; // first decoder after "All"
   } else {
     // Find the currently selected single stack
     unsigned int index = 0;
@@ -1649,6 +1663,9 @@ void ProtocolDock::on_visible_range_changed() {
     // Binary search the merged list by sample range.
     _decoder_model->set_visible_range_by_samples(start_sample, end_sample);
 
+    // Update match count to reflect the new visible range.
+    _matchs_label->setText(QString::number(_model_proxy.rowCount()));
+
     if (_jumping_to_row) {
       QTimer::singleShot(150, this, [this]() { _jumping_to_row = false; });
     }
@@ -1721,6 +1738,9 @@ void ProtocolDock::on_visible_range_changed() {
   }
 
   _decoder_model->set_visible_range(start_idx, end_idx);
+
+  // Update match count to reflect the new visible range.
+  _matchs_label->setText(QString::number(_model_proxy.rowCount()));
 
   if (_jumping_to_row && _jumping_target_row >= start_idx &&
       _jumping_target_row < end_idx) {
@@ -1837,6 +1857,14 @@ void ProtocolDock::on_decoder_combo_changed(int index) {
 
   // Reset the table view to clear stale selection/scroll state.
   _table_view->reset();
+
+  // Re-apply the viewport filter when in follow-viewport mode.
+  // Without this, switching to "All" and back leaves the model in
+  // full-list mode despite _follow_viewport being true, causing the
+  // table to show all data instead of only the viewport slice.
+  if (_follow_viewport) {
+    on_visible_range_changed();
+  }
 
   search_done();
   resize_table_view(_decoder_model);
