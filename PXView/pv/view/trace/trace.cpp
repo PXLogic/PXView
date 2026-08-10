@@ -466,7 +466,7 @@ QRectF Trace::get_rect(const char *s, int y, int right)
     else
         return QRectF(
             12,
-            y - SquareWidth / 2,
+            y - SquareWidth / 2.0,
             SquareWidth, SquareWidth);
 }
 

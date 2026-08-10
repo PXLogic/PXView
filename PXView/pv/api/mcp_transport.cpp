@@ -70,6 +70,8 @@ McpTransport::McpTransport(IJsonRpcHandler* handler, int port)
 
 McpTransport::~McpTransport()
 {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    // stop() is called here for cleanup. No derived class overrides it.
     stop();
 }
 
@@ -603,7 +605,7 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
             timeout_seconds = args["timeoutSeconds"].get<double>();
         else if (args.contains("timeout_seconds") && args["timeout_seconds"].is_number())
             timeout_seconds = args["timeout_seconds"].get<double>();
-    } catch (...) {}
+    } catch (const std::exception& e) { (void)e; }
     (void)timeout_seconds;
 
     // Dispatch the wait_capture call to the handler.

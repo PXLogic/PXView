@@ -919,6 +919,11 @@ void ViewSignalSync::signals_modified_refresh() {
 // definitions — C++ allows them in any .cpp file.
 // =============================================================================
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization)
+// These QColor static members call AppConfig::Instance() during static
+// initialization. If AppConfig is not yet initialized, the fallback
+// QColor values are used. This is acceptable — the colors are refreshed
+// later by update_theme_colors().
 QColor View::Red = AppConfig::Instance().GetThemeColor("@signal-red").isValid()
                        ? AppConfig::Instance().GetThemeColor("@signal-red")
                        : QColor(213, 15, 37, 255);
@@ -945,6 +950,7 @@ QColor View::LightBlue =
 QColor View::LightRed =
     AppConfig::Instance().GetThemeColor("@signal-light-red").isValid()
         ? AppConfig::Instance().GetThemeColor("@signal-light-red")
+// NOLINTEND(bugprone-throwing-static-initialization)
         : QColor(213, 15, 37, 200);
 
 void View::refreshSignalColors() {

@@ -268,7 +268,7 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
   const uint8_t unit_bytes = _data->get_unit_bytes();
   const uint8_t *samples = _data->get_samples(ring_index);
   // get_samples(ring_index) 已返回该样本组起始地址，只需通道内 order 偏移
-  const uint64_t sample_offs = order * unit_bytes;
+  const uint64_t sample_offs = static_cast<uint64_t>(order) * unit_bytes;
 
   const int height = get_totalHeight();
   const float top = get_y() - height * 0.5;

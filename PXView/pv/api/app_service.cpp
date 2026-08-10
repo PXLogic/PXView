@@ -38,6 +38,9 @@ AppService::AppService(AppControl* app_control)
 
 AppService::~AppService()
 {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    // shutdown() is called here to ensure cleanup. It is virtual but no
+    // derived class overrides it, so the call is safe.
     shutdown();
 }
 

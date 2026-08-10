@@ -51,8 +51,10 @@ const int Ruler::MinorTickSubdivision = 4;
 const int Ruler::ScaleUnits[3] = {1, 2, 5};
 const int Ruler::MinPeriodScale = 10;
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 const QString Ruler::SIPrefixes[9] =
 	{"f", "p", "n", QChar(0x03BC), "m", "", "k", "M", "G"};
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 const QString Ruler::FreqPrefixes[9] =
     {"P", "T", "G", "M", "K", "", "", "", ""};
 const int Ruler::FirstSIPrefixPower = -15;
@@ -132,7 +134,7 @@ QColor Ruler::GetColorByCursorOrder(int order)
     int hsv = CursorHsbColorTable[(order - 1) % CURSOR_HSB_COLOR_TABLE_LENGTH];
     QColor color;
 
-    int b = AppConfig::Instance().IsDarkStyle() ? 200 : 200;
+    int b = 200; // IsDarkStyle() ? 200 : 200 — both branches identical
     color.setHsv(hsv, 200, b, 180);
     return color;
 }

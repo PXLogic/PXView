@@ -158,8 +158,8 @@ void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
     return;
   const int64_t offset = _view->offset();
 
-  const int high_offset = y - _totalHeight + 0.5f;
-  const int low_offset = y + 0.5f;
+  const int high_offset = y - _totalHeight; // removed +0.5f: y and _totalHeight are both int, so 0.5f was silently truncated
+  const int low_offset = y;
 
   double samplerate = _data ? _data->samplerate() : 0;
   if (!_data || _data->empty() || samplerate == 0)
@@ -596,10 +596,10 @@ QRectF LogicSignal::get_rect(LogicSetRegions type, int y, int right) {
 
   if (type == POSTRIG)
     return QRectF(get_leftWidth() + name_size.width() + Margin,
-                  y - SquareWidth / 2, SquareWidth, SquareWidth);
+                  y - SquareWidth / 2.0, SquareWidth, SquareWidth);
   else if (type == HIGTRIG)
     return QRectF(get_leftWidth() + name_size.width() + SquareWidth + Margin,
-                  y - SquareWidth / 2, SquareWidth, SquareWidth);
+                  y - SquareWidth / 2.0, SquareWidth, SquareWidth);
   else if (type == NEGTRIG)
     return QRectF(get_leftWidth() + name_size.width() + 2 * SquareWidth +
                       Margin,

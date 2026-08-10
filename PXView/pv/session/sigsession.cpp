@@ -927,7 +927,7 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
   // Fill entries. Handle = index+1 (0 is reserved for NULL_HANDLE sentinel).
   for (int i = 0; i < count; i++) {
     struct ds_device_base_info *entry = &array[i];
-    entry->handle = (ds_device_handle)(i + 1);
+    entry->handle = static_cast<ds_device_handle>(i + 1);
 
     // Build display name from vendor/model/conn fields.
     const char *vendor = sr_dev_inst_vendor_get(all_sdi[i]);
@@ -1736,20 +1736,19 @@ void SigSession::remove_decoder(int index, data::SessionDocument *doc) {
   // _empty_decoder_stacks), so the erase above already removed it from the
   // document's list.
 
-  // Stop the decode work and mark for deletion
+  // P0-3 fix: Stop the decode work. The stack's lifetime is managed by
+  // shared_ptr — when the last reference is released (after the decode
+  // thread finishes), the object is automatically destroyed.
   remove_decode_task(stack);
-  stack->_delete_flag = true;
 
   // Check if the decode thread is still using this stack.
-  // We must NOT join threads here as that can deadlock
-  // (decode thread may need the main thread for Qt signals).
   bool thread_holds_stack = _decode_task_manager->is_task_running(stack);
 
   if (!thread_holds_stack) {
     signals_changed();
   }
-  // If thread still holds the stack, decode_single_task will
-  // delete it via DESTROY_QT_LATER when it sees _delete_flag
+  // If thread still holds the stack, it will finish and the shared_ptr
+  // reference in _running_tasks will be released, triggering signals_changed()
 }
 
 void SigSession::remove_decoder_by_key_handel(void *handel,
@@ -1887,10 +1886,9 @@ void SigSession::clear_all_decoder(bool bUpdateView) {
   int dex = -1;
   clear_all_decode_task(dex);
 
-  if (dex != -1) {
-    auto runningStack = decode_traces()[dex];
-    runningStack->_delete_flag = true;
-  }
+  // P0-3 fix: _delete_flag removed — shared_ptr manages lifetime.
+  // The running stack (if any) will be released when its decode thread
+  // finishes and decode_single_task() removes it from _running_tasks.
 
   decode_traces().clear();
 

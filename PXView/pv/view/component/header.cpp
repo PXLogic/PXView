@@ -115,7 +115,8 @@ pv::view::Trace *Header::get_mTrace(int &action, const QPoint &pt) {
   _view.get_traces(ALL_VIEW, traces);
 
   for (auto t : traces) {
-    if ((action = t->pt_in_rect(t->get_y(), w, pt)))
+    action = t->pt_in_rect(t->get_y(), w, pt);
+    if (action)
       return t;
   }
 

@@ -30,12 +30,14 @@
 #include <optional>
 #include <QObject>
 #include <QString>
-#include <mutex> 
+#include <mutex>
+#include <shared_mutex>
+#include <condition_variable>
 
 #include "pv/data/decode/row.h" 
 #include "pv/data/model/signaldata.h"
 #include "pv/data/decode/decoderstatus.h"
- 
+
 
 namespace DecoderStackTest {
 class TwoDecoderStack;
@@ -65,11 +67,18 @@ class DecoderStack;
 struct decode_task_status
 {
     std::atomic<bool> _bStop{false};
-    DecoderStack *_decoder;
+    // P0-2 fix: use shared_ptr instead of raw pointer so the callback
+    // safely keeps the DecoderStack alive for the duration of its execution.
+    std::shared_ptr<DecoderStack> _decoder;
 };
 
  //a torotocol have a DecoderStack, destroy by DecodeTrace
-class DecoderStack : public QObject, public SignalData
+// P0-2 fix: inherit enable_shared_from_this so callbacks can obtain a
+// shared_ptr to self, preventing use-after-free if the stack is destroyed
+// while a callback is in flight.
+class DecoderStack : public QObject,
+                     public SignalData,
+                     public std::enable_shared_from_this<DecoderStack>
 {
 	Q_OBJECT
 
@@ -117,7 +126,7 @@ public:
 	 * Extracts sorted annotations between two period into a vector.
 	 */
 	void get_annotation_subset(
-		std::vector<pv::data::decode::Annotation*> &dest,
+		std::vector<const pv::data::decode::Annotation *> &dest,
 		const decode::Row &row, uint64_t start_sample,
 		uint64_t end_sample);
 
@@ -172,7 +181,7 @@ public:
     void frame_ended();
 
     inline QString error_message(){
-        std::lock_guard<std::mutex> lock(_output_mutex);
+        std::lock_guard<std::mutex> lock(_state_mutex);
         return _error_message;
     }
 
@@ -190,11 +199,12 @@ public:
             _progress.store(0);
             _is_decoding.store(false);
         }
+        // P0-1 fix: notify the decode thread that capture has ended so it
+        // can wake up from the condition variable wait and check the flag.
+        _data_cond.notify_all();
     }
 
     inline int get_progress(){
-        //if (!_is_decoding && _progress == 0)
-          //  return -1;
         return _progress.load(std::memory_order_relaxed);
     }
 
@@ -208,33 +218,29 @@ public:
     data::SessionDocument* get_owner_document() { return _owner_document; }
 
     // Unique handle id assigned by SigSession when the stack is created.
-    // Allows the API/MCP layer to stably reference a decoder stack across
-    // re-creation (a brand-new stack always gets a fresh handle_id). The
-    // version is bumped when an existing stack is re-created in place (e.g.
-    // by restart_decoders) so consumers can invalidate cached results.
     inline uint64_t handle_id() const { return _handle_id; }
     inline uint64_t version() const { return _version; }
     inline void set_handle_id(uint64_t id) { _handle_id = id; }
     inline void bump_version() { _version++; }
 
-    // Custom user-facing label for this decoder stack. Set by the View
-    // layer (ProtocolDock) or the API layer (SessionService::add_decoder)
-    // when the user provides a custom name. Used in exports and list_analyzers
-    // to distinguish multiple instances of the same decoder (e.g. two SPI
-    // decoders can be labelled "CH2.SPI" and "CH3.SPI").
+    // Custom user-facing label for this decoder stack.
     inline QString label() const { return _label; }
     inline void set_label(const QString &label) { _label = label; }
 
     // Auto-generate a display label from the first bound channel name
-    // (e.g. "CH1"). Used when no custom label has been set, so that
-    // multiple instances of the same decoder type can still be
-    // distinguished (e.g. "PWM(CH1)" vs "PWM(CH2)").
     QString auto_label() const;
 
-    // Set by callers (e.g. SigSession) to mark a stack for asynchronous
-    // deletion by the decode thread. Mirrors the legacy
-    // view::DecodeTrace::_delete_flag mechanism.
-    std::atomic<bool> _delete_flag{false};
+    // P0-1 fix: Called by the data feed (e.g. SigSession::feed_in_logic)
+    // to notify the decode thread that new sample data is available.
+    void notify_data_ready();
+
+    // P0-2 fix: Returns a shared_ptr to this DecoderStack. Requires that
+    // the object is already managed by a shared_ptr (which it always is
+    // in DecodeTaskManager). Mirrors PulseView's enable_shared_from_this
+    // pattern used by SignalBase and LogicSegment.
+    std::shared_ptr<DecoderStack> get_shared_ptr() {
+        return shared_from_this();
+    }
 
 private:
     void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
@@ -272,8 +278,27 @@ private:
     int64_t	        _samples_decoded;
     std::atomic<uint64_t> _sample_count{0};
  
-    std::shared_ptr<decode_task_status> _stask_stauts;    
-    mutable std::mutex _output_mutex; 
+    // P3-11 fix: _stask_stauts is protected by _status_mutex instead of
+    // std::atomic_load/store (which is a legacy C++11 workaround). This
+    // is simpler and more maintainable.
+    std::shared_ptr<decode_task_status> _stask_stauts;
+    mutable std::mutex _status_mutex;
+
+    // P1-4 fix: Split the single _output_mutex into two focused locks:
+    //   _rows_mutex  — shared_mutex protecting _rows, _class_rows,
+    //                  _rows_gshow, _rows_lshow. Read-heavy (UI rendering),
+    //                  so shared_mutex allows concurrent reads.
+    //   _state_mutex — mutex protecting _error_message, _samples_decoded.
+    //                  Write-heavy (decode thread updates frequently).
+    mutable std::shared_mutex _rows_mutex;
+    mutable std::mutex _state_mutex;
+
+    // P0-1 fix: Condition variable replaces sleep_for(100ms) polling.
+    // The decode thread waits on _data_cond when no data is available;
+    // the data feed calls notify_data_ready() to wake it immediately.
+    std::condition_variable _data_cond;
+    std::mutex _data_wait_mutex;
+
     bool            _is_capture_end;
     std::atomic<int> _progress{0};
     std::atomic<bool> _is_decoding{false};

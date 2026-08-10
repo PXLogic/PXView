@@ -359,9 +359,9 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
   if (!_viewport->transfer_started()) {
     const int width = _viewport->view().get_view_width();
     const QPoint cenLeftPos =
-        QPoint(width / 2 - 0.05 * width, _viewport->height() / 2);
+        QPoint(static_cast<int>(width / 2.0 - 0.05 * width), _viewport->height() / 2);
     const QPoint cenRightPos =
-        QPoint(width / 2 + 0.05 * width, _viewport->height() / 2);
+        QPoint(static_cast<int>(width / 2.0 + 0.05 * width), _viewport->height() / 2);
     const int trigger_radius = min(0.02 * width, 0.02 * _viewport->height());
 
     QColor foreBack = fore;

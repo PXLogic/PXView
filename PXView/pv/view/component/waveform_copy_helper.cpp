@@ -256,7 +256,7 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
         if (!stack->has_annotations(row))
             continue;
 
-        std::vector<pv::data::decode::Annotation*> anns;
+        std::vector<const pv::data::decode::Annotation*> anns;
         stack->get_annotation_subset(anns, row, start, end);
 
         for (auto *ann : anns) {

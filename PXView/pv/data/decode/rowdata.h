@@ -23,16 +23,26 @@
 #ifndef PXVIEW_PV_DATA_DECODE_ROWDATA_H
 #define PXVIEW_PV_DATA_DECODE_ROWDATA_H
 
+#include <deque>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
 
 #include "pv/data/decode/annotation.h"
 
+struct srd_proto_data;
+class DecoderStatus;
+
 namespace pv {
 namespace data {
 namespace decode {
 
+// P2-7 fix: RowData now stores Annotation as a value type in a deque,
+// matching PulseView's design. This eliminates:
+//   - Manual new/delete of Annotation objects
+//   - The AnnotationPool global singleton memory pool
+//   - Memory leak risks from missed delete paths
+//   - const-correctness violations (API now returns const Annotation*)
 class RowData {
 public:
   RowData();
@@ -46,7 +56,11 @@ public:
 
   uint64_t get_annotation_index(uint64_t start_sample);
 
-  bool push_annotation(Annotation *a);
+  // P2-7 fix: Construct an Annotation in-place from srd_proto_data.
+  // Returns true on success, false on allocation failure.
+  // Replaces the old push_annotation(Annotation*) which required
+  // the caller to new the Annotation.
+  bool emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status);
 
   inline uint64_t get_annotation_size() {
     std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
@@ -59,10 +73,10 @@ public:
 
   bool get_annotation(pv::data::decode::Annotation *ann, uint64_t index);
 
-  /**
-   * Extracts sorted annotations between two period into a vector.
-   */
-  void get_annotation_subset(std::vector<pv::data::decode::Annotation *> &dest,
+  // P2-7 fix: returns const Annotation* instead of Annotation*,
+  // restoring const-correctness. Pointers point into the deque and
+  // are valid until the next emplace_annotation or clear.
+  void get_annotation_subset(std::vector<const pv::data::decode::Annotation *> &dest,
                              uint64_t start_sample, uint64_t end_sample);
 
   void clear();
@@ -77,7 +91,10 @@ private:
   uint64_t _max_annotation;
   uint64_t _min_annotation;
   uint64_t _item_count;
-  std::vector<Annotation *> _annotations;
+  // P2-7 fix: deque<Annotation> value storage — no pointer ownership,
+  // no manual delete. deque keeps element pointers stable across
+  // push_back (unlike vector which may reallocate).
+  std::deque<Annotation> _annotations;
   std::shared_mutex _visitor_mutex;
 };
 

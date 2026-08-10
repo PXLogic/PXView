@@ -207,7 +207,7 @@ void ProtocolExp::save_proc()
     // out.setGenerateByteOrderMark(true); // UTF-8 without BOM
     int row_num = 0;
     ExportRowInfo row_inf_arr[EXPORT_DEC_ROW_COUNT_MAX];
-    std::vector<Annotation*> annotations_arr[EXPORT_DEC_ROW_COUNT_MAX];
+    std::vector<const Annotation*> annotations_arr[EXPORT_DEC_ROW_COUNT_MAX];
 
     for (std::list<QCheckBox *>::const_iterator i = _row_sel_list.begin();
          i != _row_sel_list.end(); i++)
@@ -306,8 +306,8 @@ void ProtocolExp::save_proc()
             if (row_inf_arr[i].read_index >= annotations_arr[i].size())
                 continue;
             
-            Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);
-            sample_index1 = ann->start_sample();
+const Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);
+    sample_index1 = ann->start_sample();
 
             if (bFirtColumn || sample_index1 < sample_index){
                 sample_index = sample_index1;
@@ -326,9 +326,9 @@ void ProtocolExp::save_proc()
             if (row_inf_arr[i].read_index >= annotations_arr[i].size())
                 continue;
             
-            Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);           
+const Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);
 
-            if (ann->start_sample() == sample_index){
+    if (ann->start_sample() == sample_index){
                 ann_row_str.append(ann->annotations().at(0));
                 row_inf_arr[i].read_index++;
                 write_ann_num++;

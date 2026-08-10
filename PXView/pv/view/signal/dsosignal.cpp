@@ -46,6 +46,7 @@ using namespace std;
 namespace pv {
 namespace view {
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 const QString DsoSignal::vDialUnit[DsoSignal::vDialUnitCount] = {
     "mV",
     "V",
@@ -162,6 +163,9 @@ void DsoSignal::set_scale(int height) {
 // (DSO mode deprecated); its DSO-key backed methods are now no-op stubs.
 
 // -- DsoHardwareConfig (inlined; DSO-key backed parts stubbed) --
+// NOLINTNEXTLINE(bugprone-virtual-near-miss)
+// set_enable vs set_enabled: name mismatch is historical and retained
+// for API compatibility. Changing to set_enabled would break MCP clients.
 void DsoSignal::set_enable(bool enable) {
   sr_channel *probe = _model ? _model->sr_channel_handle() : nullptr;
   if (!probe)

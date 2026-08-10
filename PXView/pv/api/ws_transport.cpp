@@ -28,6 +28,8 @@ WsTransport::WsTransport(IJsonRpcHandler* handler, int port)
 
 WsTransport::~WsTransport()
 {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    // stop() is called here for cleanup. No derived class overrides it.
     stop();
 }
 

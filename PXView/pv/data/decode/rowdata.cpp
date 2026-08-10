@@ -38,16 +38,15 @@ namespace decode {
 RowData::RowData() : _max_annotation(0), _min_annotation(0) { _item_count = 0; }
 
 RowData::~RowData() {
-  // stack object can not destory the sources
+  // P2-7 fix: deque automatically destroys all Annotation objects.
+  // No manual delete needed.
 }
 
 void RowData::clear() {
   std::unique_lock<std::shared_mutex> lock(_visitor_mutex);
 
-  // destroy objercts
-  for (Annotation *p : _annotations) {
-    delete p;
-  }
+  // P2-7 fix: deque's clear() destroys all Annotation value objects.
+  // No manual delete loop needed.
   _annotations.clear();
   _item_count = 0;
   _min_annotation = 0;
@@ -58,7 +57,7 @@ uint64_t RowData::get_max_sample() {
 
   if (_annotations.empty())
     return 0;
-  return _annotations.back()->end_sample();
+  return _annotations.back().end_sample();
 }
 
 uint64_t RowData::get_max_annotation() { return _max_annotation; }
@@ -71,7 +70,7 @@ uint64_t RowData::get_min_annotation() {
 }
 
 void RowData::get_annotation_subset(
-    std::vector<pv::data::decode::Annotation *> &dest, uint64_t start_sample,
+    std::vector<const pv::data::decode::Annotation *> &dest, uint64_t start_sample,
     uint64_t end_sample) {
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
 
@@ -79,19 +78,15 @@ void RowData::get_annotation_subset(
     return;
 
   // Binary search: find the first annotation whose end_sample > start_sample
-  // Since annotations are ordered by start_sample, we use lower_bound to find
-  // the first annotation that could possibly overlap with [start_sample,
-  // end_sample]
   auto it = std::lower_bound(
       _annotations.begin(), _annotations.end(), start_sample,
-      [](Annotation *a, uint64_t val) { return a->end_sample() <= val; });
+      [](const Annotation &a, uint64_t val) { return a.end_sample() <= val; });
 
   // Iterate from the found position until annotations start beyond end_sample
   for (; it != _annotations.end(); ++it) {
-    Annotation *p = *it;
-    if (p->start_sample() > end_sample)
+    if (it->start_sample() > end_sample)
       break;
-    dest.push_back(p);
+    dest.push_back(&(*it));
   }
 }
 
@@ -100,29 +95,34 @@ uint64_t RowData::get_annotation_index(uint64_t start_sample) {
 
   auto it = std::upper_bound(
       _annotations.begin(), _annotations.end(), start_sample,
-      [](uint64_t val, Annotation *a) { return val < a->start_sample(); });
+      [](uint64_t val, const Annotation &a) { return val < a.start_sample(); });
 
   return std::distance(_annotations.begin(), it);
 }
 
-bool RowData::push_annotation(Annotation *a) {
-  if (!a)
+// P2-7 fix: emplace_annotation constructs the Annotation in-place inside
+// the deque, replacing the old push_annotation(Annotation*) which required
+// the caller to new the Annotation object.
+bool RowData::emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status) {
+  if (!pdata)
     return false;
-  assert(a);
+  assert(pdata);
 
   std::unique_lock<std::shared_mutex> lock(_visitor_mutex);
 
   try {
-    _annotations.push_back(a);
+    _annotations.emplace_back(pdata, status);
     _item_count = _annotations.size();
-    _max_annotation = max(_max_annotation, a->end_sample() - a->start_sample());
 
-    if (a->end_sample() != a->start_sample()) {
+    const Annotation &a = _annotations.back();
+    _max_annotation = max(_max_annotation, a.end_sample() - a.start_sample());
+
+    if (a.end_sample() != a.start_sample()) {
       if (_min_annotation == 0) {
-        _min_annotation = a->end_sample() - a->start_sample();
+        _min_annotation = a.end_sample() - a.start_sample();
       } else {
         _min_annotation =
-            min(_min_annotation, a->end_sample() - a->start_sample());
+            min(_min_annotation, a.end_sample() - a.start_sample());
       }
     }
 
@@ -141,7 +141,7 @@ bool RowData::get_annotation(Annotation *ann, uint64_t index) {
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
 
   if (index < _annotations.size()) {
-    *ann = *_annotations[index]; // clone
+    *ann = _annotations[index]; // copy
     return true;
   } else {
     return false;
@@ -157,13 +157,13 @@ std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
 
   auto it = std::lower_bound(
       _annotations.begin(), _annotations.end(), start_sample,
-      [](Annotation *a, uint64_t val) { return a->end_sample() <= val; });
+      [](const Annotation &a, uint64_t val) { return a.end_sample() <= val; });
 
   size_t start_idx = std::distance(_annotations.begin(), it);
 
   size_t end_idx = start_idx;
   for (; end_idx < _annotations.size(); ++end_idx) {
-    if (_annotations[end_idx]->start_sample() > end_sample)
+    if (_annotations[end_idx].start_sample() > end_sample)
       break;
   }
 
@@ -175,7 +175,7 @@ size_t RowData::find_index_after_sample(uint64_t sample) {
 
   auto it = std::upper_bound(
       _annotations.begin(), _annotations.end(), sample,
-      [](uint64_t val, Annotation *a) { return val < a->start_sample(); });
+      [](uint64_t val, const Annotation &a) { return val < a.start_sample(); });
 
   return std::distance(_annotations.begin(), it);
 }
@@ -184,7 +184,7 @@ const Annotation *RowData::annotation_at(size_t index) {
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
 
   if (index < _annotations.size())
-    return _annotations[index];
+    return &_annotations[index];
   return nullptr;
 }
 
@@ -196,10 +196,10 @@ const Annotation *RowData::get_first_annotation_ending_after(uint64_t sample) {
 
   auto it = std::lower_bound(
       _annotations.begin(), _annotations.end(), sample,
-      [](Annotation *a, uint64_t val) { return a->end_sample() <= val; });
+      [](const Annotation &a, uint64_t val) { return a.end_sample() <= val; });
 
   if (it != _annotations.end())
-    return *it;
+    return &(*it);
   return nullptr;
 }
 

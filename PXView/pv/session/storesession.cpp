@@ -140,7 +140,7 @@ QList<QString> StoreSession::getSuportedExportFormats(){
         // (CSV is the 4th entry in the output module list, after
         // ascii/binary/bits).
         if (_session->get_device()->get_work_mode() != LOGIC &&
-            strcmp(mod_id, "csv")) {
+            strcmp(mod_id, "csv") != 0) {
             supportedModules++;
             continue;
         }
@@ -358,6 +358,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
                 ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)buf, size) ? SR_OK : -1;
 
                 if (ret != SR_OK) {
+                    if (need_malloc && buf) { free(buf); buf = nullptr; }
                     if (!_has_error.load()) {
                         _has_error.store(true);
 set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
@@ -555,14 +556,21 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
         dynamic_cast<data::DsoSnapshot*>(_session->get_snapshot(SR_CHANNEL_DSO)) : nullptr;
 
     // 保存传入的 snapshot 对应类型的数据（保持向后兼容）
-    if ((logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot))) {
+    logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot);
+    if (logic_snapshot) {
         save_logic(logic_snapshot);
     }
-    else if ((analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot))) {
-        save_analog(analog_snapshot);
-    }
-    else if ((dso_snapshot = dynamic_cast<data::DsoSnapshot*>(snapshot))) {
-        save_dso(dso_snapshot);
+    else {
+        analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot);
+        if (analog_snapshot) {
+            save_analog(analog_snapshot);
+        }
+        else {
+            dso_snapshot = dynamic_cast<data::DsoSnapshot*>(snapshot);
+            if (dso_snapshot) {
+                save_dso(dso_snapshot);
+            }
+        }
     }
 
     // MSO 模式：如果传入的是 logic，但还有 analog 数据，也一并保存
@@ -641,7 +649,8 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     }
 
     data::LogicSnapshot *logic_snapshot = nullptr;
-    if ((logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot))) {
+    logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot);
+    if (logic_snapshot) {
         uint16_t to_save_probes = 0;
         for (l = _session->get_device()->get_channels(); l; l = l->next) {
             probe = (struct sr_channel *)l->data;
@@ -720,7 +729,8 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     }
     else if (mode == ANALOG) {
         data::AnalogSnapshot *analog_snapshot = nullptr;
-        if ((analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot))) {
+        analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot);
+        if (analog_snapshot) {
             uint8_t tmp_u8 = analog_snapshot->get_unit_bytes();
             sprintf(meta, "bits = %d\n", tmp_u8*8); str += meta;
         }
@@ -960,16 +970,23 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     data::DsoSnapshot *dso_snapshot = nullptr;
     int channel_type;
 
-    if ((logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot))) {
+    logic_snapshot = dynamic_cast<data::LogicSnapshot*>(snapshot);
+    if (logic_snapshot) {
         channel_type = SR_CHANNEL_LOGIC;
-    } else if ((dso_snapshot = dynamic_cast<data::DsoSnapshot*>(snapshot))) {
-        channel_type = SR_CHANNEL_DSO;
-    } else if ((analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot))) {
-        channel_type = SR_CHANNEL_ANALOG;
     } else {
-        _has_error.store(true);
-        set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR1), "data type don't support."));
-        return;
+        dso_snapshot = dynamic_cast<data::DsoSnapshot*>(snapshot);
+        if (dso_snapshot) {
+            channel_type = SR_CHANNEL_DSO;
+        } else {
+            analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot);
+            if (analog_snapshot) {
+                channel_type = SR_CHANNEL_ANALOG;
+            } else {
+                _has_error.store(true);
+                set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR1), "data type don't support."));
+                return;
+            }
+        }
     }
 
     // sr_output_new() takes a filename parameter separately (4th arg) and
@@ -1203,13 +1220,13 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             for(uint64_t i = 0; !_canceled && i < buf_sample_num; i+=usize){
                 if(buf_sample_num - i < usize)
                     size = buf_sample_num - i;
-                uint8_t *xbuf = (uint8_t *)malloc(size * unitsize);
+                uint8_t *xbuf = (uint8_t *)malloc((size_t)size * unitsize);
                 if (xbuf == nullptr) {
                     _has_error.store(true);
                     set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed."));
                     return;
                 }                
-                memset(xbuf, 0, size * unitsize);
+                memset(xbuf, 0, (size_t)size * unitsize);
 
                 for (uint64_t j = 0; j < size; j++) {
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
@@ -1221,7 +1238,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 }
 
                 lp.data = xbuf;
-                lp.length = size * unitsize;
+                lp.length = (uint64_t)size * unitsize;
                 lp.unitsize = unitsize;
                 p.type = SR_DF_LOGIC;
                 p.payload = &lp;

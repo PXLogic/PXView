@@ -82,25 +82,27 @@ bool Snapshot::empty()
 
 uint64_t Snapshot::get_sample_count()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    // P1-5 fix: recursive_mutex allows this to be called from within
+    // other methods that already hold the lock without deadlocking.
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     return _sample_count;
 }
 
 uint64_t Snapshot::get_ring_sample_count()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     return _ring_sample_count;
 }
  
 uint64_t Snapshot::get_ring_start()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     return ring_start();    
 }
 
 uint64_t Snapshot::get_ring_end()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     return ring_end();     
 }
  

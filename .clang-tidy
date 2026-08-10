@@ -9,10 +9,10 @@
 #   make
 #
 # To run clang-tidy standalone on a single file:
-#   clang-tidy -p build.dir PXView/pv/data/logicsnapshot.cpp
+#   clang-tidy -p build PXView/pv/data/logicsnapshot.cpp
 #
 # To auto-fix issues:
-#   clang-tidy -p build.dir --fix PXView/pv/data/logicsnapshot.cpp
+#   clang-tidy -p build --fix PXView/pv/data/logicsnapshot.cpp
 
 # --- Check selection ---
 # Strategy: enable broad categories, then suppress noisy/false-positive checks.
@@ -23,41 +23,41 @@
 #   F ( 7%): bounds/null/div-zero → bugprone
 Checks:
   # --- Static analyzer (most valuable for this project) ---
-  '-clang-analyzer-*',
-  'clang-analyzer-core.*',           # null dereference, uninitialized value
-  'clang-analyzer-cplusplus.*',      # use-after-free, dangling pointer, new/delete
-  'clang-analyzer-unix.*',           # malloc/free, VLA, API usage
-  'clang-analyzer-optin.*',         # optional checks (performance-critical)
+  - '-clang-analyzer-*'
+  - 'clang-analyzer-core.*'           # null dereference, uninitialized value
+  - 'clang-analyzer-cplusplus.*'      # use-after-free, dangling pointer, new/delete
+  - 'clang-analyzer-unix.*'           # malloc/free, VLA, API usage
+  - 'clang-analyzer-optin.*'          # optional checks (performance-critical)
 
   # --- Bugprone (common bug patterns) ---
-  'bugprone-*',
-  '-bugprone-narrowing-conversions',       # too noisy with Qt size types
-  '-bugprone-sizeof-expression',           # common in C-style mmap code
-  '-bugprone-easily-swappable-parameters', # too noisy for C-style APIs
-  '-bugprone-reserved-identifier',         # MSYS2/MinGW system headers
-  '-bugprone-suspicious-include',          # project uses non-standard includes
+  - 'bugprone-*'
+  - '-bugprone-narrowing-conversions'       # too noisy with Qt size types
+  - '-bugprone-sizeof-expression'           # common in C-style mmap code
+  - '-bugprone-easily-swappable-parameters' # too noisy for C-style APIs
+  - '-bugprone-reserved-identifier'         # MSYS2/MinGW system headers
+  - '-bugprone-suspicious-include'          # project uses non-standard includes
 
   # --- Misc (style + correctness) ---
-  'misc-*',
-  '-misc-non-private-member-variables-in-classes', # Qt style uses public members
-  '-misc-use-anonymous-namespace',                # too noisy
-  '-misc-include-cleaner',                        # requires compile_commands.json
-  '-misc-header-include-cycle',                   # too slow for large codebase
+  - 'misc-*'
+  - '-misc-non-private-member-variables-in-classes' # Qt style uses public members
+  - '-misc-use-anonymous-namespace'                # too noisy
+  - '-misc-include-cleaner'                        # requires compile_commands.json
+  - '-misc-header-include-cycle'                   # too slow for large codebase
 
   # --- Performance (lightweight, catches important issues) ---
-  'performance-*',
-  '-performance-avoid-const-or-ref-data-members', # Qt signal/slot needs some
+  - 'performance-*'
+  - '-performance-avoid-const-or-ref-data-members' # Qt signal/slot needs some
 
   # --- Readability (minimal, only high-value checks) ---
-  'readability-nonexistent-member-interpreter-check',
-  'readability-simplify-boolean-expr',
-  'readability-braces-around-statements',
-  'readability-else-after-return',
+  - 'readability-nonexistent-member-interpreter-check'
+  - 'readability-simplify-boolean-expr'
+  - 'readability-braces-around-statements'
+  - 'readability-else-after-return'
 
   # --- Modernize (selective) ---
-  'modernize-use-nullptr',
-  'modernize-use-override',
-  'modernize-use-using',
+  - 'modernize-use-nullptr'
+  - 'modernize-use-override'
+  - 'modernize-use-using'
 
 # --- Header filter ---
 # Only analyze project headers, not system/Qt/boost headers.
@@ -76,7 +76,7 @@ CheckOptions:
     value: true
   - key:   clang-analyzer-core.CheckNullPointerBeforeDereference
     value: true
-  - key:   clang-analyzer-optin.cplusplus.UninitializedObject:Pointers
+  - key:   clang-analyzer-optin.cplusplus.UninitializedObject
     value: true
   - key:   clang-analyzer-optin.cplusplus.VirtualCall
     value: true

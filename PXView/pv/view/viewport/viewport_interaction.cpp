@@ -837,7 +837,7 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
   }
   bool isVertical = (angley != 0);
 
-  double zoom_scale = delta / 80;
+  double zoom_scale = delta / 80.0;
 
   if (ABS_VAL(delta) <= 80) {
     zoom_scale = delta > 0 ? 1.5 : -1.5;

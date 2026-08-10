@@ -28,6 +28,11 @@
 #include <vector>
 #include <atomic>
 
+// P1-5 fix: Use recursive_mutex instead of mutex to allow nested locking
+// within the same thread. This matches PulseView's Segment::mutex_ design
+// and eliminates the need for the sample_count() non-locking accessor.
+#include <recursive_mutex>
+
 namespace pv {
 namespace data {
 
@@ -89,14 +94,15 @@ public:
      
 
 protected:
-    // TS-4 fix: Callers MUST hold _mutex when calling free_data().
-    // This establishes a happens-before with concurrent readers
-    // (get_sample_count, empty, etc.) that also acquire _mutex.
+    // P1-5 fix: Callers MUST hold _mutex when calling free_data().
+    // recursive_mutex allows the same thread to lock multiple times
+    // without deadlocking, matching PulseView's Segment::mutex_ design.
     virtual void free_data();
 
-    // TS-4 fix: Callers MUST hold _mutex when calling sample_count().
-    // This is a non-locking accessor for subclass use under _mutex
-    // protection. Public callers should use get_sample_count() instead.
+    // P1-5 fix: With recursive_mutex, get_sample_count() can be called
+    // from within other locked methods without deadlocking. The separate
+    // non-locking sample_count() accessor is retained for performance in
+    // hot paths where the caller already holds the lock.
     inline uint64_t sample_count(){
         return _sample_count;
     }
@@ -105,7 +111,8 @@ protected:
     uint64_t ring_end();
 
 protected:
-    mutable std::mutex  _mutex;  
+    // P1-5 fix: recursive_mutex allows nested locking within the same thread
+    mutable std::recursive_mutex  _mutex;
     mutable std::vector<uint16_t> _ch_index;
 
     uint64_t    _capacity;

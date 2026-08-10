@@ -27,7 +27,6 @@
 
 #include <QString>
 #include <vector>
-#include "pv/data/decode/annotation_pool.h"
 
 class AnnotationResTable;
 class DecoderStatus;
@@ -38,7 +37,9 @@ namespace pv {
 namespace data {
 namespace decode {
 
-//create at DecoderStack.annotation_callback
+// P2-7 fix: Annotation is now a value type. It is stored directly in
+// RowData's deque<Annotation> — no new/delete, no custom memory pool.
+// The operator new/delete overrides and AnnotationPool have been removed.
 class Annotation
 {
 public:
@@ -46,16 +47,9 @@ public:
     Annotation();
 	~Annotation();
 
-	// Pool-based allocation to prevent heap fragmentation
-	static void* operator new(size_t size) {
-		return AnnotationPool::instance().allocate(size);
-	}
-	static void operator delete(void* p, size_t) {
-		AnnotationPool::instance().deallocate(p);
-	}
-	static void operator delete(void* p) {
-		AnnotationPool::instance().deallocate(p);
-	}
+    // Move semantics (needed for deque storage)
+    Annotation(Annotation&&) = default;
+    Annotation& operator=(Annotation&&) = default;
 
 public:
 	inline uint64_t start_sample() const{

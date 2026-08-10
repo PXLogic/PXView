@@ -131,7 +131,8 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
     char *data = nullptr;
     long long size = 0;
 
-    if ((fp = fopen(localFile, "rb")) == nullptr) {
+    fp = fopen(localFile, "rb");
+    if (fp == nullptr) {
         strcpy(m_error, "fopen error");        
         return false;
     }
@@ -139,10 +140,11 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
     if (fstat(fileno(fp), &st) < 0) {
         strcpy(m_error, "fstat error");    
         fclose(fp);
-        return -1;
+        return false;
     } 
 
-    if ((data = (char*)malloc((size_t)st.st_size)) == nullptr) {
+    data = (char*)malloc((size_t)st.st_size);
+    if (data == nullptr) {
         strcpy(m_error, "can't malloc buffer");
         fclose(fp);
         return false;
@@ -159,6 +161,7 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
     size = (size_t)st.st_size;
 
     bool ret = AddFromBuffer(innerFile, data, size);
+    free(data);
     return ret;
 }
 
@@ -230,7 +233,8 @@ ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
         return nullptr;
     }
 
-    if (fileInfo.uncompressed_size > 0 && (metafile = (char *)malloc(fileInfo.uncompressed_size)))
+    metafile = (char *)malloc(fileInfo.uncompressed_size);
+    if (fileInfo.uncompressed_size > 0 && metafile)
     {
         unzReadCurrentFile(m_archive, metafile, fileInfo.uncompressed_size);
         unzCloseCurrentFile(m_archive);

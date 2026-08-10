@@ -748,7 +748,8 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
           s->set_name(chan_name);
 
           view::LogicSignal *logicSig = nullptr;
-          if ((logicSig = dynamic_cast<view::LogicSignal *>(s.get()))) {
+          logicSig = dynamic_cast<view::LogicSignal *>(s.get());
+          if (logicSig) {
             logicSig->set_trig(obj["trig_type"].toInt());
           }
 

@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
             argvUTF8Q.emplace_back(QString::fromUtf16(reinterpret_cast<const char16_t*>(arg), -1).toUtf8());
         });
 
-        LocalFree(argvUTF16);
+        LocalFree(reinterpret_cast<HLOCAL>(argvUTF16));
 
         // Ms::runApplication() wants an argv-style array of raw pointers to the arguments, so let's create a vector of them.
         std::vector<char*> argvUTF8;
@@ -166,7 +166,7 @@ int main(int argc, char *argv[])
 		switch (c)
 		{
 		case 'l': // log level
-			logLevel = atoi(optarg);
+			logLevel = static_cast<int>(strtol(optarg, nullptr, 10));
 			break;
 
 		case 's': // the store log flag

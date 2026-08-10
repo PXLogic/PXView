@@ -152,7 +152,9 @@ void DocumentRegistry::clear_all_documents_decoders() {
     auto &stacks = ptr->get_decoder_stacks();
     for (auto stack : stacks) {
       if (stack->IsRunning()) {
-        stack->_delete_flag = true;
+        // P0-3 fix: _delete_flag removed — just stop the work, shared_ptr
+        // manages the lifetime when the stacks vector is cleared below.
+        stack->stop_decode_work();
       }
     }
     stacks.clear();

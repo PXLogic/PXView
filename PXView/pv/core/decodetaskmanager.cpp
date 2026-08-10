@@ -205,24 +205,11 @@ void DecodeTaskManager::decode_single_task(
     std::shared_ptr<data::DecoderStack> task) {
   pxv_info("------->decode thread start");
 
-  if (!task->_delete_flag) {
-    task->begin_decode_work();
-  }
-
-  if (task->_delete_flag) {
-    pxv_info("destroy a decoder in task thread");
-
-    // L-1 fix: the previous std::atomic_thread_fence was a no-op (no paired
-    // atomic load/store). Instead of a fence + direct call (which has a
-    // TOCTOU window on bClose()), we post signals_changed() to the main
-    // thread via post_async_dispatch. The main thread will execute it after
-    // any pending close operations, so the session state is consistent.
-    pv::core::EventBus::post_async_dispatch([coord = _coord]() {
-      if (coord && !coord->bClose()) {
-        coord->signals_changed();
-      }
-    });
-  }
+  // P0-3 fix: _delete_flag is removed. The task's lifetime is managed by
+  // shared_ptr. Simply call begin_decode_work() — if the task was stopped
+  // via stop_decode_work(), begin_decode_work() returns immediately because
+  // _decode_state != Stopped.
+  task->begin_decode_work();
 
   // P0-1B fix: do NOT detach/erase ourselves from _decode_threads. The
   // previous code detached the current thread and erased it from the

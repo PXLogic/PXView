@@ -472,14 +472,14 @@ void ViewDataSync::show_region(uint64_t start, uint64_t end, bool keep) {
     const double new_off =
         (start + end) * 0.5 /
             (_view->document_snapshot_source()->cur_snap_samplerate() * new_scale) -
-        (width / 2);
+        (width / 2.0);
     _view->set_scale_offset(new_scale, new_off);
   } else {
     const double new_scale = _view->scale();
     const double new_off =
         (start + end) * 0.5 /
             (_view->document_snapshot_source()->cur_snap_samplerate() * new_scale) -
-        (width / 2);
+        (width / 2.0);
     _view->set_scale_offset(new_scale, new_off);
   }
 }

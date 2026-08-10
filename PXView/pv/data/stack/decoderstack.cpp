@@ -24,6 +24,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <shared_mutex>
+#include <chrono>
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
@@ -90,7 +91,7 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _no_memory = false;
   _mark_index = -1;
   _decoder_status.reset(decoder_status);
-  _stask_stauts = nullptr;  // shared_ptr<decode_task_status> — null init
+  _stask_stauts = nullptr;
   _is_capture_end = true;
   _snapshot.reset();
   _progress.store(0);
@@ -98,20 +99,12 @@ DecoderStack::DecoderStack(pv::SigSession *session,
   _result_count.store(0);
   _owner_document = nullptr;
 
-  // TS-3 fix: use make_unique for exception safety — if build_row() throws,
-  // the unique_ptr automatically frees the Decoder.
   _stack.push_back(std::make_unique<decode::Decoder>(dec));
 
   build_row();
 }
 
 DecoderStack::~DecoderStack() {
-  // TS-3 fix: unique_ptr handles all deletion — no manual delete needed.
-  // _decoder_status is freed by unique_ptr destructor.
-  // _rows elements are freed by unique_ptr destructors when _rows.clear() runs.
-  // _stack elements are freed by unique_ptr destructors when _stack.clear() runs.
-
-  // Clear row data (annotations) before the RowData objects are freed.
   for (auto &kv : _rows) {
     if (kv.second)
       kv.second->clear();
@@ -135,13 +128,11 @@ void DecoderStack::add_sub_decoder(std::unique_ptr<decode::Decoder> decoder) {
 }
 
 void DecoderStack::remove_sub_decoder(Decoder *decoder) {
-  // Find the decoder in the stack
   auto iter = _stack.begin();
   for (unsigned int i = 0; i < _stack.size(); i++, iter++)
     if (iter->get() == decoder)
       break;
 
-  // Erase the element — unique_ptr auto-deletes the Decoder.
   if (iter != _stack.end()) {
     _stack.erase(iter);
   }
@@ -167,18 +158,15 @@ void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
 }
 
 void DecoderStack::build_row() {
-  // Protect the map rebuild so concurrent readers (annotation_callback on
-  // the decode thread, UI-thread read methods) don't see a half-rebuilt map.
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  // P1-4 fix: use _rows_mutex (unique lock) instead of _output_mutex
+  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
 
-  // release source — unique_ptr handles deletion of old RowData objects.
   for (auto &kv : _rows) {
     if (kv.second)
       kv.second->clear();
   }
   _rows.clear();
 
-  // Add classes
   for (auto &up : _stack) {
     auto dec = up.get();
     const srd_decoder *const decc = dec->decoder();
@@ -186,7 +174,6 @@ void DecoderStack::build_row() {
 
     dec->reset_start();
 
-    // Add a row for the decoder if it doesn't have a row list
     if (!decc->annotation_rows) {
       const Row row(decc);
       _rows[row] = std::make_unique<decode::RowData>();
@@ -203,7 +190,6 @@ void DecoderStack::build_row() {
       }
     }
 
-    // Add the decoder rows
     int order = 0;
     for (const GSList *l = decc->annotation_rows; l; l = l->next) {
       const srd_decoder_annotation_row *const ann_row =
@@ -216,7 +202,6 @@ void DecoderStack::build_row() {
 
       const Row row(decc, ann_row, order);
 
-      // Add a new empty row data object
       _rows[row] = std::make_unique<decode::RowData>();
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
@@ -230,7 +215,6 @@ void DecoderStack::build_row() {
         }
       }
 
-      // Map out all the classes
       for (const GSList *ll = ann_row->ann_classes; ll; ll = ll->next) {
         _class_rows[make_pair(decc, GPOINTER_TO_INT(ll->data))] = Row(row);
       }
@@ -241,14 +225,16 @@ void DecoderStack::build_row() {
 }
 
 int64_t DecoderStack::samples_decoded() {
-  std::lock_guard<std::mutex> decode_lock(_output_mutex);
+  // P1-4 fix: use _state_mutex instead of _output_mutex
+  std::lock_guard<std::mutex> decode_lock(_state_mutex);
   return _samples_decoded;
 }
 
 void DecoderStack::get_annotation_subset(
-    std::vector<pv::data::decode::Annotation *> &dest, const Row &row,
+    std::vector<const pv::data::decode::Annotation *> &dest, const Row &row,
     uint64_t start_sample, uint64_t end_sample) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  // P1-4 fix: use shared_lock on _rows_mutex for concurrent read access
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     (*iter).second->get_annotation_subset(dest, start_sample, end_sample);
@@ -256,7 +242,7 @@ void DecoderStack::get_annotation_subset(
 
 decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
 {
-    std::lock_guard<std::mutex> lock(_output_mutex);
+    std::shared_lock<std::shared_mutex> lock(_rows_mutex);
     auto iter = _rows.find(row);
     if (iter != _rows.end())
         return (*iter).second.get();
@@ -265,7 +251,7 @@ decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
 
 uint64_t DecoderStack::get_annotation_index(const Row &row,
                                             uint64_t start_sample) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t index = 0;
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -276,7 +262,7 @@ uint64_t DecoderStack::get_annotation_index(const Row &row,
 
 std::pair<size_t, size_t> DecoderStack::get_visible_range(
     const Row &row, uint64_t start_sample, uint64_t end_sample) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::pair<size_t, size_t> range{0, 0};
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -286,7 +272,7 @@ std::pair<size_t, size_t> DecoderStack::get_visible_range(
 }
 
 uint64_t DecoderStack::get_max_annotation(const Row &row) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     return (*iter).second->get_max_annotation();
@@ -295,7 +281,7 @@ uint64_t DecoderStack::get_max_annotation(const Row &row) {
 }
 
 uint64_t DecoderStack::get_min_annotation(const Row &row) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     return (*iter).second->get_min_annotation();
@@ -304,7 +290,7 @@ uint64_t DecoderStack::get_min_annotation(const Row &row) {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool> rows_gshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
            _rows_gshow.begin();
@@ -315,7 +301,7 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool> rows_lshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
            _rows_lshow.begin();
@@ -326,7 +312,7 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
 }
 
 void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool>::const_iterator iter =
       _rows_gshow.find(row);
   if (iter != _rows_gshow.end()) {
@@ -335,7 +321,7 @@ void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
 }
 
 void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool>::const_iterator iter =
       _rows_lshow.find(row);
   if (iter != _rows_lshow.end()) {
@@ -344,7 +330,7 @@ void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
 }
 
 bool DecoderStack::has_annotations(const Row &row) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     if (0 == (*iter).second->get_max_sample())
@@ -356,7 +342,7 @@ bool DecoderStack::has_annotations(const Row &row) {
 }
 
 uint64_t DecoderStack::list_annotation_size() {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t max_annotation_size = 0;
 
   for (auto it = _rows.begin(); it != _rows.end(); it++) {
@@ -371,7 +357,7 @@ uint64_t DecoderStack::list_annotation_size() {
 }
 
 uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second)
@@ -384,7 +370,7 @@ uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
 
 bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
                                    uint16_t row_index, uint64_t col_index) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second) {
@@ -398,7 +384,7 @@ bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
 }
 
 bool DecoderStack::list_row_title(int row, QString &title) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second) {
@@ -412,7 +398,7 @@ bool DecoderStack::list_row_title(int row, QString &title) {
 }
 
 bool DecoderStack::list_row_description(int row, QString &desc) {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
     if (iter != _rows_lshow.end() && (*iter).second) {
@@ -449,7 +435,7 @@ void DecoderStack::init() {
   _sample_count.store(0);
   _samples_decoded = 0;
   {
-    std::lock_guard<std::mutex> lk(_output_mutex);
+    std::lock_guard<std::mutex> lk(_state_mutex);
     _error_message = QString();
   }
   _no_memory = false;
@@ -459,6 +445,7 @@ void DecoderStack::init() {
   _ann_dropped_mem.store(0);
   _ann_dropped_row.store(0);
 
+  std::shared_lock<std::shared_mutex> lk(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     (*i).second->clear();
   }
@@ -467,25 +454,23 @@ void DecoderStack::init() {
 }
 
 void DecoderStack::stop_decode_work() {
-  // set the flag to exit from task thread
-  // atomic_load so that if do_decode_work() on the decode thread is
-  // simultaneously replacing _stask_stauts, we still get a valid shared_ptr
-  // copy (the old object stays alive until our copy is released).
-  auto status = std::atomic_load(&_stask_stauts);
-  if (status) {
-    status->_bStop = true;
+  // P3-11 fix: use _status_mutex instead of atomic_load/store
+  {
+    std::lock_guard<std::mutex> lk(_status_mutex);
+    if (_stask_stauts) {
+      _stask_stauts->_bStop = true;
+    }
   }
   _decode_state.store(Stopped, std::memory_order_release);
+  // P0-1 fix: wake up the decode thread if it's waiting on the condition variable
+  _data_cond.notify_all();
 }
 
 void DecoderStack::begin_decode_work() {
-  // 防御性检查:若已有解码线程在运行(RevEndPacket 与 CopyToDocDone 竞态,
-  // 或 add_decode_task 重复添加遗漏),直接返回避免状态被覆盖。
-  // assert 在 Release 下是空操作,必须显式 if 检查 + early return。
   if (_decode_state.load(std::memory_order_acquire) != Stopped)
     return;
   {
-    std::lock_guard<std::mutex> lk(_output_mutex);
+    std::lock_guard<std::mutex> lk(_state_mutex);
     _error_message = "";
   }
   _decode_state.store(Running, std::memory_order_release);
@@ -505,21 +490,19 @@ bool DecoderStack::check_required_probes() {
 }
 
 void DecoderStack::do_decode_work() {
-  // set the flag to exit from task thread
-  // atomic_load/store so that concurrent stop_decode_work() on another
-  // thread can safely read the old shared_ptr while we replace it.
-  auto old = std::atomic_load(&_stask_stauts);
-  if (old) {
-    old->_bStop = true;
+  // P3-11 fix: use _status_mutex for thread-safe access to _stask_stauts
+  {
+    std::lock_guard<std::mutex> lk(_status_mutex);
+    if (_stask_stauts) {
+      _stask_stauts->_bStop = true;
+    }
+    auto new_status = std::make_shared<decode_task_status>();
+    new_status->_bStop = false;
+    // P0-2 fix: use shared_from_this() instead of raw 'this' pointer
+    new_status->_decoder = shared_from_this();
+    _stask_stauts = new_status;
   }
-  auto new_status = std::make_shared<decode_task_status>();
-  new_status->_bStop = false;
-  new_status->_decoder = this;
-  std::atomic_store(&_stask_stauts, new_status);
-  // old shared_ptr is released here — the object is freed only if no
-  // concurrent stop_decode_work() holds a copy. This fixes the leak where
-  // the previous raw-new object was never deleted.
-  _decoder_status->clear(); // clear old items
+  _decoder_status->clear();
 
   if (!_options_changed) {
     return;
@@ -534,12 +517,11 @@ void DecoderStack::do_decode_work() {
 
   if (!check_required_probes()) {
     {
-      std::lock_guard<std::mutex> lk(_output_mutex);
+      std::lock_guard<std::mutex> lk(_state_mutex);
       _error_message =
           QString::fromStdString(s_kRequiredChannelsMissing);
     }
     pxv_err("ERROR:%s", error_message().toStdString().c_str());
-    // Diagnostic: log which decoder has missing required probes
     for (auto &up : _stack) {
       auto dec = up.get();
       if (!dec->have_required_probes()) {
@@ -549,8 +531,6 @@ void DecoderStack::do_decode_work() {
     return;
   }
 
-  // Take a snapshot of signal_models under a shared_lock so concurrent
-  // writers (init_signals on the UI thread) cannot invalidate our iterators.
   std::vector<std::shared_ptr<data::SignalModel>> models_snapshot;
   {
     std::shared_lock<std::shared_mutex> lk(_session->signal_models_mutex());
@@ -592,7 +572,7 @@ void DecoderStack::do_decode_work() {
 
   if (_snapshot == nullptr) {
     {
-      std::lock_guard<std::mutex> lk(_output_mutex);
+      std::lock_guard<std::mutex> lk(_state_mutex);
       _error_message =
           QString::fromStdString(s_kRequiredChannelsMissing);
     }
@@ -606,7 +586,6 @@ void DecoderStack::do_decode_work() {
     return;
   }
 
-  // Get the samplerate
   _samplerate = _snapshot->samplerate();
   if (_samplerate == 0.0) {
     pxv_err("ERROR:Decode data got an invalid sample rate.");
@@ -617,7 +596,7 @@ void DecoderStack::do_decode_work() {
 }
 
 uint64_t DecoderStack::get_max_sample_count() {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t max_sample_count = 0;
 
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
@@ -627,18 +606,27 @@ uint64_t DecoderStack::get_max_sample_count() {
   return max_sample_count;
 }
 
+void DecoderStack::notify_data_ready() {
+  // P0-1 fix: Wake up the decode thread which may be waiting in
+  // decode_data() for new sample data to arrive.
+  _data_cond.notify_all();
+}
+
 void DecoderStack::decode_data(const uint64_t decode_start,
                                const uint64_t decode_end,
                                srd_session *const session) {
-  decode_task_status *status = _stask_stauts.get();
+  // P3-11 fix: obtain status shared_ptr under _status_mutex
+  std::shared_ptr<decode_task_status> status;
+  {
+    std::lock_guard<std::mutex> lk(_status_mutex);
+    status = _stask_stauts;
+  }
 
-  // uint8_t *chunk = nullptr;
   uint64_t last_cnt = 0;
   uint64_t notify_cnt = (decode_end - decode_start + 1) / 1000;
   if (notify_cnt == 0) notify_cnt = 1;
   srd_decoder_inst *logic_di = nullptr;
 
-  // find the first level decoder instant
   for (GSList *d = session->di_list; d; d = d->next) {
     srd_decoder_inst *di = (srd_decoder_inst *)d->data;
     srd_decoder *decoder = di->decoder;
@@ -660,7 +648,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   char *error = nullptr;
   bool bError = false;
   bool bEndTime = false;
-  // struct srd_push_param push_param;
 
   if (i >= decode_end) {
     pxv_info("decode data index have been to end");
@@ -706,8 +693,19 @@ void DecoderStack::decode_data(const uint64_t decode_start,
         }
       }
     } else if (i >= _snapshot->get_sample_count()) {
-      // Wait the data is ready.
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      // P0-1 fix: Use condition_variable instead of sleep_for(100ms) polling.
+      // The decode thread waits until either:
+      //   1) new data arrives (notify_data_ready() is called), or
+      //   2) capture ends (set_capture_end_flag() notifies), or
+      //   3) stop is requested (stop_decode_work() notifies), or
+      //   4) a 1-second timeout expires (safety net to recheck state).
+      std::unique_lock<std::mutex> wait_lk(_data_wait_mutex);
+      _data_cond.wait_for(wait_lk, std::chrono::seconds(1),
+          [this, &i]() {
+            return i < _snapshot->get_sample_count() ||
+                   _is_capture_end ||
+                   (_stask_stauts && _stask_stauts->_bStop.load());
+          });
       continue;
     }
 
@@ -740,7 +738,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           }
         } else {
           {
-            std::lock_guard<std::mutex> lk(_output_mutex);
+            std::lock_guard<std::mutex> lk(_state_mutex);
             _error_message =
                 QString::fromStdString(s_kChannelsNotEnabled);
           }
@@ -761,7 +759,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
       if (error) {
         {
-          std::lock_guard<std::mutex> lk(_output_mutex);
+          std::lock_guard<std::mutex> lk(_state_mutex);
           _error_message = QString::fromLocal8Bit(error);
         }
         pxv_err("Failed to call srd_session_send:%s", error);
@@ -778,21 +776,18 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
     i = chunk_end;
 
-    // use mutex
     {
-      std::lock_guard<std::mutex> lock(_output_mutex);
+      std::lock_guard<std::mutex> lock(_state_mutex);
       _samples_decoded = i - decode_start + 1;
     }
 
     if ((i - last_cnt) > notify_cnt) {
       last_cnt = i;
-      // CRITICAL: Must NOT emit new_decode_data() signal directly here — this
-      // runs on the decode worker thread. Qt AutoConnection cross-thread
-      // signal emission calls QThread::currentThread() → creates QThreadData
-      // on the worker thread → SIGSEGV on thread exit (LdrShutdownThread).
-      // Post the emit to the main thread via postEvent so AutoConnection
-      // resolves to DirectConnection (same thread) — no QThreadData created.
-      _session->event_bus_post([this]() { new_decode_data(); });
+      // P2-10 fix: Capture shared_ptr instead of raw 'this' to prevent
+      // use-after-free if the DecoderStack is destroyed before the
+      // lambda executes on the main thread.
+      auto self = shared_from_this();
+      _session->event_bus_post([self]() { self->new_decode_data(); });
     }
 
     entry_cnt++;
@@ -801,16 +796,16 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   _progress.store(100);
   _is_decoding.store(false);
 
-  // Final progress notification via postEvent (not direct signal emit) — see above.
-  _session->event_bus_post([this]() { new_decode_data(); });
+  // Final progress notification
+  auto self = shared_from_this();
+  _session->event_bus_post([self]() { self->new_decode_data(); });
 
-  // the task is normal ends,so all samples was processed;
   if (!bError && bEndTime) {
     srd_session_end(session, &error);
 
     if (error != nullptr) {
       {
-        std::lock_guard<std::mutex> lk(_output_mutex);
+        std::lock_guard<std::mutex> lk(_state_mutex);
         _error_message = QString::fromLocal8Bit(error);
       }
       pxv_err("Failed to call srd_session_end:%s", error);
@@ -820,9 +815,9 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   if (error != nullptr)
     g_free(error);
 
-  if (!_session->is_closed())
-    // Post to main thread — see new_decode_data comment above.
-    _session->event_bus_post([this]() { decode_done(); });
+  if (!_session->is_closed()) {
+    _session->event_bus_post([self]() { self->decode_done(); });
+  }
 }
 
 void DecoderStack::execute_decode_stack() {
@@ -837,9 +832,6 @@ void DecoderStack::execute_decode_stack() {
   }
   assert(_snapshot);
 
-  // Create the session
-  // one decoderstatck onwer one session
-  // all decoderstatck execute in sequence
   srd_session_new(&session);
 
   if (session == nullptr) {
@@ -849,14 +841,13 @@ void DecoderStack::execute_decode_stack() {
 
   _sample_count.store(_snapshot->get_sample_count());
 
-  // Create the decoders
   for (auto &up : _stack) {
     auto dec = up.get();
     srd_decoder_inst *const di = dec->create_decoder_inst(session);
 
     if (!di) {
       {
-        std::lock_guard<std::mutex> lk(_output_mutex);
+        std::lock_guard<std::mutex> lk(_state_mutex);
         _error_message =
             QString::fromStdString(s_kCreateDecoderInstanceFailed);
       }
@@ -871,20 +862,11 @@ void DecoderStack::execute_decode_stack() {
     decode_start = dec->decode_start();
 
     if (_session->is_realtime_refresh() == false) {
-      // If decode_end is 0 (not explicitly set, e.g. when added via MCP
-      // with silent=true which skips create_popup), use the full data range.
       uint64_t dec_end = dec->decode_end();
       if (dec_end == 0)
         dec_end = _sample_count - 1;
       decode_end = min(dec_end, _sample_count - 1);
     } else {
-      // In realtime refresh mode (stream/single mode, e.g. demo/file devices),
-      // data arrives incrementally. If decode_end is 0 (meaning "decode to end"),
-      // use UINT64_MAX so the decode loop waits for data and is bounded by
-      // _is_capture_end check in decode_data() (which sets end_index to
-      // align_sample_count - 1 when capture ends).
-      // Without this, decode_end stays 0 and the decode loop never executes,
-      // causing "send to decoder times: 0" and no decode results.
       uint64_t dec_end = dec->decode_end();
       if (dec_end == 0)
         dec_end = UINT64_MAX;
@@ -892,27 +874,32 @@ void DecoderStack::execute_decode_stack() {
     }
   }
 
-  // Start the session
   srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64((uint64_t)_samplerate));
 
+  // P3-11 fix: obtain status shared_ptr under _status_mutex for the callback
+  std::shared_ptr<decode_task_status> status_for_callback;
+  {
+    std::lock_guard<std::mutex> lk(_status_mutex);
+    status_for_callback = _stask_stauts;
+  }
+
   srd_pd_output_callback_add(session, SRD_OUTPUT_ANN,
-                             DecoderStack::annotation_callback, _stask_stauts.get());
+                             DecoderStack::annotation_callback,
+                             status_for_callback.get());
 
   char *error = nullptr;
   int srd_ret = srd_session_start(session, &error);
 
   if (srd_ret == SRD_OK) {
-    // need a lot time
     decode_data(decode_start, decode_end, session);
   } else if (error != nullptr) {
     {
-      std::lock_guard<std::mutex> lk(_output_mutex);
+      std::lock_guard<std::mutex> lk(_state_mutex);
       _error_message = QString::fromLocal8Bit(error);
     }
   }
 
-  // Destroy the session
   if (error != nullptr) {
     g_free(error);
   }
@@ -929,7 +916,9 @@ uint64_t DecoderStack::sample_count() {
 
 uint64_t DecoderStack::sample_rate() { return _samplerate; }
 
-// the decode callback, annotation object will be create
+// P2-7 fix: annotation_callback now uses emplace_annotation instead of
+// new/delete. The Annotation is stored as a value in RowData's deque,
+// eliminating manual memory management.
 void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   if (!pdata) {
     pxv_warn("%s", "DecoderStack::annotation_callback: pdata is nullptr");
@@ -944,7 +933,8 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
 
   struct decode_task_status *st = (decode_task_status *)self;
 
-  DecoderStack *const d = st->_decoder;
+  // P0-2 fix: _decoder is now a shared_ptr, keeping the DecoderStack alive
+  auto d = st->_decoder;  // copies the shared_ptr, ensuring lifetime
   if (!d) {
     pxv_warn("%s", "DecoderStack::annotation_callback: d is nullptr");
     return;
@@ -965,14 +955,8 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     return;
   }
 
-  Annotation *a = new Annotation(pdata, d->_decoder_status.get());
-  if (a == nullptr) {
-    d->_no_memory = true;
-    return;
-  }
   d->_result_count++;
 
-  // Find the row
   assert(pdata->pdo);
   assert(pdata->pdo->di);
   const srd_decoder *const decc = pdata->pdo->di->decoder;
@@ -982,41 +966,35 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
   assert(decc);
 
-  // Protect _rows/_class_rows lookups AND push_annotation against concurrent
-  // build_row() on the UI thread. The lock must be held during push_annotation
-  // because build_row() deletes RowData objects — releasing the lock before
-  // push_annotation would leave target_row dangling.
-  // Lock order: _output_mutex -> _visitor_mutex (inside push_annotation) is
-  // consistent with build_row() -> RowData::clear().
-  {
-    std::lock_guard<std::mutex> lk(d->_output_mutex);
+  // P1-4 fix: use _rows_mutex instead of _output_mutex
+  std::unique_lock<std::shared_mutex> lk(d->_rows_mutex);
 
-    auto row_iter = d->_rows.end();
+  auto row_iter = d->_rows.end();
 
-    // Try looking up the sub-row of this class
-    const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
-        d->_class_rows.find(make_pair(decc, a->format()));
-    if (r != d->_class_rows.end())
-      row_iter = d->_rows.find((*r).second);
-    else {
-      // Failing that, use the decoder as a key
-      row_iter = d->_rows.find(Row(decc));
-    }
+  // Determine the annotation class from the proto data
+  const srd_proto_data_annotation *const pda =
+      (const srd_proto_data_annotation *)pdata->data;
+  int ann_format = pda->ann_class;
 
-    if (row_iter == d->_rows.end()) {
-      // Row not found — map may have been rebuilt by build_row(). Drop the
-      // annotation rather than crashing on the assert.
-      pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
-              a->format());
-      d->_ann_dropped_row++;
-      delete a;
-      return;
-    }
-
-    // Add the annotation while still holding _output_mutex
-    if (!(*row_iter).second->push_annotation(a))
-      d->_no_memory = true;
+  const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
+      d->_class_rows.find(make_pair(decc, ann_format));
+  if (r != d->_class_rows.end())
+    row_iter = d->_rows.find((*r).second);
+  else {
+    row_iter = d->_rows.find(Row(decc));
   }
+
+  if (row_iter == d->_rows.end()) {
+    pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
+            ann_format);
+    d->_ann_dropped_row++;
+    return;
+  }
+
+  // P2-7 fix: emplace_annotation constructs the Annotation in-place
+  // inside the deque — no new/delete, no memory pool needed.
+  if (!(*row_iter).second->emplace_annotation(pdata, d->_decoder_status.get()))
+    d->_no_memory = true;
 }
 
 void DecoderStack::frame_ended() {
@@ -1026,23 +1004,15 @@ void DecoderStack::frame_ended() {
     const uint64_t limit = _session->get_ring_sample_count();
     const uint64_t last_samples = limit > 0 ? limit - 1 : 0;
 
-  for (auto &up : _stack) {
-    auto dec = up.get();
-    uint64_t start = dec->decode_start();
+    for (auto &up : _stack) {
+      auto dec = up.get();
+      uint64_t start = dec->decode_start();
       uint64_t end = dec->decode_end();
-      const uint64_t raw_start = start;
-      const uint64_t raw_end = end;
 
       if (start > last_samples) {
         start = 0;
       }
 
-      // end == 0 is a sentinel meaning "decode to the actual data end".
-      // Do NOT replace it with last_samples (ring buffer capacity) here,
-      // because that would permanently overwrite the sentinel in the
-      // decoder's stored config. execute_decode_stack() resolves 0 to the
-      // real _sample_count at decode time, adapting to varying capture
-      // lengths. Only clamp non-zero values that exceed the buffer.
       if (end != 0 && end > last_samples) {
         end = last_samples;
       }
@@ -1053,7 +1023,7 @@ void DecoderStack::frame_ended() {
 }
 
 int DecoderStack::list_rows_size() {
-  std::lock_guard<std::mutex> lock(_output_mutex);
+  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   int rows_size = 0;
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);

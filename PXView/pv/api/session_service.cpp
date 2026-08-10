@@ -2357,10 +2357,11 @@ Result<std::string> SessionService::add_decoder(
                 _session->have_view_data() &&
                 !_session->is_copy_in_progress()) {
                 QTimer::singleShot(0, qApp, [this, decoder_stack]() {
-                    if (decoder_stack && !decoder_stack->_delete_flag) {
-                        // add_decode_task() is now private; rst_decoder()
-                        // resets this single stack and attaches view data
-                        // before starting its decode task.
+                    if (decoder_stack) {
+                        // P0-3 fix: _delete_flag removed — shared_ptr manages
+                        // lifetime. If the stack was removed, the shared_ptr
+                        // would still be valid but the stack won't be found
+                        // in the stacks list.
                         auto &st = _session->get_decoder_stacks(api_document());
                         for (size_t i = 0; i < st.size(); i++) {
                             if (st[i].get() == decoder_stack.get()) {
@@ -2792,10 +2793,8 @@ auto *root_decoder = stack.front().get();
             // to the next event loop iteration, after all pending events
             // (including the DecoderAdded broadcast) have been processed.
             QTimer::singleShot(0, qApp, [this, decoder_stack]() {
-                if (decoder_stack && !decoder_stack->_delete_flag) {
-                    // add_decode_task() is now private; rst_decoder()
-                    // resets this single stack and attaches view data
-                    // before starting its decode task.
+                if (decoder_stack) {
+                    // P0-3 fix: _delete_flag removed — shared_ptr manages lifetime.
                     auto &st = _session->get_decoder_stacks(api_document());
                     for (size_t i = 0; i < st.size(); i++) {
                         if (st[i].get() == decoder_stack.get()) {
@@ -4525,7 +4524,7 @@ if (!root_decoder || !root_decoder->decoder())
 
             std::shared_ptr<data::DecoderStack> stack_ref = target_stack;
             QTimer::singleShot(0, qApp, [this, stack_ref]() {
-                if (!stack_ref || stack_ref->_delete_flag)
+                if (!stack_ref)
                     return;
                 _session->rst_decoder_by_key_handel(stack_ref->get_key_handel(),
                                                     api_document());
