@@ -462,7 +462,17 @@ XLOG_API int xlog_set_level(xlog_context* ctx, int level)
     ctx->_log_level = level;
 
     return 0;    
-} 
+}
+
+/**
+ * Get the current log level of a context.
+ */
+XLOG_API int xlog_get_level(xlog_context* ctx)
+{
+    if (ctx == NULL)
+        return -1;
+    return ctx->_log_level;
+}
 
 /**
  * create a new writer

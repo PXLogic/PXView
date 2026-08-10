@@ -124,6 +124,12 @@ XLOG_API const char* xlog_get_error(xlog_context* ctx);
 XLOG_API int xlog_set_level(xlog_context* ctx, int level);
 
 /**
+ * Get the current log level of a context.
+ * @return the log level (see enum xlog_level_code), or -1 on error.
+ */
+XLOG_API int xlog_get_level(xlog_context* ctx);
+
+/**
  * create a new writer
  * use free to delete the returns object.
  */
