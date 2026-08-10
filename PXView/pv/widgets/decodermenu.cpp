@@ -21,8 +21,10 @@
  */
 
 #include <libsigrokdecode.h>
+#include "pv/base/strnatcmp.h"
 #include "pv/widgets/decodermenu.h"
 #include <cassert>
+#include <cstring>
 
 namespace pv {
 namespace widgets {
@@ -50,7 +52,11 @@ DecoderMenu::DecoderMenu(QWidget *parent, bool first_level_decoder) :
 
 int DecoderMenu::decoder_name_cmp(const void *a, const void *b)
 {
-	return strcmp(((const srd_decoder*)a)->name,
+	// F-3: Use natural-order case-insensitive comparison so that
+	// decoder names like "I2C", "JTAG", "SPI", "UART" appear in a
+	// natural order instead of raw ASCII order.
+	return pv::base::strnatcasecmp(
+		((const srd_decoder*)a)->name,
 		((const srd_decoder*)b)->name);
 }
 

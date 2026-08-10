@@ -43,6 +43,17 @@ add_library(pxview-data STATIC
     decode/decoderstatus.cpp
 )
 
+# C-2: Snapshot inherits QObject + Q_OBJECT, so moc must process snapshot.h.
+# We cannot use AUTOMOC because the main PXView target already runs
+# qt6_wrap_cpp on the same headers (decoderstack.h, etc.) via
+# gui_sources.cmake's PXView_HEADERS list. AUTOMOC would re-generate moc
+# for those headers, causing duplicate symbol definitions at link time.
+# Instead, we manually wrap just snapshot.h and compile the moc output
+# into pxview-data so the static lib is self-contained.
+qt6_wrap_cpp(SNAPSHOT_MOC_OUT
+    ${CMAKE_SOURCE_DIR}/PXView/pv/data/snapshot/snapshot.h)
+target_sources(pxview-data PRIVATE ${SNAPSHOT_MOC_OUT})
+
 target_link_libraries(pxview-data PUBLIC Qt6::Core)
 # pxview-data uses FFTW directly (spectrumstack.cpp). Declare it here so CMake
 # places ${FFTW_LIBRARIES} AFTER libpxview-data.a in the final link line —

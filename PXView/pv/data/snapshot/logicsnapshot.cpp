@@ -2619,6 +2619,45 @@ void LogicSnapshot::free_head_blocks(int count) {
   _lst_free_block_index = count;
 }
 
+// B-6: Override to connect the PulseView-style free_unused_memory() API
+// to the existing free_head_blocks() mechanism. Called after capture_ended()
+// (which calls set_complete() → _mem_optimization_requested = true).
+// If there are active iterators (decode thread holding get_samples pointers),
+// release is deferred — free_head_blocks() also checks this internally.
+void LogicSnapshot::free_unused_memory() {
+  // Check the base-class flag first; if nobody requested optimization,
+  // there's nothing to do. Reset the flag regardless.
+  if (!_mem_optimization_requested) {
+    return;
+  }
+  _mem_optimization_requested = false;
+
+  // Skip if the decode thread is actively reading (has active iterators).
+  if (has_active_iterators()) {
+    pxv_dbg("LogicSnapshot::free_unused_memory: deferred — %d active iterators",
+            _iterator_count.load());
+    // Re-set the flag so the next call can retry.
+    _mem_optimization_requested = true;
+    return;
+  }
+
+  // In loop mode, _loop_offset tracks how far the ring has wrapped.
+  // The wrapped (old) data in root node 0 can be freed.
+  if (_loop_offset > 0) {
+    int free_count = static_cast<int>(_loop_offset / LeafBlockSamples);
+    if (free_count > _lst_free_block_index) {
+      // Cap to Scale (root node capacity) to match free_head_blocks assert.
+      if (free_count >= (int)Scale)
+        free_count = (int)Scale - 1;
+      if (free_count > 0) {
+        free_head_blocks(free_count);
+        pxv_info("LogicSnapshot::free_unused_memory: freed %d head blocks",
+                 free_count);
+      }
+    }
+  }
+}
+
 int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
   if (!out_offset) {
     pxv_warn("%s", "LogicSnapshot::get_block_with_sample: out_offset is nullptr");

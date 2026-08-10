@@ -347,6 +347,11 @@ private:
 
     void free_head_blocks(int count);
 
+// B-6: Override to connect PulseView-style free_unused_memory() to
+// the existing free_head_blocks() mechanism. Called by Snapshot::
+// set_complete() (via _mem_optimization_requested) after capture ends.
+void free_unused_memory() override;
+
     void push_to_free_list(void* ptr);
     void* allocate_block(uint16_t channel, uint64_t index0, uint64_t index1);
 

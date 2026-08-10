@@ -234,10 +234,7 @@ public:
     // to notify the decode thread that new sample data is available.
     void notify_data_ready();
 
-    // P0-2 fix: Returns a shared_ptr to this DecoderStack. Requires that
-    // the object is already managed by a shared_ptr (which it always is
-    // in DecodeTaskManager). Mirrors PulseView's enable_shared_from_this
-    // pattern used by SignalBase and LogicSegment.
+    // P0-2 fix: Returns a shared_ptr to this DecoderStack.
     std::shared_ptr<DecoderStack> get_shared_ptr() {
         return shared_from_this();
     }

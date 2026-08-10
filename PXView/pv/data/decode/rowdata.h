@@ -67,8 +67,10 @@ public:
     return _item_count;
   }
   inline uint64_t get_annotation_capacity() {
+    // std::deque has no capacity() — return size as the effective
+    // capacity metric for compatibility with callers that check this.
     std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
-    return _annotations.capacity();
+    return _item_count;
   }
 
   bool get_annotation(pv::data::decode::Annotation *ann, uint64_t index);
