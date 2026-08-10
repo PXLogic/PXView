@@ -80,7 +80,7 @@ void DsoSnapshot::free_envelop()
 
 void DsoSnapshot::init()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     init_all();    
 }
 
@@ -103,7 +103,7 @@ void DsoSnapshot::init_all()
 
 void DsoSnapshot::clear()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     free_data();
     free_envelop();
     init_all();
@@ -112,7 +112,7 @@ void DsoSnapshot::clear()
 
 void DsoSnapshot::copy_from(const DsoSnapshot &src)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     free_data();
     free_envelop();
@@ -228,7 +228,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
         || channel_changed
         || isFile){
         
-        std::lock_guard<std::mutex> lock(_mutex);
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
 
         free_data();
 
@@ -286,7 +286,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
         _last_ended = false;
     }
     else {
-        std::lock_guard<std::mutex> lock(_mutex);
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
         free_data();
         free_envelop();
         _memory_failed = true;
@@ -295,7 +295,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
 
 void DsoSnapshot::append_payload(const sr_datafeed_dso &dso)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (_channel_num > 0 && dso.num_samples > 0) {       
         append_data(dso.data, dso.num_samples, _instant);
@@ -347,7 +347,7 @@ void DsoSnapshot::append_data(void *data, uint64_t samples, bool instant)
 
 void DsoSnapshot::enable_envelope(bool enable)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     if (!_envelope_done && enable)
         append_payload_to_envelope_levels(true);
     _envelope_en = enable;
@@ -356,7 +356,7 @@ void DsoSnapshot::enable_envelope(bool enable)
 const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample, uint16_t ch_index)
 {
     (void)end_sample;
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (start_sample < 0 || start_sample >= (int64_t)_sample_count) {
         pxv_warn("DsoSnapshot::get_samples: start_sample %lld out of range (count=%llu)",
@@ -630,7 +630,7 @@ uint64_t DsoSnapshot::get_block_size(int block_index)
 
 bool DsoSnapshot::get_max_min_value(uint8_t &maxv, uint8_t &minv, int chan_index)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (_sample_count == 0){
         return false;

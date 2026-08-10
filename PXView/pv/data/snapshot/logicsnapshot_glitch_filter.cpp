@@ -61,7 +61,7 @@ LogicSnapshotGlitchFilter::~LogicSnapshotGlitchFilter()
 // ----------------------------------------------------------------------------
 
 void LogicSnapshotGlitchFilter::invert_channel(int sig_index) {
-  std::lock_guard<std::mutex> lock(_host->_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
   int order = _host->get_ch_order(sig_index);
   if (order == -1 || (unsigned int)order >= _host->_ch_data.size())
@@ -159,7 +159,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
   if (max_sample == 0)
     return;
 
-  std::lock_guard<std::mutex> lock(_host->_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
   // 转换为绝对偏移坐标系
   _host->_ring_sample_count += _host->_loop_offset;
@@ -471,7 +471,7 @@ LogicSnapshotGlitchFilter::get_filtered_ranges(int sig_index) const {
 }
 
 void LogicSnapshotGlitchFilter::clear_filtered_ranges() {
-  std::lock_guard<std::mutex> lock(_host->_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
   _filtered_ranges_per_channel.clear();
 }
 

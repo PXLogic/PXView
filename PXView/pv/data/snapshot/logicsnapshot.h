@@ -188,6 +188,61 @@ public:
 
     void free_decode_lpb(void *lbp);
 
+    // P1-6 fix: Iterator reference counting, matching PulseView's
+    // Segment::iterator_count_ design. When the decode thread (or any
+    // reader) calls get_samples(), it increments _iterator_count via
+    // begin_iteration(). Memory-optimization operations (free_data,
+    // free_head_blocks) check this count and skip if > 0, preventing
+    // use-after-free during concurrent memory cleanup.
+    inline void begin_iteration() {
+        _iterator_count.fetch_add(1, std::memory_order_acquire);
+    }
+    inline void end_iteration() {
+        _iterator_count.fetch_sub(1, std::memory_order_release);
+    }
+    inline bool has_active_iterators() const {
+        return _iterator_count.load(std::memory_order_acquire) > 0;
+    }
+
+    // RAII guard for iterator counting
+    struct IteratorGuard {
+        LogicSnapshot *_snap;
+        IteratorGuard(LogicSnapshot *s) : _snap(s) {
+            if (_snap) _snap->begin_iteration();
+        }
+        ~IteratorGuard() {
+            if (_snap) _snap->end_iteration();
+        }
+        IteratorGuard(const IteratorGuard&) = delete;
+        IteratorGuard& operator=(const IteratorGuard&) = delete;
+    };
+
+    // P1-B: Segment data iterator protocol, matching PulseView's
+    // Segment::begin_sample_iteration / continue_sample_iteration /
+    // end_sample_iteration design.  Provides chunk-level contiguous
+    // memory access so the decode thread can batch-read samples without
+    // calling get_samples() for every chunk.
+    struct SegmentDataIterator {
+        uint64_t current_sample = 0;   // absolute sample position
+        int       ch_order = 0;        // channel order index
+        uint64_t root_index = 0;       // index into _ch_data[order]
+        uint64_t lbp_index = 0;        // index into RootNode.lbp[]
+        uint64_t byte_offset = 0;      // byte offset within current leaf block
+        const uint8_t *chunk_data = nullptr;  // pointer to current leaf block data
+        uint64_t chunk_remaining = 0;  // remaining bytes in current leaf block
+        bool     exhausted = false;    // all samples consumed
+    };
+
+    SegmentDataIterator* begin_sample_iteration(uint64_t start, int sig_index);
+    void continue_sample_iteration(SegmentDataIterator* it, uint64_t increase);
+    void end_sample_iteration(SegmentDataIterator* it);
+    static inline const uint8_t* get_iterator_value(SegmentDataIterator* it) {
+        return it->chunk_data + it->byte_offset;
+    }
+    static inline uint64_t get_iterator_valid_length(SegmentDataIterator* it) {
+        return it->chunk_remaining;
+    }
+
     inline bool is_able_free(){
         return _able_free;
     } 
@@ -335,6 +390,11 @@ private:
     // forwarders (e.g. is_glitch_filtered / get_filtered_ranges) can call
     // non-const methods on the helper.
     mutable std::unique_ptr<LogicSnapshotGlitchFilter> _glitch_filter;
+
+    // P1-6 fix: Iterator reference count — prevents free_data/free_head_blocks
+    // from freeing memory while get_samples() or other readers are active.
+    // Matches PulseView's Segment::iterator_count_ mechanism.
+    std::atomic<int> _iterator_count{0};
 
     friend class ::LogicSnapshotDiskCacheWriter;
     friend class LogicSnapshotGlitchFilter;

@@ -389,6 +389,12 @@ public:
 
   void viewport_update();
 
+  // P1-A: Coalesce multiple viewport update requests into a single repaint
+  // within a 16ms window (~60 FPS). Prevents UI stutter when the decode
+  // thread or data feed fires many new_decode_data signals in rapid
+  // succession.
+  void request_delayed_update();
+
   void show_captured_progress(bool triggered, int progress);
 
   bool get_dso_trig_moved();
@@ -800,6 +806,11 @@ private:
   // into a single visible_range_changed() emission. Owned by View (parent
   // QObject) so it is destroyed automatically.
   QTimer *_viewport_change_timer = nullptr;
+
+  // P1-A: Delayed view-update coalescing timer. Single-shot, 16ms interval.
+  QTimer *_delayed_view_update_timer = nullptr;
+  bool _delayed_view_update_pending = false;
+  static constexpr int MaxViewAutoUpdateRateMs = 16; // ~60 FPS
 
   // (trigger position fix _trig_hoff is declared above in the layout section)
 

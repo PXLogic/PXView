@@ -138,8 +138,8 @@ DecodeTrace::DecodeTrace(pv::SigSession *session,
   _colour = getChannelColor(index % 16);
 
   _decoder_stack = decoder_stack;
-  _data_source = session;
-  _delete_flag = false;
+_data_source = session;
+// P0-3 fix: _delete_flag removed.
   _decode_cursor1 = 0;
   _decode_cursor2 = 0;
 
@@ -148,6 +148,9 @@ DecodeTrace::DecodeTrace(pv::SigSession *session,
 
   connect(_decoder_stack.get(), &data::DecoderStack::decode_done, this,
           &DecodeTrace::on_decode_done);
+
+  connect(_decoder_stack.get(), &data::DecoderStack::error_message_changed,
+          this, &DecodeTrace::on_error_message_changed);
 }
 
 DecodeTrace::~DecodeTrace() {
@@ -717,8 +720,10 @@ void DecodeTrace::on_new_decode_data() {
   // Do NOT call data_updated() which rebuilds headers, margins, scrollbars,
   // and marks the entire pixmap cache dirty. Decode data changes only affect
   // the decode trace rendering, not view layout or logic signal cache.
+  // P1-A: Use request_delayed_update() instead of viewport_update() to
+  // coalesce bursts of new_decode_data signals into a single repaint.
   if (_view && _data_source->is_stopped_status()) {
-    _view->viewport_update();
+    _view->request_delayed_update();
   }
 }
 
@@ -749,6 +754,18 @@ void DecodeTrace::on_decode_done() {
   }
 
   _data_source->decode_done();
+}
+
+void DecodeTrace::on_error_message_changed(const QString &msg) {
+  // P0-A: When the decoder stack reports an error, trigger a viewport repaint
+  // so that draw_error() is called to display the error message on the trace.
+  // Empty messages clear any previously shown error.
+  if (_view && _data_source->is_stopped_status()) {
+    _view->viewport_update();
+  }
+  if (!msg.isEmpty()) {
+    pxv_err("DecodeTrace: decoder error: %s", msg.toStdString().c_str());
+  }
 }
 
 int DecodeTrace::rows_size() {

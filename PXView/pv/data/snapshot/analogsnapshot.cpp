@@ -69,7 +69,7 @@ void AnalogSnapshot::free_envelop()
 
 void AnalogSnapshot::init()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     init_all();
 }
 
@@ -125,7 +125,7 @@ void AnalogSnapshot::free_data()
 
 void AnalogSnapshot::copy_from(const AnalogSnapshot &src)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     free_data();
     free_envelop();
@@ -178,7 +178,7 @@ void AnalogSnapshot::copy_from(const AnalogSnapshot &src)
 
 void AnalogSnapshot::clear()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     free_data();
     free_envelop();
     init_all();
@@ -317,7 +317,7 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
 
 void AnalogSnapshot::append_payload(const sr_datafeed_analog &analog)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     // CRITICAL FIX: fork 迁移遗漏 — 上游 libsigrok 的 sr_datafeed_analog 通过
     // meaning->channels 指定本包数据属于哪些通道。demo 驱动每个通道单独发送

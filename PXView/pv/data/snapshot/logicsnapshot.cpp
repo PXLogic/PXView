@@ -82,6 +82,16 @@ LogicSnapshot::~LogicSnapshot() {
   // Explicit drain_and_join is also safe but redundant here.
 }
 void LogicSnapshot::free_data() {
+  // P1-6 fix: Skip memory optimization if there are active iterators
+  // (e.g. the decode thread calling get_samples). This prevents
+  // use-after-free when free_data is called from clear/copy_from while
+  // the decode thread holds a raw pointer into the data.
+  if (has_active_iterators()) {
+    pxv_info("LogicSnapshot::free_data: deferred — %d active iterators",
+             _iterator_count.load());
+    return;
+  }
+
   // Clear the mmap slot bitmap via the writer (it owns _mmap_slot_written).
   _disk_cache_writer->clear_all_mmap_slots();
 
@@ -125,7 +135,7 @@ void LogicSnapshot::free_data() {
 }
 
 void LogicSnapshot::init() {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   init_all();
 }
 
@@ -146,7 +156,7 @@ void LogicSnapshot::clear() {
   // free_data() resets the mmap allocator. Encapsulated in drain_and_join().
   _disk_cache_writer->drain_and_join();
 
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   free_data();
   init_all();
 }
@@ -250,7 +260,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     }
   }
 
-  std::unique_lock<std::mutex> lock(_mutex);
+  std::unique_lock<std::recursive_mutex> lock(_mutex);
 
   if (total_sample_count != _total_sample_count ||
       channel_num != _channel_num || channel_changed || _is_loop) {
@@ -558,7 +568,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   // mmap data writes (page-fault-prone) release it so UI's get_samples can
   // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
   // and safe to touch without the lock during write loops.
-  std::unique_lock<std::mutex> lock(_mutex);
+  std::unique_lock<std::recursive_mutex> lock(_mutex);
 
   // Update _sample_count (cap at _total_sample_count)
   if (_sample_count + num_samples < _total_sample_count) {
@@ -887,7 +897,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // mmap data writes (page-fault-prone) release it so UI's get_samples can
   // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
   // and safe to touch without the lock during write loops.
-  std::unique_lock<std::mutex> lock(_mutex);
+  std::unique_lock<std::recursive_mutex> lock(_mutex);
 
   // Update _sample_count (cap at _total_sample_count)
   if (_sample_count + samples < _total_sample_count) {
@@ -1153,7 +1163,7 @@ void LogicSnapshot::capture_ended() {
   // Encapsulated in drain_queue_for_capture_end() (cluster D).
   _disk_cache_writer->drain_queue_for_capture_end();
 
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   Snapshot::capture_ended();
 
@@ -1205,7 +1215,7 @@ void LogicSnapshot::capture_ended() {
 }
 
 void LogicSnapshot::copy_from(const LogicSnapshot &src) {
-std::lock_guard<std::mutex> lock(_mutex);
+std::lock_guard<std::recursive_mutex> lock(_mutex);
 
 // H4 fix: drain the async writer before free_data() resets _mmap_alloc.
 // Without this, the async worker could still be accessing the old mmap
@@ -1466,7 +1476,11 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
 const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
                                           uint64_t &end_sample, int sig_index,
                                           void **lbp) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
+
+  // P1-6 fix: Increment iterator count so that free_data/free_head_blocks
+  // will skip memory optimization while this pointer is in use.
+  IteratorGuard iter_guard(this);
 
   uint64_t sample_count = _ring_sample_count;
 
@@ -1550,8 +1564,116 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   return (uint8_t *)ptr + offset;
 }
 
+// P1-B: Segment data iterator protocol implementation.
+// These methods provide chunk-level contiguous memory access, matching
+// PulseView's Segment::begin/continue/end_sample_iteration design.
+// The decode thread can use these to batch-read sample data without
+// calling get_samples() for every chunk, and the iterator count
+// prevents free_data/free_head_blocks from freeing memory mid-read.
+
+LogicSnapshot::SegmentDataIterator*
+LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
+
+  auto *it = new SegmentDataIterator();
+  begin_iteration();  // increment _iterator_count
+
+  it->current_sample = start + _loop_offset;
+  it->ch_order = get_ch_order(sig_index);
+
+  if (it->ch_order < 0 || (unsigned int)it->ch_order >= _ch_data.size()) {
+    it->exhausted = true;
+    it->chunk_data = nullptr;
+    it->chunk_remaining = 0;
+    return it;
+  }
+
+  // Compute root/lbp/byte indices for the start sample
+  it->root_index = it->current_sample >> (LeafBlockPower + RootScalePower);
+  it->lbp_index = (it->current_sample & RootMask) >> LeafBlockPower;
+  it->byte_offset = (it->current_sample & LeafMask) / 8;
+
+  // Load the first chunk
+  if (it->root_index < _ch_data[it->ch_order].size()) {
+    void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
+    if (ptr) {
+      it->chunk_data = (const uint8_t*)ptr;
+      uint64_t leaf_bytes = LeafBlockSamples / 8;
+      it->chunk_remaining = leaf_bytes - it->byte_offset;
+    } else {
+      // Constant-value block — no actual data pointer
+      it->chunk_data = nullptr;
+      it->chunk_remaining = 0;
+    }
+  } else {
+    it->exhausted = true;
+  }
+
+  return it;
+}
+
+void LogicSnapshot::continue_sample_iteration(SegmentDataIterator* it,
+                                               uint64_t increase) {
+  if (!it || it->exhausted)
+    return;
+
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
+
+  it->current_sample += increase;
+
+  // Check if we've moved past the current chunk
+  uint64_t new_root = it->current_sample >> (LeafBlockPower + RootScalePower);
+  uint64_t new_lbp  = (it->current_sample & RootMask) >> LeafBlockPower;
+  uint64_t new_off  = (it->current_sample & LeafMask) / 8;
+
+  if (new_root != it->root_index || new_lbp != it->lbp_index) {
+    // Crossed a leaf block boundary — load the new chunk
+    it->root_index = new_root;
+    it->lbp_index = new_lbp;
+    it->byte_offset = new_off;
+
+    if ((unsigned int)it->ch_order < _ch_data.size() &&
+        it->root_index < _ch_data[it->ch_order].size()) {
+      void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
+      if (ptr) {
+        it->chunk_data = (const uint8_t*)ptr;
+        uint64_t leaf_bytes = LeafBlockSamples / 8;
+        it->chunk_remaining = leaf_bytes - it->byte_offset;
+      } else {
+        it->chunk_data = nullptr;
+        it->chunk_remaining = 0;
+      }
+    } else {
+      it->exhausted = true;
+      it->chunk_data = nullptr;
+      it->chunk_remaining = 0;
+    }
+  } else {
+    // Same leaf block — just update offset and remaining
+    uint64_t advance_bytes = new_off - it->byte_offset;
+    it->byte_offset = new_off;
+    if (advance_bytes >= it->chunk_remaining) {
+      it->chunk_remaining = 0;
+    } else {
+      it->chunk_remaining -= advance_bytes;
+    }
+  }
+
+  // Check if we've passed total sample count
+  if (it->current_sample >= _ring_sample_count + _loop_offset) {
+    it->exhausted = true;
+  }
+}
+
+void LogicSnapshot::end_sample_iteration(SegmentDataIterator* it) {
+  if (!it)
+    return;
+  end_iteration();  // decrement _iterator_count
+  delete it;
+}
+
 bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   return get_sample_unlock(index, sig_index);
 }
 
@@ -1603,7 +1725,7 @@ bool LogicSnapshot::get_display_edges(
   if (!togs.empty())
     togs.clear();
 
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   if (_ring_sample_count == 0)
     return false;
@@ -1659,7 +1781,7 @@ bool LogicSnapshot::get_display_edges(
 bool LogicSnapshot::get_nxt_edge(uint64_t &index, bool last_sample,
                                  uint64_t end, double min_length,
                                  int sig_index) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   return get_nxt_edge_unlock(index, last_sample, end, min_length, sig_index);
 }
 
@@ -1802,7 +1924,7 @@ bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
 
 bool LogicSnapshot::get_pre_edge(uint64_t &index, bool last_sample,
                                  double min_length, int sig_index) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   index += _loop_offset;
   _ring_sample_count += _loop_offset;
@@ -2199,7 +2321,7 @@ bool LogicSnapshot::block_pre_edge(uint64_t *lbp, uint64_t &index,
 bool LogicSnapshot::pattern_search(int64_t start, int64_t end, int64_t &index,
                                    std::map<uint16_t, QString> &pattern,
                                    bool isNext) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   start += _loop_offset;
   end += _loop_offset;
@@ -2424,7 +2546,7 @@ void LogicSnapshot::move_first_node_to_last() {
 }
 
 void LogicSnapshot::decode_end() {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   std::sort(_free_block_list.begin(), _free_block_list.end());
   _free_block_list.erase(
@@ -2458,7 +2580,7 @@ void LogicSnapshot::free_decode_lpb(void *lbp) {
   }
   assert(lbp);
 
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   if (_mmap_alloc && _mmap_alloc->is_mmap_address(lbp)) {
       return;
   }
@@ -2472,6 +2594,13 @@ void LogicSnapshot::free_decode_lpb(void *lbp) {
 }
 
 void LogicSnapshot::free_head_blocks(int count) {
+  // P1-6 fix: Skip if there are active iterators to prevent use-after-free.
+  if (has_active_iterators()) {
+    pxv_info("LogicSnapshot::free_head_blocks: deferred — %d active iterators",
+             _iterator_count.load());
+    return;
+  }
+
   assert(count < (int)Scale);
   assert(count > 0);
 

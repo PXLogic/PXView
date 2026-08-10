@@ -197,6 +197,13 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
 
   _capture_mgr->set_data_updated(true);
 
+  // P0-1 fix: Notify all running decoder stacks that new data is available.
+  // This wakes the condition variable in decode_data() immediately instead
+  // of waiting for the 1-second timeout.
+  if (_decode_mgr) {
+    _decode_mgr->notify_data_ready();
+  }
+
   // modernize-core-layer-radical Task 13: emit DataUpdated typed event.
   // feed_in_logic runs on the libsigrok data-feed thread; use broadcast_async
   // to queue on_event(DataUpdated) onto qApp's event loop, so MainWindow's

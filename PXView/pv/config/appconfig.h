@@ -30,6 +30,10 @@
 #include <QColor>
 #include <QHash>
 #include <QTimer>
+#include <QVariant>
+
+// P2-A: Setting key constants — use these instead of bare string literals.
+#include "pv/config/appconfig_keys.h"
 
 #define LAN_CN  25
 #define LAN_TRADITIONAL  26
@@ -176,6 +180,19 @@ struct StyleOptions {
     QList<StyleTokenItem> items;
 };
 
+// P2-A: Setting change listener interface. Any class that needs to react
+// to setting changes can implement this and register via
+// AppConfig::register_setting_listener().  Listeners are notified after
+// the setting value has been written to QSettings.
+class SettingChangeListener
+{
+public:
+    virtual ~SettingChangeListener() = default;
+    virtual void on_setting_changed(const QString &group,
+                                    const QString &key,
+                                    const QVariant &value) = 0;
+};
+
 class AppConfig
 {
 private:
@@ -214,6 +231,10 @@ public:
   QColor GetThemeColor(const QString &tokenName) const;
   QString GetThemeTokenValue(const QString &tokenName) const;
 
+  // P2-A: Setting change listener registration.
+  void register_setting_listener(SettingChangeListener *listener);
+  void unregister_setting_listener(SettingChangeListener *listener);
+
   // limit_samples 应用层 fallback：当驱动返回 0（上游约定"不限制"）时使用此默认值
   // 默认 1000000 = SR_MHZ(1)（1M 采样点）
   uint64_t default_sample_limit() const { return default_sample_limit_; }
@@ -231,6 +252,12 @@ public:
 
 private:
   QHash<QString, QString> _themeTokens;
+
+  // P2-A: Registered setting change listeners.
+  std::vector<SettingChangeListener*> _setting_listeners;
+  void notify_setting_changed(const QString &group,
+                              const QString &key,
+                              const QVariant &value);
 
   uint64_t default_sample_limit_ = 1000000ULL;  // SR_MHZ(1)
 

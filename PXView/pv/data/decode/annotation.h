@@ -47,7 +47,9 @@ public:
     Annotation();
 	~Annotation();
 
-    // Move semantics (needed for deque storage)
+    // Copy and move semantics (needed for deque storage and get_annotation copy)
+    Annotation(const Annotation&) = default;
+    Annotation& operator=(const Annotation&) = default;
     Annotation(Annotation&&) = default;
     Annotation& operator=(Annotation&&) = default;
 

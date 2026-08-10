@@ -26,6 +26,7 @@
 #include <QLocale>
 #include <QDir> 
 #include <cassert>
+#include <algorithm>
 #include <QStandardPaths>
 #include "pv/base/log.h"
   
@@ -406,7 +407,30 @@ AppConfig::~AppConfig()
 {
 }
 
- AppConfig& AppConfig::Instance()
+// P2-A: Setting change listener registration / notification.
+void AppConfig::register_setting_listener(SettingChangeListener *listener)
+{
+    if (listener)
+        _setting_listeners.push_back(listener);
+}
+
+void AppConfig::unregister_setting_listener(SettingChangeListener *listener)
+{
+    auto it = std::find(_setting_listeners.begin(),
+                        _setting_listeners.end(), listener);
+    if (it != _setting_listeners.end())
+        _setting_listeners.erase(it);
+}
+
+void AppConfig::notify_setting_changed(const QString &group,
+                                       const QString &key,
+                                       const QVariant &value)
+{
+    for (auto *l : _setting_listeners)
+        l->on_setting_changed(group, key, value);
+}
+
+AppConfig& AppConfig::Instance()
  {
      static AppConfig *ins = nullptr;
      if (ins == nullptr){

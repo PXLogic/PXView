@@ -126,10 +126,22 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _viewport_change_timer = new QTimer(this);
   _viewport_change_timer->setSingleShot(true);
   _viewport_change_timer->setInterval(100);
-  connect(_viewport_change_timer, &QTimer::timeout, this,
-          [this]() { emit visible_range_changed(); });
+connect(_viewport_change_timer, &QTimer::timeout, this,
+[this]() { emit visible_range_changed(); });
 
-  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+// P1-A: Delayed view-update coalescing timer — merges bursts of
+// viewport_update() calls into a single repaint at most once per 16ms
+// (~60 FPS).  This prevents UI stutter when the decode thread fires
+// many new_decode_data signals in rapid succession.
+_delayed_view_update_timer = new QTimer(this);
+_delayed_view_update_timer->setSingleShot(true);
+_delayed_view_update_timer->setInterval(MaxViewAutoUpdateRateMs);
+connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
+  _delayed_view_update_pending = false;
+  viewport_update();
+});
+
+setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   setStyleSheet(
       QString("QScrollBar:vertical { margin-top: %1px; }").arg(RulerHeight));
 
@@ -579,6 +591,16 @@ void View::viewport_update() {
   _viewcenter->update();
   for (QWidget *viewport : _viewport_list)
     viewport->update();
+}
+
+void View::request_delayed_update() {
+  // P1-A: If the timer is already running, the pending request will be
+  // serviced when it fires — no need to restart it.  This naturally
+  // coalesces all calls within a 16ms window into a single repaint.
+  if (!_delayed_view_update_timer->isActive()) {
+    _delayed_view_update_pending = true;
+    _delayed_view_update_timer->start();
+  }
 }
 
 void View::splitterMoved(int pos, int index) {

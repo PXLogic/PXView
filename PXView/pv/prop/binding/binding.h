@@ -28,7 +28,8 @@
 #include <glib.h>
 
 #include <vector>
-#include <map> 
+#include <map>
+#include <functional>
 #include <QFont>
 #include <QString>
 
@@ -63,12 +64,23 @@ public:
         return _row_num;
     }
 
+    // P2-B: Aggregated config-changed callback.  When any property in
+    // this binding commits, the callback is invoked.  This mirrors
+    // PulseView's binding::Binding::config_changed() signal without
+    // requiring Binding to inherit from QObject.
+    using ConfigChangedCallback = std::function<void()>;
+    void set_config_changed_callback(ConfigChangedCallback cb) {
+        _config_changed_cb = std::move(cb);
+    }
+
 protected:
 	std::vector<Property*> _properties;
 
 	QWidget *_form;
 
-    int    _row_num;
+	int    _row_num;
+
+    ConfigChangedCallback _config_changed_cb;
 };
 
 } // binding

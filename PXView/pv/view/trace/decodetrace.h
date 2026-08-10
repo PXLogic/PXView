@@ -183,8 +183,10 @@ private slots:
 
   void on_decode_done();
 
+  void on_error_message_changed(const QString &msg);
+
 public:
-  std::atomic<bool> _delete_flag{false}; // destroy it when deocde task end
+// P0-3 fix: _delete_flag removed — lifetime managed by shared_ptr.
 
 private:
   data::DataSource *_data_source = nullptr;

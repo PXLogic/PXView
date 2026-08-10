@@ -67,6 +67,14 @@ void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit, QFon
             ? p->get_widget_live(layout->parentWidget())
             : p->get_widget_deferred(layout->parentWidget());
 
+        // P2-B: Connect each property's committed() signal to the
+        // aggregated config-changed callback so consumers only need
+        // to register one callback instead of per-property connections.
+        if (_config_changed_cb) {
+            QObject::connect(p, &Property::committed,
+                             [this]() { if (_config_changed_cb) _config_changed_cb(); });
+        }
+
         if (p->labeled_widget()){
             layout->addRow(widget);
             widget->setFont(font);

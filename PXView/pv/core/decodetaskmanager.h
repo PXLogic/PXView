@@ -56,6 +56,17 @@ public:
       return !_running_tasks.empty();
   }
 
+  /// P0-1 fix: Notify all running decoder stacks that new data is available.
+  /// Called by DataFeedParser::feed_in_logic after new logic data arrives,
+  /// so the decode thread's condition variable wait wakes immediately
+  /// instead of waiting for the 1-second timeout.
+  void notify_data_ready() {
+      std::lock_guard<std::mutex> lock(_running_tasks_mutex);
+      for (auto &task : _running_tasks) {
+          if (task) task->notify_data_ready();
+      }
+  }
+
   /// Used by remove_decoder to check if a specific stack is still being
   /// processed by a decode thread. Locks the mutex for a consistent read.
   bool is_task_running(std::shared_ptr<data::DecoderStack> stack);

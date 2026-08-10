@@ -242,15 +242,21 @@ public:
         return shared_from_this();
     }
 
-private:
-    void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
+private: 
+	void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
 	void execute_decode_stack();
 	static void annotation_callback(srd_proto_data *pdata, void *self);
     void do_decode_work();
+
+    // P0-A: Centralised error-message setter that emits error_message_changed
+    // via event_bus_post (thread-safe, shared_ptr-captured).  All assignments
+    // to _error_message MUST go through this helper.
+    void set_error_message(const QString &msg);
   
 signals:
 	void new_decode_data();
     void decode_done();
+    void error_message_changed(const QString &msg);
   
 private: 
 	// TS-3 fix: _stack owns decoders via unique_ptr — no manual delete needed.

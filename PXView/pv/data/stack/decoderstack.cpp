@@ -117,6 +117,20 @@ DecoderStack::~DecoderStack() {
   _class_rows.clear();
 }
 
+// P0-A: Centralised error-message setter.  All _error_message assignments
+// MUST go through this helper so that the error_message_changed signal is
+// reliably emitted (via event_bus_post for thread safety).
+void DecoderStack::set_error_message(const QString &msg) {
+  {
+    std::lock_guard<std::mutex> lk(_state_mutex);
+    _error_message = msg;
+  }
+  auto self = shared_from_this();
+  _session->event_bus_post([self, msg]() {
+    emit self->error_message_changed(msg);
+  });
+}
+
 void DecoderStack::add_sub_decoder(std::unique_ptr<decode::Decoder> decoder) {
   if (!decoder) {
     pxv_warn("%s", "DecoderStack::add_sub_decoder: decoder is nullptr");
@@ -434,11 +448,8 @@ void DecoderStack::clear() { init(); }
 void DecoderStack::init() {
   _sample_count.store(0);
   _samples_decoded = 0;
-  {
-    std::lock_guard<std::mutex> lk(_state_mutex);
-    _error_message = QString();
-  }
-  _no_memory = false;
+set_error_message(QString());
+_no_memory = false;
   _snapshot.reset();
   _result_count.store(0);
   _ann_dropped_stop.store(0);
@@ -469,11 +480,8 @@ void DecoderStack::stop_decode_work() {
 void DecoderStack::begin_decode_work() {
   if (_decode_state.load(std::memory_order_acquire) != Stopped)
     return;
-  {
-    std::lock_guard<std::mutex> lk(_state_mutex);
-    _error_message = "";
-  }
-  _decode_state.store(Running, std::memory_order_release);
+set_error_message("");
+_decode_state.store(Running, std::memory_order_release);
   do_decode_work();
   _decode_state.store(Stopped, std::memory_order_release);
 }
@@ -515,13 +523,9 @@ void DecoderStack::do_decode_work() {
 
   pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
 
-  if (!check_required_probes()) {
-    {
-      std::lock_guard<std::mutex> lk(_state_mutex);
-      _error_message =
-          QString::fromStdString(s_kRequiredChannelsMissing);
-    }
-    pxv_err("ERROR:%s", error_message().toStdString().c_str());
+if (!check_required_probes()) {
+set_error_message(QString::fromStdString(s_kRequiredChannelsMissing));
+pxv_err("ERROR:%s", error_message().toStdString().c_str());
     for (auto &up : _stack) {
       auto dec = up.get();
       if (!dec->have_required_probes()) {
@@ -570,13 +574,9 @@ void DecoderStack::do_decode_work() {
     }
   }
 
-  if (_snapshot == nullptr) {
-    {
-      std::lock_guard<std::mutex> lk(_state_mutex);
-      _error_message =
-          QString::fromStdString(s_kRequiredChannelsMissing);
-    }
-    pxv_err("ERROR:%s", error_message().toStdString().c_str());
+if (_snapshot == nullptr) {
+set_error_message(QString::fromStdString(s_kRequiredChannelsMissing));
+pxv_err("ERROR:%s", error_message().toStdString().c_str());
     pxv_err("ERROR:Failed to find matching LogicSnapshot for any decoder probe");
     return;
   }
@@ -736,13 +736,9 @@ void DecoderStack::decode_data(const uint64_t decode_start,
               lbp_array[j] = lbp;
             }
           }
-        } else {
-          {
-            std::lock_guard<std::mutex> lk(_state_mutex);
-            _error_message =
-                QString::fromStdString(s_kChannelsNotEnabled);
-          }
-          return;
+} else {
+set_error_message(QString::fromStdString(s_kChannelsNotEnabled));
+return;
         }
       }
     }
@@ -757,12 +753,9 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     if (srd_session_send(session, i, chunk_end, chunk.data(),
                          chunk_const.data(), chunk_end - i, &error) != SRD_OK) {
 
-      if (error) {
-        {
-          std::lock_guard<std::mutex> lk(_state_mutex);
-          _error_message = QString::fromLocal8Bit(error);
-        }
-        pxv_err("Failed to call srd_session_send:%s", error);
+if (error) {
+set_error_message(QString::fromLocal8Bit(error));
+pxv_err("Failed to call srd_session_send:%s", error);
         g_free(error);
         error = nullptr;
       }
@@ -803,12 +796,9 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   if (!bError && bEndTime) {
     srd_session_end(session, &error);
 
-    if (error != nullptr) {
-      {
-        std::lock_guard<std::mutex> lk(_state_mutex);
-        _error_message = QString::fromLocal8Bit(error);
-      }
-      pxv_err("Failed to call srd_session_end:%s", error);
+if (error != nullptr) {
+set_error_message(QString::fromLocal8Bit(error));
+pxv_err("Failed to call srd_session_end:%s", error);
     }
   }
 
@@ -845,13 +835,9 @@ void DecoderStack::execute_decode_stack() {
     auto dec = up.get();
     srd_decoder_inst *const di = dec->create_decoder_inst(session);
 
-    if (!di) {
-      {
-        std::lock_guard<std::mutex> lk(_state_mutex);
-        _error_message =
-            QString::fromStdString(s_kCreateDecoderInstanceFailed);
-      }
-      srd_session_destroy(session);
+if (!di) {
+set_error_message(QString::fromStdString(s_kCreateDecoderInstanceFailed));
+srd_session_destroy(session);
       return;
     }
 
@@ -893,12 +879,9 @@ void DecoderStack::execute_decode_stack() {
 
   if (srd_ret == SRD_OK) {
     decode_data(decode_start, decode_end, session);
-  } else if (error != nullptr) {
-    {
-      std::lock_guard<std::mutex> lk(_state_mutex);
-      _error_message = QString::fromLocal8Bit(error);
-    }
-  }
+} else if (error != nullptr) {
+set_error_message(QString::fromLocal8Bit(error));
+}
 
   if (error != nullptr) {
     g_free(error);
