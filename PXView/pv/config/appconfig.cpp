@@ -29,6 +29,10 @@
 #include <algorithm>
 #include <QStandardPaths>
 #include "pv/base/log.h"
+
+// P2-A: Bring setting key constants into scope.
+// 'using namespace pv::config' makes keys::App::foo resolve to pv::config::keys::App::foo.
+using namespace pv::config;
   
 #define MAX_PROTOCOL_FORMAT_LIST 15
 
@@ -78,6 +82,7 @@ static void getFiled(const char *key, QSettings &st, QString &f, const char *dv)
 static void setFiled(const char *key, QSettings &st, QString f)
 {
     st.setValue(key, f);
+    AppConfig::Instance().notify_setting_changed(st.group(), key, f);
 }
 
 static void getFiled(const char *key, QSettings &st, int &f, int dv)
@@ -88,6 +93,7 @@ static void getFiled(const char *key, QSettings &st, int &f, int dv)
 static void setFiled(const char *key, QSettings &st, int f)
 {
     st.setValue(key, f);
+    AppConfig::Instance().notify_setting_changed(st.group(), key, f);
 }
 
 static void getFiled(const char *key, QSettings &st, bool &f, bool dv)
@@ -97,6 +103,7 @@ static void getFiled(const char *key, QSettings &st, bool &f, bool dv)
 
 static void setFiled(const char *key, QSettings &st, bool f){
     st.setValue(key, f);
+    AppConfig::Instance().notify_setting_changed(st.group(), key, f);
 }
 
 static void getFiled(const char *key, QSettings &st, float &f, float dv)
@@ -107,31 +114,32 @@ static void getFiled(const char *key, QSettings &st, float &f, float dv)
 static void setFiled(const char *key, QSettings &st, float f)
 {
     st.setValue(key, f);
+    AppConfig::Instance().notify_setting_changed(st.group(), key, f);
 }
 
 ///------ app
 static void _loadApp(AppOptions &o, QSettings &st)
 {
-    st.beginGroup("Application"); 
-    getFiled("quickScroll", st, o.quickScroll, true);
-    getFiled("warnofMultiTrig", st, o.warnofMultiTrig, true);
-    getFiled("originalData", st, o.originalData, false);
-    getFiled("ableSaveLog", st, o.ableSaveLog, false);
-    getFiled("appendLogMode", st, o.appendLogMode, false);
-    getFiled("logLevel", st, o.logLevel, 3);
-    getFiled("transDecoderDlg", st, o.transDecoderDlg, true);
-    getFiled("trigPosDisplayInMid", st, o.trigPosDisplayInMid, true);
-    getFiled("displayProfileInBar", st, o.displayProfileInBar, false);
-    getFiled("swapBackBufferAlways", st, o.swapBackBufferAlways, false);
-    getFiled("fontSize", st, o.fontSize, 9.0);
-    getFiled("autoScrollLatestData", st, o.autoScrollLatestData, true);
-    getFiled("promptSaveOnExit", st, o.promptSaveOnExit, true);
-    getFiled("version", st, o.version, 1);
+    st.beginGroup(keys::Group::Application.toUtf8().constData()); 
+    getFiled(keys::App::quickScroll.toUtf8().constData(), st, o.quickScroll, true);
+    getFiled(keys::App::warnofMultiTrig.toUtf8().constData(), st, o.warnofMultiTrig, true);
+    getFiled(keys::App::originalData.toUtf8().constData(), st, o.originalData, false);
+    getFiled(keys::App::ableSaveLog.toUtf8().constData(), st, o.ableSaveLog, false);
+    getFiled(keys::App::appendLogMode.toUtf8().constData(), st, o.appendLogMode, false);
+    getFiled(keys::App::logLevel.toUtf8().constData(), st, o.logLevel, 3);
+    getFiled(keys::App::transDecoderDlg.toUtf8().constData(), st, o.transDecoderDlg, true);
+    getFiled(keys::App::trigPosDisplayInMid.toUtf8().constData(), st, o.trigPosDisplayInMid, true);
+    getFiled(keys::App::displayProfileInBar.toUtf8().constData(), st, o.displayProfileInBar, false);
+    getFiled(keys::App::swapBackBufferAlways.toUtf8().constData(), st, o.swapBackBufferAlways, false);
+    getFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize, 9.0);
+    getFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData, true);
+    getFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit, true);
+    getFiled(keys::App::version.toUtf8().constData(), st, o.version, 1);
 
     o.warnofMultiTrig = true;
 
     QString fmt;
-    getFiled("protocalFormats", st, fmt, "");
+    getFiled(keys::App::protocalFormats.toUtf8().constData(), st, fmt, "");
     if (fmt != ""){
         StringToFormatArray(fmt, o.m_protocolFormats);
     }
@@ -150,24 +158,24 @@ static void _loadApp(AppOptions &o, QSettings &st)
 
 static void _saveApp(AppOptions &o, QSettings &st)
 {
-    st.beginGroup("Application");
-    setFiled("quickScroll", st, o.quickScroll);
-    setFiled("warnofMultiTrig", st, o.warnofMultiTrig);
-    setFiled("originalData", st, o.originalData);
-    setFiled("ableSaveLog", st, o.ableSaveLog);
-    setFiled("appendLogMode", st, o.appendLogMode);
-    setFiled("logLevel", st, o.logLevel);
-    setFiled("transDecoderDlg", st, o.transDecoderDlg);
-    setFiled("trigPosDisplayInMid", st, o.trigPosDisplayInMid);
-    setFiled("displayProfileInBar", st, o.displayProfileInBar);
-    setFiled("swapBackBufferAlways", st, o.swapBackBufferAlways);
-    setFiled("fontSize", st, o.fontSize);
-    setFiled("autoScrollLatestData", st, o.autoScrollLatestData);
-    setFiled("promptSaveOnExit", st, o.promptSaveOnExit);
-    setFiled("version", st, APP_CONFIG_VERSION);
+    st.beginGroup(keys::Group::Application.toUtf8().constData());
+    setFiled(keys::App::quickScroll.toUtf8().constData(), st, o.quickScroll);
+    setFiled(keys::App::warnofMultiTrig.toUtf8().constData(), st, o.warnofMultiTrig);
+    setFiled(keys::App::originalData.toUtf8().constData(), st, o.originalData);
+    setFiled(keys::App::ableSaveLog.toUtf8().constData(), st, o.ableSaveLog);
+    setFiled(keys::App::appendLogMode.toUtf8().constData(), st, o.appendLogMode);
+    setFiled(keys::App::logLevel.toUtf8().constData(), st, o.logLevel);
+    setFiled(keys::App::transDecoderDlg.toUtf8().constData(), st, o.transDecoderDlg);
+    setFiled(keys::App::trigPosDisplayInMid.toUtf8().constData(), st, o.trigPosDisplayInMid);
+    setFiled(keys::App::displayProfileInBar.toUtf8().constData(), st, o.displayProfileInBar);
+    setFiled(keys::App::swapBackBufferAlways.toUtf8().constData(), st, o.swapBackBufferAlways);
+    setFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize);
+    setFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData);
+    setFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit);
+    setFiled(keys::App::version.toUtf8().constData(), st, APP_CONFIG_VERSION);
 
     QString fmt =  FormatArrayToString(o.m_protocolFormats);
-    setFiled("protocalFormats", st, fmt);
+    setFiled(keys::App::protocalFormats.toUtf8().constData(), st, fmt);
     st.endGroup();  
 }
 
@@ -176,48 +184,48 @@ static void _saveApp(AppOptions &o, QSettings &st)
 static void _loadDockOptions(DockOptions &o, QSettings &st, const char *group)
 {
     st.beginGroup(group);
-    getFiled("decodeDoc", st, o.decodeDock, false);
-    getFiled("triggerDoc", st, o.triggerDock, false);
-    getFiled("measureDoc", st, o.measureDock, false);
-    getFiled("searchDoc", st, o.searchDock, false);
-    getFiled("deviceOptionsDoc", st, o.deviceOptionsDock, false);
-    getFiled("logDoc", st, o.logDock, false);
+    getFiled(keys::Dock::decodeDock.toUtf8().constData(), st, o.decodeDock, false);
+    getFiled(keys::Dock::triggerDock.toUtf8().constData(), st, o.triggerDock, false);
+    getFiled(keys::Dock::measureDock.toUtf8().constData(), st, o.measureDock, false);
+    getFiled(keys::Dock::searchDock.toUtf8().constData(), st, o.searchDock, false);
+    getFiled(keys::Dock::deviceOptionsDock.toUtf8().constData(), st, o.deviceOptionsDock, false);
+    getFiled(keys::Dock::logDock.toUtf8().constData(), st, o.logDock, false);
     st.endGroup();
 }
 
 static void _saveDockOptions(DockOptions &o, QSettings &st, const char *group)
 {
     st.beginGroup(group);
-    setFiled("decodeDoc", st, o.decodeDock);
-    setFiled("triggerDoc", st, o.triggerDock);
-    setFiled("measureDoc", st, o.measureDock);
-    setFiled("searchDoc", st, o.searchDock);
-    setFiled("deviceOptionsDoc", st, o.deviceOptionsDock);
-    setFiled("logDoc", st, o.logDock);
+    setFiled(keys::Dock::decodeDock.toUtf8().constData(), st, o.decodeDock);
+    setFiled(keys::Dock::triggerDock.toUtf8().constData(), st, o.triggerDock);
+    setFiled(keys::Dock::measureDock.toUtf8().constData(), st, o.measureDock);
+    setFiled(keys::Dock::searchDock.toUtf8().constData(), st, o.searchDock);
+    setFiled(keys::Dock::deviceOptionsDock.toUtf8().constData(), st, o.deviceOptionsDock);
+    setFiled(keys::Dock::logDock.toUtf8().constData(), st, o.logDock);
     st.endGroup();
 }
 
 static void _loadFrame(FrameOptions &o, QSettings &st)
 {
-    st.beginGroup("MainFrame"); 
-    getFiled("style", st, o.style, THEME_STYLE_DARK);
-    getFiled("language", st, o.language, -1);
-    getFiled("isMax", st, o.isMax, false);  
-    getFiled("left", st, o.left, 0);
-    getFiled("top", st, o.top, 0);
-    getFiled("right", st, o.right, 0);
-    getFiled("bottom", st, o.bottom, 0);
-    getFiled("x", st, o.x, NO_POINT_VALUE);
-    getFiled("y", st, o.y, NO_POINT_VALUE);
-    getFiled("ox", st, o.ox, NO_POINT_VALUE);
-    getFiled("oy", st, o.oy, NO_POINT_VALUE);
-    getFiled("displayName", st, o.displayName, "");
+    st.beginGroup(keys::Group::MainFrame.toUtf8().constData()); 
+    getFiled(keys::Frame::style.toUtf8().constData(), st, o.style, THEME_STYLE_DARK);
+    getFiled(keys::Frame::language.toUtf8().constData(), st, o.language, -1);
+    getFiled(keys::Frame::isMax.toUtf8().constData(), st, o.isMax, false);  
+    getFiled(keys::Frame::left.toUtf8().constData(), st, o.left, 0);
+    getFiled(keys::Frame::top.toUtf8().constData(), st, o.top, 0);
+    getFiled(keys::Frame::right.toUtf8().constData(), st, o.right, 0);
+    getFiled(keys::Frame::bottom.toUtf8().constData(), st, o.bottom, 0);
+    getFiled(keys::Frame::x.toUtf8().constData(), st, o.x, NO_POINT_VALUE);
+    getFiled(keys::Frame::y.toUtf8().constData(), st, o.y, NO_POINT_VALUE);
+    getFiled(keys::Frame::ox.toUtf8().constData(), st, o.ox, NO_POINT_VALUE);
+    getFiled(keys::Frame::oy.toUtf8().constData(), st, o.oy, NO_POINT_VALUE);
+    getFiled(keys::Frame::displayName.toUtf8().constData(), st, o.displayName, "");
 
     _loadDockOptions(o._logicDock, st, "LOGIC_DOCK");
     _loadDockOptions(o._analogDock, st, "ANALOG_DOCK");
     _loadDockOptions(o._dsoDock, st, "DSO_DOCK");
 
-    o.windowState = st.value("windowState", QByteArray()).toByteArray();
+    o.windowState = st.value(keys::Frame::windowState.toUtf8().constData(), QByteArray()).toByteArray();
     st.endGroup();
 
     if (o.language == -1 || (o.language != LAN_CN && o.language != LAN_EN)){
@@ -233,21 +241,21 @@ static void _loadFrame(FrameOptions &o, QSettings &st)
 
 static void _saveFrame(FrameOptions &o, QSettings &st)
 {
-    st.beginGroup("MainFrame");
-    setFiled("style", st, o.style);
-    setFiled("language", st, o.language);
-    setFiled("isMax", st, o.isMax);  
-    setFiled("left", st, o.left);
-    setFiled("top", st, o.top);
-    setFiled("right", st, o.right);
-    setFiled("bottom", st, o.bottom);
-    setFiled("x", st, o.x);
-    setFiled("y", st, o.y);
-    setFiled("ox", st, o.ox);
-    setFiled("oy", st, o.oy);
-    setFiled("displayName", st, o.displayName);
+    st.beginGroup(keys::Group::MainFrame.toUtf8().constData());
+    setFiled(keys::Frame::style.toUtf8().constData(), st, o.style);
+    setFiled(keys::Frame::language.toUtf8().constData(), st, o.language);
+    setFiled(keys::Frame::isMax.toUtf8().constData(), st, o.isMax);  
+    setFiled(keys::Frame::left.toUtf8().constData(), st, o.left);
+    setFiled(keys::Frame::top.toUtf8().constData(), st, o.top);
+    setFiled(keys::Frame::right.toUtf8().constData(), st, o.right);
+    setFiled(keys::Frame::bottom.toUtf8().constData(), st, o.bottom);
+    setFiled(keys::Frame::x.toUtf8().constData(), st, o.x);
+    setFiled(keys::Frame::y.toUtf8().constData(), st, o.y);
+    setFiled(keys::Frame::ox.toUtf8().constData(), st, o.ox);
+    setFiled(keys::Frame::oy.toUtf8().constData(), st, o.oy);
+    setFiled(keys::Frame::displayName.toUtf8().constData(), st, o.displayName);
 
-    st.setValue("windowState", o.windowState); 
+    st.setValue(keys::Frame::windowState.toUtf8().constData(), o.windowState); 
 
     _saveDockOptions(o._logicDock, st, "LOGIC_DOCK");
     _saveDockOptions(o._analogDock, st, "ANALOG_DOCK");
@@ -259,29 +267,29 @@ static void _saveFrame(FrameOptions &o, QSettings &st)
 //------history
 static void _loadHistory(UserHistory &o, QSettings &st)
 {
-    st.beginGroup("UserHistory");
-    getFiled("exportDir", st, o.exportDir, ""); 
-    getFiled("saveDir", st, o.saveDir, ""); 
-    getFiled("showDocuments", st, o.showDocuments, true);
-    getFiled("screenShotPath", st, o.screenShotPath, ""); 
-    getFiled("sessionDir", st, o.sessionDir, ""); 
-    getFiled("openDir", st, o.openDir, ""); 
-    getFiled("protocolExportPath", st, o.protocolExportPath, ""); 
-    getFiled("exportFormat", st, o.exportFormat, ""); 
+    st.beginGroup(keys::Group::History.toUtf8().constData());
+    getFiled(keys::History::exportDir.toUtf8().constData(), st, o.exportDir, ""); 
+    getFiled(keys::History::saveDir.toUtf8().constData(), st, o.saveDir, ""); 
+    getFiled(keys::History::showDocuments.toUtf8().constData(), st, o.showDocuments, true);
+    getFiled(keys::History::screenShotPath.toUtf8().constData(), st, o.screenShotPath, ""); 
+    getFiled(keys::History::sessionDir.toUtf8().constData(), st, o.sessionDir, ""); 
+    getFiled(keys::History::openDir.toUtf8().constData(), st, o.openDir, ""); 
+    getFiled(keys::History::protocolExportPath.toUtf8().constData(), st, o.protocolExportPath, ""); 
+    getFiled(keys::History::exportFormat.toUtf8().constData(), st, o.exportFormat, ""); 
     st.endGroup();
 }
  
 static void _saveHistory(UserHistory &o, QSettings &st)
 {
-    st.beginGroup("UserHistory");
-    setFiled("exportDir", st, o.exportDir); 
-    setFiled("saveDir", st, o.saveDir); 
-    setFiled("showDocuments", st, o.showDocuments); 
-    setFiled("screenShotPath", st, o.screenShotPath); 
-    setFiled("sessionDir", st, o.sessionDir); 
-    setFiled("openDir", st, o.openDir); 
-    setFiled("protocolExportPath", st, o.protocolExportPath);
-    setFiled("exportFormat", st, o.exportFormat); 
+    st.beginGroup(keys::Group::History.toUtf8().constData());
+    setFiled(keys::History::exportDir.toUtf8().constData(), st, o.exportDir); 
+    setFiled(keys::History::saveDir.toUtf8().constData(), st, o.saveDir); 
+    setFiled(keys::History::showDocuments.toUtf8().constData(), st, o.showDocuments); 
+    setFiled(keys::History::screenShotPath.toUtf8().constData(), st, o.screenShotPath); 
+    setFiled(keys::History::sessionDir.toUtf8().constData(), st, o.sessionDir); 
+    setFiled(keys::History::openDir.toUtf8().constData(), st, o.openDir); 
+    setFiled(keys::History::protocolExportPath.toUtf8().constData(), st, o.protocolExportPath);
+    setFiled(keys::History::exportFormat.toUtf8().constData(), st, o.exportFormat); 
     st.endGroup();
 }
 
@@ -330,14 +338,14 @@ static void _saveFont(FontOptions &o, QSettings &st)
 
 static void _loadShortcuts(ShortcutOptions &o, QSettings &st)
 {
-    st.beginGroup("Shortcuts");
-    int count = st.beginReadArray("item");
+    st.beginGroup(keys::Group::Shortcuts.toUtf8().constData());
+    int count = st.beginReadArray(keys::Shortcuts::items.toUtf8().constData());
     o.items.clear();
     for (int i = 0; i < count; i++) {
         st.setArrayIndex(i);
         ShortcutItem item;
-        item.actionId = st.value("actionId", 0).toInt();
-        item.keySequence = st.value("keySequence", "").toString();
+        item.actionId = st.value(keys::Shortcuts::actionId.toUtf8().constData(), 0).toInt();
+        item.keySequence = st.value(keys::Shortcuts::keySequence.toUtf8().constData(), "").toString();
         o.items.append(item);
     }
     st.endArray();
@@ -346,12 +354,12 @@ static void _loadShortcuts(ShortcutOptions &o, QSettings &st)
 
 static void _saveShortcuts(ShortcutOptions &o, QSettings &st)
 {
-    st.beginGroup("Shortcuts");
-    st.beginWriteArray("item", o.items.size());
+    st.beginGroup(keys::Group::Shortcuts.toUtf8().constData());
+    st.beginWriteArray(keys::Shortcuts::items.toUtf8().constData(), o.items.size());
     for (int i = 0; i < o.items.size(); i++) {
         st.setArrayIndex(i);
-        st.setValue("actionId", o.items[i].actionId);
-        st.setValue("keySequence", o.items[i].keySequence);
+        st.setValue(keys::Shortcuts::actionId.toUtf8().constData(), o.items[i].actionId);
+        st.setValue(keys::Shortcuts::keySequence.toUtf8().constData(), o.items[i].keySequence);
     }
     st.endArray();
     st.endGroup();
@@ -359,14 +367,14 @@ static void _saveShortcuts(ShortcutOptions &o, QSettings &st)
 
 static void _loadStyle(StyleOptions &o, QSettings &st)
 {
-    st.beginGroup("CustomStyle");
-    int count = st.beginReadArray("token");
+    st.beginGroup(keys::Group::Style.toUtf8().constData());
+    int count = st.beginReadArray(keys::Style::items.toUtf8().constData());
     o.items.clear();
     for (int i = 0; i < count; i++) {
         st.setArrayIndex(i);
         StyleTokenItem item;
-        item.tokenName = st.value("name", "").toString();
-        item.value = st.value("value", "").toString();
+        item.tokenName = st.value(keys::Style::tokenName.toUtf8().constData(), "").toString();
+        item.value = st.value(keys::Style::value.toUtf8().constData(), "").toString();
         o.items.append(item);
     }
     st.endArray();
@@ -375,12 +383,12 @@ static void _loadStyle(StyleOptions &o, QSettings &st)
 
 static void _saveStyle(StyleOptions &o, QSettings &st)
 {
-    st.beginGroup("CustomStyle");
-    st.beginWriteArray("token", o.items.size());
+    st.beginGroup(keys::Group::Style.toUtf8().constData());
+    st.beginWriteArray(keys::Style::items.toUtf8().constData(), o.items.size());
     for (int i = 0; i < o.items.size(); i++) {
         st.setArrayIndex(i);
-        st.setValue("name", o.items[i].tokenName);
-        st.setValue("value", o.items[i].value);
+        st.setValue(keys::Style::tokenName.toUtf8().constData(), o.items[i].tokenName);
+        st.setValue(keys::Style::value.toUtf8().constData(), o.items[i].value);
     }
     st.endArray();
     st.endGroup();
@@ -448,17 +456,17 @@ void AppConfig::LoadAll()
     _loadShortcuts(shortcutOptions, st);
     _loadStyle(styleOptions, st);
 
-    st.beginGroup("Device");
+    st.beginGroup(keys::Group::Device.toUtf8().constData());
     default_sample_limit_ = st.value("defaultSampleLimit", 1000000ULL).toULongLong();
-    deviceOptions.streamMemBuff = st.value("streamMemBuff", 16.0).toDouble();
-    deviceOptions.streamBuff = st.value("streamBuff", 16.0).toDouble();
-    deviceOptions.diskCacheEnable = st.value("diskCacheEnable", false).toBool();
-    deviceOptions.diskCachePath = st.value("diskCachePath", "").toString();
-    deviceOptions.lastDeviceDriver = st.value("lastDeviceDriver", "").toString();
-    deviceOptions.lastDeviceConnId = st.value("lastDeviceConnId", "").toString();
-    deviceOptions.glitchAutoApply = st.value("glitchAutoApply", false).toBool();
-    deviceOptions.glitchDefaultThreshold = st.value("glitchDefaultThreshold", 3).toInt();
-    deviceOptions.glitchShowOverlay = st.value("glitchShowOverlay", true).toBool();
+    deviceOptions.streamMemBuff = st.value(keys::Device::streamMemBuff.toUtf8().constData(), 16.0).toDouble();
+    deviceOptions.streamBuff = st.value(keys::Device::streamBuff.toUtf8().constData(), 16.0).toDouble();
+    deviceOptions.diskCacheEnable = st.value(keys::Device::diskCacheEnable.toUtf8().constData(), false).toBool();
+    deviceOptions.diskCachePath = st.value(keys::Device::diskCachePath.toUtf8().constData(), "").toString();
+    deviceOptions.lastDeviceDriver = st.value(keys::Device::lastDeviceDriver.toUtf8().constData(), "").toString();
+    deviceOptions.lastDeviceConnId = st.value(keys::Device::lastDeviceConnId.toUtf8().constData(), "").toString();
+    deviceOptions.glitchAutoApply = st.value(keys::Device::glitchAutoApply.toUtf8().constData(), false).toBool();
+    deviceOptions.glitchDefaultThreshold = st.value(keys::Device::glitchDefaultThreshold.toUtf8().constData(), 3).toInt();
+    deviceOptions.glitchShowOverlay = st.value(keys::Device::glitchShowOverlay.toUtf8().constData(), true).toBool();
     st.endGroup();
 
     //pxv_dbg("Config file path:\"%s\"", st.fileName().toUtf8().data());
@@ -479,7 +487,7 @@ void AppConfig::doSaveApp()
     QSettings st(QApplication::organizationName(), QApplication::applicationName());
     _saveApp(appOptions, st);
 
-    st.beginGroup("Device");
+    st.beginGroup(keys::Group::Device.toUtf8().constData());
     st.setValue("defaultSampleLimit", (qulonglong)default_sample_limit_);
     st.endGroup();
 }
@@ -497,16 +505,16 @@ void AppConfig::SaveDevice()
 void AppConfig::doSaveDevice()
 {
     QSettings st(QApplication::organizationName(), QApplication::applicationName());
-    st.beginGroup("Device");
-    st.setValue("streamMemBuff", deviceOptions.streamMemBuff);
-    st.setValue("streamBuff", deviceOptions.streamBuff);
-    st.setValue("diskCacheEnable", deviceOptions.diskCacheEnable);
-    st.setValue("diskCachePath", deviceOptions.diskCachePath);
-    st.setValue("lastDeviceDriver", deviceOptions.lastDeviceDriver);
-    st.setValue("lastDeviceConnId", deviceOptions.lastDeviceConnId);
-    st.setValue("glitchAutoApply", deviceOptions.glitchAutoApply);
-    st.setValue("glitchDefaultThreshold", deviceOptions.glitchDefaultThreshold);
-    st.setValue("glitchShowOverlay", deviceOptions.glitchShowOverlay);
+    st.beginGroup(keys::Group::Device.toUtf8().constData());
+    st.setValue(keys::Device::streamMemBuff.toUtf8().constData(), deviceOptions.streamMemBuff);
+    st.setValue(keys::Device::streamBuff.toUtf8().constData(), deviceOptions.streamBuff);
+    st.setValue(keys::Device::diskCacheEnable.toUtf8().constData(), deviceOptions.diskCacheEnable);
+    st.setValue(keys::Device::diskCachePath.toUtf8().constData(), deviceOptions.diskCachePath);
+    st.setValue(keys::Device::lastDeviceDriver.toUtf8().constData(), deviceOptions.lastDeviceDriver);
+    st.setValue(keys::Device::lastDeviceConnId.toUtf8().constData(), deviceOptions.lastDeviceConnId);
+    st.setValue(keys::Device::glitchAutoApply.toUtf8().constData(), deviceOptions.glitchAutoApply);
+    st.setValue(keys::Device::glitchDefaultThreshold.toUtf8().constData(), deviceOptions.glitchDefaultThreshold);
+    st.setValue(keys::Device::glitchShowOverlay.toUtf8().constData(), deviceOptions.glitchShowOverlay);
     st.endGroup();
 }
 
@@ -572,6 +580,10 @@ void AppConfig::doSaveStyle()
 {
     QSettings st(QApplication::organizationName(), QApplication::applicationName());
     _saveStyle(styleOptions, st);
+
+    // P2-A: Notify listeners that settings were reloaded from disk.
+    // Pass empty group/key to signal a bulk reload.
+    notify_setting_changed(QString(), QString(), QVariant());
 }
 
 void AppConfig::flushPendingSaves()

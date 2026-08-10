@@ -627,7 +627,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   if (notify_cnt == 0) notify_cnt = 1;
   srd_decoder_inst *logic_di = nullptr;
 
-  for (GSList *d = session->di_list; d; d = d->next) {
+  for (const GSList *d = srd_session_inst_list_get(session); d; d = d->next) {
     srd_decoder_inst *di = (srd_decoder_inst *)d->data;
     srd_decoder *decoder = di->decoder;
     const bool have_probes = (decoder->channels || decoder->opt_channels) != 0;
@@ -645,7 +645,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
   uint64_t entry_cnt = 0;
   uint64_t i = decode_start;
-  char *error = nullptr;
   bool bError = false;
   bool bEndTime = false;
 
@@ -655,6 +654,13 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
   std::vector<const uint8_t *> chunk;
   std::vector<uint8_t> chunk_const;
+
+  // P1-B: Iterator protocol support — one iterator per channel, reused
+  // across chunks. This avoids re-computing root/lbp/byte indices on
+  // every get_samples() call; instead, continue_sample_iteration()
+  // advances incrementally.
+  std::vector<LogicSnapshot::SegmentDataIterator*> iterators;
+  std::vector<bool> iter_valid;
 
   bool bCheckEnd = false;
   uint64_t end_index = decode_end;
@@ -715,6 +721,20 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
     uint64_t chunk_end = end_index;
 
+    // P1-B: Initialize iterators on first iteration (or after wait).
+    if (iterators.empty()) {
+      for (int j = 0; j < logic_di->dec_num_channels; j++) {
+        int sig_index = logic_di->dec_channelmap[j];
+        if (sig_index != -1 && _snapshot->has_data(sig_index)) {
+          iterators.push_back(_snapshot->begin_sample_iteration(i, sig_index));
+          iter_valid.push_back(true);
+        } else {
+          iterators.push_back(nullptr);
+          iter_valid.push_back(false);
+        }
+      }
+    }
+
     for (int j = 0; j < logic_di->dec_num_channels; j++) {
       int sig_index = logic_di->dec_channelmap[j];
       void *lbp = nullptr;
@@ -724,8 +744,15 @@ void DecoderStack::decode_data(const uint64_t decode_start,
         chunk_const.push_back(0);
       } else {
         if (_snapshot->has_data(sig_index)) {
-          const uint8_t *data_ptr =
-              _snapshot->get_samples(i, chunk_end, sig_index, &lbp);
+          // P1-B: Use iterator protocol instead of get_samples().
+          // The iterator holds a raw pointer into the leaf block and
+          // advances incrementally, avoiding repeated index computation.
+          auto *it = iterators[j];
+          const uint8_t *data_ptr = nullptr;
+          if (it && !it->exhausted) {
+            data_ptr = LogicSnapshot::get_iterator_value(it);
+            lbp = (void*)data_ptr;  // lbp tracks current leaf block pointer
+          }
           chunk.push_back(data_ptr);
           chunk_const.push_back(_snapshot->get_sample(i, sig_index));
 
@@ -738,6 +765,10 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           }
 } else {
 set_error_message(QString::fromStdString(s_kChannelsNotEnabled));
+// P1-B: Clean up iterators before early return.
+for (auto *it : iterators) {
+  if (it) _snapshot->end_sample_iteration(it);
+}
 return;
         }
       }
@@ -751,14 +782,14 @@ return;
     bEndTime = (chunk_end == end_index);
 
     if (srd_session_send(session, i, chunk_end, chunk.data(),
-                         chunk_const.data(), chunk_end - i, &error) != SRD_OK) {
+                         chunk_const.data(), chunk_end - i, nullptr) != SRD_OK) {
 
-if (error) {
-set_error_message(QString::fromLocal8Bit(error));
-pxv_err("Failed to call srd_session_send:%s", error);
-        g_free(error);
-        error = nullptr;
+      const char *err_msg = srd_get_last_error();
+      if (err_msg && *err_msg) {
+        set_error_message(QString::fromLocal8Bit(err_msg));
+        pxv_err("Failed to call srd_session_send:%s", err_msg);
       }
+      srd_clear_last_error();
 
       bError = true;
       break;
@@ -766,6 +797,20 @@ pxv_err("Failed to call srd_session_send:%s", error);
 
     sended_len += chunk_end - i;
     _progress.store((int)(sended_len * 100 / end_index));
+
+    // P1-B: Advance iterators to the new position.
+    // continue_sample_iteration() moves the iterator forward incrementally,
+    // reloading the chunk_data pointer only when crossing a leaf-block
+    // boundary. This is much cheaper than calling get_samples() which
+    // re-computes all indices from scratch.
+    {
+      uint64_t advance = chunk_end - i;
+      for (int j = 0; j < (int)iterators.size(); j++) {
+        if (iterators[j] && advance > 0) {
+          _snapshot->continue_sample_iteration(iterators[j], advance);
+        }
+      }
+    }
 
     i = chunk_end;
 
@@ -786,6 +831,13 @@ pxv_err("Failed to call srd_session_send:%s", error);
     entry_cnt++;
   }
 
+  // P1-B: Clean up iterators after the decode loop.
+  for (auto *it : iterators) {
+    if (it)
+      _snapshot->end_sample_iteration(it);
+  }
+  iterators.clear();
+
   _progress.store(100);
   _is_decoding.store(false);
 
@@ -794,16 +846,15 @@ pxv_err("Failed to call srd_session_send:%s", error);
   _session->event_bus_post([self]() { self->new_decode_data(); });
 
   if (!bError && bEndTime) {
-    srd_session_end(session, &error);
-
-if (error != nullptr) {
-set_error_message(QString::fromLocal8Bit(error));
-pxv_err("Failed to call srd_session_end:%s", error);
+    if (srd_session_end(session, nullptr) != SRD_OK) {
+      const char *err_msg = srd_get_last_error();
+      if (err_msg && *err_msg) {
+        set_error_message(QString::fromLocal8Bit(err_msg));
+        pxv_err("Failed to call srd_session_end:%s", err_msg);
+      }
+      srd_clear_last_error();
     }
   }
-
-  if (error != nullptr)
-    g_free(error);
 
   if (!_session->is_closed()) {
     _session->event_bus_post([self]() { self->decode_done(); });
@@ -874,17 +925,16 @@ srd_session_destroy(session);
                              DecoderStack::annotation_callback,
                              status_for_callback.get());
 
-  char *error = nullptr;
-  int srd_ret = srd_session_start(session, &error);
+  int srd_ret = srd_session_start(session, nullptr);
 
   if (srd_ret == SRD_OK) {
     decode_data(decode_start, decode_end, session);
-} else if (error != nullptr) {
-set_error_message(QString::fromLocal8Bit(error));
-}
-
-  if (error != nullptr) {
-    g_free(error);
+  } else {
+    const char *err_msg = srd_get_last_error();
+    if (err_msg && *err_msg) {
+      set_error_message(QString::fromLocal8Bit(err_msg));
+    }
+    srd_clear_last_error();
   }
 
   srd_session_destroy(session);

@@ -234,6 +234,12 @@ public:
   // P2-A: Setting change listener registration.
   void register_setting_listener(SettingChangeListener *listener);
   void unregister_setting_listener(SettingChangeListener *listener);
+  // P2-A: Called by setFiled() after a setting value is written to QSettings.
+  // Notifies all registered listeners. Declared public so static helpers
+  // in appconfig.cpp can call it.
+  void notify_setting_changed(const QString &group,
+                              const QString &key,
+                              const QVariant &value);
 
   // limit_samples 应用层 fallback：当驱动返回 0（上游约定"不限制"）时使用此默认值
   // 默认 1000000 = SR_MHZ(1)（1M 采样点）
@@ -255,9 +261,6 @@ private:
 
   // P2-A: Registered setting change listeners.
   std::vector<SettingChangeListener*> _setting_listeners;
-  void notify_setting_changed(const QString &group,
-                              const QString &key,
-                              const QVariant &value);
 
   uint64_t default_sample_limit_ = 1000000ULL;  // SR_MHZ(1)
 
