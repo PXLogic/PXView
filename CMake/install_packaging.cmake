@@ -106,6 +106,25 @@ install(TARGETS libsigrok
     ARCHIVE DESTINATION lib
 )
 
+# Windows: copy libffi-8.dll (needed by Python's _ctypes module).
+# Without this, decoders that import ctypes (ir_irmp, iso7816) fail at runtime
+# and the application may crash due to corrupted Python state.
+if(WIN32)
+    find_file(LIBFFI_DLL NAMES libffi-8.dll libffi-7.dll libffi-6.dll
+        PATHS /mingw64/bin /mingw32/bin "$ENV{MINGW_PREFIX}/bin"
+        NO_DEFAULT_PATH)
+    if(NOT LIBFFI_DLL)
+        find_file(LIBFFI_DLL NAMES libffi-8.dll libffi-7.dll libffi-6.dll)
+    endif()
+    if(LIBFFI_DLL)
+        install(FILES ${LIBFFI_DLL} DESTINATION bin)
+        message(STATUS "libffi DLL found: ${LIBFFI_DLL} -> bin/")
+    else()
+        message(WARNING "libffi DLL not found. Python _ctypes module will fail "
+            "at runtime. Install libffi (e.g. 'pacman -S mingw-w64-x86_64-libffi').")
+    endif()
+endif()
+
 # Install sigrok firmware files (redistributable, from git submodules).
 # Sources (see sigrok-firmware/README and sigrok-firmware-fx2lafw/README):
 #   - asix-sigma + sysclk-lwla: sigrok-firmware submodule (vendor permits redistribution)
