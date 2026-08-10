@@ -239,6 +239,11 @@ bool StoreSession::save_start()
         else
         {
             if (_thread.joinable()) _thread.join();
+            // PulseView pattern: set busy flag in the CALLER thread before
+            // starting the worker, eliminating the race window where
+            // is_busy() returns false between join() and the worker setting
+            // _is_busy = true. The worker clears it when done.
+            _is_busy.store(true);
             _thread = std::thread(&StoreSession::save_proc, this, snapshot);
             return !_has_error.load();
         }
@@ -542,7 +547,8 @@ void StoreSession::save_proc(data::Snapshot *snapshot)
         return;
     }
 
-    _is_busy = true;
+    // _is_busy is now set by save_start() in the caller thread before
+    // spawning this thread, so there's no race window.
 
     pxv_info("save task start.");
 
@@ -933,13 +939,17 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1),
     }
 
     if (_thread.joinable()) _thread.join();
+    // PulseView pattern: set busy flag in the CALLER thread before
+    // starting the worker, eliminating the race window.
+    _is_busy.store(true);
     _thread = std::thread(&StoreSession::export_proc, this, snapshot);
     return !_has_error.load();
 }
 
 void StoreSession::export_proc(data::Snapshot *snapshot)
 {
-    _is_busy = true;
+    // _is_busy is now set by export_start() in the caller thread before
+    // spawning this thread, so there's no race window.
 
     pxv_info("export task start.");
 
@@ -1268,6 +1278,16 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         uint8_t *ch_data_buffer = (uint8_t*)malloc(usize * dso_snapshot->get_channel_num() + 1);
         if (ch_data_buffer == nullptr){
             pxv_err("StoreSession::export_proc, malloc failed.");
+            // PulseView RAII pattern: ensure all resources are cleaned up
+            // on early return. Previously this path jumped directly to
+            // return, leaking sr_output and GHashTable. Match the cleanup
+            // pattern already used by the file-open failure path above.
+            _has_error.store(true);
+            set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2),
+                "Failed to allocate memory for DSO export."));
+            file.close();
+            sr_output_free(output);
+            g_hash_table_destroy(params);
             return;
         }
 
@@ -1488,7 +1508,10 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
             }
 
             QJsonObject options_obj;
-            auto dec_binding = new prop::binding::DecoderOptions(stack, dec);
+            // PulseView RAII pattern: use unique_ptr instead of raw new.
+            // Previously this was `new` without a matching `delete`,
+            // leaking a DecoderOptions object on every save.
+            auto dec_binding = std::make_unique<prop::binding::DecoderOptions>(stack, dec);
 
             for (GSList *l = d->options; l; l = l->next)
             {

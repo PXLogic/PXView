@@ -77,9 +77,20 @@ LogicSnapshot::LogicSnapshot() : Snapshot(1, 0, 0) {
   _glitch_filter = std::make_unique<LogicSnapshotGlitchFilter>(this);
 }
 LogicSnapshot::~LogicSnapshot() {
-  // The async writer thread is joined by _disk_cache_writer's destructor
-  // (declared LAST — runs FIRST, before _mmap_alloc / _ch_data are freed).
-  // Explicit drain_and_join is also safe but redundant here.
+  // PulseView pattern: derived destructor explicitly frees its own data.
+  //
+  // Previously this destructor was empty, relying on unique_ptr member
+  // destructors. But the base Snapshot::~Snapshot() calls free_data()
+  // which — due to C++ [class.dtor]/12 — resolves to Snapshot::free_data()
+  // (base version), NOT LogicSnapshot::free_data(). This meant non-mmap
+  // LeafBlockPool blocks leaked and mmap slot bitmaps were never cleared.
+  //
+  // Now: explicitly drain the async writer thread and call free_data()
+  // in the derived destructor body (where the vtable is still
+  // LogicSnapshot's). drain_and_join() is safe even if the writer was
+  // already stopped (it checks _async_running before joining).
+  _disk_cache_writer->drain_and_join();
+  free_data();
 }
 void LogicSnapshot::free_data() {
   // P1-6 fix: Skip memory optimization if there are active iterators
@@ -940,6 +951,12 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // ---- Bit-align phase: complete partial u64 from previous call ----
   // Driven by _ch_fraction (channel) and _byte_fraction (bit 0..7 within
   // the current 8-byte u64 for that channel).
+  // Safety: _dest_ptr is set to nullptr whenever blocks are freed or
+  // decommitted (see push_to_free_list, move_first_node_to_last,
+  // free_head_blocks, first_payload). The prefault thread's decommit
+  // logic has been removed, so mmap-backed pages cannot be decommitted
+  // while data is being collected. The null check below is the primary
+  // defense against use-after-free of decommitted/reclaimed memory.
   while ((_ch_fraction != 0 || _byte_fraction != 0) && len > 0) {
     if (_dest_ptr == nullptr) {
       pxv_err("append_cross_payload: _dest_ptr nullptr during bit-align");

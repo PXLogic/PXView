@@ -64,6 +64,14 @@ DsoSnapshot::DsoSnapshot() :
 
 DsoSnapshot::~DsoSnapshot()
 {
+    // PulseView pattern: derived destructor explicitly frees its own data.
+    // The base Snapshot::~Snapshot() also calls free_data(), but C++
+    // [class.dtor]/12 causes virtual dispatch to resolve to the base
+    // version during base destruction — DsoSnapshot::free_data()
+    // (which frees _ch_data) would never be called. Calling it here in
+    // the derived destructor body (where the vtable is still
+    // DsoSnapshot's) ensures _ch_data elements are properly freed.
+    free_data();
     free_envelop();
 }
 

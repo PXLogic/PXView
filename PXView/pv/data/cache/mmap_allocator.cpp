@@ -334,18 +334,26 @@ void MmapAllocator::prefault_worker() {
 
     uint64_t block_seq = 0;
     while (_prefault_running.load() && block_seq < _max_blocks_per_channel) {
-        // 检查超前量：如果已超前 writer 足够，sleep 让出 CPU
+        // Check ahead distance: if we're far enough ahead of the writer, yield
         uint64_t writer_seq = _writer_block_seq.load();
         if (block_seq >= writer_seq && (block_seq - writer_seq) >= PREFAULT_AHEAD_BLOCKS) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
 
-        // prefault 所有 channel 的 block_seq 对应 block
+        // Prefault all channels' blocks for this block_seq
         for (int ch = 0; ch < _channel_num; ch++) {
             uint64_t byte_offset = ((uint64_t)ch * _max_blocks_per_channel + block_seq) * _block_size;
             if (byte_offset + _block_size > _total_bytes) break;
 
+            // PulseView-style defensive programming: wrap the page-fault
+            // trigger in a SEH/try-catch so that if the mmap mapping has
+            // been revoked (e.g. disk file deleted, memory pressure), the
+            // thread exits gracefully instead of crashing the process
+            // with SIGSEGV. The prefault thread is a background optimization
+            // — failure to prefault a block is non-fatal because
+            // get_block_data() will VirtualAlloc(MEM_COMMIT) on demand.
+            try {
 #ifdef _WIN32
             // For SEC_RESERVE anonymous mappings, commit the block before
             // touching any page. For disk-file-backed mappings, pages are
@@ -354,50 +362,27 @@ void MmapAllocator::prefault_worker() {
                          MEM_COMMIT, PAGE_READWRITE);
 #endif
 
-            // 遍历 block 内所有页写零触发 prefault
+            // Touch each page in the block to trigger the page fault
             for (uint64_t off = 0; off < _block_size; off += PREFAULT_PAGE_SIZE) {
                 *(volatile uint8_t*)((uint8_t*)_base_ptr + byte_offset + off) = 0;
+            }
+            } catch (...) {
+                // mmap mapping may have been revoked or the system is out
+                // of memory. Log and stop prefaulting — the caller will
+                // fall back to on-demand commit via get_block_data().
+                pxv_err("MmapAllocator: prefault failed at block_seq=%llu ch=%d "
+                        "— mapping may be invalid, stopping prefault thread",
+                        (unsigned long long)block_seq, ch);
+                _prefault_running.store(false);
+                goto prefault_done;
             }
         }
 
         block_seq++;
         _prefault_block_seq.store(block_seq);
-
-        // trailing decommit：落后 writer 16 blocks 回收旧页，控制工作集
-        // CRITICAL FIX: 禁用非 loop 模式下的 trailing decommit！
-        // madvise(MADV_DONTNEED) 会把 leaf block 数据清零，导致解码器读到全零数据。
-        // Windows 用 VirtualUnlock（可能不清零），Linux 用 madvise（直接清零），这就是跨平台差异的根因。
-        // 在非 loop 模式下，数据采集后需要保留在内存中供解码器读取，不应回收。
-        /*
-        if (!_is_loop_mode.load()) {
-            uint64_t writer_seq = _writer_block_seq.load();
-            if (writer_seq > TRAILING_DECHECK_BEHIND_BLOCKS) {
-                uint64_t target_decommit_seq = writer_seq - TRAILING_DECHECK_BEHIND_BLOCKS;
-                if (_decommitted_block_seq.load() < target_decommit_seq) {
-                    uint64_t decommit_seq = _decommitted_block_seq.load();
-                    // 每轮最多 decommit 1 个 block_seq（遍历所有 channel）
-                    decommit_block_seq_all_channels(decommit_seq);
-                    _decommitted_block_seq.store(decommit_seq + 1);
-                }
-            }
-        }
-        */
     }
 
-    // 末尾 decommit：prefault 到顶后，继续 decommit 直到全部回收
-    // CRITICAL FIX: 禁用非 loop 模式下的末尾 decommit！同上原因。
-    /*
-    if (!_is_loop_mode.load()) {
-        while (_prefault_running.load() && _decommitted_block_seq.load() < _max_blocks_per_channel) {
-            uint64_t decommit_seq = _decommitted_block_seq.load();
-            if (decommit_seq >= _max_blocks_per_channel) break;
-            decommit_block_seq_all_channels(decommit_seq);
-            _decommitted_block_seq.store(decommit_seq + 1);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-    */
-
+prefault_done:
     _prefault_running.store(false);
     pxv_info("MmapAllocator: prefault thread finished, prefaulted %llu blocks",
              (unsigned long long)_prefault_block_seq.load());

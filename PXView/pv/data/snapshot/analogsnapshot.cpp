@@ -53,6 +53,14 @@ AnalogSnapshot::AnalogSnapshot() :
 
 AnalogSnapshot::~AnalogSnapshot()
 {
+    // PulseView pattern: derived destructor explicitly frees its own data.
+    // The base Snapshot::~Snapshot() also calls free_data(), but C++
+    // [class.dtor]/12 causes virtual dispatch to resolve to the base
+    // version during base destruction — AnalogSnapshot::free_data()
+    // (which frees _data) would never be called. Calling it here in the
+    // derived destructor body (where the vtable is still AnalogSnapshot's)
+    // ensures _data is properly freed.
+    free_data();
     free_envelop();
 }
 
