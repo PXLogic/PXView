@@ -311,11 +311,11 @@ include(${CMAKE_SOURCE_DIR}/CMake/install_packaging.cmake)
 #===============================================================================
 #= Tests
 #-------------------------------------------------------------------------------
-option(ENABLE_TESTS "Build test executables" OFF)
+option(ENABLE_TESTS "Build test executables (QTest + CTest)" OFF)
 
 if(ENABLE_TESTS)
-	add_subdirectory(tests)
 	enable_testing()
+	add_subdirectory(tests)
 endif(ENABLE_TESTS)
 
 #add_executable(test_font test_font.cpp)

@@ -77,10 +77,11 @@ foreach(level p0 p1 p2)
 endforeach()
 
 #===============================================================================
-#= C++ unit tests (Google Test)
+#= C++ unit tests (QTest + CTest)
 #-------------------------------------------------------------------------------
-# Header-only tests that verify Core/View layer logic without requiring a full
-# Qt widget stack. Uses MockViewLayout (from iview_delegates.h), CursorRegistry
-# (from core/cursorregistry.h), and TraceVisitor (from view/trace_visitor.h).
+# QTest-based unit tests for Core/Data/API/View layers. Uses qt6_add_test()
+# for automatic CTest registration. Tests run headless via QT_QPA_PLATFORM=offscreen.
+#
+# Test files live in tests/qtest/ with subdirectories: core/, data/, api/, view/.
 #===============================================================================
-add_subdirectory(cpp)
+add_subdirectory(qtest)
