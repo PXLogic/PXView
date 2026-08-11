@@ -124,7 +124,12 @@ if(ENABLE_UBSAN)
     add_link_options(-fsanitize=undefined)
     # UBSan can be used with ASan or TSan (compatible).
     # Print the full backtrace for UB violations.
-    add_compile_options(-fno-sanitize-recover=all)
+    # Disable alignment checks in UBSan — minilzo (LZO compression)
+    # and some C libraries have intentional misaligned reads that are
+    # safe on x86_64/aarch64 but trigger UBSan abort.
+    # Also allow recovery so UBSAN_OPTIONS=halt_on_error=0 works.
+    add_compile_options(-fno-sanitize=alignment)
+    add_compile_options(-fsanitize-recover=all)
 endif()
 
 # --- Clang-Tidy (static analysis, independent of sanitizers) ---
@@ -144,7 +149,7 @@ if(ENABLE_CLANG_TIDY)
     else()
         message(WARNING
             "ENABLE_CLANG_TIDY=ON but clang-tidy not found in PATH.\n"
-            "Install it (MSYS2: pacman -S mingw-w64-x86_64-clang-tools-extra)\n"
+            "Install it (MSYS2: pacman -S mingw-w64-ucrt-x86_64-clang-tools-extra)\n"
             "or set ENABLE_CLANG_TIDY=OFF.")
     endif()
 endif()
