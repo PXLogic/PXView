@@ -790,6 +790,19 @@ Result<void> SessionService::wait_capture_complete(uint64_t timeout_ms) {
                 _wait_capture_stop_flag = true;
                 loop.quit();
             }
+            // Fallback: if the libsigrok session has stopped (is_running=0)
+            // but is_working is still true, the SessionStopped event was
+            // likely suppressed by the EventBus broadcast depth guard
+            // (caused by processEvents() re-entrancy). Force-release the
+            // capture state to avoid an infinite wait.
+            if (!running && working && check_count > 20) {
+                pxv_warn("wait_capture: session stopped but is_working stuck "
+                         "(SessionStopped event likely suppressed). "
+                         "Force-releasing capture state at check#%d.", check_count);
+                _session->force_release_capture_state();
+                _wait_capture_stop_flag = true;
+                loop.quit();
+            }
         });
 
         timeout_timer.start(static_cast<int>(timeout_ms));

@@ -11,6 +11,7 @@
 #include <thread>
 #include <functional>
 #include <vector>
+#include <queue>
 #include <concepts>
 
 #include "pv/interface/icallbacks.h"
@@ -62,15 +63,29 @@ public:
     // Synchronous dispatch to all registered IEventListener consumers. Called
     // from within the async-dispatched handler (or directly from the main
     // thread), so it stays sync and can't re-enter the caller.
+    //
+    // Re-entrancy handling: if broadcast() is called re-entrantly (depth > 1,
+    // typically caused by QCoreApplication::processEvents() processing a
+    // queued broadcast_async event while a sync broadcast is still on the
+    // call stack), the event is NOT dropped. Instead it is deferred into
+    // _deferred_broadcasts and will be dispatched after the outermost
+    // broadcast() call unwinds. This prevents silent event loss that can
+    // leave the state machine in an inconsistent state (e.g. SessionStopped
+    // dropped → is_working stuck true → wait_capture hangs).
     template <typename EventType> void broadcast(const EventType &ev) {
         std::shared_lock<std::shared_mutex> lk(_listeners_mutex);
         ++_broadcast_depth;
         if (_broadcast_depth > 1) {
-            pxv_err("Event broadcast loop detected (depth=%d), suppressing",
-                    _broadcast_depth);
-            // 不触发 assert: EventBus 作为崩溃防线,自身不能成为模态弹窗的来源。
-            // Windows 模态断言弹窗会接管 qApp 消息循环,把排队的 async 事件强行派发,
-            // 造成 EventBus 自身被打穿。改为 early-return 即可阻断连锁。
+            // Defer instead of drop — the event will be dispatched after the
+            // outermost broadcast() unwinds.
+            pxv_warn("Event broadcast re-entrancy detected (depth=%d), "
+                     "deferring event for later delivery",
+                     _broadcast_depth);
+            _deferred_broadcasts.push([this, ev]() {
+                for (auto *l : _event_listeners) {
+                    l->on_event(ev);
+                }
+            });
             --_broadcast_depth;
             return;
         }
@@ -78,6 +93,8 @@ public:
             l->on_event(ev);
         }
         --_broadcast_depth;
+        // Dispatch any deferred events from re-entrant calls.
+        drain_deferred();
     }
 
     // ---- Sync direct typed event broadcast (pre-broadcast ordering) ----
@@ -99,11 +116,15 @@ public:
         std::shared_lock<std::shared_mutex> lk(_listeners_mutex);
         ++_broadcast_depth;
         if (_broadcast_depth > 1) {
-            pxv_err("Event broadcast_sync loop detected (depth=%d), suppressing",
-                    _broadcast_depth);
-            // 不触发 assert: EventBus 作为崩溃防线,自身不能成为模态弹窗的来源。
-            // Windows 模态断言弹窗会接管 qApp 消息循环,把排队的 async 事件强行派发,
-            // 造成 EventBus 自身被打穿。改为 early-return 即可阻断连锁。
+            // Defer instead of drop — see broadcast() for rationale.
+            pxv_warn("Event broadcast_sync re-entrancy detected (depth=%d), "
+                     "deferring event for later delivery",
+                     _broadcast_depth);
+            _deferred_broadcasts.push([this, ev]() {
+                for (auto *l : _event_listeners) {
+                    l->on_event(ev);
+                }
+            });
             --_broadcast_depth;
             return;
         }
@@ -111,6 +132,8 @@ public:
             l->on_event(ev);
         }
         --_broadcast_depth;
+        // Dispatch any deferred events from re-entrant calls.
+        drain_deferred();
     }
 
     // ---- Async typed event broadcast (worker-thread → main-thread) ----
@@ -171,6 +194,23 @@ private:
     std::vector<interface::IEventListener *> _event_listeners;
     mutable std::shared_mutex _listeners_mutex;
     static thread_local int _broadcast_depth;
+    // Deferred broadcasts from re-entrant broadcast()/broadcast_sync() calls.
+    // Events are queued here instead of being silently dropped, and drained
+    // after the outermost broadcast() call returns.
+    std::queue<std::function<void()>> _deferred_broadcasts;
+
+    // Drain deferred broadcasts. Called after the outermost broadcast() or
+    // broadcast_sync() unwinds (depth returns to 0). Each deferred event is
+    // dispatched to all listeners. If a deferred dispatch itself causes
+    // re-entrancy, those events are appended to the queue and processed in
+    // subsequent iterations (BFS order).
+    void drain_deferred() {
+        while (!_deferred_broadcasts.empty()) {
+            auto fn = std::move(_deferred_broadcasts.front());
+            _deferred_broadcasts.pop();
+            fn();
+        }
+    }
     // TS-1 fix: shared_ptr<atomic<bool>> so posted lambdas can check the
     // alive flag without accessing 'this' after the EventBus is destroyed.
     // The shared_ptr keeps the atomic flag alive even after destruction.

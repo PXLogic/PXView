@@ -2231,6 +2231,32 @@ void SigSession::on_event(const interface::SessionStopped &) {
   }
 }
 
+void SigSession::force_release_capture_state() {
+  // Emergency fallback called by wait_capture_complete() when the
+  // SessionStopped event was suppressed by the EventBus broadcast depth
+  // guard. Mirrors the non-repeat branch of on_event(SessionStopped):
+  //   1. set_is_working(false)
+  //   2. data_unlock()
+  //   3. broadcast_sync<EndCollectWorkPrev> (may also be suppressed, but
+  //      that's OK — the important thing is releasing _is_working)
+  //   4. release_capture_owner()
+  //   5. broadcast_async<EndCollectWork>
+  //
+  // This is idempotent: if on_event(SessionStopped) already ran (manual
+  // stop path), is_working() is already false and this is a no-op.
+  if (!_state->is_working()) {
+    pxv_info("force_release_capture_state: is_working already false, nothing to do.");
+    return;
+  }
+  pxv_warn("force_release_capture_state: releasing CaptureOwnerGuard "
+           "(SessionStopped event was suppressed by EventBus).");
+  _state->set_is_working(false);
+  _capture_manager->data_unlock();
+  _event_bus->broadcast_sync<interface::EndCollectWorkPrev>({});
+  _document_registry->release_capture_owner();
+  _event_bus->broadcast_async<interface::EndCollectWork>({});
+}
+
 bool SigSession::switch_work_mode(int mode) {
   assert(!_state->is_working());
   int cur_mode = _state->device_agent().get_work_mode();

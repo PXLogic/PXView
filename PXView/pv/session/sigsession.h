@@ -143,6 +143,12 @@ public:
   bool import_file(QString name);
   bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override { return _capture_manager->start_capture(instant, owner); }
   bool stop_capture() override { return _capture_manager->stop_capture(); }
+  /// Emergency fallback: force-release the capture state when the
+  /// SessionStopped event was suppressed by the EventBus broadcast
+  /// depth guard (caused by processEvents() re-entrancy). This sets
+  /// _is_working=false and releases the CaptureOwnerGuard directly,
+  /// mirroring what SigSession::on_event(SessionStopped) would have done.
+  void force_release_capture_state();
   bool switch_work_mode(int mode) override;
   uint64_t cur_samplerate();
   uint64_t cur_snap_samplerate() override;
