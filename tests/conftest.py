@@ -15,6 +15,8 @@ existing instance instead.
 
 Configuration via environment variables:
     PXVIEW_MCP_URL          MCP endpoint URL (default: http://127.0.0.1:10110/mcp)
+    PXVIEW_MCP_PORT         MCP port (default: 10110, used when auto-starting)
+    PXVIEW_WS_PORT          WebSocket port (default: 10430, used when auto-starting)
     PXVIEW_STARTUP_TIMEOUT  Seconds to wait for server (default: 120)
     PXVIEW_EXE_PATH         Path to PXView.exe; if set, auto-start headless
     PXVIEW_NO_AUTO_START    If "1", never auto-start (assume server is running)
@@ -47,6 +49,8 @@ except ImportError:
 # ---- Configuration (overridable via environment variables) ----
 
 MCP_URL = os.environ.get("PXVIEW_MCP_URL", "http://127.0.0.1:10110/mcp")
+MCP_PORT = int(os.environ.get("PXVIEW_MCP_PORT", "10110"))
+WS_PORT = int(os.environ.get("PXVIEW_WS_PORT", "10430"))
 MCP_STARTUP_TIMEOUT = float(os.environ.get("PXVIEW_STARTUP_TIMEOUT", "120"))
 EXE_PATH = os.environ.get("PXVIEW_EXE_PATH", "")
 NO_AUTO_START = os.environ.get("PXVIEW_NO_AUTO_START", "") == "1"
@@ -106,7 +110,8 @@ def _pxview_process() -> Iterator[Optional[PXViewProcess]]:
     try:
         proc = PXViewProcess(
             exe_path=exe,
-            port=10110,
+            port=MCP_PORT,
+            ws_port=WS_PORT,
             startup_timeout=MCP_STARTUP_TIMEOUT,
         )
         proc.start()

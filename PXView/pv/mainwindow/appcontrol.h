@@ -72,6 +72,20 @@ public:
         return _mcp_transport;
     }
 
+    inline pv::api::WsTransport* get_ws_transport() {
+        return _ws_transport;
+    }
+
+    /// Set custom MCP and WebSocket port numbers.
+    /// Must be called before Start().
+    inline void set_api_ports(int mcp_port, int ws_port) {
+        _mcp_port = mcp_port;
+        _ws_port = ws_port;
+    }
+
+    inline int get_mcp_port() const { return _mcp_port; }
+    inline int get_ws_port() const { return _ws_port; }
+
     inline void SetTopWindow(QWidget *w){
         _topWindow = w;
     }
@@ -96,4 +110,8 @@ private:
     pv::api::WsTransport* _ws_transport = nullptr;
     pv::api::McpTransport* _mcp_transport = nullptr;
     pv::api::DirectTransport* _direct_transport = nullptr;
+
+    // API port numbers (defaults: MCP=10110, WS=10430)
+    int _mcp_port = 10110;
+    int _ws_port = 10430;
 };

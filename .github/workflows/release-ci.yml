@@ -5,9 +5,10 @@ name: PXView Release CI
 #
 # 本工作流在 push 到 main 时运行，包含 4 个并行 job：
 #
-# Job 1: release-build-and-smoke
-#   Release 编译 → 安装 → 冒烟测试 (MCP 协议 9 项)
-#   确保 Release 模式可以正常编译和启动
+# Job 1: release-build-and-tests
+#   Release 编译 → 安装 → 全量 E2E 测试 (19 个测试套件)
+#   使用 3 个 PXView 实例并行测试（端口 10110/10111/10112）
+#   每个 PXView 实例跑约 6-7 个测试文件，总时间减少约 60%
 #
 # Job 2: asan-core-tests
 #   Debug 编译 (ASan + UBSan) → 核心测试子集
@@ -33,9 +34,10 @@ on:
 
 jobs:
   # ============================================================
-  # Job 1: Release Build + Full E2E Tests
-  # Release 编译没有 ASan/TSan 减速，跑全部 24 个测试套件。
-  # 这是覆盖面最广的测试 job。
+  # Job 1: Release Build + Full E2E Tests (3-way parallel)
+  # Release 编译没有 ASan/TSan 减速，跑全部 19 个测试套件。
+  # 使用 3 个 PXView 实例（端口 10110/10111/10112）并行测试，
+  # 每个实例跑约 6-7 个测试文件，总时间约减少 60%。
   # ============================================================
   release-build-and-tests:
     name: Release Build + Full E2E Tests
@@ -144,60 +146,177 @@ jobs:
           pip install pytest pytest-html pytest-timeout
           pip install -e ./pxview-automation
 
-      - name: Run full E2E test suite (Release mode)
+      - name: Run full E2E test suite (Release mode, 3-way parallel)
         run: |
           export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
+          PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
-          "$PWD/install.dir/usr/bin/PXView" -l 4 &
-          PXV_PID=$!
-          echo "PXView PID: $PXV_PID"
+          # ---- Define 3 test groups (balanced by estimated runtime) ----
+          GROUP1="test_01_mcp_protocol.py test_02_device_management.py test_03_capture_basic.py test_05_data_integrity.py test_13_signal_data.py test_14_16_config.py test_21_error_handling.py"
+          GROUP2="test_04_capture_timed_10s.py test_06_export_import.py test_07_decoder_i2c.py test_08_decoder_spi.py test_09_decoder_uart.py test_10_decoder_can_pwm.py"
+          GROUP3="test_12_decoder_batch.py test_17_18_filter_invert.py test_19_20_session_advanced.py test_22_stress.py test_23_decoder_stacked.py test_24_real_decode.py"
 
-          MCP_URL="http://127.0.0.1:10110/mcp"
-          READY=0
-          for i in $(seq 1 60); do
-            if ! kill -0 $PXV_PID 2>/dev/null; then
-              echo "ERROR: PXView exited prematurely"
-              break
-            fi
-            RESP=$(curl -s -X POST "$MCP_URL" \
-              -H "Content-Type: application/json" \
-              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
-              --max-time 5 2>/dev/null || true)
-            if echo "$RESP" | grep -q "protocolVersion"; then
-              echo "MCP server ready after ${i}s"
-              READY=1
-              break
-            fi
-            sleep 1
-          done
+          # ---- Helper: start a PXView instance on a given port ----
+          start_pxview() {
+            local port=$1
+            local ws_port=$2
+            local logfile=$3
+            echo "Starting PXView on MCP port $port, WS port $ws_port..."
+            "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
+            echo $!
+          }
 
-          if [ "$READY" -eq 1 ]; then
-            echo "=== Running full E2E test suite (Release mode, 24 test files) ==="
+          # ---- Helper: wait for MCP server to be ready ----
+          wait_for_mcp() {
+            local port=$1
+            local pid=$2
+            local url="http://127.0.0.1:${port}/mcp"
+            for i in $(seq 1 60); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "ERROR: PXView (port $port) exited prematurely"
+                return 1
+              fi
+              RESP=$(curl -s -X POST "$url" \
+                -H "Content-Type: application/json" \
+                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+                --max-time 5 2>/dev/null || true)
+              if echo "$RESP" | grep -q "protocolVersion"; then
+                echo "MCP server (port $port) ready after ${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "ERROR: MCP server (port $port) did not start within 60s"
+            return 1
+          }
+
+          # ---- Helper: run a test group against a specific MCP port ----
+          run_test_group() {
+            local group_name=$1
+            local port=$2
+            local tests=$3
+            local url="http://127.0.0.1:${port}/mcp"
+
+            echo "=== [$group_name] Running: $tests ==="
             cd tests
-            export PXVIEW_NO_AUTO_START=1
-            export PXVIEW_MCP_URL="$MCP_URL"
-            export PXVIEW_STARTUP_TIMEOUT=30
-            python -m pytest suites/ -v \
+            PXVIEW_NO_AUTO_START=1 \
+            PXVIEW_MCP_URL="$url" \
+            PXVIEW_STARTUP_TIMEOUT=30 \
+            python -m pytest $tests -v \
               --tb=short --timeout=300 --timeout-method=thread \
-              --html="$GITHUB_WORKSPACE/test_report.html" \
-              --junitxml="$GITHUB_WORKSPACE/test_report.xml" \
+              --html="$GITHUB_WORKSPACE/${group_name}_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/${group_name}_report.xml" \
               --self-contained-html \
-              || echo "WARNING: Tests had failures"
-            # Fallback: ensure XML exists even if pytest crashed/timed out
-            if [ ! -f "$GITHUB_WORKSPACE/test_report.xml" ]; then
-              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/test_report.xml"
-              echo '<testsuites><testsuite name="release-e2e" tests="0" failures="0" errors="1" time="0"><testcase name="pytest-crash"><error message="pytest did not generate report"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/test_report.xml"
-              echo "WARNING: Generated fallback XML (pytest did not complete)"
+              2>&1 | sed "s/^/[$group_name] /" \
+              || echo "WARNING: [$group_name] Tests had failures"
+            cd ..
+
+            # Fallback XML
+            if [ ! -f "$GITHUB_WORKSPACE/${group_name}_report.xml" ]; then
+              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/${group_name}_report.xml"
+              echo "<testsuites><testsuite name=\"$group_name\" tests=\"0\" failures=\"0\" errors=\"1\" time=\"0\"><testcase name=\"pytest-crash\"><error message=\"pytest did not generate report\"/></testcase></testsuite></testsuites>" >> "$GITHUB_WORKSPACE/${group_name}_report.xml"
             fi
+          }
+
+          # ---- Start 3 PXView instances ----
+          PID1=$(start_pxview 10110 10430 /tmp/pxv1.log)
+          PID2=$(start_pxview 10111 10431 /tmp/pxv2.log)
+          PID3=$(start_pxview 10112 10432 /tmp/pxv3.log)
+
+          ALL_READY=1
+          wait_for_mcp 10110 $PID1 || ALL_READY=0
+          wait_for_mcp 10111 $PID2 || ALL_READY=0
+          wait_for_mcp 10112 $PID3 || ALL_READY=0
+
+          if [ "$ALL_READY" -eq 1 ]; then
+            echo "=== All 3 PXView instances ready, launching parallel test groups ==="
+            # Run 3 test groups in parallel
+            run_test_group "group1" 10110 "$GROUP1" &
+            PID_T1=$!
+            run_test_group "group2" 10111 "$GROUP2" &
+            PID_T2=$!
+            run_test_group "group3" 10112 "$GROUP3" &
+            PID_T3=$!
+
+            # Wait for all test groups to finish
+            wait $PID_T1
+            wait $PID_T2
+            wait $PID_T3
+            echo "=== All 3 test groups completed ==="
           else
-            echo "ERROR: MCP server did not start within 60s"
-            echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/test_report.xml"
-            echo '<testsuites><testsuite name="release-e2e" tests="0" failures="0" errors="1" time="0"><testcase name="startup-failure"><error message="PXView MCP server did not start"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/test_report.xml"
+            echo "ERROR: One or more PXView instances failed to start"
+            echo "--- PXView1 log ---"; cat /tmp/pxv1.log 2>/dev/null || true
+            echo "--- PXView2 log ---"; cat /tmp/pxv2.log 2>/dev/null || true
+            echo "--- PXView3 log ---"; cat /tmp/pxv3.log 2>/dev/null || true
+            # Generate failure XML for all groups
+            for g in group1 group2 group3; do
+              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/${g}_report.xml"
+              echo "<testsuites><testsuite name=\"$g\" tests=\"0\" failures=\"0\" errors=\"1\" time=\"0\"><testcase name=\"startup-failure\"><error message=\"PXView MCP server did not start\"/></testcase></testsuite></testsuites>" >> "$GITHUB_WORKSPACE/${g}_report.xml"
+            done
           fi
 
-          kill $PXV_PID 2>/dev/null || true
-          wait $PXV_PID 2>/dev/null || true
+          # ---- Stop all PXView instances ----
+          kill $PID1 $PID2 $PID3 2>/dev/null || true
+          wait $PID1 $PID2 $PID3 2>/dev/null || true
+
+          # ---- Merge XML reports ----
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          import glob
+
+          merged = ET.Element('testsuites')
+          total_tests = 0
+          total_failures = 0
+          total_errors = 0
+          total_time = 0.0
+
+          for f in sorted(glob.glob('$GITHUB_WORKSPACE/group*_report.xml')):
+              try:
+                  tree = ET.parse(f)
+                  root = tree.getroot()
+                  for ts in root.findall('.//testsuite'):
+                      merged.append(ts)
+                      total_tests += int(ts.get('tests', 0))
+                      total_failures += int(ts.get('failures', 0))
+                      total_errors += int(ts.get('errors', 0))
+                      try:
+                          total_time += float(ts.get('time', 0))
+                      except ValueError:
+                          pass
+              except Exception as e:
+                  print(f'WARNING: Failed to parse {f}: {e}')
+
+          merged.set('tests', str(total_tests))
+          merged.set('failures', str(total_failures))
+          merged.set('errors', str(total_errors))
+          merged.set('time', f'{total_time:.2f}')
+
+          ET.ElementTree(merged).write('$GITHUB_WORKSPACE/test_report.xml', encoding='UTF-8', xml_declaration=True)
+          print(f'Merged report: {total_tests} tests, {total_failures} failures, {total_errors} errors')
+          "
+
+          # Also merge HTML reports into a simple combined file
+          python3 -c "
+          import glob, os
+          parts = ['<html><head><meta charset=\"utf-8\"><title>Release E2E Test Report</title></head><body>']
+          parts.append('<h1>PXView Release E2E Test Report (3-way parallel)</h1>')
+          for f in sorted(glob.glob('$GITHUB_WORKSPACE/group*_report.html')):
+              name = os.path.basename(f).replace('_report.html', '')
+              parts.append(f'<h2>{name}</h2>')
+              try:
+                  with open(f, 'r', encoding='utf-8') as fh:
+                      content = fh.read()
+                      # Extract body content
+                      if '<body>' in content:
+                          content = content.split('<body>', 1)[1].split('</body>', 1)[0]
+                      parts.append(content)
+              except Exception:
+                  parts.append(f'<p>Failed to read {f}</p>')
+          parts.append('</body></html>')
+          with open('$GITHUB_WORKSPACE/test_report.html', 'w', encoding='utf-8') as fh:
+              fh.write('\\n'.join(parts))
+          "
 
       - name: Upload test report
         if: always()

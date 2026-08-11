@@ -45,6 +45,7 @@ private:
     void add_command_row(QVBoxLayout *parent_layout, const QString &tool_name,
                          const QString &command);
     pv::api::McpTransport* get_mcp_transport() const;
+    int get_mcp_port() const;
     void retranslateUi();
 
     // IUiWindow

@@ -21,6 +21,8 @@ public:
     void stop() override;
     bool is_running() const override;
 
+    int get_port() const { return _port; }
+
     // IServiceEventListener - push service events to MCP clients (via the
     // active SSE streams opened by wait_capture, or as JSON-RPC notifications).
     void on_service_event(const ServiceEventData& data) override;

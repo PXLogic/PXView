@@ -30,8 +30,6 @@
 namespace pv {
 namespace dock {
 
-static const int MCP_PORT = 10110;
-
 McpControlDock::McpControlDock(AppControl *app, QWidget *parent)
     : QWidget(parent)
     , _app(app)
@@ -97,14 +95,13 @@ void McpControlDock::setup_ui()
     _section2_desc->setFont(content_font);
     layout->addWidget(_section2_desc);
 
-    // Command rows
-    QString port_str = QString::number(MCP_PORT);
+    // Command rows — port resolved dynamically at refresh time
     add_command_row(layout, "Claude Code",
-        QString("claude mcp add --transport http pxview http://127.0.0.1:%1").arg(port_str));
+        QString("claude mcp add --transport http pxview http://127.0.0.1:%1").arg(get_mcp_port()));
     add_command_row(layout, "Codex",
-        QString("codex mcp add --url http://127.0.0.1:%1 pxview").arg(port_str));
+        QString("codex mcp add --url http://127.0.0.1:%1 pxview").arg(get_mcp_port()));
     add_command_row(layout, "OpenCode",
-        QString("opencode --mcp http://127.0.0.1:%1").arg(port_str));
+        QString("opencode --mcp http://127.0.0.1:%1").arg(get_mcp_port()));
 
     layout->addSpacing(8);
 
@@ -249,7 +246,7 @@ void McpControlDock::refresh_status()
             L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_RUNNING), "Running"));
         QColor okColor = AppConfig::Instance().GetThemeColor("@dock-status-ok");
         _status_label->setStyleSheet(QString("color: %1;").arg(okColor.isValid() ? okColor.name() : "#4ec9b0"));
-        _address_label->setText(QString("127.0.0.1:%1").arg(MCP_PORT));
+        _address_label->setText(QString("127.0.0.1:%1").arg(get_mcp_port()));
     } else {
         _status_label->setText(QString::fromUtf8("\xe2\x97\x8f ") +
             L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MCP_STOPPED), "Stopped"));
@@ -261,7 +258,7 @@ void McpControlDock::refresh_status()
 
 void McpControlDock::on_open_web_console()
 {
-    QDesktopServices::openUrl(QUrl(QString("http://127.0.0.1:%1/").arg(MCP_PORT)));
+    QDesktopServices::openUrl(QUrl(QString("http://127.0.0.1:%1/").arg(get_mcp_port())));
 }
 
 void McpControlDock::on_copy_command()
@@ -300,6 +297,17 @@ pv::api::McpTransport* McpControlDock::get_mcp_transport() const
     if (!_app)
         return nullptr;
     return _app->get_mcp_transport();
+}
+
+int McpControlDock::get_mcp_port() const
+{
+    pv::api::McpTransport *transport = get_mcp_transport();
+    if (transport)
+        return transport->get_port();
+    // Fallback to AppControl's configured port (before transport is created)
+    if (_app)
+        return _app->get_mcp_port();
+    return 10110;
 }
 
 void McpControlDock::UpdateLanguage() { retranslateUi(); }

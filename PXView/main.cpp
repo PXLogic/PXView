@@ -94,6 +94,8 @@ void usage()
 		"\n"
 		"Application Options:\n"
 		"      --headless                  Run in headless mode (no GUI, MCP/WS API only)\n"
+		"      --port PORT                 MCP server port (default: 10110)\n"
+		"      --ws-port PORT              WebSocket server port (default: 10430)\n"
 		"\n", DS_BIN_NAME, DS_DESCRIPTION);
 }
 
@@ -116,6 +118,8 @@ int main(int argc, char *argv[])
 	int logLevel = -1;
 	bool bStoreLog = false;
 	bool bHeadless = false;
+	int mcpPort = 10110;
+	int wsPort = 10430;
 
 	//----------------------rebuild command param
 #ifdef _WIN32
@@ -155,8 +159,10 @@ int main(int argc, char *argv[])
 			{"version", no_argument, 0, 'v'},
 			{"storelog", no_argument, 0, 's'},
 			{"help", no_argument, 0, 'h'},
-			{"headless", no_argument, 0, 1000},
-			{0, 0, 0, 0}
+		{"headless", no_argument, 0, 1000},
+		{"port", required_argument, 0, 1001},
+		{"ws-port", required_argument, 0, 1002},
+		{0, 0, 0, 0}
 		};
 
         const char *shortopts = "l:Vvhs?";
@@ -176,6 +182,22 @@ int main(int argc, char *argv[])
 
 		case 1000: // headless mode
 			bHeadless = true;
+			break;
+
+		case 1001: // MCP port
+			mcpPort = static_cast<int>(strtol(optarg, nullptr, 10));
+			if (mcpPort <= 0 || mcpPort > 65535) {
+				printf("Invalid MCP port: %s\n", optarg);
+				return 1;
+			}
+			break;
+
+		case 1002: // WebSocket port
+			wsPort = static_cast<int>(strtol(optarg, nullptr, 10));
+			if (wsPort <= 0 || wsPort > 65535) {
+				printf("Invalid WS port: %s\n", optarg);
+				return 1;
+			}
 			break;
 
 		case 'V': // version
@@ -254,10 +276,13 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		// Start API services (MCP :10110, WS :10430)
+		// Set custom API ports before starting services
+		control->set_api_ports(mcpPort, wsPort);
+
+		// Start API services
 		control->Start();
 
-		pxv_info("Headless mode started. MCP port 10110, WS port 10430.");
+		pxv_info("Headless mode started. MCP port %d, WS port %d.", mcpPort, wsPort);
 
 		ret = a.exec();
 
@@ -375,6 +400,7 @@ int main(int argc, char *argv[])
 		pxv_info("DBG: before MainFrame construction");
 		pv::MainFrame w;
 		pxv_info("DBG: MainFrame constructed");
+		control->set_api_ports(mcpPort, wsPort);
 		control->Start();
 		pxv_info("DBG: control->Start() done");
 

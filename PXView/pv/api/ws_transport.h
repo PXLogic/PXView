@@ -40,6 +40,8 @@ public:
     void stop() override;
     bool is_running() const override;
 
+    int get_port() const { return _port; }
+
     // IServiceEventListener — broadcast events to subscribed clients
     void on_service_event(const ServiceEventData& data) override;
 

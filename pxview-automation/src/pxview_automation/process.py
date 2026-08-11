@@ -16,6 +16,9 @@ Typical usage::
 
 On Windows, the process is launched with ``--headless`` which starts
 the MCP (:10110) and WS (:10430) transports without any GUI.
+Custom ports can be set via the *port* and *ws_port* parameters, which
+are passed to PXView via ``--port`` and ``--ws-port`` command-line
+options.
 """
 
 from __future__ import annotations
@@ -113,6 +116,10 @@ class PXViewProcess:
 
         # Build command line
         cmd = [exe, "--headless"]
+        if self.port != 10110:
+            cmd.extend(["--port", str(self.port)])
+        if self.ws_port != 10430:
+            cmd.extend(["--ws-port", str(self.ws_port)])
         if self.log_level >= 0:
             cmd.extend(["--loglevel", str(self.log_level)])
         if self.store_log:
