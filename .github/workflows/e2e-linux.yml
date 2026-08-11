@@ -135,50 +135,52 @@ jobs:
           ls ../install.dir/usr/lib/PXView/c_decoders/ 2>/dev/null | head -5 || echo "(c_decoders in other location)"
 
       # ============================================================
-      # Step 6b: Bundle Python stdlib (required by Python decoders)
+      # Step 6b: Setup Python BEFORE bundling so we can use its
+      # complete C extension set (actions/setup-python installs
+      # a full Python with _struct, math, binascii, etc.)
       # ============================================================
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Bundle Python standard library
         run: |
           PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "Bundling Python $PY_VERSION standard library"
 
-          # Find the actual stdlib path (Ubuntu 24.04 may use multiarch paths)
-          STDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])")
-          PLATSTDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['platstdlib'])")
-          echo "stdlib dir: $STDLIB_DIR"
-          echo "platstdlib dir: $PLATSTDLIB_DIR"
-
-          # Copy pure-Python stdlib
           mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a "$STDLIB_DIR"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
 
-          # Copy C extensions (.so files). On Ubuntu 24.04, sysconfig['platlib']
-          # returns /usr/local/lib/python3.12/dist-packages (pip packages), NOT
-          # the system C extension directory. We must search multiple paths.
-          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          # Copy pure-Python stdlib from system Python (build.yml approach)
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
 
-          # Method 1: Ask Python where a known C extension actually lives
-          DYNLOAD_DIR=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
-          echo "dynload dir (from _struct): ${DYNLOAD_DIR:-not found}"
-          if [ -n "$DYNLOAD_DIR" ] && [ -d "$DYNLOAD_DIR" ]; then
-            cp -a "$DYNLOAD_DIR"/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          # Also copy stdlib from setup-python (fills any gaps in system copy)
+          SETUP_STDLIB=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])" 2>/dev/null || true)
+          if [ -n "$SETUP_STDLIB" ] && [ -d "$SETUP_STDLIB" ]; then
+            echo "Also copying stdlib from setup-python: $SETUP_STDLIB"
+            cp -a "$SETUP_STDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
           fi
 
-          # Method 2: Try platstdlib/lib-dynload (should be /usr/lib/python3.12/lib-dynload)
-          cp -a "$PLATSTDLIB_DIR"/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          # Copy C extensions (.so files)
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
 
-          # Method 3: Try traditional and multiarch fallback paths
-          for d in \
-            /usr/lib/python$PY_VERSION/lib-dynload \
-            /usr/lib/x86_64-linux-gnu/python$PY_VERSION/lib-dynload \
-            /usr/lib/aarch64-linux-gnu/python$PY_VERSION/lib-dynload; do
-            if [ -d "$d" ]; then
-              echo "Copying C extensions from: $d"
-              cp -a "$d"/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
-            fi
-          done
+          # From system Python (build.yml approach)
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
 
-          # Verify critical C extensions are present
+          # From setup-python — this Python has ALL C extensions
+          # including _struct, math, binascii, _datetime, etc.
+          SETUP_DYNLOAD=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
+          echo "dynload dir (from setup-python _struct): ${SETUP_DYNLOAD:-not found}"
+          if [ -n "$SETUP_DYNLOAD" ] && [ -d "$SETUP_DYNLOAD" ]; then
+            echo "Copying C extensions from setup-python: $SETUP_DYNLOAD"
+            cp -a "$SETUP_DYNLOAD"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
+
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+          # Verify critical C extensions
           echo "=== C extensions copied: ==="
           ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/ | head -20
           echo "Total .so files: $(ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/*.so 2>/dev/null | wc -l)"
@@ -190,18 +192,8 @@ jobs:
             fi
           done
 
-          rm -rf install.dir/usr/lib/python$PY_VERSION/test
-          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
           echo "Bundled Python stdlib size:"
           du -sh install.dir/usr/lib/python$PY_VERSION
-
-      # ============================================================
-      # Step 7: Install test dependencies
-      # ============================================================
-      - name: Setup Python for testing
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
       - name: Install test dependencies
         run: |
@@ -407,46 +399,51 @@ jobs:
           ls -la ../install.dir/usr/bin/PXView
           file ../install.dir/usr/bin/PXView
 
+      # ============================================================
+      # Setup Python BEFORE bundling so we can use its
+      # complete C extension set (actions/setup-python installs
+      # a full Python with _struct, math, binascii, etc.)
+      # ============================================================
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Bundle Python standard library
         run: |
           PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "Bundling Python $PY_VERSION standard library"
 
-          # Find the actual stdlib path (Ubuntu 24.04 may use multiarch paths)
-          STDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])")
-          PLATSTDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['platstdlib'])")
-          echo "stdlib dir: $STDLIB_DIR"
-          echo "platstdlib dir: $PLATSTDLIB_DIR"
-
-          # Copy pure-Python stdlib
           mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a "$STDLIB_DIR"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
 
-          # Copy C extensions (.so files). On Ubuntu 24.04, sysconfig['platlib']
-          # returns /usr/local/lib/python3.12/dist-packages (pip packages), NOT
-          # the system C extension directory. We must search multiple paths.
-          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          # Copy pure-Python stdlib from system Python (build.yml approach)
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
 
-          # Method 1: Ask Python where a known C extension actually lives
-          DYNLOAD_DIR=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
-          echo "dynload dir (from _struct): ${DYNLOAD_DIR:-not found}"
-          if [ -n "$DYNLOAD_DIR" ] && [ -d "$DYNLOAD_DIR" ]; then
-            cp -a "$DYNLOAD_DIR"/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          # Also copy stdlib from setup-python (fills any gaps in system copy)
+          SETUP_STDLIB=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])" 2>/dev/null || true)
+          if [ -n "$SETUP_STDLIB" ] && [ -d "$SETUP_STDLIB" ]; then
+            echo "Also copying stdlib from setup-python: $SETUP_STDLIB"
+            cp -a "$SETUP_STDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
           fi
 
-          # Method 2: Try platstdlib/lib-dynload (should be /usr/lib/python3.12/lib-dynload)
-          cp -a "$PLATSTDLIB_DIR"/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          # Copy C extensions (.so files)
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
 
-          # Method 3: Try traditional and multiarch fallback paths
-          for d in \
-            /usr/lib/python$PY_VERSION/lib-dynload \
-            /usr/lib/x86_64-linux-gnu/python$PY_VERSION/lib-dynload \
-            /usr/lib/aarch64-linux-gnu/python$PY_VERSION/lib-dynload; do
-            if [ -d "$d" ]; then
-              echo "Copying C extensions from: $d"
-              cp -a "$d"/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
-            fi
-          done
+          # From system Python (build.yml approach)
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+
+          # From setup-python — this Python has ALL C extensions
+          # including _struct, math, binascii, _datetime, etc.
+          SETUP_DYNLOAD=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
+          echo "dynload dir (from setup-python _struct): ${SETUP_DYNLOAD:-not found}"
+          if [ -n "$SETUP_DYNLOAD" ] && [ -d "$SETUP_DYNLOAD" ]; then
+            echo "Copying C extensions from setup-python: $SETUP_DYNLOAD"
+            cp -a "$SETUP_DYNLOAD"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
+
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
           # Verify critical C extensions
           echo "=== C extensions copied: ==="
@@ -460,15 +457,8 @@ jobs:
             fi
           done
 
-          rm -rf install.dir/usr/lib/python$PY_VERSION/test
-          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
           echo "Bundled Python stdlib size:"
           du -sh install.dir/usr/lib/python$PY_VERSION
-
-      - name: Setup Python for testing
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
       - name: Install test dependencies
         run: |
