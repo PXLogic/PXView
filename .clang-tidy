@@ -15,19 +15,18 @@
 #   clang-tidy -p build --fix PXView/pv/data/logicsnapshot.cpp
 
 # --- Check selection ---
-# Strategy: enable broad categories, then suppress noisy/false-positive checks.
+# Strategy: enable ALL high-value categories, suppress only noisy/false-positive checks.
 # Focus on the crash categories from the analysis:
-#   A (35%): race condition / shared memory → clang-analyzer
-#   B (20%): use-after-free → clang-analyzer-cplusplus
+#   A (35%): race condition / shared memory → clang-analyzer + concurrency
+#   B (20%): use-after-free → clang-analyzer-cplusplus + cppcoreguidelines
 #   D (10%): mmap decommit → bugprone
-#   F ( 7%): bounds/null/div-zero → bugprone
+#   F ( 7%): bounds/null/div-zero → bugprone + cert + cppcoreguidelines
 Checks:
   # --- Static analyzer (most valuable for this project) ---
-  - '-clang-analyzer-*'
-  - 'clang-analyzer-core.*'           # null dereference, uninitialized value
-  - 'clang-analyzer-cplusplus.*'      # use-after-free, dangling pointer, new/delete
-  - 'clang-analyzer-unix.*'           # malloc/free, VLA, API usage
-  - 'clang-analyzer-optin.*'          # optional checks (performance-critical)
+  - 'clang-analyzer-*'
+  # clang-analyzer is fully enabled (no subcategory filtering needed).
+  # Includes: core.* (null deref, uninitialized), cplusplus.* (UAF, dangling),
+  #          unix.* (malloc/free, API), optin.* (optional).
 
   # --- Bugprone (common bug patterns) ---
   - 'bugprone-*'
@@ -36,6 +35,31 @@ Checks:
   - '-bugprone-easily-swappable-parameters' # too noisy for C-style APIs
   - '-bugprone-reserved-identifier'         # MSYS2/MinGW system headers
   - '-bugprone-suspicious-include'          # project uses non-standard includes
+
+  # --- CERT secure coding (security vulnerabilities) ---
+  - 'cert-*'
+  - '-cert-err58-cpp'                      # static init order (Qt macros trigger)
+  # cert overlaps with bugprone for many checks (e.g. cert-int09-c = bugprone-narrowing)
+
+  # --- C++ Core Guidelines (lifetime, bounds, resource management) ---
+  - 'cppcoreguidelines-*'
+  - '-cppcoreguidelines-pro-bounds-pointer-arithmetic'  # C-style mmap/snapshot code
+  - '-cppcoreguidelines-pro-bounds-constant-array-index' # common in signal data
+  - '-cppcoreguidelines-avoid-c-arrays'    # project uses C arrays in C API
+  - '-cppcoreguidelines-avoid-magic-numbers' # too noisy for sampling rates
+  - '-cppcoreguidelines-avoid-non-const-global-variables' # sigrok API uses globals
+  - '-cppcoreguidelines-no-malloc'         # C interop (glib, libsigrok)
+  - '-cppcoreguidelines-owning-memory'     # too many false positives with glib ref counting
+  - '-cppcoreguidelines-pro-type-const-cast' # needed for glib/py C interop
+  - '-cppcoreguidelines-pro-type-cstyle-cast' # C code uses C-style casts
+  - '-cppcoreguidelines-pro-type-reinterpret-cast' # needed for hardware register access
+  - '-cppcoreguidelines-special-member-functions' # Qt moc generates incomplete rule-of-5
+
+  # --- Concurrency (thread safety — critical for PXView) ---
+  # PXView has 3+ threads (data feed, decoder, UI). 35% of crashes are races.
+  # concurrency-* checks for: unsafe function calls, missing mutex protection.
+  - 'concurrency-*'
+  - '-concurrency-mt-unsafe'               # glib/Qt functions flagged as "unsafe"
 
   # --- Misc (style + correctness) ---
   - 'misc-*'
@@ -48,16 +72,21 @@ Checks:
   - 'performance-*'
   - '-performance-avoid-const-or-ref-data-members' # Qt signal/slot needs some
 
-  # --- Readability (minimal, only high-value checks) ---
-  - 'readability-nonexistent-member-interpreter-check'
-  - 'readability-simplify-boolean-expr'
-  - 'readability-braces-around-statements'
-  - 'readability-else-after-return'
+  # --- Readability (full category, high-value checks) ---
+  - 'readability-*'
+  - '-readability-identifier-naming'       # project doesn't follow strict naming
+  - '-readability-function-cognitive-complexity' # too noisy for large functions
+  - '-readability-magic-numbers'           # too noisy for sampling rates
+  - '-readability-implicit-bool-conversion' # Qt uses implicit conversions
+  - '-readability-else-after-return'       # style preference, not a bug
+  - '-readability-braces-around-statements' # style preference, not a bug
 
-  # --- Modernize (selective) ---
-  - 'modernize-use-nullptr'
-  - 'modernize-use-override'
-  - 'modernize-use-using'
+  # --- Modernize (full category) ---
+  - 'modernize-*'
+  - '-modernize-use-trailing-return-type'  # style preference
+  - '-modernize-avoid-c-arrays'            # project uses C arrays in C API
+  - '-modernize-use-nodiscard'            # too noisy for Qt return values
+  - '-modernize-deprecated-headers'        # C headers are intentional in C code
 
 # --- Header filter ---
 # Only analyze project headers, not system/Qt/boost headers.

@@ -1,3 +1,58 @@
+# =============================================================================
+# 根目录白名单 (Root Directory Whitelist)
+# 先忽略根目录下所有文件/目录 (/*), 再用 !/ 显式放行需要跟踪的条目
+# 效果: agent 在根目录新建的任何脚本/文件都会被自动忽略, 不会被误提交
+# 如需新增根目录文件入库, 必须在此处显式添加 !/文件名
+# =============================================================================
+/*
+# Git 元数据 (始终跟踪)
+!/.gitattributes
+!/.gitignore
+!/.gitmodules
+# CI/CD
+!/.github
+# 项目配置
+!/.clang-tidy
+!/CMake
+!/CMakeLists.txt
+# 构建脚本 (入库)
+!/build-debug-asan.sh
+!/build_fx2lafw.sh
+!/build_linux.sh
+!/build_macos.sh
+!/build_windows.sh
+# 源码目录
+!/PXView
+!/common
+!/debian
+!/doc
+!/lang
+!/libsigrok
+!/libsigrokdecode
+!/libusb
+!/pxview-automation
+!/python
+!/sigrok-firmware
+!/sigrok-firmware-fx2lafw
+!/sigrok-util
+!/tests
+!/tools
+!/web
+!/window
+# 项目文件
+!/COPYING
+!/INSTALL.md
+!/INSTALL_zh.md
+!/LICENSE
+!/PXView.icns
+!/README.md
+!/applogo.rc
+!/logo-win.ico
+!/mac_appbundle_template.plist.in
+!/window_nisi.nsi
+!/windows.md
+!/更新说明.txt
+
 # Build directories
 build/
 build-qt6/

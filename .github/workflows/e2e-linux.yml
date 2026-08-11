@@ -4,13 +4,19 @@ name: PXView Linux Debug + E2E Tests
 # Linux Debug 编译 + E2E 测试一体化工作流。
 #
 # Job 1: debug-asan-ubsan-e2e
-#   Debug 编译 (ASan + UBSan) → 运行 pytest E2E 全套测试
+#   Debug 编译 (ASan + UBSan) → GUI offscreen 模式运行全套 E2E 测试
 #   ASan 发现 use-after-free / buffer overflow / double-free
 #   UBSan 发现未定义行为 (signed overflow / null deref / vtable)
+#   PYTHONDEVMODE=1 检测 Python C API 引用计数泄漏
 #
-# Job 2: debug-tsan-smoke
-#   Debug 编译 (TSan) → 仅验证 PXView --headless 启动 + MCP 响应
+# Job 2: debug-tsan-races
+#   Debug 编译 (TSan) → headless + GUI offscreen 两阶段测试
 #   TSan 发现数据竞争 (ASan 和 TSan 互斥，必须分开设)
+#
+# Job 3: clang-tidy-static-analysis
+#   Debug 编译 + Clang-Tidy 静态分析 → 编译时全路径检查
+#   不需要运行 PXView，零运行时开销
+#   能发现测试覆盖不到的代码路径里的 NULL 解引用/UAF
 #
 # 触发方式：
 #   - push 到 main / pull request
@@ -135,10 +141,35 @@ jobs:
         run: |
           PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "Bundling Python $PY_VERSION standard library"
+
+          # Find the actual stdlib path (Ubuntu 24.04 may use multiarch paths)
+          STDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])")
+          PLATLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['platlib'])")
+          echo "stdlib dir: $STDLIB_DIR"
+          echo "platlib dir: $PLATLIB_DIR"
+
+          # Copy pure-Python stdlib
           mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          cp -a "$STDLIB_DIR"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+
+          # Copy C extensions (.so files) from platlib (may be multiarch path)
           mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
-          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          cp -a "$PLATLIB_DIR"/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          # Also try the traditional path as fallback
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+
+          # Verify critical C extensions are present
+          echo "=== C extensions copied: ==="
+          ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/ | head -20
+          echo "Total .so files: $(ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/*.so 2>/dev/null | wc -l)"
+          for mod in _struct binascii math _datetime _posixsubprocess; do
+            if ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/${mod}*.so >/dev/null 2>&1; then
+              echo "  OK: $mod found"
+            else
+              echo "  WARNING: $mod NOT found — decoders using it will fail"
+            fi
+          done
+
           rm -rf install.dir/usr/lib/python$PY_VERSION/test
           find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
           echo "Bundled Python stdlib size:"
@@ -182,6 +213,10 @@ jobs:
           export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=0"
           export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
+          # Python development mode: checks reference counts on shutdown,
+          # warns about Py_INCREF/Py_DECREF leaks (instance.c, decoder C API)
+          export PYTHONDEVMODE=1
+          export PYTHONTRACEMALLOC=2
 
           echo "=== Starting PXView in GUI mode (offscreen) ==="
           echo "This exercises: QApplication, MainFrame, Viewport, SignalBar,"
@@ -356,10 +391,31 @@ jobs:
         run: |
           PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "Bundling Python $PY_VERSION standard library"
+
+          # Find the actual stdlib path (Ubuntu 24.04 may use multiarch paths)
+          STDLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])")
+          PLATLIB_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['platlib'])")
+          echo "stdlib dir: $STDLIB_DIR"
+          echo "platlib dir: $PLATLIB_DIR"
+
+          # Copy pure-Python stdlib
           mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          cp -a "$STDLIB_DIR"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+
+          # Copy C extensions (.so files) from platlib (may be multiarch path)
           mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
-          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          cp -a "$PLATLIB_DIR"/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/*.so install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+
+          # Verify critical C extensions
+          for mod in _struct binascii math _datetime _posixsubprocess; do
+            if ls install.dir/usr/lib/python$PY_VERSION/lib-dynload/${mod}*.so >/dev/null 2>&1; then
+              echo "  OK: $mod"
+            else
+              echo "  WARNING: $mod NOT found"
+            fi
+          done
+
           rm -rf install.dir/usr/lib/python$PY_VERSION/test
           find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
           echo "Bundled Python stdlib size:"
@@ -552,3 +608,106 @@ jobs:
             tsan_gui_report.xml
           reporter: java-junit
           fail-on-error: 'false'
+
+  # ============================================================
+  # Job 3: Clang-Tidy Static Analysis
+  #
+  # Clang-Tidy 是编译时静态分析，和 sanitizer 互补：
+  #   - sanitizer 只检测实际执行的代码路径
+  #   - Clang-Tidy 分析所有代码路径（包括测试没覆盖到的）
+  #   - 零运行时开销（只在编译时跑）
+  #
+  # 配置在 .clang-tidy 文件中，针对项目崩溃模式：
+  #   - clang-analyzer-core.* (NULL deref, uninitialized)
+  #   - clang-analyzer-cplusplus.* (UAF, dangling pointer)
+  #   - bugprone-* (common bug patterns)
+  # ============================================================
+  clang-tidy-static-analysis:
+    name: Clang-Tidy Static Analysis
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies + clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            clang-tidy
+          clang-tidy --version
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Debug + Clang-Tidy)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_CLANG_TIDY=ON \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Run Clang-Tidy (build with static analysis)
+        run: |
+          cd build
+          # Clang-Tidy runs during compilation via CMAKE_CXX_CLANG_TIDY.
+          # Each translation unit is analyzed as it's compiled.
+          # Warnings are printed to stderr and also captured in log.
+          ninja -j $(nproc) 2>&1 | tee clang-tidy.log
+
+          # Count warnings by category
+          echo ""
+          echo "=== Clang-Tidy Summary ==="
+          TOTAL=$(grep -c "warning:" clang-tidy.log || echo 0)
+          echo "Total warnings: $TOTAL"
+          echo ""
+          echo "=== Warnings by check ==="
+          grep -oP '\[[-a-zA-Z0-9.]+\]' clang-tidy.log | sort | uniq -c | sort -rn | head -20
+
+      - name: Upload Clang-Tidy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-tidy-report
+          path: build/clang-tidy.log
+          if-no-files-found: warn
