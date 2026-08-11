@@ -48,6 +48,7 @@ namespace dock {
 QMutex LogDock::_log_mutex;
 QString LogDock::_log_buffer;
 LogDock *LogDock::_instance = nullptr;
+int LogDock::_s_callback_index = -1;
 
 // Maximum bytes retained in the in-memory log buffer while the dock is hidden.
 // When exceeded, the buffer is trimmed to half this size (most recent data kept).
@@ -57,7 +58,7 @@ static constexpr int kMaxBufferBytes = 2 * 1024 * 1024;  // 2 MB
 
 LogDock::LogDock(QWidget *parent)
     : pv::widgets::SmoothScrollArea(parent), _auto_scroll(true),
-      _needs_reload(false), _callback_index(-1) {
+      _needs_reload(false), _catching_up(false) {
   _instance = this;
 
   _widget = new QWidget(this);
@@ -154,10 +155,8 @@ LogDock::LogDock(QWidget *parent)
   connect(&_buffer_timer, &QTimer::timeout, this, &LogDock::on_flush_buffer);
   _buffer_timer.start();
 
-  xlog_context *ctx = pxv_log_context();
-  if (ctx) {
-    xlog_add_receiver(ctx, on_log_callback, &_callback_index);
-  }
+  // The log receiver is registered early in main.cpp via init_log_receiver(),
+  // so startup logs are already in _log_buffer. No need to read the log file.
 
   retranslateUi();
 
@@ -167,19 +166,28 @@ LogDock::LogDock(QWidget *parent)
 LogDock::~LogDock() {
   _buffer_timer.stop();
 
-  xlog_context *ctx = pxv_log_context();
-  if (ctx && _callback_index >= 0) {
-    xlog_remove_receiver_by_index(ctx, _callback_index);
-  }
-
+  // Receiver is removed when pxv_log_uninit() frees the xlog context.
   _instance = nullptr;
   REMOVE_UI(this);
 }
 
+void LogDock::init_log_receiver() {
+  xlog_context *ctx = pxv_log_context();
+  if (ctx && _s_callback_index < 0) {
+    xlog_add_receiver(ctx, on_log_callback, &_s_callback_index);
+  }
+}
+
 void LogDock::on_log_callback(const char *data, int length) {
-  if (_instance) {
-    QMutexLocker locker(&_log_mutex);
-    _log_buffer.append(QString::fromUtf8(data, length));
+  QMutexLocker locker(&_log_mutex);
+  _log_buffer.append(QString::fromUtf8(data, length));
+  // Cap the buffer even before a LogDock instance exists (e.g. during
+  // app startup) to prevent unbounded growth in headless or pre-GUI phases.
+  if (_log_buffer.size() > kMaxBufferBytes) {
+    _log_buffer = _log_buffer.right(kMaxBufferBytes / 2);
+    int nl = _log_buffer.indexOf('\n');
+    if (nl >= 0)
+      _log_buffer = _log_buffer.mid(nl + 1);
   }
 }
 
@@ -251,6 +259,9 @@ void LogDock::showEvent(QShowEvent *event) {
   pv::widgets::SmoothScrollArea::showEvent(event);
   // Buffer was retained while hidden; the next on_flush_buffer tick
   // will flush it to the view automatically.
+  // Mark that we are catching up so that the was_at_bottom heuristic
+  // does not yank the view to the bottom on the first flush(es).
+  _catching_up = true;
 }
 
 void LogDock::on_clear() {
@@ -362,7 +373,23 @@ void LogDock::on_flush_buffer() {
       cursor.insertText(batch);
     }
 
-    if (_auto_scroll || was_at_bottom) {
+    if (_catching_up) {
+      // Catching up after the dock was hidden: only scroll if the user
+      // explicitly enabled auto-scroll. Do not use was_at_bottom here —
+      // it would be trivially true (empty doc / old bottom) and yank
+      // the view to the very bottom even with auto-scroll off.
+      if (_auto_scroll) {
+        sb->setValue(sb->maximum());
+      } else {
+        sb->setValue(saved_pos);
+      }
+      // If the buffer is now empty, we have fully caught up.
+      {
+        QMutexLocker locker2(&_log_mutex);
+        if (_log_buffer.isEmpty())
+          _catching_up = false;
+      }
+    } else if (_auto_scroll || was_at_bottom) {
       sb->setValue(sb->maximum());
     } else {
       sb->setValue(saved_pos);

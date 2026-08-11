@@ -40,6 +40,7 @@
 #include "pv/api/iapp_service.h"
 #include "pv/api/isession_service.h"
 #include "pv/base/log.h"
+#include "pv/dock/logdock.h"
 #include "pv/ui/langresource.h"
 #include <QDateTime>
 #include <string>
@@ -303,6 +304,12 @@ int main(int argc, char *argv[])
 
 	//----------------------init log
 	pxv_log_init(); // Don't call before QApplication be inited
+
+	// Register the in-memory log buffer receiver early so that ALL startup
+	// logs (device scan, config load, etc.) are captured in LogDock::_log_buffer
+	// before the LogDock widget is constructed.  This avoids reading the log
+	// file from disk at LogDock construction time.
+	pv::dock::LogDock::init_log_receiver();
 
 
 	if (bStoreLog && logLevel < XLOG_LEVEL_DBG){

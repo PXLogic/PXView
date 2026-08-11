@@ -1,4 +1,4 @@
-﻿﻿name: PXView Build
+name: PXView Build
 
 on:
   workflow_dispatch:

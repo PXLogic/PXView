@@ -9,6 +9,7 @@
 #include <QHideEvent>
 #include <QCloseEvent>
 #include <QMouseEvent>
+#include <QApplication>
 #include "pv/config/appconfig.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/widgets/smoothscrollarea.h"
@@ -18,29 +19,19 @@
 #include <windows.h>
 #endif
 
-static const char* event_type_name(QEvent::Type t)
-{
-    switch (t) {
-        case QEvent::Show:              return "Show";
-        case QEvent::Hide:              return "Hide";
-        case QEvent::Close:             return "Close";
-        case QEvent::ActivationChange:   return "ActivationChange";
-        case QEvent::WindowActivate:    return "WindowActivate";
-        case QEvent::WindowDeactivate:  return "WindowDeactivate";
-        case QEvent::FocusIn:           return "FocusIn";
-        case QEvent::FocusOut:          return "FocusOut";
-        case QEvent::MouseButtonPress:   return "MouseButtonPress";
-        case QEvent::MouseButtonRelease: return "MouseButtonRelease";
-        case QEvent::Resize:            return "Resize";
-        case QEvent::Move:              return "Move";
-        default:                        return "Other";
-    }
-}
-
 DsComboPopup::DsComboPopup(QComboBox *combo, QWidget *parent)
     : QDialog(parent)
 {
-    setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+    // 使用 Qt::Tool 而非 Qt::Popup。
+    //
+    // Qt::Popup 会在 show() 时 grab 鼠标，导致 QComboBox::mousePressEvent
+    // 中的鼠标按下→释放周期跨越弹窗显示，释放事件被 Qt::Popup 内置机制
+    // 当作"弹窗外点击"从而关闭弹窗，然后合成 MouseButtonPress 转发给
+    // combobox 触发新的 showPopup()，造成无限循环闪烁。
+    //
+    // Qt::Tool 不 grab 鼠标，鼠标释放事件直接到达 combobox，弹窗不受影响。
+    // 点击外部关闭通过 qApp 全局事件过滤器手动实现。
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_DeleteOnClose);
     setObjectName("dsComboPopup");
     _combo = combo;
@@ -115,8 +106,8 @@ DsComboPopup::DsComboPopup(QComboBox *combo, QWidget *parent)
         scroll->ensureWidgetVisible(curBt);
     }
 
-    // 安装事件过滤器捕获所有关闭路径
-    this->installEventFilter(this);
+    // 全局事件过滤器：检测点击弹窗外时关闭弹窗（替代 Qt::Popup 的内置行为）
+    qApp->installEventFilter(this);
 
     pxv_info("[DsComboPopup] constructor: this=%p combo=%p items=%d",
              this, combo, combo->count());
@@ -126,9 +117,6 @@ void DsComboPopup::changeEvent(QEvent *event)
 {
     if (event->type() == QEvent::ActivationChange) {
         bool active = this->isActiveWindow();
-        pxv_info("[DsComboPopup#%d] changeEvent ActivationChange: active=%d _bReady=%d",
-                 _id, active, _bReady);
-
         if (_bReady && !active) {
             pxv_info("[DsComboPopup#%d] changeEvent: closing due to activation loss", _id);
             this->close();
@@ -142,8 +130,9 @@ void DsComboPopup::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
 
-    pxv_info("[DsComboPopup#%d] showEvent: isVisible=%d isActive=%d",
-             _id, this->isVisible(), this->isActiveWindow());
+    // 确保弹窗显示在最前面
+    this->raise();
+    this->activateWindow();
 
 #ifdef WIN32
     const DWORD DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -161,31 +150,34 @@ void DsComboPopup::showEvent(QShowEvent *event)
     _bReady = false;
     QTimer::singleShot(0, this, [this]() {
         _bReady = true;
-        pxv_info("[DsComboPopup#%d] _bReady timer fired: _bReady=true", _id);
     });
 }
 
 void DsComboPopup::hideEvent(QHideEvent *event)
 {
-    pxv_info("[DsComboPopup#%d] hideEvent: isVisible=%d", _id, this->isVisible());
     QDialog::hideEvent(event);
 }
 
 void DsComboPopup::closeEvent(QCloseEvent *event)
 {
-    pxv_info("[DsComboPopup#%d] closeEvent", _id);
     QDialog::closeEvent(event);
 }
 
 bool DsComboPopup::eventFilter(QObject *watched, QEvent *event)
 {
-    // 捕获所有可能关闭弹窗的事件
-    QEvent::Type t = event->type();
-    if (t == QEvent::Close || t == QEvent::Hide ||
-        t == QEvent::WindowDeactivate || t == QEvent::FocusOut ||
-        t == QEvent::MouseButtonPress || t == QEvent::MouseButtonRelease) {
-        pxv_info("[DsComboPopup#%d] eventFilter: watched=%p type=%s",
-                 _id, watched, event_type_name(t));
+    // 全局事件过滤器：检测鼠标点击落在弹窗外时关闭弹窗。
+    // 这替代了 Qt::Popup 的内置"点击外部关闭"行为（Qt::Tool 没有此行为）。
+    if (event->type() == QEvent::MouseButtonPress && this->isVisible()) {
+        auto *me = static_cast<QMouseEvent*>(event);
+        QPoint globalPos = me->globalPosition().toPoint();
+        QPoint localPos = this->mapFromGlobal(globalPos);
+
+        if (!this->rect().contains(localPos)) {
+            // 点击在弹窗外部 → 关闭弹窗
+            pxv_info("[DsComboPopup#%d] eventFilter: outside click at (%d,%d), closing",
+                     _id, globalPos.x(), globalPos.y());
+            this->close();
+        }
     }
     return QDialog::eventFilter(watched, event);
 }
@@ -236,31 +228,24 @@ void DsComboBox::measureSize()
 
 void DsComboBox::showPopup()
 {
-    pxv_info("[DsComboBox] showPopup ENTER: this=%p _bPopup=%d _popup=%p",
-             this, _bPopup, (QWidget*)_popup);
-
     if (_bPopup || _popup) {
-        pxv_info("[DsComboBox] showPopup: REJECTED (re-entrancy guard)");
         return;
     }
 
     _bPopup = true;
 
     if (count() == 0) {
-        pxv_info("[DsComboBox] showPopup: count=0, aborting");
         _bPopup = false;
         return;
     }
 
+    // 延迟到下一个事件循环迭代再创建和显示弹窗。
+    // 让 mousePressEvent → mouseReleaseEvent 的完整周期先结束，
+    // 避免弹窗在鼠标按下期间显示。
     int seq = ++_popup_seq;
-    pxv_info("[DsComboBox] showPopup: scheduling deferred popup seq=%d", seq);
 
     QTimer::singleShot(0, this, [this, seq]() {
-        pxv_info("[DsComboBox] deferred timer fired: seq=%d _bPopup=%d _popup=%p",
-                 seq, _bPopup, (QWidget*)_popup);
-
         if (!_bPopup || _popup) {
-            pxv_info("[DsComboBox] deferred: SKIPPED (state changed)");
             return;
         }
 
@@ -268,25 +253,16 @@ void DsComboBox::showPopup()
         _popup->_id = seq;
 
         connect(_popup, &QObject::destroyed, this, [this, seq]() {
-            pxv_info("[DsComboBox] popup#%d destroyed signal: resetting _bPopup", seq);
             _bPopup = false;
         });
 
-        pxv_info("[DsComboBox] calling popup#%d->show()", seq);
         _popup->show();
-        pxv_info("[DsComboBox] popup#%d->show() returned", seq);
     });
-
-    pxv_info("[DsComboBox] showPopup EXIT (deferred)");
 }
 
 void DsComboBox::hidePopup()
 {
-    pxv_info("[DsComboBox] hidePopup ENTER: _bPopup=%d _popup=%p",
-             _bPopup, (QWidget*)_popup);
-
     if (_popup) {
-        pxv_info("[DsComboBox] hidePopup: closing popup=%p", (QWidget*)_popup);
         _popup->close();
     }
     _bPopup = false;

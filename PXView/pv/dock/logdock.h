@@ -56,6 +56,7 @@ public:
   void unbind_context() override;
 
   static void on_log_callback(const char *data, int length);
+  static void init_log_receiver();
 
 private:
   void retranslateUi();
@@ -92,13 +93,14 @@ private:
   QCheckBox *_append_mode_check;
   bool _auto_scroll;
   bool _needs_reload;
+  bool _catching_up;
 
   QTimer _buffer_timer;
 
   static QMutex _log_mutex;
   static QString _log_buffer;
   static LogDock *_instance;
-  int _callback_index;
+  static int _s_callback_index;
 };
 
 } // namespace dock

@@ -110,18 +110,39 @@ jobs:
             -DENABLE_ASAN=ON \
             -DENABLE_UBSAN=ON \
             -DDISABLE_WERROR=ON \
+            -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
       # ============================================================
-      # Step 6: Build PXView
+      # Step 6: Build + Install PXView
       # ============================================================
-      - name: Build PXView
+      - name: Build and Install PXView
         run: |
           cd build
           ninja -j $(nproc)
-          echo "=== Build output ==="
-          ls -la PXView
-          file PXView
+          ninja install
+          echo "=== Installed binary ==="
+          ls -la ../install.dir/usr/bin/PXView
+          file ../install.dir/usr/bin/PXView
+          echo "=== Installed decoders ==="
+          ls ../install.dir/usr/share/PXView/decoders/ | head -5
+          ls ../install.dir/usr/lib/PXView/c_decoders/ 2>/dev/null | head -5 || echo "(c_decoders in other location)"
+
+      # ============================================================
+      # Step 6b: Bundle Python stdlib (required by Python decoders)
+      # ============================================================
+      - name: Bundle Python standard library
+        run: |
+          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Bundling Python $PY_VERSION standard library"
+          mkdir -p install.dir/usr/lib/python$PY_VERSION
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Bundled Python stdlib size:"
+          du -sh install.dir/usr/lib/python$PY_VERSION
 
       # ============================================================
       # Step 7: Install test dependencies
@@ -170,7 +191,7 @@ jobs:
           # Start PXView in GUI mode (NO --headless flag!)
           # main.cpp calls control->Start() in BOTH headless and GUI paths,
           # so MCP server (port 10110) is available in GUI mode too.
-          "$PWD/build/PXView" -l 4 &
+          "$PWD/install.dir/usr/bin/PXView" -l 4 &
           PXV_PID=$!
           echo "PXView PID: $PXV_PID"
 
@@ -319,15 +340,30 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DENABLE_TSAN=ON \
             -DDISABLE_WERROR=ON \
+            -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
-      - name: Build PXView
+      - name: Build and Install PXView
         run: |
           cd build
           ninja -j $(nproc)
-          echo "=== Build output ==="
-          ls -la PXView
-          file PXView
+          ninja install
+          echo "=== Installed binary ==="
+          ls -la ../install.dir/usr/bin/PXView
+          file ../install.dir/usr/bin/PXView
+
+      - name: Bundle Python standard library
+        run: |
+          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Bundling Python $PY_VERSION standard library"
+          mkdir -p install.dir/usr/lib/python$PY_VERSION
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Bundled Python stdlib size:"
+          du -sh install.dir/usr/lib/python$PY_VERSION
 
       - name: Setup Python for testing
         uses: actions/setup-python@v5
@@ -347,7 +383,7 @@ jobs:
       # ============================================================
       - name: TSan Phase 1 — headless mode (MCP protocol)
         run: |
-          export PXVIEW_EXE_PATH="$PWD/build/PXView"
+          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/PXView"
           export PXVIEW_STARTUP_TIMEOUT=180
           export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
           export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
@@ -415,7 +451,7 @@ jobs:
       # ============================================================
       - name: TSan Phase 2 — GUI mode offscreen (MCP + capture)
         run: |
-          export PXVIEW_EXE_PATH="$PWD/build/PXView"
+          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/PXView"
           export PXVIEW_STARTUP_TIMEOUT=180
           export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
           export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
