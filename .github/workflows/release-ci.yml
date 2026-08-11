@@ -33,12 +33,14 @@ on:
 
 jobs:
   # ============================================================
-  # Job 1: Release Build + Smoke Test
+  # Job 1: Release Build + Full E2E Tests
+  # Release 编译没有 ASan/TSan 减速，跑全部 24 个测试套件。
+  # 这是覆盖面最广的测试 job。
   # ============================================================
-  release-build-and-smoke:
-    name: Release Build + Smoke Test
+  release-build-and-tests:
+    name: Release Build + Full E2E Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       checks: write
@@ -142,7 +144,7 @@ jobs:
           pip install pytest pytest-html pytest-timeout
           pip install -e ./pxview-automation
 
-      - name: Smoke test (MCP protocol)
+      - name: Run full E2E test suite (Release mode)
         run: |
           export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
@@ -171,32 +173,50 @@ jobs:
           done
 
           if [ "$READY" -eq 1 ]; then
+            echo "=== Running full E2E test suite (Release mode, 24 test files) ==="
             cd tests
             export PXVIEW_NO_AUTO_START=1
             export PXVIEW_MCP_URL="$MCP_URL"
             export PXVIEW_STARTUP_TIMEOUT=30
-            python -m pytest suites/test_01_mcp_protocol.py -v \
-              --tb=short --timeout=120 --timeout-method=thread \
-              --html="$GITHUB_WORKSPACE/smoke_report.html" \
-              --junitxml="$GITHUB_WORKSPACE/smoke_report.xml" \
+            python -m pytest suites/ -v \
+              --tb=short --timeout=300 --timeout-method=thread \
+              --html="$GITHUB_WORKSPACE/test_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/test_report.xml" \
               --self-contained-html \
-              || echo "WARNING: Smoke test had failures"
+              || echo "WARNING: Tests had failures"
+            # Fallback: ensure XML exists even if pytest crashed/timed out
+            if [ ! -f "$GITHUB_WORKSPACE/test_report.xml" ]; then
+              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/test_report.xml"
+              echo '<testsuites><testsuite name="release-e2e" tests="0" failures="0" errors="1" time="0"><testcase name="pytest-crash"><error message="pytest did not generate report"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/test_report.xml"
+              echo "WARNING: Generated fallback XML (pytest did not complete)"
+            fi
           else
             echo "ERROR: MCP server did not start within 60s"
+            echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/test_report.xml"
+            echo '<testsuites><testsuite name="release-e2e" tests="0" failures="0" errors="1" time="0"><testcase name="startup-failure"><error message="PXView MCP server did not start"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/test_report.xml"
           fi
 
           kill $PXV_PID 2>/dev/null || true
           wait $PXV_PID 2>/dev/null || true
 
-      - name: Upload smoke test report
+      - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-smoke-report
+          name: release-e2e-report
           path: |
-            smoke_report.html
-            smoke_report.xml
+            test_report.html
+            test_report.xml
           if-no-files-found: warn
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Release E2E Test Results
+          path: 'test_report.xml'
+          reporter: java-junit
+          fail-on-error: 'false'
 
   # ============================================================
   # Job 2: ASan + UBSan Core Tests (subset)
