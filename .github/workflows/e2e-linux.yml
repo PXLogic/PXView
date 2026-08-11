@@ -272,8 +272,8 @@ jobs:
 
             python -m pytest suites/ -v \
               --tb=short \
-              --html="../test_report.html" \
-              --junitxml="../test_report.xml" \
+              --html="$GITHUB_WORKSPACE/test_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/test_report.xml" \
               --self-contained-html \
               --timeout=300 --timeout-method=thread \
               || true
@@ -511,12 +511,12 @@ jobs:
           if [ "$READY" -eq 1 ]; then
             echo "=== Running MCP protocol tests under TSan ==="
             cd tests
-            python -m pytest suites/test_01_mcp_protocol.py -v \
-              --tb=short --timeout=300 --timeout-method=thread \
-              --html="../tsan_headless_report.html" \
-              --junitxml="../tsan_headless_report.xml" \
-              --self-contained-html \
-              || echo "WARNING: Tests had failures (check for TSan race reports above)"
+          python -m pytest suites/test_01_mcp_protocol.py -v \
+            --tb=short --timeout=300 --timeout-method=thread \
+            --html="$GITHUB_WORKSPACE/tsan_headless_report.html" \
+            --junitxml="$GITHUB_WORKSPACE/tsan_headless_report.xml" \
+            --self-contained-html \
+            || echo "WARNING: Tests had failures (check for TSan race reports above)"
           else
             echo "ERROR: MCP server did not start within 180s"
           fi
@@ -597,8 +597,8 @@ jobs:
               suites/test_01_mcp_protocol.py \
               suites/test_03_capture_basic.py \
               -v --tb=short --timeout=300 --timeout-method=thread \
-              --html="../tsan_gui_report.html" \
-              --junitxml="../tsan_gui_report.xml" \
+              --html="$GITHUB_WORKSPACE/tsan_gui_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/tsan_gui_report.xml" \
               --self-contained-html \
               || echo "WARNING: Tests had failures (check for TSan race reports above)"
           else
@@ -637,9 +637,7 @@ jobs:
         uses: dorny/test-reporter@v1
         with:
           name: TSan Race Detection Results
-          path: |
-            tsan_headless_report.xml
-            tsan_gui_report.xml
+          path: 'tsan_*_report.xml'
           reporter: java-junit
           fail-on-error: 'false'
 
