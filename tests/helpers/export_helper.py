@@ -9,7 +9,7 @@ import os
 import struct
 from typing import List, Optional
 
-from mcp_client import McpClient
+from pxview_automation import McpClient
 
 
 def read_csv_file(filepath: str) -> List[dict]:

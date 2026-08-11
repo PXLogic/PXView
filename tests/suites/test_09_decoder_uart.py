@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 from helpers.assertions import (
     assert_annotation_valid,
     assert_analyzer_options_valid,

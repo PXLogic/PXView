@@ -1,5 +1,9 @@
 # PXView MCP E2E Test Dependencies
+#
+# pxview-automation is installed from the local source tree:
+#   pip install -e ../pxview-automation
+# or it's added to sys.path by conftest.py automatically.
 pytest>=8.0
 pytest-html>=4.1
 pytest-timeout>=2.0
-requests>=2.28
+# requests is no longer needed — pxview-automation uses only stdlib urllib

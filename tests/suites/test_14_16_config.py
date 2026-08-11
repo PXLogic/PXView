@@ -6,7 +6,7 @@ test_16_sample_config.py - Sample configuration tests.
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 from helpers.capture_helper import do_timed_capture
 
 pytestmark = pytest.mark.p1

@@ -1,4 +1,4 @@
-/*
+ /*
  * This file is part of the PXView project.
  * PXView is based on DSView.
  * PXView is based on PulseView.
@@ -131,7 +131,12 @@ void LogicSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
                             QColor back) {
   if (!_data)
     return;
-  uint64_t end_align_sample = _data->get_ring_sample_count() - 1;
+  uint64_t ring_count = _data->get_ring_sample_count();
+  if (ring_count == 0) {
+    pxv_warn("LogicSignal::paint_mid: ring_sample_count==0, skipping paint");
+    return;
+  }
+  uint64_t end_align_sample = ring_count - 1;
   paint_mid_align(p, left, right, fore, back, end_align_sample);
 }
 
@@ -162,14 +167,24 @@ void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
   const int low_offset = y;
 
   double samplerate = _data ? _data->samplerate() : 0;
-  if (!_data || _data->empty() || samplerate == 0)
+  if (!_data || _data->empty() || samplerate == 0) {
+    pxv_warn("LogicSignal::paint_mid_align: no data or samplerate==0, skipping paint");
     return;
+  }
 
-  if (!_data->has_data(_model ? _model->index() : 0))
+  if (!_data->has_data(_model ? _model->index() : 0)) {
+    pxv_warn("LogicSignal::paint_mid_align: has_data false for index=%d, skipping paint",
+             _model ? _model->index() : 0);
     return;
+  }
 
-  if (end_align_sample >= _data->get_ring_sample_count())
-    end_align_sample = _data->get_ring_sample_count() - 1;
+  uint64_t ring_cnt = _data->get_ring_sample_count();
+  if (ring_cnt == 0) {
+    pxv_warn("LogicSignal::paint_mid_align: ring_sample_count==0, skipping paint");
+    return;
+  }
+  if (end_align_sample >= ring_cnt)
+    end_align_sample = ring_cnt - 1;
 
   const int64_t last_sample = end_align_sample;
   const double samples_per_pixel = samplerate * scale;
@@ -374,10 +389,17 @@ bool LogicSignal::measure(const QPointF &p, uint64_t &index0, uint64_t &index1,
   const float gap = abs(p.y() - get_y());
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
-        !_data->has_data(_model ? _model->index() : 0))
+        !_data->has_data(_model ? _model->index() : 0)) {
+      pxv_warn("LogicSignal::measure: no data or has_data false, skipping");
       return false;
+    }
 
-    const uint64_t end = _data->get_ring_sample_count() - 1;
+    const uint64_t ring_count = _data->get_ring_sample_count();
+    if (ring_count == 0) {
+      pxv_warn("LogicSignal: ring_sample_count==0, skipping edge/measure");
+      return false;
+    }
+    const uint64_t end = ring_count - 1;
     uint64_t index =
         _data->samplerate() * _view->scale() * (_view->offset() + p.x());
 
@@ -426,10 +448,17 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
 
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
-        !_data->has_data(_model ? _model->index() : 0))
+        !_data->has_data(_model ? _model->index() : 0)) {
+      pxv_warn("LogicSignal::is_by_edge: no data or has_data false, skipping");
       return false;
+    }
 
-    const uint64_t end = _data->get_ring_sample_count() - 1;
+    const uint64_t ring_count = _data->get_ring_sample_count();
+    if (ring_count == 0) {
+      pxv_warn("LogicSignal: ring_sample_count==0, skipping edge/measure");
+      return false;
+    }
+    const uint64_t end = ring_count - 1;
     const double pos =
         _data->samplerate() * _view->scale() * (_view->offset() + p.x());
     index = floor(pos + 0.5);
@@ -478,10 +507,17 @@ bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
 
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
-        !_data->has_data(_model ? _model->index() : 0))
+        !_data->has_data(_model ? _model->index() : 0)) {
+      pxv_warn("LogicSignal::edge: no data or has_data false, skipping");
       return false;
+    }
 
-    const uint64_t end = _data->get_ring_sample_count() - 1;
+    const uint64_t ring_count = _data->get_ring_sample_count();
+    if (ring_count == 0) {
+      pxv_warn("LogicSignal: ring_sample_count==0, skipping edge/measure");
+      return false;
+    }
+    const uint64_t end = ring_count - 1;
     const double pos =
         _data->samplerate() * _view->scale() * (_view->offset() + p.x());
     index = floor(pos + 0.5);

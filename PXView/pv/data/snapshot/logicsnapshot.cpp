@@ -1501,13 +1501,23 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
 
   uint64_t sample_count = _ring_sample_count;
 
-  assert(start_sample < sample_count);
+  // Guard: sample_count may be 0 when opening a saved waveform file
+  // (data not fully loaded or race condition). Original asserts crash via
+  // MSVC assertion dialog.
+  if (sample_count == 0 || start_sample >= sample_count) {
+    pxv_warn("LogicSnapshot::get_samples: sample_count=%llu start=%llu, skipping",
+             (unsigned long long)sample_count, (unsigned long long)start_sample);
+    return nullptr;
+  }
 
   if (end_sample >= sample_count)
     end_sample = sample_count - 1;
 
-  assert(end_sample <= sample_count);
-  assert(start_sample <= end_sample);
+  if (start_sample > end_sample) {
+    pxv_warn("LogicSnapshot::get_samples: start=%llu > end=%llu, skipping",
+             (unsigned long long)start_sample, (unsigned long long)end_sample);
+    return nullptr;
+  }
 
   start_sample += _loop_offset;
   // Note: previously _ring_sample_count was temporarily modified here
@@ -1706,19 +1716,27 @@ bool LogicSnapshot::get_sample_unlock(uint64_t index, int sig_index) {
 
 bool LogicSnapshot::get_sample_self(uint64_t index, int sig_index) {
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
+  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+    pxv_warn("LogicSnapshot::get_sample_self: invalid order for sig_index=%d", sig_index);
     return false;
+  }
 
-  if (index >= _ring_sample_count)
+  if (index >= _ring_sample_count) {
+    pxv_warn("LogicSnapshot::get_sample_self: index=%llu >= ring=%llu",
+             (unsigned long long)index, (unsigned long long)_ring_sample_count);
     return false;
+  }
 
   uint64_t index_mask = 1ULL << (index & LevelMask[0]);
   uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
   uint64_t index1 = (index & RootMask) >> LeafBlockPower;
   uint64_t root_pos_mask = 1ULL << index1;
 
-  if (index0 >= _ch_data[order].size())
+  if (index0 >= _ch_data[order].size()) {
+    pxv_warn("LogicSnapshot::get_sample_self: index0=%llu out of range (size=%zu)",
+             (unsigned long long)index0, _ch_data[order].size());
     return false;
+  }
 
   if ((_ch_data[order][index0].tog & root_pos_mask) == 0)
     return (_ch_data[order][index0].first & root_pos_mask) != 0;
@@ -1747,9 +1765,14 @@ bool LogicSnapshot::get_display_edges(
   if (_ring_sample_count == 0)
     return false;
 
-  assert(end < _ring_sample_count);
-  assert(start <= end);
-  assert(min_length > 0);
+  // Guard: end/start may be invalid when called during file loading or
+  // after a stale config restore. Original asserts crash via MSVC dialog.
+  if (end >= _ring_sample_count || start > end || min_length <= 0) {
+    pxv_warn("LogicSnapshot::get_nxt_edge_self: end=%llu ring=%llu start=%llu min_len=%f",
+             (unsigned long long)end, (unsigned long long)_ring_sample_count,
+             (unsigned long long)start, min_length);
+    return false;
+  }
 
   uint64_t index = start;
   bool last_sample;
@@ -1820,12 +1843,17 @@ bool LogicSnapshot::get_nxt_edge_unlock(uint64_t &index, bool last_sample,
 bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
                                       uint64_t end, double min_length,
                                       int sig_index) {
-  if (index > end)
+  if (index > end) {
+    pxv_warn("LogicSnapshot::get_nxt_edge_self: index=%llu > end=%llu",
+             (unsigned long long)index, (unsigned long long)end);
     return false;
+  }
 
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
+  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+    pxv_warn("LogicSnapshot::get_nxt_edge_self: invalid order for sig_index=%d", sig_index);
     return false;
+  }
 
   // const unsigned int min_level = max((int)floorf(logf(min_length) /
   // logf(Scale)) - 1, 0);
@@ -1955,20 +1983,31 @@ bool LogicSnapshot::get_pre_edge(uint64_t &index, bool last_sample,
 
 bool LogicSnapshot::get_pre_edge_self(uint64_t &index, bool last_sample,
                                       double min_length, int sig_index) {
-  assert(index < _ring_sample_count);
+  // Guard: when opening a saved waveform file, _ring_sample_count may be 0
+  // (data not fully loaded or race condition during file open). The original
+  // assert(index < _ring_sample_count) crashes via the MSVC assertion dialog.
+  // Replace with a safe bounds check that returns false.
+  if (_ring_sample_count == 0 || index >= _ring_sample_count) {
+    pxv_warn("LogicSnapshot::get_pre_edge_self: index=%llu ring=%llu, skipping",
+             (unsigned long long)index, (unsigned long long)_ring_sample_count);
+    return false;
+  }
 
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size())
+  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+    pxv_warn("LogicSnapshot::get_pre_edge_self: invalid order for sig_index=%d", sig_index);
     return false;
-
-  // const unsigned int min_level = max((int)floorf(logf(min_length) /
+  }
   // logf(Scale)) - 1, 1);
   const unsigned int min_level =
       max((int)(log2f(min_length) - 1) / (int)ScalePower, 0);
   int root_index = index >> (LeafBlockPower + RootScalePower);
   uint8_t root_pos = (index & RootMask) >> LeafBlockPower;
-  if ((unsigned int)root_index >= _ch_data[order].size())
+  if ((unsigned int)root_index >= _ch_data[order].size()) {
+    pxv_warn("LogicSnapshot::get_pre_edge_self: root_index=%llu out of range (size=%zu)",
+             (unsigned long long)root_index, _ch_data[order].size());
     return false;
+  }
   bool root_first = _ch_data[order][root_index].last & MSB;
   bool edge_hit = false;
 
@@ -2030,7 +2069,12 @@ bool LogicSnapshot::lbp_nxt_edge(uint64_t &index, uint64_t root_index,
                                  uint64_t lbp_tog, uint8_t lbp_tog_pos,
                                  bool aft_tog, uint8_t aft_pos,
                                  bool last_sample, int sig_index) {
-  assert(lbp_tog != 0);
+  // Guard: lbp_tog may be 0 when called with stale/empty data during
+  // file loading. Original assert crashes via MSVC dialog.
+  if (lbp_tog == 0) {
+    pxv_warn("LogicSnapshot::lbp_nxt_edge: lbp_tog==0, skipping");
+    return false;
+  }
 
   // check last_sample with current index
   bool sample = get_sample_self(index, sig_index);
@@ -2166,7 +2210,12 @@ bool LogicSnapshot::lbp_pre_edge(uint64_t &index, uint64_t root_index,
                                  uint64_t lbp_tog, uint8_t &lbp_tog_pos,
                                  bool pre_tog, uint8_t pre_pos,
                                  bool last_sample, int sig_index) {
-  assert(lbp_tog != 0);
+  // Guard: lbp_tog may be 0 when called with stale/empty data during
+  // file loading. Original assert crashes via MSVC dialog.
+  if (lbp_tog == 0) {
+    pxv_warn("LogicSnapshot::lbp_pre_edge: lbp_tog==0, skipping");
+    return false;
+  }
 
   // check last_sample with current index
   bool sample = get_sample_self(index, sig_index);
@@ -2215,7 +2264,11 @@ bool LogicSnapshot::lbp_pre_edge(uint64_t &index, uint64_t root_index,
 bool LogicSnapshot::block_pre_edge(uint64_t *lbp, uint64_t &index,
                                    bool last_sample, unsigned int min_level,
                                    int sig_index) {
-  assert(min_level == 0);
+  // Guard: min_level > 0 is not expected, but can happen with stale state.
+  if (min_level != 0) {
+    pxv_warn("LogicSnapshot::block_pre_edge: min_level=%u != 0, skipping", min_level);
+    return false;
+  }
 
   unsigned int level = min_level;
   bool fast_forward = true;
@@ -2469,6 +2522,11 @@ uint64_t LogicSnapshot::get_block_size(int block_index) {
   uint64_t samples = 0;
 
   assert(block_index < block_num);
+  if (block_index >= block_num || block_index < 0) {
+    pxv_warn("LogicSnapshot::get_block_size: block_index=%d block_num=%d, returning 0",
+             block_index, block_num);
+    return 0;
+  }
 
   if (_loop_offset > 0) {
     if (block_index > 0 && block_index < block_num - 1) {
@@ -2499,7 +2557,13 @@ uint64_t LogicSnapshot::get_block_size(int block_index) {
 
 uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
                                       bool &sample) {
-  assert(block_index < get_block_num());
+  // Guard: block_index may be out of range during file loading.
+  if (block_index < 0 || block_index >= get_block_num()) {
+    pxv_warn("LogicSnapshot::get_block_buf: block_index=%d out of range, returning nullptr",
+             block_index);
+    sample = 0;
+    return nullptr;
+  }
 
   int order = get_ch_order(sig_index);
   if (order == -1 || (unsigned int)order >= _ch_data.size()) {
@@ -2618,8 +2682,13 @@ void LogicSnapshot::free_head_blocks(int count) {
     return;
   }
 
-  assert(count < (int)Scale);
-  assert(count > 0);
+  // Guard: count must be valid. Stale state during file loading
+  // could violate these invariants. Original asserts crash via MSVC dialog.
+  if (count <= 0 || count >= (int)Scale) {
+    pxv_warn("LogicSnapshot::free_head_blocks: count=%d invalid (Scale=%d), skipping",
+             count, (int)Scale);
+    return;
+  }
 
   for (int i = 0; i < (int)_channel_num; i++) {
     for (int j = _lst_free_block_index; j < count; j++) {

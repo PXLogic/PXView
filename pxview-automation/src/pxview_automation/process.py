@@ -58,6 +58,13 @@ class PXViewProcess:
         r"D:\PXView\PXView.exe",
     ]
 
+    # Common Linux install locations
+    _LINUX_SEARCH_PATHS = [
+        "/usr/local/bin/PXView",
+        "/usr/bin/PXView",
+        "/opt/PXView/PXView",
+    ]
+
     def __init__(
         self,
         exe_path: Optional[str] = None,
@@ -188,6 +195,12 @@ class PXViewProcess:
         # Search common Windows install locations
         if sys.platform == "win32":
             for path in cls._WIN_SEARCH_PATHS:
+                if os.path.isfile(path):
+                    return path
+
+        # Search common Linux install locations
+        if sys.platform != "win32":
+            for path in cls._LINUX_SEARCH_PATHS:
                 if os.path.isfile(path):
                     return path
 

@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 from helpers.assertions import assert_capture_status
 from helpers.capture_helper import do_timed_capture
 from helpers.export_helper import (

@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from mcp_client import McpClient
+from pxview_automation import McpClient
 
 
 def do_timed_capture(mcp: McpClient, device_id: str,

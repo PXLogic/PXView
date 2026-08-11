@@ -101,6 +101,7 @@ private:
   ISearchItemClick *_item_click;
   pv::widgets::SmoothScrollArea *_scroll;
   int _filter_index = 0;
+  bool _bReady = false;  // 延迟就绪标志，防止 show() 过程中的激活切换导致弹窗过早关闭
 };
 
 #endif // SEARCHCOMBOBOX_H

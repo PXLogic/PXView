@@ -148,10 +148,14 @@ srd_decoder_inst* Decoder::create_decoder_inst(srd_session *session)
 	{
         GVariant *const gvar = g_variant_new_int32((*it).second);
 		g_variant_ref_sink(gvar);
-		g_hash_table_insert(probes, (*it).first->id, gvar);
+		/* g_strdup the channel id — the hash table owns the key copy
+		 * and will g_free it on destroy. Without this, g_hash_table_destroy
+		 * would free srd_channel::id which is owned by srd_decoder. */
+		g_hash_table_insert(probes, g_strdup((*it).first->id), gvar);
 	}
 
     srd_inst_channel_set_all(decoder_inst, probes);
+	g_hash_table_destroy(probes);
 
 	return decoder_inst;
 }

@@ -49,6 +49,12 @@ QMutex LogDock::_log_mutex;
 QString LogDock::_log_buffer;
 LogDock *LogDock::_instance = nullptr;
 
+// Maximum bytes retained in the in-memory log buffer while the dock is hidden.
+// When exceeded, the buffer is trimmed to half this size (most recent data kept).
+// This allows the user to see recent history when switching to the log dock,
+// while preventing unbounded memory growth during long sessions.
+static constexpr int kMaxBufferBytes = 2 * 1024 * 1024;  // 2 MB
+
 LogDock::LogDock(QWidget *parent)
     : pv::widgets::SmoothScrollArea(parent), _auto_scroll(true),
       _needs_reload(false), _callback_index(-1) {
@@ -243,10 +249,8 @@ void LogDock::append_log_text(const QString &text) {
 
 void LogDock::showEvent(QShowEvent *event) {
   pv::widgets::SmoothScrollArea::showEvent(event);
-
-  // Discard stale flag — just start receiving new data from now on.
-  // Old data discarded while hidden is still in the log file on disk.
-  _needs_reload = false;
+  // Buffer was retained while hidden; the next on_flush_buffer tick
+  // will flush it to the view automatically.
 }
 
 void LogDock::on_clear() {
@@ -304,14 +308,18 @@ void LogDock::on_open_log_file() {
 }
 
 void LogDock::on_flush_buffer() {
-  // When not visible, just drain the buffer to prevent unbounded memory growth.
-  // Data is still written to the log file by xlog, so nothing is lost.
-  // When the panel becomes visible again, showEvent will reload from file.
+  // When not visible, retain the buffer so the user can see recent history
+  // after switching to this dock. Cap the buffer size to prevent unbounded
+  // memory growth. Data is also written to the log file by xlog, so older
+  // trimmed data is still available on disk via the "Open" button.
   if (!isVisible()) {
     QMutexLocker locker(&_log_mutex);
-    if (!_log_buffer.isEmpty()) {
-      _needs_reload = true;
-      _log_buffer.clear();
+    if (_log_buffer.size() > kMaxBufferBytes) {
+      // Keep the most recent half, aligned to the next line boundary.
+      _log_buffer = _log_buffer.right(kMaxBufferBytes / 2);
+      int nl = _log_buffer.indexOf('\n');
+      if (nl >= 0)
+        _log_buffer = _log_buffer.mid(nl + 1);
     }
     return;
   }

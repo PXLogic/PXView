@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 
 pytestmark = pytest.mark.p0
 

@@ -632,7 +632,14 @@ _own_signals.clear();
       model->set_hw_offset(ch.hw_offset);
       model->set_vertical_offset(ch.offset);
       model->set_zero_offset(ch.zero_offset);
-      model->set_vfactor(ch.vfactor);
+      // Guard: vfactor=0 in config is invalid (causes assertion failure in
+      // dslDial::set_factor). Old .pxc files saved in LA mode may have 0
+      // for DSO channels. Clamp to 1 (x1 probe default).
+      if (ch.vfactor == 0) {
+        pxv_warn("ViewSignalSync::rebuild: ch[%d] vfactor==0 in config, clamping to 1",
+                 ch.index);
+      }
+      model->set_vfactor(ch.vfactor > 0 ? ch.vfactor : 1);
     }
 
     // Set session for the model (so it can call session methods if needed)

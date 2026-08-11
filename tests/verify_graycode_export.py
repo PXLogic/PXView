@@ -4,7 +4,7 @@
 """
 import os, sys, time, hashlib, json
 sys.path.insert(0, os.path.dirname(__file__))
-from mcp_client import McpClient
+from pxview_automation import McpClient
 
 HOST, PORT = "127.0.0.1", 10110
 URL = f"http://{HOST}:{PORT}"

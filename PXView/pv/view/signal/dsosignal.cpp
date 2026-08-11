@@ -326,7 +326,12 @@ _vDial.reset(new dslDial(vValue.count(), DsoSignal::vDialValueStep, vValue, vUni
 
   if (src) {
     _vDial->set_sel(src->_vDial->get_sel());
-    _vDial->set_factor(src->_vDial->get_factor());
+    uint64_t src_factor = src->_vDial->get_factor();
+    if (src_factor == 0) {
+      pxv_warn("DsoSignal::init_vDial: src factor==0, clamping to 1");
+      src_factor = 1;
+    }
+    _vDial->set_factor(src_factor);
   }
 }
 
@@ -362,8 +367,8 @@ bool DsoSignal::load_settings() {
     _ref_max = ((1 << _bits) - 1);
 
   // -- vdiv (DSO-key backed; fall back to model value)
-  uint64_t vdiv;
-  uint64_t vfactor;
+  uint64_t vdiv = 0;
+  uint64_t vfactor = 1;  // safe default; 0 would trigger assertion in dslDial::set_factor
   if (probe) {
     ret = _data_source->device()->get_probe_vdiv(vdiv, probe);
     if (!ret) {
@@ -379,6 +384,14 @@ bool DsoSignal::load_settings() {
   } else {
     vdiv = _model ? _model->vdiv() : 0;
     vfactor = _model ? _model->vfactor() : 1;
+  }
+
+  // Clamp vfactor to at least 1 — saved waveform files may have factor=0
+  // (missing/malformed metadata), which would crash dslDial::set_factor.
+  if (vfactor == 0) {
+    pxv_warn("DsoSignal::load_settings: vfactor == 0 from %s, clamping to 1",
+             probe ? "driver" : "model");
+    vfactor = 1;
   }
 
   _vDial->set_value(vdiv);

@@ -206,9 +206,17 @@ void dslDial::set_value(uint64_t value)
 }
 
 void dslDial::set_factor(uint64_t factor)
-{   
-    assert(factor > 0);
-    
+{
+    // Guard against factor == 0 which can happen when loading a saved
+    // waveform file whose probe-factor metadata is 0 or missing.
+    // The original assert(factor > 0) crashes the application via the
+    // MSVC runtime assertion dialog. Clamp to 1 (the minimum valid factor)
+    // instead so the UI continues to function.
+    if (factor == 0) {
+        pxv_warn("dslDial::set_factor: factor == 0, clamping to 1");
+        factor = 1;
+    }
+
     if (_factor != factor) {
         _factor = factor;
     }

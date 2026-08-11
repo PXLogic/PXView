@@ -1,6 +1,6 @@
 import sys, time, json
 sys.path.insert(0, '.')
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 
 c = McpClient()
 c.connect()

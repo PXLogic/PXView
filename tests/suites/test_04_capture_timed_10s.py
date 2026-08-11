@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from mcp_client import McpClient
+from pxview_automation import McpClient
 from helpers.assertions import assert_capture_status
 from helpers.capture_helper import do_timed_capture
 

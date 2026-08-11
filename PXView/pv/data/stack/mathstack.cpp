@@ -236,23 +236,31 @@ uint64_t MathStack::default_factor()
 
     const uint64_t factor1 = static_cast<uint64_t>(m1->vfactor());
     const uint64_t factor2 = static_cast<uint64_t>(m2->vfactor());
-    assert(factor1 > 0);
-    assert(factor2 > 0);
+    // Guard instead of assert — saved waveform files may have vfactor=0
+    // in the model metadata, which would crash via MSVC assertion dialog.
+    if (factor1 == 0) {
+        pxv_warn("MathStack::default_factor: factor1 == 0, clamping to 1");
+    }
+    if (factor2 == 0) {
+        pxv_warn("MathStack::default_factor: factor2 == 0, clamping to 1");
+    }
+    const uint64_t f1 = factor1 > 0 ? factor1 : 1;
+    const uint64_t f2 = factor2 > 0 ? factor2 : 1;
     const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
     const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv());
-    const uint64_t v1 = dial1_value * factor1;
-    const uint64_t v2 = dial2_value * factor2;
+    const uint64_t v1 = dial1_value * f1;
+    const uint64_t v2 = dial2_value * f2;
 
     switch(_type) {
     case MATH_ADD:
     case MATH_SUB:
-        value = v1 > v2 ? factor1 : factor2;
+        value = v1 > v2 ? f1 : f2;
         break;
     case MATH_MUL:
-        value = factor1 * factor2;
+        value = f1 * f2;
         break;
     case MATH_DIV:
-        value = factor1 / factor2;
+        value = f1 / f2;
         break;
     }
 
@@ -399,7 +407,12 @@ void MathStack::get_math_envelope_section(EnvelopeSection &s,
 
 void MathStack::calc_math(uint64_t mathFactor)
 {
-    assert(mathFactor > 0);
+    // Guard instead of assert — mathFactor could be 0 when loading
+    // saved waveform files with missing/zero probe factor metadata.
+    if (mathFactor == 0) {
+        pxv_warn("MathStack::calc_math: mathFactor == 0, clamping to 1");
+        mathFactor = 1;
+    }
 
     std::lock_guard<std::mutex> lock(_mutex);
 

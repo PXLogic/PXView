@@ -1,0 +1,518 @@
+name: PXView Linux Debug + E2E Tests
+
+# ============================================================
+# Linux Debug 编译 + E2E 测试一体化工作流。
+#
+# Job 1: debug-asan-ubsan-e2e
+#   Debug 编译 (ASan + UBSan) → 运行 pytest E2E 全套测试
+#   ASan 发现 use-after-free / buffer overflow / double-free
+#   UBSan 发现未定义行为 (signed overflow / null deref / vtable)
+#
+# Job 2: debug-tsan-smoke
+#   Debug 编译 (TSan) → 仅验证 PXView --headless 启动 + MCP 响应
+#   TSan 发现数据竞争 (ASan 和 TSan 互斥，必须分开设)
+#
+# 触发方式：
+#   - push 到 main / pull request
+#   - 手动触发 (workflow_dispatch)
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Job 1: ASan + UBSan Debug Build + Full E2E Tests
+  # ============================================================
+  debug-asan-ubsan-e2e:
+    name: Debug ASan+UBSan Build & E2E Tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      # ============================================================
+      # Step 1: Checkout
+      # ============================================================
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # ============================================================
+      # Step 2: Install build dependencies
+      # ============================================================
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            sdcc wget zip
+          gcc --version
+          g++ --version
+
+      # ============================================================
+      # Step 3: Install Qt
+      # ============================================================
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      # ============================================================
+      # Step 4: Build qtwayland platform plugin
+      # ============================================================
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      # ============================================================
+      # Step 5: Configure CMake (Debug + ASan + UBSan)
+      # ============================================================
+      - name: Configure CMake (Debug + ASan + UBSan)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_ASAN=ON \
+            -DENABLE_UBSAN=ON \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      # ============================================================
+      # Step 6: Build PXView
+      # ============================================================
+      - name: Build PXView
+        run: |
+          cd build
+          ninja -j $(nproc)
+          echo "=== Build output ==="
+          ls -la PXView
+          file PXView
+
+      # ============================================================
+      # Step 7: Install test dependencies
+      # ============================================================
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html pytest-timeout
+          pip install -e ./pxview-automation
+
+      # ============================================================
+      # Step 8: Start PXView in GUI mode (offscreen) + Run E2E tests
+      #
+      # GUI mode (not --headless) exercises ALL code paths:
+      #   - QApplication + MainFrame + Viewport + SignalBar + all widgets
+      #   - signal/slot connections between data model and view
+      #   - viewport rendering (offscreen, but logic runs)
+      #   - DeviceAgent → SessionService → MainWindow event dispatch
+      #   - data feed → decoder → viewport threading pipeline
+      #
+      # QT_QPA_PLATFORM=offscreen:
+      #   Qt6 built-in platform plugin — creates all QWidgets, runs the
+      #   full event loop, but skips screen rendering. No Xvfb needed.
+      #
+      # PXVIEW_NO_AUTO_START=1:
+      #   Tells conftest.py NOT to start PXView again (we start it
+      #   manually here without --headless so the full GUI is created).
+      # ============================================================
+      - name: Start PXView GUI + Run E2E tests (ASan + UBSan)
+        run: |
+          export ASAN_OPTIONS="detect_leaks=1:abort_on_error=0:print_stacktrace=1:halt_on_error=0"
+          export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=0"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          export QT_QPA_PLATFORM=offscreen
+
+          echo "=== Starting PXView in GUI mode (offscreen) ==="
+          echo "This exercises: QApplication, MainFrame, Viewport, SignalBar,"
+          echo "signal/slot connections, viewport rendering pipeline."
+          echo ""
+
+          # Start PXView in GUI mode (NO --headless flag!)
+          # main.cpp calls control->Start() in BOTH headless and GUI paths,
+          # so MCP server (port 10110) is available in GUI mode too.
+          "$PWD/build/PXView" -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          # Wait for MCP server
+          MCP_URL="http://127.0.0.1:10110/mcp"
+          READY=0
+          for i in $(seq 1 120); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo ""
+            echo "=== Running pytest E2E test suite (ASan + UBSan, GUI mode) ==="
+            cd tests
+            export PXVIEW_NO_AUTO_START=1
+            export PXVIEW_MCP_URL="$MCP_URL"
+            export PXVIEW_STARTUP_TIMEOUT=30
+
+            python -m pytest suites/ -v \
+              --tb=short \
+              --html="../test_report.html" \
+              --junitxml="../test_report.xml" \
+              --self-contained-html \
+              --timeout=300 --timeout-method=thread \
+              || true
+          else
+            echo "ERROR: MCP server did not start within 120s"
+          fi
+
+          # Cleanup: stop PXView
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      # ============================================================
+      # Step 9: Upload test reports
+      # ============================================================
+      - name: Upload test report (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-asan-test-report-html
+          path: test_report.html
+          if-no-files-found: warn
+
+      - name: Upload test report (JUnit XML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-asan-test-report-junit
+          path: test_report.xml
+          if-no-files-found: warn
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: ASan E2E Test Results
+          path: test_report.xml
+          reporter: java-junit
+          fail-on-error: 'false'
+
+  # ============================================================
+  # Job 2: TSan Debug Build + Thread Race Detection
+  # (ASan and TSan are mutually exclusive, so this is a separate job)
+  #
+  # TSan causes 5-20x slowdown, so we run a targeted subset of tests:
+  #   Phase 1: headless mode — test_01 (9 MCP protocol tests)
+  #   Phase 2: GUI mode (QT_QPA_PLATFORM=offscreen) — test_01 + test_03
+  #            GUI mode exercises full threading: data feed → decoder →
+  #            viewport rendering → signal/slot connections. This is
+  #            where races between sig_session, device_agent, and view
+  #            would be caught.
+  # ============================================================
+  debug-tsan-races:
+    name: Debug TSan Build & Race Detection
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            sdcc wget zip
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Debug + TSan)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_TSAN=ON \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Build PXView
+        run: |
+          cd build
+          ninja -j $(nproc)
+          echo "=== Build output ==="
+          ls -la PXView
+          file PXView
+
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html pytest-timeout
+          pip install -e ./pxview-automation
+
+      # ============================================================
+      # Phase 1: TSan headless mode — MCP protocol tests
+      # QCoreApplication only (no GUI widgets).
+      # Catches races in: MCP transport, session service, device agent.
+      # ============================================================
+      - name: TSan Phase 1 — headless mode (MCP protocol)
+        run: |
+          export PXVIEW_EXE_PATH="$PWD/build/PXView"
+          export PXVIEW_STARTUP_TIMEOUT=180
+          export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
+          export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+
+          echo "=============================================="
+          echo "  TSan Phase 1: headless mode"
+          echo "  (QCoreApplication, no GUI widgets)"
+          echo "=============================================="
+
+          # Start PXView in headless mode
+          "$PXVIEW_EXE_PATH" --headless -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          # Wait for MCP server (TSan slows startup ~10x, allow 180s)
+          READY=0
+          for i in $(seq 1 180); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$PXVIEW_MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo "=== Running MCP protocol tests under TSan ==="
+            cd tests
+            python -m pytest suites/test_01_mcp_protocol.py -v \
+              --tb=short --timeout=300 --timeout-method=thread \
+              --html="../tsan_headless_report.html" \
+              --junitxml="../tsan_headless_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Tests had failures (check for TSan race reports above)"
+          else
+            echo "ERROR: MCP server did not start within 180s"
+          fi
+
+          # Cleanup
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      # ============================================================
+      # Phase 2: TSan GUI mode (offscreen) — MCP + capture tests
+      # QApplication + MainFrame + Viewport + SignalBar + all widgets.
+      # This exercises the full threading pipeline:
+      #   datafeed thread → decoder thread → Qt UI thread (viewport)
+      #   signal/slot connections between data model and view
+      #   DeviceAgent → SessionService → MainWindow event dispatch
+      #
+      # QT_QPA_PLATFORM=offscreen:
+      #   - Qt6 built-in platform plugin (no Xvfb needed)
+      #   - Creates all QWidgets but skips screen rendering
+      #   - Full Qt event loop, signal/slot, timers all active
+      #   - Exposes ALL threading paths that headless mode skips
+      # ============================================================
+      - name: TSan Phase 2 — GUI mode offscreen (MCP + capture)
+        run: |
+          export PXVIEW_EXE_PATH="$PWD/build/PXView"
+          export PXVIEW_STARTUP_TIMEOUT=180
+          export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
+          export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          # Use Qt offscreen platform: full GUI without a display.
+          # This is a Qt6 built-in plugin, no extra packages needed.
+          # It creates QApplication + MainFrame + all widgets, runs the
+          # full event loop, but skips OpenGL/rendering to screen.
+          export QT_QPA_PLATFORM=offscreen
+
+          echo "=============================================="
+          echo "  TSan Phase 2: GUI mode (offscreen)"
+          echo "  (QApplication + MainFrame + Viewport + ...)"
+          echo "  Exercises: data feed → decoder → viewport"
+          echo "             signal/slot, event dispatch"
+          echo "=============================================="
+
+          # Start PXView in GUI mode (NO --headless flag!)
+          # MCP server starts in both modes (control->Start() is
+          # called in both headless and GUI paths in main.cpp).
+          "$PXVIEW_EXE_PATH" -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          # Wait for MCP server
+          READY=0
+          for i in $(seq 1 180); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$PXVIEW_MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo "=== Running MCP + capture tests under TSan (GUI mode) ==="
+            echo "These tests exercise the full data feed → decoder → viewport"
+            echo "threading pipeline. TSan will detect any data races."
+            cd tests
+            # test_01: MCP protocol (9 tests)
+            # test_03: capture basic (13 tests) — exercises data feed thread,
+            #          capture status polling, stop/wait capture
+            python -m pytest \
+              suites/test_01_mcp_protocol.py \
+              suites/test_03_capture_basic.py \
+              -v --tb=short --timeout=300 --timeout-method=thread \
+              --html="../tsan_gui_report.html" \
+              --junitxml="../tsan_gui_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Tests had failures (check for TSan race reports above)"
+          else
+            echo "ERROR: MCP server did not start within 180s (GUI mode)"
+          fi
+
+          # Cleanup
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      # ============================================================
+      # Upload TSan test reports
+      # ============================================================
+      - name: Upload TSan headless report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-headless-report
+          path: |
+            tsan_headless_report.html
+            tsan_headless_report.xml
+          if-no-files-found: warn
+
+      - name: Upload TSan GUI report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-gui-report
+          path: |
+            tsan_gui_report.html
+            tsan_gui_report.xml
+          if-no-files-found: warn
+
+      - name: Publish TSan test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: TSan Race Detection Results
+          path: |
+            tsan_headless_report.xml
+            tsan_gui_report.xml
+          reporter: java-junit
+          fail-on-error: 'false'

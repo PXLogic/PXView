@@ -108,9 +108,17 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
       cfg.colour = ch_obj.contains("colour")
                        ? ch_obj["colour"].toString().toStdString()
                        : std::string();
+      // Guard: vfactor=0 is invalid (causes assertion failure in
+      // dslDial::set_factor). Old config files saved in LA mode may
+      // have vfactor=0 for DSO channels. Clamp to 1 (x1 probe default).
       cfg.vfactor = ch_obj.contains("vfactor")
                         ? (uint64_t)ch_obj["vfactor"].toVariant().toULongLong()
                         : 0;
+      if (cfg.vfactor == 0) {
+        pxv_warn("SignalConfigStore: ch[%d] vfactor==0 in JSON, clamping to 1",
+                 cfg.index);
+        cfg.vfactor = 1;
+      }
       cfg.trig_value = ch_obj.contains("trig_value")
                            ? (uint8_t)ch_obj["trig_value"].toInt()
                            : 0;
@@ -174,7 +182,14 @@ void SignalConfigStore::save_signal_config(
       }
     }
 
-    if (mode == ANALOG || mode == DSO) {
+    // ROOT FIX: Use channel TYPE (not work mode) to decide whether to save
+    // DSO/ANALOG fields. The device may have DSO channels even in LOGIC mode
+    // (e.g. DSLogic/DSCope have both LOGIC + DSO channels). The old code
+    // checked `mode == ANALOG || mode == DSO`, so in LA mode DSO channels
+    // had vfactor=0 (the struct default), which caused assertion failures
+    // when the file was loaded later (dslDial::set_factor assert(factor > 0)).
+    if (probe->type == SR_CHANNEL_DSO ||
+        probe->type == SR_CHANNEL_ANALOG) {
       // SR_CONF_PROBE_VDIV / SR_CONF_PROBE_COUPLING fork DSO keys deleted;
       // cfg.vdiv / cfg.coupling keep their defaults (0). map_default is still
       // queried (key retained in pxvdef.h, migrated in Phase 2).
@@ -191,7 +206,16 @@ void SignalConfigStore::save_signal_config(
       cfg.offset = matched_model ? (uint16_t)matched_model->vertical_offset() : 0;
       cfg.zero_offset = matched_model ? (uint16_t)matched_model->zero_offset() : 0;
       // Task 3: vfactor (DSO/ANALOG，原 MainWindow 路径 B 写入)。
-      cfg.vfactor = matched_model ? (uint64_t)matched_model->vfactor() : 0;
+      // Clamp to at least 1 — vfactor=0 is invalid (causes assertion failure
+      // in dslDial::set_factor). When the current work mode is LOGIC, DSO
+      // SignalModels may not have vfactor set, so the model value could be 0.
+      uint64_t vf = matched_model ? (uint64_t)matched_model->vfactor() : 0;
+      if (vf == 0) {
+        pxv_warn("SignalConfigStore::save: ch[%d] vfactor==0 from model, clamping to 1",
+                 cfg.index);
+        vf = 1;
+      }
+      cfg.vfactor = vf;
     }
 
     // Task 3: DSO 触发电平原始值 (原 MainWindow 路径 trigValue)。

@@ -1037,6 +1037,7 @@ void ViewportInteraction::update_edge_nav_buttons() {
       _viewport->mouse_point() - QPoint(0, _viewport->view().get_vOffset());
   LogicSignal *sig = get_hovered_logic_signal(screenPos);
   if (!sig || !sig->data() || sig->data()->empty()) {
+    pxv_warn("ViewportInteraction::update_edge_nav_buttons: no signal or empty data, hiding buttons");
     _viewport->prev_edge_btn()->hide();
     _viewport->next_edge_btn()->hide();
     _viewport->hover_logic_signal() = nullptr;
@@ -1059,7 +1060,12 @@ void ViewportInteraction::update_edge_nav_buttons() {
   // Check if previous/next edges exist outside the viewport
   auto *snapshot = sig->data();
   int sig_index = sig->get_index();
-  uint64_t end = snapshot->get_ring_sample_count() - 1;
+  uint64_t ring_count = snapshot->get_ring_sample_count();
+  if (ring_count == 0) {
+    pxv_warn("ViewportInteraction: ring_sample_count==0, skipping edge nav");
+    return;
+  }
+  uint64_t end = ring_count - 1;
 
   // Get current viewport boundaries in sample indices
   uint64_t leftIndex = _viewport->view().pixel2index(0);
@@ -1092,11 +1098,18 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
     return;
 
   auto *snapshot = _viewport->hover_logic_signal()->data();
-  if (!snapshot || snapshot->empty())
+  if (!snapshot || snapshot->empty()) {
+    pxv_warn("ViewportInteraction::navigate_to_edge: no snapshot or empty data, skipping");
     return;
+  }
 
   int sig_index = _viewport->hover_logic_signal()->get_index();
-  uint64_t end = snapshot->get_ring_sample_count() - 1;
+  uint64_t ring_count = snapshot->get_ring_sample_count();
+  if (ring_count == 0) {
+    pxv_warn("ViewportInteraction: ring_sample_count==0, skipping edge nav");
+    return;
+  }
+  uint64_t end = ring_count - 1;
 
   // Start searching from the viewport edge (consistent with Logic 2:
   // next edge searches from right edge, previous edge searches from left edge)

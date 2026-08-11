@@ -1,7 +1,7 @@
 """手动验证：统一 export_raw_data 工具支持 csv/binary/vcd/hex/bits 多格式导出。"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(__file__))
-from mcp_client import McpClient
+from pxview_automation import McpClient
 
 URL = "http://127.0.0.1:10110"
 TMP = "c:/tmp/fmt_verify"

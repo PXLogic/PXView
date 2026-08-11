@@ -7,36 +7,130 @@ Provides:
 - device_id: Device ID string of the demo device
 - tmp_capture_dir: Temporary directory for capture/export files
 - cleanup_after_test: Fixture that ensures clean state between tests
+
+This conftest uses pxview-automation's PXViewProcess to automatically
+start/stop PXView in headless mode, eliminating the need for external
+startup scripts.  If PXView is already running, it connects to the
+existing instance instead.
+
+Configuration via environment variables:
+    PXVIEW_MCP_URL          MCP endpoint URL (default: http://127.0.0.1:10110/mcp)
+    PXVIEW_STARTUP_TIMEOUT  Seconds to wait for server (default: 120)
+    PXVIEW_EXE_PATH         Path to PXView.exe; if set, auto-start headless
+    PXVIEW_NO_AUTO_START    If "1", never auto-start (assume server is running)
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 import pytest
 
-from mcp_client import McpClient, McpError, McpConnectionError
+# Ensure the pxview-automation package is importable.  The package may be
+# pip-installed (preferred) or used directly from source.
+try:
+    from pxview_automation import McpClient, McpError, PXViewProcess
+except ImportError:
+    # Fall back to source tree
+    _pkg_src = Path(__file__).resolve().parent.parent / "pxview-automation" / "src"
+    if str(_pkg_src) not in sys.path:
+        sys.path.insert(0, str(_pkg_src))
+    from pxview_automation import McpClient, McpError, PXViewProcess
 
 
 # ---- Configuration (overridable via environment variables) ----
 
 MCP_URL = os.environ.get("PXVIEW_MCP_URL", "http://127.0.0.1:10110/mcp")
-MCP_STARTUP_TIMEOUT = float(os.environ.get("PXVIEW_STARTUP_TIMEOUT", "60"))
+MCP_STARTUP_TIMEOUT = float(os.environ.get("PXVIEW_STARTUP_TIMEOUT", "120"))
+EXE_PATH = os.environ.get("PXVIEW_EXE_PATH", "")
+NO_AUTO_START = os.environ.get("PXVIEW_NO_AUTO_START", "") == "1"
 
 
 # ---- Session-scoped fixtures ----
 
 @pytest.fixture(scope="session")
-def mcp() -> Iterator[McpClient]:
+def _pxview_process() -> Iterator[Optional[PXViewProcess]]:
+    """Start PXView headless if needed, or return None if already running.
+
+    This fixture is session-scoped so PXView is started once for the
+    entire test run and stopped when all tests are done.
+
+    If PXVIEW_NO_AUTO_START=1 is set, or if the MCP server is already
+    reachable, no process is started.
+    """
+    proc: Optional[PXViewProcess] = None
+
+    # Check if MCP server is already reachable
+    probe = McpClient(url=MCP_URL, timeout=5.0, max_retries=1)
+    if probe.wait_for_server(timeout=3.0, interval=0.5):
+        # Server already running — no need to start PXView
+        yield None
+        return
+
+    if NO_AUTO_START:
+        pytest.fail(
+            f"PXVIEW_NO_AUTO_START=1 but MCP server at {MCP_URL} is not "
+            f"reachable. Start PXView --headless first."
+        )
+
+    # Determine the exe path
+    exe = EXE_PATH or None
+
+    # If no exe path given, try common build/package locations relative to repo
+    if not exe:
+        repo_root = Path(__file__).resolve().parent.parent
+        # Linux/macOS uses "PXView", Windows uses "PXView.exe"
+        candidates = [
+            repo_root / "build" / "PXView",            # Linux build dir
+            repo_root / "build" / "PXView.exe",        # Windows build dir
+            repo_root / "package" / "PXView.exe",      # Windows package dir
+            repo_root / "package" / "PXView",          # Linux package dir
+            repo_root / "install.dir" / "usr" / "bin" / "PXView",  # Linux install dir
+            repo_root / "PXView" / "build" / "PXView.exe",
+        ]
+        for c in candidates:
+            if c.exists():
+                exe = str(c)
+                break
+
+    if not exe:
+        # Let PXViewProcess search PATH and common install dirs
+        exe = None
+
+    try:
+        proc = PXViewProcess(
+            exe_path=exe,
+            port=10110,
+            startup_timeout=MCP_STARTUP_TIMEOUT,
+        )
+        proc.start()
+    except Exception as exc:
+        pytest.fail(
+            f"Failed to start PXView headless: {exc}\n"
+            f"Set PXVIEW_EXE_PATH to point to PXView.exe, or start it "
+            f"manually with: PXView.exe --headless -l 4"
+        )
+
+    yield proc
+
+    # Cleanup: stop PXView
+    if proc is not None:
+        proc.stop()
+
+
+@pytest.fixture(scope="session")
+def mcp(_pxview_process) -> Iterator[McpClient]:
     """Provide a connected MCP client for the entire test session."""
-    client = McpClient(url=MCP_URL, timeout=120.0, max_retries=5,
-                       retry_delay=1.0)
-    # Wait for server to be reachable
+    client = McpClient(
+        url=MCP_URL, timeout=120.0, max_retries=5, retry_delay=1.0
+    )
+    # Wait for server to be reachable (covers both auto-started and external)
     if not client.wait_for_server(timeout=MCP_STARTUP_TIMEOUT, interval=1.0):
         pytest.fail(
             f"Cannot connect to MCP server at {MCP_URL} within "
@@ -46,7 +140,7 @@ def mcp() -> Iterator[McpClient]:
     client.connect()
     assert client.connected, "MCP connect() returned but connected=False"
     # Verify we got tools
-    assert len(client.tools) > 0, f"tools/list returned 0 tools"
+    assert len(client.tools) > 0, "tools/list returned 0 tools"
     yield client
     # Cleanup: close any capture, clear decoders
     try:

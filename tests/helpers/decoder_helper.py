@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 
 
 def add_decoder_safe(mcp: McpClient, decoder_name: str,

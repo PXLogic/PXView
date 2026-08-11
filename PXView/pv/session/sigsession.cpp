@@ -1267,9 +1267,16 @@ void SigSession::init_signals() {
       if (ch_type == SR_CHANNEL_DSO ||
           ch_type == SR_CHANNEL_ANALOG) {
         uint64_t vfactor = 1;
-        if (_state->device_agent().get_probe_factor(vfactor, probe))
+        if (_state->device_agent().get_probe_factor(vfactor, probe)) {
+          // Guard: saved waveform files may have probe factor = 0 in metadata.
+          // Storing 0 in the model would later trigger assertion failures in
+          // dslDial::set_factor / MathStack::default_factor.
+          if (vfactor == 0) {
+            pxv_warn("SigSession: vfactor==0 from driver, clamping to 1");
+            vfactor = 1;
+          }
           model->set_vfactor((double)vfactor);
-        else
+        } else
           model->set_vfactor(1.0);
 
         bool map_default = true;
@@ -1467,9 +1474,16 @@ void SigSession::reload() {
         // Use typed wrappers (is_dsl_device() guard) — non-DSL devices skip
         // the queries entirely, avoiding "not available" log noise on demo.
         uint64_t vfactor = 1;
-        if (_state->device_agent().get_probe_factor(vfactor, probe))
+        if (_state->device_agent().get_probe_factor(vfactor, probe)) {
+          // Guard: saved waveform files may have probe factor = 0 in metadata.
+          // Storing 0 in the model would later trigger assertion failures in
+          // dslDial::set_factor / MathStack::default_factor.
+          if (vfactor == 0) {
+            pxv_warn("SigSession: vfactor==0 from driver, clamping to 1");
+            vfactor = 1;
+          }
           model->set_vfactor((double)vfactor);
-        else
+        } else
           model->set_vfactor(1.0);
 
         bool map_default = true;

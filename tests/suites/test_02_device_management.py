@@ -7,7 +7,7 @@ refresh_device_list.
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 from helpers.assertions import assert_device_valid, assert_channel_valid
 
 pytestmark = pytest.mark.p0

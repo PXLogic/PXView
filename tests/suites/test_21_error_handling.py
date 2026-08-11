@@ -4,7 +4,7 @@ test_21_error_handling.py - Error handling tests.
 
 import pytest
 
-from mcp_client import McpClient, McpError
+from pxview_automation import McpClient, McpError
 from helpers.capture_helper import do_timed_capture
 
 pytestmark = pytest.mark.p2

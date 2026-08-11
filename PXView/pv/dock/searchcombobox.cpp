@@ -31,6 +31,7 @@
 #include <QPoint>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #ifdef WIN32
@@ -162,7 +163,10 @@ void SearchComboBox::AddDataItem(QString id, QString name, void *data_handle,
 
 void SearchComboBox::changeEvent(QEvent *event) {
   if (event->type() == QEvent::ActivationChange) {
-    if (this->isActiveWindow() == false) {
+    // 只有在弹窗完全就绪后才响应失焦关闭。
+    // show() 过程中窗口管理器会产生一系列短暂的激活状态切换，
+    // 如果在就绪前就关闭会导致弹窗“闪一下”被销毁又重建。
+    if (_bReady && this->isActiveWindow() == false) {
       this->close();
       this->deleteLater();
       return;
@@ -188,6 +192,15 @@ void SearchComboBox::showEvent(QShowEvent *event) {
                            sizeof(preference));
   }
 #endif
+
+  // 延迟到下一个事件循环迭代才将弹窗标记为就绪。
+  // show() 过程中窗口管理器会产生一系列短暂的激活状态切换，
+  // 在此期间 isActiveWindow() 可能短暂返回 false，
+  // 如果不延迟，弹窗会在刚 show 出来时就被 changeEvent 关闭。
+  _bReady = false;
+  QTimer::singleShot(0, this, [this]() {
+    _bReady = true;
+  });
 }
 
 void SearchComboBox::OnItemClick(void *sender, void *data_handle) {

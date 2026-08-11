@@ -1,0 +1,162 @@
+[1m============================= test session starts =============================[0m
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Program Files\Python314\python.exe
+cachedir: .pytest_cache
+metadata: {'Python': '3.14.7', 'Platform': 'Windows-11-10.0.26200-SP0', 'Packages': {'pytest': '9.1.1', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.14.2', 'html': '4.2.0', 'metadata': '3.1.1', 'timeout': '2.4.0'}}
+rootdir: C:\Users\admin\Downloads\Downloads\DSView-main_2026_4_27cppnb\tests
+configfile: pytest.ini
+plugins: anyio-4.14.2, html-4.2.0, metadata-3.1.1, timeout-2.4.0
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+[1mcollecting ... [0mcollected 10 items
+
+suites/test_24_real_decode.py::TestPwmRealDecode::test_pwm_random_pattern_produces_results [31mFAILED[0m[31m [ 10%][0m
+suites/test_24_real_decode.py::TestPwmRealDecode::test_pwm_duty_cycle_values_in_range [31mFAILED[0m[31m [ 20%][0m
+suites/test_24_real_decode.py::TestPwmRealDecode::test_pwm_period_values_positive [31mFAILED[0m[31m [ 30%][0m
+suites/test_24_real_decode.py::TestPwmRealDecode::test_pwm_annotation_count_reasonable [31mFAILED[0m[31m [ 40%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_pattern_produces_results [31mFAILED[0m[31m [ 50%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_phase_values [31mFAILED[0m[31m [ 60%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_increment_values [31mFAILED[0m[31m [ 70%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_count_values [32mPASSED[0m[31m [ 80%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_annotation_count_reasonable [31mFAILED[0m[31m [ 90%][0m
+suites/test_24_real_decode.py::TestGrayCodeRealDecode::test_graycode_interval_values [31mFAILED[0m[31m [100%][0m
+
+================================== FAILURES ===================================
+[31m[1m_________ TestPwmRealDecode.test_pwm_random_pattern_produces_results __________[0m
+[1m[31msuites\test_24_real_decode.py[0m:101: in test_pwm_random_pattern_produces_results
+    [0m[94massert[39;49;00m [96mlen[39;49;00m(results) > [94m0[39;49;00m, \
+[1m[31mE   AssertionError: PWM decoder produced 0 annotations on random pattern �� random data should have many edges[0m
+[1m[31mE   assert 0 > 0[0m
+[1m[31mE    +  where 0 = len([])[0m
+[31m[1m____________ TestPwmRealDecode.test_pwm_duty_cycle_values_in_range ____________[0m
+[1m[31msuites\test_24_real_decode.py[0m:107: in test_pwm_duty_cycle_values_in_range
+    [0manalyzer_id = add_decoder_safe([90m[39;49;00m
+[1m[31mhelpers\decoder_helper.py[0m:25: in add_decoder_safe
+    [0mresult = mcp.add_analyzer([90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:598: in add_analyzer
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33madd_analyzer[39;49;00m[33m"[39;49;00m, args, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m______________ TestPwmRealDecode.test_pwm_period_values_positive ______________[0m
+[1m[31msuites\test_24_real_decode.py[0m:143: in test_pwm_period_values_positive
+    [0manalyzer_id = add_decoder_safe([90m[39;49;00m
+[1m[31mhelpers\decoder_helper.py[0m:25: in add_decoder_safe
+    [0mresult = mcp.add_analyzer([90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:598: in add_analyzer
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33madd_analyzer[39;49;00m[33m"[39;49;00m, args, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m___________ TestPwmRealDecode.test_pwm_annotation_count_reasonable ____________[0m
+[1m[31msuites\test_24_real_decode.py[0m:182: in test_pwm_annotation_count_reasonable
+    [0manalyzer_id = add_decoder_safe([90m[39;49;00m
+[1m[31mhelpers\decoder_helper.py[0m:25: in add_decoder_safe
+    [0mresult = mcp.add_analyzer([90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:598: in add_analyzer
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33madd_analyzer[39;49;00m[33m"[39;49;00m, args, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m________ TestGrayCodeRealDecode.test_graycode_pattern_produces_results ________[0m
+[1m[31msuites\test_24_real_decode.py[0m:220: in test_graycode_pattern_produces_results
+    [0manalyzer_id = add_decoder_safe([90m[39;49;00m
+[1m[31mhelpers\decoder_helper.py[0m:25: in add_decoder_safe
+    [0mresult = mcp.add_analyzer([90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:598: in add_analyzer
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33madd_analyzer[39;49;00m[33m"[39;49;00m, args, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m______________ TestGrayCodeRealDecode.test_graycode_phase_values ______________[0m
+[1m[31msuites\test_24_real_decode.py[0m:247: in test_graycode_phase_values
+    [0manalyzer_id = add_decoder_safe([90m[39;49;00m
+[1m[31mhelpers\decoder_helper.py[0m:25: in add_decoder_safe
+    [0mresult = mcp.add_analyzer([90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:598: in add_analyzer
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33madd_analyzer[39;49;00m[33m"[39;49;00m, args, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m____________ TestGrayCodeRealDecode.test_graycode_increment_values ____________[0m
+[1m[31msuites\test_24_real_decode.py[0m:304: in test_graycode_increment_values
+    [0m[94massert[39;49;00m [96mlen[39;49;00m(results) > [94m0[39;49;00m, [33m"[39;49;00m[33mNo GrayCode results[39;49;00m[33m"[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: No GrayCode results[0m
+[1m[31mE   assert 0 > 0[0m
+[1m[31mE    +  where 0 = len([])[0m
+[31m[1m______ TestGrayCodeRealDecode.test_graycode_annotation_count_reasonable _______[0m
+[1m[31msuites\test_24_real_decode.py[0m:384: in test_graycode_annotation_count_reasonable
+    [0mdo_buffer_capture_with_pattern([90m[39;49;00m
+[1m[31msuites\test_24_real_decode.py[0m:66: in do_buffer_capture_with_pattern
+    [0m[94mreturn[39;49;00m mcp.get_capture_status()[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:499: in get_capture_status
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._call_tool([33m"[39;49;00m[33mget_capture_status[39;49;00m[33m"[39;49;00m, {}, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:266: in _call_tool
+    [0mresp = [96mself[39;49;00m._call_method([33m"[39;49;00m[33mtools/call[39;49;00m[33m"[39;49;00m, params, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:250: in _call_method
+    [0m[94mreturn[39;49;00m [96mself[39;49;00m._post(body, timeout=timeout)[90m[39;49;00m
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31m..\pxview-automation\src\pxview_automation\client.py[0m:232: in _post
+    [0m[94mraise[39;49;00m McpConnectionError([90m[39;49;00m
+[1m[31mE   pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>[0m
+[31m[1m____________ TestGrayCodeRealDecode.test_graycode_interval_values _____________[0m
+[1m[31msuites\test_24_real_decode.py[0m:419: in test_graycode_interval_values
+    [0m[94massert[39;49;00m [96mlen[39;49;00m(results) > [94m0[39;49;00m, [33m"[39;49;00m[33mNo GrayCode results[39;49;00m[33m"[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: No GrayCode results[0m
+[1m[31mE   assert 0 > 0[0m
+[1m[31mE    +  where 0 = len([])[0m
+[36m[1m=========================== short test summary info ===========================[0m
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestPwmRealDecode::test_pwm_random_pattern_produces_results[0m - AssertionError: PWM decoder produced 0 annotations on random pattern �� random data should have many edges
+assert 0 > 0
+ +  where 0 = len([])
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestPwmRealDecode::test_pwm_duty_cycle_values_in_range[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestPwmRealDecode::test_pwm_period_values_positive[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestPwmRealDecode::test_pwm_annotation_count_reasonable[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestGrayCodeRealDecode::test_graycode_pattern_produces_results[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestGrayCodeRealDecode::test_graycode_phase_values[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestGrayCodeRealDecode::test_graycode_increment_values[0m - AssertionError: No GrayCode results
+assert 0 > 0
+ +  where 0 = len([])
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestGrayCodeRealDecode::test_graycode_annotation_count_reasonable[0m - pxview_automation.exceptions.McpConnectionError: Cannot connect to MCP server at http://127.0.0.1:10110/mcp: <urlopen error [WinError 10061] ����Ŀ�����������ܾ����޷����ӡ�>
+[31mFAILED[0m suites/test_24_real_decode.py::[1mTestGrayCodeRealDecode::test_graycode_interval_values[0m - AssertionError: No GrayCode results
+assert 0 > 0
+ +  where 0 = len([])
+[31m=================== [31m[1m9 failed[0m, [32m1 passed[0m[31m in 909.90s (0:15:09)[0m[31m ===================[0m

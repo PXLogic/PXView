@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from mcp_client import McpClient
+from pxview_automation import McpClient
 
 
 def assert_device_valid(device: dict) -> None:

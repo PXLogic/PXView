@@ -1,4 +1,4 @@
-﻿name: PXView Build
+﻿﻿name: PXView Build
 
 on:
   workflow_dispatch:
@@ -894,17 +894,7 @@ jobs:
           name: PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}
           path: package/
           if-no-files-found: error
-          compression-level: 9
-
-      - name: Create Portable ZIP (for Release upload)
-        run: |
-          ZIP_NAME="PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip"
-          cd package
-          zip -r -9 "../${ZIP_NAME}" .
-          cd ..
-          ls -la "${ZIP_NAME}"
-          echo "=== ZIP contents (first 20 entries) ==="
-          unzip -l "${ZIP_NAME}" | head -25
+          compression-level: 0
 
       - name: Create GitHub Release (tag push or manual opt-in)
         if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true') }}
@@ -912,7 +902,6 @@ jobs:
         with:
           files: |
             PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe
-            PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:
