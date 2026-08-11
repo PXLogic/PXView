@@ -1598,11 +1598,11 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
 // calling get_samples() for every chunk, and the iterator count
 // prevents free_data/free_head_blocks from freeing memory mid-read.
 
-LogicSnapshot::SegmentDataIterator*
+std::unique_ptr<LogicSnapshot::SegmentDataIterator>
 LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
-  auto *it = new SegmentDataIterator();
+  auto it = std::make_unique<SegmentDataIterator>();
   begin_iteration();  // increment _iterator_count
 
   it->current_sample = start + _loop_offset;
@@ -1692,11 +1692,11 @@ void LogicSnapshot::continue_sample_iteration(SegmentDataIterator* it,
   }
 }
 
-void LogicSnapshot::end_sample_iteration(SegmentDataIterator* it) {
+void LogicSnapshot::end_sample_iteration(std::unique_ptr<SegmentDataIterator> it) {
   if (!it)
     return;
   end_iteration();  // decrement _iterator_count
-  delete it;
+  // unique_ptr destructor deletes the SegmentDataIterator
 }
 
 bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {

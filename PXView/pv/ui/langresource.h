@@ -25,6 +25,7 @@
 
 #include <map>
 #include <vector>
+#include <memory>
 #include <QString>
 #include <string>
 #include "pv/ui/string_ids.h"
@@ -104,7 +105,7 @@ private:
     void load_page(Lang_resource_page &p, QString file);
  
 private:
-    std::vector<Lang_resource_page*> _pages;
+    std::vector<std::unique_ptr<Lang_resource_page>> _pages;
     Lang_resource_page    *_current_page;
     int     _cur_lang;
     std::map<std::string, int> _query_decoders;

@@ -58,14 +58,8 @@ LangResource::LangResource()
 
 LangResource *LangResource::Instance()
 {
-    static LangResource *ins = nullptr;
-
-    if (ins == nullptr)
-    {
-        ins = new LangResource();
-    }
-
-    return ins;
+    static LangResource ins;
+    return &ins;
 }
 
 const char *LangResource::get_lang_key(int lang)
@@ -106,11 +100,11 @@ bool LangResource::Load(int lang)
 
     for (int i = 0; i < num; i++)
     {
-        Lang_resource_page *p = new Lang_resource_page();
+        auto p = std::make_unique<Lang_resource_page>();
         p->_id = lange_page_keys[i].id;
         p->_source = lange_page_keys[i].source;
         p->_is_dynamic = lange_page_keys[i].is_dynamic;
-        _pages.push_back(p);
+        _pages.push_back(std::move(p));
     }
 
     // P0-1: Preload all non-dynamic pages on the main thread.
@@ -124,7 +118,7 @@ bool LangResource::Load(int lang)
     // true for non-dynamic pages, so the worker thread never enters load_page().
     // Safe w.r.t. locking: Load() already holds _mutex and load_page() does not
     // reacquire it.
-    for (Lang_resource_page *p : _pages)
+    for (const auto &p : _pages)
     {
         if (!p->_is_dynamic)
             load_page(*p);
@@ -141,10 +135,9 @@ void LangResource::Release()
 
 void LangResource::release_self()
 { 
-    for (Lang_resource_page *p : _pages)
+    for (const auto &p : _pages)
     {
         p->Clear();
-        delete p;
     }
     _pages.clear();
     _current_page = nullptr;
@@ -229,9 +222,9 @@ const char* LangResource::get_lang_text(int page_id, const char *str_id, const c
 
     if (_current_page == nullptr || _current_page->_id != page_id){
         _current_page = nullptr; 
-        for (Lang_resource_page *p : _pages){
+        for (const auto &p : _pages){
             if (p->_id == page_id){
-                _current_page = p;
+                _current_page = p.get();
                 break;
             }
         }
@@ -300,7 +293,7 @@ void LangResource::reload_dynamic()
 {
     std::lock_guard<std::mutex> lock(_mutex);
 
-    for (Lang_resource_page *p : _pages)
+    for (const auto &p : _pages)
     {
         if (p->_is_dynamic){
             p->_released = false;
@@ -314,7 +307,7 @@ void LangResource::release_dynamic()
 {
     std::lock_guard<std::mutex> lock(_mutex);
 
-    for (Lang_resource_page *p : _pages)
+    for (const auto &p : _pages)
     {
         if (p->_is_dynamic){
             p->_res.clear();

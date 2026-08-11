@@ -7,6 +7,7 @@
 #include <QMainWindow>
 #include <QGridLayout>
 #include <QRect>
+#include <memory>
 
 #include "pv/toolbars/titlebar.h"
 
@@ -99,7 +100,7 @@ private:
     QRect _dragStartRegion;
 
     bool _is_win32_parent_window;
-    WinNativeWidget *_parentNativeWidget;
+    std::unique_ptr<WinNativeWidget> _parentNativeWidget;
 };
 
 } // namespace pv

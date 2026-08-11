@@ -34,7 +34,6 @@ SubMainFrame::SubMainFrame(QWidget *content, const QString &title, QWidget *pare
     _hit_border = 0;
     _titleBar = nullptr;
     _is_win32_parent_window = false;
-    _parentNativeWidget = nullptr;
 
     _left = nullptr;
     _right = nullptr;
@@ -141,8 +140,7 @@ SubMainFrame::~SubMainFrame()
 #ifdef _WIN32
     if (_parentNativeWidget != nullptr) {
         SetWindowLongPtr(_parentNativeWidget->Handle(), GWLP_USERDATA, 0);
-        delete _parentNativeWidget;
-        _parentNativeWidget = nullptr;
+        _parentNativeWidget.reset();
     }
 #endif
 }
@@ -176,11 +174,10 @@ void SubMainFrame::AttachNativeWindow()
     int h = height() * k;
 
     QColor bkColor = AppConfig::Instance().GetStyleColor();
-    WinNativeWidget *nativeWindow = new WinNativeWidget(x, y, w, h, bkColor);
+    auto nativeWindow = std::make_unique<WinNativeWidget>(x, y, w, h, bkColor);
 
     if (nativeWindow->Handle() == nullptr){
         pxv_info("ERROR: native window is invalid for sub window.");
-        delete nativeWindow;
         return;
     }
 
@@ -201,7 +198,7 @@ void SubMainFrame::AttachNativeWindow()
     nativeWindow->ResizeChild();
 
     nativeWindow->SetBorderColor(QColor(0x80, 0x80, 0x80));
-    _parentNativeWidget = nativeWindow;
+    _parentNativeWidget = std::move(nativeWindow);
 
     QTimer::singleShot(100, this, [this](){
         if (_parentNativeWidget)

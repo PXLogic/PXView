@@ -420,7 +420,7 @@ private:
   // underlying libusb_device has been freed (no dereference is performed).
   static void hotplug_cb_(int event, void *user_data, void *device_handle);
   void on_hotplug_event_(int event, void *device_handle);
-  QTimer *reconnect_timer_ = nullptr;
+  std::unique_ptr<QTimer> reconnect_timer_;
   void start_reconnect_watchdog_();
   void on_reconnect_timeout_();
   // Returns true if the detached device (identified by device_handle, a

@@ -659,7 +659,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   // across chunks. This avoids re-computing root/lbp/byte indices on
   // every get_samples() call; instead, continue_sample_iteration()
   // advances incrementally.
-  std::vector<LogicSnapshot::SegmentDataIterator*> iterators;
+  std::vector<std::unique_ptr<LogicSnapshot::SegmentDataIterator>> iterators;
   std::vector<bool> iter_valid;
 
   bool bCheckEnd = false;
@@ -747,7 +747,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           // P1-B: Use iterator protocol instead of get_samples().
           // The iterator holds a raw pointer into the leaf block and
           // advances incrementally, avoiding repeated index computation.
-          auto *it = iterators[j];
+          auto *it = iterators[j].get();
           const uint8_t *data_ptr = nullptr;
           if (it && !it->exhausted) {
             data_ptr = LogicSnapshot::get_iterator_value(it);
@@ -766,8 +766,8 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 } else {
 set_error_message(QString::fromStdString(s_kChannelsNotEnabled));
 // P1-B: Clean up iterators before early return.
-for (auto *it : iterators) {
-  if (it) _snapshot->end_sample_iteration(it);
+for (auto &it : iterators) {
+  if (it) _snapshot->end_sample_iteration(std::move(it));
 }
 return;
         }
@@ -807,7 +807,7 @@ return;
       uint64_t advance = chunk_end - i;
       for (int j = 0; j < (int)iterators.size(); j++) {
         if (iterators[j] && advance > 0) {
-          _snapshot->continue_sample_iteration(iterators[j], advance);
+          _snapshot->continue_sample_iteration(iterators[j].get(), advance);
         }
       }
     }
@@ -832,9 +832,9 @@ return;
   }
 
   // P1-B: Clean up iterators after the decode loop.
-  for (auto *it : iterators) {
+  for (auto &it : iterators) {
     if (it)
-      _snapshot->end_sample_iteration(it);
+      _snapshot->end_sample_iteration(std::move(it));
   }
   iterators.clear();
 

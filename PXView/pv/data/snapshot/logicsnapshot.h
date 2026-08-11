@@ -233,9 +233,9 @@ public:
         bool     exhausted = false;    // all samples consumed
     };
 
-    SegmentDataIterator* begin_sample_iteration(uint64_t start, int sig_index);
+    std::unique_ptr<SegmentDataIterator> begin_sample_iteration(uint64_t start, int sig_index);
     void continue_sample_iteration(SegmentDataIterator* it, uint64_t increase);
-    void end_sample_iteration(SegmentDataIterator* it);
+    void end_sample_iteration(std::unique_ptr<SegmentDataIterator> it);
     static inline const uint8_t* get_iterator_value(SegmentDataIterator* it) {
         return it->chunk_data + it->byte_offset;
     }

@@ -50,6 +50,12 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
 endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 
+# Enable libstdc++ runtime assertions (bounds checking on std::vector::operator[],
+# std::string::operator[], iterator validation) in Debug builds only.
+# Zero overhead in Release — the macro expands to nothing unless _GLIBCXX_DEBUG
+# is also defined (which we deliberately do NOT enable to avoid ABI breakage).
+add_compile_definitions($<$<CONFIG:Debug>:_GLIBCXX_ASSERTIONS>)
+
 #===============================================================================
 #= Sanitizers + Clang-Tidy (Debug mode static analysis & runtime checks)
 #-------------------------------------------------------------------------------

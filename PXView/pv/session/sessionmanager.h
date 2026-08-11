@@ -2,7 +2,9 @@
 #define PXVIEW_PV_SESSIONMANAGER_H
 
 #include <cstddef>
+#include <memory>
 #include <vector>
+#include <algorithm>
 
 namespace pv {
 
@@ -39,10 +41,10 @@ public:
 
 private:
     SessionManager();
-    static SessionManager *_instance;
+    static std::unique_ptr<SessionManager> _instance;
 
-    std::vector<TabContext*> _contexts;
-    std::vector<TabContext*> _detached_contexts;
+    std::vector<std::unique_ptr<TabContext>> _contexts;
+    std::vector<std::unique_ptr<TabContext>> _detached_contexts;
     TabContext *_active_context;
 };
 

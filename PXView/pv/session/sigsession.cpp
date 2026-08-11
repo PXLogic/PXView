@@ -180,12 +180,11 @@ SigSession::~SigSession() {
 
   // Stop the reconnect watchdog timer (if active) before _event_bus is
   // torn down. QTimer has nullptr parent (SigSession is NOT a QObject), so
-  // explicit delete is required — deleteLater() would also work but direct
-  // delete is safer against in-flight timer events racing teardown.
+  // unique_ptr manages its lifetime. stop() ensures no in-flight timer
+  // events race teardown; reset() deletes the QTimer.
   if (reconnect_timer_) {
     reconnect_timer_->stop();
-    delete reconnect_timer_;
-    reconnect_timer_ = nullptr;
+    reconnect_timer_.reset();
   }
 
   // Unregister as IEventListener before _event_bus is destroyed (unique_ptr
@@ -2838,12 +2837,11 @@ void SigSession::on_hotplug_event_(int event, void *device_handle) {
 void SigSession::start_reconnect_watchdog_() {
   if (!reconnect_timer_) {
     // SigSession is NOT a QObject — QTimer cannot be parented to `this`.
-    // Use nullptr parent; the timer is owned by reconnect_timer_ unique_ptr
-    // semantics (manually deleted in ~SigSession). The connect context
-    // argument uses qApp to ensure the lambda runs on the main thread.
-    reconnect_timer_ = new QTimer(nullptr);
+    // unique_ptr manages lifetime. The connect context argument uses qApp
+    // to ensure the lambda runs on the main thread.
+    reconnect_timer_ = std::make_unique<QTimer>(nullptr);
     reconnect_timer_->setSingleShot(true);
-    QObject::connect(reconnect_timer_, &QTimer::timeout, qApp, [this]() {
+    QObject::connect(reconnect_timer_.get(), &QTimer::timeout, qApp, [this]() {
       this->on_reconnect_timeout_();
     });
   }

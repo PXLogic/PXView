@@ -49,7 +49,7 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
     _fileLab = nullptr;
     _ckOrigin = nullptr;
 
-    _store_session = new StoreSession(session);
+    _store_session = std::make_unique<StoreSession>(session);
 
     this->setMinimumSize(550, 220);
     this->setModal(true);
@@ -99,7 +99,7 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
     connect(_button_box, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(_button_box, &QDialogButtonBox::accepted, this, &QDialog::accept);
 
-    connect(_store_session, &StoreSession::progress_updated,
+    connect(_store_session.get(), &StoreSession::progress_updated,
         this, &StoreProgress::on_progress_updated, Qt::QueuedConnection);
 
     connect(_openButton, &QAbstractButton::clicked, this, &StoreProgress::on_change_file);

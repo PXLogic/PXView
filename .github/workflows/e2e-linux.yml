@@ -640,7 +640,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Install build dependencies + clang-tidy
+      - name: Install build dependencies + clang-tidy-20
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -654,8 +654,13 @@ jobs:
             libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
             libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
             libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
-            libzip-dev nettle-dev libftdi1-dev \
-            clang-tidy
+            libzip-dev nettle-dev libftdi1-dev
+          # Install clang-tidy-20 from LLVM official APT repo (supports C++23 std::expected)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm-snapshot.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-20
+          sudo ln -sf /usr/bin/clang-tidy-20 /usr/local/bin/clang-tidy
           clang-tidy --version
 
       - name: Install Qt via aqtinstall

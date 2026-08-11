@@ -25,6 +25,7 @@
  
 #include <QProgressBar>
 #include <QTimer>
+#include <memory>
 #include "pv/session/storesession.h"
 #include "pv/dialogs/pxdialog.h" 
 #include "pv/interface/icallbacks.h"
@@ -80,7 +81,7 @@ private slots:
     void on_ck_compress(bool ck);
 
 private:
-    pv::StoreSession    *_store_session;
+    std::unique_ptr<pv::StoreSession> _store_session;
     QProgressBar        _progress;
     bool                _isExport;
     QTextEdit           *_fileLab;

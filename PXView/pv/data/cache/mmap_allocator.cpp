@@ -20,6 +20,12 @@
 #include <unistd.h>
 #endif
 
+// ASan poison macros — only active when built with -fsanitize=address.
+// Placed here (not in a header) because they are used only in clear().
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#endif
+
 namespace {
 // 在 worker 线程路径上避免使用 QDir/QDateTime，改用 std::filesystem + std::chrono
 // 生成磁盘缓存文件路径，并保证目录存在。
@@ -269,6 +275,14 @@ void MmapAllocator::clear() {
     // so the background delete thread never touches object state.
     const QString file_to_delete = _file_path;
 
+#if defined(__SANITIZE_ADDRESS__)
+    // Poison the mmap region before unmapping so ASan can detect
+    // use-after-munmap: any access through a cached pointer after clear()
+    // will trigger an ASan error instead of silent stale-data reads.
+    if (_base_ptr && _total_bytes > 0) {
+        ASAN_POISON_MEMORY_REGION(_base_ptr, _total_bytes);
+    }
+#endif
 #ifdef _WIN32
     if (_base_ptr) {
         UnmapViewOfFile(_base_ptr);
