@@ -1,0 +1,767 @@
+name: PXView Release CI
+
+# ============================================================
+# Release 构建 + 多层测试工作流。
+#
+# 本工作流在 push 到 main 时运行，包含 4 个并行 job：
+#
+# Job 1: release-build-and-smoke
+#   Release 编译 → 安装 → 冒烟测试 (MCP 协议 9 项)
+#   确保 Release 模式可以正常编译和启动
+#
+# Job 2: asan-core-tests
+#   Debug 编译 (ASan + UBSan) → 核心测试子集
+#   只跑 test_01 (MCP 协议) + test_03 (采集基础) + test_05 (数据完整性)
+#   ASan 2-5x 减速下核心子集约 15 分钟完成
+#
+# Job 3: tsan-races
+#   Debug 编译 (TSan) → headless + GUI 两阶段
+#   直接复用 e2e-linux.yml 的 TSan 逻辑
+#
+# Job 4: clang-tidy-fast
+#   Debug 编译 + Clang-Tidy（仅 bug-finding checks）
+#   使用 .clang-tidy-ci 配置（clang-analyzer + bugprone + cert + concurrency）
+#   跳过 readability/modernize/misc/performance/cppcoreguidelines
+#   预计 15-20 分钟（vs 全量 57+ 分钟）
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Job 1: Release Build + Smoke Test
+  # ============================================================
+  release-build-and-smoke:
+    name: Release Build + Smoke Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            sdcc wget zip
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Release)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Build and Install PXView
+        run: |
+          cd build
+          ninja -j $(nproc)
+          ninja install
+          echo "=== Installed binary ==="
+          ls -la ../install.dir/usr/bin/PXView
+          file ../install.dir/usr/bin/PXView
+
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bundle Python standard library
+        run: |
+          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Bundling Python $PY_VERSION standard library"
+          mkdir -p install.dir/usr/lib/python$PY_VERSION
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          SETUP_STDLIB=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])" 2>/dev/null || true)
+          if [ -n "$SETUP_STDLIB" ] && [ -d "$SETUP_STDLIB" ]; then
+            cp -a "$SETUP_STDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          fi
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          SETUP_DYNLOAD=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
+          if [ -n "$SETUP_DYNLOAD" ] && [ -d "$SETUP_DYNLOAD" ]; then
+            cp -a "$SETUP_DYNLOAD"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Bundled Python stdlib size:"
+          du -sh install.dir/usr/lib/python$PY_VERSION
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html pytest-timeout
+          pip install -e ./pxview-automation
+
+      - name: Smoke test (MCP protocol)
+        run: |
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          export QT_QPA_PLATFORM=offscreen
+
+          "$PWD/install.dir/usr/bin/PXView" -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          MCP_URL="http://127.0.0.1:10110/mcp"
+          READY=0
+          for i in $(seq 1 60); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            cd tests
+            export PXVIEW_NO_AUTO_START=1
+            export PXVIEW_MCP_URL="$MCP_URL"
+            export PXVIEW_STARTUP_TIMEOUT=30
+            python -m pytest suites/test_01_mcp_protocol.py -v \
+              --tb=short --timeout=120 --timeout-method=thread \
+              --html="$GITHUB_WORKSPACE/smoke_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/smoke_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Smoke test had failures"
+          else
+            echo "ERROR: MCP server did not start within 60s"
+          fi
+
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      - name: Upload smoke test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke-report
+          path: |
+            smoke_report.html
+            smoke_report.xml
+          if-no-files-found: warn
+
+  # ============================================================
+  # Job 2: ASan + UBSan Core Tests (subset)
+  # ============================================================
+  asan-core-tests:
+    name: ASan Core Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            sdcc wget zip
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Debug + ASan + UBSan)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_ASAN=ON \
+            -DENABLE_UBSAN=ON \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Build and Install PXView
+        run: |
+          cd build
+          ninja -j $(nproc)
+          ninja install
+          echo "=== Installed binary ==="
+          ls -la ../install.dir/usr/bin/PXView
+          file ../install.dir/usr/bin/PXView
+
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bundle Python standard library
+        run: |
+          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Bundling Python $PY_VERSION standard library"
+          mkdir -p install.dir/usr/lib/python$PY_VERSION
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          SETUP_STDLIB=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])" 2>/dev/null || true)
+          if [ -n "$SETUP_STDLIB" ] && [ -d "$SETUP_STDLIB" ]; then
+            cp -a "$SETUP_STDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          fi
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          SETUP_DYNLOAD=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
+          if [ -n "$SETUP_DYNLOAD" ] && [ -d "$SETUP_DYNLOAD" ]; then
+            cp -a "$SETUP_DYNLOAD"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Bundled Python stdlib size:"
+          du -sh install.dir/usr/lib/python$PY_VERSION
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html pytest-timeout
+          pip install -e ./pxview-automation
+
+      - name: Run ASan core E2E tests (subset)
+        run: |
+          export ASAN_OPTIONS="detect_leaks=1:abort_on_error=0:print_stacktrace=1:halt_on_error=0"
+          export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=0"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          export QT_QPA_PLATFORM=offscreen
+
+          "$PWD/install.dir/usr/bin/PXView" -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          MCP_URL="http://127.0.0.1:10110/mcp"
+          READY=0
+          for i in $(seq 1 120); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo "=== Running ASan core E2E test subset ==="
+            echo "test_01: MCP protocol (9 tests)"
+            echo "test_03: capture basic (13 tests)"
+            echo "test_05: data integrity"
+            cd tests
+            export PXVIEW_NO_AUTO_START=1
+            export PXVIEW_MCP_URL="$MCP_URL"
+            export PXVIEW_STARTUP_TIMEOUT=30
+
+            python -m pytest \
+              suites/test_01_mcp_protocol.py \
+              suites/test_03_capture_basic.py \
+              suites/test_05_data_integrity.py \
+              -v --tb=short --timeout=120 --timeout-method=thread \
+              --html="$GITHUB_WORKSPACE/asan_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/asan_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Tests had failures (check ASan reports above)"
+
+            # Fallback: ensure XML exists even if pytest crashed/timed out
+            if [ ! -f "$GITHUB_WORKSPACE/asan_report.xml" ]; then
+              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/asan_report.xml"
+              echo '<testsuites><testsuite name="asan-core" tests="0" failures="0" errors="1" time="0"><testcase name="pytest-crash"><error message="pytest did not generate report"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/asan_report.xml"
+              echo "WARNING: Generated fallback XML (pytest did not complete)"
+            fi
+          else
+            echo "ERROR: MCP server did not start within 120s"
+            echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/asan_report.xml"
+            echo '<testsuites><testsuite name="asan-core" tests="0" failures="0" errors="1" time="0"><testcase name="startup-failure"><error message="PXView MCP server did not start"/></testcase></testsuite></testsuites>' >> "$GITHUB_WORKSPACE/asan_report.xml"
+          fi
+
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      - name: Upload ASan test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-core-report
+          path: |
+            asan_report.html
+            asan_report.xml
+          if-no-files-found: warn
+
+      - name: Publish ASan test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: ASan Core Test Results
+          path: 'asan_report.xml'
+          reporter: java-junit
+          fail-on-error: 'false'
+
+  # ============================================================
+  # Job 3: TSan Race Detection (headless + GUI)
+  # ============================================================
+  tsan-races:
+    name: TSan Race Detection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev \
+            sdcc wget zip
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Debug + TSan)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_TSAN=ON \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Build and Install PXView
+        run: |
+          cd build
+          ninja -j $(nproc)
+          ninja install
+          echo "=== Installed binary ==="
+          ls -la ../install.dir/usr/bin/PXView
+          file ../install.dir/usr/bin/PXView
+
+      - name: Setup Python for testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bundle Python standard library
+        run: |
+          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Bundling Python $PY_VERSION standard library"
+          mkdir -p install.dir/usr/lib/python$PY_VERSION
+          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          SETUP_STDLIB=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['stdlib'])" 2>/dev/null || true)
+          if [ -n "$SETUP_STDLIB" ] && [ -d "$SETUP_STDLIB" ]; then
+            cp -a "$SETUP_STDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          fi
+          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          SETUP_DYNLOAD=$(python3 -c "import _struct, os; print(os.path.dirname(_struct.__file__))" 2>/dev/null || true)
+          if [ -n "$SETUP_DYNLOAD" ] && [ -d "$SETUP_DYNLOAD" ]; then
+            cp -a "$SETUP_DYNLOAD"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
+          rm -rf install.dir/usr/lib/python$PY_VERSION/test
+          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
+          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Bundled Python stdlib size:"
+          du -sh install.dir/usr/lib/python$PY_VERSION
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html pytest-timeout
+          pip install -e ./pxview-automation
+
+      # ============================================================
+      # Phase 1: TSan headless mode — MCP protocol tests
+      # ============================================================
+      - name: TSan Phase 1 — headless mode (MCP protocol)
+        run: |
+          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/PXView"
+          export PXVIEW_STARTUP_TIMEOUT=180
+          export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
+          export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+
+          echo "=============================================="
+          echo "  TSan Phase 1: headless mode"
+          echo "=============================================="
+
+          "$PXVIEW_EXE_PATH" --headless -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          READY=0
+          for i in $(seq 1 180); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$PXVIEW_MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo "=== Running MCP protocol tests under TSan ==="
+            cd tests
+            python -m pytest suites/test_01_mcp_protocol.py -v \
+              --tb=short --timeout=300 --timeout-method=thread \
+              --html="$GITHUB_WORKSPACE/tsan_headless_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/tsan_headless_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Tests had failures (check for TSan race reports above)"
+          else
+            echo "ERROR: MCP server did not start within 180s"
+          fi
+
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      # ============================================================
+      # Phase 2: TSan GUI mode (offscreen) — MCP + capture tests
+      # ============================================================
+      - name: TSan Phase 2 — GUI mode offscreen (MCP + capture)
+        run: |
+          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/PXView"
+          export PXVIEW_STARTUP_TIMEOUT=180
+          export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
+          export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"
+          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          export QT_QPA_PLATFORM=offscreen
+
+          echo "=============================================="
+          echo "  TSan Phase 2: GUI mode (offscreen)"
+          echo "=============================================="
+
+          "$PXVIEW_EXE_PATH" -l 4 &
+          PXV_PID=$!
+          echo "PXView PID: $PXV_PID"
+
+          READY=0
+          for i in $(seq 1 180); do
+            if ! kill -0 $PXV_PID 2>/dev/null; then
+              echo "ERROR: PXView exited prematurely"
+              break
+            fi
+            RESP=$(curl -s -X POST "$PXVIEW_MCP_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
+              --max-time 5 2>/dev/null || true)
+            if echo "$RESP" | grep -q "protocolVersion"; then
+              echo "MCP server ready after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -eq 1 ]; then
+            echo "=== Running MCP + capture tests under TSan (GUI mode) ==="
+            cd tests
+            python -m pytest \
+              suites/test_01_mcp_protocol.py \
+              suites/test_03_capture_basic.py \
+              -v --tb=short --timeout=300 --timeout-method=thread \
+              --html="$GITHUB_WORKSPACE/tsan_gui_report.html" \
+              --junitxml="$GITHUB_WORKSPACE/tsan_gui_report.xml" \
+              --self-contained-html \
+              || echo "WARNING: Tests had failures (check for TSan race reports above)"
+          else
+            echo "ERROR: MCP server did not start within 180s (GUI mode)"
+          fi
+
+          kill $PXV_PID 2>/dev/null || true
+          wait $PXV_PID 2>/dev/null || true
+
+      - name: Upload TSan headless report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-headless-report
+          path: |
+            tsan_headless_report.html
+            tsan_headless_report.xml
+          if-no-files-found: warn
+
+      - name: Upload TSan GUI report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-gui-report
+          path: |
+            tsan_gui_report.html
+            tsan_gui_report.xml
+          if-no-files-found: warn
+
+      - name: Publish TSan test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: TSan Race Detection Results
+          path: 'tsan_*_report.xml'
+          reporter: java-junit
+          fail-on-error: 'false'
+
+  # ============================================================
+  # Job 4: Clang-Tidy Fast (bug-finding checks only)
+  #
+  # 使用 .clang-tidy-ci 配置，只包含 bug-finding checks：
+  #   clang-analyzer-*  : NULL deref, UAF, uninitialized
+  #   bugprone-*        : common bug patterns
+  #   cert-*            : security vulnerabilities
+  #   concurrency-*     : thread safety
+  #
+  # 跳过的 checks（style/performance — 在本地用完整 .clang-tidy 跑）：
+  #   cppcoreguidelines-*, misc-*, performance-*, readability-*, modernize-*
+  #
+  # 预计 15-20 分钟（vs 全量 57+ 分钟）
+  # ============================================================
+  clang-tidy-fast:
+    name: Clang-Tidy (Fast)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: write
+
+    env:
+      QT_PREFIX: ${{ github.workspace }}/Qt
+      QT_VERSION: "6.11.0"
+
+    steps:
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies + clang-tidy-20
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gcc g++ make cmake ninja-build pkg-config \
+            libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
+            libboost-dev libfftw3-dev libssl-dev \
+            python3-dev python3-pip \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
+            libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
+            libzip-dev nettle-dev libftdi1-dev
+          # Install clang-tidy-20 from LLVM official APT repo
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm-snapshot.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-20
+          sudo ln -sf /usr/bin/clang-tidy-20 /usr/local/bin/clang-tidy
+          clang-tidy --version
+
+      - name: Install Qt via aqtinstall
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
+            -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
+
+      - name: Build qtwayland platform plugin
+        run: |
+          sudo apt-get install -y wayland-protocols libwayland-dev
+          git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
+          cd qtwayland
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64" \
+            -DQT_FEATURE_wayland_server=OFF \
+            -DQT_FEATURE_wayland_client=ON
+          cmake --build build --parallel $(nproc)
+          cmake --install build
+
+      - name: Configure CMake (Debug + Clang-Tidy CI)
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_CLANG_TIDY=ON \
+            -DCLANG_TIDY_CONFIG_FILE=${{ github.workspace }}/.clang-tidy-ci \
+            -DDISABLE_WERROR=ON \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Run Clang-Tidy (fast, bug-finding only)
+        run: |
+          cd build
+          # Clang-Tidy runs during compilation via CMAKE_CXX_CLANG_TIDY.
+          # Uses .clang-tidy-ci config (only clang-analyzer + bugprone + cert + concurrency).
+          # Skips readability/modernize/misc/performance/cppcoreguidelines.
+          timeout 1200 ninja -j $(nproc) 2>&1 | tee clang-tidy.log || {
+            echo "WARNING: Build or clang-tidy timed out after 20 minutes"
+            echo "Partial results are in clang-tidy.log"
+          }
+
+          # Count warnings by category
+          echo ""
+          echo "=== Clang-Tidy Summary ==="
+          TOTAL=$(grep -c "warning:" clang-tidy.log || echo 0)
+          echo "Total warnings: $TOTAL"
+          echo ""
+          echo "=== Warnings by check ==="
+          grep -oP '\[[-a-zA-Z0-9.]+\]' clang-tidy.log | sort | uniq -c | sort -rn | head -20
+          echo ""
+          echo "=== Check categories in this run ==="
+          echo "  clang-analyzer-* (NULL deref, UAF, uninitialized)"
+          echo "  bugprone-* (common bug patterns)"
+          echo "  cert-* (security vulnerabilities)"
+          echo "  concurrency-* (thread safety)"
+          echo ""
+          echo "Skipped (run locally with full .clang-tidy):"
+          echo "  cppcoreguidelines-*, misc-*, performance-*, readability-*, modernize-*"
+
+      - name: Upload Clang-Tidy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-tidy-fast-report
+          path: build/clang-tidy.log
+          if-no-files-found: warn

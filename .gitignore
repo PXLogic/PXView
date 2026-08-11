@@ -13,6 +13,7 @@
 !/.github
 # 项目配置
 !/.clang-tidy
+!/.clang-tidy-ci
 !/CMake
 !/CMakeLists.txt
 # 构建脚本 (入库)

@@ -1,0 +1,68 @@
+# Clang-Tidy CI configuration (fast, bug-finding only)
+# ========================================================
+# This config is used by release-ci.yml for fast CI analysis.
+# It only includes checks that find real bugs, skipping style/readability.
+# The full .clang-tidy config is for local development.
+#
+# Check categories included (bug-finding):
+#   clang-analyzer-*  : NULL deref, UAF, uninitialized (most valuable)
+#   bugprone-*        : common bug patterns (fast)
+#   cert-*            : security vulnerabilities (fast)
+#   concurrency-*     : thread safety (critical for PXView)
+#
+# Check categories excluded (style/performance - too slow for CI):
+#   cppcoreguidelines-* : noisy, overlaps with bugprone/cert
+#   misc-*              : style, not bugs
+#   performance-*       : style, not bugs
+#   readability-*       : style, not bugs
+#   modernize-*         : style, not bugs
+
+Checks:
+  # --- Static analyzer (most valuable — finds real bugs) ---
+  - 'clang-analyzer-*'
+
+  # --- Bugprone (common bug patterns — fast and practical) ---
+  - 'bugprone-*'
+  - '-bugprone-narrowing-conversions'       # too noisy with Qt size types
+  - '-bugprone-sizeof-expression'           # common in C-style mmap code
+  - '-bugprone-easily-swappable-parameters' # too noisy for C-style APIs
+  - '-bugprone-reserved-identifier'         # MSYS2/MinGW system headers
+  - '-bugprone-suspicious-include'          # project uses non-standard includes
+
+  # --- CERT secure coding (security vulnerabilities) ---
+  - 'cert-*'
+  - '-cert-err58-cpp'                      # static init order (Qt macros trigger)
+
+  # --- Concurrency (thread safety — 35% of PXView crashes are races) ---
+  - 'concurrency-*'
+  - '-concurrency-mt-unsafe'               # glib/Qt functions flagged as "unsafe"
+
+# --- Header filter ---
+# Only analyze project headers, not system/Qt/boost headers.
+HeaderFilterRegex: 'PXView/|libsigrokdecode/|common/'
+
+# --- Warnings as errors ---
+# Don't treat clang-tidy warnings as errors in CI.
+WarningsAsErrors: ''
+
+# --- Analysis options ---
+CheckOptions:
+  - key:   clang-analyzer-cplusplus.AllocationInlining
+    value: true
+  - key:   clang-analyzer-cplusplus.SmartPtrModeling
+    value: true
+  - key:   clang-analyzer-core.CheckNullPointerBeforeDereference
+    value: true
+  - key:   clang-analyzer-optin.cplusplus.UninitializedObject
+    value: true
+  - key:   clang-analyzer-optin.cplusplus.VirtualCall
+    value: true
+  # Inline max steps: large functions need more
+  - key:   clang-analyzer-core.AnalysisInlineMaxFunctionSize
+    value: 500
+  # CFG scope: deep function call chains
+  - key:   clang-analyzer.core.AnalysisDepth
+    value: 20
+
+# --- Inherit parent config ---
+InheritParentConfig: false

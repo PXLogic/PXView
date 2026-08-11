@@ -142,10 +142,17 @@ if(ENABLE_CLANG_TIDY)
     )
     if(CLANG_TIDY_EXE)
         message(STATUS "─── Clang-Tidy enabled: ${CLANG_TIDY_EXE} ───")
-        # Apply to all C++ targets. Uses .clang-tidy config in project root.
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--extra-arg=-std=c++23")
-        # Also apply to C sources (libsigrokdecode, common, libsigrok)
-        set(CMAKE_C_CLANG_TIDY "${CLANG_TIDY_EXE}")
+        # Support optional config file override (e.g., .clang-tidy-ci for fast CI)
+        if(CLANG_TIDY_CONFIG_FILE)
+            message(STATUS "    Config file: ${CLANG_TIDY_CONFIG_FILE}")
+            set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--extra-arg=-std=c++23;--config-file=${CLANG_TIDY_CONFIG_FILE}")
+            set(CMAKE_C_CLANG_TIDY "${CLANG_TIDY_EXE};--config-file=${CLANG_TIDY_CONFIG_FILE}")
+        else()
+            # Apply to all C++ targets. Uses .clang-tidy config in project root.
+            set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--extra-arg=-std=c++23")
+            # Also apply to C sources (libsigrokdecode, common, libsigrok)
+            set(CMAKE_C_CLANG_TIDY "${CLANG_TIDY_EXE}")
+        endif()
     else()
         message(WARNING
             "ENABLE_CLANG_TIDY=ON but clang-tidy not found in PATH.\n"
