@@ -1,14 +1,14 @@
 #!/bin/bash
 # =============================================================================
 # build_windows.sh
-# PXView Windows 本机构建脚本 (x86_64, MSYS2/MinGW64)
+# PXView Windows 本机构建脚本 (x86_64, MSYS2/UCRT64)
 #
 # 基于 .github/workflows/build.yml Windows 作业,保持本地与 CI 一致
 #
 # 前置条件:
 #   1. 安装 MSYS2: https://www.msys2.org/
 #      或: choco install msys2
-#   2. 在 MSYS2 MinGW64 终端中运行此脚本
+#   2. 在 MSYS2 UCRT64 终端中运行此脚本
 #
 # 用法:
 #   ./build_windows.sh              # 完整构建 (依赖安装 + 编译 + 打包)
@@ -60,7 +60,7 @@ done
 
 TOTAL_STEPS=7
 echo "================================================"
-echo " PXView Windows 本机构建 (MinGW64)"
+echo " PXView Windows 本机构建 (UCRT64)"
 echo " MSYS2:    ${MSYSTEM:-unknown}"
 echo " 版本:     $VERSION"
 echo "================================================"
@@ -68,15 +68,15 @@ echo ""
 
 # ── 检查 MSYS2 环境 ──────────────────────────────────────────────────────
 if [ -z "$MSYSTEM" ]; then
-    echo " [错误] 此脚本必须在 MSYS2 MinGW64 终端中运行!"
+    echo " [错误] 此脚本必须在 MSYS2 UCRT64 终端中运行!"
     echo "   请安装 MSYS2 (https://www.msys2.org/)"
-    echo "   然后打开 'MSYS2 MinGW64' 终端运行此脚本"
+    echo "   然后打开 'MSYS2 UCRT64' 终端运行此脚本"
     exit 1
 fi
 
-if [ "$MSYSTEM" != "MINGW64" ]; then
-    echo " [警告] 当前环境为 $MSYSTEM,建议使用 MINGW64"
-    echo "   请在 'MSYS2 MinGW64' 终端中运行此脚本"
+if [ "$MSYSTEM" != "UCRT64" ]; then
+    echo " [警告] 当前环境为 $MSYSTEM,建议使用 UCRT64"
+    echo "   请在 'MSYS2 UCRT64' 终端中运行此脚本"
     echo ""
     read -p " 是否继续? (y/N): " CONTINUE
     [ "$CONTINUE" = "y" ] || exit 1
@@ -89,29 +89,29 @@ echo ""
 if [ "$INSTALL_DEPS" = true ]; then
     echo " [1/${TOTAL_STEPS}] 安装构建依赖..."
     pacman -S --needed --noconfirm \
-        mingw-w64-x86_64-toolchain \
-        mingw-w64-x86_64-cmake \
-        mingw-w64-x86_64-ninja \
-        mingw-w64-x86_64-pkgconf \
-        mingw-w64-x86_64-qt6-base \
-        mingw-w64-x86_64-qt6-svg \
-        mingw-w64-x86_64-qt6-websockets \
-        mingw-w64-x86_64-glib2 \
-        mingw-w64-x86_64-boost \
-        mingw-w64-x86_64-fftw \
-        mingw-w64-x86_64-zlib \
-        mingw-w64-x86_64-python \
-        mingw-w64-x86_64-libzip \
-        mingw-w64-x86_64-nettle \
-        mingw-w64-x86_64-libftdi \
-        mingw-w64-x86_64-libusb \
-        mingw-w64-x86_64-lcms2 \
+        mingw-w64-ucrt-x86_64-toolchain \
+        mingw-w64-ucrt-x86_64-cmake \
+        mingw-w64-ucrt-x86_64-ninja \
+        mingw-w64-ucrt-x86_64-pkgconf \
+        mingw-w64-ucrt-x86_64-qt6-base \
+        mingw-w64-ucrt-x86_64-qt6-svg \
+        mingw-w64-ucrt-x86_64-qt6-websockets \
+        mingw-w64-ucrt-x86_64-glib2 \
+        mingw-w64-ucrt-x86_64-boost \
+        mingw-w64-ucrt-x86_64-fftw \
+        mingw-w64-ucrt-x86_64-zlib \
+        mingw-w64-ucrt-x86_64-python \
+        mingw-w64-ucrt-x86_64-libzip \
+        mingw-w64-ucrt-x86_64-nettle \
+        mingw-w64-ucrt-x86_64-libftdi \
+        mingw-w64-ucrt-x86_64-libusb \
+        mingw-w64-ucrt-x86_64-lcms2 \
         zip unzip curl
 
     # sdcc: 编译 fx2lafw 固件 (可选,CI 中不安装)
     if [ "$BUILD_FIRMWARE" = true ]; then
         echo "   安装 sdcc (fx2lafw 固件编译器)..."
-        pacman -S --needed --noconfirm mingw-w64-x86_64-sdcc 2>/dev/null \
+        pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-sdcc 2>/dev/null \
             || echo "   [跳过] sdcc 安装失败,fx2lafw 固件将跳过"
     fi
 
@@ -150,7 +150,7 @@ if [ "$BUILD_WEBUI" = true ]; then
         cd "$SCRIPT_DIR"
     else
         echo "   [跳过] npm/node 未安装"
-        echo "   安装: pacman -S mingw-w64-x86_64-nodejs"
+        echo "   安装: pacman -S mingw-w64-ucrt-x86_64-nodejs"
     fi
 else
     echo " [4/${TOTAL_STEPS}] 跳过 Web UI (--no-webui)"
@@ -179,8 +179,8 @@ if [ "$BUILD_PACKAGE" = true ]; then
 
     # Python runtime is bundled entirely from MSYS2 (see window/package.sh):
     #   - python3XX.dll / libffi-8.dll via copy-deps.sh (ldd of PXView.exe)
-    #   - .pyd extension modules from /mingw64/lib/pythonX.Y/lib-dynload
-    #   - stdlib from /mingw64/lib/pythonX.Y
+    #   - .pyd extension modules from /ucrt64/lib/pythonX.Y/lib-dynload
+    #   - stdlib from /ucrt64/lib/pythonX.Y
     # We intentionally do NOT pull python.org embeddable zip, because its
     # libffi build is incompatible with MinGW's _ctypes.pyd (breaks ctypes).
 

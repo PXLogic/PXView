@@ -11,18 +11,18 @@ Or download from <https://www.msys2.org/>
 # Install dependencies
 
 ```
-pacman -S mingw-w64-x86_64-pkg-config mingw-w64-x86_64-libusb mingw-w64-x86_64-toolchain mingw-w64-x86_64-boost mingw-w64-x86_64-python mingw-w64-x86_64-cmake mingw-w64-x86_64-qt6-base mingw-w64-x86_64-qt6-svg mingw-w64-x86_64-qt6-websockets mingw-w64-x86_64-glib2 mingw-w64-x86_64-fftw mingw-w64-x86_64-zlib mingw-w64-x86_64-nlohmann-json mingw-w64-x86_64-libzip liblzma liblzma-devel mingw-w64-x86_64-lcms2 curl unzip
+pacman -S mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-svg mingw-w64-ucrt-x86_64-qt6-websockets mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-fftw mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-nlohmann-json mingw-w64-ucrt-x86_64-libzip liblzma liblzma-devel mingw-w64-ucrt-x86_64-lcms2 curl unzip
 ```
 
 # Optional dependencies
 
 These are NOT required for PXLogic hardware. Only install if you need the specific drivers:
 
-- `mingw-w64-x86_64-libftdi` — FTDI-based drivers (asix-sigma, chronovu-la, ftdi-la, ikalogic-scanaplus, pipistrello-ols). Without it, a warning is printed and those drivers are disabled; the rest of libsigrok builds normally.
-- `mingw-w64-x86_64-nettle` — rdtech-tc driver (AES-256 firmware decryption). Without it, that single driver is disabled.
+- `mingw-w64-ucrt-x86_64-libftdi` — FTDI-based drivers (asix-sigma, chronovu-la, ftdi-la, ikalogic-scanaplus, pipistrello-ols). Without it, a warning is printed and those drivers are disabled; the rest of libsigrok builds normally.
+- `mingw-w64-ucrt-x86_64-nettle` — rdtech-tc driver (AES-256 firmware decryption). Without it, that single driver is disabled.
 
 ```
-pacman -S mingw-w64-x86_64-libftdi mingw-w64-x86_64-nettle
+pacman -S mingw-w64-ucrt-x86_64-libftdi mingw-w64-ucrt-x86_64-nettle
 ```
 
 # Download python embed with your python version

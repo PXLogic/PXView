@@ -2,13 +2,13 @@
 # copy-deps.sh — Copy MinGW DLL dependencies for a given binary
 #
 # Usage: copy-deps.sh <binary> <mingw_prefix>
-#   e.g.: copy-deps.sh PXView.exe /mingw64
+#   e.g.: copy-deps.sh PXView.exe /ucrt64
 #
 # Uses ldd to resolve dependencies, then copies those that reside
 # under the specified MinGW prefix to the current directory.
 
 BINARY="$1"
-MINGW_PREFIX="${2:-/mingw64}"
+MINGW_PREFIX="${2:-/ucrt64}"
 
 if [ -z "$BINARY" ]; then
     echo "ERROR: copy-deps.sh: no binary specified"
@@ -29,7 +29,7 @@ if [ -z "$deps" ]; then
     exit 0
 fi
 
-# Filter the dependencies to include only those with the prefix /mingw64
+# Filter the dependencies to include only those with the MSYS2 prefix (e.g. /ucrt64)
 deps_to_copy=$(echo "$deps" | grep "$MINGW_PREFIX" | awk '{print $3}')
 
 # Copy each dependency to the current directory

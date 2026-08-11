@@ -721,25 +721,25 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           update: true
-          msystem: MINGW64
+          msystem: UCRT64
           install: >-
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-qt6-base
-            mingw-w64-x86_64-qt6-svg
-            mingw-w64-x86_64-qt6-websockets
-            mingw-w64-x86_64-glib2
-            mingw-w64-x86_64-boost
-            mingw-w64-x86_64-fftw
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-python
-            mingw-w64-x86_64-libzip
-            mingw-w64-x86_64-nettle
-            mingw-w64-x86_64-libftdi
-            mingw-w64-x86_64-libusb
-            mingw-w64-x86_64-lcms2
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-websockets
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-fftw
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-libzip
+            mingw-w64-ucrt-x86_64-nettle
+            mingw-w64-ucrt-x86_64-libftdi
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-lcms2
             zip
             unzip
 

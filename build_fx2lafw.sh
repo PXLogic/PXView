@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - git submodule update --init --recursive (already done by clone --recursive)
-#   - sdcc 4.5.0+ (MSYS2: pacman -S mingw-w64-x86_64-sdcc)
+#   - sdcc 4.5.0+ (MSYS2: pacman -S mingw-w64-ucrt-x86_64-sdcc)
 set -e
 
 # Resolve script directory (works regardless of CWD)
@@ -22,7 +22,7 @@ fi
 
 if ! command -v sdcc >/dev/null 2>&1; then
     echo "ERROR: sdcc not found in PATH."
-    echo "MSYS2: pacman -S mingw-w64-x86_64-sdcc"
+    echo "MSYS2: pacman -S mingw-w64-ucrt-x86_64-sdcc"
     echo "Linux: apt install sdcc  (or dnf install sdcc)"
     echo "macOS: brew install sdcc"
     exit 1

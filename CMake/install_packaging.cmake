@@ -111,7 +111,7 @@ install(TARGETS libsigrok
 # and the application may crash due to corrupted Python state.
 if(WIN32)
     find_file(LIBFFI_DLL NAMES libffi-8.dll libffi-7.dll libffi-6.dll
-        PATHS /mingw64/bin /mingw32/bin "$ENV{MINGW_PREFIX}/bin"
+        PATHS /ucrt64/bin "$ENV{MINGW_PREFIX}/bin"
         NO_DEFAULT_PATH)
     if(NOT LIBFFI_DLL)
         find_file(LIBFFI_DLL NAMES libffi-8.dll libffi-7.dll libffi-6.dll)
@@ -121,7 +121,7 @@ if(WIN32)
         message(STATUS "libffi DLL found: ${LIBFFI_DLL} -> bin/")
     else()
         message(WARNING "libffi DLL not found. Python _ctypes module will fail "
-            "at runtime. Install libffi (e.g. 'pacman -S mingw-w64-x86_64-libffi').")
+            "at runtime. Install libffi (e.g. 'pacman -S mingw-w64-ucrt-x86_64-libffi').")
     endif()
 endif()
 

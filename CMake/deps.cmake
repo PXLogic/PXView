@@ -35,20 +35,18 @@ link_directories(${GLIB_LIBDIR})
 #
 # Fix: in MSYS2 environments, force CMake to find the MinGW Python by:
 # 1. Setting Python3_FIND_REGISTRY=NEVER (skip Windows registry search)
-# 2. Setting Python3_ROOT_DIR to the MinGW prefix (/mingw64 or /mingw32)
+# 2. Setting Python3_ROOT_DIR to the MSYS2 prefix (/ucrt64)
 # This ensures PXView.exe links against libpython3.XX.dll (MinGW naming),
 # which copy-deps.sh will bundle correctly.
 
 if(DEFINED ENV{MSYSTEM})
-	# MSYS2/MinGW environment detected
+	# MSYS2/UCRT64 environment detected
 	set(Python3_FIND_REGISTRY NEVER)
-	if(EXISTS "/mingw64/bin/python3.exe")
-		set(Python3_ROOT_DIR "/mingw64")
-	elseif(EXISTS "/mingw32/bin/python3.exe")
-		set(Python3_ROOT_DIR "/mingw32")
+	if(EXISTS "/ucrt64/bin/python3.exe")
+		set(Python3_ROOT_DIR "/ucrt64")
 	endif()
 	message(STATUS "MSYS2 environment detected (MSYSTEM=$ENV{MSYSTEM})")
-	message(STATUS "Forcing MinGW Python: Python3_ROOT_DIR=${Python3_ROOT_DIR}")
+	message(STATUS "Forcing MSYS2 Python: Python3_ROOT_DIR=${Python3_ROOT_DIR}")
 endif()
 
 find_package(Python3 COMPONENTS Interpreter Development)

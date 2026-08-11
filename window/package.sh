@@ -2,12 +2,12 @@
 # =============================================================================
 # package.sh — Windows MinGW dependency bundling for PXView
 #
-# Run from the repo root (inside MSYS2/MinGW64 shell):
+# Run from the repo root (inside MSYS2/UCRT64 shell):
 #   bash window/package.sh
 #
 # Prerequisites:
 #   - CMake build + install completed (install.dir/ must exist)
-#   - MinGW64 environment active (/mingw64)
+#   - UCRT64 environment active (/ucrt64)
 #   - Python embeddable zip downloaded to python/ (for stdlib .pyc)
 # =============================================================================
 set -e
@@ -28,13 +28,13 @@ cp -r ../install.dir/share/libsigrokdecode/* .
 echo "=== Copying MinGW DLL dependencies ==="
 # --- Resolve MinGW DLL dependencies via ldd ---
 # This copies libpython3.14.dll, libgcc_s_seh-1.dll, libstdc++-6.dll, etc.
-../window/copy-deps.sh PXView.exe /mingw64
+../window/copy-deps.sh PXView.exe /ucrt64
 
 # --- Qt6 plugins ---
 mkdir -p plugins
-cp -r /mingw64/share/qt6/plugins/* .
-../window/copy-deps.sh imageformats/qsvg.dll /mingw64
-../window/copy-deps.sh imageformats/qjpeg.dll /mingw64
+cp -r /ucrt64/share/qt6/plugins/* .
+../window/copy-deps.sh imageformats/qsvg.dll /ucrt64
+../window/copy-deps.sh imageformats/qjpeg.dll /ucrt64
 
 # --- Python standard library ---
 # Detect Python version from the Python DLL that PXView.exe ACTUALLY links.
@@ -75,13 +75,13 @@ if [ -z "$PY_VER" ]; then
     fi
 fi
 
-# Method 3: Fallback — find libpython3.XX.dll in /mingw64/bin
+# Method 3: Fallback — find libpython3.XX.dll in /ucrt64/bin
 if [ -z "$PY_VER" ]; then
-    echo "ldd did not find Python DLL, trying /mingw64/bin/..."
-    PY_DLL=$(ls /mingw64/bin/libpython3*.dll 2>/dev/null | head -1)
+echo "ldd did not find Python DLL, trying /ucrt64/bin/..."
+PY_DLL=$(ls /ucrt64/bin/libpython3*.dll 2>/dev/null | head -1)
     if [ -n "$PY_DLL" ]; then
         PY_VER=$(echo "$(basename "$PY_DLL")" | grep -oE '3\.[0-9]+')
-        echo "Found MinGW Python DLL in /mingw64/bin: $(basename "$PY_DLL") -> version $PY_VER"
+        echo "Found MinGW Python DLL in /ucrt64/bin: $(basename "$PY_DLL") -> version $PY_VER"
     fi
 fi
 
@@ -103,7 +103,7 @@ else
     # extension modules copied below, so libffi/_ctypes stay ABI-compatible).
     # NOTE: Do NOT mix in python.org embeddable zip — its libffi-8.dll is a
     # different build than MinGW's _ctypes.pyd and breaks ctypes import.
-    MSYS_PYLIB="/mingw64/lib/python${PY_VER}"
+    MSYS_PYLIB="/ucrt64/lib/python${PY_VER}"
     if [ -d "$MSYS_PYLIB" ]; then
         echo "Copying Python stdlib from MSYS2: $MSYS_PYLIB"
         mkdir -p "lib/python${PY_VER}"
@@ -129,18 +129,18 @@ else
     fi
 
     # Copy MinGW's compiled extension modules (.pyd)
-    if [ -d "/mingw64/lib/python${PY_VER}/lib-dynload" ]; then
+    if [ -d "/ucrt64/lib/python${PY_VER}/lib-dynload" ]; then
         echo "Copying MinGW Python extension modules (.pyd)"
-        cp /mingw64/lib/python${PY_VER}/lib-dynload/*.pyd "lib/python${PY_VER}/" 2>/dev/null || true
+        cp /ucrt64/lib/python${PY_VER}/lib-dynload/*.pyd "lib/python${PY_VER}/" 2>/dev/null || true
         echo "   [OK] .pyd files copied"
     else
-        echo "WARNING: /mingw64/lib/python${PY_VER}/lib-dynload not found"
+        echo "WARNING: /ucrt64/lib/python${PY_VER}/lib-dynload not found"
     fi
 
     # _ctypes.pyd (loaded by ctypes/__init__.py) links against libffi-8.dll,
     # which is NOT a dependency of libpython3.14.dll (so copy-deps.sh won't
     # pick it up). Copy it explicitly from MinGW so it stays ABI-compatible.
-    for ffi in /mingw64/bin/libffi-8.dll /mingw64/bin/libffi-7.dll; do
+    for ffi in /ucrt64/bin/libffi-8.dll /ucrt64/bin/libffi-7.dll; do
         if [ -f "$ffi" ]; then
             echo "Copying $ffi (required by _ctypes.pyd)"
             cp "$ffi" . 2>/dev/null || true
