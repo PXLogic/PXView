@@ -100,7 +100,9 @@ private:
     QRect _dragStartRegion;
 
     bool _is_win32_parent_window;
+#ifdef _WIN32
     std::unique_ptr<WinNativeWidget> _parentNativeWidget;
+#endif
 };
 
 } // namespace pv
