@@ -268,8 +268,6 @@ public:
     QVBoxLayout*& vertical_layout() { return _vertical_layout; }
     QWidget*& frame() { return _frame; }
     dialogs::DSMessageBox*& msg() { return _msg; }
-    EventObject& event_object() { return _event; }
-
     // State
     bool& is_auto_switch_device() { return _is_auto_switch_device; }
     bool& is_save_confirm_msg() { return _is_save_confirm_msg; }
@@ -345,7 +343,6 @@ private:
 
     QTranslator     _qtTrans;
     QTranslator     _myTrans;
-    EventObject     _event; 
     SigSession      *_session;
     DeviceAgent     *_device_agent;
     bool            _is_auto_switch_device;

@@ -43,7 +43,11 @@ public:
 
         for (const auto& p : params_) {
             json prop = json::object();
-            prop["type"]        = p.json_type;
+            // Only emit "type" when json_type is non-empty.
+            // An empty json_type means "accept any type" (valid JSON Schema:
+            // omitting the type keyword makes the schema permissive).
+            if (!p.json_type.empty())
+                prop["type"] = p.json_type;
             prop["description"] = p.description;
 
             if (p.json_type == "array" && !p.items_type.empty()) {

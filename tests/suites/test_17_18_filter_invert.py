@@ -16,7 +16,7 @@ class TestGlitchFilter:
                                cleanup_after_test):
         """set_glitch_filter enables filter on channels."""
         mcp.connect_device(device_id)
-        mcp.configure_glitch_filter(channels=[0], threshold=10)
+        mcp.configure_glitch_filter(channels=[0], thresholds=[10])
 
     def test_get_glitch_filter_config(self, mcp: McpClient, device_id: str,
                                       cleanup_after_test):
@@ -29,7 +29,7 @@ class TestGlitchFilter:
                                  cleanup_after_test):
         """clear_glitch_filter removes filter."""
         mcp.connect_device(device_id)
-        mcp.configure_glitch_filter(channels=[0], threshold=10)
+        mcp.configure_glitch_filter(channels=[0], thresholds=[10])
         mcp.configure_glitch_filter(channels=[])
 
     def test_glitch_filter_per_channel(self, mcp: McpClient, device_id: str,
@@ -44,7 +44,7 @@ class TestGlitchFilter:
                                         cleanup_after_test):
         """Glitch filter doesn't break capture."""
         mcp.connect_device(device_id)
-        mcp.configure_glitch_filter(channels=[0], threshold=5)
+        mcp.configure_glitch_filter(channels=[0], thresholds=[5])
         status = do_timed_capture(mcp, device_id, channels=[0],
                                   sample_rate=1000000, duration_seconds=0.3)
         assert status["state"] in ("completed", "idle")

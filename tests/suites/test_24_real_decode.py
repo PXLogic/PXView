@@ -43,13 +43,21 @@ def do_buffer_capture_with_pattern(
 ):
     """用指定 pattern + manualCaptureMode（buffer 模式）采集。
 
+    通过 set_config(SR_CONF_PATTERN_MODE) 设置 demo pattern，
+    因为 start_capture MCP 工具不支持 pattern 参数。
+
     Args:
         pattern: "random", "graycode", "sigrok", "inc", ...
     """
+    # SR_CONF_PATTERN_MODE = 30002 (from libsigrok.h enum)
+    SR_CONF_PATTERN_MODE = 30002
+    mcp.set_config(
+        key=SR_CONF_PATTERN_MODE, type="string", value=pattern
+    )
+
     logic_config = {
         "digitalChannels": channels,
         "digitalSampleRate": sample_rate,
-        "pattern": pattern,
     }
     capture_config = {
         "manualCaptureMode": {"sampleCount": sample_count},

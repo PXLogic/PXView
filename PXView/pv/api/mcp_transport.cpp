@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include "pv/core/eventbus.h"
+#include "pv/core/qt_async_dispatcher.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -69,6 +70,17 @@ McpTransport::McpTransport(IJsonRpcHandler* handler, int port)
 {
 }
 
+void McpTransport::customEvent(QEvent* event)
+{
+    if (event->type() == pv::core::QtAsyncDispatcher::AsyncEvent::eventType()) {
+        auto* e = static_cast<pv::core::QtAsyncDispatcher::AsyncEvent*>(event);
+        if (e->fn)
+            e->fn();
+        return;
+    }
+    QObject::customEvent(event);
+}
+
 McpTransport::~McpTransport()
 {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -80,6 +92,10 @@ bool McpTransport::start()
 {
     if (_server && _server->isListening())
         return true;
+
+    // Create worker pool for offloading business logic.
+    if (!_worker_pool)
+        _worker_pool = std::make_unique<pv::core::ThreadPool>(2);
 
     _server = new QTcpServer(this);
     connect(_server, &QTcpServer::newConnection,
@@ -96,6 +112,12 @@ bool McpTransport::start()
 
 void McpTransport::stop()
 {
+    // 0. Shut down the worker pool first so no worker thread is accessing
+    //    a socket while we clean up below.  Workers that are blocked in
+    //    run_string_on_main_thread will have their posted events processed
+    //    by the main thread event loop (which is still running at this point).
+    _worker_pool.reset();
+
     // 1. Clean up SSE clients first to prevent on_service_event from
     //    writing to sockets that are about to be destroyed.
     {
@@ -140,66 +162,60 @@ bool McpTransport::is_running() const
 
 void McpTransport::on_service_event(const ServiceEventData& data)
 {
-    // MCP transport sockets live on the main thread. If invoked from a worker
-    // thread (e.g. SessionService::broadcast_event from a feed/device thread),
-    // re-post to the main thread so send_sse_event touches the socket on the
-    // correct thread.
+    // MCP transport sockets live on the IO thread. Always post the actual
+    // work (JSON building + socket writes) to the IO thread via post_to_self.
     //
-    // CRITICAL: Use EventBus::post_async_dispatch (QCoreApplication::postEvent)
+    // CRITICAL: Use post_to_self (QCoreApplication::postEvent(this, ...))
     // instead of QMetaObject::invokeMethod. invokeMethod internally calls
     // QThread::currentThread() which creates a QThreadData on the worker thread
     // → SIGSEGV on thread exit (LdrShutdownThread). postEvent only accesses
-    // the receiver's (qApp's) QThreadData — safe for worker threads.
-    if (!pv::core::EventBus::on_main_thread()) {
-        pv::core::EventBus::post_async_dispatch(
-            [this, data]() { on_service_event(data); });
-        return;
-    }
+    // the receiver's QThreadData — safe for worker threads.
+    post_to_self([this, data]() {
+        // Build a JSON-RPC notification payload.
+        json notification;
+        notification["jsonrpc"] = "2.0";
+        notification["method"] = "event";
 
-    // Build a JSON-RPC notification payload.
-    json notification;
-    notification["jsonrpc"] = "2.0";
-    notification["method"] = "event";
+        json params;
+        params["type"] = service_event_to_string(data.event);
 
-    json params;
-    params["type"] = service_event_to_string(data.event);
-
-    json params_map = json::object();
-    for (const auto& [key, value] : data.params) {
-        params_map[key] = value;
-    }
-    params["data"] = params_map;
-    notification["params"] = params;
-
-    const std::string payload = notification.dump();
-
-    // Push to every client currently holding an open SSE stream (e.g. a
-    // wait_capture in progress). The wait_capture QEventLoop processes Qt
-    // events, so this queued slot runs while the SSE stream is still open.
-    // HTTP MCP clients without an open SSE stream cannot be pushed to (HTTP
-    // is request/response); they will see the updated state on their next
-    // request.
-    std::lock_guard<std::mutex> lock(_sse_clients_mutex);
-    // Build a list of alive sockets, and prune dead ones in a single pass
-    // to prevent use-after-free if a socket was disconnected but not yet
-    // removed from _sse_clients.
-    QList<QTcpSocket*> alive_sockets;
-    QSet<QTcpSocket*> dead_sockets;
-    for (auto* socket : _sse_clients) {
-        if (socket && socket->state() == QAbstractSocket::ConnectedState) {
-            alive_sockets.append(socket);
-        } else {
-            dead_sockets.insert(socket);
+        json params_map = json::object();
+        for (const auto& [key, value] : data.params) {
+            params_map[key] = value;
         }
-    }
-    // Remove dead sockets from the set so we never touch them again
-    for (auto* s : dead_sockets) {
-        _sse_clients.remove(s);
-    }
-    // Send only to verified-alive sockets
-    for (auto* socket : alive_sockets) {
-        send_sse_event(socket, "event", payload);
-    }
+        params["data"] = params_map;
+        notification["params"] = params;
+
+        const std::string payload = notification.dump();
+
+        // Push to every client currently holding an open SSE stream (e.g. a
+        // wait_capture in progress). The IO thread event loop processes this
+        // queued lambda while the SSE stream is still open.
+        // HTTP MCP clients without an open SSE stream cannot be pushed to
+        // (HTTP is request/response); they will see the updated state on
+        // their next request.
+        std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+        // Build a list of alive sockets, and prune dead ones in a single pass
+        // to prevent use-after-free if a socket was disconnected but not yet
+        // removed from _sse_clients.
+        QList<QTcpSocket*> alive_sockets;
+        QSet<QTcpSocket*> dead_sockets;
+        for (auto* socket : _sse_clients) {
+            if (socket && socket->state() == QAbstractSocket::ConnectedState) {
+                alive_sockets.append(socket);
+            } else {
+                dead_sockets.insert(socket);
+            }
+        }
+        // Remove dead sockets from the set so we never touch them again
+        for (auto* s : dead_sockets) {
+            _sse_clients.remove(s);
+        }
+        // Send only to verified-alive sockets
+        for (auto* socket : alive_sockets) {
+            send_sse_event(socket, "event", payload);
+        }
+    });
 }
 
 void McpTransport::on_new_connection()
@@ -473,9 +489,17 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
         }
         req.params_json = req.mcp_tool_args;
 
-        // Check if this is a wait_capture tool call — use SSE streaming
+        // Check if this is a wait_capture tool call — use SSE streaming.
+        // Submit to worker pool so the blocking wait_capture_complete()
+        // (SharedState::wait, cv — no Qt event pumping) blocks a worker
+        // thread, not the IO thread. The IO thread remains free to process
+        // SSE events (on_service_event, progress_thread) and other requests.
         if (req.mcp_tool_name == "wait_capture") {
-            handle_sse_wait_capture(socket, req);
+            QPointer<QTcpSocket> socket_guard(socket);
+            disconnect(socket, &QTcpSocket::readyRead, this, &McpTransport::on_ready_read);
+            _worker_pool->submit([this, req, socket_guard]() {
+                handle_sse_wait_capture(socket_guard, req);
+            });
             return;
         }
     } else {
@@ -484,59 +508,44 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
             req.params_json = j["params"].dump();
     }
 
-    // Dispatch to handler (standard JSON response)
-    JsonRpcResponse resp = _handler->handle_request(req);
+    // Dispatch to handler.
+    //
+    // Phase 2 (worker thread): RpcDispatcher::handle_request + response JSON
+    // building.  SessionService methods that need the main thread use
+    // run_string_on_main_thread() internally, so the worker blocks while
+    // the main thread processes Qt object creation — but the main thread
+    // remains free to handle UI events (paint, input, queued EventBus
+    // events) in between.
+    //
+    // Phase 3 (main thread): send_http_response on the socket.
+    //
+    // If the worker pool is not initialized (e.g. start() not called), fall
+    // back to synchronous execution on the main thread.
+    if (_worker_pool) {
+        QPointer<QTcpSocket> socket_guard(socket);
+        // Disconnect readyRead to prevent re-entrant on_ready_read calls
+        // while the worker is processing this request.
+        disconnect(socket, &QTcpSocket::readyRead, this, &McpTransport::on_ready_read);
 
-    // Build MCP response JSON
-    json resp_json;
-    resp_json["jsonrpc"] = "2.0";
-    resp_json["id"] = req.id;
+        _worker_pool->submit([this, req, socket_guard]() {
+            // Phase 2: Business logic + response building (worker thread)
+            JsonRpcResponse resp = _handler->handle_request(req);
+            QByteArray resp_body = build_mcp_response_body(resp, req);
 
-    if (resp.is_mcp_direct) {
-        // For initialize and tools/list: result is returned directly (not wrapped in content)
-        if (!resp.result_json.empty()) {
-            resp_json["result"] = json::parse(resp.result_json);
-        } else {
-            resp_json["result"] = nullptr;
-        }
-    } else if (resp.is_mcp_error) {
-        // MCP error: {"content":[{"type":"text","text":"[ErrorCode] message"}],"isError":true}
-        if (!resp.error_json.empty()) {
-            resp_json["result"] = json::parse(resp.error_json);
-        } else {
-            resp_json["result"] = {
-                {"content", json::array({{{"type", "text"}, {"text", "Internal error"}}})},
-                {"isError", true}
-            };
-        }
-    } else if (resp.success) {
-        // MCP tool call success: wrap result in content array
-        json content_item;
-        content_item["type"] = "text";
-        if (!resp.result_json.empty()) {
-            content_item["text"] = resp.result_json;
-        } else {
-            content_item["text"] = "null";
-        }
-        resp_json["result"] = {
-            {"content", json::array({content_item})}
-        };
+            // Phase 3: Post response back to IO thread for socket write
+            post_to_self([this, resp_body, socket_guard]() {
+                auto* s = socket_guard.data();
+                if (!s)
+                    return; // socket was deleted while worker ran
+                send_http_response(s, 200, resp_body);
+            });
+        });
     } else {
-        // Legacy error path — wrap as MCP error
-        std::string error_text;
-        if (!resp.error_json.empty()) {
-            error_text = resp.error_json;
-        } else {
-            error_text = R"({"code":-32603,"message":"Internal error"})";
-        }
-        resp_json["result"] = {
-            {"content", json::array({{{"type", "text"}, {"text", error_text}}})},
-            {"isError", true}
-        };
+        // Fallback: synchronous on main thread (worker pool not initialized)
+        JsonRpcResponse resp = _handler->handle_request(req);
+        QByteArray resp_body = build_mcp_response_body(resp, req);
+        send_http_response(socket, 200, resp_body);
     }
-
-    QByteArray resp_body = QByteArray::fromStdString(resp_json.dump());
-    send_http_response(socket, 200, resp_body);
 }
 
 // ---------------------------------------------------------------------------
@@ -582,20 +591,26 @@ void McpTransport::send_sse_done(QTcpSocket* socket,
     socket->disconnectFromHost();
 }
 
-void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
+void McpTransport::handle_sse_wait_capture(QPointer<QTcpSocket> socket_guard,
                                             const JsonRpcRequest& req)
 {
-    // Send SSE headers immediately
-    send_sse_headers(socket);
+    // This function runs on a worker thread (submitted via _worker_pool).
+    // The IO thread is free to process posted events (SSE headers, progress,
+    // service events) while we block in handle_request below.
+
+    // Send SSE headers — post to IO thread for socket write
+    post_to_self([this, socket_guard]() {
+        if (socket_guard)
+            send_sse_headers(socket_guard);
+    });
 
     // Register this socket as an active SSE subscriber so that
     // on_service_event can push JSON-RPC notifications (CaptureStateChanged,
     // SampleConfigChanged, ...) to the client while wait_capture is running.
-    // The blocking handle_request below drives its own QEventLoop, so queued
-    // main-thread invocations (including on_service_event) are processed here.
+    // Safe to do on the worker thread — _sse_clients is protected by mutex.
     {
         std::lock_guard<std::mutex> lock(_sse_clients_mutex);
-        _sse_clients.insert(socket);
+        _sse_clients.insert(socket_guard.data());
     }
 
     // Parse timeout from arguments
@@ -609,12 +624,8 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
     } catch (const std::exception& e) { (void)e; }
     (void)timeout_seconds;
 
-    // Dispatch the wait_capture call to the handler.
-    //
-    // Gap 7 fix: wait_capture_complete() now uses SharedState::wait() (cv),
-    // which does NOT pump the Qt event queue. A QTimer would never fire.
-    // Fix: run the progress pusher on a separate std::thread that is
-    // independent of the Qt event loop.
+    // Progress pusher: runs on a separate std::thread, posts SSE events
+    // to the IO thread for socket write (no cross-thread socket access).
     int elapsed_ms = 0;
     const int progress_interval_ms = 500;
     std::atomic<bool> progress_done{false};
@@ -624,7 +635,11 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
             json progress_data;
             progress_data["status"] = "capturing";
             progress_data["elapsed_seconds"] = elapsed_ms / 1000.0;
-            send_sse_event(socket, "progress", progress_data.dump());
+            // Post SSE event to IO thread — no direct cross-thread socket write
+            post_to_self([this, socket_guard, progress_data]() {
+                if (socket_guard)
+                    send_sse_event(socket_guard, "progress", progress_data.dump());
+            });
             elapsed_ms += progress_interval_ms;
             // Sleep in small increments to check progress_done promptly
             for (int i = 0; i < progress_interval_ms / 50 && !progress_done.load(); i++)
@@ -633,6 +648,8 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
     });
 
     // This call blocks using SharedState::wait() — no Qt event queue pumping.
+    // The IO thread is free to process posted events (on_service_event,
+    // progress_thread SSE events) while we wait.
     JsonRpcResponse resp = _handler->handle_request(req);
 
     progress_done.store(true);
@@ -672,11 +689,64 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
     // socket (send_sse_done will disconnect the host).
     {
         std::lock_guard<std::mutex> lock(_sse_clients_mutex);
-        _sse_clients.remove(socket);
+        _sse_clients.remove(socket_guard.data());
     }
 
-    // Send the final result as an SSE event and close
-    send_sse_done(socket, "result", resp_json.dump());
+    // Send the final result as an SSE event and close — post to IO thread
+    std::string final_json = resp_json.dump();
+    post_to_self([this, socket_guard, final_json]() {
+        if (socket_guard)
+            send_sse_done(socket_guard, "result", final_json);
+    });
+}
+
+QByteArray McpTransport::build_mcp_response_body(const JsonRpcResponse& resp,
+                                                   const JsonRpcRequest& req)
+{
+    json resp_json;
+    resp_json["jsonrpc"] = "2.0";
+    resp_json["id"] = req.id;
+
+    if (resp.is_mcp_direct) {
+        if (!resp.result_json.empty()) {
+            resp_json["result"] = json::parse(resp.result_json);
+        } else {
+            resp_json["result"] = nullptr;
+        }
+    } else if (resp.is_mcp_error) {
+        if (!resp.error_json.empty()) {
+            resp_json["result"] = json::parse(resp.error_json);
+        } else {
+            resp_json["result"] = {
+                {"content", json::array({{{"type", "text"}, {"text", "Internal error"}}})},
+                {"isError", true}
+            };
+        }
+    } else if (resp.success) {
+        json content_item;
+        content_item["type"] = "text";
+        if (!resp.result_json.empty()) {
+            content_item["text"] = resp.result_json;
+        } else {
+            content_item["text"] = "null";
+        }
+        resp_json["result"] = {
+            {"content", json::array({content_item})}
+        };
+    } else {
+        std::string error_text;
+        if (!resp.error_json.empty()) {
+            error_text = resp.error_json;
+        } else {
+            error_text = R"({"code":-32603,"message":"Internal error"})";
+        }
+        resp_json["result"] = {
+            {"content", json::array({{{"type", "text"}, {"text", error_text}}})},
+            {"isError", true}
+        };
+    }
+
+    return QByteArray::fromStdString(resp_json.dump());
 }
 
 void McpTransport::send_http_response(QTcpSocket* socket, int status,

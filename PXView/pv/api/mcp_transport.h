@@ -1,12 +1,16 @@
 #pragma once
 
 #include "pv/api/transport.h"
+#include "pv/core/qt_async_dispatcher.h"
+#include "pv/core/thread_pool.h"
 
 #include <QObject>
+#include <QPointer>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QSet>
 #include <map>
+#include <memory>
 #include <mutex>
 
 namespace pv::api {
@@ -36,6 +40,17 @@ private slots:
     void on_new_connection();
     void on_ready_read();
 
+protected:
+    // Handle AsyncEvent posted via post_to_self(). Runs on the IO thread.
+    void customEvent(QEvent* event) override;
+
+    // Post a functor to this transport's thread (IO thread). Safe to call
+    // from any thread — uses QCoreApplication::postEvent which only
+    // accesses the receiver's QThreadData.
+    void post_to_self(std::function<void()> fn) {
+        pv::core::QtAsyncDispatcher::post_to(this, std::move(fn));
+    }
+
 private:
     IJsonRpcHandler* _handler;
     int _port;
@@ -53,7 +68,16 @@ private:
     void send_http_response(QTcpSocket* socket, int status, const QByteArray& body,
                             const char* content_type = "application/json");
     void send_http_204(QTcpSocket* socket);
-    void handle_sse_wait_capture(QTcpSocket* socket, const JsonRpcRequest& req);
+    void handle_sse_wait_capture(QPointer<QTcpSocket> socket_guard, const JsonRpcRequest& req);
+
+    // Build the MCP JSON-RPC response body from a JsonRpcResponse.
+    // Pure data manipulation — safe to call from any thread.
+    static QByteArray build_mcp_response_body(const JsonRpcResponse& resp,
+                                               const JsonRpcRequest& req);
+
+    // Worker thread pool for offloading business logic (RpcDispatcher dispatch)
+    // from the main thread.  Created in start(), destroyed in stop().
+    std::unique_ptr<pv::core::ThreadPool> _worker_pool;
 };
 
 } // namespace pv::api

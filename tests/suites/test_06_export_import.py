@@ -147,10 +147,10 @@ class TestExportImport:
     def test_export_partial_range(self, mcp: McpClient, device_id: str,
                                   tmp_capture_dir: str,
                                   cleanup_after_test):
-        """Export only a partial range using set_save_range."""
+        """Export only a partial range using set_export_config."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        mcp.set_save_range(start_sample=100, end_sample=500)
+        mcp.set_export_config(start_sample=100, end_sample=500)
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
         csv_files = find_exported_csv(tmp_capture_dir)
         assert len(csv_files) > 0

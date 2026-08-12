@@ -103,6 +103,7 @@ struct Enum_val {
 struct ParamDesc {
     std::string     name;
     std::string     json_type;       // "integer", "string", "boolean", "number", "array", "object"
+                                       // empty string = accept any type (is_any_type=true)
     std::string     items_type;      // for arrays: type of elements
     std::string     description;
     bool            required    = false;
@@ -110,6 +111,7 @@ struct ParamDesc {
     json            default_value;
     bool            has_enum    = false;
     std::vector<json> enum_values;
+    bool            is_any_type = false;  // true = accept any JSON type (omit "type" in schema)
     std::type_index cpp_type   = std::type_index(typeid(void));
 };
 
@@ -219,6 +221,9 @@ private:
         std::string key_str(key);
         for (const auto& desc : *type_checks_) {
             if (desc.name == key_str) {
+                // Skip type check for any-type params (they accept any JSON value)
+                if (desc.is_any_type)
+                    return;
                 auto requested = std::type_index(typeid(T));
                 if (desc.cpp_type != requested) {
                     // Type mismatch detected!

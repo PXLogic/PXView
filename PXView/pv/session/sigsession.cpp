@@ -2821,7 +2821,7 @@ void SigSession::hotplug_cb_(int event, void *user_data, void *device_handle) {
   // hotplug thread, which would crash on thread exit (see eventbus.h:100-111).
   // `self` is safe to capture: SigSession outlives libusb hotplug thread
   // (joined in uninit() before _state is destroyed).
-  self->_event_bus->post_async_dispatch([self, event, device_handle]() {
+  self->_event_bus->dispatch_async([self, event, device_handle]() {
     self->on_hotplug_event_(event, device_handle);
   });
 }

@@ -168,10 +168,10 @@ class TestDataIntegrity:
             f"Sample rate changed: {config_before.get('sample_rate')} -> " \
             f"{config_after.get('sample_rate')}"
 
-    def test_set_save_range_export(self, mcp: McpClient, device_id: str,
+    def test_set_export_config_export(self, mcp: McpClient, device_id: str,
                                    tmp_capture_dir: str,
                                    cleanup_after_test):
-        """set_save_range limits export to specified range."""
+        """set_export_config limits export to specified range."""
         status = do_timed_capture(mcp, device_id,
                                   channels=[0],
                                   sample_rate=1000000,
@@ -179,7 +179,7 @@ class TestDataIntegrity:
         assert_capture_status(status, "completed")
 
         # Set a range
-        mcp.set_save_range(start_sample=100, end_sample=1000)
+        mcp.set_export_config(start_sample=100, end_sample=1000)
 
         # Export
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])

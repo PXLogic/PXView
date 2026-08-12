@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "pv/core/eventbus.h"
+#include "pv/core/qt_async_dispatcher.h"
 #include <QCoreApplication>
 #include <QHostAddress>
 #include <QThread>
@@ -26,6 +27,17 @@ WsTransport::WsTransport(IJsonRpcHandler* handler, int port)
 {
 }
 
+void WsTransport::customEvent(QEvent* event)
+{
+    if (event->type() == pv::core::QtAsyncDispatcher::AsyncEvent::eventType()) {
+        auto* e = static_cast<pv::core::QtAsyncDispatcher::AsyncEvent*>(event);
+        if (e->fn)
+            e->fn();
+        return;
+    }
+    QObject::customEvent(event);
+}
+
 WsTransport::~WsTransport()
 {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -37,6 +49,10 @@ bool WsTransport::start()
 {
     if (_server)
         return true;
+
+    // Create worker pool for offloading business logic.
+    if (!_worker_pool)
+        _worker_pool = std::make_unique<pv::core::ThreadPool>(2);
 
     _server = new QWebSocketServer(QStringLiteral("PXView API"),
                                    QWebSocketServer::NonSecureMode, this);
@@ -61,6 +77,10 @@ bool WsTransport::start()
 
 void WsTransport::stop()
 {
+    // Shut down the worker pool first so no worker thread is accessing
+    // a client while we clean up below.
+    _worker_pool.reset();
+
     if (!_server)
         return;
 
@@ -165,48 +185,92 @@ void WsTransport::on_text_message(const QString& message)
         req.params_json = j.contains("params") ? j["params"].dump() : "{}";
         req.id = id;
 
-        JsonRpcResponse resp = _handler->handle_request(req);
-
-        // P0-3: Check for binary response
-        if (resp.is_binary && !resp.binary_payload.empty()) {
-            // Send JSON header as text frame
-            json header = {
-                {"jsonrpc", "2.0"},
-                {"id", resp.id},
-                {"result", {
-                    {"binary", true},
-                    {"content_type", resp.binary_content_type},
-                    {"size", resp.binary_payload.size()}
-                }}
-            };
-            client->sendTextMessage(QString::fromStdString(header.dump()));
-            // Send binary payload as binary frame
-            QByteArray bin_data(reinterpret_cast<const char*>(resp.binary_payload.data()),
-                               static_cast<int>(resp.binary_payload.size()));
-            client->sendBinaryMessage(bin_data);
-            return;
-        }
-
-        // Standard JSON response
-        json resp_json;
-        resp_json["jsonrpc"] = "2.0";
-        resp_json["id"] = resp.id;
-
-        if (resp.success) {
-            if (!resp.result_json.empty()) {
-                resp_json["result"] = json::parse(resp.result_json);
-            } else {
-                resp_json["result"] = nullptr;
-            }
+        if (_worker_pool) {
+            QPointer<QWebSocket> guard(client);
+            _worker_pool->submit([this, req, guard]() {
+                JsonRpcResponse resp = _handler->handle_request(req);
+                // Post response back to IO thread for socket write
+                post_to_self([this, guard, resp]() {
+                    if (!guard)
+                        return;
+                    // P0-3: Check for binary response
+                    if (resp.is_binary && !resp.binary_payload.empty()) {
+                        json header = {
+                            {"jsonrpc", "2.0"},
+                            {"id", resp.id},
+                            {"result", {
+                                {"binary", true},
+                                {"content_type", resp.binary_content_type},
+                                {"size", resp.binary_payload.size()}
+                            }}
+                        };
+                        guard->sendTextMessage(QString::fromStdString(header.dump()));
+                        QByteArray bin_data(reinterpret_cast<const char*>(resp.binary_payload.data()),
+                                           static_cast<int>(resp.binary_payload.size()));
+                        guard->sendBinaryMessage(bin_data);
+                        return;
+                    }
+                    // Standard JSON response
+                    json resp_json;
+                    resp_json["jsonrpc"] = "2.0";
+                    resp_json["id"] = resp.id;
+                    if (resp.success) {
+                        if (!resp.result_json.empty()) {
+                            resp_json["result"] = json::parse(resp.result_json);
+                        } else {
+                            resp_json["result"] = nullptr;
+                        }
+                    } else {
+                        if (!resp.error_json.empty()) {
+                            resp_json["error"] = json::parse(resp.error_json);
+                        } else {
+                            resp_json["error"] = {{"code", -1}, {"message", "Unknown error"}};
+                        }
+                    }
+                    guard->sendTextMessage(QString::fromStdString(resp_json.dump()));
+                });
+            });
         } else {
-            if (!resp.error_json.empty()) {
-                resp_json["error"] = json::parse(resp.error_json);
-            } else {
-                resp_json["error"] = {{"code", -1}, {"message", "Unknown error"}};
-            }
-        }
+            // Fallback: synchronous on IO thread (worker pool not initialized)
+            JsonRpcResponse resp = _handler->handle_request(req);
 
-        client->sendTextMessage(QString::fromStdString(resp_json.dump()));
+            // P0-3: Check for binary response
+            if (resp.is_binary && !resp.binary_payload.empty()) {
+                json header = {
+                    {"jsonrpc", "2.0"},
+                    {"id", resp.id},
+                    {"result", {
+                        {"binary", true},
+                        {"content_type", resp.binary_content_type},
+                        {"size", resp.binary_payload.size()}
+                    }}
+                };
+                client->sendTextMessage(QString::fromStdString(header.dump()));
+                QByteArray bin_data(reinterpret_cast<const char*>(resp.binary_payload.data()),
+                                   static_cast<int>(resp.binary_payload.size()));
+                client->sendBinaryMessage(bin_data);
+                return;
+            }
+
+            // Standard JSON response
+            json resp_json;
+            resp_json["jsonrpc"] = "2.0";
+            resp_json["id"] = resp.id;
+            if (resp.success) {
+                if (!resp.result_json.empty()) {
+                    resp_json["result"] = json::parse(resp.result_json);
+                } else {
+                    resp_json["result"] = nullptr;
+                }
+            } else {
+                if (!resp.error_json.empty()) {
+                    resp_json["error"] = json::parse(resp.error_json);
+                } else {
+                    resp_json["error"] = {{"code", -1}, {"message", "Unknown error"}};
+                }
+            }
+            client->sendTextMessage(QString::fromStdString(resp_json.dump()));
+        }
     } catch (const nlohmann::json::exception&) {
         json err;
         err["jsonrpc"] = "2.0";
@@ -451,26 +515,17 @@ void WsTransport::push_viewport_data(QWebSocket* client, ViewportSubscription& s
 
 void WsTransport::send_binary_to_client(QWebSocket* client, const std::vector<uint8_t>& payload)
 {
-    if (!pv::core::EventBus::on_main_thread()) {
-        // Marshal to main thread. Use QPointer to guard against the client
-        // being destroyed (deleteLater processed) before the lambda runs.
-        QPointer<QWebSocket> guard(client);
-        auto payload_copy = payload;
-        pv::core::EventBus::post_async_dispatch(
-            [this, guard, payload_copy = std::move(payload_copy)]() {
-                if (guard)
-                    send_binary_to_client(guard, payload_copy);
-            });
-        return;
-    }
-
-    // On main thread — QPointer guarantees the client hasn't been deleted.
-    if (!client)
-        return;
-
-    QByteArray bin_data(reinterpret_cast<const char*>(payload.data()),
-                       static_cast<int>(payload.size()));
-    client->sendBinaryMessage(bin_data);
+    // Always post to IO thread — QWebSocket has thread affinity and must
+    // only be written from the IO thread.
+    QPointer<QWebSocket> guard(client);
+    auto payload_copy = payload;
+    post_to_self([this, guard, payload_copy = std::move(payload_copy)]() {
+        if (!guard)
+            return;
+        QByteArray bin_data(reinterpret_cast<const char*>(payload_copy.data()),
+                           static_cast<int>(payload_copy.size()));
+        guard->sendBinaryMessage(bin_data);
+    });
 }
 
 // ============================================================================
@@ -479,34 +534,24 @@ void WsTransport::send_binary_to_client(QWebSocket* client, const std::vector<ui
 
 void WsTransport::send_to_clients(const QString& msg)
 {
-    if (!pv::core::EventBus::on_main_thread()) {
-        pv::core::EventBus::post_async_dispatch(
-            [this, msg]() { send_to_clients(msg); });
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(_clients_mutex);
-    for (auto* client : _clients) {
-        client->sendTextMessage(msg);
-    }
+    // Always post to IO thread — QWebSocket has thread affinity.
+    post_to_self([this, msg]() {
+        std::lock_guard<std::mutex> lock(_clients_mutex);
+        for (auto* client : _clients) {
+            client->sendTextMessage(msg);
+        }
+    });
 }
 
 void WsTransport::send_to_client(QWebSocket* client, const QString& msg)
 {
-    if (!pv::core::EventBus::on_main_thread()) {
-        // Marshal to main thread. Use QPointer to guard against the client
-        // being destroyed (deleteLater processed) before the lambda runs.
-        QPointer<QWebSocket> guard(client);
-        pv::core::EventBus::post_async_dispatch(
-            [this, guard, msg]() {
-                if (guard)
-                    send_to_client(guard, msg);
-            });
-        return;
-    }
-    if (!client)
-        return;
-    client->sendTextMessage(msg);
+    // Always post to IO thread — QWebSocket has thread affinity.
+    QPointer<QWebSocket> guard(client);
+    post_to_self([this, guard, msg]() {
+        if (!guard)
+            return;
+        guard->sendTextMessage(msg);
+    });
 }
 
 // P0-2: Build a versioned notification JSON
@@ -661,43 +706,26 @@ json WsTransport::build_notification(const ServiceEventData& data) const
 
 void WsTransport::on_service_event(const ServiceEventData& data)
 {
-    json notification = build_notification(data);
-    std::string topic = notification.value("topic", "misc");
-    auto msg = QString::fromStdString(notification.dump());
+    // Always post to IO thread — QWebSocket has thread affinity and must
+    // only be written from the IO thread.
+    post_to_self([this, data]() {
+        json notification = build_notification(data);
+        std::string topic = notification.value("topic", "misc");
+        auto msg = QString::fromStdString(notification.dump());
 
-    // P0-1: Marshal-aware selective broadcast
-    if (!pv::core::EventBus::on_main_thread()) {
-        pv::core::EventBus::post_async_dispatch(
-            [this, msg, topic]() {
-                // On main thread: send only to subscribed clients
-                std::lock_guard<std::mutex> lock(_clients_mutex);
-                for (auto* client : _clients) {
-                    // Check topic subscription
-                    auto it = _client_states.find(client);
-                    bool subscribed = true;
-                    if (it != _client_states.end() && !it->second.subscribed_topics.empty()) {
-                        subscribed = it->second.subscribed_topics.count(topic) > 0;
-                    }
-                    if (subscribed) {
-                        client->sendTextMessage(msg);
-                    }
-                }
-            });
-        return;
-    }
-
-    // On main thread: selective broadcast
-    std::lock_guard<std::mutex> lock(_clients_mutex);
-    for (auto* client : _clients) {
-        auto it = _client_states.find(client);
-        bool subscribed = true;
-        if (it != _client_states.end() && !it->second.subscribed_topics.empty()) {
-            subscribed = it->second.subscribed_topics.count(topic) > 0;
+        // Selective broadcast to subscribed clients
+        std::lock_guard<std::mutex> lock(_clients_mutex);
+        for (auto* client : _clients) {
+            auto it = _client_states.find(client);
+            bool subscribed = true;
+            if (it != _client_states.end() && !it->second.subscribed_topics.empty()) {
+                subscribed = it->second.subscribed_topics.count(topic) > 0;
+            }
+            if (subscribed) {
+                client->sendTextMessage(msg);
+            }
         }
-        if (subscribed) {
-            client->sendTextMessage(msg);
-        }
-    }
+    });
 }
 
 } // namespace pv::api

@@ -25,8 +25,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include "pv/interface/icallbacks.h"
 #include "pv/interface/events.h"
+#include "pv/interface/event_notification.h"
 #include "pv/core/eventbus.h"
 #include "pv/core/thread_pool.h"
 
@@ -299,6 +301,11 @@ explicit SessionService(SigSession *session, DeviceAgent *device);
     void add_event_listener(IServiceEventListener *listener) override;
     void remove_event_listener(IServiceEventListener *listener) override;
 
+    // Phase 3: Typed notification listener registration (JSON payload).
+    // These run in parallel with IServiceEventListener during migration.
+    void add_notification_listener(IEventNotificationListener *listener);
+    void remove_notification_listener(IEventNotificationListener *listener);
+
     // ---- ISessionService: 22. Error state (Batch B) ----
     Result<ErrorState> get_error_state() override;
     Result<void> clear_error_state() override;
@@ -329,6 +336,13 @@ void delay_prop_msg(QString strMsg);
 private:
 void broadcast_event(ServiceEvent event,
                          const std::map<std::string, std::string> &params = {}) const;
+
+    // ---- Phase 3: Event notification dispatch (typed JSON payload) ----
+    // Dispatch an EventNotification with serialized JSON payload to all
+    // registered IEventNotificationListener instances. Called alongside
+    // broadcast_event() for parallel old/new notification during migration.
+    void dispatch_notification(const char* event_name, const char* topic,
+                               nlohmann::json payload);
     ChannelType sr_channel_type_to_api(int sr_type) const;
 
     // ---- configure_and_start helper methods (split from 470-line function) ----
@@ -377,6 +391,10 @@ private:
     DeviceAgent *_device;
     std::vector<IServiceEventListener *> _listeners;
     mutable std::mutex _listeners_mutex;
+
+    // Phase 3: IEventNotificationListener instances (typed JSON payload)
+    std::vector<IEventNotificationListener *> _notification_listeners;
+    mutable std::mutex _notification_listeners_mutex;
 int _capture_id;
 
 // RAII event subscriptions

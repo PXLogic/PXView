@@ -3,9 +3,9 @@ test_27_cursor_export.py - Cursor range + export/import roundtrip tests.
 
 Tests:
 1. Cursor API: add/get/remove/clear cursors
-2. Left cursor export: set_save_range with only left cursor → export → verify
-3. Right cursor export: set_save_range with only right cursor → export → verify
-4. Both cursors export: set_save_range with left+right → export → verify
+2. Left cursor export: set_export_config with only left cursor → export → verify
+3. Right cursor export: set_export_config with only right cursor → export → verify
+4. Both cursors export: set_export_config with left+right → export → verify
 5. CSV export → verify row count matches range
 6. Binary export → verify byte count matches range
 7. .pxc save → load → verify data integrity
@@ -106,7 +106,7 @@ class TestLeftCursorExport:
         assert total_samples > 1000, f"Only {total_samples} samples"
 
         left = 500
-        mcp.set_save_range(start_sample=left, end_sample=total_samples)
+        mcp.set_export_config(start_sample=left, end_sample=total_samples)
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -125,7 +125,7 @@ class TestLeftCursorExport:
 
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left = 500
-        mcp.set_save_range(start_sample=left, end_sample=total_samples)
+        mcp.set_export_config(start_sample=left, end_sample=total_samples)
         mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
@@ -154,7 +154,7 @@ class TestRightCursorExport:
 
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         right = 5000
-        mcp.set_save_range(start_sample=0, end_sample=right)
+        mcp.set_export_config(start_sample=0, end_sample=right)
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -172,7 +172,7 @@ class TestRightCursorExport:
                          sample_rate=1000000, duration_seconds=1.0)
 
         right = 5000
-        mcp.set_save_range(start_sample=0, end_sample=right)
+        mcp.set_export_config(start_sample=0, end_sample=right)
         mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
@@ -199,7 +199,7 @@ class TestBothCursorsExport:
 
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left, right = 1000, 5000
-        mcp.set_save_range(start_sample=left, end_sample=right)
+        mcp.set_export_config(start_sample=left, end_sample=right)
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -218,7 +218,7 @@ class TestBothCursorsExport:
                          sample_rate=1000000, duration_seconds=1.0)
 
         left, right = 1000, 5000
-        mcp.set_save_range(start_sample=left, end_sample=right)
+        mcp.set_export_config(start_sample=left, end_sample=right)
         mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
@@ -240,7 +240,7 @@ class TestBothCursorsExport:
         assert len(all_samples) > 0
 
         left, right = 100, 800
-        mcp.set_save_range(start_sample=left, end_sample=right)
+        mcp.set_export_config(start_sample=left, end_sample=right)
         mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -404,12 +404,12 @@ class TestExportImportRoundtrip:
     def test_save_load_with_cursor_range(self, mcp, device_id,
                                            tmp_pxc_file,
                                            cleanup_after_test):
-        """set_save_range + save → load preserves ranged data."""
+        """set_export_config + save → load preserves ranged data."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
 
         left, right = 100, 5000
-        mcp.set_save_range(start_sample=left, end_sample=right)
+        mcp.set_export_config(start_sample=left, end_sample=right)
         mcp.save_capture(tmp_pxc_file)
         assert os.path.exists(tmp_pxc_file)
 

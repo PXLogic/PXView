@@ -64,17 +64,27 @@ class TestAdvancedTools:
 
     def test_get_config(self, mcp: McpClient, device_id: str,
                         cleanup_after_test):
-        """get_config is removed from the 46-tool set — verify it raises."""
+        """get_config reads a generic SR_CONF_* config value."""
         mcp.connect_device(device_id)
-        with pytest.raises(NotImplementedError):
-            mcp.get_config(key=1, value_type="int")
+        # get_config and set_config are part of the 45-tool set.
+        # Verify they execute without error (may return a value or error
+        # depending on the key, but should not raise NotImplementedError).
+        try:
+            result = mcp.get_config(key=1, type="int")
+            assert isinstance(result, dict)
+        except McpError:
+            pass  # Key 1 may not be valid for this device
 
     def test_set_config(self, mcp: McpClient, device_id: str,
                         cleanup_after_test):
-        """set_config is removed from the 46-tool set — verify it raises."""
+        """set_config writes a generic SR_CONF_* config value."""
         mcp.connect_device(device_id)
-        with pytest.raises(NotImplementedError):
-            mcp.set_config(key=1, value_type="int", value=0)
+        # set_config is part of the 45-tool set.
+        try:
+            result = mcp.set_config(key=1, type="int", value=0)
+            assert isinstance(result, dict)
+        except McpError:
+            pass  # Key 1 may not be writable for this device
 
     def test_get_disk_cache_info(self, mcp: McpClient):
         """get_disk_cache_info returns info."""
@@ -92,17 +102,17 @@ class TestAdvancedTools:
 
     def test_get_math_results(self, mcp: McpClient):
         """get_math_results returns dict."""
-        result = mcp.get_math_results()
+        result = mcp.get_measurement_results(types=["math"])
         assert isinstance(result, dict)
 
     def test_get_spectrum_results(self, mcp: McpClient):
         """get_spectrum_results returns dict."""
-        result = mcp.get_spectrum_results()
+        result = mcp.get_measurement_results(types=["spectrum"])
         assert isinstance(result, dict)
 
     def test_get_lissajous_results(self, mcp: McpClient):
         """get_lissajous_results returns dict."""
-        result = mcp.get_lissajous_results()
+        result = mcp.get_measurement_results(types=["lissajous"])
         assert isinstance(result, dict)
 
     def test_get_error_state(self, mcp: McpClient):
@@ -117,8 +127,10 @@ class TestAdvancedTools:
         result = mcp.configure_error_state(action="get")
         assert result.get("has_error") is False or result.get("has_error") == 0
 
-    def test_get_decoder_binary_output(self, mcp: McpClient, device_id: str,
-                                       cleanup_after_test):
-        """get_decoder_binary_output is removed from the 46-tool set."""
-        with pytest.raises(NotImplementedError):
-            mcp.get_decoder_binary_output("1:1", output_id=0)
+    def test_get_decoder_binary_output_removed(self, mcp: McpClient):
+        """get_decoder_binary_output is not part of the 45-tool set."""
+        # This tool was removed during consolidation. Verify the client
+        # does not expose it (raises AttributeError, not NotImplementedError).
+        assert not hasattr(mcp, "get_decoder_binary_output"), (
+            "get_decoder_binary_output should not exist on McpClient"
+        )

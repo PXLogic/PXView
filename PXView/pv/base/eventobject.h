@@ -20,39 +20,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+// EventObject (14 Qt signals) has been REMOVED — it was a legacy notification
+// system superseded by EventBus (pv/core/eventbus.h). All its signal
+// connections in signal_connector.cpp were dead connections (never emitted).
+//
+// DeviceEventObject is retained because its device_updated() signal is still
+// actively used by SigSession and event_dispatcher.cpp.
+
 #ifndef _EVENT_OBJECT_H
 #define _EVENT_OBJECT_H
 
 #include <QObject>
-
-class EventObject : public QObject
-{
-    Q_OBJECT
-
-public:
-    EventObject(); 
-
-
-signals:
-    void show_error(QString error);
-    void capture_state_changed(int state);
-    void data_updated();
-
-    void session_error();
-    void signals_changed();
-    void receive_trigger(quint64 trigger_pos);
-    void frame_ended();
-    void frame_began();
-
-    void decode_done();
-    void receive_data_len(quint64 len);
-    void cur_snap_samplerate_changed();
-    void update_capture_sig();
-    void show_region_sig(quint64 start, quint64 end, bool keep);
-    void show_wait_trigger_sig();
-    void repeat_hold_sig(int percent);
-};
-
 
 class DeviceEventObject : public QObject
 {
@@ -65,5 +43,6 @@ public:
 signals: 
     void device_updated();
 };
+
 
 #endif

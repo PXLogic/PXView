@@ -50,6 +50,7 @@ struct ToolDesc {
     std::string name{};
     std::string description{};
     json        input_schema{};
+    json        output_schema{};      // MCP output schema (optional, empty = omitted)
     json        annotations{};       // MCP tool annotations (readOnlyHint, destructiveHint, etc.)
 
     // Handler variants (mutually exclusive — kind indicates which)
@@ -170,6 +171,50 @@ struct ToolDesc {
         return param_desc(std::move(p));
     }
 
+    // ── Any-type parameters (accept any JSON value: object, array, etc.) ──
+    // Replaces the typeid(void) hack for params like "analyzers", "value",
+    // "channels" (multi-channel pattern), "types" (measurement types).
+    //
+    // The json_type parameter controls the schema's "type" field:
+    //   "object" (default) — for dict/any-value params (options, channelMap, value)
+    //   "array"            — for array params; pair with items_type for item schema
+    //
+    // is_any_type=true means the debug type-check is skipped (the handler
+    // reads the value via p.raw() rather than p.get<T>()).
+
+    // Optional any-type:  any_param("name", "desc")  →  type="object"
+    // Optional any-type:  any_param("name", "desc", "array", "object")  →  type="array", items.type="object"
+    ToolDesc& any_param(std::string_view name,
+                         std::string_view desc,
+                         std::string_view json_type = "object",
+                         std::string_view items_type = "") {
+        ParamDesc p;
+        p.name        = std::string(name);
+        p.json_type   = std::string(json_type);
+        p.items_type  = std::string(items_type);
+        p.description = std::string(desc);
+        p.required    = false;
+        p.is_any_type = true;
+        return param_desc(std::move(p));
+    }
+
+    // Required any-type:  any_param("name", "desc", Required)
+    // Required any-type:  any_param("name", "desc", Required, "array", "string")
+    ToolDesc& any_param(std::string_view name,
+                         std::string_view desc,
+                         Required_tag,
+                         std::string_view json_type = "object",
+                         std::string_view items_type = "") {
+        ParamDesc p;
+        p.name        = std::string(name);
+        p.json_type   = std::string(json_type);
+        p.items_type  = std::string(items_type);
+        p.description = std::string(desc);
+        p.required    = true;
+        p.is_any_type = true;
+        return param_desc(std::move(p));
+    }
+
     // ── Handler registration ──
 
     // Builder API handler
@@ -193,6 +238,15 @@ struct ToolDesc {
     ToolDesc& on_call_struct(StructHandler h) {
         struct_handler = std::move(h);
         kind = HandlerKind::Struct;
+        return *this;
+    }
+
+    // ── Output schema (optional, for structured output) ──
+    // Sets the JSON Schema describing the tool's output structure.
+    // When non-empty, it is included in the tool definition as
+    // "outputSchema" (MCP 2025-03-26 spec).
+    ToolDesc& set_output_schema(json schema) {
+        output_schema = std::move(schema);
         return *this;
     }
 
@@ -240,6 +294,8 @@ struct ToolDesc {
             {"description", description},
             {"inputSchema", input_schema}
         };
+        if (!output_schema.is_null())
+            j["outputSchema"] = output_schema;
         if (!annotations.is_null())
             j["annotations"] = annotations;
         return j;

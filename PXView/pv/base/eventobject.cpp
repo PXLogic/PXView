@@ -22,10 +22,6 @@
 
 #include "pv/base/eventobject.h"
 
-EventObject::EventObject(){
-    
-}
-
 DeviceEventObject::DeviceEventObject()
 {
 }

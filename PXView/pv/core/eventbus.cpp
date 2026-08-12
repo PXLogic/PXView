@@ -1,5 +1,7 @@
 #include "pv/core/eventbus.h"
 
+#include "pv/core/qt_async_dispatcher.h"
+
 #include <algorithm>
 
 namespace pv {
@@ -8,54 +10,33 @@ namespace core {
 thread_local int EventBus::_broadcast_depth = 0;
 std::thread::id EventBus::_main_thread_id;
 
-class AsyncDispatchEvent : public QEvent {
-public:
-    static QEvent::Type eventType() {
-        static QEvent::Type t = static_cast<QEvent::Type>(
-            QEvent::registerEventType(QEvent::User + 0x100));
-        return t;
-    }
-
-    std::function<void()> fn;
-
-    explicit AsyncDispatchEvent(std::function<void()> f)
-        : QEvent(eventType()), fn(std::move(f)) {}
-};
-
-class EventBus::AsyncEventFilter : public QObject {
-public:
-    bool eventFilter(QObject *obj, QEvent *event) override {
-        if (event->type() == AsyncDispatchEvent::eventType()) {
-            auto *e = static_cast<AsyncDispatchEvent *>(event);
-            if (e->fn) {
-                e->fn();
-            }
-            return true;
-        }
-        return QObject::eventFilter(obj, event);
-    }
-};
-
-EventBus::EventBus()
-    : _alive_shared(std::make_shared<std::atomic<bool>>(true)) {
+EventBus::EventBus(std::unique_ptr<IAsyncDispatcher> dispatcher)
+    : _alive_shared(std::make_shared<std::atomic<bool>>(true))
+    , _dispatcher(dispatcher ? std::move(dispatcher)
+                             : std::make_unique<QtAsyncDispatcher>()) {
     _main_thread_id = std::this_thread::get_id();
-    _async_filter = std::make_unique<AsyncEventFilter>();
-    qApp->installEventFilter(_async_filter.get());
 }
 
 EventBus::~EventBus() {
     if (_alive_shared)
         _alive_shared->store(false, std::memory_order_release);
-    if (_async_filter) {
-        qApp->removeEventFilter(_async_filter.get());
-        _async_filter.reset();
-    }
+    // _dispatcher destructor cleans up the Qt event filter (if QtAsyncDispatcher).
 }
 
+void EventBus::dispatch_async(std::function<void()> fn) {
+    _dispatcher->post(std::move(fn));
+}
+
+// Static convenience — uses a global default QtAsyncDispatcher singleton.
+// External callers (SessionService, WsTransport, McpTransport,
+// DeviceOptionsDock) call this to post functors to the main thread without
+// holding an EventBus instance.
 void EventBus::post_async_dispatch(std::function<void()> fn) {
-    QCoreApplication::postEvent(qApp, new AsyncDispatchEvent(std::move(fn)));
+    // Function-local static — created on first call, destroyed at program exit.
+    // This is thread-safe in C++11+ (magic statics).
+    static auto s_default_dispatcher = std::make_unique<QtAsyncDispatcher>();
+    s_default_dispatcher->post(std::move(fn));
 }
 
 } // namespace core
 } // namespace pv
-

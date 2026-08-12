@@ -30,6 +30,7 @@ set(PXVIEW_CORE_SOURCES
     # Core session/orchestration
     PXView/pv/base/log.cpp
     PXView/pv/core/eventbus.cpp
+    PXView/pv/core/qt_async_dispatcher.cpp
     PXView/pv/core/sessionstatecontext.cpp
     PXView/pv/core/filterprocessor.cpp
     PXView/pv/core/decodetaskmanager.cpp
@@ -57,6 +58,7 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/api/binary_codec.cpp
     # MCP SDK (tool registration, schema generation, exception-driven dispatch)
     PXView/pv/mcp/mcp_server.cpp
+    PXView/pv/mcp/mcp_serializers.cpp
     PXView/pv/mcp/mcp_tool_registry.cpp
     # NOTE: utility/*.cpp live in PXView/pv/utility/CMakeLists.txt (pxview-utility STATIC lib)
     # NOTE: config/*.cpp live in PXView/pv/config/CMakeLists.txt (pxview-config STATIC lib)

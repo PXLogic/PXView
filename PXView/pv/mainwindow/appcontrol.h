@@ -28,6 +28,7 @@
 
 struct sr_context;
 class QWidget;
+class QThread;
 
 namespace pv{
     class SigSession;
@@ -110,6 +111,11 @@ private:
     pv::api::WsTransport* _ws_transport = nullptr;
     pv::api::McpTransport* _mcp_transport = nullptr;
     pv::api::DirectTransport* _direct_transport = nullptr;
+
+    // Dedicated IO thread for network transports (McpTransport/WsTransport).
+    // Moves all socket I/O off the GUI main thread so that blocking
+    // operations (e.g. wait_capture) never freeze the UI.
+    QThread* _io_thread = nullptr;
 
     // API port numbers (defaults: MCP=10110, WS=10430)
     int _mcp_port = 10110;

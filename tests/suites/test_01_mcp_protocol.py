@@ -56,7 +56,7 @@ class TestMcpProtocol:
             assert name in names, f"Core tool '{name}' not in tools/list"
 
     def test_tool_names_contain_consolidated_tools(self, mcp: McpClient):
-        """Consolidated 46-tool-set names are present."""
+        """Consolidated 45-tool-set names are present."""
         expected = [
             # Tier 0: Mode management
             "switch_work_mode", "get_work_mode", "get_supported_work_modes",
@@ -66,19 +66,18 @@ class TestMcpProtocol:
             "save_capture", "close_capture", "list_analyzers",
             "get_analyzer_options", "add_analyzer", "remove_analyzer",
             "get_analyzer_results", "export_raw_data", "export_data_table_csv",
-            "get_sample_config", "refresh_device_list",
+            "refresh_device_list",
             # Tier 2: Configuration (consolidated)
             "set_sample_config", "configure_channel", "configure_trigger",
             "configure_probe", "configure_glitch_filter",
-            "configure_signal_invert", "set_save_range",
+            "configure_signal_invert", "set_export_config",
             "connect_device", "disconnect_device", "get_session_status",
             # Tier 3: Advanced features
             "get_samples", "find_next_edge", "find_pattern",
             "get_active_decoders", "clear_all_decoders",
-            "reconfigure_decoder", "get_decoder_class_names",
+            "reconfigure_decoder",
             "list_sessions", "create_session", "destroy_session",
-            "get_math_results", "get_spectrum_results",
-            "get_lissajous_results", "configure_error_state",
+            "get_measurement_results", "configure_error_state",
             # Generic device config (SR_CONF_* keys: PWM, VTH, Filter, etc.)
             "get_config", "set_config",
             # Cursors (consolidated into configure_cursors)
@@ -111,6 +110,10 @@ class TestMcpProtocol:
             "get_time_info", "get_device_info", "get_signal_list",
             "save_file", "load_file", "export_data",
             "batch_call", "get_viewport_binary",
+            # Issue 3: further consolidation
+            "get_sample_config", "get_decoder_class_names",
+            "get_math_results", "get_spectrum_results", "get_lissajous_results",
+            "set_save_range",
         ]
         names = set(mcp.tool_names)
         for name in removed:
@@ -120,8 +123,7 @@ class TestMcpProtocol:
             )
 
     def test_total_tool_count(self, mcp: McpClient):
-        """Verify total tool count matches the consolidated set (>= 46)."""
-        # The consolidated 46-tool set (with some extras like cursors/math)
-        # registers ~50 tools.  We check we have at least 46.
-        assert len(mcp.tools) >= 46, \
-            f"Expected at least 46 tools, got {len(mcp.tools)}."
+        """Verify total tool count matches the consolidated set (>= 45)."""
+        # The consolidated 45-tool set (49 minus 4 merged/removed tools)
+        assert len(mcp.tools) >= 45, \
+            f"Expected at least 45 tools, got {len(mcp.tools)}."

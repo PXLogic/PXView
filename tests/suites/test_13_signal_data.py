@@ -90,9 +90,9 @@ class TestSignalData:
         """find_pattern with exact '0'/'1' pattern."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        result = mcp.find_pattern(channel_index=0,
-                                  pattern="1",
-                                  from_sample=0)
+        result = mcp.find_pattern(from_sample=0,
+                                  channel_index=0,
+                                  pattern="1")
         assert result is not None
 
     def test_find_pattern_dont_care(self, mcp: McpClient, device_id: str,
@@ -100,9 +100,22 @@ class TestSignalData:
         """find_pattern with 'x' wildcard."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        result = mcp.find_pattern(channel_index=0,
-                                  pattern="x",
-                                  from_sample=0)
+        result = mcp.find_pattern(from_sample=0,
+                                  channel_index=0,
+                                  pattern="x")
+        assert result is not None
+
+    def test_find_pattern_multi_channel(self, mcp: McpClient, device_id: str,
+                                         cleanup_after_test):
+        """find_pattern with multi-channel combined search."""
+        do_timed_capture(mcp, device_id, channels=[0, 1],
+                         sample_rate=1000000, duration_seconds=0.5)
+        result = mcp.find_pattern(
+            from_sample=0,
+            channels=[
+                {"channelIndex": 0, "state": "1"},
+                {"channelIndex": 1, "state": "0"},
+            ])
         assert result is not None
 
     def test_get_logic_samples_no_capture(self, mcp: McpClient,

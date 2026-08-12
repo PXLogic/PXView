@@ -2,6 +2,8 @@
 
 #include "pv/api/transport.h"
 #include "pv/api/types.h"
+#include "pv/core/qt_async_dispatcher.h"
+#include "pv/core/thread_pool.h"
 
 #include <nlohmann/json.hpp>
 
@@ -9,7 +11,10 @@
 #include <QWebSocketServer>
 #include <QWebSocket>
 #include <QTimer>
+#include <QPointer>
 
+#include <functional>
+#include <memory>
 #include <set>
 #include <map>
 #include <mutex>
@@ -51,6 +56,17 @@ private slots:
     void on_client_disconnected();
     // P1-1: Periodic viewport data push timer
     void on_viewport_timer();
+
+protected:
+    // Handle AsyncEvent posted via post_to_self(). Runs on the IO thread.
+    void customEvent(QEvent* event) override;
+
+    // Post a functor to this transport's thread (IO thread). Safe to call
+    // from any thread — uses QCoreApplication::postEvent which only
+    // accesses the receiver's QThreadData.
+    void post_to_self(std::function<void()> fn) {
+        pv::core::QtAsyncDispatcher::post_to(this, std::move(fn));
+    }
 
 private:
     // Marshal-aware broadcast helpers
@@ -102,6 +118,10 @@ private:
     // Set from SessionService::broadcast_event via ServiceEventData.version,
     // but also tracked here for events that don't carry a version.
     static uint64_t s_next_version;
+
+    // Worker thread pool for offloading business logic (RpcDispatcher dispatch)
+    // from the IO thread. Created in start(), destroyed in stop().
+    std::unique_ptr<pv::core::ThreadPool> _worker_pool;
 };
 
 } // namespace pv::api

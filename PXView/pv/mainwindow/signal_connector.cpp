@@ -25,9 +25,7 @@
 #include "pv/mainwindow/mainwindow.h"
 
 #include <QObject>
-#include <QOverload>
 
-#include "pv/base/eventobject.h"
 #include "pv/mainwindow/dock_manager.h"
 #include "pv/mainwindow/tab_manager.h"
 #include "pv/mainwindow/status_bar.h"
@@ -48,44 +46,10 @@
 namespace pv {
 
 void MainWindowSignalConnector::setup_connections() {
-  // event
-  QObject::connect(&_wnd->event_object(), &EventObject::session_error, _wnd,
-          &MainWindow::on_session_error);
-  QObject::connect(&_wnd->event_object(), &EventObject::signals_changed, _wnd,
-          &MainWindow::on_signals_changed);
-  QObject::connect(&_wnd->event_object(), &EventObject::signals_changed,
-          _wnd->dock_manager()->search_widget(),
-          &dock::SearchDock::on_device_updated);
-  QObject::connect(&_wnd->event_object(), &EventObject::frame_ended,
-          _wnd->dock_manager()->search_widget(),
-          &dock::SearchDock::on_frame_ended);
-  QObject::connect(&_wnd->event_object(), &EventObject::receive_trigger, _wnd,
-          &MainWindow::on_receive_trigger);
-  QObject::connect(&_wnd->event_object(), &EventObject::frame_ended, _wnd,
-          &MainWindow::on_frame_ended, Qt::QueuedConnection);
-  QObject::connect(&_wnd->event_object(), &EventObject::frame_began, _wnd,
-          &MainWindow::on_frame_began, Qt::QueuedConnection);
-  QObject::connect(&_wnd->event_object(), &EventObject::decode_done, _wnd,
-          &MainWindow::on_decode_done);
-  // C5 fix: on_data_updated is the no-arg Qt slot connected to
-  // EventObject::data_updated. Use QOverload<>::of to select it.
-  QObject::connect(&_wnd->event_object(), &EventObject::data_updated, _wnd,
-          QOverload<>::of(&MainWindow::on_data_updated));
-  QObject::connect(&_wnd->event_object(), &EventObject::cur_snap_samplerate_changed, _wnd,
-          &MainWindow::on_cur_snap_samplerate_changed);
-  QObject::connect(&_wnd->event_object(), &EventObject::receive_data_len, _wnd,
-          &MainWindow::on_receive_data_len);
-  // Task 1.3: ICaptureCallback signals are emitted from Core capture thread;
-  // route through Qt::QueuedConnection so the on_* slots touch View on GUI
-  // thread.
-  QObject::connect(&_wnd->event_object(), &EventObject::update_capture_sig, _wnd,
-          &MainWindow::on_update_capture, Qt::QueuedConnection);
-  QObject::connect(&_wnd->event_object(), &EventObject::show_region_sig, _wnd,
-          &MainWindow::on_show_region, Qt::QueuedConnection);
-  QObject::connect(&_wnd->event_object(), &EventObject::show_wait_trigger_sig, _wnd,
-          &MainWindow::on_show_wait_trigger, Qt::QueuedConnection);
-  QObject::connect(&_wnd->event_object(), &EventObject::repeat_hold_sig, _wnd,
-          &MainWindow::on_repeat_hold, Qt::QueuedConnection);
+  // Note: EventObject dead connections removed — all session events are now
+  // dispatched via EventBus (see SessionEventDispatcher). The remaining
+  // connections below are UI-component signals (View, ToolBar, Dock) that are
+  // still actively emitted and NOT part of the EventBus notification system.
 
   // view
   pv::view::View *initial_view = _wnd->tab_manager()->current_view();

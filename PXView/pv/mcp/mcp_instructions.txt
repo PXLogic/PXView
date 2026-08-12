@@ -79,10 +79,9 @@ The error message will tell you which mode to switch to.
 
   Tier 3: Advanced features (16 tools)
     get_samples, find_next_edge, find_pattern, get_active_decoders,
-    clear_all_decoders, reconfigure_decoder, get_decoder_class_names,
+    clear_all_decoders, reconfigure_decoder,
     list_sessions, create_session, destroy_session, set_active_session,
-    get_math_results, get_spectrum_results, get_lissajous_results,
-    configure_error_state, configure_cursors
+    get_measurement_results, configure_error_state, configure_cursors
 
 ## Common Error Patterns
 

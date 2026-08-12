@@ -305,6 +305,14 @@ void ViewDerivedTraces::sync_derived_traces() {
         dt->set_visible(false);
       }
       dt->set_view_index((int)_view->get_own_signals().size() + decode_index);
+      // Initialize _view and _viewport so paint_back/paint_mid can safely
+      // access _view->scale(), _view->offset(), etc. without SIGSEGV.
+      // Without this, the Modified path in signals_modified_refresh()
+      // creates DecodeTrace objects that are painted before
+      // layout_time_signals() calls set_view().
+      dt->set_view(_view);
+      if (_view->get_time_view())
+        dt->set_viewport(_view->get_time_view());
       _own_decode_traces.push_back(std::move(dt));
       changed = true;
     }
@@ -344,6 +352,9 @@ void ViewDerivedTraces::sync_derived_traces() {
     }
     if (!exists) {
       auto st = std::make_unique<SpectrumTrace>(_view->session_ptr(), stack, stack->get_index());
+      st->set_view(_view);
+      if (_view->fft_viewport())
+        st->set_viewport(_view->fft_viewport());
       _own_spectrum_traces.push_back(std::move(st));
       changed = true;
     }

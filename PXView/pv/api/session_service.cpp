@@ -19,6 +19,7 @@
 
 #include "pv/api/session_service.h"
 
+#include "pv/interface/events_json.h"  // Phase 3: event serialization (to_json overloads)
 #include "pv/session/sigsession.h"
 #include "pv/core/documentregistry.h"
 #include "pv/core/eventbus.h"
@@ -399,45 +400,47 @@ SessionService::SessionService(SigSession *session, DeviceAgent *device)
 _capture_id(0),
 _api_worker_pool(std::make_unique<pv::core::ThreadPool>(1)) {
 // Register event handlers via EventBus::subscribe<T>().
+// Each lambda dispatches BOTH the legacy ServiceEvent (broadcast_event) and
+// the new typed EventNotification (dispatch_notification) in parallel.
 if (_session && _session->get_event_bus()) {
 auto *bus = _session->get_event_bus();
 auto *self = this;
-_event_subscriptions.push_back(bus->subscribe<pv::interface::StoreConfPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete, {{"detail", "store_conf_prev"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect_prev"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect_prev"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectStart>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_start"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectEnd>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_end"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::RevEndPacket>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "end_packet"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureStateChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceListUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceListUpdated); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceModeChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceModeChanged); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceConfigUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceDetached>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceDetached); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::UsbDeviceArrived>([self](const auto &) { self->broadcast_event(ServiceEvent::NewUsbDevice); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CurrentDeviceChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceModeChanged, {{"detail", "device_changed"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceOptionsUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "options_updated"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DsoViewOptionChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "dso_view_option"}, {"channel_index", std::to_string(ev.channel_index)}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleRateChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "duration_updated"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectModeChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "collect_mode_changed"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::DataPoolChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "data_pool_changed"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SimpleTriggerChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "trigger_changed"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterStarted); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterProgress>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterProgress); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCompleted); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCleared); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertStarted); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCompleted); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCleared); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyToDocDone>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "copy_to_doc_done"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleCountUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "sample_count_updated"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::ActiveDocumentChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::ChannelConfigChanged, {{"change", "active_document"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyInProgressChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "copy_in_progress"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureOwnerChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "capture_owner"}, {"is_working", ev.new_owner ? "true" : "false"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::TrigNextCollect>([self](const auto &) { self->broadcast_event(ServiceEvent::TriggerReceived, {{"detail", "next_collect"}}); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::SaveComplete>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete); }));
-_event_subscriptions.push_back(bus->subscribe<pv::interface::ClearDecodeData>([self](const auto &) { self->broadcast_event(ServiceEvent::DecodeDone, {{"detail", "clear_decode_data"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StoreConfPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete, {{"detail", "store_conf_prev"}}); self->dispatch_notification("SaveComplete", "file_op", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect_prev"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect_prev"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectStart>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_start"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectEnd>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_end"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::RevEndPacket>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "end_packet"}}); self->dispatch_notification("DataUpdated", "data_updated", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureStateChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::CaptureStateChanged); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceListUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceListUpdated); self->dispatch_notification("DeviceListUpdated", "device_list", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceModeChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DeviceModeChanged); self->dispatch_notification("DeviceModeChanged", "device", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceConfigUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceDetached>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceDetached); self->dispatch_notification("DeviceDetached", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::UsbDeviceArrived>([self](const auto &) { self->broadcast_event(ServiceEvent::NewUsbDevice); self->dispatch_notification("NewUsbDevice", "device_list", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CurrentDeviceChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceModeChanged, {{"detail", "device_changed"}}); self->dispatch_notification("DeviceModeChanged", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceOptionsUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "options_updated"}}); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DsoViewOptionChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "dso_view_option"}, {"channel_index", std::to_string(ev.channel_index)}}); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleRateChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "duration_updated"}}); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectModeChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "collect_mode_changed"}}); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DataPoolChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "data_pool_changed"}}); self->dispatch_notification("DataUpdated", "data_updated", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SimpleTriggerChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "trigger_changed"}}); self->dispatch_notification("DeviceConfigChanged", "device", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterStarted); self->dispatch_notification("GlitchFilterStarted", "glitch_filter", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterProgress>([self](const auto &ev) { self->broadcast_event(ServiceEvent::GlitchFilterProgress); self->dispatch_notification("GlitchFilterProgress", "glitch_filter", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCompleted); self->dispatch_notification("GlitchFilterCompleted", "glitch_filter", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCleared); self->dispatch_notification("GlitchFilterCleared", "glitch_filter", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertStarted); self->dispatch_notification("SignalInvertStarted", "signal_invert", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCompleted); self->dispatch_notification("SignalInvertCompleted", "signal_invert", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCleared); self->dispatch_notification("SignalInvertCleared", "signal_invert", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyToDocDone>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "copy_to_doc_done"}}); self->dispatch_notification("DataUpdated", "data_updated", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleCountUpdated>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "sample_count_updated"}}); self->dispatch_notification("DataUpdated", "data_updated", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::ActiveDocumentChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::ChannelConfigChanged, {{"change", "active_document"}}); self->dispatch_notification("ChannelConfigChanged", "channel_config", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyInProgressChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "copy_in_progress"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(ev)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureOwnerChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "capture_owner"}, {"is_working", ev.new_owner ? "true" : "false"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::TrigNextCollect>([self](const auto &) { self->broadcast_event(ServiceEvent::TriggerReceived, {{"detail", "next_collect"}}); self->dispatch_notification("TriggerReceived", "trigger", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SaveComplete>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete); self->dispatch_notification("SaveComplete", "file_op", nlohmann::json(nullptr)); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::ClearDecodeData>([self](const auto &) { self->broadcast_event(ServiceEvent::DecodeDone, {{"detail", "clear_decode_data"}}); self->dispatch_notification("DecodeDone", "decode", nlohmann::json(nullptr)); }));
 }
 }
 
@@ -2476,30 +2479,25 @@ Result<std::string> SessionService::add_decoder(
         return result;
     }
 
-    // The add_decoder operation creates QObjects (DecodeTrace) and triggers
-    // Qt signals, so it MUST run on the main (Qt GUI) thread.
-    // If already on the main thread, execute directly to avoid deadlock.
+    // ---- Phase 1: Data preparation (worker-safe, no Qt object access) ----
+    // Validation, GVariant option binding, and channel mapping are pure
+    // data operations that can run on any thread.  This phase produces a
+    // PreparedDecoder that phase 2 consumes on the main thread.
+    auto prepare_decoder = [this, dec, &options, &channel_map, &label]() -> PreparedDecoder {
+        PreparedDecoder prep;
+        prep.label = label;
 
-    auto do_add = [this, dec, &options, &channel_map, &label]() -> Result<std::string> {
         // Validate: decoder can only be added in LOGIC or MSO mode.
-        // MSO (Mixed Signal Oscilloscope) includes logic channels, so
-        // protocol decoders are valid. This mirrors ProtocolDock::add_protocol_by_id().
         int cur_mode = _session->get_device()->get_work_mode();
         if (cur_mode != LOGIC && cur_mode != MSO) {
-            return Result<std::string>::Fail(
-                ErrorCode::DecoderError,
+            prep.error_message =
                 "Protocol analyzers are only valid in Digital/Logic mode. "
-                "Please switch to Logic mode first using switch_work_mode.");
+                "Please switch to Logic mode first using switch_work_mode.";
+            return prep;
         }
 
         // Validate: all required channels must be provided in channel_map.
-        // This mirrors the check that ProtocolDock::create_popup() does via
-        // DecoderStack::check_required_probes(). Without this validation,
-        // MCP add_decoder with silent=true would bypass the channel
-        // configuration dialog and allow decoders with missing required
-        // channels, which would silently fail to decode.
         if (!channel_map.empty()) {
-            // Check that all required channels are covered
             std::string missing;
             for (const GSList *c = dec->channels; c; c = c->next) {
                 auto *ch = static_cast<srd_channel*>(c->data);
@@ -2527,21 +2525,17 @@ Result<std::string> SessionService::add_decoder(
                 }
             }
 
-            // Auto-map: if channelMap has exactly one entry and decoder
-            // has exactly one required channel, skip the missing check
             int required_ch_count = 0;
             for (const GSList *c = dec->channels; c; c = c->next)
                 required_ch_count++;
             bool auto_map = (channel_map.size() == 1 && required_ch_count == 1);
 
             if (!missing.empty() && !auto_map) {
-                return Result<std::string>::Fail(
-                    ErrorCode::DecoderError,
-                    "Required channel(s) not mapped: " + missing +
-                    ". Please provide a channelMap with all required channels.");
+                prep.error_message = "Required channel(s) not mapped: " + missing +
+                    ". Please provide a channelMap with all required channels.";
+                return prep;
             }
         } else if (dec->channels) {
-            // channel_map is empty but decoder has required channels
             int required_ch_count = 0;
             for (const GSList *c = dec->channels; c; c = c->next)
                 required_ch_count++;
@@ -2552,43 +2546,199 @@ Result<std::string> SessionService::add_decoder(
                     if (!missing.empty()) missing += ", ";
                     missing += ch->id ? ch->id : (ch->name ? ch->name : "?");
                 }
-                return Result<std::string>::Fail(
-                    ErrorCode::DecoderError,
-                    "Required channel(s) not mapped: " + missing +
-                    ". Please provide a channelMap with all required channels.");
+                prep.error_message = "Required channel(s) not mapped: " + missing +
+                    ". Please provide a channelMap with all required channels.";
+                return prep;
             }
         }
 
-        // Do NOT call processEvents() or wait for _copy_in_progress here.
-        // Calling processEvents() while inside do_add() on the main thread
-        // causes a crash: it processes CopyToDocDone which calls
-        // add_decode_task(), starting a decode thread that emits
-        // new_decode_data() signals. The main thread is still inside do_add()
-        // (e.g., in rebuild_decoder_pannel), causing a race in Qt's signal
-        // delivery mechanism (crash in Qt6Core.dll).
-        //
-        // Instead, if copy is in progress, we just set up the decoder and
-        // let CopyToDocDone start the decode task for us.
-        // If copy is NOT in progress, we defer the decode start to after
-        // do_add() returns using QTimer::singleShot.
+        // Prepare GVariant options (pure GLib operations, thread-safe).
+        // g_variant_new_*() returns a floating reference; we ref_sink to
+        // take ownership.  Phase 2 will pass each to set_option() (which
+        // does its own ref_sink) and then unref our copy.
+        for (const auto &opt : options) {
+            GVariant *val = nullptr;
+            bool found_type = false;
 
+            for (const GSList *o = dec->options; o; o = o->next) {
+                auto *opt_def = static_cast<srd_decoder_option*>(o->data);
+                if (!opt_def || !opt_def->id) continue;
+                if (opt.first != opt_def->id) continue;
+
+                if (opt_def->values) {
+                    for (const GSList *v = opt_def->values; v; v = v->next) {
+                        auto *enum_val = static_cast<GVariant*>(v->data);
+                        if (!enum_val) continue;
+                        gchar *enum_str = g_variant_print(enum_val, false);
+                        std::string cmp_str = enum_str ? enum_str : "";
+                        g_free(enum_str);
+                        if (cmp_str.size() >= 2 && cmp_str.front() == '\'' && cmp_str.back() == '\'')
+                            cmp_str = cmp_str.substr(1, cmp_str.size() - 2);
+                        if (cmp_str == opt.second) {
+                            if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("s")))
+                                val = g_variant_new_string(g_variant_get_string(enum_val, nullptr));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("t")))
+                                val = g_variant_new_uint64(g_variant_get_uint64(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("x")))
+                                val = g_variant_new_int64(g_variant_get_int64(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("d")))
+                                val = g_variant_new_double(g_variant_get_double(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("b")))
+                                val = g_variant_new_boolean(g_variant_get_boolean(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("y")))
+                                val = g_variant_new_byte(g_variant_get_byte(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("n")))
+                                val = g_variant_new_int16(g_variant_get_int16(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("q")))
+                                val = g_variant_new_uint16(g_variant_get_uint16(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("i")))
+                                val = g_variant_new_int32(g_variant_get_int32(enum_val));
+                            else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("u")))
+                                val = g_variant_new_uint32(g_variant_get_uint32(enum_val));
+                            else
+                                val = g_variant_new_string(opt.second.c_str());
+                            break;
+                        }
+                    }
+                    if (!val && opt_def->def) {
+                        if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("s")))
+                            val = g_variant_new_string(opt.second.c_str());
+                        else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("d")))
+                            val = g_variant_new_double(std::stod(opt.second));
+                        else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("x")))
+                            val = g_variant_new_int64(std::stoll(opt.second));
+                        else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("b")))
+                            val = g_variant_new_boolean(opt.second == "True" || opt.second == "1");
+                        else
+                            val = g_variant_new_string(opt.second.c_str());
+                    }
+                    if (!val)
+                        val = g_variant_new_string(opt.second.c_str());
+                } else if (opt_def->def) {
+                    if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("d")))
+                        val = g_variant_new_double(std::stod(opt.second));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("x")))
+                        val = g_variant_new_int64(std::stoll(opt.second));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("s")))
+                        val = g_variant_new_string(opt.second.c_str());
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("b")))
+                        val = g_variant_new_boolean(opt.second == "True" || opt.second == "1");
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("y")))
+                        val = g_variant_new_byte(static_cast<guchar>(std::stoi(opt.second)));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("n")))
+                        val = g_variant_new_int16(static_cast<gint16>(std::stoi(opt.second)));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("q")))
+                        val = g_variant_new_uint16(static_cast<guint16>(std::stoi(opt.second)));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("i")))
+                        val = g_variant_new_int32(std::stoi(opt.second));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("u")))
+                        val = g_variant_new_uint32(static_cast<guint32>(std::stoul(opt.second)));
+                    else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("t")))
+                        val = g_variant_new_uint64(std::stoull(opt.second));
+                    else
+                        val = g_variant_new_string(opt.second.c_str());
+                } else {
+                    val = g_variant_new_string(opt.second.c_str());
+                }
+                found_type = true;
+                break;
+            }
+
+            if (!found_type)
+                val = g_variant_new_string(opt.second.c_str());
+
+            if (val) {
+                g_variant_ref_sink(val);
+                prep.prepared_options.emplace_back(opt.first, val);
+            }
+        }
+
+        // Prepare channel mapping (pure data operations).
+        auto match_channel = [&channel_map](const srd_channel *ch) -> std::pair<bool, int16_t> {
+            if (!ch) return {false, 0};
+            std::string ch_id = ch->id ? ch->id : "";
+            std::string ch_name = ch->name ? ch->name : "";
+            std::string ch_desc = ch->desc ? ch->desc : "";
+
+            auto ci_eq = [](const std::string& a, const std::string& b) {
+                if (a.size() != b.size()) return false;
+                for (size_t i = 0; i < a.size(); i++)
+                    if (tolower(a[i]) != tolower(b[i])) return false;
+                return true;
+            };
+
+            for (const auto& [key, val] : channel_map) {
+                if (ci_eq(key, ch_id) || ci_eq(key, ch_name) || ci_eq(key, ch_desc))
+                    return {true, val};
+            }
+            return {false, 0};
+        };
+
+        int required_ch_count = 0;
+        for (const GSList *c = dec->channels; c; c = c->next)
+            required_ch_count++;
+        bool auto_map = (channel_map.size() == 1 && required_ch_count == 1);
+
+        for (const GSList *c = dec->channels; c; c = c->next) {
+            auto *ch = static_cast<srd_channel*>(c->data);
+            auto [found, val] = match_channel(ch);
+            if (!found && auto_map) {
+                val = channel_map.begin()->second;
+                found = true;
+            }
+            if (found) {
+                prep.prepared_probes[ch] = val;
+                prep.prepared_index_list.push_back(val);
+            }
+        }
+
+        for (const GSList *c = dec->opt_channels; c; c = c->next) {
+            auto *ch = static_cast<srd_channel*>(c->data);
+            auto [found, val] = match_channel(ch);
+            if (found) {
+                prep.prepared_probes[ch] = val;
+                prep.prepared_index_list.push_back(val);
+            }
+        }
+
+        // Debug: log channel mapping result
+        {
+            QString probe_info;
+            for (const auto& [ch, idx] : prep.prepared_probes) {
+                probe_info += QString("  %1(id=%2) -> ch%3, ")
+                    .arg(ch->name ? ch->name : "?")
+                    .arg(ch->id ? ch->id : "?")
+                    .arg(idx);
+            }
+            pxv_info("add_decoder channel mapping: %s probes=%d index_list=%d have_view_data=%d",
+                     probe_info.toUtf8().constData(),
+                     (int)prep.prepared_probes.size(), (int)prep.prepared_index_list.size(),
+                     _session->have_view_data() ? 1 : 0);
+        }
+
+        prep.valid = true;
+        return prep;
+    };
+
+    // ---- Phase 2: Qt object creation + UI update (main thread only) ----
+    // Creates DecoderStack (QObject), applies prepared options/probes,
+    // triggers UI rebuild, and broadcasts DecoderAdded.
+    auto apply_prepared = [this, dec](PreparedDecoder& prep) -> Result<std::string> {
         // Do NOT call processEvents() or wait for _copy_in_progress here.
-        // Calling processEvents() while inside do_add() on the main thread
+        // Calling processEvents() while inside this lambda on the main thread
         // causes a crash: it processes CopyToDocDone which calls
         // add_decode_task(), starting a decode thread that emits
-        // new_decode_data() signals. The main thread is still inside do_add()
-        // (e.g., in rebuild_decoder_pannel), causing a race in Qt's signal
-        // delivery mechanism (crash in Qt6Core.dll).
+        // new_decode_data() signals. The main thread is still inside this
+        // lambda (e.g., in rebuild_decoder_pannel), causing a race in Qt's
+        // signal delivery mechanism (crash in Qt6Core.dll).
         //
         // Instead, if copy is in progress, we just set up the decoder and
         // let CopyToDocDone start the decode task for us.
         // If copy is NOT in progress, we defer the decode start to after
-        // do_add() returns using QTimer::singleShot.
+        // this lambda returns using QTimer::singleShot.
 
         std::shared_ptr<data::DecoderStack> decoder_stack;
         std::list<pv::data::decode::Decoder *> sub_decoders;
-        // DecoderStatus must be heap-allocated; DecoderStack stores the pointer
-        // and uses it for the lifetime of the decode trace.
         DecoderStatus *dstatus = new DecoderStatus();
         dstatus->m_format = (int)DecoderDataFormat::hex;
 
@@ -2603,251 +2753,39 @@ Result<std::string> SessionService::add_decoder(
             return Result<std::string>::Fail(ErrorCode::DecoderError,
                                              "No decoder stack created");
 
-        // Store the custom label on the DecoderStack so exports and
-        // list_analyzers can distinguish multiple instances of the same
-        // decoder (e.g. "0:SPI(CH2.SPI)" vs "1:SPI(CH3.SPI)").
-        if (!label.empty()) {
-            decoder_stack->set_label(QString::fromStdString(label));
+        if (!prep.label.empty()) {
+            decoder_stack->set_label(QString::fromStdString(prep.label));
         }
 
         {
             auto &stack = decoder_stack->stack();
             if (!stack.empty()) {
-auto *root_decoder = stack.front().get();
+                auto *root_decoder = stack.front().get();
 
-// Apply options with correct GVariant types (matching DecoderOptions binding)
-                for (const auto &opt : options) {
-                    GVariant *val = nullptr;
-                    bool found_type = false;
-
-                    for (const GSList *o = dec->options; o; o = o->next) {
-                        auto *opt_def = static_cast<srd_decoder_option*>(o->data);
-                        if (!opt_def || !opt_def->id) continue;
-                        if (opt.first != opt_def->id) continue;
-
-                        if (opt_def->values) {
-                            // Enum type: find matching value in the values list
-                            // Create a NEW GVariant instead of reusing the shared one from values list,
-                            // to avoid floating reference issues with shared GVariant pointers.
-                            for (const GSList *v = opt_def->values; v; v = v->next) {
-                                auto *enum_val = static_cast<GVariant*>(v->data);
-                                if (!enum_val) continue;
-                                // Compare by string representation
-                                gchar *enum_str = g_variant_print(enum_val, false);
-                                std::string cmp_str = enum_str ? enum_str : "";
-                                g_free(enum_str);
-                                // Strip quotes from string variants for comparison
-                                if (cmp_str.size() >= 2 && cmp_str.front() == '\'' && cmp_str.back() == '\'')
-                                    cmp_str = cmp_str.substr(1, cmp_str.size() - 2);
-                                if (cmp_str == opt.second) {
-                                    // Create a new GVariant of the same type instead of
-                                    // reusing the shared one from the values list.
-                                    // The values list GVariants may be floating references
-                                    // (C decoders use g_variant_new_*() which returns floats),
-                                    // and sharing them causes refcount corruption.
-                                    if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("s")))
-                                        val = g_variant_new_string(g_variant_get_string(enum_val, nullptr));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("t")))
-                                        val = g_variant_new_uint64(g_variant_get_uint64(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("x")))
-                                        val = g_variant_new_int64(g_variant_get_int64(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("d")))
-                                        val = g_variant_new_double(g_variant_get_double(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("b")))
-                                        val = g_variant_new_boolean(g_variant_get_boolean(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("y")))
-                                        val = g_variant_new_byte(g_variant_get_byte(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("n")))
-                                        val = g_variant_new_int16(g_variant_get_int16(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("q")))
-                                        val = g_variant_new_uint16(g_variant_get_uint16(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("i")))
-                                        val = g_variant_new_int32(g_variant_get_int32(enum_val));
-                                    else if (g_variant_is_of_type(enum_val, G_VARIANT_TYPE("u")))
-                                        val = g_variant_new_uint32(g_variant_get_uint32(enum_val));
-                                    else
-                                        val = g_variant_new_string(opt.second.c_str());
-                                    break;
-                                }
-                            }
-                            // If no match found, try creating from the default value type
-                            if (!val && opt_def->def) {
-                                if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("s")))
-                                    val = g_variant_new_string(opt.second.c_str());
-                                else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("d")))
-                                    val = g_variant_new_double(std::stod(opt.second));
-                                else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("x")))
-                                    val = g_variant_new_int64(std::stoll(opt.second));
-                                else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("b")))
-                                    val = g_variant_new_boolean(opt.second == "True" || opt.second == "1");
-                                else
-                                    val = g_variant_new_string(opt.second.c_str());
-                            }
-                            if (!val)
-                                val = g_variant_new_string(opt.second.c_str());
-                        } else if (opt_def->def) {
-                            if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("d"))) {
-                                val = g_variant_new_double(std::stod(opt.second));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("x"))) {
-                                val = g_variant_new_int64(std::stoll(opt.second));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("s"))) {
-                                val = g_variant_new_string(opt.second.c_str());
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("b"))) {
-                                val = g_variant_new_boolean(opt.second == "True" || opt.second == "1");
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("y"))) {
-                                val = g_variant_new_byte(static_cast<guchar>(std::stoi(opt.second)));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("n"))) {
-                                val = g_variant_new_int16(static_cast<gint16>(std::stoi(opt.second)));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("q"))) {
-                                val = g_variant_new_uint16(static_cast<guint16>(std::stoi(opt.second)));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("i"))) {
-                                val = g_variant_new_int32(std::stoi(opt.second));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("u"))) {
-                                val = g_variant_new_uint32(static_cast<guint32>(std::stoul(opt.second)));
-                            } else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("t"))) {
-                                val = g_variant_new_uint64(std::stoull(opt.second));
-                            } else {
-                                val = g_variant_new_string(opt.second.c_str());
-                            }
-                        } else {
-                            val = g_variant_new_string(opt.second.c_str());
-                        }
-                        found_type = true;
-                        break;
-                    }
-
-                    if (!found_type) {
-                        val = g_variant_new_string(opt.second.c_str());
-                    }
-
-                    root_decoder->set_option(opt.first.c_str(), val);
+                // Apply prepared options (GVariant refs owned by prep).
+                // set_option() does its own g_variant_ref_sink(), so we unref
+                // our copy afterwards.
+                for (auto& [opt_id, val] : prep.prepared_options) {
+                    root_decoder->set_option(opt_id.c_str(), val);
+                    g_variant_unref(val);
                 }
+                prep.prepared_options.clear();
 
-                // Build channel map from provided map.
-                // Match channel keys against srd_channel id, name, and desc
-                // (case-insensitive) so MCP clients can use any of them.
-                // If channelMap has only one entry and the decoder has only one
-                // required channel, auto-map regardless of key name.
-                auto match_channel = [&channel_map](const srd_channel *ch) -> std::pair<bool, int16_t> {
-                    if (!ch) return {false, 0};
-                    std::string ch_id = ch->id ? ch->id : "";
-                    std::string ch_name = ch->name ? ch->name : "";
-                    std::string ch_desc = ch->desc ? ch->desc : "";
+                root_decoder->set_probes(prep.prepared_probes);
 
-                    // Helper: case-insensitive compare
-                    auto ci_eq = [](const std::string& a, const std::string& b) {
-                        if (a.size() != b.size()) return false;
-                        for (size_t i = 0; i < a.size(); i++)
-                            if (tolower(a[i]) != tolower(b[i])) return false;
-                        return true;
-                    };
-
-                    for (const auto& [key, val] : channel_map) {
-                        if (ci_eq(key, ch_id) || ci_eq(key, ch_name) || ci_eq(key, ch_desc))
-                            return {true, val};
-                    }
-                    return {false, 0};
-                };
-
-                std::map<const srd_channel*, int> probes;
-                std::list<int> index_list;
-
-                // Count required channels
-                int required_ch_count = 0;
-                for (const GSList *c = dec->channels; c; c = c->next)
-                    required_ch_count++;
-
-                // Auto-map: if channelMap has exactly one entry and decoder
-                // has exactly one required channel, map regardless of key name
-                bool auto_map = (channel_map.size() == 1 && required_ch_count == 1);
-
-                for (const GSList *c = dec->channels; c; c = c->next) {
-                    auto *ch = static_cast<srd_channel*>(c->data);
-                    auto [found, val] = match_channel(ch);
-                    if (!found && auto_map) {
-                        // Auto-map: use the single channelMap value
-                        val = channel_map.begin()->second;
-                        found = true;
-                    }
-                    if (found) {
-                        probes[ch] = val;
-                        index_list.push_back(val);
-                    }
-                }
-
-                for (const GSList *c = dec->opt_channels; c; c = c->next) {
-                    auto *ch = static_cast<srd_channel*>(c->data);
-                    auto [found, val] = match_channel(ch);
-                    if (found) {
-                        probes[ch] = val;
-                        index_list.push_back(val);
-                    }
-                }
-
-                root_decoder->set_probes(probes);
-
-                // set_index_list was a view::Trace method used to render the
-                // connected-signal indicators in the trace header. DecoderStack
-                // has no equivalent; the View layer/DecoderPannel is responsible
-                // for tracking channel index lists. We retain index_list only
-                // for the debug log below.
                 decoder_stack->set_options_changed(true);
 
-                // Note: We do NOT need to set decode_region here.
-                // When silent=true, create_popup() is skipped, so
-                // Decoder::_decode_end remains 0 (the default).
-                // execute_decode_stack() now handles this case: if
-                // dec->decode_end() is 0, it uses _sample_count - 1
-                // (the full data range) automatically.
-
-                // Debug: log channel mapping result
-                {
-                    QString probe_info;
-                    for (const auto& [ch, idx] : probes) {
-                        probe_info += QString("  %1(id=%2) -> ch%3, ")
-                            .arg(ch->name ? ch->name : "?")
-                            .arg(ch->id ? ch->id : "?")
-                            .arg(idx);
-                    }
-                    pxv_info("add_decoder channel mapping: %s probes=%d index_list=%d have_view_data=%d",
-                             probe_info.toUtf8().constData(),
-                             (int)probes.size(), (int)index_list.size(),
-                             _session->have_view_data() ? 1 : 0);
+                // Prepare decode parameters but do NOT start the decode task here.
+                bool copy_in_progress = _session->is_copy_in_progress();
+                if (!_session->have_view_data() || copy_in_progress) {
+                    decoder_stack->set_options_changed(true);
+                } else {
+                    decoder_stack->set_capture_end_flag(true);
+                    decoder_stack->frame_ended();
                 }
-            }
-
-            // Prepare decode parameters but do NOT start the decode task here.
-            // Starting the decode task while do_add() is still running on the
-            // main thread causes a crash: the decode thread emits
-            // new_decode_data() signals via queued connection, but the main
-            // thread is still inside do_add() (e.g., in rebuild_decoder_pannel
-            // or processEvents), leading to a race in Qt's signal delivery
-            // (crash in Qt6Core.dll at QMetaObject::activate).
-            //
-            // Three cases:
-            // 1. No view data yet (added before capture): Just set
-            //    options_changed. When capture completes, RevEndPacket
-            //    → copy_data_to_document → CopyToDocDone will
-            //    automatically call frame_ended() + add_decode_task() for this
-            //    decoder.
-            // 2. Copy in progress (added during capture): Same as case 1 —
-            //    CopyToDocDone will start the decode for us.
-            // 3. Data is ready (added after capture): Set capture_end_flag and
-            //    frame_ended(), then defer add_decode_task() to after do_add()
-            //    returns via QTimer::singleShot.
-            bool copy_in_progress = _session->is_copy_in_progress();
-            if (!_session->have_view_data() || copy_in_progress) {
-                // No data yet or copy in progress — the capture pipeline will
-                // start the decode for us when data is ready.
-                decoder_stack->set_options_changed(true);
-            } else {
-                // Data is ready — prepare decode but don't start yet.
-                decoder_stack->set_capture_end_flag(true);
-                decoder_stack->frame_ended();
             }
         }
 
-        // Update the ProtocolDock so the new decoder appears in the GUI
         _session->rebuild_decoder_pannel();
 
         std::string instance_id = make_instance_id(decoder_stack.get());
@@ -2859,13 +2797,22 @@ auto *root_decoder = stack.front().get();
         return Result<std::string>::Success(instance_id);
     };
 
-    // do_add() touches Qt objects (DecoderStack is a QObject, sub-decoders
-    // are QObjects) and must run on the Qt main thread. Use the helper that
-    // invokes inline when already on the main thread (avoids the
-    // Qt::QueuedConnection + result_cv.wait() deadlock that occurs when MCP
-    // requests — which already run on the main thread — call add_decoder).
+    // Execute: phase 1 (any thread), phase 2 (main thread).
+    // When called from the main thread (current MCP path), both phases run
+    // inline.  When called from a worker thread (after Problem 2 threading),
+    // phase 1 runs on the worker and phase 2 is dispatched to the main thread
+    // via run_string_on_main_thread, which blocks the worker until the main
+    // thread processes the Qt object creation.
+    PreparedDecoder prepared = prepare_decoder();
+    if (!prepared.valid) {
+        return Result<std::string>::Fail(ErrorCode::DecoderError,
+                                         prepared.error_message);
+    }
+
     Result<std::string> result =
-        run_string_on_main_thread(do_add);
+        run_string_on_main_thread([&apply_prepared, &prepared]() -> Result<std::string> {
+            return apply_prepared(prepared);
+        });
 
     if (!result.ok())
         return result;
@@ -4162,6 +4109,48 @@ void SessionService::remove_event_listener(IServiceEventListener *listener) {
     auto it = std::find(_listeners.begin(), _listeners.end(), listener);
     if (it != _listeners.end())
         _listeners.erase(it);
+}
+
+// ---- Phase 3: IEventNotificationListener registration + dispatch ----
+
+void SessionService::add_notification_listener(IEventNotificationListener *listener) {
+    std::lock_guard<std::mutex> lock(_notification_listeners_mutex);
+    if (listener) {
+        auto it = std::find(_notification_listeners.begin(),
+                            _notification_listeners.end(), listener);
+        if (it == _notification_listeners.end())
+            _notification_listeners.push_back(listener);
+    }
+}
+
+void SessionService::remove_notification_listener(IEventNotificationListener *listener) {
+    std::lock_guard<std::mutex> lock(_notification_listeners_mutex);
+    auto it = std::find(_notification_listeners.begin(),
+                        _notification_listeners.end(), listener);
+    if (it != _notification_listeners.end())
+        _notification_listeners.erase(it);
+}
+
+void SessionService::dispatch_notification(const char* event_name, const char* topic,
+                                            nlohmann::json payload) {
+    // Early exit if no notification listeners — avoids JSON copy + timestamp.
+    {
+        std::lock_guard<std::mutex> lk(_notification_listeners_mutex);
+        if (_notification_listeners.empty())
+            return;
+    }
+
+    pv::interface::EventNotification n;
+    n.event_name = event_name;
+    n.topic = topic;
+    n.payload = std::move(payload);
+    n.version = ++_state_version_counter;
+    n.timestamp_ms = QDateTime::currentMSecsSinceEpoch();
+
+    std::lock_guard<std::mutex> lk(_notification_listeners_mutex);
+    for (auto* listener : _notification_listeners) {
+        listener->on_event_notification(n);
+    }
 }
 
 // ===========================================================================

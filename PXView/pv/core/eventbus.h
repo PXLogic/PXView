@@ -1,9 +1,6 @@
 #ifndef PXVIEW_CORE_EVENTBUS_H
 #define PXVIEW_CORE_EVENTBUS_H
 
-#include <QObject>
-#include <QCoreApplication>
-#include <QEvent>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -17,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pv/core/iasync_dispatcher.h"
 #include "pv/base/log.h"
 
 namespace pv {
@@ -55,7 +53,8 @@ private:
  *     callbacks for the event type. A thread_local _broadcast_depth guard
  *     defers re-entrant calls to prevent event loss.
  *   * broadcast_async<T>() — asynchronous. Queues a typed event onto
- *     the qApp event loop via postEvent.
+ *     the target thread via the injected IAsyncDispatcher (default:
+ *     QtAsyncDispatcher which uses QCoreApplication::postEvent).
  *
  * IEventListener has been removed. All event consumers use subscribe<T>()
  * with RAII Subscription management.
@@ -64,11 +63,13 @@ private:
  *   - subscribe<T>() acquires a write lock on _callbacks_mutex.
  *   - broadcast<T>() acquires a read lock on _callbacks_mutex.
  *   - Subscription destructor acquires a write lock to remove the callback.
- *   - broadcast_async<T>() posts to qApp (thread-safe).
+ *   - broadcast_async<T>() posts via IAsyncDispatcher (thread-safe).
  */
 class EventBus {
 public:
-    EventBus();
+    // Construct with an optional custom async dispatcher.  If nullptr,
+    // a QtAsyncDispatcher (QCoreApplication::postEvent) is used by default.
+    explicit EventBus(std::unique_ptr<IAsyncDispatcher> dispatcher = nullptr);
     ~EventBus();
 
     // ---- Type-erased callback subscription ----
@@ -145,7 +146,7 @@ public:
                     return; // already pending — coalesce
                 _pending_async_types.insert(ti);
             }
-            post_async_dispatch([this, alive]() {
+            dispatch_async([this, alive]() {
                 // Clear pending flag BEFORE dispatching so that events posted
                 // during dispatch are not lost.
                 {
@@ -160,7 +161,7 @@ public:
             });
         } else {
             // Non-coalescable: always dispatch
-            post_async_dispatch([this, ev, alive]() {
+            dispatch_async([this, ev, alive]() {
                 if (!alive->load(std::memory_order_acquire))
                     return;
                 broadcast(ev);
@@ -168,7 +169,16 @@ public:
         }
     }
 
-    // ---- Internal: post a functor to the main thread via QCoreApplication::postEvent ----
+    // ---- Internal: post a functor to the target thread via the injected
+    //      IAsyncDispatcher. Used by broadcast_async<T>().
+    void dispatch_async(std::function<void()> fn);
+
+    // ---- Static convenience: post a functor to the main thread via a
+    //      global default QtAsyncDispatcher.  Used by external callers
+    //      (SessionService, WsTransport, McpTransport, DeviceOptionsDock)
+    //      that need "post to main thread" without holding an EventBus
+    //      instance.  When QCoreApplication is available this is equivalent
+    //      to QCoreApplication::postEvent with a custom event type.
     static void post_async_dispatch(std::function<void()> fn);
 
     // Check if the current thread is the main (GUI) thread.
@@ -218,8 +228,8 @@ private:
     std::shared_ptr<std::atomic<bool>> _alive_shared;
     static std::thread::id _main_thread_id;
 
-    class AsyncEventFilter;
-    std::unique_ptr<AsyncEventFilter> _async_filter;
+    // ---- Async dispatch strategy (injected, defaults to QtAsyncDispatcher) ----
+    std::unique_ptr<IAsyncDispatcher> _dispatcher;
 };
 
 } // namespace core

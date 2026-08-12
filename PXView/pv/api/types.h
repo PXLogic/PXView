@@ -8,6 +8,8 @@
 #include <variant>
 #include <vector>
 
+#include "pv/interface/event_notification.h"
+
 namespace pv {
 namespace api {
 
@@ -462,6 +464,23 @@ class IServiceEventListener {
 public:
     virtual ~IServiceEventListener() = default;
     virtual void on_service_event(const ServiceEventData& data) = 0;
+};
+
+// ---- New notification interface (Phase 3: event self-serialization) ----
+//
+// IEventNotificationListener receives EventNotification objects with typed
+// JSON payloads, replacing the ServiceEvent enum + params map<string,string>
+// intermediate layer. Transports (WsTransport, McpTransport) implement this
+// to directly serialize notifications without manual field extraction.
+//
+// During the migration period, both IServiceEventListener and
+// IEventNotificationListener are dispatched in parallel. Once all consumers
+// migrate, IServiceEventListener will be removed.
+
+class IEventNotificationListener {
+public:
+    virtual ~IEventNotificationListener() = default;
+    virtual void on_event_notification(const pv::interface::EventNotification& notification) = 0;
 };
 
 } // namespace api

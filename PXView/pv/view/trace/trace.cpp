@@ -159,6 +159,8 @@ void Trace::resize()
 void Trace::set_view(pv::view::View *view)
 {
 	assert(view);
+	if (_view == view)
+		return; // idempotent — prevent double-connecting resize signal
 	_view = view;
     connect(_view, &View::resize, this, &Trace::resize);
 }

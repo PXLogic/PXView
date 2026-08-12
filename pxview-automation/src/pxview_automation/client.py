@@ -587,10 +587,30 @@ class McpClient:
         args: dict = {}
         if device_id is not None:
             args["deviceId"] = device_id
+        # Flatten logic_device_configuration into top-level params.
+        # The C++ start_capture tool expects flat params (digitalChannels,
+        # digitalSampleRate, etc.), not nested logicDeviceConfiguration.
         if logic_device_configuration is not None:
-            args["logicDeviceConfiguration"] = logic_device_configuration
+            args.update(logic_device_configuration)
+        # Convert capture_configuration from nested format to flat params.
+        # Nested: {"timedCaptureMode": {"durationSeconds": 0.5}}
+        # Flat:   {"captureMode": "timed", "durationSeconds": 0.5}
         if capture_configuration is not None:
-            args["captureConfiguration"] = capture_configuration
+            if "timedCaptureMode" in capture_configuration:
+                args["captureMode"] = "timed"
+                timed = capture_configuration["timedCaptureMode"]
+                if isinstance(timed, dict) and "durationSeconds" in timed:
+                    args["durationSeconds"] = timed["durationSeconds"]
+            elif "manualCaptureMode" in capture_configuration:
+                args["captureMode"] = "manual"
+                manual = capture_configuration["manualCaptureMode"]
+                if isinstance(manual, dict) and "sampleCount" in manual:
+                    args["sampleCount"] = manual["sampleCount"]
+            elif "streamCaptureMode" in capture_configuration:
+                args["captureMode"] = "stream"
+            else:
+                # Unknown format — flatten as-is
+                args.update(capture_configuration)
         args.update(extra)
         return self._call_tool("start_capture", args, timeout=timeout)
 
@@ -817,35 +837,59 @@ class McpClient:
     def export_data_table_csv(
         self,
         filepath: str,
-        analyzer_id: str,
+        analyzer_id: Optional[str] = None,
+        *,
         radix_type: int = 0,
+        analyzers: Optional[List[dict]] = None,
         iso8601_timestamp: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
         """Export decoded analyzer results as a CSV data table.
 
+        Single mode:
+            export_data_table_csv("out.csv", analyzer_id="1:1", radix_type=3)
+
+        Multi mode:
+            export_data_table_csv("out", analyzers=[
+                {"analyzerId": "1:1", "radixType": 3},
+                {"analyzerId": "1:2", "radixType": 1},
+            ])
+            # Generates out_1_1.csv and out_1_2.csv
+
         Args:
-            filepath:          Output CSV file path.
-            analyzer_id:       Analyzer instance ID (e.g. ``'1:1'``).
+            filepath:          Output CSV file path (or prefix for multi mode).
+            analyzer_id:       Single mode: analyzer instance ID.
             radix_type:        Radix: 1=Binary, 2=Decimal, 3=Hex, 4=Ascii.
+            analyzers:         Multi mode: list of ``{analyzerId, radixType}`` dicts.
             iso8601_timestamp: Use ISO8601 wall-clock timestamps.
         """
         args: dict = {
             "filePath": to_windows_path(filepath),
-            "analyzerId": analyzer_id,
-            "radixType": radix_type,
             "iso8601Timestamp": iso8601_timestamp,
         }
+        if analyzers is not None:
+            args["analyzers"] = analyzers
+        else:
+            if analyzer_id is None:
+                raise ValueError("Provide either 'analyzers' or 'analyzer_id'")
+            args["analyzerId"] = analyzer_id
+            args["radixType"] = radix_type
         return self._call_tool("export_data_table_csv", args, timeout=timeout)
 
     def get_sample_config(self, timeout: Optional[float] = None) -> dict:
         """Get the full sample configuration.
 
+        Uses get_session_status(include='config') internally.
+
         Returns: ``sample_rate``, ``sample_limit``, ``time_base``,
         ``collect_mode``, ``stream_mode``, ``rle_enabled``,
         ``repeat_interval``, ``repeat_hold_percent``.
         """
-        return self._call_tool("get_sample_config", {}, timeout=timeout)
+        result = self._call_tool(
+            "get_session_status", {"include": "config"}, timeout=timeout)
+        if isinstance(result, dict) and "sampleConfig" in result:
+            return result["sampleConfig"]
+        return result
 
     def get_sample_config_typed(self, timeout: Optional[float] = None) -> SampleConfig:
         """Get sample configuration as a typed :class:`SampleConfig` object."""
@@ -881,30 +925,45 @@ class McpClient:
 
     def find_pattern(
         self,
-        channel_index: int,
-        pattern: str,
         from_sample: int,
+        *,
+        channel_index: Optional[int] = None,
+        pattern: Optional[str] = None,
+        channels: Optional[List[dict]] = None,
         timeout: Optional[float] = None,
     ) -> Any:
-        """Search for a bit pattern on a logic channel.
+        """Search for a signal pattern.
+
+        Single-channel mode (simple)::
+
+            find_pattern(from_sample=0, channel_index=0, pattern="1")
+
+        Multi-channel mode (combined)::
+
+            find_pattern(from_sample=0, channels=[
+                {"channelIndex": 0, "state": "1"},
+                {"channelIndex": 1, "state": "0"},
+            ])
 
         Args:
-            channel_index: Channel index to search on.
-            pattern:       Pattern string (e.g. ``'1'``, ``'0'``, ``'x'``).
             from_sample:   Sample index to start from.
+            channel_index: Single mode: channel index.
+            pattern:       Single mode: pattern string (``'1'``, ``'0'``, ``'x'``).
+            channels:      Multi mode: list of ``{channelIndex, state}`` dicts.
 
         Returns:
             Sample index of the first match, or None.
         """
-        return self._call_tool(
-            "find_pattern",
-            {
-                "channelIndex": channel_index,
-                "pattern": pattern,
-                "fromSample": from_sample,
-            },
-            timeout=timeout,
-        )
+        args: dict = {"fromSample": from_sample}
+        if channels is not None:
+            args["channels"] = channels
+        else:
+            if channel_index is None or pattern is None:
+                raise ValueError(
+                    "Provide either 'channels' or 'channel_index'+'pattern'")
+            args["channelIndex"] = channel_index
+            args["pattern"] = pattern
+        return self._call_tool("find_pattern", args, timeout=timeout)
 
     # ---- 12. Decoder Management (2 tools) ----
 
@@ -992,15 +1051,18 @@ class McpClient:
             "refresh_device_list", {}, timeout=timeout or 120.0
         )
 
-    def set_save_range(
+    def set_export_config(
         self,
         start_sample: int,
         end_sample: int,
         timeout: Optional[float] = None,
     ) -> Any:
-        """Set the save range (in samples) for export/save operations."""
+        """Set the export/display range (in samples).
+
+        Note: These are export/display offsets, not acquisition triggers.
+        """
         return self._call_tool(
-            "set_save_range",
+            "set_export_config",
             {"startSample": start_sample, "endSample": end_sample},
             timeout=timeout,
         )
@@ -1021,27 +1083,81 @@ class McpClient:
             args["channelMap"] = channel_map
         return self._call_tool("reconfigure_decoder", args, timeout=timeout)
 
+    def get_measurement_results(
+        self,
+        types: Optional[List[str]] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
+        """Get measurement and analysis results.
+
+        Args:
+            types: List of result types to include: 'math', 'spectrum', 'lissajous'.
+                  If None, returns all available.
+
+        Returns:
+            Dict with keys for each requested type.
+        """
+        args: dict = {}
+        if types is not None:
+            args["types"] = types
+        return self._call_tool("get_measurement_results", args, timeout=timeout)
+
     def get_decoder_class_names(
-        self, analyzer_name: str, timeout: Optional[float] = None
-    ) -> List[str]:
-        """Get annotation class names declared by a decoder."""
-        return self._call_tool(
-            "get_decoder_class_names",
-            {"analyzerName": analyzer_name},
-            timeout=timeout,
-        )
+        self,
+        decoder_name: str,
+        timeout: Optional[float] = None,
+    ) -> List[dict]:
+        """Get annotation class names for a decoder type.
 
-    def get_math_results(self, timeout: Optional[float] = None) -> dict:
-        """Read computed math trace results."""
-        return self._call_tool("get_math_results", {}, timeout=timeout)
+        Convenience method: temporarily adds a decoder instance, queries
+        class names via ``get_analyzer_results(includeMetadata=true)``,
+        then removes the decoder.
 
-    def get_spectrum_results(self, timeout: Optional[float] = None) -> dict:
-        """Read computed FFT spectrum results."""
-        return self._call_tool("get_spectrum_results", {}, timeout=timeout)
+        Args:
+            decoder_name: Decoder ID (e.g. ``'i2c_c'``, ``'spi_c'``).
 
-    def get_lissajous_results(self, timeout: Optional[float] = None) -> dict:
-        """Read Lissajous trace configuration."""
-        return self._call_tool("get_lissajous_results", {}, timeout=timeout)
+        Returns:
+            List of ``{class_id, class_name}`` dicts, or empty list
+            if the decoder cannot be queried.
+        """
+        # Try to add the decoder temporarily (no channel map needed
+        # — the server accepts decoders without channel mapping).
+        try:
+            result = self._call_tool(
+                "add_analyzer", {"decoderId": decoder_name}, timeout=timeout
+            )
+            analyzer_id = None
+            if isinstance(result, dict):
+                analyzer_id = (
+                    result.get("analyzerId")
+                    or result.get("instance_id")
+                    or result.get("id")
+                )
+            elif isinstance(result, str):
+                analyzer_id = result
+            if not analyzer_id:
+                return []
+        except (McpError, Exception):
+            return []
+
+        try:
+            result = self._call_tool(
+                "get_analyzer_results",
+                {
+                    "analyzerId": analyzer_id,
+                    "includeMetadata": True,
+                    "maxCount": 1,
+                },
+                timeout=timeout,
+            )
+            if isinstance(result, dict) and "metadata" in result:
+                return result["metadata"].get("classNames", [])
+            return []
+        finally:
+            try:
+                self.remove_analyzer(analyzer_id)
+            except Exception:
+                pass
 
     def get_demo_device(self) -> dict:
         """Find and return the demo device from :meth:`get_devices`.
@@ -1095,24 +1211,43 @@ class McpClient:
 
         Returns a list of dicts with ``sample_position`` and
         ``index`` fields.
+
+        Uses the consolidated ``configure_cursors`` tool with action='get'.
         """
-        return self._call_tool("get_cursors", {}, timeout=timeout)
+        return self._call_tool(
+            "configure_cursors", {"action": "get"}, timeout=timeout
+        )
 
     def add_cursor(self, sample_pos: int, timeout: Optional[float] = None) -> Any:
-        """Add a cursor at the given sample position."""
+        """Add a cursor at the given sample position.
+
+        Uses the consolidated ``configure_cursors`` tool with action='add'.
+        """
         return self._call_tool(
-            "add_cursor", {"samplePos": sample_pos}, timeout=timeout
+            "configure_cursors",
+            {"action": "add", "samplePos": sample_pos},
+            timeout=timeout,
         )
 
     def remove_cursor(self, index: int, timeout: Optional[float] = None) -> Any:
-        """Remove the cursor at the given index."""
+        """Remove the cursor at the given index.
+
+        Uses the consolidated ``configure_cursors`` tool with action='remove'.
+        """
         return self._call_tool(
-            "remove_cursor", {"index": index}, timeout=timeout
+            "configure_cursors",
+            {"action": "remove", "index": index},
+            timeout=timeout,
         )
 
     def clear_cursors(self, timeout: Optional[float] = None) -> Any:
-        """Remove all cursors."""
-        return self._call_tool("clear_cursors", {}, timeout=timeout)
+        """Remove all cursors.
+
+        Uses the consolidated ``configure_cursors`` tool with action='clear'.
+        """
+        return self._call_tool(
+            "configure_cursors", {"action": "clear"}, timeout=timeout
+        )
 
     # ================================================================
     # 18. Consolidated Tools (Phase 0-8 — 46 tools replacing 64)

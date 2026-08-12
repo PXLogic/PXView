@@ -75,6 +75,11 @@ def wait_for_decode(mcp: McpClient, analyzer_id: str,
     return mcp.get_analyzer_results(analyzer_id, max_count=10000)
 
 
+# SR_CONF_PATTERN_MODE — demo device pattern selection (string type).
+# Numeric value from libsigrok.h enum (SR_CONF_PATTERN_MODE = 30002).
+SR_CONF_PATTERN_MODE = 30002
+
+
 def do_buffer_capture_with_pattern(
     mcp: McpClient,
     device_id: str,
@@ -85,13 +90,21 @@ def do_buffer_capture_with_pattern(
 ) -> dict:
     """Buffer-mode capture with a specific demo pattern.
 
+    Sets the demo pattern via ``set_config(SR_CONF_PATTERN_MODE)``
+    before starting the capture, because the ``start_capture`` MCP
+    tool does not have a ``pattern`` parameter.
+
     Args:
         pattern: 'random', 'graycode', 'i2c', 'sigrok', 'incremental', etc.
     """
+    # Set demo pattern mode via set_config before capture
+    mcp.set_config(
+        key=SR_CONF_PATTERN_MODE, type="string", value=pattern
+    )
+
     logic_config = {
         "digitalChannels": channels,
         "digitalSampleRate": sample_rate,
-        "pattern": pattern,
     }
     capture_config = {
         "manualCaptureMode": {"sampleCount": sample_count},

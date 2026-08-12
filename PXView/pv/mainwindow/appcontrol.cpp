@@ -29,6 +29,7 @@
 #include <QProcess>
 #include <QFile>
 #include <QWidget>
+#include <QThread>
 #include <string>
 #include <cassert>
 #include "pv/session/sigsession.h"
@@ -346,11 +347,27 @@ bool AppControl::Start()
 
     _rpc_dispatcher = new pv::api::RpcDispatcher(_app_service);
 
-    _ws_transport = new pv::api::WsTransport(_rpc_dispatcher, _ws_port);
-    _ws_transport->start();
+    // Create dedicated IO thread for network transports.
+    // CRITICAL: moveToThread must happen BEFORE start() is called, so that
+    // QTcpServer/QWebSocketServer/QTimer are created on the IO thread and
+    // new connections inherit the IO thread's affinity. start() is invoked
+    // via post_to (QCoreApplication::postEvent) which is safe from the main
+    // thread — the event is processed on the IO thread's event loop.
+    _io_thread = new QThread();
+    _io_thread->start();
 
+    _ws_transport = new pv::api::WsTransport(_rpc_dispatcher, _ws_port);
     _mcp_transport = new pv::api::McpTransport(_rpc_dispatcher, _mcp_port);
-    _mcp_transport->start();
+
+    _ws_transport->moveToThread(_io_thread);
+    _mcp_transport->moveToThread(_io_thread);
+
+    // Start on IO thread — post_to queues the start() call on the IO
+    // thread's event loop. The IO thread processes it when it pumps events.
+    pv::core::QtAsyncDispatcher::post_to(_ws_transport,
+        [this]() { _ws_transport->start(); });
+    pv::core::QtAsyncDispatcher::post_to(_mcp_transport,
+        [this]() { _mcp_transport->start(); });
 
     auto* active_session = _app_service->get_active_session();
     if (active_session) {
@@ -371,12 +388,34 @@ bool AppControl::Start()
 
  void AppControl::Stop()
  {
-    // Cleanup API Service Layer
-    if (_ws_transport) { _ws_transport->stop(); delete _ws_transport; _ws_transport = nullptr; }
-    if (_mcp_transport) { _mcp_transport->stop(); delete _mcp_transport; _mcp_transport = nullptr; }
+    // Stop transports on the IO thread (they live there).
+    // post_to() queues stop() before quit(), so the IO thread processes
+    // stop() first, then exits the event loop.
+    if (_ws_transport)
+        pv::core::QtAsyncDispatcher::post_to(_ws_transport,
+            [this]() { _ws_transport->stop(); });
+    if (_mcp_transport)
+        pv::core::QtAsyncDispatcher::post_to(_mcp_transport,
+            [this]() { _mcp_transport->stop(); });
+
+    // Quit IO thread event loop and wait for it to finish.
+    // The quit event is queued after the stop() events, so stop() runs
+    // first, then the event loop exits.
+    if (_io_thread) {
+        _io_thread->quit();
+        _io_thread->wait();
+    }
+
+    // Now safe to delete transports (IO thread is stopped — QObject
+    // can be deleted from any thread after its thread is stopped).
+    // The destructors call stop() again, but it's a no-op (already stopped).
+    if (_ws_transport) { delete _ws_transport; _ws_transport = nullptr; }
+    if (_mcp_transport) { delete _mcp_transport; _mcp_transport = nullptr; }
     if (_direct_transport) { delete _direct_transport; _direct_transport = nullptr; }
     if (_rpc_dispatcher) { delete _rpc_dispatcher; _rpc_dispatcher = nullptr; }
     if (_app_service) { _app_service->shutdown(); delete _app_service; _app_service = nullptr; }
+
+    if (_io_thread) { delete _io_thread; _io_thread = nullptr; }
 
     _session->Close();
  }
