@@ -1,0 +1,43 @@
+PXView is a multi-mode signal analyzer (Logic/Analog/DSO/MSO).
+
+## Quick Start Workflow
+
+1. get_devices — discover available devices and their IDs
+2. (optional) connect_device — connect to a specific device
+3. (recommended) add_analyzer — add protocol decoders BEFORE capture so auto-decode works
+4. start_capture — begin acquisition with device/channel/sample-rate config
+5. wait_capture — wait for acquisition to complete (non-stream mode)
+6. get_analyzer_results — read decoded protocol data
+7. export_raw_data_csv / export_data_table_csv — export results
+
+## Important Notes
+
+### Work Modes
+PXView operates in one of four work modes. Some tools require a specific mode:
+- Logic (0): Digital signal analysis — use get_samples with channelType="logic"
+- Analog (1): Analog signal analysis — use get_samples with channelType="analog"
+- DSO (2): Oscilloscope mode — use get_samples with channelType="dso"
+- MSO (3): Mixed Signal — both logic and analog channels available
+Call switch_work_mode to change mode BEFORE configuring channels or starting capture.
+
+### Capture Modes
+- Buffer mode: Traditional fixed-length capture. Use timedCaptureMode or manualCaptureMode.
+- Stream mode: Continuous acquisition with no sample limit. Use stop_capture to end.
+  In Stream mode, durationSeconds and sampleCount are IGNORED.
+
+### Decoders
+- Add decoders (add_analyzer) BEFORE start_capture for auto-decode.
+- Decoded results are available after capture via get_analyzer_results.
+- Use stackOnAnalyzerId to stack decoders (e.g., SPI on top of I2C).
+
+### Sessions
+- PXView supports multiple sessions. Use create_session to create a new one.
+- Each session has its own device, channels, and capture state.
+- Use set_active_session to switch between sessions.
+- get_session_count returns the total number of sessions.
+
+### Common Error Patterns
+- "No active session": Call create_session or connect_device first.
+- "Capture in progress": Call stop_capture or wait_capture first.
+- "No data": Capture hasn't completed or no channels were enabled.
+- "Config not supported": The device doesn't support the requested configuration.
