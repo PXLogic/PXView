@@ -153,9 +153,9 @@ jobs:
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
-          GROUP1="test_01_mcp_protocol.py test_02_device_management.py test_03_capture_basic.py test_05_data_integrity.py test_13_signal_data.py test_14_16_config.py test_21_error_handling.py"
-          GROUP2="test_04_capture_timed_10s.py test_06_export_import.py test_07_decoder_i2c.py test_08_decoder_spi.py test_09_decoder_uart.py test_10_decoder_can_pwm.py"
-          GROUP3="test_12_decoder_batch.py test_17_18_filter_invert.py test_19_20_session_advanced.py test_22_stress.py test_23_decoder_stacked.py test_24_real_decode.py"
+          GROUP1="test_01_mcp_protocol.py test_02_device_management.py test_03_capture_basic.py test_05_data_integrity.py test_13_signal_data.py test_14_16_config.py test_21_error_handling.py test_27_cursor_export.py"
+          GROUP2="test_04_capture_timed_10s.py test_06_export_import.py test_07_decoder_i2c.py test_08_decoder_spi.py test_09_decoder_uart.py test_10_decoder_can_pwm.py test_26_i2c_real_decode.py"
+          GROUP3="test_12_decoder_batch.py test_17_18_filter_invert.py test_19_20_session_advanced.py test_22_stress.py test_23_decoder_stacked.py test_24_real_decode.py test_25_pwm_mixed_stress.py"
 
           # ---- Helper: start a PXView instance on a given port ----
           start_pxview() {

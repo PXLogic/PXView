@@ -73,3 +73,56 @@ def wait_for_decode(mcp: McpClient, analyzer_id: str,
         time.sleep(poll_interval)
     # Final attempt
     return mcp.get_analyzer_results(analyzer_id, max_count=10000)
+
+
+def do_buffer_capture_with_pattern(
+    mcp: McpClient,
+    device_id: str,
+    channels: list,
+    sample_rate: int,
+    sample_count: int,
+    pattern: str,
+) -> dict:
+    """Buffer-mode capture with a specific demo pattern.
+
+    Args:
+        pattern: 'random', 'graycode', 'i2c', 'sigrok', 'incremental', etc.
+    """
+    logic_config = {
+        "digitalChannels": channels,
+        "digitalSampleRate": sample_rate,
+        "pattern": pattern,
+    }
+    capture_config = {
+        "manualCaptureMode": {"sampleCount": sample_count},
+    }
+    mcp.start_capture(
+        device_id=device_id,
+        logic_device_configuration=logic_config,
+        capture_configuration=capture_config,
+    )
+    wait_timeout = max(sample_count / sample_rate * 3, 30)
+    mcp.wait_capture(timeout_seconds=wait_timeout, timeout=wait_timeout + 10)
+    time.sleep(0.5)
+    return mcp.get_capture_status()
+
+
+def configure_pwm(mcp: McpClient, channel: int, enable: bool,
+                  freq: float, duty: float):
+    """Configure demo PWM output on ch6 (pwm0) or ch7 (pwm1).
+
+    Uses set_config with SR_CONF_PWM0/1_* keys:
+      PWM0_EN=60004, PWM0_FREQ=60005, PWM0_DUTY=60006
+      PWM1_EN=60007, PWM1_FREQ=60008, PWM1_DUTY=60009
+    """
+    if channel == 0:
+        en_key, freq_key, duty_key = 60004, 60005, 60006
+    elif channel == 1:
+        en_key, freq_key, duty_key = 60007, 60008, 60009
+    else:
+        raise ValueError(f"PWM channel must be 0 or 1, got {channel}")
+    mcp.set_config(key=en_key, value_type="bool", value=enable)
+    if enable:
+        mcp.set_config(key=freq_key, value_type="double", value=freq)
+        mcp.set_config(key=duty_key, value_type="double", value=duty)
+

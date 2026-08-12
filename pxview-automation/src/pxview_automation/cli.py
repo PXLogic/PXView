@@ -480,6 +480,24 @@ def cmd_list_decoders(client: McpClient, args: argparse.Namespace) -> None:
         )
 
 
+def cmd_dump_schema(client: McpClient, args: argparse.Namespace) -> None:
+    """Dump the server's tool schemas to JSON.
+
+    The schema is extracted from the MCP tools/list response — the
+    single source of truth defined in PXView/pv/api/tool_schemas.inc.
+    No hand-maintained duplicate file is needed.
+    """
+    schema = client.dump_schema()
+    if args.out:
+        import json as _json
+        with open(args.out, "w", encoding="utf-8") as f:
+            _json.dump(schema, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        print(f"Schema written to {args.out} ({schema['toolCount']} tools)")
+    else:
+        print(json.dumps(schema, indent=2, default=str))
+
+
 def cmd_run(client: McpClient, args: argparse.Namespace) -> None:
     """All-in-one: capture + decode + export."""
     pxv = PXView.__new__(PXView)
@@ -563,6 +581,7 @@ _COMMAND_MAP = {
     "load": cmd_load,
     "run": cmd_run,
     "list-decoders": cmd_list_decoders,
+    "dump-schema": cmd_dump_schema,
 }
 
 

@@ -220,6 +220,7 @@ def cleanup_after_test(mcp: McpClient):
     for cleanup_fn in [
         lambda: mcp._call_tool("stop_capture", {}, timeout=5.0),
         lambda: mcp._call_tool("clear_all_decoders", {}, timeout=5.0),
+        lambda: mcp._call_tool("clear_cursors", {}, timeout=5.0),
         lambda: mcp._call_tool("close_capture", {}, timeout=5.0),
     ]:
         try:

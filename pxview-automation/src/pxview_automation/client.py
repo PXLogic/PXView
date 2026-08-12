@@ -33,6 +33,16 @@ from typing import Any, Dict, List, Optional
 
 from ._utils import to_windows_path
 from .exceptions import McpConnectionError, McpError
+from .types import (
+    AppInfo,
+    CaptureStatus,
+    ChannelInfo,
+    DataTableExportConfiguration,
+    DataTableFilter,
+    DeviceDesc,
+    ProbeConfig,
+    SampleConfig,
+)
 
 # ------------------------------------------------------------------
 # Force-disable all HTTP proxies at module import time.
@@ -344,6 +354,63 @@ class McpClient:
         """List of tool names discovered during connect()."""
         return [t["name"] for t in self._tools]
 
+    def dump_schema(self, filepath: Optional[str] = None) -> dict:
+        """Dump the server's tool schemas to a JSON file.
+
+        This extracts the schema from the MCP ``tools/list`` response
+        (the single source of truth — ``tool_schemas.inc`` in the
+        PXView C++ code) and writes it as a standalone JSON document.
+
+        This replaces a hand-maintained static schema file: instead
+        of keeping a separate ``mcp-schema.json`` in sync with the
+        server, you generate it on demand from the running server.
+
+        Args:
+            filepath: Output file path.  If None, returns the schema
+                      dict without writing a file.
+
+        Returns:
+            The schema as a dict (also written to *filepath* if given).
+
+        Example::
+
+            client.connect()
+            client.dump_schema("mcp-schema.json")
+
+            # Or from the CLI:
+            # pxview-cli dump-schema --out mcp-schema.json
+        """
+        import json as _json
+
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "PXView MCP Automation API Schema",
+            "description": (
+                "Auto-generated from the running PXView server's "
+                "tools/list response. Source of truth: "
+                "PXView/pv/api/tool_schemas.inc"
+            ),
+            "version": __import__("pxview_automation").__version__,
+            "protocolVersion": "2025-03-26",
+            "transport": "JSON-RPC 2.0 over HTTP",
+            "defaultEndpoint": self.url,
+            "toolCount": len(self._tools),
+            "tools": {
+                t["name"]: {
+                    "description": t.get("description", ""),
+                    "inputSchema": t.get("inputSchema", {}),
+                }
+                for t in self._tools
+            },
+        }
+
+        if filepath is not None:
+            with open(filepath, "w", encoding="utf-8") as f:
+                _json.dump(schema, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+
+        return schema
+
     def ping(self) -> bool:
         """Send a ping and return True if server responds."""
         try:
@@ -420,6 +487,21 @@ class McpClient:
             args["includeSimulationDevices"] = include_simulation_devices
         return self._call_tool("get_devices", args, timeout=timeout)
 
+    def get_devices_typed(
+        self,
+        include_simulation_devices: Optional[bool] = None,
+        timeout: Optional[float] = None,
+    ) -> List[DeviceDesc]:
+        """List connected devices as typed :class:`DeviceDesc` objects.
+
+        This is the typed equivalent of :meth:`get_devices`.
+        """
+        raw = self.get_devices(
+            include_simulation_devices=include_simulation_devices,
+            timeout=timeout,
+        )
+        return [DeviceDesc.from_dict(d) for d in raw]
+
     def get_channels(self, timeout: Optional[float] = None) -> List[dict]:
         """Get channel list for the current device.
 
@@ -428,6 +510,11 @@ class McpClient:
             ``enabled``, ``enabled_default``.
         """
         return self._call_tool("get_channels", {}, timeout=timeout)
+
+    def get_channels_typed(self, timeout: Optional[float] = None) -> List[ChannelInfo]:
+        """Get channel list as typed :class:`ChannelInfo` objects."""
+        raw = self.get_channels(timeout=timeout)
+        return [ChannelInfo.from_dict(d) for d in raw]
 
     # ---- 2. Capture Control (4 tools) ----
 
@@ -497,6 +584,11 @@ class McpClient:
             ``progress``, ``triggered``, etc.
         """
         return self._call_tool("get_capture_status", {}, timeout=timeout)
+
+    def get_capture_status_typed(self, timeout: Optional[float] = None) -> CaptureStatus:
+        """Get capture status as a typed :class:`CaptureStatus` object."""
+        raw = self.get_capture_status(timeout=timeout)
+        return CaptureStatus.from_dict(raw)
 
     # ---- 3. File Operations (3 tools) ----
 
@@ -710,19 +802,40 @@ class McpClient:
         self,
         filepath: str,
         analyzers: Optional[List[dict]] = None,
+        *,
+        columns: Optional[List[str]] = None,
+        filter: Optional[dict] = None,
+        filter_query: Optional[str] = None,
+        filter_columns: Optional[List[str]] = None,
         iso8601_timestamp: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
         """Export decoded analyzer results as a CSV data table.
 
         Args:
-            filepath: Output CSV file path.
-            analyzers: List of ``{analyzerId, radixType}`` dicts.
-                       If omitted, exports all active decoders.
+            filepath:          Output CSV file path.
+            analyzers:         List of ``{analyzerId, radixType}`` dicts.
+                               If omitted, exports all active decoders.
+            columns:           Column names to include in the export.
+                               If omitted, all columns are exported.
+            filter:            Pre-built filter dict ``{query, columns}``.
+            filter_query:      Convenience: query string for filtering.
+            filter_columns:    Convenience: columns to apply the query to.
+            iso8601_timestamp: Use ISO8601 wall-clock timestamps.
         """
         args: dict = {"filepath": to_windows_path(filepath)}
         if analyzers is not None:
             args["analyzers"] = analyzers
+        if columns is not None:
+            args["exportColumns"] = columns
+        # Build filter: explicit filter dict takes precedence, then convenience args
+        if filter is not None:
+            args["filter"] = filter
+        elif filter_query is not None:
+            f: dict = {"query": filter_query}
+            if filter_columns is not None:
+                f["columns"] = filter_columns
+            args["filter"] = f
         args["iso8601Timestamp"] = iso8601_timestamp
         return self._call_tool("export_data_table_csv", args, timeout=timeout)
 
@@ -768,6 +881,13 @@ class McpClient:
             {"channelIndex": channel_index},
             timeout=timeout,
         )
+
+    def get_probe_config_typed(
+        self, channel_index: int, timeout: Optional[float] = None
+    ) -> ProbeConfig:
+        """Get probe config as a typed :class:`ProbeConfig` object."""
+        raw = self.get_probe_config(channel_index, timeout=timeout)
+        return ProbeConfig.from_dict(raw)
 
     def set_probe_config(
         self,
@@ -822,6 +942,11 @@ class McpClient:
         ``repeat_interval``, ``repeat_hold_percent``.
         """
         return self._call_tool("get_sample_config", {}, timeout=timeout)
+
+    def get_sample_config_typed(self, timeout: Optional[float] = None) -> SampleConfig:
+        """Get sample configuration as a typed :class:`SampleConfig` object."""
+        raw = self.get_sample_config(timeout=timeout)
+        return SampleConfig.from_dict(raw)
 
     def set_sample_rate(
         self, rate: int, timeout: Optional[float] = None
@@ -1306,3 +1431,29 @@ class McpClient:
             except Exception:
                 pass
             raise
+
+    # ---- 17. Cursors (4 tools) ----
+
+    def get_cursors(self, timeout: Optional[float] = None) -> List[dict]:
+        """Get all cursor positions.
+
+        Returns a list of dicts with ``sample_position`` and
+        ``index`` fields.
+        """
+        return self._call_tool("get_cursors", {}, timeout=timeout)
+
+    def add_cursor(self, sample_pos: int, timeout: Optional[float] = None) -> Any:
+        """Add a cursor at the given sample position."""
+        return self._call_tool(
+            "add_cursor", {"samplePos": sample_pos}, timeout=timeout
+        )
+
+    def remove_cursor(self, index: int, timeout: Optional[float] = None) -> Any:
+        """Remove the cursor at the given index."""
+        return self._call_tool(
+            "remove_cursor", {"index": index}, timeout=timeout
+        )
+
+    def clear_cursors(self, timeout: Optional[float] = None) -> Any:
+        """Remove all cursors."""
+        return self._call_tool("clear_cursors", {}, timeout=timeout)

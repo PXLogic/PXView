@@ -443,6 +443,7 @@ JsonRpcResponse RpcDispatcher::dispatch_mcp_tool(int id, const std::string& tool
     if (tool_name == "find_pattern")               return on_find_pattern(id, args);
     if (tool_name == "get_active_decoders")        return on_get_active_decoders(id, args);
     if (tool_name == "clear_all_decoders")         return on_clear_all_decoders(id, args);
+    if (tool_name == "clear_cursors")              return on_clear_cursors(id, args);
     if (tool_name == "list_sessions")              return on_list_sessions(id, args);
     if (tool_name == "create_session")             return on_create_session_mcp(id, args);
     if (tool_name == "destroy_session")            return on_destroy_session_mcp(id, args);
@@ -582,6 +583,7 @@ JsonRpcResponse RpcDispatcher::handle_request(const JsonRpcRequest& req) {
     if (req.method == "get_cursors")              return on_get_cursors(req.id, params);
     if (req.method == "add_cursor")               return on_add_cursor(req.id, params);
     if (req.method == "remove_cursor")            return on_remove_cursor(req.id, params);
+if (req.method == "clear_cursors")            return on_clear_cursors(req.id, params);
     if (req.method == "set_glitch_filter")        return on_set_glitch_filter(req.id, params);
     if (req.method == "clear_glitch_filter")      return on_clear_glitch_filter(req.id, params);
     if (req.method == "set_signal_invert")        return on_set_signal_invert(req.id, params);
@@ -2131,6 +2133,14 @@ JsonRpcResponse RpcDispatcher::on_remove_cursor(int id, const json& params) {
         return error_resp(id, static_cast<int>(ErrorCode::InvalidRequest), "Missing 'index' parameter");
     int index = params["index"].get<int>();
     return wrap_void(id, session->remove_cursor(index));
+}
+
+JsonRpcResponse RpcDispatcher::on_clear_cursors(int id, const json& /*params*/) {
+    auto session = app_svc_->get_active_session();
+    if (!session)
+        return error_resp(id, static_cast<int>(ErrorCode::MissingDevice),
+                          "No active session");
+    return wrap_void(id, session->clear_cursors());
 }
 
 JsonRpcResponse RpcDispatcher::on_set_glitch_filter(int id, const json& params) {

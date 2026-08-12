@@ -150,6 +150,7 @@ private:
     JsonRpcResponse on_get_cursors(int id, const nlohmann::json& params);
     JsonRpcResponse on_add_cursor(int id, const nlohmann::json& params);
     JsonRpcResponse on_remove_cursor(int id, const nlohmann::json& params);
+JsonRpcResponse on_clear_cursors(int id, const nlohmann::json& params);
     JsonRpcResponse on_set_glitch_filter(int id, const nlohmann::json& params);
     JsonRpcResponse on_clear_glitch_filter(int id, const nlohmann::json& params);
     JsonRpcResponse on_set_signal_invert(int id, const nlohmann::json& params);

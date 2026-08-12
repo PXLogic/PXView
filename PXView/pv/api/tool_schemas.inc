@@ -1032,4 +1032,52 @@
         {"type", "object"},
         {"properties", json::object()}
     }}
+},
+// 62. get_cursors
+{
+    {"name", "get_cursors"},
+    {"description", "Get all cursor positions. Returns a list of cursor objects with sample_position and index fields."},
+    {"inputSchema", {
+        {"type", "object"},
+        {"properties", json::object()}
+    }}
+},
+// 63. add_cursor
+{
+    {"name", "add_cursor"},
+    {"description", "Add a cursor at the specified sample position."},
+    {"inputSchema", {
+        {"type", "object"},
+        {"properties", {
+            {"samplePos", {
+                {"type", "integer"},
+                {"description", "Sample position for the new cursor"}
+            }}
+        }},
+        {"required", {"samplePos"}}
+    }}
+},
+// 64. remove_cursor
+{
+    {"name", "remove_cursor"},
+    {"description", "Remove the cursor at the specified index."},
+    {"inputSchema", {
+        {"type", "object"},
+        {"properties", {
+            {"index", {
+                {"type", "integer"},
+                {"description", "Index of the cursor to remove"}
+            }}
+        }},
+        {"required", {"index"}}
+    }}
+},
+// 65. clear_cursors
+{
+    {"name", "clear_cursors"},
+    {"description", "Remove all cursors from the current session."},
+    {"inputSchema", {
+        {"type", "object"},
+        {"properties", json::object()}
+    }}
 }

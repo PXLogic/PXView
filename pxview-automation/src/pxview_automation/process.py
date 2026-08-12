@@ -146,6 +146,13 @@ class PXViewProcess:
                 f"Failed to start PXView: {exc}"
             ) from exc
 
+        # On Windows, assign the child process to a Job Object so that
+        # it is automatically killed when this (parent) process exits,
+        # even on abnormal termination (crash, SIGKILL, etc.).
+        # This mirrors the approach used by Saleae's logic2-automation.
+        if sys.platform == "win32":
+            self._assign_to_job_object()
+
         # Wait for MCP port to become reachable
         if not self._wait_for_port(self.startup_timeout):
             # Kill the process if it started but port never came up
@@ -188,6 +195,57 @@ class PXViewProcess:
         return self.process is not None and self.process.poll() is None
 
     # ---- Internal helpers ----
+
+    def _assign_to_job_object(self) -> None:
+        """Assign the child process to a Windows Job Object.
+
+        The Job Object is configured with
+        ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` so that the child
+        process is automatically terminated when the parent process
+        exits — including on crashes, SIGKILL, or any abnormal
+        termination.
+
+        This prevents orphaned PXView --headless processes from
+        lingering after the Python automation script exits.
+
+        Requires ``pywin32`` (``win32job``, ``win32api``, ``win32con``).
+        If pywin32 is not installed, this method silently does nothing
+        (falls back to manual terminate() in stop()).
+        """
+        if self.process is None:
+            return
+        try:
+            import win32job
+            import win32api
+            import win32con
+        except ImportError:
+            # pywin32 not installed — fall back to manual cleanup.
+            return
+
+        try:
+            job = win32job.CreateJobObject(None, "PXViewAutomationJob")
+            limits = win32job.QueryInformationJobObject(
+                job, win32job.JobObjectExtendedLimitInformation
+            )
+            limits["BasicLimitInformation"]["LimitFlags"] = (
+                win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            )
+            win32job.SetInformationJobObject(
+                job,
+                win32job.JobObjectExtendedLimitInformation,
+                limits,
+            )
+            child_handle = win32api.OpenProcess(
+                win32con.PROCESS_ALL_ACCESS, False, self.process.pid
+            )
+            win32job.AssignProcessToJobObject(job, child_handle)
+            # Store the job on the process object so it is not garbage
+            # collected while the Popen object is alive.
+            self._win32_job = job  # type: ignore[attr-defined]
+        except Exception:
+            # If Job Object creation fails for any reason, fall back to
+            # manual cleanup. Don't crash the application.
+            pass
 
     @classmethod
     def _find_exe(cls) -> Optional[str]:

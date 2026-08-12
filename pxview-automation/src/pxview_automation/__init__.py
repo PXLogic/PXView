@@ -37,6 +37,39 @@ from .exceptions import (
 from .client import McpClient
 from .highlevel import PXView
 from .process import PXViewProcess
+from .types import (
+    # Enums
+    CaptureState,
+    ChannelType,
+    CollectMode,
+    CouplingType,
+    DeviceType,
+    DigitalTriggerLinkedChannelState,
+    DigitalTriggerType,
+    ExportFormat,
+    RadixType,
+    StreamMode,
+    # Dataclasses — configuration
+    CaptureConfiguration,
+    DigitalTriggerCaptureMode,
+    DigitalTriggerLinkedChannel,
+    GlitchFilterEntry,
+    LogicDeviceConfiguration,
+    ManualCaptureMode,
+    ProbeConfig,
+    SampleConfig,
+    TimedCaptureMode,
+    # Dataclasses — results
+    AnalyzerHandle,
+    AnalyzerSettingValue,
+    AppInfo,
+    CaptureStatus,
+    ChannelInfo,
+    DataTableExportConfiguration,
+    DataTableFilter,
+    DeviceDesc,
+    Version,
+)
 
 __all__ = [
     # Core client
@@ -51,6 +84,37 @@ __all__ = [
     "McpConnectionError",
     "ProcessError",
     "ConfigError",
+    # Enums
+    "CaptureState",
+    "ChannelType",
+    "CollectMode",
+    "CouplingType",
+    "DeviceType",
+    "DigitalTriggerLinkedChannelState",
+    "DigitalTriggerType",
+    "ExportFormat",
+    "RadixType",
+    "StreamMode",
+    # Dataclasses — configuration
+    "CaptureConfiguration",
+    "DigitalTriggerCaptureMode",
+    "DigitalTriggerLinkedChannel",
+    "GlitchFilterEntry",
+    "LogicDeviceConfiguration",
+    "ManualCaptureMode",
+    "ProbeConfig",
+    "SampleConfig",
+    "TimedCaptureMode",
+    # Dataclasses — results
+    "AnalyzerHandle",
+    "AnalyzerSettingValue",
+    "AppInfo",
+    "CaptureStatus",
+    "ChannelInfo",
+    "DataTableExportConfiguration",
+    "DataTableFilter",
+    "DeviceDesc",
+    "Version",
     # Version
     "__version__",
 ]

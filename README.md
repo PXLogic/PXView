@@ -30,6 +30,164 @@ PXView provides native support for PXLogic USB logic analyzers:
 | PX-Logic 16 Plus | 16 ch | 500 MSa/s (buffer), 125 MSa/s (stream) | USB 3.0 / 2.0 |
 | PX-Logic 16 Base | 16 ch | 250 MSa/s (buffer), 125 MSa/s (stream) | USB 3.0 / 2.0 |
 
+## Device Support
+
+PXView uses libsigrok as its hardware abstraction layer. All 89+ libsigrok hardware drivers are compiled in, and PXView scans every driver at startup via `sr_driver_list()` + `sr_driver_scan()`. However, the level of GUI support varies by device category.
+
+### Tier 1 — Full GUI Support (Native)
+
+These devices receive all PXView features: operation mode selection (Buffer/Stream), channel mode switching, device mode (Logic/Analog/DSO/MSO), hardware trigger configuration, DSO analog options (vdiv, coupling, offset, probe factor), firmware version checking, disk cache configuration, and stream buffer settings.
+
+| Driver | Device | Connection | Notes |
+|--------|--------|------------|-------|
+| `pxlogic` | PXLogic PX-Logic 32/16 Pro/16 Plus/16 Base | USB 3.0/2.0 | Native, primary target hardware |
+| `demo` | Virtual demo device | — | Built-in, no hardware required |
+
+### Tier 2 — Compatible GUI Support (USB Auto-Detected)
+
+These devices are automatically discovered via USB bus scan and appear in the PXView device dropdown. They support basic capture operations: channel enable/disable, sample rate selection, sample limit configuration, and stream mode auto-detection. They **do not** support: operation mode switching, hardware trigger, DSO-specific analog options, channel mode configuration, or firmware management.
+
+#### Logic Analyzers
+
+| Driver | Device | Firmware Required |
+|--------|--------|-------------------|
+| `dreamsourcelab-dslogic` | DreamSourceLab DSLogic / DSCope series | Yes (DSLogic.fw, DSCope.fw) |
+| `fx2lafw` | Cypress FX2LP-based LAs (Saleae Logic, FX2 eval boards, etc.) | Yes (fx2lafw-*.fw) |
+| `ftdi-la` | FTDI-based logic analyzers | No |
+| `asix-sigma` | ASIX SIGMA / SIGMA2 | Yes (asix-sigma-*.fwb) |
+| `chronovu-la` | ChronoVu LA8 / LA16 | No |
+| `hantek-4032l` | Hantek 4032L | No |
+| `ikalogic-scanalogic2` | IKALOGIC Scanalogic2 | No |
+| `ikalogic-scanaplus` | IKALOGIC ScanAPLUS | No |
+| `kingst-la2016` | Kingst LA2016 | Yes (MCU firmware + FPGA) |
+| `lecroy-logicstudio` | LeCroy LogicStudio | Yes (FPGA + FX2) |
+| `openbench-logic-sniffer` | Openbench Logic Sniffer (OLS) / JTAGulator | No (persistent) |
+| `pipistrello-ols` | Pipistrello OLS | No |
+| `saleae-logic-pro` | Saleae Logic Pro 16 | Yes (FX3 + FPGA) |
+| `saleae-logic16` | Saleae Logic16 | Yes (FX2 + FPGA) |
+| `sipeed-slogic-analyzer` | Sipeed SLogic / SLogic16U3 | No |
+| `sysclk-lwla` | Sysclk LWLA1034 / LWLA1016 | Yes (bitstream) |
+| `sysclk-sla5032` | Sysclk SLA5032 | Yes (FPGA) |
+| `zeroplus-logic-cube` | Zeroplus Logic Cube | No |
+| `greatfet` | GreatFET | No |
+| `raspberrypi-pico` | Raspberry Pi Pico (as LA) | Yes (pico firmware) |
+
+#### Oscilloscopes
+
+| Driver | Device | Firmware Required |
+|--------|--------|-------------------|
+| `hantek-6xxx` | Hantek 6022BE / 6022BL / SainSmart DDS120 / Rocktech BM102 | Yes (fx2lafw) |
+| `hantek-dso` | Hantek DSO-2090 and similar | Yes (vendor firmware) |
+| `rigol-ds` | Rigol DS series | No |
+| `siglent-sds` | Siglent SDS series | No |
+| `lecroy-xstream` | LeCroy XStream series | No |
+| `hameg-hmo` | Hameg HMO series | No |
+| `gwinstek-gds-800` | GW Instek GDS-800 | No |
+| `yokogawa-dlm` | Yokogawa DLM series | No |
+| `hung-chang-dso-2100` | Hung-Chang DSO-2100 | No |
+| `link-mso19` | Link MSO-19 | No |
+
+#### Other USB Devices
+
+| Driver | Device | Firmware Required |
+|--------|--------|-------------------|
+| `lascar-el-usb` | Lascar EL-USB data loggers | No |
+
+### Tier 3 — No GUI Support (Serial / SCPI / Bluetooth)
+
+These drivers require a `conn=` parameter (serial port, TCP/VXI address, or Bluetooth MAC) to scan for devices. PXView's GUI does not provide a connection specification dialog, so these devices **cannot be used from the PXView GUI**. They are compiled into libsigrok and may be accessible via the MCP API or sigrok-cli with explicit connection parameters.
+
+#### Multimeters (DMM)
+
+| Driver | Device | Connection |
+|--------|--------|------------|
+| `agilent-dmm` | Agilent DMM (SCPI) | TCP/VXI/USB-TMC |
+| `appa-55ii` | APPA 55II | Bluetooth BLE |
+| `fluke-45` | Fluke 45 | Serial RS232 |
+| `fluke-dmm` | Fluke 18x/190/28x series | Serial / USB |
+| `gmc-mh-1x-2x` | Gossen Metrawatt Metrahit 1x/2x | Serial / HID |
+| `norma-dmm` | Norma DMM | SCPI |
+| `serial-dmm` | Generic serial DMM (various sub-drivers) | Serial |
+| `scpi-dmm` | Generic SCPI DMM | TCP/VXI/USB-TMC |
+| `uni-t-dmm` | UNI-T DMM (UT61x, UT71x, etc.) | USB HID (requires VID:PID) |
+| `uni-t-ut181a` | UNI-T UT181A | Serial USB |
+| `mooshimeter-dmm` | Mooshimeter | Bluetooth BLE |
+| `mastech-ms6514` | MASTECH MS6514 | Serial USB |
+| `bkprecision-1856d` | BK Precision 1856D | Serial USB |
+
+#### Power Supplies (PSU)
+
+| Driver | Device | Connection |
+|--------|--------|------------|
+| `atten-pps3xxx` | Atten PPS3xxx | Serial USB |
+| `gwinstek-gpd` | GW Instek GPD | Serial USB |
+| `gwinstek-psp` | GW Instek PSP | Serial USB |
+| `korad-kaxxxxp` | Korad KAXXXXP | Serial USB |
+| `manson-hcs-3xxx` | Manson HCS-3xxx | Serial USB |
+| `motech-lps-30x` | Motech LPS-30x | Serial USB |
+| `rdtech-dps` | RDTech DPS | Serial USB (Modbus) |
+| `rdtech-um` | RDTech UM | Serial USB (Modbus) |
+| `scpi-pps` | Generic SCPI PSU | TCP/VXI/USB-TMC |
+| `rigol-dg` | Rigol DG (function generator) | SCPI |
+| `itech-it8500` | iTech IT8500 | Serial USB |
+| `juntek-jds6600` | Juntek JDS6600 | Serial USB |
+| `rohde-schwarz-sme-0x` | Rohde & Schwarz SME-0x | SCPI |
+
+#### LCR Meters / Scales
+
+| Driver | Device | Connection |
+|--------|--------|------------|
+| `serial-lcr` | Serial LCR meters | Serial |
+| `kern-scale` | Kern scale | Serial USB |
+
+#### Sound Level Meters
+
+| Driver | Device | Connection |
+|--------|--------|------------|
+| `colead-slm` | Colead SLM | Serial USB |
+| `cem-dt-885x` | CEM DT-885x | Serial USB |
+| `pce-322a` | PCE-322A | Serial USB |
+| `testo` | Testo 435/480/6681 | Serial USB |
+
+#### Other Instruments
+
+| Driver | Device | Connection |
+|--------|--------|------------|
+| `arachnid-labs-re-load-pro` | Arachnid Labs Re:load Pro | Serial USB |
+| `atorch` | Atorch (power monitor) | Serial USB |
+| `baylibre-acme` | BayLibre ACME (GPIO/I2C) | Platform I2C |
+| `beaglelogic` | BeagleLogic | Platform (BeagleBone) |
+| `center-3xx` | Center 3xx thermometer | Serial |
+| `conrad-digi-35-cpu` | Conrad Digi 35 CPU | Serial |
+| `dcttech-usbrelay` | DCTTech USB Relay | Serial USB |
+| `devantech-eth008` | Devantech ETH008 Relay | TCP |
+| `hp-3457a` | HP 3457A | GPIB/Serial |
+| `hp-3478a` | HP 3478A | GPIB/Serial |
+| `hp-59306a` | HP 59306A | GPIB/Serial |
+| `icstation-usbrelay` | ICStation USB Relay | Serial USB |
+| `ipdbg-la` | IPDBG Logic Analyzer | TCP |
+| `kecheng-kc-330b` | Kecheng KC-330B | Serial USB |
+| `maynuo-m97` | Maynuo M97 | Serial USB |
+| `mic-985xx` | MIC 985xx (temp/humidity) | Serial USB |
+| `microchip-pickit2` | Microchip PICkit2 | USB (serial mode) |
+| `rdtech-tc` | RDTech TC | Serial USB (Modbus) |
+| `siglent-sdl10x0` | Siglent SDL10x0 (DC load) | SCPI |
+| `teleinfo` | Teleinfo (EDF energy meter) | Serial |
+| `tondaj-sl-814` | Tondaj SL-814 (sound level) | Serial |
+| `uni-t-ut32x` | UNI-T UT32x (thermometer) | Serial USB |
+| `zketech-ebd-usb` | ZKETech EBD USB (DC load) | Serial USB |
+| `asix-omega-rtm-cli` | ASIX OMEGA (RTM CLI mode) | External process |
+
+### Summary
+
+| Tier | GUI Support | Driver Count | Description |
+|------|-------------|--------------|-------------|
+| Tier 1 | Full | 2 (`pxlogic`, `demo`) | All features: operation mode, trigger, DSO options, firmware |
+| Tier 2 | Compatible (basic) | ~31 USB drivers | Auto-detected; basic capture only, no advanced features |
+| Tier 3 | None (no GUI) | ~56 serial/SCPI/BT drivers | Compiled in but not accessible from GUI; requires conn= parameter |
+
+**Total:** 89+ hardware drivers compiled into libsigrok, with 33 accessible via the PXView GUI (2 full + 31 basic) and 56+ requiring serial/SCPI/Bluetooth connection parameters not exposed by the GUI.
+
 ## Installation
 
 See the detailed build and installation guides:

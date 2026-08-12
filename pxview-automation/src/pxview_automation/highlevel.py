@@ -34,6 +34,15 @@ from typing import Any, Dict, List, Optional
 from .client import McpClient
 from .exceptions import ConfigError, McpError
 from ._utils import to_windows_path
+from .types import (
+    CaptureConfiguration,
+    CaptureStatus,
+    DataTableExportConfiguration,
+    DataTableFilter,
+    DeviceDesc,
+    LogicDeviceConfiguration,
+    RadixType,
+)
 
 
 class PXView:
@@ -116,6 +125,12 @@ class PXView:
             List of device dicts.
         """
         return self._client.get_devices(
+            include_simulation_devices=include_sim
+        )
+
+    def list_devices_typed(self, include_sim: bool = False) -> List[DeviceDesc]:
+        """List all connected devices as typed :class:`DeviceDesc` objects."""
+        return self._client.get_devices_typed(
             include_simulation_devices=include_sim
         )
 
@@ -279,6 +294,74 @@ class PXView:
     def get_status(self) -> dict:
         """Get current capture status."""
         return self._client.get_capture_status()
+
+    def get_status_typed(self) -> CaptureStatus:
+        """Get current capture status as a typed :class:`CaptureStatus`."""
+        return self._client.get_capture_status_typed()
+
+    # ==================================================================
+    # Typed capture (using dataclasses)
+    # ==================================================================
+
+    def capture_typed(
+        self,
+        device_id: str,
+        *,
+        device_config: LogicDeviceConfiguration,
+        capture_config: Optional[CaptureConfiguration] = None,
+        wait: bool = True,
+        wait_timeout_s: float = 300.0,
+    ) -> CaptureStatus:
+        """Type-safe capture using :class:`LogicDeviceConfiguration` and
+        :class:`CaptureConfiguration` dataclasses.
+
+        This is the typed equivalent of :meth:`capture`.  It provides
+        IDE autocompletion and type checking for all configuration
+        fields.
+
+        Example::
+
+            from pxview_automation import PXView, LogicDeviceConfiguration,
+                CaptureConfiguration, TimedCaptureMode
+
+            with PXView() as pxv:
+                pxv.connect()
+                status = pxv.capture_typed(
+                    device_id="demo",
+                    device_config=LogicDeviceConfiguration(
+                        digital_channels=[0, 1],
+                        digital_sample_rate=1_000_000,
+                    ),
+                    capture_config=CaptureConfiguration(
+                        capture_mode=TimedCaptureMode(duration_seconds=1.0),
+                    ),
+                )
+        """
+        self._client.start_capture(
+            device_id=device_id,
+            logic_device_configuration=device_config.to_dict(),
+            capture_configuration=capture_config.to_dict()
+            if capture_config is not None
+            else None,
+        )
+
+        if not wait:
+            return self._client.get_capture_status_typed()
+
+        self._client.wait_capture(
+            timeout_seconds=wait_timeout_s,
+            timeout=wait_timeout_s + 10,
+        )
+
+        status = self._client.get_capture_status_typed()
+        if status.state.value == "error":
+            err = self._client.get_error_state()
+            raise McpError(
+                f"Capture failed: {err.get('error_message', 'unknown error')}",
+                raw=err,
+            )
+
+        return status
 
     # ==================================================================
     # Decoding
@@ -466,13 +549,20 @@ class PXView:
         filepath: str,
         analyzer_id: Optional[str] = None,
         *,
+        columns: Optional[List[str]] = None,
+        filter_query: Optional[str] = None,
+        filter_columns: Optional[List[str]] = None,
         iso8601_timestamp: bool = False,
     ) -> Any:
         """Export decoded analyzer results as a CSV data table.
 
         Args:
-            filepath:    Output CSV file path.
-            analyzer_id: Specific analyzer to export.  If None, exports all.
+            filepath:       Output CSV file path.
+            analyzer_id:    Specific analyzer to export.  If None, exports all.
+            columns:        Column names to include.  If None, all columns.
+            filter_query:   Query string to filter rows.
+            filter_columns: Columns to apply the query to.
+            iso8601_timestamp: Use ISO8601 wall-clock timestamps.
         """
         analyzers = None
         if analyzer_id is not None:
@@ -481,6 +571,9 @@ class PXView:
         return self._client.export_data_table_csv(
             filepath=filepath,
             analyzers=analyzers,
+            columns=columns,
+            filter_query=filter_query,
+            filter_columns=filter_columns,
             iso8601_timestamp=iso8601_timestamp,
         )
 
