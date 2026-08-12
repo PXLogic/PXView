@@ -133,7 +133,7 @@ bool CaptureManager::start_capture(bool instant, data::SessionDocument *owner) {
 
 bool CaptureManager::action_start_capture(bool instant,
                                           data::SessionDocument *owner) {
-  assert(_event_bus && _event_bus->has_listeners());
+  assert(_event_bus && _event_bus->has_subscribers());
 
   pxv_info("Start collect.");
 

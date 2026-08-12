@@ -541,7 +541,7 @@ bool SigSession::set_default_device() {
 bool SigSession::set_device(ds_device_handle dev_handle) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
-  assert(_event_bus && _event_bus->has_listeners());
+  assert(_event_bus && _event_bus->has_subscribers());
 
   // modernize-core-layer-radical Task 11: pre-broadcast synchronously so
   // MainWindow can close modal dialogs / hide calibration / delete protocols
