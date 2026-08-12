@@ -23,7 +23,7 @@ class TestSignalData:
         """get_logic_samples returns base64-encoded bytes."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        samples = mcp.get_logic_samples(channel_index=0)
+        samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert samples is not None
         assert len(samples) > 0
 
@@ -32,7 +32,7 @@ class TestSignalData:
         """get_logic_samples with startSample/endSample."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        samples = mcp.get_logic_samples(channel_index=0,
+        samples = mcp.get_samples(channel_type="logic", channel_index=0,
                                         start_sample=0,
                                         end_sample=100)
         assert samples is not None
@@ -42,14 +42,14 @@ class TestSignalData:
         """Page through logic samples in chunks."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        all_samples = mcp.get_logic_samples(channel_index=0)
+        all_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(all_samples) > 0
 
         # Read in pages of 100 bytes
         page_size = 100
         total_read = 0
         for i in range(0, min(len(all_samples), 1000), page_size):
-            page = mcp.get_logic_samples(channel_index=0,
+            page = mcp.get_samples(channel_type="logic", channel_index=0,
                                          start_sample=i * 8,
                                          end_sample=(i + page_size) * 8 - 1)
             assert page is not None
@@ -62,7 +62,7 @@ class TestSignalData:
         """endSample=-1 means end of capture."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        samples = mcp.get_logic_samples(channel_index=0, end_sample=-1)
+        samples = mcp.get_samples(channel_type="logic", channel_index=0, end_sample=-1)
         assert len(samples) > 0
 
     def test_find_next_edge(self, mcp: McpClient, device_id: str,
@@ -71,8 +71,8 @@ class TestSignalData:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
         result = mcp.find_next_edge(channel_index=0,
-                                    start_sample=0,
-                                    direction="forward")
+                                    from_sample=0,
+                                    rising_edge=True)
         assert result is not None
 
     def test_find_next_edge_falling(self, mcp: McpClient, device_id: str,
@@ -81,8 +81,8 @@ class TestSignalData:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
         result = mcp.find_next_edge(channel_index=0,
-                                    start_sample=0,
-                                    direction="falling")
+                                    from_sample=0,
+                                    rising_edge=False)
         assert result is not None
 
     def test_find_pattern_exact(self, mcp: McpClient, device_id: str,
@@ -90,9 +90,9 @@ class TestSignalData:
         """find_pattern with exact '0'/'1' pattern."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        result = mcp.find_pattern(channels=[0],
+        result = mcp.find_pattern(channel_index=0,
                                   pattern="1",
-                                  start_sample=0)
+                                  from_sample=0)
         assert result is not None
 
     def test_find_pattern_dont_care(self, mcp: McpClient, device_id: str,
@@ -100,16 +100,16 @@ class TestSignalData:
         """find_pattern with 'x' wildcard."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        result = mcp.find_pattern(channels=[0],
+        result = mcp.find_pattern(channel_index=0,
                                   pattern="x",
-                                  start_sample=0)
+                                  from_sample=0)
         assert result is not None
 
     def test_get_logic_samples_no_capture(self, mcp: McpClient,
                                           cleanup_after_test):
         """get_logic_samples without capture returns error or empty."""
         try:
-            result = mcp.get_logic_samples(channel_index=0)
+            result = mcp.get_samples(channel_type="logic", channel_index=0)
             # If it doesn't error, it should be empty/None
         except McpError:
             pass  # Expected
@@ -121,5 +121,5 @@ class TestSignalData:
         do_timed_capture(mcp, device_id, channels=channels,
                          sample_rate=1000000, duration_seconds=0.3)
         for ch in channels:
-            samples = mcp.get_logic_samples(channel_index=ch)
+            samples = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert len(samples) > 0, f"Channel {ch} has no samples"

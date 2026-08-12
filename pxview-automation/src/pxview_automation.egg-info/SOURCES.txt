@@ -8,6 +8,7 @@ src/pxview_automation/client.py
 src/pxview_automation/exceptions.py
 src/pxview_automation/highlevel.py
 src/pxview_automation/process.py
+src/pxview_automation/types.py
 src/pxview_automation.egg-info/PKG-INFO
 src/pxview_automation.egg-info/SOURCES.txt
 src/pxview_automation.egg-info/dependency_links.txt
@@ -15,3 +16,5 @@ src/pxview_automation.egg-info/entry_points.txt
 src/pxview_automation.egg-info/requires.txt
 src/pxview_automation.egg-info/top_level.txt
 tests/test_basic.py
+tests/test_integration.py
+tests/test_version_compat.py

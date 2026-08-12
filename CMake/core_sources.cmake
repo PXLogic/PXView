@@ -57,6 +57,7 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/api/binary_codec.cpp
     # MCP SDK (tool registration, schema generation, exception-driven dispatch)
     PXView/pv/mcp/mcp_server.cpp
+    PXView/pv/mcp/mcp_tool_registry.cpp
     # NOTE: utility/*.cpp live in PXView/pv/utility/CMakeLists.txt (pxview-utility STATIC lib)
     # NOTE: config/*.cpp live in PXView/pv/config/CMakeLists.txt (pxview-config STATIC lib)
 )

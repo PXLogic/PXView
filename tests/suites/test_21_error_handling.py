@@ -54,7 +54,7 @@ class TestErrorHandling:
                                     cleanup_after_test):
         """Export without capture returns error."""
         with pytest.raises(McpError):
-            mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+            mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
     def test_load_nonexistent_file(self, mcp: McpClient, cleanup_after_test):
         """load_capture with non-existent file returns error."""
@@ -81,7 +81,7 @@ class TestErrorHandling:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
         try:
-            result = mcp.get_logic_samples(channel_index=999)
+            result = mcp.get_samples(channel_type="logic", channel_index=999)
         except McpError:
             pass  # Expected
 
@@ -97,9 +97,9 @@ class TestErrorHandling:
 
     def test_clear_error_state_works(self, mcp: McpClient):
         """clear_error_state can be called multiple times."""
-        mcp.clear_error_state()
-        mcp.clear_error_state()
-        result = mcp.get_error_state()
+        mcp.configure_error_state(action="clear")
+        mcp.configure_error_state(action="clear")
+        result = mcp.configure_error_state(action="get")
         assert isinstance(result, dict)
 
     def test_clear_all_decoders_empty(self, mcp: McpClient):

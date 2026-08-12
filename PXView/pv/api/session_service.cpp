@@ -54,6 +54,7 @@
 #include <QFile>
 #include <QString>
 #include <QTextStream>
+#include <QEventLoop>
 #include <QThread>
 #include <QTimer>
 
@@ -340,12 +341,63 @@ inline std::shared_ptr<pv::data::DecoderStack> find_stack_by_instance_id(
 }
 
 // ---------------------------------------------------------------------------
+// PreparedDecoder — data prepared by phase 1 (worker-safe), consumed by
+// phase 2 (main thread).  Owns GVariant references.
+// ---------------------------------------------------------------------------
+struct PreparedDecoder {
+    bool valid = false;
+    std::string error_message;
+    std::string label;
+
+    // Prepared options: (option_id, GVariant*) — ref_sink'd, owned by this struct.
+    std::vector<std::pair<std::string, GVariant*>> prepared_options;
+
+    // Prepared channel mapping: srd_channel* → channel index
+    std::map<const srd_channel*, int> prepared_probes;
+    std::list<int> prepared_index_list;
+
+    ~PreparedDecoder() {
+        for (auto& [id, val] : prepared_options) {
+            if (val) g_variant_unref(val);
+        }
+    }
+
+    PreparedDecoder() = default;
+    PreparedDecoder(const PreparedDecoder&) = delete;
+    PreparedDecoder& operator=(const PreparedDecoder&) = delete;
+    PreparedDecoder(PreparedDecoder&& o) noexcept
+        : valid(o.valid), error_message(std::move(o.error_message)),
+          label(std::move(o.label)),
+          prepared_options(std::move(o.prepared_options)),
+          prepared_probes(std::move(o.prepared_probes)),
+          prepared_index_list(std::move(o.prepared_index_list)) {
+        o.prepared_options.clear();
+    }
+    PreparedDecoder& operator=(PreparedDecoder&& o) noexcept {
+        if (this != &o) {
+            for (auto& [id, val] : prepared_options) {
+                if (val) g_variant_unref(val);
+            }
+            valid = o.valid;
+            error_message = std::move(o.error_message);
+            label = std::move(o.label);
+            prepared_options = std::move(o.prepared_options);
+            prepared_probes = std::move(o.prepared_probes);
+            prepared_index_list = std::move(o.prepared_index_list);
+            o.prepared_options.clear();
+        }
+        return *this;
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
 SessionService::SessionService(SigSession *session, DeviceAgent *device)
 : _session(session), _device(device),
-_capture_id(0) {
+_capture_id(0),
+_api_worker_pool(std::make_unique<pv::core::ThreadPool>(1)) {
 // Register event handlers via EventBus::subscribe<T>().
 if (_session && _session->get_event_bus()) {
 auto *bus = _session->get_event_bus();
@@ -390,6 +442,10 @@ _event_subscriptions.push_back(bus->subscribe<pv::interface::ClearDecodeData>([s
 }
 
 SessionService::~SessionService() {
+    // Shutdown the worker pool FIRST so any in-flight wait_for_completion
+    // tasks finish before we start destroying SessionService state.
+    if (_api_worker_pool)
+        _api_worker_pool->shutdown();
     // Subscriptions auto-unsubscribe via RAII.
     // phase 2: release the MCP-dedicated document slot. Ownership is held by
     // DocumentRegistry, so release_document() frees the document (marked
@@ -418,6 +474,15 @@ void SessionService::set_api_document(size_t doc_index) {
 // ---------------------------------------------------------------------------
 
 pv::data::SessionDocument *SessionService::api_document() const {
+    // In GUI mode, prefer the active document so that MCP-added decoders
+    // are visible in the GUI. The active document is the one the View layer
+    // reads from (document_snapshot_source()->get_decoder_stacks()).
+    // In headless mode (no GUI), fall back to the dedicated API document.
+    if (is_gui_mode() && _session) {
+        auto *active = _session->get_active_document();
+        if (active)
+            return active;
+    }
     if (_api_doc_index == SIZE_MAX || !_session || !_session->document_registry())
         return nullptr;
     return _session->document_registry()->get_document_by_index(_api_doc_index);
@@ -2219,8 +2284,21 @@ Result<std::string> SessionService::add_decoder(
         return Result<std::string>::Fail(ErrorCode::InternalError,
                                          "Session is nullptr");
 
-    // Look up the decoder by ID
+    // Look up the decoder by ID (case-sensitive first, then case-insensitive
+    // fallback). Some Python decoders use uppercase IDs (e.g. "MIPI_DSI")
+    // while users may pass the lowercase folder name. srd_decoder_get_by_id()
+    // is case-sensitive, so we fall back to a case-insensitive scan of the
+    // decoder list to avoid "Decoder not found" errors.
     srd_decoder *dec = srd_decoder_get_by_id(decoder_id.c_str());
+    if (!dec) {
+        for (const GSList *l = srd_decoder_list(); l; l = l->next) {
+            auto *d = static_cast<srd_decoder *>(l->data);
+            if (d->id && g_ascii_strcasecmp(d->id, decoder_id.c_str()) == 0) {
+                dec = d;
+                break;
+            }
+        }
+    }
     if (!dec)
         return Result<std::string>::Fail(ErrorCode::DecoderNotFound,
                                          "Decoder not found: " + decoder_id);
@@ -2828,84 +2906,137 @@ auto *root_decoder = stack.front().get();
         }
     }
 
-    // Wait for decoder completion if requested
+    // Wait for decoder completion if requested.
+    //
+    // ARCHITECTURE FIX: Previously, the entire wait_for_completion polling
+    // loop ran on the main thread using std::this_thread::sleep_for(100ms).
+    // This blocked the Qt event loop, freezing the GUI for the entire
+    // decode duration (potentially seconds). When 16 decoders were added
+    // in sequence, the GUI froze for the sum of all decode times.
+    //
+    // Fix: The polling loop is now submitted to a dedicated worker thread
+    // (_api_worker_pool). The main thread waits for the worker to finish
+    // using a QEventLoop + QTimer::singleShot(50) pattern, which keeps the
+    // Qt event loop running so UI events (paint, input, queued EventBus
+    // events) are processed normally while waiting.
+    //
+    // The polled flags (is_copy_in_progress, IsRunning, get_progress) are
+    // all std::atomic, so they are safe to read from the worker thread.
+    // The decoder_stack shared_ptr is thread-safe (refcount is atomic).
+    // Error checking and decoder removal happen on the main thread (via
+    // post_async_dispatch) since they touch Qt objects.
     if (wait_for_completion && result.ok()) {
         std::string instance_id = result.value();
-        // Look up the stack by its stable "<handle_id>:<version>" identifier.
-        // The previous code reinterpret_cast<std::stoll(instance_id)> which
-        // only worked when instance_id was a stringified raw pointer and was
-        // undefined behavior for the new handle:version format.
         auto &stacks_for_wait = _session->get_decoder_stacks(api_document());
         std::shared_ptr<data::DecoderStack> decoder_stack =
             find_stack_by_instance_id(stacks_for_wait, instance_id);
 
         if (decoder_stack) {
-            // Plan B Phase 2: replace QEventLoop polling with direct
-            // atomic polling + sleep_for. This avoids pumping the Qt event
-            // queue while waiting, which could cause re-entrant event
-            // processing and state corruption. The polled flags
-            // (is_copy_in_progress, IsRunning, get_progress) are all
-            // std::atomic, so they are safe to read from the main thread
-            // without holding any lock.
-
-            // 1. Wait for copy_data_to_document to complete.
-            //    copy_data_to_document is now zero-copy (instant), so this
-            //    loop almost never iterates. Keep it as a safety net.
-            {
-                int wait_count = 0;
-                while (_session->is_copy_in_progress() && wait_count < 200) {
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds(100));
-                    wait_count++;
-                }
-            }
-
-            // 2. Wait for decode to start (or finish instantly).
-            {
-                int wait_count = 0;
-                while (!decoder_stack->IsRunning() && wait_count < 50) {
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds(100));
-                    wait_count++;
-                    if (decoder_stack->get_progress() >= 100)
-                        break;
-                }
-            }
-
-            // Remove this decoder on the main thread. invoke_or_call() runs
-            // inline when the caller is already on the main thread (the common
-            // MCP case) and otherwise dispatches via BlockingQueuedConnection.
-            auto remove_this_stack = [this, decoder_stack]() {
-                auto &stacks = _session->get_decoder_stacks(api_document());
-                for (size_t i = 0; i < stacks.size(); i++) {
-                    if (stacks[i].get() == decoder_stack.get()) {
-                        _session->remove_decoder(static_cast<int>(i),
-                                                 api_document());
-                        break;
+            // Worker thread: poll until decode completes.
+            // Result is written to worker_err (shared_ptr<std::string>):
+            // empty string = success, non-empty = error message.
+            auto worker_err = std::make_shared<std::string>();
+            auto worker_fn = [this, decoder_stack, worker_err]() {
+                // 1. Wait for copy_data_to_document to complete.
+                //    copy_data_to_document is now zero-copy (instant), so this
+                //    loop almost never iterates. Keep it as a safety net.
+                {
+                    int wait_count = 0;
+                    while (_session->is_copy_in_progress() &&
+                           wait_count < 200) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(100));
+                        wait_count++;
                     }
                 }
+
+                // 2. Wait for decode to start (or finish instantly).
+                {
+                    int wait_count = 0;
+                    while (!decoder_stack->IsRunning() && wait_count < 50) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(100));
+                        wait_count++;
+                        if (decoder_stack->get_progress() >= 100)
+                            break;
+                    }
+                }
+
+                // 3. Poll until decode completes.
+                while (decoder_stack->IsRunning()) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(100));
+
+                    QString err = decoder_stack->error_message();
+                    if (!err.isEmpty()) {
+                        *worker_err = err.toStdString();
+                        return;
+                    }
+                }
+
+                if (decoder_stack->get_progress() < 100) {
+                    QString err = decoder_stack->error_message();
+                    if (!err.isEmpty()) {
+                        *worker_err = err.toStdString();
+                        return;
+                    }
+                }
+
+                // success: worker_err remains empty
             };
 
-            // 3. Poll until decode completes.
-            while (decoder_stack->IsRunning()) {
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(100));
+            // Submit to worker thread, get future (returns void).
+            std::future<void> fut = _api_worker_pool->submit(
+                std::move(worker_fn));
 
-                if (!decoder_stack->error_message().isEmpty()) {
-                    invoke_or_call(qApp, remove_this_stack);
-                    return Result<std::string>::Fail(
-                        ErrorCode::DecoderError,
-                        decoder_stack->error_message().toStdString());
+            // Wait for the worker to finish while keeping the Qt event loop
+            // alive. We use a QEventLoop with periodic future status checks
+            // via QTimer::singleShot. This allows paint events, queued
+            // EventBus events (DataUpdated, SignalsChanged, etc.), and user
+            // input to be processed during the wait.
+            //
+            // The QEventLoop is scoped: it exits when the future is ready
+            // or when the worker returns an error. This prevents re-entrant
+            // MCP requests from nesting (the outer QEventLoop processes
+            // UI events but does NOT accept new MCP requests — the TCP
+            // server's readyRead is also queued and will fire after the
+            // loop exits).
+            QEventLoop wait_loop;
+            QTimer wait_timer;
+            wait_timer.setSingleShot(false);
+            wait_timer.setInterval(50); // check every 50ms
+            QObject::connect(&wait_timer, &QTimer::timeout, [&]() {
+                if (fut.wait_for(std::chrono::seconds(0)) ==
+                    std::future_status::ready) {
+                    wait_timer.stop();
+                    wait_loop.quit();
                 }
-            }
+            });
+            wait_timer.start(50);
+            wait_loop.exec();
 
-            if (decoder_stack->get_progress() < 100) {
-                if (!decoder_stack->error_message().isEmpty()) {
-                    invoke_or_call(qApp, remove_this_stack);
-                    return Result<std::string>::Fail(
-                        ErrorCode::DecoderError,
-                        decoder_stack->error_message().toStdString());
-                }
+            // Worker has finished. Ensure future is consumed (waits if needed).
+            fut.get();
+
+            if (!worker_err->empty()) {
+                // Decode failed — remove the stack on the main thread.
+                // decoder_stack is still alive (shared_ptr captured by
+                // worker_fn), but we need to remove it from the document's
+                // stacks list, which is a main-thread operation.
+                pv::core::EventBus::post_async_dispatch(
+                    [this, decoder_stack]() {
+                        auto &stacks =
+                            _session->get_decoder_stacks(api_document());
+                        for (size_t i = 0; i < stacks.size(); i++) {
+                            if (stacks[i].get() == decoder_stack.get()) {
+                                _session->remove_decoder(
+                                    static_cast<int>(i), api_document());
+                                break;
+                            }
+                        }
+                    });
+                return Result<std::string>::Fail(
+                    ErrorCode::DecoderError, *worker_err);
             }
         }
     }

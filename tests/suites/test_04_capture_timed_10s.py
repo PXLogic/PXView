@@ -38,7 +38,7 @@ class TestCaptureTimed10s:
                                   duration_seconds=duration)
         assert_capture_status(status, "completed")
         # Read samples to verify we got data
-        samples = mcp.get_logic_samples(channel_index=0, end_sample=-1)
+        samples = mcp.get_samples(channel_type="logic", channel_index=0, end_sample=-1)
         assert samples is not None
         assert len(samples) > 0, "No samples returned from 10s capture"
         # Expected: rate * duration = 10M samples = 1.25M bytes (8 samples/byte)
@@ -77,7 +77,7 @@ class TestCaptureTimed10s:
                                   duration_seconds=10.0)
         assert_capture_status(status, "completed")
         for ch in channels:
-            samples = mcp.get_logic_samples(channel_index=ch)
+            samples = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert samples is not None, f"Channel {ch} returned None samples"
             assert len(samples) > 0, f"Channel {ch} returned empty samples"
 

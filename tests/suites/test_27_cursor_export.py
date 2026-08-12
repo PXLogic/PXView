@@ -102,12 +102,12 @@ class TestLeftCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_logic_samples(channel_index=0))
+        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         assert total_samples > 1000, f"Only {total_samples} samples"
 
         left = 500
         mcp.set_save_range(start_sample=left, end_sample=total_samples)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0, "No CSV files exported"
@@ -123,10 +123,10 @@ class TestLeftCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_logic_samples(channel_index=0))
+        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left = 500
         mcp.set_save_range(start_sample=left, end_sample=total_samples)
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0, "No binary files exported"
@@ -152,10 +152,10 @@ class TestRightCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_logic_samples(channel_index=0))
+        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         right = 5000
         mcp.set_save_range(start_sample=0, end_sample=right)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
@@ -173,7 +173,7 @@ class TestRightCursorExport:
 
         right = 5000
         mcp.set_save_range(start_sample=0, end_sample=right)
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
@@ -197,10 +197,10 @@ class TestBothCursorsExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_logic_samples(channel_index=0))
+        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left, right = 1000, 5000
         mcp.set_save_range(start_sample=left, end_sample=right)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
@@ -219,7 +219,7 @@ class TestBothCursorsExport:
 
         left, right = 1000, 5000
         mcp.set_save_range(start_sample=left, end_sample=right)
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
@@ -236,12 +236,12 @@ class TestBothCursorsExport:
                          sample_rate=1000000, duration_seconds=0.5)
 
         # Get all samples via MCP
-        all_samples = mcp.get_logic_samples(channel_index=0)
+        all_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(all_samples) > 0
 
         left, right = 100, 800
         mcp.set_save_range(start_sample=left, end_sample=right)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
@@ -266,7 +266,7 @@ class TestExportImportRoundtrip:
         """Save → load preserves single channel data."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        before = mcp.get_logic_samples(channel_index=0)
+        before = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(before) > 0
 
         mcp.save_capture(tmp_pxc_file)
@@ -277,7 +277,7 @@ class TestExportImportRoundtrip:
         mcp.load_capture(tmp_pxc_file)
         time.sleep(1)
 
-        after = mcp.get_logic_samples(channel_index=0)
+        after = mcp.get_samples(channel_type="logic", channel_index=0)
         assert compare_logic_samples(before, after), \
             f"Data mismatch: before={len(before)} bytes, after={len(after)} bytes"
 
@@ -291,7 +291,7 @@ class TestExportImportRoundtrip:
 
         originals = {}
         for ch in channels:
-            originals[ch] = mcp.get_logic_samples(channel_index=ch)
+            originals[ch] = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert len(originals[ch]) > 0, f"Channel {ch} no data"
 
         mcp.save_capture(tmp_pxc_file)
@@ -300,7 +300,7 @@ class TestExportImportRoundtrip:
         time.sleep(1)
 
         for ch in channels:
-            loaded = mcp.get_logic_samples(channel_index=ch)
+            loaded = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert compare_logic_samples(originals[ch], loaded), \
                 f"Channel {ch} data mismatch after save/load"
 
@@ -330,10 +330,10 @@ class TestExportImportRoundtrip:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp_samples = mcp.get_logic_samples(channel_index=0)
+        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(mcp_samples) > 0
 
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
         csv_data = read_csv_file(csv_files[0])
@@ -350,10 +350,10 @@ class TestExportImportRoundtrip:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp_samples = mcp.get_logic_samples(channel_index=0)
+        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(mcp_samples) > 0
 
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
         bin_data = read_binary_file(bin_files[0])
@@ -371,7 +371,7 @@ class TestExportImportRoundtrip:
         do_timed_capture(mcp, device_id, channels=channels,
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=channels)
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=channels)
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         # Should have at least one file per channel
@@ -391,7 +391,7 @@ class TestExportImportRoundtrip:
         do_timed_capture(mcp, device_id, channels=channels,
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=channels)
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=channels)
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) >= len(channels), \
@@ -417,7 +417,7 @@ class TestExportImportRoundtrip:
         mcp.load_capture(tmp_pxc_file)
         time.sleep(1)
 
-        samples = mcp.get_logic_samples(channel_index=0)
+        samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(samples) > 0, "No samples after load with save range"
 
     def test_export_cycle_3x(self, mcp, device_id, tmp_capture_dir,
@@ -432,6 +432,6 @@ class TestExportImportRoundtrip:
             mcp.close_capture()
             mcp.load_capture(filepath)
             time.sleep(0.5)
-            samples = mcp.get_logic_samples(channel_index=0)
+            samples = mcp.get_samples(channel_type="logic", channel_index=0)
             assert len(samples) > 0, f"Cycle {i}: no samples after load"
             mcp.close_capture()

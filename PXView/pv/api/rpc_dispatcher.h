@@ -3,20 +3,26 @@
 #include "pv/api/transport.h"
 #include "pv/api/iapp_service.h"
 #include <nlohmann/json.hpp>
+#include <memory>
+
+// Forward declare the MCP SDK server (owned by RpcDispatcher)
+namespace mcp { class McpServer; }
 
 namespace pv::api {
 
 class RpcDispatcher : public IJsonRpcHandler {
 public:
     explicit RpcDispatcher(IAppService* app_svc);
+    ~RpcDispatcher();
 
     JsonRpcResponse handle_request(const JsonRpcRequest& req) override;
 
-    // MCP tool schema definitions — 61 tool schemas in tool_schemas.inc
-    static nlohmann::json get_tool_schemas();
-
 private:
     IAppService* app_svc_;
+
+    // MCP SDK server — owns all tool registrations, schema generation,
+    // and exception-driven dispatch.
+    std::unique_ptr<mcp::McpServer> mcp_server_;
 
     // Helper: build success / error responses
     static JsonRpcResponse success_resp(int id, const nlohmann::json& result);

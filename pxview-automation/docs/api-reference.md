@@ -113,8 +113,8 @@ McpClient(
 
 | 方法 | MCP Tool | 说明 |
 |------|----------|------|
-| `find_next_edge(channel_index, start_sample, direction)` | `find_next_edge` | 查找下一个边沿 |
-| `find_pattern(channels, pattern, start_sample)` | `find_pattern` | 搜索多位模式 |
+| `find_next_edge(channel_index, from_sample, rising_edge)` | `find_next_edge` | 查找下一个边沿 |
+| `find_pattern(channel_index, pattern, from_sample)` | `find_pattern` | 搜索位模式 |
 
 ### 12. 解码器管理（2 个工具）
 

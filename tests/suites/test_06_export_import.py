@@ -31,7 +31,7 @@ class TestExportImport:
         """Export single channel CSV."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
         data = read_csv_file(csv_files[0])
@@ -43,7 +43,7 @@ class TestExportImport:
         """Export multi-channel CSV."""
         do_timed_capture(mcp, device_id, channels=[0, 1, 2, 3],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0, 1, 2, 3])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) >= 1
 
@@ -53,7 +53,7 @@ class TestExportImport:
         """Export CSV with ISO 8601 timestamps."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0],
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0],
                                 iso8601_timestamp=True)
         csv_files = find_exported_csv(tmp_capture_dir)
         assert len(csv_files) > 0
@@ -64,7 +64,7 @@ class TestExportImport:
         """Export single channel binary."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
         data = read_binary_file(bin_files[0])
@@ -76,7 +76,7 @@ class TestExportImport:
         """Export multi-channel binary."""
         do_timed_capture(mcp, device_id, channels=[0, 1, 2, 3],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0, 1, 2, 3])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) >= 1
 
@@ -93,9 +93,7 @@ class TestExportImport:
         get_decoder_results_with_retry(mcp, analyzer_id, max_wait=15.0)
 
         filepath = os.path.join(tmp_capture_dir, "decode_table.csv")
-        mcp.export_data_table_csv(filepath, analyzers=[
-            {"analyzerId": analyzer_id, "radixType": 3}
-        ])
+        mcp.export_data_table_csv(filepath, analyzer_id=analyzer_id, radix_type=3)
 
     def test_export_data_table_csv_radix_binary(self, mcp: McpClient,
                                                 device_id: str,
@@ -111,9 +109,7 @@ class TestExportImport:
         get_decoder_results_with_retry(mcp, analyzer_id, max_wait=15.0)
 
         filepath = os.path.join(tmp_capture_dir, "decode_bin.csv")
-        mcp.export_data_table_csv(filepath, analyzers=[
-            {"analyzerId": analyzer_id, "radixType": 1}
-        ])
+        mcp.export_data_table_csv(filepath, analyzer_id=analyzer_id, radix_type=1)
 
     def test_export_data_table_csv_radix_decimal(self, mcp: McpClient,
                                                  device_id: str,
@@ -129,9 +125,7 @@ class TestExportImport:
         get_decoder_results_with_retry(mcp, analyzer_id, max_wait=15.0)
 
         filepath = os.path.join(tmp_capture_dir, "decode_dec.csv")
-        mcp.export_data_table_csv(filepath, analyzers=[
-            {"analyzerId": analyzer_id, "radixType": 2}
-        ])
+        mcp.export_data_table_csv(filepath, analyzer_id=analyzer_id, radix_type=2)
 
     def test_pxc_save_load_roundtrip(self, mcp: McpClient, device_id: str,
                                      tmp_pxc_file: str,
@@ -139,7 +133,7 @@ class TestExportImport:
         """Full .pxc save -> load roundtrip."""
         do_timed_capture(mcp, device_id, channels=[0, 1],
                          sample_rate=1000000, duration_seconds=0.5)
-        samples_before = mcp.get_logic_samples(channel_index=0)
+        samples_before = mcp.get_samples(channel_type="logic", channel_index=0)
 
         mcp.save_capture(tmp_pxc_file)
         assert os.path.exists(tmp_pxc_file)
@@ -147,7 +141,7 @@ class TestExportImport:
         mcp.load_capture(tmp_pxc_file)
 
         import time; time.sleep(1)
-        samples_after = mcp.get_logic_samples(channel_index=0)
+        samples_after = mcp.get_samples(channel_type="logic", channel_index=0)
         assert samples_before == samples_after, "Data changed after save/load"
 
     def test_export_partial_range(self, mcp: McpClient, device_id: str,
@@ -157,7 +151,7 @@ class TestExportImport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
         mcp.set_save_range(start_sample=100, end_sample=500)
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
         csv_files = find_exported_csv(tmp_capture_dir)
         assert len(csv_files) > 0
 
@@ -166,7 +160,7 @@ class TestExportImport:
                                           cleanup_after_test):
         """Export without a capture should return an error."""
         with pytest.raises(McpError):
-            mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+            mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
     def test_load_nonexistent_file(self, mcp: McpClient, cleanup_after_test):
         """load_capture with non-existent file returns error."""

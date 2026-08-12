@@ -289,7 +289,14 @@ void on_load_config_end();
   void set_trace_name(std::shared_ptr<data::SignalModel> model, QString name);
   void set_decoder_row_label(int index, QString label);
   void set_decoder_pannel(IDecoderPannel *pannel) { _decoder_pannel = pannel; }
-  void rebuild_decoder_pannel() { if (_decoder_pannel) _decoder_pannel->rebuild_layers(); }
+  void rebuild_decoder_pannel() {
+      if (_decoder_pannel) _decoder_pannel->rebuild_layers();
+      // Broadcast signals_changed so the View layer marks derived traces
+      // dirty and syncs new DecoderStacks via sync_derived_traces().
+      // Without this, MCP-added decoders (which bypass View::add_decoder)
+      // are invisible in the GUI until a tab switch or repaint triggers sync.
+      signals_changed();
+  }
   void update_dso_data_scale() override;
   void remove_decode_task(std::shared_ptr<data::DecoderStack> stack);
   double get_logic_data_view_time() override;

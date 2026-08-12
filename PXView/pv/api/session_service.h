@@ -24,9 +24,11 @@
 #include <QString>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include "pv/interface/icallbacks.h"
 #include "pv/interface/events.h"
 #include "pv/core/eventbus.h"
+#include "pv/core/thread_pool.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -388,6 +390,15 @@ std::vector<pv::core::Subscription> _event_subscriptions;
     // via DocumentRegistry::create_api_document() (called from AppService) and
     // released in the destructor via release_document().
     size_t _api_doc_index = SIZE_MAX;
+
+    // Worker thread pool for non-UI blocking operations (e.g. waiting for
+    // decode completion in add_decoder with wait_for_completion=true).
+    // Prevents the Qt main thread from freezing during sleep_for polling.
+    // NOTE: As of the latest fix, all MCP/RPC callers use
+    // wait_for_completion=false, so the QEventLoop wait path is only
+    // reachable via direct API calls. The pool is retained for future
+    // use cases that may need synchronous completion.
+    std::unique_ptr<pv::core::ThreadPool> _api_worker_pool;
 };
 
 } // namespace api

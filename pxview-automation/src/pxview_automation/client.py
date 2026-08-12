@@ -1,6 +1,6 @@
 """Low-level MCP client for PXView.
 
-This module wraps all 61 MCP tools exposed by PXView's JSON-RPC 2.0
+This module wraps all 46 MCP tools exposed by PXView's JSON-RPC 2.0
 over HTTP API on port 10110.  It provides automatic JSON-RPC
 encapsulation/parsing, error detection, retry logic, SSE stream
 parsing, and base64 sample decoding.
@@ -66,7 +66,7 @@ urllib.request.install_opener(_urllib_opener)
 class McpClient:
     """MCP JSON-RPC 2.0 client for PXView.
 
-    Wraps all 61 MCP tools.  Each tool is exposed as a Python method
+    Wraps all 46 MCP tools.  Each tool is exposed as a Python method
     with the same name (snake_case).  Methods return parsed Python
     objects (dict / list / str / bytes / None).
 
@@ -516,6 +516,49 @@ class McpClient:
         raw = self.get_channels(timeout=timeout)
         return [ChannelInfo.from_dict(d) for d in raw]
 
+    def get_config(
+        self,
+        key: int,
+        type: str,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Read a generic SR_CONF_* config value by key.
+
+        Args:
+            key:  SR_CONF_* config key (numeric).
+            type: Value type: ``'bool'``, ``'int'``, ``'int64'``,
+                  ``'string'``, ``'double'``, ``'uint64'``.
+
+        Returns:
+            ``{"value": ...}`` dict with the config value.
+        """
+        return self._call_tool(
+            "get_config",
+            {"key": key, "type": type},
+            timeout=timeout,
+        )
+
+    def set_config(
+        self,
+        key: int,
+        type: str,
+        value: Any,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Write a generic SR_CONF_* config value by key.
+
+        Args:
+            key:   SR_CONF_* config key (numeric).
+            type:  Value type: ``'bool'``, ``'int'``, ``'int64'``,
+                   ``'string'``, ``'double'``, ``'uint64'``.
+            value: Value to set (type depends on ``type`` field).
+        """
+        return self._call_tool(
+            "set_config",
+            {"key": key, "type": type, "value": value},
+            timeout=timeout,
+        )
+
     # ---- 2. Capture Control (4 tools) ----
 
     def start_capture(
@@ -603,7 +646,7 @@ class McpClient:
         """
         return self._call_tool(
             "load_capture",
-            {"filepath": to_windows_path(filepath)},
+            {"filePath": to_windows_path(filepath)},
             timeout=timeout,
         )
 
@@ -618,7 +661,7 @@ class McpClient:
         """
         return self._call_tool(
             "save_capture",
-            {"filepath": to_windows_path(filepath)},
+            {"filePath": to_windows_path(filepath)},
             timeout=timeout,
         )
 
@@ -650,7 +693,7 @@ class McpClient:
         """
         return self._call_tool(
             "get_analyzer_options",
-            {"analyzerName": analyzer_name},
+            {"decoderId": analyzer_name},
             timeout=timeout,
         )
 
@@ -678,13 +721,24 @@ class McpClient:
         Returns:
             Analyzer instance ID string (e.g. ``'1:1'``).
         """
-        args: dict = {"analyzerName": analyzer_name}
-        if settings is not None:
-            args["settings"] = settings
+        # If device_id is provided, ensure the device is connected first.
+        # The MCP add_analyzer tool does not have a deviceId parameter;
+        # device connection must be done via connect_device beforehand.
         if device_id is not None:
-            args["deviceId"] = device_id
+            try:
+                self.connect_device(device_id)
+            except Exception:
+                pass  # Already connected
+
+        args: dict = {"decoderId": analyzer_name}
+        # Flatten settings into top-level channelMap and options
+        if settings is not None:
+            if "channelMap" in settings:
+                args["channelMap"] = settings["channelMap"]
+            if "options" in settings:
+                args["options"] = settings["options"]
         if analyzer_label is not None:
-            args["analyzerLabel"] = analyzer_label
+            args["label"] = analyzer_label
         if stack_on_analyzer_id is not None:
             args["stackOnAnalyzerId"] = stack_on_analyzer_id
         return self._call_tool("add_analyzer", args, timeout=timeout)
@@ -732,44 +786,6 @@ class McpClient:
             "get_analyzer_results", args, timeout=timeout
         )
 
-    # ---- 5. Data Export (4 tools) ----
-
-    def export_raw_data_csv(
-        self,
-        directory: str,
-        digital_channels: Optional[List[int]] = None,
-        analog_channels: Optional[List[int]] = None,
-        analog_downsample_ratio: int = 1,
-        iso8601_timestamp: bool = False,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Export raw capture data as CSV files."""
-        args: dict = {"directory": to_windows_path(directory)}
-        if digital_channels is not None:
-            args["digitalChannels"] = digital_channels
-        if analog_channels is not None:
-            args["analogChannels"] = analog_channels
-        args["analogDownsampleRatio"] = analog_downsample_ratio
-        args["iso8601Timestamp"] = iso8601_timestamp
-        return self._call_tool("export_raw_data_csv", args, timeout=timeout)
-
-    def export_raw_data_binary(
-        self,
-        directory: str,
-        digital_channels: Optional[List[int]] = None,
-        analog_channels: Optional[List[int]] = None,
-        analog_downsample_ratio: int = 1,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Export raw capture data as binary files."""
-        args: dict = {"directory": to_windows_path(directory)}
-        if digital_channels is not None:
-            args["digitalChannels"] = digital_channels
-        if analog_channels is not None:
-            args["analogChannels"] = analog_channels
-        args["analogDownsampleRatio"] = analog_downsample_ratio
-        return self._call_tool("export_raw_data_binary", args, timeout=timeout)
-
     def export_raw_data(
         self,
         format: str,
@@ -801,12 +817,8 @@ class McpClient:
     def export_data_table_csv(
         self,
         filepath: str,
-        analyzers: Optional[List[dict]] = None,
-        *,
-        columns: Optional[List[str]] = None,
-        filter: Optional[dict] = None,
-        filter_query: Optional[str] = None,
-        filter_columns: Optional[List[str]] = None,
+        analyzer_id: str,
+        radix_type: int = 0,
         iso8601_timestamp: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
@@ -814,125 +826,17 @@ class McpClient:
 
         Args:
             filepath:          Output CSV file path.
-            analyzers:         List of ``{analyzerId, radixType}`` dicts.
-                               If omitted, exports all active decoders.
-            columns:           Column names to include in the export.
-                               If omitted, all columns are exported.
-            filter:            Pre-built filter dict ``{query, columns}``.
-            filter_query:      Convenience: query string for filtering.
-            filter_columns:    Convenience: columns to apply the query to.
+            analyzer_id:       Analyzer instance ID (e.g. ``'1:1'``).
+            radix_type:        Radix: 1=Binary, 2=Decimal, 3=Hex, 4=Ascii.
             iso8601_timestamp: Use ISO8601 wall-clock timestamps.
         """
-        args: dict = {"filepath": to_windows_path(filepath)}
-        if analyzers is not None:
-            args["analyzers"] = analyzers
-        if columns is not None:
-            args["exportColumns"] = columns
-        # Build filter: explicit filter dict takes precedence, then convenience args
-        if filter is not None:
-            args["filter"] = filter
-        elif filter_query is not None:
-            f: dict = {"query": filter_query}
-            if filter_columns is not None:
-                f["columns"] = filter_columns
-            args["filter"] = f
-        args["iso8601Timestamp"] = iso8601_timestamp
+        args: dict = {
+            "filePath": to_windows_path(filepath),
+            "analyzerId": analyzer_id,
+            "radixType": radix_type,
+            "iso8601Timestamp": iso8601_timestamp,
+        }
         return self._call_tool("export_data_table_csv", args, timeout=timeout)
-
-    # ---- 6. Trigger Config (2 tools) ----
-
-    def get_trigger_config(
-        self, mode: Optional[str] = None, timeout: Optional[float] = None
-    ) -> dict:
-        """Get trigger configuration.
-
-        Args:
-            mode: ``'logic'`` or ``'dso'``.  If omitted, uses the
-                  active work mode.
-        """
-        args: dict = {}
-        if mode is not None:
-            args["mode"] = mode
-        return self._call_tool("get_trigger_config", args, timeout=timeout)
-
-    def set_trigger_config(self, mode: str, **kwargs: Any) -> Any:
-        """Set trigger configuration.
-
-        Args:
-            mode: ``'logic'`` or ``'dso'``.
-            **kwargs: Trigger config fields (see MCP schema).
-        """
-        args: dict = {"mode": mode}
-        args.update(kwargs)
-        return self._call_tool("set_trigger_config", args)
-
-    # ---- 7. Probe Config (2 tools) ----
-
-    def get_probe_config(
-        self, channel_index: int, timeout: Optional[float] = None
-    ) -> dict:
-        """Get probe configuration for a channel.
-
-        Returns ``vdiv``, ``coupling``, ``vfactor``, ``map_default``.
-        Only meaningful for analog/DSO channels.
-        """
-        return self._call_tool(
-            "get_probe_config",
-            {"channelIndex": channel_index},
-            timeout=timeout,
-        )
-
-    def get_probe_config_typed(
-        self, channel_index: int, timeout: Optional[float] = None
-    ) -> ProbeConfig:
-        """Get probe config as a typed :class:`ProbeConfig` object."""
-        raw = self.get_probe_config(channel_index, timeout=timeout)
-        return ProbeConfig.from_dict(raw)
-
-    def set_probe_config(
-        self,
-        channel_index: int,
-        vdiv: Optional[float] = None,
-        coupling: Optional[int] = None,
-        vfactor: Optional[float] = None,
-        map_default: Optional[bool] = None,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Set probe configuration for a channel."""
-        args: dict = {"channelIndex": channel_index}
-        if vdiv is not None:
-            args["vdiv"] = vdiv
-        if coupling is not None:
-            args["coupling"] = coupling
-        if vfactor is not None:
-            args["vfactor"] = vfactor
-        if map_default is not None:
-            args["mapDefault"] = map_default
-        return self._call_tool("set_probe_config", args, timeout=timeout)
-
-    # ---- 8. Channel Config (2 tools) ----
-
-    def set_channel_enabled(
-        self, channel_index: int, enabled: bool, timeout: Optional[float] = None
-    ) -> Any:
-        """Enable or disable a channel by index."""
-        return self._call_tool(
-            "set_channel_enabled",
-            {"channelIndex": channel_index, "enabled": enabled},
-            timeout=timeout,
-        )
-
-    def set_channel_name(
-        self, channel_index: int, name: str, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the display name for a channel."""
-        return self._call_tool(
-            "set_channel_name",
-            {"channelIndex": channel_index, "name": name},
-            timeout=timeout,
-        )
-
-    # ---- 9. Sample Config (5 tools) ----
 
     def get_sample_config(self, timeout: Optional[float] = None) -> dict:
         """Get the full sample configuration.
@@ -948,159 +852,59 @@ class McpClient:
         raw = self.get_sample_config(timeout=timeout)
         return SampleConfig.from_dict(raw)
 
-    def set_sample_rate(
-        self, rate: int, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the sample rate in Hz."""
-        return self._call_tool(
-            "set_sample_rate", {"rate": rate}, timeout=timeout
-        )
-
-    def set_sample_limit(
-        self, limit: int, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the sample limit (capture depth)."""
-        return self._call_tool(
-            "set_sample_limit", {"limit": limit}, timeout=timeout
-        )
-
-    def set_time_base(
-        self, time_base: int, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the time base in nanoseconds."""
-        return self._call_tool(
-            "set_time_base", {"timeBase": time_base}, timeout=timeout
-        )
-
-    def set_collect_mode(
-        self, mode: str, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the collect mode: ``'single'``, ``'repeat'``, or ``'loop'``."""
-        return self._call_tool(
-            "set_collect_mode", {"mode": mode}, timeout=timeout
-        )
-
-    def set_repeat_interval(
-        self, interval_ms: int, timeout: Optional[float] = None
-    ) -> Any:
-        """Set the repeat interval in milliseconds."""
-        return self._call_tool(
-            "set_repeat_interval", {"intervalMs": interval_ms}, timeout=timeout
-        )
-
-    # ---- 10. Sample Reading (3 tools) ----
-
-    def get_logic_samples(
-        self,
-        channel_index: int,
-        start_sample: int = 0,
-        end_sample: Optional[int] = None,
-        timeout: Optional[float] = None,
-    ) -> bytes:
-        """Read logic (digital) samples for a channel.
-
-        Args:
-            channel_index: Digital channel index.
-            start_sample:  Start sample index (0-based).
-            end_sample:    End sample index (exclusive).  None = to end.
-
-        Returns:
-            Raw bytes (one byte per sample, 0 or 1).
-        """
-        args: dict = {"channelIndex": channel_index, "startSample": start_sample}
-        if end_sample is not None:
-            args["endSample"] = end_sample
-        result = self._call_tool("get_logic_samples", args, timeout=timeout)
-        if isinstance(result, str):
-            return base64.b64decode(result)
-        if isinstance(result, dict) and "data" in result:
-            return base64.b64decode(result["data"])
-        return result  # type: ignore[return-value]
-
-    def get_analog_samples(
-        self,
-        channel_index: int,
-        start_sample: int = 0,
-        end_sample: Optional[int] = None,
-        timeout: Optional[float] = None,
-    ) -> List[float]:
-        """Read analog samples for a channel.
-
-        Returns a list of float values.
-        """
-        args: dict = {"channelIndex": channel_index, "startSample": start_sample}
-        if end_sample is not None:
-            args["endSample"] = end_sample
-        return self._call_tool("get_analog_samples", args, timeout=timeout)
-
-    def get_dso_samples(
-        self,
-        channel_index: int,
-        start_sample: int = 0,
-        end_sample: Optional[int] = None,
-        timeout: Optional[float] = None,
-    ) -> List[float]:
-        """Read DSO samples for a channel.
-
-        Returns a list of float values.
-        """
-        args: dict = {"channelIndex": channel_index, "startSample": start_sample}
-        if end_sample is not None:
-            args["endSample"] = end_sample
-        return self._call_tool("get_dso_samples", args, timeout=timeout)
-
-    # ---- 11. Edge/Pattern Search (2 tools) ----
-
     def find_next_edge(
         self,
         channel_index: int,
-        start_sample: int,
-        direction: str = "forward",
+        from_sample: int,
+        rising_edge: bool = True,
         timeout: Optional[float] = None,
     ) -> Any:
-        """Find the next logic edge on a channel.
+        """Find the next signal edge on a channel.
 
         Args:
             channel_index: Digital channel index.
-            start_sample:  Sample index to start searching from.
-            direction:     ``'forward'`` or ``'backward'``.
+            from_sample:   Sample index to start searching from.
+            rising_edge:   True = find rising edge, False = find falling edge.
 
         Returns:
-            Sample index of the next edge.
+            Sample index of the next edge, or None.
         """
         return self._call_tool(
             "find_next_edge",
             {
                 "channelIndex": channel_index,
-                "startSample": start_sample,
-                "direction": direction,
+                "fromSample": from_sample,
+                "risingEdge": rising_edge,
             },
             timeout=timeout,
         )
 
     def find_pattern(
         self,
-        channels: List[int],
+        channel_index: int,
         pattern: str,
-        start_sample: int,
-        options: Optional[dict] = None,
+        from_sample: int,
         timeout: Optional[float] = None,
     ) -> Any:
-        """Search for a bit pattern on logic channels.
+        """Search for a bit pattern on a logic channel.
 
         Args:
-            channels:    List of channel indices.
-            pattern:     Pattern string (e.g. ``'1X0'``).
-            start_sample: Sample index to start from.
+            channel_index: Channel index to search on.
+            pattern:       Pattern string (e.g. ``'1'``, ``'0'``, ``'x'``).
+            from_sample:   Sample index to start from.
+
+        Returns:
+            Sample index of the first match, or None.
         """
-        args: dict = {
-            "channels": channels,
-            "pattern": pattern,
-            "startSample": start_sample,
-        }
-        if options is not None:
-            args["options"] = options
-        return self._call_tool("find_pattern", args, timeout=timeout)
+        return self._call_tool(
+            "find_pattern",
+            {
+                "channelIndex": channel_index,
+                "pattern": pattern,
+                "fromSample": from_sample,
+            },
+            timeout=timeout,
+        )
 
     # ---- 12. Decoder Management (2 tools) ----
 
@@ -1153,12 +957,6 @@ class McpClient:
             "set_active_session", {"sessionId": session_id}, timeout=timeout
         )
 
-    def get_session_count(self, timeout: Optional[float] = None) -> int:
-        """Return the current number of sessions."""
-        return self._call_tool("get_session_count", {}, timeout=timeout)
-
-    # ---- 14. Device Connect/Disconnect (2 tools) ----
-
     def connect_device(
         self, device_id: str, timeout: Optional[float] = None
     ) -> Any:
@@ -1181,123 +979,6 @@ class McpClient:
         if device_id is not None:
             args["deviceId"] = device_id
         return self._call_tool("disconnect_device", args, timeout=timeout)
-
-    # ---- 15. Generic Config (2 tools) ----
-
-    def get_config(
-        self, key: int, value_type: str, timeout: Optional[float] = None
-    ) -> Any:
-        """Read a generic ``SR_CONF_*`` config value.
-
-        Args:
-            key:        ``SR_CONF_*`` config key (numeric).
-            value_type: ``'bool'``, ``'int'``, ``'int64'``, ``'string'``,
-                        ``'double'``.
-        """
-        return self._call_tool(
-            "get_config",
-            {"key": key, "type": value_type},
-            timeout=timeout,
-        )
-
-    def set_config(
-        self,
-        key: int,
-        value_type: str,
-        value: Any,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Write a generic ``SR_CONF_*`` config value."""
-        return self._call_tool(
-            "set_config",
-            {"key": key, "type": value_type, "value": value},
-            timeout=timeout,
-        )
-
-    # ---- 16. Glitch Filter (3 tools) ----
-
-    def set_glitch_filter(
-        self,
-        channels: List[int],
-        threshold: Optional[int] = None,
-        thresholds: Optional[List[int]] = None,
-        modes: Optional[List[int]] = None,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Enable glitch filter on channels with a minimum pulse-width
-        threshold (in samples)."""
-        args: dict = {"channels": channels}
-        if threshold is not None:
-            args["threshold"] = threshold
-        if thresholds is not None:
-            args["thresholds"] = thresholds
-        if modes is not None:
-            args["modes"] = modes
-        return self._call_tool("set_glitch_filter", args, timeout=timeout)
-
-    def clear_glitch_filter(
-        self,
-        channels: Optional[List[int]] = None,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Clear/disable glitch filter."""
-        args: dict = {}
-        if channels is not None:
-            args["channels"] = channels
-        return self._call_tool("clear_glitch_filter", args, timeout=timeout)
-
-    def get_glitch_filter_config(
-        self, timeout: Optional[float] = None
-    ) -> dict:
-        """Get current glitch filter configuration."""
-        return self._call_tool(
-            "get_glitch_filter_config", {}, timeout=timeout
-        )
-
-    # ---- 17. Signal Invert (3 tools) ----
-
-    def set_signal_invert(
-        self,
-        channels: List[int],
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Enable signal invert on specified channels."""
-        return self._call_tool(
-            "set_signal_invert", {"channels": channels}, timeout=timeout
-        )
-
-    def clear_signal_invert(
-        self,
-        channels: Optional[List[int]] = None,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Clear signal invert."""
-        args: dict = {}
-        if channels is not None:
-            args["channels"] = channels
-        return self._call_tool("clear_signal_invert", args, timeout=timeout)
-
-    def get_signal_invert_config(
-        self, timeout: Optional[float] = None
-    ) -> dict:
-        """Get current signal invert configuration."""
-        return self._call_tool(
-            "get_signal_invert_config", {}, timeout=timeout
-        )
-
-    # ---- 18. Repeat Status (1 tool) ----
-
-    def get_repeat_status(self, timeout: Optional[float] = None) -> dict:
-        """Get repeat/collect mode status."""
-        return self._call_tool("get_repeat_status", {}, timeout=timeout)
-
-    # ---- 19. Disk Cache (1 tool) ----
-
-    def get_disk_cache_info(self, timeout: Optional[float] = None) -> dict:
-        """Get disk cache info."""
-        return self._call_tool("get_disk_cache_info", {}, timeout=timeout)
-
-    # ---- 20. Batch B tools (10 tools) ----
 
     def refresh_device_list(
         self, timeout: Optional[float] = None
@@ -1350,19 +1031,6 @@ class McpClient:
             timeout=timeout,
         )
 
-    def get_decoder_binary_output(
-        self,
-        analyzer_id: str,
-        output_id: int,
-        timeout: Optional[float] = None,
-    ) -> Any:
-        """Read a decoder's binary output stream."""
-        return self._call_tool(
-            "get_decoder_binary_output",
-            {"analyzerId": analyzer_id, "outputId": output_id},
-            timeout=timeout,
-        )
-
     def get_math_results(self, timeout: Optional[float] = None) -> dict:
         """Read computed math trace results."""
         return self._call_tool("get_math_results", {}, timeout=timeout)
@@ -1374,18 +1042,6 @@ class McpClient:
     def get_lissajous_results(self, timeout: Optional[float] = None) -> dict:
         """Read Lissajous trace configuration."""
         return self._call_tool("get_lissajous_results", {}, timeout=timeout)
-
-    def get_error_state(self, timeout: Optional[float] = None) -> dict:
-        """Read the session error state."""
-        return self._call_tool("get_error_state", {}, timeout=timeout)
-
-    def clear_error_state(self, timeout: Optional[float] = None) -> Any:
-        """Clear the session error state."""
-        return self._call_tool("clear_error_state", {}, timeout=timeout)
-
-    # ==================================================================
-    # Utility methods
-    # ==================================================================
 
     def get_demo_device(self) -> dict:
         """Find and return the demo device from :meth:`get_devices`.
@@ -1457,3 +1113,255 @@ class McpClient:
     def clear_cursors(self, timeout: Optional[float] = None) -> Any:
         """Remove all cursors."""
         return self._call_tool("clear_cursors", {}, timeout=timeout)
+
+    # ================================================================
+    # 18. Consolidated Tools (Phase 0-8 — 46 tools replacing 64)
+    # ================================================================
+
+    # ---- Tier 0: Mode Management (3 tools) ----
+
+    def switch_work_mode(self, mode: int, timeout: Optional[float] = None) -> Any:
+        """Switch the device work mode.
+
+        Modes: 0=Logic, 1=DSO, 2=Analog, 3=MSO.
+        Must be called before configuring channels/triggers/probes.
+        """
+        return self._call_tool("switch_work_mode", {"mode": mode}, timeout=timeout)
+
+    def get_work_mode(self, timeout: Optional[float] = None) -> int:
+        """Get the current device work mode (0=Logic, 1=DSO, 2=Analog, 3=MSO)."""
+        result = self._call_tool("get_work_mode", {}, timeout=timeout)
+        if isinstance(result, dict):
+            return result.get("mode", -1)
+        return result
+
+    def get_supported_work_modes(self, timeout: Optional[float] = None) -> List[int]:
+        """Get the work modes supported by the current device."""
+        result = self._call_tool("get_supported_work_modes", {}, timeout=timeout)
+        if isinstance(result, dict):
+            return result.get("modes", [])
+        return result
+
+    # ---- Tier 2: Consolidated Configuration ----
+
+    def set_sample_config(
+        self,
+        sample_rate: Optional[int] = None,
+        sample_limit: Optional[int] = None,
+        time_base: Optional[int] = None,
+        collect_mode: Optional[int] = None,
+        repeat_interval: Optional[float] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Set sample configuration (consolidated).
+
+        All params optional — only provided params are updated.
+        Sample rate type is determined by current work mode.
+        """
+        args: Dict[str, Any] = {}
+        if sample_rate is not None:
+            args["sampleRate"] = sample_rate
+        if sample_limit is not None:
+            args["sampleLimit"] = sample_limit
+        if time_base is not None:
+            args["timeBase"] = time_base
+        if collect_mode is not None:
+            args["collectMode"] = collect_mode
+        if repeat_interval is not None:
+            args["repeatInterval"] = repeat_interval
+        return self._call_tool("set_sample_config", args, timeout=timeout)
+
+    def configure_channel(
+        self,
+        channel_index: int,
+        enabled: Optional[bool] = None,
+        name: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Configure a channel (consolidated set_channel_enabled + set_channel_name)."""
+        args: Dict[str, Any] = {"channelIndex": channel_index}
+        if enabled is not None:
+            args["enabled"] = enabled
+        if name is not None:
+            args["name"] = name
+        return self._call_tool("configure_channel", args, timeout=timeout)
+
+    def configure_trigger(
+        self,
+        stage_count: Optional[int] = None,
+        config_json: Optional[str] = None,
+        source: Optional[int] = None,
+        slope: Optional[int] = None,
+        horiz_pos: Optional[float] = None,
+        holdoff: Optional[float] = None,
+        margin: Optional[float] = None,
+        channel: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Get or set trigger configuration (consolidated, mode-aware).
+
+        Automatically uses LogicTrigger or DsoTrigger based on current mode.
+        Call with no args to get current config.
+        """
+        args: Dict[str, Any] = {}
+        if stage_count is not None:
+            args["stageCount"] = stage_count
+        if config_json is not None:
+            args["configJson"] = config_json
+        if source is not None:
+            args["source"] = source
+        if slope is not None:
+            args["slope"] = slope
+        if horiz_pos is not None:
+            args["horizPos"] = horiz_pos
+        if holdoff is not None:
+            args["holdoff"] = holdoff
+        if margin is not None:
+            args["margin"] = margin
+        if channel is not None:
+            args["channel"] = channel
+        return self._call_tool("configure_trigger", args, timeout=timeout)
+
+    def configure_probe(
+        self,
+        channel_index: int,
+        vdiv: Optional[float] = None,
+        coupling: Optional[int] = None,
+        vfactor: Optional[float] = None,
+        map_default: Optional[bool] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Get or set probe configuration (consolidated, DSO/Analog/MSO only)."""
+        args: Dict[str, Any] = {"channelIndex": channel_index}
+        if vdiv is not None:
+            args["vdiv"] = vdiv
+        if coupling is not None:
+            args["coupling"] = coupling
+        if vfactor is not None:
+            args["vfactor"] = vfactor
+        if map_default is not None:
+            args["mapDefault"] = map_default
+        return self._call_tool("configure_probe", args, timeout=timeout)
+
+    def configure_glitch_filter(
+        self,
+        channels: Optional[List[int]] = None,
+        thresholds: Optional[List[int]] = None,
+        modes: Optional[List[int]] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Get, set, or clear glitch filter (consolidated, Logic/MSO only).
+
+        Call with no args to get current config.
+        Set channels=[] to clear.
+        """
+        args: Dict[str, Any] = {}
+        if channels is not None:
+            args["channels"] = channels
+        if thresholds is not None:
+            args["thresholds"] = thresholds
+        if modes is not None:
+            args["modes"] = modes
+        return self._call_tool("configure_glitch_filter", args, timeout=timeout)
+
+    def configure_signal_invert(
+        self,
+        channels: Optional[List[int]] = None,
+        invert_states: Optional[List[bool]] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Get, set, or clear signal invert (consolidated)."""
+        args: Dict[str, Any] = {}
+        if channels is not None:
+            args["channels"] = channels
+        if invert_states is not None:
+            args["invertStates"] = invert_states
+        return self._call_tool("configure_signal_invert", args, timeout=timeout)
+
+    def get_session_status(self, timeout: Optional[float] = None) -> Any:
+        """Get session status (consolidated repeat_status + disk_cache_info)."""
+        return self._call_tool("get_session_status", {}, timeout=timeout)
+
+    def configure_error_state(
+        self, action: str = "get", timeout: Optional[float] = None
+    ) -> Any:
+        """Get or clear the session error state (consolidated)."""
+        return self._call_tool(
+            "configure_error_state", {"action": action}, timeout=timeout
+        )
+
+    # ---- Tier 3: Consolidated Sample Reading ----
+
+    def get_samples(
+        self,
+        channel_index: int,
+        channel_type: str,
+        start_sample: int = 0,
+        end_sample: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Read raw samples (consolidated get_logic/analog/dso_samples).
+
+        channelType must match current work mode:
+        'logic' for Logic/MSO, 'analog' for Analog, 'dso' for DSO.
+
+        For logic channels, returns decoded bytes (one byte per sample).
+        For analog/DSO channels, returns a list of float values.
+        """
+        args: Dict[str, Any] = {
+            "channelIndex": channel_index,
+            "channelType": channel_type,
+            "startSample": start_sample,
+        }
+        if end_sample is not None:
+            args["endSample"] = end_sample
+        result = self._call_tool("get_samples", args, timeout=timeout)
+        # Extract data from the {sample_count, data, encoding} response
+        if isinstance(result, dict) and "data" in result:
+            data = result["data"]
+            if channel_type == "logic" and isinstance(data, str):
+                return base64.b64decode(data)
+            return data
+        return result
+
+    # ---- Generic Device Config (SR_CONF_* keys) ----
+
+    def get_config(
+        self,
+        key: int,
+        type: str,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Read a generic SR_CONF_* config value by key.
+
+        Args:
+            key: SR_CONF_* config key (numeric integer).
+            type: Value type — ``'bool'``, ``'int'``, ``'int64'``,
+                  ``'string'``, ``'double'``, ``'uint64'``.
+        """
+        return self._call_tool(
+            "get_config",
+            {"key": key, "type": type},
+            timeout=timeout,
+        )
+
+    def set_config(
+        self,
+        key: int,
+        type: str,
+        value: Any,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Write a generic SR_CONF_* config value by key.
+
+        Args:
+            key: SR_CONF_* config key (numeric integer).
+            type: Value type — ``'bool'``, ``'int'``, ``'int64'``,
+                  ``'string'``, ``'double'``, ``'uint64'``.
+            value: Value to set (type depends on ``type``).
+        """
+        return self._call_tool(
+            "set_config",
+            {"key": key, "type": type, "value": value},
+            timeout=timeout,
+        )

@@ -7,9 +7,12 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <queue>
+#include <set>
 #include <shared_mutex>
 #include <thread>
+#include <type_traits>
 #include <typeindex>
 #include <unordered_map>
 #include <vector>
@@ -118,13 +121,51 @@ public:
     }
 
     // ---- Async typed event broadcast (worker-thread → main-thread) ----
+    //
+    // For empty (parameterless) event types — detected at compile time via
+    // std::is_empty_v — e.g. DataUpdated, CollectEnd, EndCollectWork,
+    // DeviceOptionsUpdated, SessionStopped — same-type async events are
+    // coalesced: if an event of the same type is already pending in the qApp
+    // event queue, subsequent calls are silently dropped.  The pending flag
+    // is cleared just before dispatch, so a genuinely new event posted during
+    // dispatch will still be queued.
+    //
+    // For non-empty event types (TriggerReceived{pos}, CaptureStateChanged{...},
+    // SignalsChanged{rebuild_kind,...}, ...) every call is dispatched
+    // individually — coalescing would lose per-instance data.
     template <typename EventType> void broadcast_async(const EventType &ev) {
         auto alive = _alive_shared;
-        post_async_dispatch([this, ev, alive]() {
-            if (!alive->load(std::memory_order_acquire))
-                return;
-            broadcast(ev);
-        });
+
+        if constexpr (std::is_empty_v<EventType>) {
+            // Coalescable: skip if same type is already pending
+            {
+                std::lock_guard<std::mutex> lk(_pending_async_mutex);
+                auto ti = std::type_index(typeid(EventType));
+                if (_pending_async_types.count(ti) > 0)
+                    return; // already pending — coalesce
+                _pending_async_types.insert(ti);
+            }
+            post_async_dispatch([this, alive]() {
+                // Clear pending flag BEFORE dispatching so that events posted
+                // during dispatch are not lost.
+                {
+                    std::lock_guard<std::mutex> lk(_pending_async_mutex);
+                    _pending_async_types.erase(
+                        std::type_index(typeid(EventType)));
+                }
+                if (!alive->load(std::memory_order_acquire))
+                    return;
+                // Empty event — default-construct (no per-instance data)
+                broadcast(EventType{});
+            });
+        } else {
+            // Non-coalescable: always dispatch
+            post_async_dispatch([this, ev, alive]() {
+                if (!alive->load(std::memory_order_acquire))
+                    return;
+                broadcast(ev);
+            });
+        }
     }
 
     // ---- Internal: post a functor to the main thread via QCoreApplication::postEvent ----
@@ -166,6 +207,12 @@ private:
             fn();
         }
     }
+
+    // ---- Async event coalescing ----
+    // Tracks which empty event types have a pending async dispatch.
+    // Protected by _pending_async_mutex.
+    std::set<std::type_index> _pending_async_types;
+    std::mutex _pending_async_mutex;
 
     // ---- Lifetime management ----
     std::shared_ptr<std::atomic<bool>> _alive_shared;

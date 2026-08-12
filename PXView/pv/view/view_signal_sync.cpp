@@ -98,19 +98,29 @@ void ViewSignalSync::compute_signal_groups() {
   std::vector<Trace *> decode_traces;
   std::vector<Trace *> logic_traces;
 
+  // 包含 disabled 的 LOGIC 通道：禁用的通道仍需参与 view_index 归一化，
+  // 否则其 view_index 保持旧值，与被重新编号的 enabled 通道冲突。
+  // 重新启用时归一化排序遇到重复 view_index，std::sort 不稳定 → 通道顺序错乱。
   for (auto t : all_traces) {
     if (t->get_type() == SR_CHANNEL_DECODER && t->enabled())
       decode_traces.push_back(t);
-    else if (t->get_type() == SR_CHANNEL_LOGIC && t->enabled())
+    else if (t->get_type() == SR_CHANNEL_LOGIC)
       logic_traces.push_back(t);
   }
 
   // 按 view_index 排序，确保分组顺序与布局顺序一致
+  // view_index 相同时用 channel index 做 tiebreaker，避免不稳定排序导致顺序错乱
   sort(decode_traces.begin(), decode_traces.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
+    int va = a->get_view_index(), vb = b->get_view_index();
+    if (va != vb)
+      return va < vb;
+    return a->get_index() < b->get_index();
   });
   sort(logic_traces.begin(), logic_traces.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
+    int va = a->get_view_index(), vb = b->get_view_index();
+    if (va != vb)
+      return va < vb;
+    return a->get_index() < b->get_index();
   });
 
   // 归一化 view_index：消除空洞与 -1，保持相对顺序
@@ -132,11 +142,15 @@ void ViewSignalSync::compute_signal_groups() {
       normalize_pool.push_back(t);
     }
     // view_index>=0 的按 view_index 排在前，view_index<0 的按 channel index 排在后
+    // view_index 相同时用 channel index 做 tiebreaker，确保稳定排序
     sort(normalize_pool.begin(), normalize_pool.end(), [](Trace *a, Trace *b) {
       int va = a->get_view_index();
       int vb = b->get_view_index();
-      if (va >= 0 && vb >= 0)
-        return va < vb;
+      if (va >= 0 && vb >= 0) {
+        if (va != vb)
+          return va < vb;
+        return a->get_index() < b->get_index();
+      }
       if (va >= 0 && vb < 0)
         return true;
       if (va < 0 && vb >= 0)
@@ -250,7 +264,10 @@ void ViewSignalSync::compute_signal_groups() {
     }
   }
   sort(unassigned.begin(), unassigned.end(), [](Trace *a, Trace *b) {
-    return a->get_view_index() < b->get_view_index();
+    int va = a->get_view_index(), vb = b->get_view_index();
+    if (va != vb)
+      return va < vb;
+    return a->get_index() < b->get_index();
   });
   // 连续的未分配逻辑通道合并成一个组，不连续的单独成组
   if (!unassigned.empty()) {
@@ -275,7 +292,10 @@ void ViewSignalSync::compute_signal_groups() {
 
   for (auto &group : _signal_groups) {
     sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      return a->get_v_offset() < b->get_v_offset();
+      int va = a->get_v_offset(), vb = b->get_v_offset();
+      if (va != vb)
+        return va < vb;
+      return a->get_index() < b->get_index();
     });
   }
 }
@@ -305,7 +325,10 @@ void ViewSignalSync::sort_signal_groups_by_view_index() {
     sort(_signal_groups[gi].traces.begin(),
          _signal_groups[gi].traces.end(),
          [](Trace *a, Trace *b) {
-           return a->get_view_index() < b->get_view_index();
+           int va = a->get_view_index(), vb = b->get_view_index();
+           if (va != vb)
+             return va < vb;
+           return a->get_index() < b->get_index();
          });
     for (auto gt : _signal_groups[gi].traces) {
       gt->set_view_index(new_index++);
@@ -540,7 +563,10 @@ void ViewSignalSync::finalize_signal_layout() {
 
   for (auto &group : _signal_groups) {
     sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      return a->get_v_offset() < b->get_v_offset();
+      int va = a->get_v_offset(), vb = b->get_v_offset();
+      if (va != vb)
+        return va < vb;
+      return a->get_index() < b->get_index();
     });
   }
 

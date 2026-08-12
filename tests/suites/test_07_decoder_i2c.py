@@ -130,9 +130,7 @@ class TestDecoderI2c:
                          duration_seconds=1.0)
 
         filepath = tmp_capture_dir + "/i2c_results.csv"
-        mcp.export_data_table_csv(filepath, analyzers=[
-            {"analyzerId": analyzer_id, "radixType": 3}
-        ])
+        mcp.export_data_table_csv(filepath, analyzer_id=analyzer_id, radix_type=3)
 
     def test_i2c_results_max_count(self, mcp: McpClient, device_id: str,
                                    cleanup_after_test):

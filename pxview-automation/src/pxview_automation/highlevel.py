@@ -258,7 +258,7 @@ class PXView:
 
         status = self._client.get_capture_status()
         if status.get("state") == "error":
-            err = self._client.get_error_state()
+            err = self._client.configure_error_state(action="get")
             raise McpError(
                 f"Capture failed: {err.get('error_message', 'unknown error')}",
                 raw=err,
@@ -355,7 +355,7 @@ class PXView:
 
         status = self._client.get_capture_status_typed()
         if status.state.value == "error":
-            err = self._client.get_error_state()
+            err = self._client.configure_error_state(action="get")
             raise McpError(
                 f"Capture failed: {err.get('error_message', 'unknown error')}",
                 raw=err,
@@ -547,33 +547,23 @@ class PXView:
     def export_decoder_table(
         self,
         filepath: str,
-        analyzer_id: Optional[str] = None,
+        analyzer_id: str,
         *,
-        columns: Optional[List[str]] = None,
-        filter_query: Optional[str] = None,
-        filter_columns: Optional[List[str]] = None,
+        radix_type: int = 0,
         iso8601_timestamp: bool = False,
     ) -> Any:
         """Export decoded analyzer results as a CSV data table.
 
         Args:
             filepath:       Output CSV file path.
-            analyzer_id:    Specific analyzer to export.  If None, exports all.
-            columns:        Column names to include.  If None, all columns.
-            filter_query:   Query string to filter rows.
-            filter_columns: Columns to apply the query to.
+            analyzer_id:    Analyzer instance ID to export.
+            radix_type:     Radix: 1=Binary, 2=Decimal, 3=Hex, 4=Ascii.
             iso8601_timestamp: Use ISO8601 wall-clock timestamps.
         """
-        analyzers = None
-        if analyzer_id is not None:
-            analyzers = [{"analyzerId": analyzer_id}]
-
         return self._client.export_data_table_csv(
             filepath=filepath,
-            analyzers=analyzers,
-            columns=columns,
-            filter_query=filter_query,
-            filter_columns=filter_columns,
+            analyzer_id=analyzer_id,
+            radix_type=radix_type,
             iso8601_timestamp=iso8601_timestamp,
         )
 
@@ -597,12 +587,20 @@ class PXView:
         Returns:
             Raw bytes (one byte per sample, 0 or 1).
         """
+        import base64
         end = start + count if count is not None else None
-        return self._client.get_logic_samples(
+        result = self._client.get_samples(
             channel_index=channel,
+            channel_type="logic",
             start_sample=start,
             end_sample=end,
         )
+        if isinstance(result, dict):
+            data = result.get("data", result)
+            if isinstance(data, str):
+                return base64.b64decode(data)
+            return data
+        return result
 
     def get_analog_samples(
         self,
@@ -615,11 +613,15 @@ class PXView:
         Returns a list of float values.
         """
         end = start + count if count is not None else None
-        return self._client.get_analog_samples(
+        result = self._client.get_samples(
             channel_index=channel,
+            channel_type="analog",
             start_sample=start,
             end_sample=end,
         )
+        if isinstance(result, dict):
+            return result.get("data", result)
+        return result
 
     # ==================================================================
     # File operations
@@ -648,7 +650,7 @@ class PXView:
 
     def set_sample_rate(self, rate: int) -> Any:
         """Set the sample rate in Hz."""
-        return self._client.set_sample_rate(rate)
+        return self._client.set_sample_config(sample_rate=rate)
 
     def get_channels(self) -> List[dict]:
         """Get channel list for the current device."""
@@ -656,8 +658,8 @@ class PXView:
 
     def enable_channel(self, index: int) -> Any:
         """Enable a channel."""
-        return self._client.set_channel_enabled(index, True)
+        return self._client.configure_channel(index, True)
 
     def disable_channel(self, index: int) -> Any:
         """Disable a channel."""
-        return self._client.set_channel_enabled(index, False)
+        return self._client.configure_channel(index, False)

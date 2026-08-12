@@ -60,6 +60,17 @@ namespace pv {
 
 SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBus *bus)
     : _window(window), _bus(bus) {
+  // Throttle timer for SignalsChanged: singleShot, 50ms delay.
+  // When multiple SignalsChanged events arrive in rapid succession,
+  // only the first triggers the timer; subsequent events are coalesced
+  // (timer is already running so they're ignored). The actual
+  // on_signals_changed logic runs once when the timer fires.
+  _signals_changed_timer.setSingleShot(true);
+  _signals_changed_timer.setInterval(50);
+  QObject::connect(&_signals_changed_timer, &QTimer::timeout, [this]() {
+    if (_window.isNull()) return;
+    _window->on_signals_changed();
+  });
   _subscriptions.push_back(_bus->subscribe<pv::interface::CaptureStateChanged>(
       [this](const pv::interface::CaptureStateChanged &e) { on_capture_state_changed(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::CaptureOwnerChanged>(
@@ -665,7 +676,13 @@ void SessionEventDispatcher::on_decode_done(const pv::interface::DecodeDone &) {
   _window->on_decode_done();
 }
 void SessionEventDispatcher::on_signals_changed(const pv::interface::SignalsChanged &) {
-  _window->on_signals_changed();
+  // Throttle: if the timer is already pending, this event is coalesced.
+  // This prevents N full signal-layout passes from running back-to-back
+  // when N SignalsChanged events are queued (e.g. when MCP adds multiple
+  // decoders in rapid succession). The timer fires once after 50ms of
+  // quiet, processing the latest state.
+  if (!_signals_changed_timer.isActive())
+    _signals_changed_timer.start();
 }
 void SessionEventDispatcher::on_data_updated(const pv::interface::DataUpdated &) {
   _window->on_data_updated();
@@ -763,10 +780,14 @@ void SessionEventDispatcher::on_service_event(const pv::api::ServiceEventData &d
   case pv::api::ServiceEvent::DecoderRemoved:
   case pv::api::ServiceEvent::SignalsChanged: {
     // Core data changed via MCP/API (decoder added/removed or signals
-    // changed). Trigger lazy sync so View creates/removes the
-    // corresponding DecodeTrace by Core Stack identity comparison.
+    // changed). Mark derived traces dirty immediately (cheap — just
+    // sets a flag), but defer the expensive signals_changed(nullptr)
+    // layout pass to the throttle timer so that rapid bursts (e.g.
+    // 16 decoders added in succession) don't cause 16 full layout
+    // passes back-to-back.
     view->mark_derived_traces_dirty();
-    view->signals_changed(nullptr);
+    if (!_signals_changed_timer.isActive())
+      _signals_changed_timer.start();
     break;
   }
   default:

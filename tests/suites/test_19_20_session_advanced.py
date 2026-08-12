@@ -22,7 +22,7 @@ class TestSessionManagement:
 
     def test_get_session_count(self, mcp: McpClient):
         """get_session_count returns a number."""
-        count = mcp.get_session_count()
+        count = len(mcp.list_sessions())
         assert count >= 1, "Should have at least 1 session"
 
     def test_create_session_empty(self, mcp: McpClient):
@@ -54,9 +54,9 @@ class TestSessionManagement:
 
     def test_multi_session_count(self, mcp: McpClient):
         """Creating sessions increases session count."""
-        count_before = mcp.get_session_count()
+        count_before = len(mcp.list_sessions())
         mcp.create_session()
-        count_after = mcp.get_session_count()
+        count_after = len(mcp.list_sessions())
         assert count_after >= count_before
 
 
@@ -64,25 +64,21 @@ class TestAdvancedTools:
 
     def test_get_config(self, mcp: McpClient, device_id: str,
                         cleanup_after_test):
-        """get_config reads a SR_CONF value."""
+        """get_config is removed from the 46-tool set — verify it raises."""
         mcp.connect_device(device_id)
-        try:
-            result = mcp.get_config(key=1, value_type="int")
-        except McpError:
-            pass  # Key 1 may not be valid for demo device
+        with pytest.raises(NotImplementedError):
+            mcp.get_config(key=1, value_type="int")
 
     def test_set_config(self, mcp: McpClient, device_id: str,
                         cleanup_after_test):
-        """set_config writes a SR_CONF value."""
+        """set_config is removed from the 46-tool set — verify it raises."""
         mcp.connect_device(device_id)
-        try:
+        with pytest.raises(NotImplementedError):
             mcp.set_config(key=1, value_type="int", value=0)
-        except McpError:
-            pass
 
     def test_get_disk_cache_info(self, mcp: McpClient):
         """get_disk_cache_info returns info."""
-        info = mcp.get_disk_cache_info()
+        info = mcp.get_session_status()
         assert isinstance(info, dict)
 
     def test_get_decoder_class_names(self, mcp: McpClient):
@@ -111,26 +107,18 @@ class TestAdvancedTools:
 
     def test_get_error_state(self, mcp: McpClient):
         """get_error_state returns dict."""
-        result = mcp.get_error_state()
+        result = mcp.configure_error_state(action="get")
         assert isinstance(result, dict)
         assert "has_error" in result
 
     def test_clear_error_state(self, mcp: McpClient):
         """clear_error_state resets error state."""
-        mcp.clear_error_state()
-        result = mcp.get_error_state()
+        mcp.configure_error_state(action="clear")
+        result = mcp.configure_error_state(action="get")
         assert result.get("has_error") is False or result.get("has_error") == 0
 
     def test_get_decoder_binary_output(self, mcp: McpClient, device_id: str,
                                        cleanup_after_test):
-        """get_decoder_binary_output (may return ConfigNotSupported)."""
-        from helpers.decoder_helper import add_decoder_safe
-        analyzer_id = add_decoder_safe(mcp, "i2c_c",
-                                       channel_map={"sda": 0, "scl": 1},
-                                       device_id=device_id)
-        do_timed_capture(mcp, device_id, channels=[0, 1],
-                         sample_rate=1000000, duration_seconds=0.5)
-        try:
-            result = mcp.get_decoder_binary_output(analyzer_id, output_id=0)
-        except McpError:
-            pass  # Expected: ConfigNotSupported per tool description
+        """get_decoder_binary_output is removed from the 46-tool set."""
+        with pytest.raises(NotImplementedError):
+            mcp.get_decoder_binary_output("1:1", output_id=0)

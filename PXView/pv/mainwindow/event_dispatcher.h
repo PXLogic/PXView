@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <QPointer>
+#include <QTimer>
 
 #include "pv/interface/events.h"
 #include "pv/core/eventbus.h"
@@ -100,6 +101,14 @@ private:
     void on_save_requested(const interface::SaveRequested &);
     void on_delayed_prop_msg(const interface::DelayedPropMsg &);
     void on_sample_limits_changed(const interface::SampleLimitsChanged &);
+
+    // Throttle timer for SignalsChanged events: when multiple
+    // SignalsChanged arrive in rapid succession (e.g. when MCP adds
+    // 16 decoders), only process the first one and defer it by 50ms.
+    // Subsequent events during the deferral period are coalesced.
+    // This prevents N full signal-layout passes (each O(M) where M
+    // is the signal count) from running back-to-back on the main thread.
+    QTimer _signals_changed_timer;
 };
 
 } // namespace pv

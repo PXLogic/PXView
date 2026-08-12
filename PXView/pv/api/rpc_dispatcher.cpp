@@ -1,12 +1,18 @@
 #include "pv/api/rpc_dispatcher.h"
 #include "pv/api/binary_codec.h"
 #include "pv/api/session_service.h"
+#include "pv/mcp/mcp.h"
 #include <algorithm>
 #include <QFile>
 #include <QDir>
 #include <QCoreApplication>
 #include <QDateTime>
 #include "PXView/config.h"
+
+// MCP tool registry — creates and configures the McpServer with all tools
+namespace mcp {
+std::unique_ptr<McpServer> create_mcp_server(pv::api::IAppService* app_svc);
+}
 
 namespace pv::api {
 
@@ -349,47 +355,46 @@ json RpcDispatcher::to_json(const DecoderClassInfo& d) {
 // ---- Constructor ----
 
 RpcDispatcher::RpcDispatcher(IAppService* app_svc)
-    : app_svc_(app_svc) {}
+    : app_svc_(app_svc)
+    , mcp_server_(mcp::create_mcp_server(app_svc)) {}
 
-// ---- MCP Tool Schemas ----
-
-json RpcDispatcher::get_tool_schemas() {
-    return json::array({
-#include "pv/api/tool_schemas.inc"
-    });
-}
+RpcDispatcher::~RpcDispatcher() = default;
 
 // ---- MCP Protocol Handlers ----
+// These delegate to the mcp::McpServer SDK, which handles initialize,
+// tools/list, and tools/call with auto-generated schemas and
+// exception-driven dispatch.
 
 JsonRpcResponse RpcDispatcher::on_initialize(int id) {
-    json result = {
-        {"protocolVersion", "2025-03-26"},
-        {"capabilities", {
-            {"tools", json::object()}
-        }},
-        {"serverInfo", {
-            {"name", "pxview"},
-            {"version", DS_VERSION_STRING}
-        }}
-    };
-    JsonRpcResponse resp;
-    resp.id = id;
-    resp.success = true;
-    resp.is_mcp_direct = true;
-    resp.result_json = result.dump();
-    return resp;
+    // Delegate to MCP SDK — includes instructions field for AI agent guidance
+    json params = json::object();
+    json resp = mcp_server_->handle_request("initialize", params, id);
+    JsonRpcResponse out;
+    out.id = id;
+    if (resp.contains("result")) {
+        out.success = true;
+        out.is_mcp_direct = true;
+        out.result_json = resp["result"].dump();
+    } else if (resp.contains("error")) {
+        out.success = false;
+        out.error_json = resp["error"].dump();
+    }
+    return out;
 }
 
 JsonRpcResponse RpcDispatcher::on_tools_list(int id) {
-    json result = {
-        {"tools", get_tool_schemas()}
-    };
-    JsonRpcResponse resp;
-    resp.id = id;
-    resp.success = true;
-    resp.is_mcp_direct = true;
-    resp.result_json = result.dump();
-    return resp;
+    // Delegate to MCP SDK — returns auto-generated schemas for all 49 tools
+    json params = json::object();
+    json resp = mcp_server_->handle_request("tools/list", params, id);
+    JsonRpcResponse out;
+    out.id = id;
+    out.success = true;
+    out.is_mcp_direct = true;
+    if (resp.contains("result"))
+        out.result_json = resp["result"].dump();
+    else
+        out.result_json = resp.dump();
+    return out;
 }
 
 JsonRpcResponse RpcDispatcher::on_ping(int id) {
@@ -401,80 +406,26 @@ JsonRpcResponse RpcDispatcher::on_ping(int id) {
 }
 
 // ---- MCP Tool Dispatch ----
+// Delegates to the mcp::McpServer SDK.  All 49 consolidated tools are
+// registered in mcp_tool_registry.cpp and dispatched via exception-driven
+// handle_tools_call().  Old tool names are NOT retained — callers must
+// use the new consolidated names.
 
 JsonRpcResponse RpcDispatcher::dispatch_mcp_tool(int id, const std::string& tool_name, const json& args) {
-    // Map MCP tool names to internal handlers
-    if (tool_name == "get_devices")            return on_get_devices(id, args);
-    if (tool_name == "start_capture")          return on_start_capture(id, args);
-    if (tool_name == "stop_capture")           return on_stop_capture(id, args);
-    if (tool_name == "wait_capture")           return on_wait_capture(id, args);
-    if (tool_name == "load_capture")           return on_load_capture(id, args);
-    if (tool_name == "save_capture")           return on_save_capture(id, args);
-    if (tool_name == "close_capture")          return on_close_capture(id, args);
-    if (tool_name == "add_analyzer")           return on_add_analyzer(id, args);
-    if (tool_name == "remove_analyzer")        return on_remove_analyzer(id, args);
-    if (tool_name == "list_analyzers")         return on_list_analyzers(id, args);
-    if (tool_name == "get_analyzer_options")   return on_get_analyzer_options(id, args);
-    if (tool_name == "export_raw_data_csv")    return on_export_raw_data_csv(id, args);
-    if (tool_name == "export_raw_data_binary") return on_export_raw_data_binary(id, args);
-    if (tool_name == "export_raw_data")       return on_export_raw_data(id, args);
-    if (tool_name == "export_data_table_csv")  return on_export_data_table_csv(id, args);
-    if (tool_name == "get_capture_status")     return on_get_capture_status(id, args);
-    if (tool_name == "get_channels")           return on_get_channels(id, args);
-    if (tool_name == "get_analyzer_results")   return on_get_analyzer_results(id, args);
+    // Check if the tool is registered in the SDK
+    if (mcp_server_->find_tool(tool_name)) {
+        // Delegate to MCP SDK — exception-driven dispatch
+        json result = mcp_server_->handle_tools_call(tool_name, args);
 
-    // ===== Batch A tools =====
-    if (tool_name == "get_trigger_config")         return on_get_trigger_config(id, args);
-    if (tool_name == "set_trigger_config")         return on_set_trigger_config(id, args);
-    if (tool_name == "get_probe_config")           return on_get_probe_config(id, args);
-    if (tool_name == "set_probe_config")           return on_set_probe_config(id, args);
-    if (tool_name == "set_channel_enabled")        return on_set_channel_enabled_mcp(id, args);
-    if (tool_name == "set_channel_name")           return on_set_channel_name_mcp(id, args);
-    if (tool_name == "get_sample_config")          return on_get_sample_config(id, args);
-    if (tool_name == "set_sample_rate")            return on_set_sample_rate(id, args);
-    if (tool_name == "set_sample_limit")           return on_set_sample_limit(id, args);
-    if (tool_name == "set_time_base")              return on_set_time_base(id, args);
-    if (tool_name == "set_collect_mode")           return on_set_collect_mode_mcp(id, args);
-    if (tool_name == "set_repeat_interval")        return on_set_repeat_interval(id, args);
-    if (tool_name == "get_logic_samples")          return on_get_logic_samples_mcp(id, args);
-    if (tool_name == "get_analog_samples")         return on_get_analog_samples_mcp(id, args);
-    if (tool_name == "get_dso_samples")            return on_get_dso_samples_mcp(id, args);
-    if (tool_name == "find_next_edge")             return on_find_next_edge_mcp(id, args);
-    if (tool_name == "find_pattern")               return on_find_pattern(id, args);
-    if (tool_name == "get_active_decoders")        return on_get_active_decoders(id, args);
-    if (tool_name == "clear_all_decoders")         return on_clear_all_decoders(id, args);
-    if (tool_name == "clear_cursors")              return on_clear_cursors(id, args);
-    if (tool_name == "list_sessions")              return on_list_sessions(id, args);
-    if (tool_name == "create_session")             return on_create_session_mcp(id, args);
-    if (tool_name == "destroy_session")            return on_destroy_session_mcp(id, args);
-    if (tool_name == "set_active_session")         return on_set_active_session_mcp(id, args);
-    if (tool_name == "get_session_count")          return on_get_session_count(id, args);
-    if (tool_name == "connect_device")             return on_connect_device(id, args);
-    if (tool_name == "disconnect_device")          return on_disconnect_device(id, args);
-    if (tool_name == "get_config")                 return on_get_config(id, args);
-    if (tool_name == "set_config")                 return on_set_config(id, args);
-    if (tool_name == "set_glitch_filter")          return on_set_glitch_filter(id, args);
-    if (tool_name == "clear_glitch_filter")        return on_clear_glitch_filter(id, args);
-    if (tool_name == "get_glitch_filter_config")   return on_get_glitch_filter_config(id, args);
-    if (tool_name == "set_signal_invert")          return on_set_signal_invert(id, args);
-    if (tool_name == "clear_signal_invert")        return on_clear_signal_invert(id, args);
-    if (tool_name == "get_signal_invert_config")   return on_get_signal_invert_config(id, args);
-    if (tool_name == "get_repeat_status")          return on_get_repeat_status(id, args);
-    if (tool_name == "get_disk_cache_info")        return on_get_disk_cache_info(id, args);
+        JsonRpcResponse resp;
+        resp.id = id;
+        resp.success = true;
+        resp.is_mcp_direct = true;
+        resp.result_json = result.dump();
+        return resp;
+    }
 
-    // ===== Batch B tools =====
-    if (tool_name == "refresh_device_list")           return on_refresh_device_list(id, args);
-    if (tool_name == "set_save_range")                return on_set_save_range(id, args);
-    if (tool_name == "reconfigure_decoder")           return on_reconfigure_decoder(id, args);
-    if (tool_name == "get_decoder_class_names")       return on_get_decoder_class_names(id, args);
-    if (tool_name == "get_decoder_binary_output")     return on_get_decoder_binary_output(id, args);
-    if (tool_name == "get_math_results")              return on_get_math_results(id, args);
-    if (tool_name == "get_spectrum_results")          return on_get_spectrum_results(id, args);
-    if (tool_name == "get_lissajous_results")         return on_get_lissajous_results(id, args);
-    if (tool_name == "get_error_state")               return on_get_error_state(id, args);
-    if (tool_name == "clear_error_state")             return on_clear_error_state(id, args);
-
-    // Build MCP error response for unknown tool
+    // Unknown tool — return MCP error
     JsonRpcResponse resp;
     resp.id = id;
     resp.success = false;

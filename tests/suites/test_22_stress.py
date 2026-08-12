@@ -95,7 +95,7 @@ class TestStress:
             mcp.close_capture()
             mcp.load_capture(filepath)
             time.sleep(0.5)
-            samples = mcp.get_logic_samples(channel_index=0)
+            samples = mcp.get_samples(channel_type="logic", channel_index=0)
             assert len(samples) > 0
             mcp.close_capture()
 
@@ -116,7 +116,7 @@ class TestStress:
                                   sample_rate=10000000,
                                   duration_seconds=0.5)
         assert status["state"] in ("completed", "idle")
-        samples = mcp.get_logic_samples(channel_index=0)
+        samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(samples) > 0
 
     def test_export_import_stress(self, mcp: McpClient, device_id: str,
@@ -128,5 +128,5 @@ class TestStress:
         for i in range(3):
             subdir = os.path.join(tmp_capture_dir, f"export_{i}")
             os.makedirs(subdir, exist_ok=True)
-            mcp.export_raw_data_csv(subdir, digital_channels=[0])
-            mcp.export_raw_data_binary(subdir, digital_channels=[0])
+            mcp.export_raw_data(format="csv", subdir, digital_channels=[0])
+            mcp.export_raw_data(format="binary", subdir, digital_channels=[0])

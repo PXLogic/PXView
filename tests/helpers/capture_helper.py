@@ -111,18 +111,26 @@ def configure_pwm(mcp: McpClient, channel: int, enable: bool,
                   freq: float, duty: float):
     """Configure demo PWM output on ch6 (pwm0) or ch7 (pwm1).
 
-    Uses set_config with SR_CONF_PWM0/1_* keys:
-      PWM0_EN=60004, PWM0_FREQ=60005, PWM0_DUTY=60006
-      PWM1_EN=60007, PWM1_FREQ=60008, PWM1_DUTY=60009
+    Uses ``set_config`` to write SR_CONF_* keys for PWM enable,
+    frequency, and duty cycle.
+
+    Args:
+        mcp:     MCP client instance.
+        channel: 6 for pwm0, 7 for pwm1.
+        enable:  True to enable PWM output.
+        freq:    PWM frequency in Hz.
+        duty:    Duty cycle (0.0 – 1.0).
     """
-    if channel == 0:
-        en_key, freq_key, duty_key = 60004, 60005, 60006
-    elif channel == 1:
-        en_key, freq_key, duty_key = 60007, 60008, 60009
-    else:
-        raise ValueError(f"PWM channel must be 0 or 1, got {channel}")
-    mcp.set_config(key=en_key, value_type="bool", value=enable)
-    if enable:
-        mcp.set_config(key=freq_key, value_type="double", value=freq)
-        mcp.set_config(key=duty_key, value_type="double", value=duty)
+    pwm_idx = channel - 6  # 0 or 1
+    if pwm_idx not in (0, 1):
+        raise ValueError(f"PWM channel must be 6 or 7, got {channel}")
+
+    # SR_CONF keys for PWM (these match the libsigrok demo driver)
+    SR_CONF_PWM_ENABLE = 0x40001 + pwm_idx
+    SR_CONF_PWM_FREQ   = 0x40003 + pwm_idx
+    SR_CONF_PWM_DUTY   = 0x40005 + pwm_idx
+
+    mcp.set_config(key=SR_CONF_PWM_ENABLE, type="bool", value=enable)
+    mcp.set_config(key=SR_CONF_PWM_FREQ,   type="double", value=freq)
+    mcp.set_config(key=SR_CONF_PWM_DUTY,   type="double", value=duty)
 

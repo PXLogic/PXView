@@ -69,7 +69,7 @@ def assert_analyzer_options_valid(options: dict) -> None:
 
 def assert_no_error(mcp: McpClient) -> None:
     """Assert the session has no error state."""
-    err = mcp.get_error_state()
+    err = mcp.configure_error_state(action="get")
     assert not err.get("has_error", False), \
         f"Session has unexpected error: {err.get('error_message', '')}"
 

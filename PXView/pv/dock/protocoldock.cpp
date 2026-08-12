@@ -61,6 +61,7 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
+#include <set>
 #include <string>
 
 using namespace std;
@@ -665,72 +666,141 @@ bool ProtocolDock::add_protocol_by_id(
 }
 
 void ProtocolDock::rebuild_protocol_layers() {
-  for (auto layer : _protocol_lay_items) {
-    if (layer->_trace) {
-      auto stack = static_cast<data::DecoderStack *>(layer->_trace);
-      disconnect(stack, &data::DecoderStack::new_decode_data, this,
-                 &ProtocolDock::on_decoder_progress);
-      disconnect(stack, &data::DecoderStack::decode_done, this,
-                 &ProtocolDock::on_decoder_progress);
-    }
-    _top_layout->removeItem(layer);
-    DESTROY_QT_LATER(layer);
-  }
-  _protocol_lay_items.clear();
-
-  // Read decoder traces from the View layer (View-owned DecodeTrace list)
-  // instead of querying Core's DecoderStack list directly. Each DecodeTrace
-  // wraps a Core-owned DecoderStack accessed via trace->decoder().
+  // Incremental update: only add/remove layers that changed, instead of
+  // destroying and recreating all layers. This avoids O(N) QWidget
+  // destruction + construction on every call, which caused GUI freezes
+  // when N decoders were added in rapid succession (each call rebuilt all
+  // N layers, so N calls = O(N^2) widget operations).
+  //
+  // The diff is based on DecoderStack pointer identity (layer->_trace vs
+  // trace->decoder().get()), matching the pattern used by
+  // ViewDerivedTraces::sync_derived_traces().
   const auto &decode_traces = _view->get_own_decode_traces();
+
+  // Build a set of current stack pointers for quick lookup.
+  std::set<data::DecoderStack *> current_stacks;
+  for (auto &trace : decode_traces) {
+    auto stack = trace ? trace->decoder() : nullptr;
+    if (stack)
+      current_stacks.insert(stack.get());
+  }
+
+  // Phase 1: Remove layers whose DecoderStack no longer exists.
+  for (auto it = _protocol_lay_items.begin();
+       it != _protocol_lay_items.end();) {
+    auto layer = *it;
+    auto *stack = static_cast<data::DecoderStack *>(layer->_trace);
+    if (stack && current_stacks.count(stack) > 0) {
+      // Stack still exists — keep this layer, just update its state.
+      ++it;
+    } else {
+      // Stack was removed — disconnect and destroy the layer.
+      if (stack) {
+        disconnect(stack, &data::DecoderStack::new_decode_data, this,
+                   &ProtocolDock::on_decoder_progress);
+        disconnect(stack, &data::DecoderStack::decode_done, this,
+                   &ProtocolDock::on_decoder_progress);
+      }
+      _top_layout->removeItem(layer);
+      DESTROY_QT_LATER(layer);
+      it = _protocol_lay_items.erase(it);
+    }
+  }
+
+  // Phase 2: Update existing layers (progress, visibility) and add new ones.
+  // We iterate decode_traces in order and ensure _protocol_lay_items matches
+  // the same order. Since Phase 1 only removed stale layers, the remaining
+  // layers are a subset of decode_traces — we need to add the missing ones
+  // and update the existing ones.
+  //
+  // Build a map from stack pointer to existing layer for quick lookup.
+  std::map<data::DecoderStack *, ProtocolItemLayer *> existing_layers;
+  for (auto layer : _protocol_lay_items) {
+    auto *stack = static_cast<data::DecoderStack *>(layer->_trace);
+    if (stack)
+      existing_layers[stack] = layer;
+  }
+
+  // Track which layers we've assigned in this pass so we can append new ones
+  // at the end in the correct order.
+  std::vector<ProtocolItemLayer *> new_items;
   for (auto &trace : decode_traces) {
     auto stack = trace ? trace->decoder() : nullptr;
     if (!stack)
       continue;
 
-    DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
+    auto *stack_ptr = stack.get();
+    auto it_layer = existing_layers.find(stack_ptr);
 
-    auto &decoders = stack->stack();
-    QString protocolName(decoders.back()->decoder()->name);
-    QString protocolId(decoders.back()->decoder()->id);
+    if (it_layer != existing_layers.end()) {
+      // Existing layer — update progress and state.
+      ProtocolItemLayer *layer = it_layer->second;
+      DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
 
-    // Distinguish instances:
-    // 1. If custom label exists: use "Name(label)"
-    // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
-    QString lbl = stack->label();
-    if (lbl.isEmpty())
-      lbl = stack->auto_label();
-    if (!lbl.isEmpty())
-      protocolName += "(" + lbl + ")";
+      auto &decoders = stack->stack();
+      layer->SetVisibilityState(decoders.front()->shown());
 
-    ProtocolItemLayer *layer =
-        new ProtocolItemLayer(_top_panel, protocolName, this);
-    _protocol_lay_items.push_back(layer);
-    _top_layout->insertLayout(_protocol_lay_items.size(), layer);
-    layer->m_decoderStatus = dstatus;
-    layer->m_protocolId = protocolId;
-    layer->_trace = stack.get();
-    layer->SetVisibilityState(decoders.front()->shown());
+      int pg = stack->get_progress();
+      QString err;
+      if (stack->out_of_memory())
+        err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY),
+                   "Out of Memory");
+      layer->SetProgress(pg, err);
+      if (pg == 100 && dstatus != nullptr) {
+        layer->enable_format(dstatus->m_bNumeric);
+      }
+      new_items.push_back(layer);
+    } else {
+      // New stack — create a new layer.
+      DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
 
-    static const char *formatNames[] = {"hex", "dec", "oct", "bin", "ascii"};
-    int fmt = dstatus->m_format;
-    if (fmt >= 0 && fmt <= 4) {
-      layer->SetProtocolFormat(formatNames[fmt]);
+      auto &decoders = stack->stack();
+      QString protocolName(decoders.back()->decoder()->name);
+      QString protocolId(decoders.back()->decoder()->id);
+
+      QString lbl = stack->label();
+      if (lbl.isEmpty())
+        lbl = stack->auto_label();
+      if (!lbl.isEmpty())
+        protocolName += "(" + lbl + ")";
+
+      ProtocolItemLayer *layer =
+          new ProtocolItemLayer(_top_panel, protocolName, this);
+      layer->m_decoderStatus = dstatus;
+      layer->m_protocolId = protocolId;
+      layer->_trace = stack_ptr;
+      layer->SetVisibilityState(decoders.front()->shown());
+
+      static const char *formatNames[] = {"hex", "dec", "oct", "bin",
+                                          "ascii"};
+      int fmt = dstatus ? dstatus->m_format : -1;
+      if (fmt >= 0 && fmt <= 4) {
+        layer->SetProtocolFormat(formatNames[fmt]);
+      }
+
+      int pg = stack->get_progress();
+      QString err;
+      if (stack->out_of_memory())
+        err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY),
+                   "Out of Memory");
+      layer->SetProgress(pg, err);
+      if (pg == 100 && dstatus != nullptr) {
+        layer->enable_format(dstatus->m_bNumeric);
+      }
+
+      connect(stack.get(), &data::DecoderStack::new_decode_data, this,
+              &ProtocolDock::on_decoder_progress);
+      connect(stack.get(), &data::DecoderStack::decode_done, this,
+              &ProtocolDock::on_decoder_progress);
+
+      _top_layout->insertLayout(
+          static_cast<int>(new_items.size()) + 1, layer);
+      new_items.push_back(layer);
     }
-
-    int pg = stack->get_progress();
-    QString err;
-    if (stack->out_of_memory())
-      err = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OUT_OF_MEMORY), "Out of Memory");
-    layer->SetProgress(pg, err);
-    if (pg == 100 && dstatus != nullptr) {
-      layer->enable_format(dstatus->m_bNumeric);
-    }
-
-    connect(stack.get(), &data::DecoderStack::new_decode_data, this,
-            &ProtocolDock::on_decoder_progress);
-    connect(stack.get(), &data::DecoderStack::decode_done, this,
-            &ProtocolDock::on_decoder_progress);
   }
+
+  // Replace _protocol_lay_items with the ordered new_items list.
+  _protocol_lay_items = std::move(new_items);
 
   protocol_updated();
   adjustPannelSize();

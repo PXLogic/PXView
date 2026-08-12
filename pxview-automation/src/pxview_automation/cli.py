@@ -406,7 +406,7 @@ def cmd_samples(client: McpClient, args: argparse.Namespace) -> None:
     end = args.start + count if count else None
 
     if args.type == "logic":
-        data = client.get_logic_samples(
+        data = client.get_samples(channel_type="logic", 
             channel_index=args.channel,
             start_sample=args.start,
             end_sample=end,
@@ -424,7 +424,7 @@ def cmd_samples(client: McpClient, args: argparse.Namespace) -> None:
                 print(f"[{args.start + i}] {b}")
 
     elif args.type == "analog":
-        data = client.get_analog_samples(
+        data = client.get_samples(channel_type="analog", 
             channel_index=args.channel,
             start_sample=args.start,
             end_sample=end,
@@ -436,7 +436,7 @@ def cmd_samples(client: McpClient, args: argparse.Namespace) -> None:
                 print(f"[{args.start + i}] {v}")
 
     elif args.type == "dso":
-        data = client.get_dso_samples(
+        data = client.get_samples(channel_type="dso", 
             channel_index=args.channel,
             start_sample=args.start,
             end_sample=end,

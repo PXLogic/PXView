@@ -273,6 +273,10 @@ void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current
 
   case Added: {
     // Create signals for models that have no matching signal yet.
+    // Restore view_index/v_offset/own_height from SessionDocument config
+    // for newly created signals, so re-enabled channels return to their
+    // original position instead of being placed at the end (vi=-1).
+    auto *doc = source->get_active_document();
     for (auto model : models) {
       bool exists = false;
       for (auto &s : current_signals) {
@@ -283,8 +287,24 @@ void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current
       }
       if (!exists) {
         auto new_sig = create_signal(model, data_source);
-        if (new_sig)
+        if (new_sig) {
+          // Restore layout from config
+          if (doc && doc->get_signal_config().is_valid) {
+            const auto &cfg = doc->get_signal_config();
+            auto it = std::find_if(cfg.channels.begin(), cfg.channels.end(),
+                                   [&](const data::ChannelConfig &ch) {
+                                     return ch.index == new_sig->get_index();
+                                   });
+            if (it != cfg.channels.end()) {
+              if (it->view_index >= 0)
+                new_sig->set_view_index(it->view_index);
+              new_sig->set_v_offset(it->v_offset);
+              if (it->own_height >= 0)
+                new_sig->set_own_height(it->own_height);
+            }
+          }
           current_signals.push_back(std::move(new_sig));
+        }
       }
     }
     break;

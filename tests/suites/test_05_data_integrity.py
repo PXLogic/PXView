@@ -38,8 +38,8 @@ class TestDataIntegrity:
         assert_capture_status(status, "completed")
 
         # 2. Get original samples
-        original_ch0 = mcp.get_logic_samples(channel_index=0)
-        original_ch1 = mcp.get_logic_samples(channel_index=1)
+        original_ch0 = mcp.get_samples(channel_type="logic", channel_index=0)
+        original_ch1 = mcp.get_samples(channel_type="logic", channel_index=1)
         assert len(original_ch0) > 0
         assert len(original_ch1) > 0
 
@@ -58,8 +58,8 @@ class TestDataIntegrity:
         time.sleep(1)  # Allow load to complete
 
         # 6. Get loaded samples
-        loaded_ch0 = mcp.get_logic_samples(channel_index=0)
-        loaded_ch1 = mcp.get_logic_samples(channel_index=1)
+        loaded_ch0 = mcp.get_samples(channel_type="logic", channel_index=0)
+        loaded_ch1 = mcp.get_samples(channel_type="logic", channel_index=1)
 
         # 7. Verify data integrity
         assert compare_logic_samples(original_ch0, loaded_ch0), \
@@ -81,11 +81,11 @@ class TestDataIntegrity:
         assert_capture_status(status, "completed")
 
         # 2. Get samples via MCP
-        mcp_samples = mcp.get_logic_samples(channel_index=0)
+        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(mcp_samples) > 0
 
         # 3. Export to CSV
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         # 4. Find and read CSV
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -109,11 +109,11 @@ class TestDataIntegrity:
         assert_capture_status(status, "completed")
 
         # 2. Get samples via MCP
-        mcp_samples = mcp.get_logic_samples(channel_index=0)
+        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(mcp_samples) > 0
 
         # 3. Export to binary
-        mcp.export_raw_data_binary(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
 
         # 4. Find and read binary file
         bin_files = find_exported_binary(tmp_capture_dir)
@@ -134,7 +134,7 @@ class TestDataIntegrity:
 
         originals = {}
         for ch in channels:
-            originals[ch] = mcp.get_logic_samples(channel_index=ch)
+            originals[ch] = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert len(originals[ch]) > 0, f"Channel {ch} no data"
 
         mcp.save_capture(tmp_pxc_file)
@@ -143,7 +143,7 @@ class TestDataIntegrity:
         time.sleep(1)
 
         for ch in channels:
-            loaded = mcp.get_logic_samples(channel_index=ch)
+            loaded = mcp.get_samples(channel_type="logic", channel_index=ch)
             assert compare_logic_samples(originals[ch], loaded), \
                 f"Channel {ch} data mismatch after save/load"
 
@@ -182,7 +182,7 @@ class TestDataIntegrity:
         mcp.set_save_range(start_sample=100, end_sample=1000)
 
         # Export
-        mcp.export_raw_data_csv(tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
 
         # Verify CSV has data
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -206,6 +206,6 @@ class TestDataIntegrity:
             mcp.close_capture()
             mcp.load_capture(filepath)
             time.sleep(0.5)
-            samples = mcp.get_logic_samples(channel_index=0)
+            samples = mcp.get_samples(channel_type="logic", channel_index=0)
             assert len(samples) > 0, f"Cycle {i}: no samples after load"
             mcp.close_capture()

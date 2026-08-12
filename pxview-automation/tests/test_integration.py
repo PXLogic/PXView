@@ -268,7 +268,7 @@ class TestExport:
         )
         client.wait_capture(timeout_seconds=10.0)
 
-        result = client.export_raw_data_csv(directory=temp_dir, digital_channels=[0])
+        result = client.export_raw_data(format="csv", directory=temp_dir, digital_channels=[0])
         # Check that files were created
         files = os.listdir(temp_dir)
         assert len(files) > 0
@@ -288,7 +288,7 @@ class TestExport:
         )
         client.wait_capture(timeout_seconds=10.0)
 
-        client.export_raw_data_binary(directory=temp_dir, digital_channels=[0])
+        client.export_raw_data(format="binary", directory=temp_dir, digital_channels=[0])
         files = os.listdir(temp_dir)
         assert any(f.endswith(".bin") for f in files)
 
@@ -340,8 +340,8 @@ class TestExport:
         out_file = os.path.join(temp_dir, "table.csv")
         client.export_data_table_csv(
             filepath=out_file,
-            analyzers=[{"analyzerId": str(analyzer_id)}],
-            columns=["time", "data"],
+            analyzer_id=str(analyzer_id),
+            radix_type=3,
         )
         if os.path.exists(out_file):
             with open(out_file, "r") as f:
@@ -372,7 +372,7 @@ class TestSampleReading:
         )
         client.wait_capture(timeout_seconds=10.0)
 
-        data = client.get_logic_samples(channel_index=0, start_sample=0, end_sample=100)
+        data = client.get_samples(channel_type="logic", channel_index=0, start_sample=0, end_sample=100)
         assert isinstance(data, (bytes, bytearray))
         assert len(data) > 0
 
@@ -393,8 +393,8 @@ class TestSampleReading:
 
         result = client.find_next_edge(
             channel_index=0,
-            start_sample=0,
-            direction="forward",
+            from_sample=0,
+            rising_edge=True,
         )
         # Result is a sample index or None
         assert result is not None

@@ -1,43 +1,100 @@
-PXView is a multi-mode signal analyzer (Logic/Analog/DSO/MSO).
+PXView is a multi-mode signal analyzer with 4 work modes.
+This server provides 49 tools organized in 4 tiers.
 
-## Quick Start Workflow
+## Work Modes
 
-1. get_devices — discover available devices and their IDs
-2. (optional) connect_device — connect to a specific device
-3. (recommended) add_analyzer — add protocol decoders BEFORE capture so auto-decode works
-4. start_capture — begin acquisition with device/channel/sample-rate config
-5. wait_capture — wait for acquisition to complete (non-stream mode)
-6. get_analyzer_results — read decoded protocol data
-7. export_raw_data_csv / export_data_table_csv — export results
+PXView operates in one of four work modes. You MUST switch to the desired
+mode before configuring channels, triggers, or probes:
 
-## Important Notes
+  0 = Logic  — Digital signal analysis (digital channels, logic triggers,
+               glitch filter, RLE compression, digital threshold)
+  1 = DSO    — Digital Storage Oscilloscope (oscilloscope channels, DSO
+               triggers with source/slope/holdoff, probe config, math/
+               spectrum/lissajous)
+  2 = Analog — Analog/DAQ acquisition (analog channels, probe config,
+               math/spectrum/lissajous)
+  3 = MSO    — Mixed Signal Oscilloscope (both digital + analog channels,
+               all features available)
 
-### Work Modes
-PXView operates in one of four work modes. Some tools require a specific mode:
-- Logic (0): Digital signal analysis — use get_samples with channelType="logic"
-- Analog (1): Analog signal analysis — use get_samples with channelType="analog"
-- DSO (2): Oscilloscope mode — use get_samples with channelType="dso"
-- MSO (3): Mixed Signal — both logic and analog channels available
-Call switch_work_mode to change mode BEFORE configuring channels or starting capture.
+## Standard Workflow
 
-### Capture Modes
-- Buffer mode: Traditional fixed-length capture. Use timedCaptureMode or manualCaptureMode.
-- Stream mode: Continuous acquisition with no sample limit. Use stop_capture to end.
-  In Stream mode, durationSeconds and sampleCount are IGNORED.
+1. get_devices                    — discover available devices and their IDs
+2. create_session(deviceId)       — create a session for the device
+3. get_supported_work_modes       — check which modes the device supports
+4. switch_work_mode(mode)         — select the work mode (MUST do before
+                                     configuring channels/triggers/probes)
+5. get_channels                   — see available channels for current mode
+6. configure_channel              — enable/disable channels, set names
+7. set_sample_config              — set sample rate/limit/timebase/collect mode
+8. configure_trigger              — set trigger (auto-dispatches to LogicTrigger
+                                     or DsoTrigger based on current mode)
+9. configure_probe                — set probe/vdiv/coupling (DSO/Analog/MSO only)
+10. configure_glitch_filter       — set glitch filter (Logic/MSO only)
+11. add_analyzer                  — add protocol decoder (Logic/MSO only,
+                                     before start_capture for auto-decode)
+12. start_capture                 — begin acquisition (trigger config set separately)
+13. wait_capture                  — wait for completion (non-stream mode)
+14. get_samples                   — read raw samples (channelType must match mode)
+15. get_analyzer_results          — read decoded protocol data
+16. export_raw_data / export_data_table_csv — export results
 
-### Decoders
-- Add decoders (add_analyzer) BEFORE start_capture for auto-decode.
-- Decoded results are available after capture via get_analyzer_results.
-- Use stackOnAnalyzerId to stack decoders (e.g., SPI on top of I2C).
+## Mode-Specific Constraints
 
-### Sessions
-- PXView supports multiple sessions. Use create_session to create a new one.
-- Each session has its own device, channels, and capture state.
-- Use set_active_session to switch between sessions.
-- get_session_count returns the total number of sessions.
+These tools will return an error if called in the wrong mode:
 
-### Common Error Patterns
-- "No active session": Call create_session or connect_device first.
-- "Capture in progress": Call stop_capture or wait_capture first.
-- "No data": Capture hasn't completed or no channels were enabled.
-- "Config not supported": The device doesn't support the requested configuration.
+  configure_probe:        Only in DSO/Analog/MSO mode
+  configure_glitch_filter: Only in Logic/MSO mode
+  add_analyzer:           Only in Logic/MSO mode (decoders need digital channels)
+  get_math_results:       Only in DSO/Analog/MSO mode
+  get_spectrum_results:   Only in DSO/Analog/MSO mode
+  get_lissajous_results:  Only in DSO/Analog/MSO mode
+
+The error message will tell you which mode to switch to.
+
+## Capture Modes
+
+  Buffer mode: Traditional fixed-length capture. Use captureMode="timed" with
+               durationSeconds, or captureMode="manual".
+  Stream mode: Continuous acquisition with no sample limit. Use
+               captureMode="stream" and call stop_capture to end.
+               In Stream mode, durationSeconds and sampleCount are IGNORED.
+
+## Tool Organization (49 tools)
+
+  Tier 0: Mode management (3 tools) — call first
+    get_supported_work_modes, get_work_mode, switch_work_mode
+
+  Tier 1: Core workflow (18 tools)
+    get_devices, start_capture, stop_capture, wait_capture,
+    get_capture_status, load_capture, save_capture, close_capture,
+    add_analyzer, remove_analyzer, list_analyzers, get_analyzer_options,
+    get_analyzer_results, export_raw_data, export_data_table_csv,
+    get_channels, get_sample_config, refresh_device_list
+
+  Tier 2: Configuration (12 tools)
+    set_sample_config, configure_channel, configure_trigger,
+    configure_probe, configure_glitch_filter, configure_signal_invert,
+    get_config, set_config, set_save_range, connect_device,
+    disconnect_device, get_session_status
+
+  Tier 3: Advanced features (16 tools)
+    get_samples, find_next_edge, find_pattern, get_active_decoders,
+    clear_all_decoders, reconfigure_decoder, get_decoder_class_names,
+    list_sessions, create_session, destroy_session, set_active_session,
+    get_math_results, get_spectrum_results, get_lissajous_results,
+    configure_error_state, configure_cursors
+
+## Common Error Patterns
+
+  "No active session": Call create_session or connect_device first.
+  "Capture in progress": Call stop_capture or wait_capture first.
+  "No data": Capture hasn't completed or no channels were enabled.
+  "Config not supported": The device doesn't support the requested config.
+  "Probe config not available in Logic mode": Call switch_work_mode(1) or (2).
+  "Glitch filter not available in DSO mode": Call switch_work_mode(0).
+
+## Sessions
+
+PXView supports multiple sessions. Each session has its own device,
+channels, and capture state. Use create_session to create a new one,
+set_active_session to switch between them, and list_sessions to see all.

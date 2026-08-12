@@ -117,7 +117,7 @@ class TestMcpSchema:
             for n in [
                 "get_devices", "start_capture", "stop_capture",
                 "wait_capture", "add_analyzer", "get_analyzer_results",
-                "export_raw_data_csv", "export_data_table_csv",
+                "export_raw_data", "export_data_table_csv",
             ]
         ]
         schema = client.dump_schema()
@@ -289,8 +289,13 @@ class TestServerVersionCompatibility:
         try:
             server_tools = set(client.tool_names)
 
-            # Map of client method names to expected tool names
+            # Map of client method names to expected tool names (consolidated 46+ tools)
             method_to_tool = {
+                # Tier 0: Mode management
+                "switch_work_mode": "switch_work_mode",
+                "get_work_mode": "get_work_mode",
+                "get_supported_work_modes": "get_supported_work_modes",
+                # Tier 1: Core workflow
                 "get_devices": "get_devices",
                 "get_channels": "get_channels",
                 "start_capture": "start_capture",
@@ -305,56 +310,42 @@ class TestServerVersionCompatibility:
                 "add_analyzer": "add_analyzer",
                 "remove_analyzer": "remove_analyzer",
                 "get_analyzer_results": "get_analyzer_results",
-                "export_raw_data_csv": "export_raw_data_csv",
-                "export_raw_data_binary": "export_raw_data_binary",
                 "export_raw_data": "export_raw_data",
                 "export_data_table_csv": "export_data_table_csv",
-                "get_trigger_config": "get_trigger_config",
-                "set_trigger_config": "set_trigger_config",
-                "get_probe_config": "get_probe_config",
-                "set_probe_config": "set_probe_config",
-                "set_channel_enabled": "set_channel_enabled",
-                "set_channel_name": "set_channel_name",
                 "get_sample_config": "get_sample_config",
-                "set_sample_rate": "set_sample_rate",
-                "set_sample_limit": "set_sample_limit",
-                "set_time_base": "set_time_base",
-                "set_collect_mode": "set_collect_mode",
-                "set_repeat_interval": "set_repeat_interval",
-                "get_logic_samples": "get_logic_samples",
-                "get_analog_samples": "get_analog_samples",
-                "get_dso_samples": "get_dso_samples",
+                "refresh_device_list": "refresh_device_list",
+                # Tier 2: Configuration (consolidated)
+                "set_sample_config": "set_sample_config",
+                "configure_channel": "configure_channel",
+                "configure_trigger": "configure_trigger",
+                "configure_probe": "configure_probe",
+                "configure_glitch_filter": "configure_glitch_filter",
+                "configure_signal_invert": "configure_signal_invert",
+                "set_save_range": "set_save_range",
+                "connect_device": "connect_device",
+                "disconnect_device": "disconnect_device",
+                "get_session_status": "get_session_status",
+                # Tier 3: Advanced features
+                "get_samples": "get_samples",
                 "find_next_edge": "find_next_edge",
                 "find_pattern": "find_pattern",
                 "get_active_decoders": "get_active_decoders",
                 "clear_all_decoders": "clear_all_decoders",
+                "reconfigure_decoder": "reconfigure_decoder",
+                "get_decoder_class_names": "get_decoder_class_names",
                 "list_sessions": "list_sessions",
                 "create_session": "create_session",
                 "destroy_session": "destroy_session",
                 "set_active_session": "set_active_session",
-                "get_session_count": "get_session_count",
-                "connect_device": "connect_device",
-                "disconnect_device": "disconnect_device",
-                "get_config": "get_config",
-                "set_config": "set_config",
-                "set_glitch_filter": "set_glitch_filter",
-                "clear_glitch_filter": "clear_glitch_filter",
-                "get_glitch_filter_config": "get_glitch_filter_config",
-                "set_signal_invert": "set_signal_invert",
-                "clear_signal_invert": "clear_signal_invert",
-                "get_signal_invert_config": "get_signal_invert_config",
-                "get_repeat_status": "get_repeat_status",
-                "get_disk_cache_info": "get_disk_cache_info",
-                "refresh_device_list": "refresh_device_list",
-                "set_save_range": "set_save_range",
-                "reconfigure_decoder": "reconfigure_decoder",
-                "get_decoder_class_names": "get_decoder_class_names",
-                "get_decoder_binary_output": "get_decoder_binary_output",
                 "get_math_results": "get_math_results",
                 "get_spectrum_results": "get_spectrum_results",
                 "get_lissajous_results": "get_lissajous_results",
-                "get_error_state": "get_error_state",
-                "clear_error_state": "clear_error_state",
+                "configure_error_state": "configure_error_state",
+                # Cursors
+                "get_cursors": "get_cursors",
+                "add_cursor": "add_cursor",
+                "remove_cursor": "remove_cursor",
+                "clear_cursors": "clear_cursors",
             }
 
             for method_name, tool_name in method_to_tool.items():

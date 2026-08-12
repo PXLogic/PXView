@@ -175,6 +175,10 @@ void Header::paintEvent(QPaintEvent *) {
         double groupTop = 1e9;
         double groupBottom = -1e9;
         for (auto gt : group.traces) {
+          // 跳过 disabled 通道：其 v_offset 未被 layout 更新，
+          // 会干扰分组卡片的边界计算
+          if (!gt->enabled() && !gt->as_dso())
+            continue;
           double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
                             View::SignalMargin;
           double traceBottom = gt->get_v_offset() +
@@ -182,6 +186,9 @@ void Header::paintEvent(QPaintEvent *) {
           groupTop = min(groupTop, traceTop);
           groupBottom = max(groupBottom, traceBottom);
         }
+        // 全部 disabled 时跳过该组卡片
+        if (groupTop > groupBottom)
+          continue;
 
         double cardTop = groupTop - View::GroupGap * 0.5;
         double cardHeight = groupBottom - groupTop + View::GroupGap;
@@ -195,13 +202,27 @@ void Header::paintEvent(QPaintEvent *) {
           painter.setClipPath(groupPath);
           painter.setPen(Qt::NoPen);
           
+          // 预计算第一个和最后一个 enabled trace 的索引，
+          // 用于正确应用 GroupGap 边缘扩展
+          int firstEnabled = -1, lastEnabled = -1;
           for (size_t i = 0; i < group.traces.size(); i++) {
             auto gt = group.traces[i];
+            if (gt->enabled() || gt->as_dso()) {
+              if (firstEnabled < 0)
+                firstEnabled = (int)i;
+              lastEnabled = (int)i;
+            }
+          }
+          for (size_t i = 0; i < group.traces.size(); i++) {
+            auto gt = group.traces[i];
+            // 跳过 disabled 通道
+            if (!gt->enabled() && !gt->as_dso())
+              continue;
             double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 - View::SignalMargin;
             double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 + View::SignalMargin;
             
-            if (i == 0) tTop -= View::GroupGap * 0.5;
-            if (i == group.traces.size() - 1) tBottom += View::GroupGap * 0.5;
+            if ((int)i == firstEnabled) tTop -= View::GroupGap * 0.5;
+            if ((int)i == lastEnabled) tBottom += View::GroupGap * 0.5;
             
             QRectF traceRect(0, tTop, w + View::GroupCardRadius + 1, tBottom - tTop);
             painter.setBrush(_view.get_trace_card_color(gt));
