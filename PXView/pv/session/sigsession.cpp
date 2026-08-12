@@ -189,6 +189,10 @@ SigSession::SigSession() {
 SigSession::SigSession(SigSession &o) { (void)o; }
 
 SigSession::~SigSession() {
+  // Join any background file import thread before destroying state.
+  // The import thread accesses the sdi and sr_session through DeviceAgent.
+  wait_for_import_complete_();
+
   // A3 fix: ensure Close() has been called so background threads (decode/copy/
   // glitch_filter/signal_invert) are joined before we destroy _state.
   // Close() is idempotent (_bClose guard), so calling it here is safe even
@@ -543,6 +547,11 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   assert(!_state->is_working());
   assert(_event_bus && _event_bus->has_subscribers());
 
+  // If a background file import (import_file Steps 5-7) is still running,
+  // join it before releasing the current device. The import thread accesses
+  // the sdi (via sr_input_send) that DeviceAgent::release() would free.
+  wait_for_import_complete_();
+
   // modernize-core-layer-radical Task 11: pre-broadcast synchronously so
   // MainWindow can close modal dialogs / hide calibration / delete protocols
   // / reload the view BEFORE the old device is released below.
@@ -761,8 +770,10 @@ bool SigSession::import_file(QString name) {
   // so the loop exits without feeding any data.
   // Use QFile for cross-platform Unicode path handling (g_fopen needs
   // glib/gstdio.h which is not reliably available on all platforms).
-  QFile file(name);
-  if (!file.open(QIODevice::ReadOnly)) {
+  // Allocated on the heap (shared_ptr) so the background thread can safely
+  // outlive this stack frame — the lambda captures the shared_ptr by value.
+  auto file = std::make_shared<QFile>(name);
+  if (!file->open(QIODevice::ReadOnly)) {
     pxv_err("Import file error: cannot open file \"%s\"",
             file_name.c_str());
     sr_input_free(input);
@@ -773,7 +784,7 @@ bool SigSession::import_file(QString name) {
   struct sr_dev_inst *sdi = sr_input_dev_inst_get(input);
 
   while (!sdi) {
-    qint64 n = file.read(chunk->str, 65536);
+    qint64 n = file->read(chunk->str, 65536);
     if (n <= 0) {
       // EOF — check if sdi became ready on the last chunk
       sdi = sr_input_dev_inst_get(input);
@@ -788,7 +799,7 @@ bool SigSession::import_file(QString name) {
     pxv_err("Import file error: could not determine device instance "
             "from input module \"%s\"", mod_id_str.c_str());
     g_string_free(chunk, TRUE);
-    file.close();
+    file->close();
     sr_input_free(input);
     return false;
   }
@@ -805,7 +816,7 @@ bool SigSession::import_file(QString name) {
   if (dev_handle == NULL_HANDLE) {
     pxv_err("Import file error: set_file_device returned NULL_HANDLE");
     g_string_free(chunk, TRUE);
-    file.close();
+    file->close();
     // sdi was NOT registered (set_file_device failed), so sr_input_free
     // is safe here — it frees the sdi along with the input.
     sr_input_free(input);
@@ -815,7 +826,7 @@ bool SigSession::import_file(QString name) {
   if (!set_device(dev_handle)) {
     pxv_err("Import file error: set_device failed for input device");
     g_string_free(chunk, TRUE);
-    file.close();
+    file->close();
     // The sdi was registered with DeviceAgent via set_file_device(),
     // so ownership has been transferred. Use sr_input_release_sdi() to
     // avoid freeing the sdi, then remove_device() to clean it up from
@@ -825,56 +836,114 @@ bool SigSession::import_file(QString name) {
     return false;
   }
 
-  // Step 5: Process any remaining data in the input buffer.
-  // After header parsing, sample data from the last chunk stays in
-  // input->buf. Feeding an empty GString triggers receive() which
-  // processes this data (now that the session is set up, datafeed
-  // packets are properly routed to DataFeedParser).
-  // For headerless formats (binary), input->buf is empty, so this
-  // is a no-op except for sending the DF header packet.
-  {
-    GString *empty = g_string_new("");
-    sr_input_send(input, empty);
-    g_string_free(empty, TRUE);
-  }
-
-  // Step 6: Feed the rest of the file in chunks.
-  // sr_input_send() calls the module's receive() which processes the
-  // data and calls sr_session_send() — this directly invokes the
-  // datafeed callback (DataFeedParser::data_feed_in) which appends
-  // samples to the snapshot. No sr_session_run() is needed.
-  while (true) {
-    qint64 n = file.read(chunk->str, 65536);
-    if (n <= 0)
-      break;
-    chunk->len = n;
-    sr_input_send(input, chunk);
-  }
-
-  // Step 7: Signal end-of-data and release the input.
-  // sr_input_end() flushes any buffered samples and sends SR_DF_END,
-  // which triggers DataFeedParser's SR_DF_END handler: calls
-  // capture_ended() on all snapshot types, sets device status to
-  // ST_STOPPED, and broadcasts RevEndPacket (for LOGIC mode) which
-  // swaps the capture/view buffer and kicks off decoders.
+  // ========================================================================
+  // Steps 5-7: Feed the remaining file data and finalise the import.
   //
-  // Use sr_input_release_sdi() instead of sr_input_free() because the
-  // sdi has been registered with DeviceAgent (via set_file_device +
-  // open_by_handle). sr_input_free() would call sr_dev_inst_free() on
-  // the sdi, causing a use-after-free when the async CurrentDeviceChanged
-  // event later triggers reset_all_view() → DevMode::set_device() →
-  // get_device_mode_list(), which accesses _di (the same sdi pointer).
-  // sr_input_release_sdi() detaches the sdi from the input so it is NOT
-  // freed; DeviceAgent takes ownership and will free it via
-  // sr_dev_inst_free() in release() when the device is closed.
-  sr_input_end(input);
-  sr_input_release_sdi(input);
-  g_string_free(chunk, TRUE);
-  file.close();
+  // ARCHITECTURE CHANGE: These steps now run on a background std::async
+  // thread instead of the GUI main thread. The sr_input_send() loop reads
+  // the entire file (potentially tens of MB for VCD/CSV/binary) and calls
+  // the datafeed callback (DataFeedParser::data_feed_in) which appends
+  // samples to the snapshot. Running this on the main thread blocked the
+  // GUI for the entire duration; moving it to a background thread keeps
+  // the UI responsive.
+  //
+  // Thread safety: DataFeedParser is already designed for non-main-thread
+  // access — during normal hardware captures, the datafeed callback fires
+  // on libsigrok's data-feed thread. The same locking (_state->data_mutex()
+  // in DataFeedParser::data_feed_in) protects concurrent access from the
+  // view's paint thread. The EventBus::broadcast_async calls made inside
+  // DataFeedParser (DataUpdated, RevEndPacket) are safe from any thread.
+  //
+  // Lifecycle: _import_in_progress is set atomically before launching and
+  // cleared by the background thread on exit. wait_for_import_complete_()
+  // is called in set_device(), close_file(), and ~SigSession() to join the
+  // thread before the device/sdi it references is released.
+  // ========================================================================
+  _import_in_progress.store(true, std::memory_order_release);
 
-  pxv_info("Import file complete: \"%s\"", file_name.c_str());
+  // Capture the file name for error reporting and logging.
+  std::string import_file_name = file_name;
+
+  _import_future = std::async(std::launch::async,
+      [this, input, chunk, file, import_file_name]() mutable {
+        // Step 5: Process any remaining data in the input buffer.
+        // After header parsing, sample data from the last chunk stays in
+        // input->buf. Feeding an empty GString triggers receive() which
+        // processes this data (now that the session is set up, datafeed
+        // packets are properly routed to DataFeedParser).
+        // For headerless formats (binary), input->buf is empty, so this
+        // is a no-op except for sending the DF header packet.
+        {
+          GString *empty = g_string_new("");
+          sr_input_send(input, empty);
+          g_string_free(empty, TRUE);
+        }
+
+        // Step 6: Feed the rest of the file in chunks.
+        // sr_input_send() calls the module's receive() which processes the
+        // data and calls sr_session_send() — this directly invokes the
+        // datafeed callback (DataFeedParser::data_feed_in) which appends
+        // samples to the snapshot. No sr_session_run() is needed.
+        while (true) {
+          qint64 n = file->read(chunk->str, 65536);
+          if (n <= 0)
+            break;
+          chunk->len = n;
+          sr_input_send(input, chunk);
+        }
+
+        // Step 7: Signal end-of-data and release the input.
+        // sr_input_end() flushes any buffered samples and sends SR_DF_END,
+        // which triggers DataFeedParser's SR_DF_END handler: calls
+        // capture_ended() on all snapshot types, sets device status to
+        // ST_STOPPED, and broadcasts RevEndPacket (for LOGIC mode) which
+        // swaps the capture/view buffer and kicks off decoders.
+        //
+        // Use sr_input_release_sdi() instead of sr_input_free() because the
+        // sdi has been registered with DeviceAgent (via set_file_device +
+        // open_by_handle). sr_input_free() would call sr_dev_inst_free() on
+        // the sdi, causing a use-after-free when the async CurrentDeviceChanged
+        // event later triggers reset_all_view() → DevMode::set_device() →
+        // get_device_mode_list(), which accesses _di (the same sdi pointer).
+        // sr_input_release_sdi() detaches the sdi from the input so it is NOT
+        // freed; DeviceAgent takes ownership and will free it via
+        // sr_dev_inst_free() in release() when the device is closed.
+        sr_input_end(input);
+        sr_input_release_sdi(input);
+        g_string_free(chunk, TRUE);
+        file->close();
+
+        pxv_info("Import file complete: \"%s\"", import_file_name.c_str());
+
+        _import_in_progress.store(false, std::memory_order_release);
+      });
+
+  // Return immediately — the background thread feeds data and posts
+  // DataUpdated events to the main thread as samples arrive, so the
+  // view will progressively show the imported waveform. The
+  // CurrentDeviceChanged event (already broadcast by set_device in
+  // Step 4) will fire on the main thread and handle UI setup (signal
+  // rebuild, config loading). For input-module devices it does NOT
+  // call start_capture() (see event_dispatcher.cpp:306).
+  pxv_info("Import file: background thread started for \"%s\"",
+           file_name.c_str());
 
   return true;
+}
+
+void SigSession::wait_for_import_complete_() {
+  // Called on the main thread before releasing the current device
+  // (set_device, close_file, destructor). If a background import is still
+  // running, this blocks until it finishes. The import thread's
+  // sr_input_send loop typically completes within seconds for most files;
+  // the wait is bounded by file I/O speed, not network/USB latency.
+  if (_import_in_progress.load(std::memory_order_acquire)) {
+    pxv_info("Waiting for background file import to complete before "
+             "switching/releasing device...");
+  }
+  if (_import_future.valid()) {
+    _import_future.wait();
+  }
 }
 
 void SigSession::close_file(unsigned long long dev_handle) {
@@ -882,6 +951,9 @@ void SigSession::close_file(unsigned long long dev_handle) {
     pxv_warn("%s", "SigSession::close_file: dev_handle is nullptr");
     return;
   }
+
+  // Join any background file import before removing the device.
+  wait_for_import_complete_();
 
   if (dev_handle == _state->device_agent().handle() && _state->is_working()) {
     pxv_err("The virtual device is running, can't remove it.");
@@ -1882,6 +1954,11 @@ void SigSession::Open() {}
 void SigSession::Close() {
   if (_state->bClose())
     return;
+
+  // Join any background file import thread before clearing data.
+  // Close() clears data_list entries (p->clear()) which the import
+  // thread may still be writing to via DataFeedParser.
+  wait_for_import_complete_();
 
   _state->set_bClose(true);
 

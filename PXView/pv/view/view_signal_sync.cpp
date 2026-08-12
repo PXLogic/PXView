@@ -876,6 +876,31 @@ void ViewSignalSync::on_signals_changed() {
     return;
   }
 
+  // --- Plan B: detect derived-trace (decoder/spectrum) changes ---
+  //
+  // compute_change_event only compares SignalModels (Logic/Dso/Analog).
+  // DecoderStacks are NOT in _signal_models, so adding/removing a decoder
+  // yields Modified — which skips the full layout pass
+  // (layout_time_signals) that sets _v_offset, _viewport, etc.
+  //
+  // To fix this, sample the derived-trace counts BEFORE update_signals
+  // and compare with the Core's stack counts. If they differ, force a
+  // full layout pass (signals_changed) instead of the Modified shortcut.
+  //
+  // This count comparison is stateless and cannot be polluted by
+  // intermediate calls (unlike the _derived_traces_dirty flag, which
+  // signals_modified_refresh itself toggles).
+  auto *source = _view->document_snapshot_source();
+  bool derived_changed = false;
+  if (source) {
+    size_t view_decode = _view->get_own_decode_traces().size();
+    size_t core_decode = source->get_decoder_stacks().size();
+    size_t view_spectrum = _view->get_own_spectrum_traces().size();
+    size_t core_spectrum = source->get_spectrum_stacks().size();
+    derived_changed = (view_decode != core_decode) ||
+                      (view_spectrum != core_spectrum);
+  }
+
   auto models = _view->data_source()->get_signal_models_snapshot();
   //
   // This does NOT directly touch _own_decode_traces / _own_spectrum_traces
@@ -885,6 +910,12 @@ void ViewSignalSync::on_signals_changed() {
   // Signal list).
 
   auto event = SignalFactory::compute_change_event(_own_signals, models);
+
+  // If derived traces changed, upgrade Modified → full layout.
+  // Added/Removed/AllReplaced already call signals_changed(nullptr)
+  // via their layout helpers, so only Modified needs upgrading.
+  if (derived_changed && event == SignalFactory::Modified)
+    event = SignalFactory::AllReplaced;
 
   SignalFactory::update_signals(_own_signals, _view->data_source(),
                                 _view->data_source(), event);

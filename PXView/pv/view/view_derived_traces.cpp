@@ -77,6 +77,40 @@ void ViewDerivedTraces::mark_derived_traces_dirty() {
   _derived_traces_dirty = true;
 }
 
+// ---------------------------------------------------------------------------
+// Single creation points for derived traces.
+//
+// Every DecodeTrace / SpectrumTrace MUST be created through these helpers
+// so that view_index and visibility are always set at construction time.
+//
+// _view and _viewport are NOT set here — they are set later by
+// layout_time_signals() (for DecodeTrace) or update_fft_viewport() (for
+// SpectrumTrace). Until then, the trace is in a "not-yet-laid-out" state:
+//   - _view is nullptr
+//   - _v_offset is INT_MAX (the sentinel set by the Trace constructor)
+//
+// This is safe because the paint methods (paint_back / paint_mid) check
+// for the INT_MAX sentinel and return early, preventing any dereference
+// of _view. This is a principled defense at the paint layer rather than
+// a pre-initialisation safety net that masks event-routing bugs.
+// ---------------------------------------------------------------------------
+
+std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
+    std::shared_ptr<pv::data::DecoderStack> stack, int index) {
+  auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, index);
+  dt->set_view_index((int)_view->get_own_signals().size() + index);
+  if (!stack->stack().empty() && !stack->stack().front()->shown())
+    dt->set_visible(false);
+  return dt;
+}
+
+std::unique_ptr<SpectrumTrace> ViewDerivedTraces::create_spectrum_trace(
+    std::shared_ptr<pv::data::SpectrumStack> stack) {
+  auto st = std::make_unique<SpectrumTrace>(
+      _view->session_ptr(), stack, stack->get_index());
+  return st;
+}
+
 bool ViewDerivedTraces::add_decoder(
     srd_decoder *const dec, bool silent, DecoderStatus *dstatus,
     std::list<pv::data::decode::Decoder *> &sub_decoders,
@@ -96,11 +130,10 @@ bool ViewDerivedTraces::add_decoder(
     return false;
 
   // 2. View directly creates its DecodeTrace wrapper for the new
-  //    DecoderStack.
+  //    DecoderStack, using the single creation point to ensure all
+  //    fields (_view, _viewport, view_index, visibility) are initialised.
   int decode_index = (int)_own_decode_traces.size();
-  auto trace = std::make_unique<DecodeTrace>(_view->session_ptr(), out_stack, decode_index);
-  trace->set_view_index((int)_view->get_own_signals().size() + decode_index);
-  trace->set_view(_view);
+  auto trace = create_decode_trace(out_stack, decode_index);
 
   // 3. If silent is false, show the decoder options dialog. If the user
   //    cancels, roll back: unique_ptr auto-deletes the DecodeTrace.
@@ -300,20 +333,7 @@ void ViewDerivedTraces::sync_derived_traces() {
       }
     }
     if (!exists) {
-      auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, decode_index);
-      if (!stack->stack().empty() && !stack->stack().front()->shown()) {
-        dt->set_visible(false);
-      }
-      dt->set_view_index((int)_view->get_own_signals().size() + decode_index);
-      // Initialize _view and _viewport so paint_back/paint_mid can safely
-      // access _view->scale(), _view->offset(), etc. without SIGSEGV.
-      // Without this, the Modified path in signals_modified_refresh()
-      // creates DecodeTrace objects that are painted before
-      // layout_time_signals() calls set_view().
-      dt->set_view(_view);
-      if (_view->get_time_view())
-        dt->set_viewport(_view->get_time_view());
-      _own_decode_traces.push_back(std::move(dt));
+      _own_decode_traces.push_back(create_decode_trace(stack, decode_index));
       changed = true;
     }
     decode_index++;
@@ -351,11 +371,7 @@ void ViewDerivedTraces::sync_derived_traces() {
       }
     }
     if (!exists) {
-      auto st = std::make_unique<SpectrumTrace>(_view->session_ptr(), stack, stack->get_index());
-      st->set_view(_view);
-      if (_view->fft_viewport())
-        st->set_viewport(_view->fft_viewport());
-      _own_spectrum_traces.push_back(std::move(st));
+      _own_spectrum_traces.push_back(create_spectrum_trace(stack));
       changed = true;
     }
   }

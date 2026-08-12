@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from pxview_automation import McpClient, McpError
+from pxview_automation import McpClient
 from helpers.assertions import assert_capture_status
 from helpers.capture_helper import do_timed_capture
 from helpers.export_helper import (
@@ -25,17 +25,8 @@ pytestmark = pytest.mark.p1
 
 class TestExportImport:
 
-    def test_export_csv_single_channel(self, mcp: McpClient, device_id: str,
-                                       tmp_capture_dir: str,
-                                       cleanup_after_test):
-        """Export single channel CSV."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
-        csv_files = find_exported_csv(tmp_capture_dir, "channel")
-        assert len(csv_files) > 0
-        data = read_csv_file(csv_files[0])
-        assert len(data) > 0
+    # NOTE: test_export_csv_single_channel and test_export_binary_single_channel
+    # were removed — they duplicate test_05_data_integrity.
 
     def test_export_csv_multi_channel(self, mcp: McpClient, device_id: str,
                                       tmp_capture_dir: str,
@@ -57,18 +48,6 @@ class TestExportImport:
                                 iso8601_timestamp=True)
         csv_files = find_exported_csv(tmp_capture_dir)
         assert len(csv_files) > 0
-
-    def test_export_binary_single_channel(self, mcp: McpClient, device_id: str,
-                                          tmp_capture_dir: str,
-                                          cleanup_after_test):
-        """Export single channel binary."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
-        bin_files = find_exported_binary(tmp_capture_dir)
-        assert len(bin_files) > 0
-        data = read_binary_file(bin_files[0])
-        assert len(data) > 0
 
     def test_export_binary_multi_channel(self, mcp: McpClient, device_id: str,
                                          tmp_capture_dir: str,
@@ -127,42 +106,7 @@ class TestExportImport:
         filepath = os.path.join(tmp_capture_dir, "decode_dec.csv")
         mcp.export_data_table_csv(filepath, analyzer_id=analyzer_id, radix_type=2)
 
-    def test_pxc_save_load_roundtrip(self, mcp: McpClient, device_id: str,
-                                     tmp_pxc_file: str,
-                                     cleanup_after_test):
-        """Full .pxc save -> load roundtrip."""
-        do_timed_capture(mcp, device_id, channels=[0, 1],
-                         sample_rate=1000000, duration_seconds=0.5)
-        samples_before = mcp.get_samples(channel_type="logic", channel_index=0)
-
-        mcp.save_capture(tmp_pxc_file)
-        assert os.path.exists(tmp_pxc_file)
-        mcp.close_capture()
-        mcp.load_capture(tmp_pxc_file)
-
-        import time; time.sleep(1)
-        samples_after = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert samples_before == samples_after, "Data changed after save/load"
-
-    def test_export_partial_range(self, mcp: McpClient, device_id: str,
-                                  tmp_capture_dir: str,
-                                  cleanup_after_test):
-        """Export only a partial range using set_export_config."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.5)
-        mcp.set_export_config(start_sample=100, end_sample=500)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
-        csv_files = find_exported_csv(tmp_capture_dir)
-        assert len(csv_files) > 0
-
-    def test_export_without_capture_fails(self, mcp: McpClient,
-                                          tmp_capture_dir: str,
-                                          cleanup_after_test):
-        """Export without a capture should return an error."""
-        with pytest.raises(McpError):
-            mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
-
-    def test_load_nonexistent_file(self, mcp: McpClient, cleanup_after_test):
-        """load_capture with non-existent file returns error."""
-        with pytest.raises(McpError):
-            mcp.load_capture("/nonexistent/path/file.pxc")
+    # NOTE: test_pxc_save_load_roundtrip, test_export_partial_range,
+    # test_export_without_capture_fails, and test_load_nonexistent_file
+    # were removed — they duplicate test_05_data_integrity and
+    # test_21_error_handling.

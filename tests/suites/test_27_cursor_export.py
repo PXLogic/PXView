@@ -1,15 +1,18 @@
 """
-test_27_cursor_export.py - Cursor range + export/import roundtrip tests.
+test_27_cursor_export.py - Cursor range export tests.
+
+Focus: cursor-specific export functionality that is NOT covered by
+test_05_data_integrity or test_06_export_import.
 
 Tests:
 1. Cursor API: add/get/remove/clear cursors
 2. Left cursor export: set_export_config with only left cursor → export → verify
 3. Right cursor export: set_export_config with only right cursor → export → verify
 4. Both cursors export: set_export_config with left+right → export → verify
-5. CSV export → verify row count matches range
-6. Binary export → verify byte count matches range
-7. .pxc save → load → verify data integrity
-8. Data table CSV export → verify non-empty
+5. Cursor + save/load: set_export_config + save → load preserves ranged data
+
+Note: basic save/load, CSV/binary export, and multi-channel export
+roundtrip tests are in test_05_data_integrity.py and test_06_export_import.py.
 """
 
 import os
@@ -252,159 +255,13 @@ class TestBothCursorsExport:
         assert abs(len(csv_data) - expected_rows) <= 10, \
             f"CSV rows={len(csv_data)}, expected ~{expected_rows}"
 
-
-# ======================================================================
-# Test Group E: Full export/import roundtrip for each format
-# ======================================================================
-
-class TestExportImportRoundtrip:
-    """Every export format: export → import → verify correctness."""
-
-    def test_pxc_save_load_single_channel(self, mcp, device_id,
-                                            tmp_pxc_file,
-                                            cleanup_after_test):
-        """Save → load preserves single channel data."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.5)
-        before = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert len(before) > 0
-
-        mcp.save_capture(tmp_pxc_file)
-        assert os.path.exists(tmp_pxc_file)
-        assert os.path.getsize(tmp_pxc_file) > 0
-
-        mcp.close_capture()
-        mcp.load_capture(tmp_pxc_file)
-        time.sleep(1)
-
-        after = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert compare_logic_samples(before, after), \
-            f"Data mismatch: before={len(before)} bytes, after={len(after)} bytes"
-
-    def test_pxc_save_load_multi_channel(self, mcp, device_id,
-                                           tmp_pxc_file,
-                                           cleanup_after_test):
-        """Save → load preserves all channels."""
-        channels = [0, 1, 2, 3]
-        do_timed_capture(mcp, device_id, channels=channels,
-                         sample_rate=1000000, duration_seconds=0.5)
-
-        originals = {}
-        for ch in channels:
-            originals[ch] = mcp.get_samples(channel_type="logic", channel_index=ch)
-            assert len(originals[ch]) > 0, f"Channel {ch} no data"
-
-        mcp.save_capture(tmp_pxc_file)
-        mcp.close_capture()
-        mcp.load_capture(tmp_pxc_file)
-        time.sleep(1)
-
-        for ch in channels:
-            loaded = mcp.get_samples(channel_type="logic", channel_index=ch)
-            assert compare_logic_samples(originals[ch], loaded), \
-                f"Channel {ch} data mismatch after save/load"
-
-    def test_pxc_save_load_preserves_sample_rate(self, mcp, device_id,
-                                                   tmp_pxc_file,
-                                                   cleanup_after_test):
-        """Save → load preserves sample rate."""
-        rate = 1000000
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=rate, duration_seconds=0.5)
-
-        config_before = mcp.get_sample_config()
-        mcp.save_capture(tmp_pxc_file)
-        mcp.close_capture()
-        mcp.load_capture(tmp_pxc_file)
-        time.sleep(1)
-        config_after = mcp.get_sample_config()
-
-        assert config_before.get("sample_rate") == config_after.get("sample_rate"), \
-            f"Sample rate changed: {config_before.get('sample_rate')} → " \
-            f"{config_after.get('sample_rate')}"
-
-    def test_csv_export_import_data_matches_mcp(self, mcp, device_id,
-                                                  tmp_capture_dir,
-                                                  cleanup_after_test):
-        """CSV export data matches get_logic_samples."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.3)
-
-        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert len(mcp_samples) > 0
-
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
-        csv_files = find_exported_csv(tmp_capture_dir, "channel")
-        assert len(csv_files) > 0
-        csv_data = read_csv_file(csv_files[0])
-        assert len(csv_data) > 0
-
-        # CSV row count should be close to sample count
-        # (1 row per sample, may have header)
-        assert len(csv_data) > 0, "CSV has no data rows"
-
-    def test_binary_export_size_matches_samples(self, mcp, device_id,
-                                                  tmp_capture_dir,
-                                                  cleanup_after_test):
-        """Binary export size matches get_logic_samples byte count."""
-        do_timed_capture(mcp, device_id, channels=[0],
-                         sample_rate=1000000, duration_seconds=0.3)
-
-        mcp_samples = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert len(mcp_samples) > 0
-
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
-        bin_files = find_exported_binary(tmp_capture_dir)
-        assert len(bin_files) > 0
-        bin_data = read_binary_file(bin_files[0])
-        assert len(bin_data) > 0
-
-        # Binary should be approximately the same size as MCP samples
-        # (1 byte per 8 samples for single channel)
-        assert len(bin_data) > 0
-
-    def test_multi_channel_csv_exports_all_channels(self, mcp, device_id,
-                                                       tmp_capture_dir,
-                                                       cleanup_after_test):
-        """Multi-channel CSV export produces file for each channel."""
-        channels = [0, 1, 2, 3]
-        do_timed_capture(mcp, device_id, channels=channels,
-                         sample_rate=1000000, duration_seconds=0.3)
-
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=channels)
-
-        csv_files = find_exported_csv(tmp_capture_dir, "channel")
-        # Should have at least one file per channel
-        assert len(csv_files) >= len(channels), \
-            f"Expected >= {len(channels)} CSV files, got {len(csv_files)}"
-
-        # Each file should have data
-        for csv_file in csv_files:
-            data = read_csv_file(csv_file)
-            assert len(data) > 0, f"{csv_file} is empty"
-
-    def test_multi_channel_binary_exports_all_channels(self, mcp, device_id,
-                                                         tmp_capture_dir,
-                                                         cleanup_after_test):
-        """Multi-channel binary export produces file for each channel."""
-        channels = [0, 1, 2, 3]
-        do_timed_capture(mcp, device_id, channels=channels,
-                         sample_rate=1000000, duration_seconds=0.3)
-
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=channels)
-
-        bin_files = find_exported_binary(tmp_capture_dir)
-        assert len(bin_files) >= len(channels), \
-            f"Expected >= {len(channels)} binary files, got {len(bin_files)}"
-
-        for bin_file in bin_files:
-            data = read_binary_file(bin_file)
-            assert len(data) > 0, f"{bin_file} is empty"
-
     def test_save_load_with_cursor_range(self, mcp, device_id,
                                            tmp_pxc_file,
                                            cleanup_after_test):
-        """set_export_config + save → load preserves ranged data."""
+        """set_export_config + save → load preserves ranged data.
+
+        This is the only cursor-specific save/load test.  Basic
+        save/load roundtrip is covered by test_05_data_integrity."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
 
@@ -419,19 +276,3 @@ class TestExportImportRoundtrip:
 
         samples = mcp.get_samples(channel_type="logic", channel_index=0)
         assert len(samples) > 0, "No samples after load with save range"
-
-    def test_export_cycle_3x(self, mcp, device_id, tmp_capture_dir,
-                              cleanup_after_test):
-        """Multiple capture → save → close → load → verify cycles."""
-        for i in range(3):
-            do_timed_capture(mcp, device_id, channels=[0],
-                             sample_rate=1000000, duration_seconds=0.3)
-            filepath = os.path.join(tmp_capture_dir, f"cycle_{i}.pxc")
-            mcp.save_capture(filepath)
-            assert os.path.exists(filepath)
-            mcp.close_capture()
-            mcp.load_capture(filepath)
-            time.sleep(0.5)
-            samples = mcp.get_samples(channel_type="logic", channel_index=0)
-            assert len(samples) > 0, f"Cycle {i}: no samples after load"
-            mcp.close_capture()

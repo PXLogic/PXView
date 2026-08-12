@@ -28,6 +28,7 @@
 #include <QTimer>
 #include <QString>
 #include <atomic>
+#include <future>
 #include <list>
 #include <map>
 #include <memory>
@@ -449,6 +450,18 @@ std::vector<core::Subscription> _event_subscriptions;
   // matching is by VID/PID). On mismatch or failure, falls back to
   // stop_capture() + set_default_device().
   void update_device_handle_(void *device_handle);
+
+  // --- Async file import (Steps 5-7 of import_file) ---
+  // The heavy file-reading + sr_input_send() loop runs on a background
+  // std::async thread so the GUI main thread stays responsive for large
+  // VCD/CSV/binary files. The future is joined (waited) in set_device(),
+  // close_file(), and ~SigSession() before any device switch / teardown.
+  std::future<void> _import_future;
+  std::atomic<bool> _import_in_progress{false};
+  // Joins _import_future if running. Called on the main thread before
+  // releasing the current device (set_device, close_file, destructor).
+  // Blocks until the background import thread finishes its current chunk.
+  void wait_for_import_complete_();
 };
 
 } // namespace pv

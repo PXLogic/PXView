@@ -100,6 +100,20 @@ public:
   void cleanup();
 
 private:
+  // Single creation point for DecodeTrace — ensures every DecodeTrace
+  // gets view_index and visibility set at construction time. _view and
+  // _viewport are set later by layout_time_signals(). Until then, the
+  // INT_MAX sentinel on _v_offset prevents paint methods from
+  // dereferencing _view. Both add_decoder() (UI path) and
+  // sync_derived_traces() (lazy sync path) call this.
+  std::unique_ptr<DecodeTrace> create_decode_trace(
+      std::shared_ptr<pv::data::DecoderStack> stack, int index);
+
+  // Single creation point for SpectrumTrace — same rationale.
+  // _view/_viewport are set later by update_fft_viewport().
+  std::unique_ptr<SpectrumTrace> create_spectrum_trace(
+      std::shared_ptr<pv::data::SpectrumStack> stack);
+
   View *_view;
 
   std::vector<std::unique_ptr<DecodeTrace>> _own_decode_traces;

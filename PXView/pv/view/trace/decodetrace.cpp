@@ -51,6 +51,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollArea>
+#include <climits>
 #include <libsigrokdecode.h>
 
 using namespace std;
@@ -178,6 +179,14 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
                              QColor back) {
   (void)back;
 
+  // Skip paint if this trace has not been laid out yet. _v_offset is
+  // initialized to INT_MAX by the Trace constructor and set to a real
+  // pixel position by layout_time_signals(). Painting with INT_MAX
+  // draws at an absurd Y coordinate (visible as a stray line at the
+  // viewport edge or silently clipped, depending on platform).
+  if (get_v_offset() == INT_MAX)
+    return;
+
   QColor backFore = fore;
   backFore.setAlpha(View::BackAlpha);
   QPen pen(backFore);
@@ -247,6 +256,10 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
 void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                             QColor back) {
   using namespace pv::data::decode;
+
+  // Skip paint if not yet laid out (see paint_back for rationale).
+  if (get_v_offset() == INT_MAX)
+    return;
 
   assert(_decoder_stack);
   const QString err = _decoder_stack->error_message();

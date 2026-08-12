@@ -5,8 +5,11 @@ The demo driver's PATTERN_I2C generates valid I2C bus traffic on
 ch0(SCL) and ch1(SDA). Each transaction is:
   START + 7-bit addr + R/W + ACK + 3 data bytes + ACK + STOP
 
-Address starts at 0x50 and increments each transaction.
-Data bytes increment within each transaction.
+Address is fixed at 0x50 (standard 24C02 EEPROM device address).
+Data bytes form an EEPROM write sequence:
+  DATA0 = word address (increments each transaction)
+  DATA1 = 0x10 + (frame & 0x0F)
+  DATA2 = 0x20 + (frame & 0x0F)
 
 This test verifies that both C and Python I2C decoders can:
 - Detect START/STOP conditions
