@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "pv/core/cursorregistry.h"
+#include "pv/core/shared_state.h"
 #include "pv/data/datasource.h"
 #include "pv/data/document/sessiondata.h"
 #include "pv/data/model/signalmodel.h"
@@ -247,9 +248,76 @@ public:
   void set_cur_snap_samplerate(uint64_t samplerate) override;
   void set_cur_samplelimits(uint64_t samplelimits) override;
 
+  // --- Plan B Phase 4: atomic state snapshot ---
+  // Returns a consistent snapshot of the capture-related state. All fields
+  // are read from atomics, so the snapshot is thread-safe.
+  // Modeled after Logic2's DigitalStore::GetState() pattern (Pull).
+  struct CaptureStateSnapshot {
+    bool is_working;
+    int device_status;      // ST_INIT / ST_RUNNING / ST_STOPPED
+    bool is_copy_in_progress;
+  };
+  CaptureStateSnapshot get_capture_state_snapshot() const {
+    return CaptureStateSnapshot{
+      _is_working.load(std::memory_order_acquire),
+      _device_status.load(std::memory_order_acquire),
+      // is_copy_in_progress lives on DocumentRegistry — query it there.
+      // For the snapshot, we read it from the atomic on DocumentRegistry.
+      // If _document_registry is null (during early init), default to false.
+      _document_registry ? _document_registry->is_copy_in_progress() : false
+    };
+  }
+
   // --- Decode-stack handle id generator (kept on state for centralized
   // access by both SigSession::add_decoder and DecodeTaskManager) ---
   uint64_t next_decoder_handle_id() { return _next_decoder_handle_id.fetch_add(1); }
+
+  // --- Phase 3: capture-complete sync wait (via SharedState, bypasses Qt event queue) ---
+  // Called by the worker thread (DeviceSessionStopped) when sr_session_run()
+  // returns. Sets _is_working=false and signals the SharedState so that
+  // wait_for_capture_complete() (called on the main thread by the API /
+  // RPC layer) is woken immediately, without depending on the Qt event queue.
+  //
+  // Mirrors Logic2's SharedState::SetResult() pattern
+  // (task_executor.h:191-196).
+  void notify_capture_complete() {
+    _is_working.store(false, std::memory_order_release);
+    _capture_complete_state.set_result();
+  }
+  // Called by the main thread (SessionService::wait_capture_complete) to
+  // block until _is_working becomes false or timeout. Does NOT use
+  // QEventLoop::exec() — the wakeup comes directly from the worker thread's
+  // notify_capture_complete() via SharedState.
+  //
+  // Mirrors Logic2's SharedState::WaitOnState() pattern
+  // (task_executor.h:209-224).
+  bool wait_for_capture_complete(uint64_t timeout_ms) {
+    // Fast path: already complete
+    if (!_is_working.load(std::memory_order_acquire))
+      return true;
+    return _capture_complete_state.wait(timeout_ms);
+  }
+
+  // --- Phase 3: decode-complete sync wait (via SharedState) ---
+  // Called by the decode thread (DecodeTaskManager) when all decoders
+  // finish. Signals the SharedState so that wait_for_decode_complete()
+  // (called on the main thread by the API / RPC layer) is woken.
+  void notify_decode_complete() {
+    _decode_complete_state.set_result();
+  }
+  // Called by the main thread to block until decode finishes or timeout.
+  bool wait_for_decode_complete(uint64_t timeout_ms) {
+    return _decode_complete_state.wait(timeout_ms);
+  }
+  // Reset decode state before starting a new decode cycle.
+  void reset_decode_complete() {
+    _decode_complete_state.reset();
+  }
+
+  // --- Phase 3: reset capture state before starting a new capture ---
+  void reset_capture_complete() {
+    _capture_complete_state.reset();
+  }
 
 private:
   EventBus *_event_bus = nullptr;
@@ -301,6 +369,21 @@ private:
   // both SigSession (Core) and the View layer (via DataSource) share one
   // source of truth. Position-indexed (see CursorRegistry docs).
   CursorRegistry _cursor_registry;
+
+  // --- Phase 3: SharedState instances for sync waits ---
+  // Replaces Phase 1's inline mutex + cv with the reusable SharedState
+  // primitive (pv/core/shared_state.h), modeled after Logic2's
+  // Saleae::Tasks::Detail::SharedState.
+  //
+  // _capture_complete_state: signaled by notify_capture_complete() on the
+  //   worker thread, waited on by wait_for_capture_complete() on the main
+  //   thread. Predicate: _is_working == false.
+  //
+  // _decode_complete_state: signaled by notify_decode_complete() on the
+  //   decode thread, waited on by wait_for_decode_complete() on the main
+  //   thread.
+  SharedState _capture_complete_state;
+  SharedState _decode_complete_state;
 };
 
 } // namespace core

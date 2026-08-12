@@ -54,12 +54,11 @@ DocumentRegistry::CaptureOwnerGuard::operator=(CaptureOwnerGuard &&o) noexcept {
 // CaptureOwnerGuard::release() — Track C4: shared cleanup logic
 // ---------------------------------------------------------------------------
 void DocumentRegistry::CaptureOwnerGuard::release() {
-  // join_copy_thread() MUST be outside the lock — the copy thread may
-  // need to acquire _capture_state_mutex (e.g. in copy_to_doc_done).
-  _registry->join_copy_thread();
-  {
-    std::lock_guard<std::mutex> lock(_registry->_capture_state_mutex);
-    _registry->_capture_owner_index = SIZE_MAX;
+// Gap 3: join_copy_thread removed — copy_data_to_document is now
+// zero-copy (instant), no background thread to join.
+{
+std::lock_guard<std::mutex> lock(_registry->_capture_state_mutex);
+_registry->_capture_owner_index = SIZE_MAX;
     _registry->_coord->set_is_working(false);
   }
   // Broadcast outside the lock to minimize critical section and avoid
@@ -78,10 +77,7 @@ DocumentRegistry::DocumentRegistry(EventBus *bus, ISessionState *state, ISession
       _copy_in_progress(false) {}
 
 DocumentRegistry::~DocumentRegistry() {
-  // Join any in-flight copy thread before destruction (a joinable std::thread
-  // would otherwise std::terminate on destruction). Owned documents are freed
-  // automatically by ~unique_ptr in _owned_documents.
-  join_copy_thread();
+// Gap 3: no copy thread to join — copy_data_to_document is zero-copy.
 }
 
 size_t DocumentRegistry::take_document(
@@ -165,29 +161,20 @@ void DocumentRegistry::clear_capture_owner_document(data::SessionDocument *doc) 
   // Task 4: Guard-managed — reset the guard when the caller asks to clear the
   // document that is currently the capture owner. Guard destructor handles
   // join_copy_thread() + owner clear + _is_working=false + broadcast.
-  // C4 fix: lock the mutex to get a consistent snapshot of
-  // _capture_owner_guard and _capture_owner_index. The guard.reset() call
-  // happens OUTSIDE the lock — the guard destructor calls join_copy_thread()
-  // which could block, and we must not hold the mutex during that (the copy
-  // thread may need to acquire _capture_state_mutex in copy_to_doc_done).
-  std::unique_ptr<CaptureOwnerGuard> guard_to_reset;
-  {
-    std::lock_guard<std::mutex> lock(_capture_state_mutex);
-    if (_capture_owner_guard &&
-        get_document_by_index(_capture_owner_index) == doc) {
-      guard_to_reset = std::move(_capture_owner_guard);
-    }
-  }
-  // Reset outside the lock — guard destructor calls join_copy_thread()
-  // which could block, and we don't want to hold the mutex during that.
-  guard_to_reset.reset();
+// C4 fix: lock the mutex to get a consistent snapshot of
+// _capture_owner_guard and _capture_owner_index.
+std::unique_ptr<CaptureOwnerGuard> guard_to_reset;
+{
+std::lock_guard<std::mutex> lock(_capture_state_mutex);
+if (_capture_owner_guard &&
+get_document_by_index(_capture_owner_index) == doc) {
+guard_to_reset = std::move(_capture_owner_guard);
+}
+}
+// Reset outside the lock.
+guard_to_reset.reset();
 }
 
-void DocumentRegistry::join_copy_thread() {
-  if (_copy_thread.joinable()) {
-    _copy_thread.join();
-  }
-}
 
 void DocumentRegistry::acquire_capture_owner(data::SessionDocument *doc) {
   size_t idx = doc ? find_index_for_document(doc) : SIZE_MAX;
@@ -215,6 +202,11 @@ void DocumentRegistry::release_capture_owner() {
       guard_to_reset = std::move(_capture_owner_guard);
   }
   guard_to_reset.reset();
+}
+
+bool DocumentRegistry::has_capture_owner() const {
+  std::lock_guard<std::mutex> lock(_capture_state_mutex);
+  return _capture_owner_guard != nullptr;
 }
 
 } // namespace core

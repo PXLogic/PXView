@@ -19,39 +19,17 @@ FilterProcessor::FilterProcessor(EventBus *bus, ISessionState *state, ISessionCo
 FilterProcessor::~FilterProcessor() { stop(); }
 
 void FilterProcessor::stop() {
-  // A3 fix: Stop glitch filter and signal invert background threads before
-  // tearing down data. Set running flags false first so the task functions
-  // know no new work should be accepted, then join the thread if still
-  // joinable. Without this, a joinable std::thread would std::terminate on
-  // destruction.
-  //
-  // modernize-core-layer-final Task 5: threads are now held by unique_ptr.
-  // No manual delete — reset() releases the thread object after join().
-  //
-  // M-2 fix: acquire the launch mutexes so that if a task thread is in the
-  // middle of a recursive set_glitch_filter()/set_signal_invert() call,
-  // we wait for it to finish launching (or queuing the pending request)
-  // before we set _running=false and join. This closes the TOCTOU window
-  // where stop() sets _running=false concurrently with the task thread
-  // setting it back to true.
+  // Gap 1: ThreadPool::shutdown() joins all worker threads.
+  // No need for manual join/detach or self-join detection.
   {
     std::lock_guard<std::mutex> lk(_glitch_launch_mutex);
     _glitch_filter_running = false;
-  }
-  if (_glitch_filter_thread) {
-    if (_glitch_filter_thread->joinable())
-      _glitch_filter_thread->join();
-    _glitch_filter_thread.reset();
   }
   {
     std::lock_guard<std::mutex> lk(_signal_invert_launch_mutex);
     _signal_invert_running = false;
   }
-  if (_signal_invert_thread) {
-    if (_signal_invert_thread->joinable())
-      _signal_invert_thread->join();
-    _signal_invert_thread.reset();
-  }
+  _filter_pool.shutdown();
 }
 
 void FilterProcessor::set_glitch_filter(
@@ -91,25 +69,13 @@ void FilterProcessor::set_glitch_filter(
   _glitch_filter_running = true;
   _event_bus->broadcast_async<interface::GlitchFilterStarted>({});
 
-  // S1 fix: if the thread pointer is the calling thread itself (recursive
-  // call from glitch_filter_task), reset it WITHOUT joining — joining
-  // oneself is undefined behavior (resource_deadlock_would_occur).
-  if (_glitch_filter_thread) {
-    if (_glitch_filter_thread->get_id() == std::this_thread::get_id()) {
-      // This is a recursive call from the task thread itself. The thread
-      // object is about to go out of scope when we reassign, but it's
-      // joinable. We must detach (not join) to avoid self-join UB.
-      _glitch_filter_thread->detach();
-      _glitch_filter_thread.reset();
-    } else {
-      if (_glitch_filter_thread->joinable())
-        _glitch_filter_thread->join();
-      _glitch_filter_thread.reset();
-    }
-  }
-
-  _glitch_filter_thread = std::make_unique<std::thread>(
-      &FilterProcessor::glitch_filter_task, this, thresholds, filter_modes);
+  // Gap 1: submit to ThreadPool instead of creating raw std::thread.
+  // No self-join detection needed — ThreadPool workers are always
+  // different threads from the caller.
+  auto self = this;
+  _filter_pool.submit([self, thresholds, filter_modes]() {
+    self->glitch_filter_task(thresholds, filter_modes);
+  });
 }
 
 void FilterProcessor::glitch_filter_task(
@@ -296,20 +262,11 @@ void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
   _signal_invert_running = true;
   _event_bus->broadcast_async<interface::SignalInvertStarted>({});
 
-  if (_signal_invert_thread) {
-    if (_signal_invert_thread->get_id() == std::this_thread::get_id()) {
-      _signal_invert_thread->detach();
-      _signal_invert_thread.reset();
-    } else {
-      if (_signal_invert_thread->joinable())
-        _signal_invert_thread->join();
-      _signal_invert_thread.reset();
-    }
-  }
-
-  _signal_invert_thread =
-      std::make_unique<std::thread>(
-          &FilterProcessor::signal_invert_task, this, channels);
+  // Gap 1: submit to ThreadPool.
+  auto self = this;
+  _filter_pool.submit([self, channels]() {
+    self->signal_invert_task(channels);
+  });
 }
 
 void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {

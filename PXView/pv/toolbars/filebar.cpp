@@ -328,7 +328,8 @@ void FileBar::on_actionStore_triggered()
         // reads them. The legacy async int-message path is removed.
         // Caller (on_actionStore_triggered) is on the main thread
         // (user-initiated save action).
-        _session->broadcast_sync<interface::StoreConfPrev>({});
+        // Plan B Phase 1: broadcast_sync → broadcast_async.
+        _session->broadcast_async<interface::StoreConfPrev>({});
          
         sig_store_session(file_name);
     }

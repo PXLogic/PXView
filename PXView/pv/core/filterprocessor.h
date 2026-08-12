@@ -5,9 +5,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <vector>
 #include <cstdint>
+
+#include "pv/core/thread_pool.h"
 
 // Spec v2 Task 4/5: GlitchFilterMode is now an enum class with fixed
 // underlying type (int), so it can be forward-declared here without
@@ -30,11 +31,9 @@ class SessionStateContext;
  * threads and their running flags. Extracted from SigSession (SubTask 10.5)
  * as a mechanical refactoring: no behavior change, just code movement.
  *
- * The processor holds an injected EventBus* (for typed event dispatch via
- * broadcast_async<T>/broadcast_sync<T>) and a SessionStateContext* (for
- * accessing view_data / device_agent / data_updated()).
- * modernize-core-layer-radical phase 1 replaced the previous SigSession* +
- * friend-declaration coupling.
+ * Gap 1 fix: background threads now use ThreadPool instead of raw
+ * std::thread. This eliminates the self-join detection logic and
+ * manual join/detach patterns.
  */
 class FilterProcessor {
 public:
@@ -51,7 +50,7 @@ public:
   void clear_signal_invert();
   bool is_signal_invert_active();
 
-  /// Stop both background threads. Called from SigSession::Close().
+  /// Stop both background tasks. Called from SigSession::Close().
   void stop();
 
 private:
@@ -63,26 +62,20 @@ private:
   ISessionState *_state;
   ISessionCoordination *_coord;
 
-  // modernize-core-layer-final Task 5: RAII-managed background threads.
-  // unique_ptr replaces raw std::thread* + manual new/delete. The destructor
-  // path joins (if joinable) and resets the pointer automatically — no
-  // `delete` calls remain in the .cpp.
-  std::unique_ptr<std::thread> _glitch_filter_thread;
+  // Gap 1: ThreadPool replaces unique_ptr<std::thread>.
+  // ThreadPool manages thread lifetime — no manual join, no self-join risk.
+  ThreadPool _filter_pool;
+
   std::atomic<bool> _glitch_filter_running;
-  // S1/H2 fix: mutex protects the launch path (check _running + create thread)
+  // S1/H2 fix: mutex protects the launch path (check _running + submit task)
   // so concurrent callers cannot both see _running==false and create
-  // duplicate threads. Also prevents the self-join deadlock: when the task
-  // thread recursively calls set_glitch_filter(), it holds this mutex, and
-  // the join check can detect that _glitch_filter_thread is itself.
+  // duplicate tasks.
   std::mutex _glitch_launch_mutex;
   // 架构修复：滤波运行中排队最近一次请求，不再静默丢弃
-  // Track A4: pending data protected by _pending_mutex; _has_pending_glitch
-  // uses std::atomic<bool> as a fast flag, but map data still needs mutex.
   std::atomic<bool> _has_pending_glitch{false};
   std::map<int, uint32_t> _pending_glitch_thresholds;
   std::map<int, GlitchFilterMode> _pending_glitch_modes;
   std::mutex _pending_mutex;
-  std::unique_ptr<std::thread> _signal_invert_thread;
   std::atomic<bool> _signal_invert_running;
   // H2 fix: same TOCTOU protection for signal invert launch path
   std::mutex _signal_invert_launch_mutex;

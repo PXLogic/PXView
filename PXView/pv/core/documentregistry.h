@@ -48,15 +48,15 @@ class SessionStateContext;
  * --------------------------------------------------------------------------- */
 class DocumentRegistry {
 public:
-  // RAII guard for _capture_owner_index + _is_working lifecycle.
-  // Constructed in start_capture on success; destructed in stop_capture /
-  // clear_capture_owner_document (tab close). Manages owner index + _is_working
-  // flag + join_copy_thread + CaptureOwnerChanged broadcast as a single unit,
-  // eliminating manual clear_capture_owner_document() calls and use-after-free
-  // risk on the background copy thread.
-  //
-  // NOTE: copy_to_doc_done does NOT reset this guard — in repeat mode the owner
-  // field is cleared per-frame but _is_working must stay true across frames.
+// RAII guard for _capture_owner_index + _is_working lifecycle.
+// Constructed in start_capture on success; destructed in stop_capture /
+// clear_capture_owner_document (tab close). Manages owner index + _is_working
+// flag + CaptureOwnerChanged broadcast as a single unit,
+// eliminating manual clear_capture_owner_document() calls and use-after-free
+// risk on the background copy thread.
+//
+// NOTE: copy_to_doc_done does NOT reset this guard — in repeat mode the owner
+// field is cleared per-frame but _is_working must stay true across frames.
   // The guard persists for the whole capture session.
   class CaptureOwnerGuard {
   public:
@@ -118,9 +118,8 @@ public:
     return get_document_by_index(_capture_owner_index);
   }
   inline size_t get_capture_owner_index() const { return _capture_owner_index; }
-  inline bool is_copy_in_progress() const { return _copy_in_progress; }
-  void clear_capture_owner_document(data::SessionDocument *doc);
-  void join_copy_thread();
+inline bool is_copy_in_progress() const { return _copy_in_progress; }
+void clear_capture_owner_document(data::SessionDocument *doc);
 
   // Called by start_capture to acquire the capture owner guard.
   void acquire_capture_owner(data::SessionDocument *doc);
@@ -128,12 +127,16 @@ public:
   // Called by stop_capture / action_stop_capture to release the guard.
   void release_capture_owner();
 
-  // Mutex + copy_thread accessors for the copy_to_doc_done flow in SigSession
-  // (which needs to atomically snapshot _copy_in_progress + owner, and launch
-  // the copy thread). SigSession is a friend of DocumentRegistry.
-  inline std::mutex &capture_state_mutex() { return _capture_state_mutex; }
-  inline std::atomic<bool> &copy_in_progress() { return _copy_in_progress; }
-  inline std::thread &copy_thread() { return _copy_thread; }
+  // Returns true if the capture owner guard is still held (capture active,
+  // not yet cleaned up). Used by on_event(SessionStopped) to distinguish
+  // the auto-stop path (guard still held → cleanup needed) from the manual
+  // stop path (guard already released by action_stop_capture → skip).
+  bool has_capture_owner() const;
+
+// Mutex + copy_in_progress accessors for the copy_to_doc_done flow in
+// SigSession. SigSession is a friend of DocumentRegistry.
+inline std::mutex &capture_state_mutex() { return _capture_state_mutex; }
+inline std::atomic<bool> &copy_in_progress() { return _copy_in_progress; }
   // Direct index setter used by the copy_to_doc_done flow when the capture
   // owner must be cleared without going through CaptureOwnerGuard (e.g. when
   // there is no active document in headless mode). Caller MUST hold
@@ -159,10 +162,9 @@ private:
   size_t _capture_owner_index;
 
   // Capture owner / copy thread state
-  mutable std::mutex _capture_state_mutex;
-  std::atomic<bool> _copy_in_progress;
-  std::unique_ptr<CaptureOwnerGuard> _capture_owner_guard;
-  std::thread _copy_thread;
+mutable std::mutex _capture_state_mutex;
+std::atomic<bool> _copy_in_progress;
+std::unique_ptr<CaptureOwnerGuard> _capture_owner_guard;
 
   // CaptureOwnerGuard is a nested class of DocumentRegistry, so under C++11+
   // rules it has implicit access to private members without an explicit

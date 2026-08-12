@@ -52,7 +52,6 @@
 #include <QJsonObject>
 #include <QTimeZone>
 #include <QDir>
-#include <QEventLoop>
 #include <QFile>
 #include <QString>
 #include <QTextStream>
@@ -346,21 +345,54 @@ inline std::shared_ptr<pv::data::DecoderStack> find_stack_by_instance_id(
 // ---------------------------------------------------------------------------
 
 SessionService::SessionService(SigSession *session, DeviceAgent *device)
-    : _session(session), _device(device),
-      _capture_id(0), _wait_capture_stop_flag(false) {
-    // _api_doc_index defaults to SIZE_MAX via its in-class default initializer.
-    // It is later injected via set_api_document() by AppService.
-    if (_session) {
-        // Spec v2 Task 7: add_callback removed, only IEventListener registration remains
-        _session->add_event_listener(this);
-    }
+: _session(session), _device(device),
+_capture_id(0) {
+// Register event handlers via EventBus::subscribe<T>().
+if (_session && _session->get_event_bus()) {
+auto *bus = _session->get_event_bus();
+auto *self = this;
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StoreConfPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete, {{"detail", "store_conf_prev"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect_prev"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect_prev"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectStart>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_start"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectEnd>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "collect_end"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::RevEndPacket>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "end_packet"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureStateChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceListUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceListUpdated); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceModeChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceModeChanged); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceConfigUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceDetached>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceDetached); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::UsbDeviceArrived>([self](const auto &) { self->broadcast_event(ServiceEvent::NewUsbDevice); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CurrentDeviceChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceModeChanged, {{"detail", "device_changed"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DeviceOptionsUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "options_updated"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DsoViewOptionChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "dso_view_option"}, {"channel_index", std::to_string(ev.channel_index)}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleRateChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "duration_updated"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CollectModeChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "collect_mode_changed"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::DataPoolChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "data_pool_changed"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SimpleTriggerChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::DeviceConfigChanged, {{"detail", "trigger_changed"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterStarted); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterProgress>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterProgress); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCompleted); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::GlitchFilterCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::GlitchFilterCleared); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertStarted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertStarted); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCompleted>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCompleted); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SignalInvertCleared>([self](const auto &) { self->broadcast_event(ServiceEvent::SignalInvertCleared); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyToDocDone>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "copy_to_doc_done"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SampleCountUpdated>([self](const auto &) { self->broadcast_event(ServiceEvent::DataUpdated, {{"detail", "sample_count_updated"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::ActiveDocumentChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::ChannelConfigChanged, {{"change", "active_document"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CopyInProgressChanged>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "copy_in_progress"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::CaptureOwnerChanged>([self](const auto &ev) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"change", "capture_owner"}, {"is_working", ev.new_owner ? "true" : "false"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::TrigNextCollect>([self](const auto &) { self->broadcast_event(ServiceEvent::TriggerReceived, {{"detail", "next_collect"}}); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::SaveComplete>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete); }));
+_event_subscriptions.push_back(bus->subscribe<pv::interface::ClearDecodeData>([self](const auto &) { self->broadcast_event(ServiceEvent::DecodeDone, {{"detail", "clear_decode_data"}}); }));
+}
 }
 
 SessionService::~SessionService() {
-    if (_session) {
-        // Spec v2 Task 7: remove_callback removed
-        _session->remove_event_listener(this);
-    }
+// Subscriptions auto-unsubscribe via RAII.
+}
     // phase 2: release the MCP-dedicated document slot. Ownership is held by
     // DocumentRegistry, so release_document() frees the document (marked
     // deletion — slot stays, index stays stable). No manual unregister + delete.
@@ -451,14 +483,13 @@ void SessionService::ensure_logic_mode_for_digital(
             // Device reports LOGIC mode but has too few channels.
             // Force a mode cycle to reinitialize.
             _device->set_work_mode(DSO);
-            if (is_gui_mode()) QCoreApplication::processEvents();
             _device->set_work_mode(LOGIC);
             _session->init_signals();
         }
-        if (is_gui_mode()) {
-            QCoreApplication::processEvents();
-            QCoreApplication::processEvents();
-        }
+        // processEvents() removed (Phase 2): the UI will process pending
+        // signals_changed events asynchronously when the main thread returns
+        // to the event loop. The subsequent configuration steps do not depend
+        // on the UI being updated.
     }
 }
 
@@ -751,74 +782,50 @@ Result<void> SessionService::wait_capture_complete(uint64_t timeout_ms) {
         return Result<void>::Fail(ErrorCode::InvalidState,
                                  "Unexpected capture state");
 
-    // Block until capture stops or timeout.
+    // Phase 1: use condition_variable to wait, completely bypassing the Qt
+    // event queue. The worker thread (DeviceSessionStopped) sets
+    // _is_working=false + notify_all() directly, so cv.wait_for is woken
+    // immediately — no QEventLoop::exec() or processEvents() needed.
     //
-    // CRITICAL: We must always use QEventLoop (not condition_variable) in
-    // BOTH GUI and headless modes. EventBus::dispatch_to posts callbacks
-    // (frame_ended, update_capture) to the main thread via
-    // QCoreApplication::postEvent. If the main thread is blocked in
-    // _wait_cv.wait_for(), those posted events never get processed,
-    // _wait_cv.notify_all() is never called, and the wait deadlocks.
-    //
-    // QEventLoop::exec() pumps the Qt event queue so posted callbacks
-    // are delivered, while a check_timer polls the capture state directly.
-    _wait_capture_stop_flag = false;
-
-    {
-        QEventLoop loop;
-        QTimer timeout_timer;
-        timeout_timer.setSingleShot(true);
-
-        QObject::connect(&timeout_timer, &QTimer::timeout, &loop, [&]() {
-            _wait_capture_stop_flag = false;
-            loop.quit();
-        });
-
-        // Check capture state periodically via a repeating timer.
-        QTimer check_timer;
-        int check_count = 0;
-        QObject::connect(&check_timer, &QTimer::timeout, &loop, [&]() {
-            bool working = _session->is_working();
-            bool running = _session->is_running_status();
-            check_count++;
-            if (check_count % 10 == 1) { // log every ~1s
-                pxv_info("wait_capture check#%d: is_working=%d is_running=%d",
-                         check_count, working, running);
-            }
-            if (!working && !running) {
-                pxv_info("wait_capture: capture complete detected at check#%d", check_count);
-                _wait_capture_stop_flag = true;
-                loop.quit();
-            }
-            // Fallback: if the libsigrok session has stopped (is_running=0)
-            // but is_working is still true, the SessionStopped event was
-            // likely suppressed by the EventBus broadcast depth guard
-            // (caused by processEvents() re-entrancy). Force-release the
-            // capture state to avoid an infinite wait.
-            if (!running && working && check_count > 20) {
-                pxv_warn("wait_capture: session stopped but is_working stuck "
-                         "(SessionStopped event likely suppressed). "
-                         "Force-releasing capture state at check#%d.", check_count);
-                _session->force_release_capture_state();
-                _wait_capture_stop_flag = true;
-                loop.quit();
-            }
-        });
-
-        timeout_timer.start(static_cast<int>(timeout_ms));
-        check_timer.start(100); // check every 100 ms
-
-        loop.exec();
-
-        check_timer.stop();
-        timeout_timer.stop();
-    }
-
-    if (_wait_capture_stop_flag)
+    // This breaks the previous circular dependency:
+    //   wait_capture_complete → QEventLoop::exec → needs SessionStopped event
+    //   → SessionStopped posted via broadcast_async → needs event queue pump
+    //   → main thread blocked in QEventLoop::exec → deadlock
+    bool ok = _session->get_state()->wait_for_capture_complete(timeout_ms);
+    if (ok)
         return Result<void>::Success();
 
+    // Timeout fallback: force-release the capture state to avoid leaving
+    // the session in a stuck state (e.g. hardware error preventing
+    // sr_session_run() from returning).
+    pxv_warn("wait_capture_complete: timed out after %llu ms, "
+             "force-releasing capture state.",
+             (unsigned long long)timeout_ms);
+    _session->force_release_capture_state();
     return Result<void>::Fail(ErrorCode::SessionBusy,
                              "Capture wait timed out");
+}
+
+Result<void> SessionService::wait_for_decode_complete(uint64_t timeout_ms) {
+    if (!_session)
+        return Result<void>::Fail(ErrorCode::InternalError,
+                                 "Session is nullptr");
+
+    // Phase 3: Use SharedState to wait for decode completion, bypassing
+    // the Qt event queue. The decode thread (DecodeTaskManager) broadcasts
+    // DecodeDone, which triggers SigSession::on_event(DecodeDone) on the
+    // main thread, which calls _state->notify_decode_complete() to signal
+    // the SharedState. This wait() is woken directly by the cv.notify_all()
+    // inside SharedState::set_result(), with no dependency on event queue
+    // pumping.
+    //
+    // Mirrors Logic2's SharedState::WaitOnState() pattern
+    // (task_executor.h:209-224).
+    bool ok = _session->get_state()->wait_for_decode_complete(timeout_ms);
+    if (ok)
+        return Result<void>::Success();
+    return Result<void>::Fail(ErrorCode::SessionBusy,
+                             "Decode wait timed out");
 }
 
 Result<int> SessionService::configure_and_start(
@@ -903,10 +910,10 @@ Result<int> SessionService::configure_and_start(
     // Step 2d: Apply trigger types to SignalModel (drives UI rendering).
     apply_trigger_to_signal_models(trigger_channel_index, trigger_type, linked_channels);
 
-    // Let UI process signals_changed event. Skip in headless mode.
-    if (is_gui_mode()) QCoreApplication::processEvents();
+// processEvents() removed (Phase 2): UI will process signals_changed
+// asynchronously. Sample rate config does not depend on UI state.
 
-    // Step 3: Set sample rate
+// Step 3: Set sample rate
     if (digital_sample_rate > 0) {
         bool ok = _device->set_config_uint64(SR_CONF_SAMPLERATE, digital_sample_rate);
         if (!ok)
@@ -946,10 +953,10 @@ Result<int> SessionService::configure_and_start(
         capture_mode, repeat_interval_seconds,
         capture_ratio, duration_seconds, sample_count);
 
-    // Let UI process pending config change events before starting.
-    if (is_gui_mode()) QCoreApplication::processEvents();
+// processEvents() removed (Phase 2): UI will process config change events
+// asynchronously. start_capture() reads from device/session state, not UI.
 
-    // Step 8: Start capture
+// Step 8: Start capture
     bool ok = _session->start_capture(instant, api_document());
     if (!ok)
         return Result<int>::Fail(ErrorCode::DeviceError,
@@ -993,11 +1000,13 @@ CaptureState SessionService::get_capture_state() const {
     if (!_session)
         return CaptureState::Empty;
 
-    if (_session->is_running_status())
+    // Plan B Phase 4: use atomic state snapshot for consistent reads.
+    auto snap = _session->get_state()->get_capture_state_snapshot();
+    if (snap.device_status == ST_RUNNING)
         return CaptureState::Recording;
-    if (_session->is_working())
+    if (snap.is_working)
         return CaptureState::Starting;
-    if (_session->is_init_status())
+    if (snap.device_status == ST_INIT)
         return CaptureState::Empty;
 
     // Stopped with data
@@ -2833,39 +2842,41 @@ auto *root_decoder = stack.front().get();
             find_stack_by_instance_id(stacks_for_wait, instance_id);
 
         if (decoder_stack) {
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
-            QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            // Plan B Phase 2: replace QEventLoop polling with direct
+            // atomic polling + sleep_for. This avoids pumping the Qt event
+            // queue while waiting, which could cause re-entrant event
+            // processing and state corruption. The polled flags
+            // (is_copy_in_progress, IsRunning, get_progress) are all
+            // std::atomic, so they are safe to read from the main thread
+            // without holding any lock.
 
-            // First, wait for copy_data_to_document to complete if it's
-            // still in progress. The CopyToDocDone handler will
-            // start the decode task for our new decoder.
+            // 1. Wait for copy_data_to_document to complete.
+            //    copy_data_to_document is now zero-copy (instant), so this
+            //    loop almost never iterates. Keep it as a safety net.
             {
                 int wait_count = 0;
                 while (_session->is_copy_in_progress() && wait_count < 200) {
-                    timer.start(100);
-                    loop.exec();
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(100));
                     wait_count++;
                 }
             }
 
-            // Wait for decode to start
-            int wait_count = 0;
-            while (!decoder_stack->IsRunning() && wait_count < 50) {
-                timer.start(100);
-                loop.exec();
-                wait_count++;
-                if (decoder_stack->get_progress() >= 100)
-                    break;
+            // 2. Wait for decode to start (or finish instantly).
+            {
+                int wait_count = 0;
+                while (!decoder_stack->IsRunning() && wait_count < 50) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(100));
+                    wait_count++;
+                    if (decoder_stack->get_progress() >= 100)
+                        break;
+                }
             }
 
             // Remove this decoder on the main thread. invoke_or_call() runs
             // inline when the caller is already on the main thread (the common
             // MCP case) and otherwise dispatches via BlockingQueuedConnection.
-            // This replaces the previous QueuedConnection + condition_variable
-            // wait pattern which DEADLOCKED when the caller blocked the main
-            // thread inside loop.exec()/wait().
             auto remove_this_stack = [this, decoder_stack]() {
                 auto &stacks = _session->get_decoder_stacks(api_document());
                 for (size_t i = 0; i < stacks.size(); i++) {
@@ -2877,13 +2888,12 @@ auto *root_decoder = stack.front().get();
                 }
             };
 
-            // Poll until decode completes
+            // 3. Poll until decode completes.
             while (decoder_stack->IsRunning()) {
-                timer.start(100);
-                loop.exec();
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(100));
 
                 if (!decoder_stack->error_message().isEmpty()) {
-                    // Remove decoder with error on main thread.
                     invoke_or_call(qApp, remove_this_stack);
                     return Result<std::string>::Fail(
                         ErrorCode::DecoderError,
@@ -4065,12 +4075,7 @@ void SessionService::update_capture() {
         _session->get_capture_status(triggered, progress);
     }
     broadcast_event(ServiceEvent::CaptureProgress,
-                    {{"progress", std::to_string(progress)}});
-
-    // Wake up any headless wait_capture_complete() waiter so its predicate
-    // can re-check the session state. In GUI mode this is a no-op (no one
-    // is waiting on the cv).
-    _wait_cv.notify_all();
+{{"progress", std::to_string(progress)}});
 }
 
 void SessionService::cur_snap_samplerate_changed() {
@@ -4088,10 +4093,7 @@ void SessionService::receive_trigger(quint64 trigger_pos) {
 }
 
 void SessionService::frame_ended() {
-    broadcast_event(ServiceEvent::FrameEnded);
-
-    // Wake up wait_capture_complete() in headless mode.
-    _wait_cv.notify_all();
+broadcast_event(ServiceEvent::FrameEnded);
 }
 
 void SessionService::frame_began() {
@@ -4132,190 +4134,6 @@ void SessionService::receive_header() {
 void SessionService::delay_prop_msg(QString strMsg) {
     broadcast_event(ServiceEvent::ErrorOccurred,
                     {{"message", strMsg.toStdString()}});
-}
-
-// ===========================================================================
-// IEventListener implementation
-// ===========================================================================
-
-// The 4 PREV ordering events are emitted via broadcast_sync<XxxPrev>({}).
-// The 32 notification events are emitted via broadcast_async<TypedEvent>({}).
-// Each handler re-broadcasts as a ServiceEvent for MCP/WS clients, mirroring
-// the former int-message switch cases verbatim.
-
-void SessionService::on_event(const pv::interface::StoreConfPrev &) {
-    broadcast_event(ServiceEvent::SaveComplete,
-                    {{"detail", "store_conf_prev"}});
-}
-
-void SessionService::on_event(const pv::interface::CurrentDeviceChangePrev &) {
-    // No former case for this code — SessionService did not handle
-    // CurrentDeviceChangePrev. Empty override satisfies the
-    // IEventListener virtual dispatch.
-}
-
-void SessionService::on_event(const pv::interface::StartCollectWorkPrev &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "start_collect_prev"}});
-}
-
-void SessionService::on_event(const pv::interface::EndCollectWorkPrev &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "end_collect_prev"}});
-}
-
-void SessionService::on_event(const pv::interface::StartCollectWork &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "start_collect"}});
-}
-
-void SessionService::on_event(const pv::interface::CollectStart &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "collect_start"}});
-}
-
-void SessionService::on_event(const pv::interface::CollectEnd &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "collect_end"}});
-}
-
-void SessionService::on_event(const pv::interface::EndCollectWork &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"detail", "end_collect"}});
-}
-
-void SessionService::on_event(const pv::interface::RevEndPacket &) {
-    broadcast_event(ServiceEvent::DataUpdated,
-                    {{"detail", "end_packet"}});
-}
-
-void SessionService::on_event(const pv::interface::CaptureStateChanged &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged);
-}
-
-void SessionService::on_event(const pv::interface::DeviceListUpdated &) {
-    broadcast_event(ServiceEvent::DeviceListUpdated);
-}
-
-void SessionService::on_event(const pv::interface::DeviceModeChanged &) {
-    broadcast_event(ServiceEvent::DeviceModeChanged);
-}
-
-void SessionService::on_event(const pv::interface::DeviceConfigUpdated &) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged);
-}
-
-void SessionService::on_event(const pv::interface::DeviceDetached &) {
-    broadcast_event(ServiceEvent::DeviceDetached);
-}
-
-void SessionService::on_event(const pv::interface::UsbDeviceArrived &) {
-    broadcast_event(ServiceEvent::NewUsbDevice);
-}
-
-void SessionService::on_event(const pv::interface::CurrentDeviceChanged &) {
-    broadcast_event(ServiceEvent::DeviceModeChanged,
-                    {{"detail", "device_changed"}});
-}
-
-void SessionService::on_event(const pv::interface::DeviceOptionsUpdated &) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged,
-                    {{"detail", "options_updated"}});
-}
-
-void SessionService::on_event(const pv::interface::DsoViewOptionChanged &ev) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged,
-                    {{"detail", "dso_view_option"},
-                     {"channel_index", std::to_string(ev.channel_index)}});
-}
-
-void SessionService::on_event(const pv::interface::SampleRateChanged &) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged,
-                    {{"detail", "duration_updated"}});
-}
-
-void SessionService::on_event(const pv::interface::CollectModeChanged &) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged,
-                    {{"detail", "collect_mode_changed"}});
-}
-
-void SessionService::on_event(const pv::interface::DataPoolChanged &) {
-    broadcast_event(ServiceEvent::DataUpdated,
-                    {{"detail", "data_pool_changed"}});
-}
-
-void SessionService::on_event(const pv::interface::SimpleTriggerChanged &) {
-    broadcast_event(ServiceEvent::DeviceConfigChanged,
-                    {{"detail", "trigger_changed"}});
-}
-
-void SessionService::on_event(const pv::interface::GlitchFilterStarted &) {
-    broadcast_event(ServiceEvent::GlitchFilterStarted);
-}
-
-void SessionService::on_event(const pv::interface::GlitchFilterProgress &) {
-    broadcast_event(ServiceEvent::GlitchFilterProgress);
-}
-
-void SessionService::on_event(const pv::interface::GlitchFilterCompleted &) {
-    broadcast_event(ServiceEvent::GlitchFilterCompleted);
-}
-
-void SessionService::on_event(const pv::interface::GlitchFilterCleared &) {
-    broadcast_event(ServiceEvent::GlitchFilterCleared);
-}
-
-void SessionService::on_event(const pv::interface::SignalInvertStarted &) {
-    broadcast_event(ServiceEvent::SignalInvertStarted);
-}
-
-void SessionService::on_event(const pv::interface::SignalInvertCompleted &) {
-    broadcast_event(ServiceEvent::SignalInvertCompleted);
-}
-
-void SessionService::on_event(const pv::interface::SignalInvertCleared &) {
-    broadcast_event(ServiceEvent::SignalInvertCleared);
-}
-
-void SessionService::on_event(const pv::interface::CopyToDocDone &) {
-    broadcast_event(ServiceEvent::DataUpdated,
-                    {{"detail", "copy_to_doc_done"}});
-}
-
-void SessionService::on_event(const pv::interface::SampleCountUpdated &) {
-    broadcast_event(ServiceEvent::DataUpdated,
-                    {{"detail", "sample_count_updated"}});
-}
-
-void SessionService::on_event(const pv::interface::ActiveDocumentChanged &) {
-    broadcast_event(ServiceEvent::ChannelConfigChanged,
-                    {{"change", "active_document"}});
-}
-
-void SessionService::on_event(const pv::interface::CopyInProgressChanged &) {
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"change", "copy_in_progress"}});
-}
-
-void SessionService::on_event(const pv::interface::CaptureOwnerChanged &ev) {
-    // new_owner non-nullptr = capture in progress, nullptr = idle.
-    broadcast_event(ServiceEvent::CaptureStateChanged,
-                    {{"change", "capture_owner"},
-                     {"is_working", ev.new_owner ? "true" : "false"}});
-}
-
-void SessionService::on_event(const pv::interface::TrigNextCollect &) {
-    broadcast_event(ServiceEvent::TriggerReceived,
-                    {{"detail", "next_collect"}});
-}
-
-void SessionService::on_event(const pv::interface::SaveComplete &) {
-    broadcast_event(ServiceEvent::SaveComplete);
-}
-
-void SessionService::on_event(const pv::interface::ClearDecodeData &) {
-    broadcast_event(ServiceEvent::DecodeDone,
-                    {{"detail", "clear_decode_data"}});
 }
 
 // ===========================================================================

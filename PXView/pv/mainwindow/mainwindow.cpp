@@ -213,7 +213,7 @@ MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
   _device_agent = _session->get_device();
 // Phase 2: initialise the config I/O delegate.
 _config_io = std::make_unique<MainWindowConfigIO>(this);
-_event_dispatcher = std::make_unique<SessionEventDispatcher>(this);
+_event_dispatcher = std::make_unique<SessionEventDispatcher>(this, _session->get_event_bus());
 _tab_manager = std::make_unique<TabManager>(this);
 _dock_manager = std::make_unique<DockManager>(this);
 _theme_manager = std::make_unique<MainWindowThemeManager>(this);
@@ -681,70 +681,9 @@ MainWindow::build_channel_layout(pv::view::View *view) {
 }
 
 // ---------------------------------------------------------------------------
-// IEventListener forwarding — Phase 2: all 45 on_event overrides delegate to
-// _event_dispatcher (SessionEventDispatcher). The actual handler bodies live
-// in mainwindow_event_dispatcher.cpp.
+// IEventListener forwarding removed — SessionEventDispatcher now registers
+// directly with EventBus via subscribe<T>(). No forwarding needed.
 // ---------------------------------------------------------------------------
-
-void MainWindow::on_event(const pv::interface::CaptureStateChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CaptureOwnerChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::TriggerConfigChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SampleCountUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceOptionsUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DsoViewOptionChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::ActiveDocumentChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CopyToDocDone &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DecodeDone &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SignalsChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DataUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceModeChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CollectModeChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceListUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CurrentDeviceChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceOpenFailed &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::UsbDeviceArrived &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceDetached &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SampleRateChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SaveComplete &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::StartCollectWork &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CollectStart &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CollectEnd &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::EndCollectWork &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::EndDeviceOptions &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DeviceConfigUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DemoModeChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DataPoolChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SimpleTriggerChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::GlitchFilterStarted &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::GlitchFilterProgress &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::GlitchFilterCompleted &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::GlitchFilterCleared &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SignalInvertStarted &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SignalInvertCompleted &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SignalInvertCleared &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CopyInProgressChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::TrigNextCollect &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::ClearDecodeData &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::AppOptionsChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::FontOptionsChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::ShortcutChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::StyleChanged &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::StoreConfPrev &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CurrentDeviceChangePrev &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::StartCollectWorkPrev &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::EndCollectWorkPrev &e) { _event_dispatcher->on_event(e); }
-// Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
-void MainWindow::on_event(const pv::interface::DataLenUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::HeaderReceived &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::CaptureUpdated &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::ShowRegion &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::RepeatHold &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::TriggerReceived &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::ShowWaitTrigger &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SessionError &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SaveRequested &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::DelayedPropMsg &e) { _event_dispatcher->on_event(e); }
-void MainWindow::on_event(const pv::interface::SampleLimitsChanged &e) { _event_dispatcher->on_event(e); }
 
 // ---------------------------------------------------------------------------
 // IServiceEventListener — forwarded to SessionEventDispatcher (Phase 2).

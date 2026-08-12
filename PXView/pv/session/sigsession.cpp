@@ -117,11 +117,28 @@ SigSession::SigSession() {
   // through broadcast<T>() / broadcast_sync<T>() / broadcast_async<T>().
   _event_bus = std::make_unique<core::EventBus>();
   _state->set_event_bus(_event_bus.get());
-  // SigSession is now an IEventListener. It registers to receive the 5
-  // Core-internal state-machine typed events whose logic lives in on_event
-  // overrides (DeviceOptionsUpdated / TrigNextCollect / RevEndPacket /
-  // CopyToDocDone / DeviceSpeedNotMatch).
-  _event_bus->add_event_listener(this);
+  // Register event handlers via subscribe<T>() (replaces IEventListener).
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::DeviceOptionsUpdated>(
+          [this](const interface::DeviceOptionsUpdated &) { on_device_options_updated(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::TrigNextCollect>(
+          [this](const interface::TrigNextCollect &) { on_trig_next_collect(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::RevEndPacket>(
+          [this](const interface::RevEndPacket &) { on_rev_end_packet(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::CopyToDocDone>(
+          [this](const interface::CopyToDocDone &) { on_copy_to_doc_done(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::DeviceSpeedNotMatch>(
+          [this](const interface::DeviceSpeedNotMatch &) { on_device_speed_not_match(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::SessionStopped>(
+          [this](const interface::SessionStopped &) { on_session_stopped_event(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::DecodeDone>(
+          [this](const interface::DecodeDone &) { on_decode_done_event(); }));
 
   // Managers are constructed after _event_bus (they hold a raw pointer to it)
   // and after _state (they hold a raw pointer to it). FilterProcessor accesses
@@ -533,7 +550,8 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   // MainWindow can close modal dialogs / hide calibration / delete protocols
   // / reload the view BEFORE the old device is released below.
   // Caller (set_device) is on the main thread (user-initiated action).
-  _event_bus->broadcast_sync<interface::CurrentDeviceChangePrev>({});
+  // Plan B Phase 1: broadcast_sync → broadcast_async.
+  _event_bus->broadcast_async<interface::CurrentDeviceChangePrev>({});
   // Release the old device.
   _state->device_agent().release();
   _state->set_device_status(ST_INIT);
@@ -1883,9 +1901,7 @@ void SigSession::Close() {
   // destruction.
   _filter_processor->stop();
 
-  // Join any in-flight background copy thread before tearing down data
-  // (a joinable std::thread would otherwise std::terminate on destruction).
-  join_copy_thread();
+// Gap 3: join_copy_thread removed — zero-copy, no thread to join.
 
   for (auto &p : _state->data_list()) {
     p->clear();
@@ -1981,11 +1997,11 @@ Snapshot *SigSession::get_signal_snapshot() {
 // safe via qApp queue).
 // ============================================================================
 
-void SigSession::on_event(const interface::DeviceOptionsUpdated &) {
+void SigSession::on_device_options_updated() {
   reload();
 }
 
-void SigSession::on_event(const interface::TrigNextCollect &) {
+void SigSession::on_trig_next_collect() {
   if (_state->is_working() && is_repeat_mode()) {
     // Note: We do NOT call clear_all_decode_task() here. The decoder SIGSEGV
     // is now prevented by two other fixes:
@@ -2020,7 +2036,7 @@ void SigSession::on_event(const interface::TrigNextCollect &) {
   }
 }
 
-void SigSession::on_event(const interface::RevEndPacket &) {
+void SigSession::on_rev_end_packet() {
   pxv_info("SigSession::on_event(RevEndPacket): mode=%d stream=%d single=%d",
            _state->device_agent().get_work_mode(),
            _capture_manager->is_stream_mode(),
@@ -2148,7 +2164,7 @@ void SigSession::on_event(const interface::RevEndPacket &) {
   }
 }
 
-void SigSession::on_event(const interface::CopyToDocDone &) {
+void SigSession::on_copy_to_doc_done() {
   // copy_data_to_document has completed (now synchronous/instant — zero-copy
   // shared_ptr sharing). Start decoders.
   // NOTE: _capture_owner_document is NOT cleared here for repeat/loop mode —
@@ -2164,7 +2180,7 @@ void SigSession::on_event(const interface::CopyToDocDone &) {
   // 发生竞争（第二次采集不自动停止的根因）。
 }
 
-void SigSession::on_event(const interface::DeviceSpeedNotMatch &) {
+void SigSession::on_device_speed_not_match() {
   QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DEVICE_SPEED_TOO_LOW),
                      "Speed too low!"));
   delay_prop_msg(strMsg);
@@ -2184,37 +2200,48 @@ void SigSession::DeviceConfigChanged() {
 
 void SigSession::DeviceSessionStopped() {
   // Called from DeviceAgent's worker thread AFTER sr_session_run() returned.
-  // Re-broadcast as a typed event via broadcast_async so listeners run on the
-  // main thread. CaptureManager listens for this and releases the
-  // CaptureOwnerGuard (which sets _is_working=false + broadcasts
-  // EndCollectWork). This is the upstream replacement for fork libsigrok's
-  // DS_EV_COLLECT_TASK_END.
-  pxv_info("DeviceSessionStopped: sr_session_run() returned, broadcasting SessionStopped.");
+  //
+  // Phase 1 refactoring: set _is_working=false + notify the condition_variable
+  // DIRECTLY on the worker thread, BEFORE broadcasting SessionStopped. This
+  // allows wait_capture_complete() (main thread) to be woken via cv.wait_for
+  // instead of QEventLoop::exec(), breaking the circular dependency where
+  // the main thread was blocked in QEventLoop and couldn't pump the event
+  // queue to receive the SessionStopped event.
+  //
+  // The SessionStopped broadcast_async is still sent for UI notification
+  // (main-thread cleanup: release_capture_owner, EndCollectWork, etc.).
+  pxv_info("DeviceSessionStopped: sr_session_run() returned, "
+           "setting is_working=false + notifying cv, then broadcasting SessionStopped.");
+  _state->notify_capture_complete();
   _event_bus->broadcast_async<interface::SessionStopped>({});
 }
 
-void SigSession::on_event(const interface::SessionStopped &) {
+void SigSession::on_session_stopped_event() {
   // Main-thread handler for the SessionStopped event re-broadcast by
   // DeviceSessionStopped().
   //
-  // Idempotency: action_stop_capture (manual stop) already calls
-  // set_is_working(false) + release_capture_owner() + EndCollectWork before
-  // the worker thread's DeviceSessionStopped callback is dispatched (the
-  // callback is broadcast_async, queued behind the current synchronous
-  // action_stop_capture call). is_working()==false here means the guard was
-  // already released — skip to avoid a redundant EndCollectWork broadcast.
-  if (!_state->is_working()) {
-    pxv_info("SigSession::on_event(SessionStopped): is_working already false, "
-             "guard already released (manual stop path). Skipping.");
+  // Phase 1 refactoring: _is_working is now set to false by
+  // DeviceSessionStopped() on the worker thread (via notify_capture_complete),
+  // BEFORE this handler runs. So we can no longer use is_working() to
+  // distinguish the manual-stop path from the auto-stop path.
+  //
+  // Instead, we use has_capture_owner() as the guard: if the CaptureOwnerGuard
+  // was already released by action_stop_capture (manual stop), skip cleanup.
+  // If the guard is still held (auto-stop), proceed with main-thread cleanup.
+  if (!_document_registry->has_capture_owner()) {
+    pxv_info("SigSession::on_event(SessionStopped): capture owner already "
+             "released (manual stop path). Skipping cleanup.");
     return;
   }
 
   // Auto-stop path (capture completed normally, sr_session_run() returned).
-  // Matches DSView's DS_EV_COLLECT_TASK_END handler (Reference/DSView-master/
-  // DSView/pv/sigsession.cpp:2112-2121): in repeat mode, keep _is_working=true
-  // and the CaptureOwnerGuard alive, and broadcast TrigNextCollect to trigger
-  // the next collection. In all other modes, release the guard (sets
-  // _is_working=false) and broadcast EndCollectWork.
+  // _is_working was already set to false by DeviceSessionStopped() on the
+  // worker thread — no need to set it here.
+  //
+  // Matches DSView's DS_EV_COLLECT_TASK_END handler: in repeat mode, keep
+  // _is_working and the CaptureOwnerGuard alive, and broadcast
+  // TrigNextCollect to trigger the next collection. In all other modes,
+  // release the guard and broadcast EndCollectWork.
   if (is_repeat_mode()) {
     pxv_info("SigSession::on_event(SessionStopped): repeat mode — keeping "
              "guard alive, broadcasting TrigNextCollect.");
@@ -2223,12 +2250,18 @@ void SigSession::on_event(const interface::SessionStopped &) {
   } else {
     pxv_info("SigSession::on_event(SessionStopped): releasing CaptureOwnerGuard "
              "(auto-stop path).");
-    _state->set_is_working(false);
     _capture_manager->data_unlock();
-    _event_bus->broadcast_sync<interface::EndCollectWorkPrev>({});
+    // Plan B Phase 1: broadcast_sync → broadcast_async.
+    _event_bus->broadcast_async<interface::EndCollectWorkPrev>({});
     _document_registry->release_capture_owner();
     _event_bus->broadcast_async<interface::EndCollectWork>({});
   }
+}
+
+void SigSession::on_decode_done_event() {
+  // Phase 3: Signal the SharedState so that wait_for_decode_complete()
+  // (API/RPC layer) is woken without depending on the Qt event queue.
+  _state->notify_decode_complete();
 }
 
 void SigSession::force_release_capture_state() {
@@ -2252,7 +2285,8 @@ void SigSession::force_release_capture_state() {
            "(SessionStopped event was suppressed by EventBus).");
   _state->set_is_working(false);
   _capture_manager->data_unlock();
-  _event_bus->broadcast_sync<interface::EndCollectWorkPrev>({});
+  // Plan B Phase 1: broadcast_sync → broadcast_async.
+  _event_bus->broadcast_async<interface::EndCollectWorkPrev>({});
   _document_registry->release_capture_owner();
   _event_bus->broadcast_async<interface::EndCollectWork>({});
 }
@@ -2600,9 +2634,6 @@ void SigSession::clear_capture_owner_document(data::SessionDocument *doc) {
   _document_registry->clear_capture_owner_document(doc);
 }
 
-void SigSession::join_copy_thread() {
-  _document_registry->join_copy_thread();
-}
 
 bool SigSession::is_copy_in_progress() const {
   return _document_registry->is_copy_in_progress();

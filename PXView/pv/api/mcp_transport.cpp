@@ -4,11 +4,12 @@
 
 #include "pv/core/eventbus.h"
 #include <QCoreApplication>
-#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QThread>
-#include <QTimer>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 using json = nlohmann::json;
 
@@ -609,30 +610,33 @@ void McpTransport::handle_sse_wait_capture(QTcpSocket* socket,
     (void)timeout_seconds;
 
     // Dispatch the wait_capture call to the handler.
-    // The handler's wait_capture_complete uses its own QEventLoop internally,
-    // which processes Qt events. We add a progress timer that fires during
-    // that event loop to send SSE progress events.
+    //
+    // Gap 7 fix: wait_capture_complete() now uses SharedState::wait() (cv),
+    // which does NOT pump the Qt event queue. A QTimer would never fire.
+    // Fix: run the progress pusher on a separate std::thread that is
+    // independent of the Qt event loop.
     int elapsed_ms = 0;
     const int progress_interval_ms = 500;
+    std::atomic<bool> progress_done{false};
 
-    QTimer progress_timer;
-    progress_timer.setSingleShot(false);
-
-    QObject::connect(&progress_timer, &QTimer::timeout, [&]() {
-        json progress_data;
-        progress_data["status"] = "capturing";
-        progress_data["elapsed_seconds"] = elapsed_ms / 1000.0;
-        send_sse_event(socket, "progress", progress_data.dump());
-        elapsed_ms += progress_interval_ms;
+    std::thread progress_thread([&]() {
+        while (!progress_done.load()) {
+            json progress_data;
+            progress_data["status"] = "capturing";
+            progress_data["elapsed_seconds"] = elapsed_ms / 1000.0;
+            send_sse_event(socket, "progress", progress_data.dump());
+            elapsed_ms += progress_interval_ms;
+            // Sleep in small increments to check progress_done promptly
+            for (int i = 0; i < progress_interval_ms / 50 && !progress_done.load(); i++)
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
     });
 
-    progress_timer.start(progress_interval_ms);
-
-    // This call blocks internally using QEventLoop, but the progress timer
-    // fires during that event loop since Qt processes timer events.
+    // This call blocks using SharedState::wait() — no Qt event queue pumping.
     JsonRpcResponse resp = _handler->handle_request(req);
 
-    progress_timer.stop();
+    progress_done.store(true);
+    progress_thread.join();
 
     // Build the final MCP response
     json resp_json;

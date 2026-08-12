@@ -25,9 +25,8 @@ DecodeTaskManager::DecodeTaskManager(EventBus *bus, ISessionState *state, ISessi
 DecodeTaskManager::~DecodeTaskManager() { stop(); }
 
 void DecodeTaskManager::stop() {
-  // P0-2 fix: request stop on all running tasks BEFORE joining, so decode
-  // threads actually exit their work loops. Without this, join() would wait
-  // indefinitely for a decoder that's still processing data.
+  // P0-2 fix: request stop on all running tasks BEFORE shutting down the
+  // pool, so decode threads actually exit their work loops.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     for (auto &stack : _running_tasks) {
@@ -36,24 +35,10 @@ void DecodeTaskManager::stop() {
     }
   }
 
-  // P0-1A fix: "lock-swap-unlock-join" pattern. We must NOT hold
-  // _running_tasks_mutex while calling join(), because the worker threads
-  // need to acquire it in decode_single_task() to finish their cleanup.
-  // Holding the lock during join() creates a classic deadlock:
-  //   main thread: holds lock → join → waits for worker
-  //   worker thread: waits for lock → can never finish
-  // The fix: atomically swap the thread vector out under the lock, then
-  // release the lock and join outside the critical section.
-  std::vector<std::thread> threads_to_join;
-  {
-    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
-    threads_to_join.swap(_decode_threads);
-  }
-  // Join outside the lock — workers can now acquire it to finish cleanup.
-  for (auto &t : threads_to_join) {
-    if (t.joinable())
-      t.join();
-  }
+  // Plan B Phase 3: ThreadPool::shutdown() joins all worker threads.
+  // No need for the old lock-swap-unlock-join pattern — ThreadPool
+  // handles it internally.
+  _decode_pool.shutdown();
 
   // After all threads are joined, clear _running_tasks.
   {
@@ -103,16 +88,8 @@ void DecodeTaskManager::add_decode_task(
   // start_all_decode_tasks() and rst_decoder().
   attach_data_to_signal(_state->view_data());
 
-  // L-2 fix: create the thread object BEFORE entering the critical section.
-  // Creating a std::thread starts the OS thread immediately, and the new
-  // thread will try to acquire _running_tasks_mutex in decode_single_task().
-  // If we create it while holding the lock, the new thread blocks until we
-  // release — unnecessary contention, especially when batch-starting N
-  // decoders. By creating the thread first and then moving it into the
-  // vector under the lock, we avoid this.
-  std::thread new_thread(
-      &DecodeTaskManager::decode_single_task, this, stack);
-
+  // Plan B Phase 3: use ThreadPool instead of raw std::thread.
+  // ThreadPool manages thread lifetime — no manual join needed.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     // 防止重复添加:RevEndPacket 和 CopyToDocDone 都会调用
@@ -123,20 +100,18 @@ void DecodeTaskManager::add_decode_task(
         pxv_info("DecodeTaskManager::add_decode_task: stack %p already "
                  "running, skip duplicate",
                  stack.get());
-        // Thread was already started — add it to _decode_threads so that
-        // stop()/clear_all_decode_task() will join it. Previously this used
-        // detach(), which left the thread accessing `this` (DecodeTaskManager*)
-        // after potential destruction — a use-after-free risk. The thread
-        // will quickly exit because begin_decode_work() returns immediately
-        // when _decode_state != Stopped, and decode_single_task() will find
-        // the task absent from _running_tasks.
-        _decode_threads.push_back(std::move(new_thread));
         return;
       }
     }
     _running_tasks.push_back(stack);
-    _decode_threads.push_back(std::move(new_thread));
   }
+
+  // Submit to thread pool — task runs on a pool worker thread.
+  // Capture stack by value (shared_ptr copy) to keep it alive.
+  auto self = this;
+  _decode_pool.submit([self, stack]() {
+    self->decode_single_task(stack);
+  });
 }
 
 void DecodeTaskManager::remove_decode_task(
@@ -177,19 +152,11 @@ void DecodeTaskManager::clear_all_decode_task(int &runningDex) {
     }
   }
 
-  // Phase 2: P0-1A fix — swap threads out under lock, then join WITHOUT
-  // holding the lock. Worker threads need the lock to finish cleanup.
-  std::vector<std::thread> threads_to_join;
-  {
-    std::lock_guard<std::mutex> lock(_running_tasks_mutex);
-    threads_to_join.swap(_decode_threads);
-  }
-  for (auto &t : threads_to_join) {
-    if (t.joinable())
-      t.join();
-  }
+  // Plan B Phase 3: ThreadPool::wait_for_idle() replaces the old
+  // lock-swap-unlock-join pattern. Wait for all decode tasks to finish.
+  _decode_pool.wait_for_idle();
 
-  // Phase 3: clear _running_tasks after all threads are joined.
+  // Clear _running_tasks after all tasks are done.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     _running_tasks.clear();
@@ -230,6 +197,14 @@ void DecodeTaskManager::decode_single_task(
           _state->view_data()->get_logic() != nullptr) {
         _state->view_data()->get_logic()->decode_end();
       }
+      // Phase 3 fix: signal the SharedState DIRECTLY on the decode thread,
+      // BEFORE broadcasting DecodeDone. This allows wait_for_decode_complete()
+      // (main thread) to be woken via cv.wait_for without depending on the
+      // Qt event queue — the same pattern used by DeviceSessionStopped() for
+      // capture-complete. Without this, the main thread would be blocked in
+      // SharedState::wait(), unable to pump the event queue to receive the
+      // DecodeDone event, creating a circular dependency (deadlock).
+      _state->notify_decode_complete();
       // B1.2: emit the typed DecodeDone event so IEventListener consumers
       // (e.g. a future headless decode-done handler) can react without going
       // through the legacy ISessionStateCallback::decode_done path (which is

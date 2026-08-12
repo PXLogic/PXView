@@ -369,88 +369,9 @@ struct SampleLimitsChanged {};
 // It is now broadcast directly from DataFeedParser::feed_in_logic /
 // feed_in_dso / feed_in_analog after each successful sample-data feed-in.
 
-// ---------------------------------------------------------------------------
-// IEventListener — typed event consumer interface.
-//
-// Each event type has its own virtual overload with a default empty
-// implementation, so a subclass overrides only the events it cares about. This
-// is non-intrusive (no CRTP, no std::variant visitor boilerplate) and keeps
-// adding a new event to a one-line change here plus the new struct above.
-//
-// Implementations MUST NOT call back into SigSession::broadcast() synchronously
-// from within an on_event() handler in a way that re-emits the same event — the
-// SigSession::broadcast<>() template carries a thread-local re-entrancy guard
-// that short-circuits nested broadcasts to prevent infinite recursion / stack
-// overflow (see sigsession.h).
-// ---------------------------------------------------------------------------
-class IEventListener {
-public:
-    virtual ~IEventListener() = default;
-
-    virtual void on_event(const CaptureStateChanged &) {}
-    virtual void on_event(const CaptureOwnerChanged &) {}
-    virtual void on_event(const TriggerConfigChanged &) {}
-    virtual void on_event(const SampleCountUpdated &) {}
-    virtual void on_event(const DeviceOptionsUpdated &) {}
-    virtual void on_event(const DsoViewOptionChanged &) {}
-    virtual void on_event(const ActiveDocumentChanged &) {}
-    virtual void on_event(const CopyToDocDone &) {}
-    virtual void on_event(const DecodeDone &) {}
-    virtual void on_event(const SignalsChanged &) {}
-    virtual void on_event(const DataUpdated &) {}
-    virtual void on_event(const DeviceModeChanged &) {}
-    virtual void on_event(const CollectModeChanged &) {}
-    virtual void on_event(const DeviceListUpdated &) {}
-    virtual void on_event(const CurrentDeviceChanged &) {}
-    virtual void on_event(const DeviceOpenFailed &) {}
-    virtual void on_event(const UsbDeviceArrived &) {}
-    virtual void on_event(const DeviceDetached &) {}
-    virtual void on_event(const SampleRateChanged &) {}
-    virtual void on_event(const SaveComplete &) {}
-    virtual void on_event(const StartCollectWork &) {}
-    virtual void on_event(const CollectStart &) {}
-    virtual void on_event(const CollectEnd &) {}
-    virtual void on_event(const EndCollectWork &) {}
-    virtual void on_event(const SessionStopped &) {}
-    virtual void on_event(const RevEndPacket &) {}
-    virtual void on_event(const EndDeviceOptions &) {}
-    virtual void on_event(const DeviceConfigUpdated &) {}
-    virtual void on_event(const DemoModeChanged &) {}
-    virtual void on_event(const DataPoolChanged &) {}
-    virtual void on_event(const SimpleTriggerChanged &) {}
-    virtual void on_event(const GlitchFilterStarted &) {}
-    virtual void on_event(const GlitchFilterProgress &) {}
-    virtual void on_event(const GlitchFilterCompleted &) {}
-    virtual void on_event(const GlitchFilterCleared &) {}
-    virtual void on_event(const SignalInvertStarted &) {}
-    virtual void on_event(const SignalInvertCompleted &) {}
-    virtual void on_event(const SignalInvertCleared &) {}
-    virtual void on_event(const CopyInProgressChanged &) {}
-    virtual void on_event(const TrigNextCollect &) {}
-    virtual void on_event(const ClearDecodeData &) {}
-    virtual void on_event(const AppOptionsChanged &) {}
-    virtual void on_event(const FontOptionsChanged &) {}
-    virtual void on_event(const ShortcutChanged &) {}
-    virtual void on_event(const StyleChanged &) {}
-    virtual void on_event(const DeviceSpeedNotMatch &) {}
-    virtual void on_event(const StoreConfPrev &) {}
-    virtual void on_event(const CurrentDeviceChangePrev &) {}
-    virtual void on_event(const StartCollectWorkPrev &) {}
-    virtual void on_event(const EndCollectWorkPrev &) {}
-
-    // Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
-    virtual void on_event(const DataLenUpdated &) {}
-    virtual void on_event(const HeaderReceived &) {}
-    virtual void on_event(const CaptureUpdated &) {}
-    virtual void on_event(const ShowRegion &) {}
-    virtual void on_event(const RepeatHold &) {}
-    virtual void on_event(const TriggerReceived &) {}
-    virtual void on_event(const ShowWaitTrigger &) {}
-    virtual void on_event(const SessionError &) {}
-    virtual void on_event(const SaveRequested &) {}
-    virtual void on_event(const DelayedPropMsg &) {}
-    virtual void on_event(const SampleLimitsChanged &) {}
-};
+// IEventListener has been removed. Event consumers now use
+// EventBus::subscribe<T>(lambda) with RAII Subscription management.
+// See pv/core/eventbus.h for the new API.
 
 } // namespace interface
 } // namespace pv

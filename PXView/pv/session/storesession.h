@@ -25,7 +25,7 @@
 
 #include <cstdint>
 #include <string>
-#include <thread>  
+#include <future>
 #include <atomic>
 #include <mutex>
 #include <QObject>
@@ -153,7 +153,7 @@ private:
     QString         _file_name;
     QString         _suffix;
     SigSession      *_session;
-	std::thread     _thread;
+	std::future<void> _save_future;
     const struct sr_output_module* _outModule;
  
 	std::atomic<uint64_t> _units_stored{0};

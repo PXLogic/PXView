@@ -3,9 +3,11 @@
 #define PXVIEW_PV_MAINWINDOW_EVENT_DISPATCHER_H
 
 #include <memory>
+#include <vector>
 #include <QPointer>
 
 #include "pv/interface/events.h"
+#include "pv/core/eventbus.h"
 
 namespace pv {
 namespace api { struct ServiceEventData; }
@@ -13,106 +15,91 @@ namespace api { struct ServiceEventData; }
 class MainWindow;
 class View;
 
-// Forward declaration so the safe_current_view() signature does not depend on
-// the full view/view.h include order (event_dispatcher.h may be parsed before
-// mainwindow.h declares pv::view::View).
 namespace view {
 class View;
 }
 
-// SessionEventDispatcher — delegate for MainWindow's IEventListener
-// implementation. Extracted during Phase 2 of the view-layer modernization
-// to reduce MainWindow's responsibilities. All 45 typed on_event overrides
-// live here; MainWindow holds a unique_ptr to this delegate and forwards
-// the IEventListener interface to it.
+// SessionEventDispatcher — handles all session events for MainWindow.
 //
-// The dispatcher is a friend of MainWindow so it can access private members
-// (toolbars, docks, session, device_agent, etc.) directly — same pattern as
-// MainWindowConfigIO.
-class SessionEventDispatcher : public pv::interface::IEventListener {
+// IEventListener has been removed. Events are registered via
+// EventBus::subscribe<T>() in the constructor, with RAII Subscription
+// management. The dispatcher accesses MainWindow's private members
+// (friend class).
+class SessionEventDispatcher {
 public:
-    explicit SessionEventDispatcher(MainWindow *window) : _window(window) {}
+    SessionEventDispatcher(MainWindow *window, core::EventBus *bus);
+    ~SessionEventDispatcher() = default;
 
-    // P0/P1: Safely resolve the current view. Returns nullptr if the owning
-    // MainWindow has been destroyed (QPointer) or no tab is active, so callers
-    // MUST null-check before dereferencing.
     pv::view::View *safe_current_view() const;
 
-    // --- IEventListener: 45 typed event overrides ---
-    void on_event(const pv::interface::CaptureStateChanged &) override;
-    void on_event(const pv::interface::CaptureOwnerChanged &) override;
-    void on_event(const pv::interface::TriggerConfigChanged &) override;
-    void on_event(const pv::interface::SampleCountUpdated &) override;
-    void on_event(const pv::interface::DeviceOptionsUpdated &) override;
-    void on_event(const pv::interface::DsoViewOptionChanged &) override;
-    void on_event(const pv::interface::ActiveDocumentChanged &) override;
-    void on_event(const pv::interface::CopyToDocDone &) override;
-    void on_event(const pv::interface::DecodeDone &) override;
-    void on_event(const pv::interface::SignalsChanged &) override;
-    void on_event(const pv::interface::DataUpdated &) override;
-    void on_event(const pv::interface::DeviceModeChanged &) override;
-    void on_event(const pv::interface::CollectModeChanged &) override;
-    void on_event(const pv::interface::DeviceListUpdated &) override;
-    void on_event(const pv::interface::CurrentDeviceChanged &) override;
-    void on_event(const pv::interface::DeviceOpenFailed &) override;
-    void on_event(const pv::interface::UsbDeviceArrived &) override;
-    void on_event(const pv::interface::DeviceDetached &) override;
-    void on_event(const pv::interface::SampleRateChanged &) override;
-    void on_event(const pv::interface::SaveComplete &) override;
-    void on_event(const pv::interface::StartCollectWork &) override;
-    void on_event(const pv::interface::CollectStart &) override;
-    void on_event(const pv::interface::CollectEnd &) override;
-    void on_event(const pv::interface::EndCollectWork &) override;
-    void on_event(const pv::interface::EndDeviceOptions &) override;
-    void on_event(const pv::interface::DeviceConfigUpdated &) override;
-    void on_event(const pv::interface::DemoModeChanged &) override;
-    void on_event(const pv::interface::DataPoolChanged &) override;
-    void on_event(const pv::interface::SimpleTriggerChanged &) override;
-    void on_event(const pv::interface::GlitchFilterStarted &) override;
-    void on_event(const pv::interface::GlitchFilterProgress &) override;
-    void on_event(const pv::interface::GlitchFilterCompleted &) override;
-    void on_event(const pv::interface::GlitchFilterCleared &) override;
-    void on_event(const pv::interface::SignalInvertStarted &) override;
-    void on_event(const pv::interface::SignalInvertCompleted &) override;
-    void on_event(const pv::interface::SignalInvertCleared &) override;
-    void on_event(const pv::interface::CopyInProgressChanged &) override;
-    void on_event(const pv::interface::TrigNextCollect &) override;
-    void on_event(const pv::interface::ClearDecodeData &) override;
-    void on_event(const pv::interface::AppOptionsChanged &) override;
-    void on_event(const pv::interface::FontOptionsChanged &) override;
-    void on_event(const pv::interface::ShortcutChanged &) override;
-    void on_event(const pv::interface::StyleChanged &) override;
-    void on_event(const pv::interface::StoreConfPrev &) override;
-    void on_event(const pv::interface::CurrentDeviceChangePrev &) override;
-    void on_event(const pv::interface::StartCollectWorkPrev &) override;
-    void on_event(const pv::interface::EndCollectWorkPrev &) override;
-
-    // Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
-    void on_event(const pv::interface::DataLenUpdated &) override;
-    void on_event(const pv::interface::HeaderReceived &) override;
-    void on_event(const pv::interface::CaptureUpdated &) override;
-    void on_event(const pv::interface::ShowRegion &) override;
-    void on_event(const pv::interface::RepeatHold &) override;
-    void on_event(const pv::interface::TriggerReceived &) override;
-    void on_event(const pv::interface::ShowWaitTrigger &) override;
-    void on_event(const pv::interface::SessionError &) override;
-    void on_event(const pv::interface::SaveRequested &) override;
-    void on_event(const pv::interface::DelayedPropMsg &) override;
-    void on_event(const pv::interface::SampleLimitsChanged &) override;
-
-    // --- IServiceEventListener forwarding ---
-    // Routes View operation broadcasts from SessionService (MCP/WS API)
-    // to the active View. MainWindow::on_service_event forwards here.
     void on_service_event(const pv::api::ServiceEventData &data);
-
-    // --- Phase 2: additional delegated logic ---
-    // Session error dialog display (moved from MainWindow::on_session_error).
     void handle_session_error();
-    // USB device speed check (moved from MainWindow::check_usb_device_speed).
     void check_usb_device_speed();
 
 private:
     QPointer<MainWindow> _window;
+    core::EventBus *_bus;
+    std::vector<core::Subscription> _subscriptions;
+
+    // Event handler methods (called from subscribe<T>() lambdas)
+    void on_capture_state_changed(const interface::CaptureStateChanged &);
+    void on_capture_owner_changed(const interface::CaptureOwnerChanged &);
+    void on_trigger_config_changed(const interface::TriggerConfigChanged &);
+    void on_sample_count_updated(const interface::SampleCountUpdated &);
+    void on_device_options_updated(const interface::DeviceOptionsUpdated &);
+    void on_dso_view_option_changed(const interface::DsoViewOptionChanged &);
+    void on_active_document_changed(const interface::ActiveDocumentChanged &);
+    void on_copy_to_doc_done(const interface::CopyToDocDone &);
+    void on_decode_done(const interface::DecodeDone &);
+    void on_signals_changed(const interface::SignalsChanged &);
+    void on_data_updated(const interface::DataUpdated &);
+    void on_device_mode_changed(const interface::DeviceModeChanged &);
+    void on_collect_mode_changed(const interface::CollectModeChanged &);
+    void on_device_list_updated(const interface::DeviceListUpdated &);
+    void on_current_device_changed(const interface::CurrentDeviceChanged &);
+    void on_device_open_failed(const interface::DeviceOpenFailed &);
+    void on_usb_device_arrived(const interface::UsbDeviceArrived &);
+    void on_device_detached(const interface::DeviceDetached &);
+    void on_sample_rate_changed(const interface::SampleRateChanged &);
+    void on_save_complete(const interface::SaveComplete &);
+    void on_start_collect_work(const interface::StartCollectWork &);
+    void on_collect_start(const interface::CollectStart &);
+    void on_collect_end(const interface::CollectEnd &);
+    void on_end_collect_work(const interface::EndCollectWork &);
+    void on_end_device_options(const interface::EndDeviceOptions &);
+    void on_device_config_updated(const interface::DeviceConfigUpdated &);
+    void on_demo_mode_changed(const interface::DemoModeChanged &);
+    void on_data_pool_changed(const interface::DataPoolChanged &);
+    void on_simple_trigger_changed(const interface::SimpleTriggerChanged &);
+    void on_glitch_filter_started(const interface::GlitchFilterStarted &);
+    void on_glitch_filter_progress(const interface::GlitchFilterProgress &);
+    void on_glitch_filter_completed(const interface::GlitchFilterCompleted &);
+    void on_glitch_filter_cleared(const interface::GlitchFilterCleared &);
+    void on_signal_invert_started(const interface::SignalInvertStarted &);
+    void on_signal_invert_completed(const interface::SignalInvertCompleted &);
+    void on_signal_invert_cleared(const interface::SignalInvertCleared &);
+    void on_copy_in_progress_changed(const interface::CopyInProgressChanged &);
+    void on_trig_next_collect(const interface::TrigNextCollect &);
+    void on_clear_decode_data(const interface::ClearDecodeData &);
+    void on_app_options_changed(const interface::AppOptionsChanged &);
+    void on_font_options_changed(const interface::FontOptionsChanged &);
+    void on_shortcut_changed(const interface::ShortcutChanged &);
+    void on_style_changed(const interface::StyleChanged &);
+    void on_store_conf_prev(const interface::StoreConfPrev &);
+    void on_current_device_change_prev(const interface::CurrentDeviceChangePrev &);
+    void on_start_collect_work_prev(const interface::StartCollectWorkPrev &);
+    void on_end_collect_work_prev(const interface::EndCollectWorkPrev &);
+    void on_data_len_updated(const interface::DataLenUpdated &);
+    void on_header_received(const interface::HeaderReceived &);
+    void on_capture_updated(const interface::CaptureUpdated &);
+    void on_show_region(const interface::ShowRegion &);
+    void on_repeat_hold(const interface::RepeatHold &);
+    void on_trigger_received(const interface::TriggerReceived &);
+    void on_show_wait_trigger(const interface::ShowWaitTrigger &);
+    void on_session_error(const interface::SessionError &);
+    void on_save_requested(const interface::SaveRequested &);
+    void on_delayed_prop_msg(const interface::DelayedPropMsg &);
+    void on_sample_limits_changed(const interface::SampleLimitsChanged &);
 };
 
 } // namespace pv

@@ -114,8 +114,7 @@ class MainWindow :
     public QMainWindow,
     public IMainForm,
     public ISessionDataGetter,
-    public pv::api::IServiceEventListener,
-    public pv::interface::IEventListener
+    public pv::api::IServiceEventListener
 {
 	Q_OBJECT
 
@@ -245,76 +244,9 @@ private:
     void on_service_event(const pv::api::ServiceEventData &data) override;
 
     // ---- SessionEventDispatcher delegate ----
-    // Phase 2: IEventListener implementation extracted to a delegate class.
-    // All 45 typed on_event overrides live in SessionEventDispatcher.
-    // MainWindow holds a unique_ptr to the dispatcher and forwards the
-    // IEventListener interface to it.
+    // Events are registered via EventBus::subscribe<T>() in the dispatcher's
+    // constructor. No IEventListener forwarding needed.
     std::unique_ptr<class SessionEventDispatcher> _event_dispatcher;
-
-    // IEventListener forwarding — delegates to _event_dispatcher.
-    // These are kept on MainWindow so that EventBus registration still works
-    // (MainWindow is the registered listener). Each just forwards to the
-    // dispatcher's override.
-    void on_event(const pv::interface::CaptureStateChanged &) override;
-    void on_event(const pv::interface::CaptureOwnerChanged &) override;
-    void on_event(const pv::interface::TriggerConfigChanged &) override;
-    void on_event(const pv::interface::SampleCountUpdated &) override;
-    void on_event(const pv::interface::DeviceOptionsUpdated &) override;
-    void on_event(const pv::interface::DsoViewOptionChanged &) override;
-    void on_event(const pv::interface::ActiveDocumentChanged &) override;
-    void on_event(const pv::interface::CopyToDocDone &) override;
-    void on_event(const pv::interface::DecodeDone &) override;
-    void on_event(const pv::interface::SignalsChanged &) override;
-    void on_event(const pv::interface::DataUpdated &) override;
-    void on_event(const pv::interface::DeviceModeChanged &) override;
-    void on_event(const pv::interface::CollectModeChanged &) override;
-    void on_event(const pv::interface::DeviceListUpdated &) override;
-    void on_event(const pv::interface::CurrentDeviceChanged &) override;
-    void on_event(const pv::interface::DeviceOpenFailed &) override;
-    void on_event(const pv::interface::UsbDeviceArrived &) override;
-    void on_event(const pv::interface::DeviceDetached &) override;
-    void on_event(const pv::interface::SampleRateChanged &) override;
-    void on_event(const pv::interface::SaveComplete &) override;
-    void on_event(const pv::interface::StartCollectWork &) override;
-    void on_event(const pv::interface::CollectStart &) override;
-    void on_event(const pv::interface::CollectEnd &) override;
-    void on_event(const pv::interface::EndCollectWork &) override;
-    void on_event(const pv::interface::EndDeviceOptions &) override;
-    void on_event(const pv::interface::DeviceConfigUpdated &) override;
-    void on_event(const pv::interface::DemoModeChanged &) override;
-    void on_event(const pv::interface::DataPoolChanged &) override;
-    void on_event(const pv::interface::SimpleTriggerChanged &) override;
-    void on_event(const pv::interface::GlitchFilterStarted &) override;
-    void on_event(const pv::interface::GlitchFilterProgress &) override;
-    void on_event(const pv::interface::GlitchFilterCompleted &) override;
-    void on_event(const pv::interface::GlitchFilterCleared &) override;
-    void on_event(const pv::interface::SignalInvertStarted &) override;
-    void on_event(const pv::interface::SignalInvertCompleted &) override;
-    void on_event(const pv::interface::SignalInvertCleared &) override;
-    void on_event(const pv::interface::CopyInProgressChanged &) override;
-    void on_event(const pv::interface::TrigNextCollect &) override;
-    void on_event(const pv::interface::ClearDecodeData &) override;
-    void on_event(const pv::interface::AppOptionsChanged &) override;
-    void on_event(const pv::interface::FontOptionsChanged &) override;
-    void on_event(const pv::interface::ShortcutChanged &) override;
-    void on_event(const pv::interface::StyleChanged &) override;
-    void on_event(const pv::interface::StoreConfPrev &) override;
-    void on_event(const pv::interface::CurrentDeviceChangePrev &) override;
-    void on_event(const pv::interface::StartCollectWorkPrev &) override;
-    void on_event(const pv::interface::EndCollectWorkPrev &) override;
-
-    // Spec v2 Task 7: Events migrated from ISessionCallback dispatch_to<>
-    void on_event(const pv::interface::DataLenUpdated &) override;
-    void on_event(const pv::interface::HeaderReceived &) override;
-    void on_event(const pv::interface::CaptureUpdated &) override;
-    void on_event(const pv::interface::ShowRegion &) override;
-    void on_event(const pv::interface::RepeatHold &) override;
-    void on_event(const pv::interface::TriggerReceived &) override;
-    void on_event(const pv::interface::ShowWaitTrigger &) override;
-    void on_event(const pv::interface::SessionError &) override;
-    void on_event(const pv::interface::SaveRequested &) override;
-    void on_event(const pv::interface::DelayedPropMsg &) override;
-    void on_event(const pv::interface::SampleLimitsChanged &) override;
 
 public:
     // ---- Spec v2 Task 2: Public accessors for delegate classes ----

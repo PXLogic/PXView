@@ -47,10 +47,9 @@ class DeviceAgent;
 namespace pv {
 namespace api {
 
-class SessionService : public ISessionService,
-                       public pv::interface::IEventListener {
+class SessionService : public ISessionService {
 public:
-    explicit SessionService(SigSession *session, DeviceAgent *device);
+explicit SessionService(SigSession *session, DeviceAgent *device);
     ~SessionService() override;
 
     // Disable copy
@@ -105,6 +104,7 @@ public:
         uint64_t sample_count = 0) override;
     int get_current_capture_id() const override;
     Result<void> close_capture() override;
+    Result<void> wait_for_decode_complete(uint64_t timeout_ms = 300000) override;
 
     // ---- ISessionService: 2. Capture state ----
     CaptureState get_capture_state() const override;
@@ -324,46 +324,8 @@ void delay_prop_msg(QString strMsg);
     // Full migration: all notification events are wired to on_event handlers
     // that re-broadcast as ServiceEvent for MCP/WS clients. The legacy
     // int-message dispatch path is removed.
-    void on_event(const pv::interface::StoreConfPrev &) override;
-    void on_event(const pv::interface::CurrentDeviceChangePrev &) override;
-    void on_event(const pv::interface::StartCollectWorkPrev &) override;
-    void on_event(const pv::interface::EndCollectWorkPrev &) override;
-    void on_event(const pv::interface::StartCollectWork &) override;
-    void on_event(const pv::interface::CollectStart &) override;
-    void on_event(const pv::interface::CollectEnd &) override;
-    void on_event(const pv::interface::EndCollectWork &) override;
-    void on_event(const pv::interface::RevEndPacket &) override;
-    void on_event(const pv::interface::CaptureStateChanged &) override;
-    void on_event(const pv::interface::DeviceListUpdated &) override;
-    void on_event(const pv::interface::DeviceModeChanged &) override;
-    void on_event(const pv::interface::DeviceConfigUpdated &) override;
-    void on_event(const pv::interface::DeviceDetached &) override;
-    void on_event(const pv::interface::UsbDeviceArrived &) override;
-    void on_event(const pv::interface::CurrentDeviceChanged &) override;
-    void on_event(const pv::interface::DeviceOptionsUpdated &) override;
-    void on_event(const pv::interface::DsoViewOptionChanged &) override;
-    void on_event(const pv::interface::SampleRateChanged &) override;
-    void on_event(const pv::interface::CollectModeChanged &) override;
-    void on_event(const pv::interface::DataPoolChanged &) override;
-    void on_event(const pv::interface::SimpleTriggerChanged &) override;
-    void on_event(const pv::interface::GlitchFilterStarted &) override;
-    void on_event(const pv::interface::GlitchFilterProgress &) override;
-    void on_event(const pv::interface::GlitchFilterCompleted &) override;
-    void on_event(const pv::interface::GlitchFilterCleared &) override;
-    void on_event(const pv::interface::SignalInvertStarted &) override;
-    void on_event(const pv::interface::SignalInvertCompleted &) override;
-    void on_event(const pv::interface::SignalInvertCleared &) override;
-    void on_event(const pv::interface::CopyToDocDone &) override;
-    void on_event(const pv::interface::SampleCountUpdated &) override;
-    void on_event(const pv::interface::ActiveDocumentChanged &) override;
-    void on_event(const pv::interface::CopyInProgressChanged &) override;
-    void on_event(const pv::interface::CaptureOwnerChanged &) override;
-    void on_event(const pv::interface::TrigNextCollect &) override;
-    void on_event(const pv::interface::SaveComplete &) override;
-    void on_event(const pv::interface::ClearDecodeData &) override;
-
 private:
-    void broadcast_event(ServiceEvent event,
+void broadcast_event(ServiceEvent event,
                          const std::map<std::string, std::string> &params = {}) const;
     ChannelType sr_channel_type_to_api(int sr_type) const;
 
@@ -398,10 +360,8 @@ private:
         int capture_ratio,
         double duration_seconds,
         uint64_t sample_count);
-    // Returns true when running inside the GUI (QApplication), false when
-    // running headless (QCoreApplication only). In headless mode View-related
-    // operations are no-ops and QEventLoop-based waits fall back to a plain
-    // condition_variable + mutex.
+// Returns true when running inside the GUI (QApplication), false when
+// running headless (QCoreApplication only).
     static bool is_gui_mode();
     // phase 2: resolve the MCP-dedicated document weak pointer from the owning
     // index in DocumentRegistry. Returns nullptr if no document is injected
@@ -413,14 +373,12 @@ private:
     DeviceAgent *_device;
     std::vector<IServiceEventListener *> _listeners;
     mutable std::mutex _listeners_mutex;
-    int _capture_id;
-    bool _wait_capture_stop_flag;
+int _capture_id;
 
-    // Wait-state used by wait_capture_complete() in headless mode.
-    mutable std::mutex _wait_mutex;
-    std::condition_variable _wait_cv;
+// RAII event subscriptions
+std::vector<core::Subscription> _event_subscriptions;
 
-    // P0-2: Global state version counter for versioned notifications
+// P0-2: Global state version counter for versioned notifications
     mutable uint64_t _state_version_counter = 0;
 
     // MCP-dedicated document. phase 2: ownership is held by DocumentRegistry;

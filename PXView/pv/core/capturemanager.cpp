@@ -285,7 +285,11 @@ bool CaptureManager::action_start_capture(bool instant,
   // broadcast_sync<StartCollectWorkPrev> path replaces the old int-message
   // dispatch. Caller (start_capture) is on the main thread (user-initiated
   // action).
-  _event_bus->broadcast_sync<interface::StartCollectWorkPrev>({});
+  // Plan B Phase 1: broadcast_sync → broadcast_async. The Prev handler
+  // (event_dispatcher.cpp:572-581) is a lightweight UI commit (trigger
+  // settings + capture_init), which is idempotent and safe to run
+  // asynchronously before exec_capture().
+  _event_bus->broadcast_async<interface::StartCollectWorkPrev>({});
 
   if (exec_capture()) {
     _work_time_id.fetch_add(1);
@@ -524,7 +528,8 @@ bool CaptureManager::action_stop_capture() {
     // observers (SessionService) can emit "end_collect_prev" BEFORE
     // exit_capture() runs. The legacy async int-message path is removed.
     // Caller (stop_capture) is on the main thread.
-    _event_bus->broadcast_sync<interface::EndCollectWorkPrev>({});
+    // Plan B Phase 1: broadcast_sync → broadcast_async.
+    _event_bus->broadcast_async<interface::EndCollectWorkPrev>({});
 
     exit_capture();
 

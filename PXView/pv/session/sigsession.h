@@ -100,7 +100,7 @@ using namespace pv::data;
  * View/API layers. Inline method bodies that previously touched private
  * fields now forward to `_state->xxx()` accessors.
  */
-class SigSession : public pv::interface::IEventListener, public IDeviceAgentCallback, public pv::data::DataSource {
+class SigSession : public IDeviceAgentCallback, public pv::data::DataSource {
 private:
   static constexpr float Oversampling = 2.0f;
   SigSession(SigSession &o);
@@ -132,6 +132,9 @@ public:
   explicit SigSession();
   ~SigSession();
   DeviceAgent *get_device() { return &_state->device_agent(); }
+  // Expose the SessionStateContext for the API layer to access
+  // wait_for_capture_complete() (Phase 1 sync-wait bypass).
+  core::SessionStateContext *get_state() { return _state.get(); }
   // Task D4: DataSource::device() override — exposes the DeviceAgent to the
   // View layer for device-level capability/probe queries that have no
   // SignalModel getter. Aliases get_device() (single device per session).
@@ -261,12 +264,10 @@ std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   struct ds_device_base_info *get_device_list(int &out_count, int &actived_index);
   // 强制重新扫描所有驱动（热插拔检测场景）。get_device_list 默认复用缓存，
   // 避免在设备已 dev_open 后重复 sr_driver_scan 导致 LIBUSB_ERROR_ACCESS。
-  void refresh_device_list();
-  void add_event_listener(interface::IEventListener *l) { _event_bus->add_event_listener(l); }
-  void remove_event_listener(interface::IEventListener *l) { _event_bus->remove_event_listener(l); }
-  template <typename EventType> void broadcast(const EventType &ev) { _event_bus->broadcast(ev); }
-  template <typename EventType> void broadcast_sync(const EventType &ev) { _event_bus->broadcast_sync(ev); }
-  template <typename EventType> void broadcast_async(const EventType &ev) { _event_bus->broadcast_async(ev); }
+void refresh_device_list();
+core::EventBus *get_event_bus() { return _event_bus.get(); }
+template <typename EventType> void broadcast(const EventType &ev) { _event_bus->broadcast(ev); }
+template <typename EventType> void broadcast_async(const EventType &ev) { _event_bus->broadcast_async(ev); }
   // Post an arbitrary callable to the main thread via postEvent (same
   // technique as broadcast_async). Used by Core-layer objects (e.g.
   // DecoderStack) that need to emit Qt signals from a worker thread —
@@ -279,9 +280,8 @@ std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   bool have_view_data() override { return get_signal_snapshot()->have_data(); }
   bool is_copy_in_progress() const;
   data::SessionDocument *get_capture_owner_document() const;
-  void clear_capture_owner_document(data::SessionDocument *doc);
-  void join_copy_thread();
-  void on_load_config_end();
+void clear_capture_owner_document(data::SessionDocument *doc);
+void on_load_config_end();
   void init_signals();
   bool is_doing_action() { return _capture_manager->is_action(); }
   void clear_view_data();
@@ -367,21 +367,22 @@ private:
   // DS_EV_COLLECT_TASK_END — the reliable "session really stopped" signal
   // that SR_DF_END cannot provide.
   void DeviceSessionStopped() override;
-  // --- IEventListener overrides (Core-internal state-machine events) ---
-  // These 5 events drive SigSession's own state machine and were previously
-  // handled by the former OnMessage switch (now removed). The logic is copied
-  // verbatim from that switch. Other notification events have empty defaults
-  // in the base class and are consumed by MainWindow / SessionService.
-  void on_event(const interface::DeviceOptionsUpdated &) override;
-  void on_event(const interface::TrigNextCollect &) override;
-  void on_event(const interface::RevEndPacket &) override;
-  void on_event(const interface::CopyToDocDone &) override;
-  void on_event(const interface::DeviceSpeedNotMatch &) override;
-  void on_event(const interface::SessionStopped &) override;
-  static sr_input_format *determine_input_file_format(const std::string &filename);
-  data::Snapshot *get_signal_snapshot(); void clear_signals();
-  std::shared_ptr<data::SignalModel> get_channel_by_index(int orgIndex);
-  void make_channels_view_index(int start_dex = -1);
+  // --- Core-internal state-machine event handlers ---
+  // Called via EventBus::subscribe<T>() from the constructor.
+  void on_device_options_updated();
+  void on_trig_next_collect();
+  void on_rev_end_packet();
+  void on_copy_to_doc_done();
+  void on_device_speed_not_match();
+  void on_session_stopped_event();
+  void on_decode_done_event();
+static sr_input_format *determine_input_file_format(const std::string &filename);
+data::Snapshot *get_signal_snapshot(); void clear_signals();
+std::shared_ptr<data::SignalModel> get_channel_by_index(int orgIndex);
+void make_channels_view_index(int start_dex = -1);
+
+// RAII subscriptions (auto-unsubscribe on destruction)
+std::vector<core::Subscription> _event_subscriptions;
 
   // --- Shared mutable state (migrated to SessionStateContext) ---
   // All fields previously declared here (_sampling_mutex, _data_mutex,

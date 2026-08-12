@@ -1,7 +1,6 @@
 // mainwindow_event_dispatcher.cpp
-// Phase 2: SessionEventDispatcher — extracted from MainWindow's IEventListener
-// implementation. All 45 typed on_event overrides moved here verbatim;
-// references to MainWindow members go through _window-> (friend access).
+// SessionEventDispatcher — handles all session events for MainWindow.
+// Events registered via EventBus::subscribe<T>() (no IEventListener).
 
 #include "pv/mainwindow/event_dispatcher.h"
 
@@ -69,10 +68,10 @@ view::View *SessionEventDispatcher::safe_current_view() const {
 } // namespace pv
 
 // --- Capture state group ---
-void SessionEventDispatcher::on_event(const pv::interface::CaptureStateChanged &) {
+void SessionEventDispatcher::on_capture_state_changed(const pv::interface::CaptureStateChanged &) {
   _window->update_capture_ui_status();
 }
-void SessionEventDispatcher::on_event(const pv::interface::StartCollectWork &) {
+void SessionEventDispatcher::on_start_collect_work(const pv::interface::StartCollectWork &) {
   PV_WIN_GUARD();
   _window->update_capture_ui_status();
   if (_window->session()->is_instant()) {
@@ -82,11 +81,11 @@ void SessionEventDispatcher::on_event(const pv::interface::StartCollectWork &) {
   }
   if (auto *v = safe_current_view()) v->on_state_changed(false);
 }
-void SessionEventDispatcher::on_event(const pv::interface::CollectStart &) {
+void SessionEventDispatcher::on_collect_start(const pv::interface::CollectStart &) {
   _window->statusBar()->showMessage(MainWindow::tr("采集中..."), 3000);
   _window->on_frame_began();
 }
-void SessionEventDispatcher::on_event(const pv::interface::CollectEnd &) {
+void SessionEventDispatcher::on_collect_end(const pv::interface::CollectEnd &) {
   PV_WIN_GUARD();
   _window->prgRate(0);
   if (auto *v = safe_current_view()) {
@@ -95,7 +94,7 @@ void SessionEventDispatcher::on_event(const pv::interface::CollectEnd &) {
   }
   _window->on_frame_ended();
 }
-void SessionEventDispatcher::on_event(const pv::interface::EndCollectWork &) {
+void SessionEventDispatcher::on_end_collect_work(const pv::interface::EndCollectWork &) {
   _window->update_capture_ui_status();
 
   pv::TabContext *ctx = _window->current_context();
@@ -112,15 +111,15 @@ void SessionEventDispatcher::on_event(const pv::interface::EndCollectWork &) {
     _window->session()->set_active_document(ctx->document());
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::TrigNextCollect &) {
+void SessionEventDispatcher::on_trig_next_collect(const pv::interface::TrigNextCollect &) {
   _window->statusBar()->showMessage(MainWindow::tr("等待下一次采集..."), 3000);
 }
 
 // --- Device management group ---
-void SessionEventDispatcher::on_event(const pv::interface::DeviceListUpdated &) {
+void SessionEventDispatcher::on_device_list_updated(const pv::interface::DeviceListUpdated &) {
   _window->sampling_bar()->update_device_list();
 }
-void SessionEventDispatcher::on_event(const pv::interface::CurrentDeviceChanged &) {
+void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &) {
   PV_WIN_GUARD();
   _window->reset_all_view();
   _window->load_device_config();
@@ -195,7 +194,7 @@ void SessionEventDispatcher::on_event(const pv::interface::CurrentDeviceChanged 
     _window->check_usb_device_speed();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::UsbDeviceArrived &) {
+void SessionEventDispatcher::on_usb_device_arrived(const pv::interface::UsbDeviceArrived &) {
   if (_window->msg() != nullptr) {
     _window->msg()->close();
     _window->msg() = nullptr;
@@ -242,7 +241,7 @@ void SessionEventDispatcher::on_event(const pv::interface::UsbDeviceArrived &) {
     _window->session()->set_default_device();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::DeviceDetached &) {
+void SessionEventDispatcher::on_device_detached(const pv::interface::DeviceDetached &) {
   if (_window->msg() != nullptr) {
     _window->msg()->close();
     _window->msg() = nullptr;
@@ -264,7 +263,7 @@ void SessionEventDispatcher::on_event(const pv::interface::DeviceDetached &) {
     _window->session()->set_default_device();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::DeviceOpenFailed &evt) {
+void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOpenFailed &evt) {
   QString driver = QString::fromStdString(evt.driver_name);
   QString err = QString::fromStdString(evt.error_message);
   QString title = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DEVICE_OPEN_FAILED),
@@ -286,7 +285,7 @@ void SessionEventDispatcher::on_event(const pv::interface::DeviceOpenFailed &evt
 }
 
 // --- Device options group ---
-void SessionEventDispatcher::on_event(const pv::interface::DeviceOptionsUpdated &) {
+void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &) {
   _window->dock_manager()->trigger_widget()->device_updated();
   _window->dock_manager()->device_options_widget()->device_updated();
   _window->dock_manager()->measure_widget()->reload();
@@ -302,7 +301,7 @@ void SessionEventDispatcher::on_event(const pv::interface::DeviceOptionsUpdated 
     v->signals_changed(nullptr);
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::DsoViewOptionChanged &) {
+void SessionEventDispatcher::on_dso_view_option_changed(const pv::interface::DsoViewOptionChanged &) {
   _window->dock_manager()->trigger_widget()->device_updated();
   _window->dock_manager()->device_options_widget()->device_updated();
   _window->dock_manager()->measure_widget()->reload();
@@ -313,15 +312,15 @@ void SessionEventDispatcher::on_event(const pv::interface::DsoViewOptionChanged 
         _window->session()->get_signal_models(), _window->build_channel_layout(safe_current_view()));
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::SampleRateChanged &) {
+void SessionEventDispatcher::on_sample_rate_changed(const pv::interface::SampleRateChanged &) {
   _window->dock_manager()->trigger_widget()->device_updated();
   if (auto *v = safe_current_view()) v->timebase_changed();
   _window->on_cur_snap_samplerate_changed();
 }
-void SessionEventDispatcher::on_event(const pv::interface::SampleCountUpdated &) {
+void SessionEventDispatcher::on_sample_count_updated(const pv::interface::SampleCountUpdated &) {
   _window->sampling_bar()->update_sample_count_selector();
 }
-void SessionEventDispatcher::on_event(const pv::interface::DeviceModeChanged &) {
+void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceModeChanged &) {
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->mode_changed();
   _window->reset_all_view();
@@ -363,7 +362,7 @@ void SessionEventDispatcher::on_event(const pv::interface::DeviceModeChanged &) 
 
   _window->calc_min_height();
 }
-void SessionEventDispatcher::on_event(const pv::interface::CollectModeChanged &) {
+void SessionEventDispatcher::on_collect_mode_changed(const pv::interface::CollectModeChanged &) {
   PV_WIN_GUARD();
   if (_window->device_agent()->is_demo()) {
     _window->pattern_mode() = _window->device_agent()->get_demo_operation_mode();
@@ -371,7 +370,7 @@ void SessionEventDispatcher::on_event(const pv::interface::CollectModeChanged &)
   _window->dock_manager()->trigger_widget()->device_updated();
   if (auto *v = safe_current_view()) v->update();
 }
-void SessionEventDispatcher::on_event(const pv::interface::EndDeviceOptions &) {
+void SessionEventDispatcher::on_end_device_options(const pv::interface::EndDeviceOptions &) {
   if (_window->device_agent()->is_demo() && _window->device_agent()->get_work_mode() == LOGIC) {
     QString pattern_mode = _window->device_agent()->get_demo_operation_mode();
 
@@ -394,7 +393,7 @@ void SessionEventDispatcher::on_event(const pv::interface::EndDeviceOptions &) {
   }
   _window->calc_min_height();
 }
-void SessionEventDispatcher::on_event(const pv::interface::DemoModeChanged &) {
+void SessionEventDispatcher::on_demo_mode_changed(const pv::interface::DemoModeChanged &) {
   if (_window->device_agent()->is_demo() && _window->device_agent()->get_work_mode() == LOGIC) {
     QString pattern_mode = _window->device_agent()->get_demo_operation_mode();
 
@@ -418,15 +417,15 @@ void SessionEventDispatcher::on_event(const pv::interface::DemoModeChanged &) {
 }
 
 // --- UI options group ---
-void SessionEventDispatcher::on_event(const pv::interface::AppOptionsChanged &) {
+void SessionEventDispatcher::on_app_options_changed(const pv::interface::AppOptionsChanged &) {
   _window->update_title_bar_text();
 }
-void SessionEventDispatcher::on_event(const pv::interface::FontOptionsChanged &) {
+void SessionEventDispatcher::on_font_options_changed(const pv::interface::FontOptionsChanged &) {
   UiManager::Instance()->Update(UI_UPDATE_ACTION_FONT);
 }
-void SessionEventDispatcher::on_event(const pv::interface::ShortcutChanged &) {
+void SessionEventDispatcher::on_shortcut_changed(const pv::interface::ShortcutChanged &) {
 }
-void SessionEventDispatcher::on_event(const pv::interface::StyleChanged &) {
+void SessionEventDispatcher::on_style_changed(const pv::interface::StyleChanged &) {
   UiManager::Instance()->Update(UI_UPDATE_ACTION_THEME);
   for (QWidget *w : qApp->topLevelWidgets()) {
     w->update();
@@ -434,18 +433,18 @@ void SessionEventDispatcher::on_event(const pv::interface::StyleChanged &) {
 }
 
 // --- Data group ---
-void SessionEventDispatcher::on_event(const pv::interface::DataPoolChanged &) {
+void SessionEventDispatcher::on_data_pool_changed(const pv::interface::DataPoolChanged &) {
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->check_measure();
 }
-void SessionEventDispatcher::on_event(const pv::interface::CopyInProgressChanged &) {
+void SessionEventDispatcher::on_copy_in_progress_changed(const pv::interface::CopyInProgressChanged &) {
   if (_window->disk_cache_status_label())
     _window->disk_cache_status_label()->setText(MainWindow::tr("后台数据拷贝中..."));
 }
-void SessionEventDispatcher::on_event(const pv::interface::ActiveDocumentChanged &) {
+void SessionEventDispatcher::on_active_document_changed(const pv::interface::ActiveDocumentChanged &) {
   _window->update_title_bar_text();
 }
-void SessionEventDispatcher::on_event(const pv::interface::SaveComplete &) {
+void SessionEventDispatcher::on_save_complete(const pv::interface::SaveComplete &) {
   _window->session()->clear_store_confirm_flag();
 
   if (_window->is_auto_switch_device()) {
@@ -459,24 +458,24 @@ void SessionEventDispatcher::on_event(const pv::interface::SaveComplete &) {
     }
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::ClearDecodeData &) {
+void SessionEventDispatcher::on_clear_decode_data(const pv::interface::ClearDecodeData &) {
   if (_window->device_agent()->get_work_mode() == LOGIC)
     _window->dock_manager()->protocol_widget()->reset_view();
 }
 
 // --- Filter / invert group ---
-void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterStarted &) {
+void SessionEventDispatcher::on_glitch_filter_started(const pv::interface::GlitchFilterStarted &) {
   if (_window->disk_cache_status_label())
     _window->disk_cache_status_label()->setText(MainWindow::tr("毛刺滤波处理中..."));
 }
-void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterProgress &e) {
+void SessionEventDispatcher::on_glitch_filter_progress(const pv::interface::GlitchFilterProgress &e) {
   int p = e.progress;
   if (p < 0) p = 0;
   if (p > 100) p = 100;
   _window->statusBar()->showMessage(
       MainWindow::tr("毛刺滤波进行中... %1%").arg(p), 2000);
 }
-void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterCompleted &) {
+void SessionEventDispatcher::on_glitch_filter_completed(const pv::interface::GlitchFilterCompleted &) {
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {
     _window->session()->copy_data_to_document(ctx->document());
@@ -486,7 +485,7 @@ void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterCompleted
     v->on_glitch_filter_completed();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterCleared &) {
+void SessionEventDispatcher::on_glitch_filter_cleared(const pv::interface::GlitchFilterCleared &) {
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {
     _window->session()->copy_data_to_document(ctx->document());
@@ -496,18 +495,18 @@ void SessionEventDispatcher::on_event(const pv::interface::GlitchFilterCleared &
     v->on_glitch_filter_cleared();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::SignalInvertStarted &) {
+void SessionEventDispatcher::on_signal_invert_started(const pv::interface::SignalInvertStarted &) {
   if (_window->disk_cache_status_label())
     _window->disk_cache_status_label()->setText(MainWindow::tr("信号反相处理中..."));
 }
-void SessionEventDispatcher::on_event(const pv::interface::SignalInvertCompleted &) {
+void SessionEventDispatcher::on_signal_invert_completed(const pv::interface::SignalInvertCompleted &) {
   pv::TabContext *ctx2 = _window->current_context();
   if (ctx2 && ctx2->document()) {
     _window->session()->copy_data_to_document(ctx2->document());
   }
   _window->session()->restart_decoders();
 }
-void SessionEventDispatcher::on_event(const pv::interface::SignalInvertCleared &) {
+void SessionEventDispatcher::on_signal_invert_cleared(const pv::interface::SignalInvertCleared &) {
   pv::TabContext *ctx2 = _window->current_context();
   if (ctx2 && ctx2->document()) {
     _window->session()->copy_data_to_document(ctx2->document());
@@ -516,27 +515,27 @@ void SessionEventDispatcher::on_event(const pv::interface::SignalInvertCleared &
 }
 
 // --- Trigger group ---
-void SessionEventDispatcher::on_event(const pv::interface::SimpleTriggerChanged &) {
+void SessionEventDispatcher::on_simple_trigger_changed(const pv::interface::SimpleTriggerChanged &) {
   if (_window->dock_manager()->trigger_widget()) {
     _window->dock_manager()->trigger_widget()->select_simple_trigger();
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::TriggerConfigChanged &) {
+void SessionEventDispatcher::on_trigger_config_changed(const pv::interface::TriggerConfigChanged &) {
   if (_window->dock_manager()->trigger_widget())
     _window->dock_manager()->trigger_widget()->update_view();
 }
 
 // --- Empty-body / pre-broadcast overrides ---
-void SessionEventDispatcher::on_event(const pv::interface::CaptureOwnerChanged &) {
+void SessionEventDispatcher::on_capture_owner_changed(const pv::interface::CaptureOwnerChanged &) {
 }
-void SessionEventDispatcher::on_event(const pv::interface::CopyToDocDone &) {
+void SessionEventDispatcher::on_copy_to_doc_done(const pv::interface::CopyToDocDone &) {
   PV_WIN_GUARD();
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document() && ctx->document()->has_data()) {
     if (auto *v = safe_current_view()) v->set_data_document(ctx->document());
   }
 }
-void SessionEventDispatcher::on_event(const pv::interface::DecodeDone &) {
+void SessionEventDispatcher::on_decode_done(const pv::interface::DecodeDone &) {
   PV_WIN_GUARD();
   _window->on_data_updated();
   if (auto *v = safe_current_view()) {
@@ -545,22 +544,22 @@ void SessionEventDispatcher::on_event(const pv::interface::DecodeDone &) {
   }
   _window->on_decode_done();
 }
-void SessionEventDispatcher::on_event(const pv::interface::SignalsChanged &) {
+void SessionEventDispatcher::on_signals_changed(const pv::interface::SignalsChanged &) {
   _window->on_signals_changed();
 }
-void SessionEventDispatcher::on_event(const pv::interface::DataUpdated &) {
+void SessionEventDispatcher::on_data_updated(const pv::interface::DataUpdated &) {
   _window->on_data_updated();
 }
-void SessionEventDispatcher::on_event(const pv::interface::DeviceConfigUpdated &) {}
+void SessionEventDispatcher::on_device_config_updated(const pv::interface::DeviceConfigUpdated &) {}
 
-void SessionEventDispatcher::on_event(const pv::interface::StoreConfPrev &) {
+void SessionEventDispatcher::on_store_conf_prev(const pv::interface::StoreConfPrev &) {
   if (_window->device_agent() && _window->device_agent()->is_hardware() &&
       _window->session() && !_window->session()->have_hardware_data()) {
     _window->sampling_bar()->commit_settings();
   }
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::CurrentDeviceChangePrev &) {
+void SessionEventDispatcher::on_current_device_change_prev(const pv::interface::CurrentDeviceChangePrev &) {
   if (_window->msg() != nullptr) {
     _window->msg()->close();
     _window->msg() = nullptr;
@@ -569,7 +568,7 @@ void SessionEventDispatcher::on_event(const pv::interface::CurrentDeviceChangePr
   if (auto *v = safe_current_view()) v->reload();
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::StartCollectWorkPrev &) {
+void SessionEventDispatcher::on_start_collect_work_prev(const pv::interface::StartCollectWorkPrev &) {
   if (_window->device_agent()->get_work_mode() == LOGIC)
     _window->dock_manager()->trigger_widget()->try_commit_trigger();
   else if (_window->device_agent()->get_work_mode() == DSO)
@@ -581,7 +580,7 @@ void SessionEventDispatcher::on_event(const pv::interface::StartCollectWorkPrev 
   }
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::EndCollectWorkPrev &) {
+void SessionEventDispatcher::on_end_collect_work_prev(const pv::interface::EndCollectWorkPrev &) {
 }
 
 // ---------------------------------------------------------------------------
@@ -752,55 +751,55 @@ void SessionEventDispatcher::check_usb_device_speed() {
 
 // --- Spec v2 Task 7: Handlers for events migrated from ISessionCallback ---
 
-void SessionEventDispatcher::on_event(const pv::interface::DataLenUpdated &e) {
+void SessionEventDispatcher::on_data_len_updated(const pv::interface::DataLenUpdated &e) {
   PV_WIN_GUARD();
   _window->on_receive_data_len(e.length);
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::HeaderReceived &) {
+void SessionEventDispatcher::on_header_received(const pv::interface::HeaderReceived &) {
   // Was MainWindow::receive_header() — empty in original implementation.
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::CaptureUpdated &) {
+void SessionEventDispatcher::on_capture_updated(const pv::interface::CaptureUpdated &) {
   PV_WIN_GUARD();
   _window->on_update_capture();
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::ShowRegion &e) {
+void SessionEventDispatcher::on_show_region(const pv::interface::ShowRegion &e) {
   PV_WIN_GUARD();
   _window->on_show_region((quint64)e.start, (quint64)e.end, e.keep);
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::RepeatHold &e) {
+void SessionEventDispatcher::on_repeat_hold(const pv::interface::RepeatHold &e) {
   PV_WIN_GUARD();
   _window->on_repeat_hold(e.percent);
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::TriggerReceived &e) {
+void SessionEventDispatcher::on_trigger_received(const pv::interface::TriggerReceived &e) {
   PV_WIN_GUARD();
   _window->on_receive_trigger(e.trigger_pos);
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::ShowWaitTrigger &) {
+void SessionEventDispatcher::on_show_wait_trigger(const pv::interface::ShowWaitTrigger &) {
   PV_WIN_GUARD();
   _window->on_show_wait_trigger();
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::SessionError &) {
+void SessionEventDispatcher::on_session_error(const pv::interface::SessionError &) {
   PV_WIN_GUARD();
   _window->on_session_error();
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::SaveRequested &) {
+void SessionEventDispatcher::on_save_requested(const pv::interface::SaveRequested &) {
   PV_WIN_GUARD();
   _window->save_config();
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::DelayedPropMsg &e) {
+void SessionEventDispatcher::on_delayed_prop_msg(const pv::interface::DelayedPropMsg &e) {
   PV_WIN_GUARD();
   _window->delay_prop_msg(e.message);
 }
 
-void SessionEventDispatcher::on_event(const pv::interface::SampleLimitsChanged &) {
+void SessionEventDispatcher::on_sample_limits_changed(const pv::interface::SampleLimitsChanged &) {
   // Was ICaptureCallback::cur_samplelimits_changed() — empty default in original.
 }

@@ -3,12 +3,11 @@
 
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <vector>
 
+#include "pv/core/thread_pool.h"
 #include "pv/data/document/sessiondata.h"
 #include "pv/core/isession_coordination.h"
-#include "pv/core/isession_state.h"
 #include "pv/core/isession_state.h"
 
 namespace pv {
@@ -74,14 +73,21 @@ public:
   /// Stop all decode threads. Called from SigSession::Close().
   void stop();
 
+  /// Plan B Phase 3: access the shared thread pool for decode tasks.
+  /// DecodeTaskManager owns its own pool (2 threads) for decode work.
+  ThreadPool &decode_pool() { return _decode_pool; }
+
 private:
   EventBus *_event_bus;
   ISessionState *_state;
   ISessionCoordination *_coord;
 
   mutable std::mutex _running_tasks_mutex;
-  std::vector<std::thread> _decode_threads;
+  // Plan B Phase 3: replace std::vector<std::thread> with ThreadPool.
+  // The old _decode_threads vector + manual join is now handled by
+  // ThreadPool's destructor (shutdown + join).
   std::vector<std::shared_ptr<data::DecoderStack>> _running_tasks;
+  ThreadPool _decode_pool;
 };
 
 } // namespace core

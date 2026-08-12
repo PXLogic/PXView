@@ -114,8 +114,9 @@ QString StoreSession::error()
 
 void StoreSession::wait()
 {
-    if (_thread.joinable())
-        _thread.join();
+// Gap 2: future.wait() replaces thread.join().
+if (_save_future.valid())
+_save_future.wait();
 }
 
 void StoreSession::cancel()
@@ -238,13 +239,14 @@ bool StoreSession::save_start()
         }
         else
         {
-            if (_thread.joinable()) _thread.join();
+            // Gap 2: join previous save if still running
+            if (_save_future.valid())
+                _save_future.wait();
             // PulseView pattern: set busy flag in the CALLER thread before
-            // starting the worker, eliminating the race window where
-            // is_busy() returns false between join() and the worker setting
-            // _is_busy = true. The worker clears it when done.
+            // starting the worker, eliminating the race window.
             _is_busy.store(true);
-            _thread = std::thread(&StoreSession::save_proc, this, snapshot);
+            _save_future = std::async(std::launch::async,
+                &StoreSession::save_proc, this, snapshot);
             return !_has_error.load();
         }
     }
@@ -938,11 +940,12 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1),
         return false;
     }
 
-    if (_thread.joinable()) _thread.join();
-    // PulseView pattern: set busy flag in the CALLER thread before
-    // starting the worker, eliminating the race window.
+    // Gap 2: join previous export if still running
+    if (_save_future.valid())
+        _save_future.wait();
     _is_busy.store(true);
-    _thread = std::thread(&StoreSession::export_proc, this, snapshot);
+    _save_future = std::async(std::launch::async,
+        &StoreSession::export_proc, this, snapshot);
     return !_has_error.load();
 }
 

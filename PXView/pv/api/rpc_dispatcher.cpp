@@ -1,5 +1,6 @@
 #include "pv/api/rpc_dispatcher.h"
 #include "pv/api/binary_codec.h"
+#include "pv/api/session_service.h"
 #include <algorithm>
 #include <QFile>
 #include <QDir>
@@ -655,10 +656,12 @@ JsonRpcResponse RpcDispatcher::on_start_capture(int id, const json& params) {
 
             // If create_session() called set_device() (device was not already active),
             // it triggered CurrentDeviceChanged which causes massive UI rebuilds.
-            // We must let the UI process all pending events before continuing, otherwise
-            // configure_and_start() will conflict with the ongoing UI rebuild.
-            QCoreApplication::processEvents();
-            QCoreApplication::processEvents(); // Second pass for cascading events
+            // In GUI mode, process pending events so configure_and_start() doesn't
+            // conflict with the ongoing UI rebuild. In headless mode, skip — there's
+            // no UI to rebuild.
+            // Phase 2: reduced from double processEvents() to single + gui guard.
+            if (SessionService::is_gui_mode())
+                QCoreApplication::processEvents();
         }
     }
 
@@ -862,8 +865,9 @@ JsonRpcResponse RpcDispatcher::on_add_analyzer(int id, const json& params) {
             }
             session = app_svc_->get_active_session();
             mcp_dbg_log("on_add_analyzer: session ready, processing events");
-            QCoreApplication::processEvents();
-            QCoreApplication::processEvents();
+            // Phase 2: guard with is_gui_mode() — headless mode has no UI rebuild.
+            if (SessionService::is_gui_mode())
+                QCoreApplication::processEvents();
         }
     } else if (!session) {
         // No deviceId provided and no active session — try to auto-create
@@ -891,8 +895,9 @@ JsonRpcResponse RpcDispatcher::on_add_analyzer(int id, const json& params) {
             }
             session = app_svc_->get_active_session();
             mcp_dbg_log("on_add_analyzer: session created, processing events");
-            QCoreApplication::processEvents();
-            QCoreApplication::processEvents();
+            // Phase 2: guard with is_gui_mode() — headless mode has no UI rebuild.
+            if (SessionService::is_gui_mode())
+                QCoreApplication::processEvents();
         }
     }
 
