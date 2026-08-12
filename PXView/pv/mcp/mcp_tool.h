@@ -50,6 +50,7 @@ struct ToolDesc {
     std::string name{};
     std::string description{};
     json        input_schema{};
+    json        annotations{};       // MCP tool annotations (readOnlyHint, destructiveHint, etc.)
 
     // Handler variants (mutually exclusive — kind indicates which)
     BuilderHandler builder_handler{};
@@ -195,6 +196,30 @@ struct ToolDesc {
         return *this;
     }
 
+    // ── Tool annotations (MCP spec hints for AI agents) ──
+    // These help MCP clients decide whether to ask for user confirmation
+    // before calling a tool, or whether to batch read-only calls.
+
+    ToolDesc& read_only() {
+        annotations = {{"readOnlyHint", true}};
+        return *this;
+    }
+
+    ToolDesc& destructive() {
+        annotations = {{"destructiveHint", true}, {"readOnlyHint", false}};
+        return *this;
+    }
+
+    ToolDesc& idempotent() {
+        annotations = {{"idempotentHint", true}};
+        return *this;
+    }
+
+    ToolDesc& open_world() {
+        annotations = {{"openWorldHint", true}};
+        return *this;
+    }
+
     // ── Schema finalisation ──
 
     void finalize_schema() {
@@ -210,11 +235,14 @@ struct ToolDesc {
     // ── Serialise to MCP tool definition (for tools/list) ──
 
     json to_tool_json() const {
-        return {
+        json j = {
             {"name",        name},
             {"description", description},
             {"inputSchema", input_schema}
         };
+        if (!annotations.is_null())
+            j["annotations"] = annotations;
+        return j;
     }
 
 private:

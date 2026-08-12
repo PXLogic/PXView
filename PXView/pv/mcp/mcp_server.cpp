@@ -86,9 +86,7 @@ json McpServer::handle_initialize() const {
     return {
         {"protocolVersion", "2025-03-26"},
         {"capabilities", {
-            {"tools", {{"listChanged", false}}},
-            {"resources", {{"listChanged", false, "subscribe", false}}},
-            {"prompts", {{"listChanged", false}}}
+            {"tools", {{"listChanged", false}}}
         }},
         {"serverInfo", {
             {"name", name_},
