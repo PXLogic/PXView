@@ -413,5 +413,14 @@ void SessionStateContext::clear_glitch_filter_state_for_capture() {
   }
 }
 
+SessionStateContext::CaptureStateSnapshot
+SessionStateContext::get_capture_state_snapshot() const {
+  return CaptureStateSnapshot{
+    _is_working.load(std::memory_order_acquire),
+    _device_status.load(std::memory_order_acquire),
+    _document_registry ? _document_registry->is_copy_in_progress() : false
+  };
+}
+
 } // namespace core
 } // namespace pv

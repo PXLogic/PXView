@@ -51,6 +51,7 @@ namespace data { class AnalogSnapshot; class DsoSnapshot; class LogicSnapshot; }
 #include "pv/base/pxvdef.h"
 #include "pv/base/eventobject.h"
 #include "pv/interface/icallbacks.h"
+#include "pv/interface/events.h"
 #include "pv/core/eventbus.h"
 #include "pv/core/capturemanager.h"
 #include "pv/core/sessionstatecontext.h"

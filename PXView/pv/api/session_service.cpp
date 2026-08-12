@@ -391,8 +391,7 @@ _event_subscriptions.push_back(bus->subscribe<pv::interface::ClearDecodeData>([s
 }
 
 SessionService::~SessionService() {
-// Subscriptions auto-unsubscribe via RAII.
-}
+    // Subscriptions auto-unsubscribe via RAII.
     // phase 2: release the MCP-dedicated document slot. Ownership is held by
     // DocumentRegistry, so release_document() frees the document (marked
     // deletion — slot stays, index stays stable). No manual unregister + delete.

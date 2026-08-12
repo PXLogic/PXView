@@ -27,6 +27,7 @@
 #include <cstdint>
 #include "pv/interface/icallbacks.h"
 #include "pv/interface/events.h"
+#include "pv/core/eventbus.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -360,9 +361,11 @@ void broadcast_event(ServiceEvent event,
         int capture_ratio,
         double duration_seconds,
         uint64_t sample_count);
-// Returns true when running inside the GUI (QApplication), false when
-// running headless (QCoreApplication only).
+public:
+    // Returns true when running inside the GUI (QApplication), false when
+    // running headless (QCoreApplication only).
     static bool is_gui_mode();
+private:
     // phase 2: resolve the MCP-dedicated document weak pointer from the owning
     // index in DocumentRegistry. Returns nullptr if no document is injected
     // or the slot has been released.
@@ -376,7 +379,7 @@ private:
 int _capture_id;
 
 // RAII event subscriptions
-std::vector<core::Subscription> _event_subscriptions;
+std::vector<pv::core::Subscription> _event_subscriptions;
 
 // P0-2: Global state version counter for versioned notifications
     mutable uint64_t _state_version_counter = 0;

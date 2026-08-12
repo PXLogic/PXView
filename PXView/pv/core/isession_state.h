@@ -135,6 +135,10 @@ public:
     virtual void show_wait_trigger() = 0;
     virtual void delay_prop_msg(QString strMsg) = 0;
     virtual uint64_t next_decoder_handle_id() = 0;
+
+    // --- SharedState signaling (Phase 3) ---
+    /// Signal that decode is complete (wakes wait_for_decode_complete).
+    virtual void notify_decode_complete() = 0;
 };
 
 } // namespace pv

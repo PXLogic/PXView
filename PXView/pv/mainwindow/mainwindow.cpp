@@ -209,7 +209,6 @@ MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
   _title_bar = title_bar;
 
   _session = ::AppControl::Instance()->GetSession();
-  _session->add_event_listener(this);
   _device_agent = _session->get_device();
 // Phase 2: initialise the config I/O delegate.
 _config_io = std::make_unique<MainWindowConfigIO>(this);
@@ -221,8 +220,6 @@ _status_bar = std::make_unique<MainWindowStatusBar>(this);
 _shortcut_manager = std::make_unique<MainWindowShortcutManager>(this);
 _signal_connector = std::make_unique<MainWindowSignalConnector>(this);
 _file_ops = std::make_unique<MainWindowFileOps>(this);
-  // Register as a typed event listener for all notification events.
-  _session->add_event_listener(this);
 
   _is_auto_switch_device = false;
   _is_save_confirm_msg = false;
@@ -252,13 +249,7 @@ _file_ops = std::make_unique<MainWindowFileOps>(this);
 }
 
 MainWindow::~MainWindow() {
-  // B1.2: unregister the typed event listener before destruction. The
-  // SigSession outlives this MainWindow (it is owned by AppControl), so
-  // failing to unregister would leave a dangling pointer in the listener
-  // vector.
-  if (_session) {
-    _session->remove_event_listener(this);
-  }
+  // Subscriptions auto-unsubscribe via RAII in SessionEventDispatcher.
 }
 
 void MainWindow::setup_ui() {

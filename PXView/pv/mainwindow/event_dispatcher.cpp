@@ -57,6 +57,126 @@ using namespace pv;
   } while (0)
 
 namespace pv {
+
+SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBus *bus)
+    : _window(window), _bus(bus) {
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CaptureStateChanged>(
+      [this](const pv::interface::CaptureStateChanged &e) { on_capture_state_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CaptureOwnerChanged>(
+      [this](const pv::interface::CaptureOwnerChanged &e) { on_capture_owner_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::TriggerConfigChanged>(
+      [this](const pv::interface::TriggerConfigChanged &e) { on_trigger_config_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SampleCountUpdated>(
+      [this](const pv::interface::SampleCountUpdated &e) { on_sample_count_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceOptionsUpdated>(
+      [this](const pv::interface::DeviceOptionsUpdated &e) { on_device_options_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DsoViewOptionChanged>(
+      [this](const pv::interface::DsoViewOptionChanged &e) { on_dso_view_option_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::ActiveDocumentChanged>(
+      [this](const pv::interface::ActiveDocumentChanged &e) { on_active_document_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CopyToDocDone>(
+      [this](const pv::interface::CopyToDocDone &e) { on_copy_to_doc_done(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DecodeDone>(
+      [this](const pv::interface::DecodeDone &e) { on_decode_done(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SignalsChanged>(
+      [this](const pv::interface::SignalsChanged &e) { on_signals_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DataUpdated>(
+      [this](const pv::interface::DataUpdated &e) { on_data_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceModeChanged>(
+      [this](const pv::interface::DeviceModeChanged &e) { on_device_mode_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CollectModeChanged>(
+      [this](const pv::interface::CollectModeChanged &e) { on_collect_mode_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceListUpdated>(
+      [this](const pv::interface::DeviceListUpdated &e) { on_device_list_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CurrentDeviceChanged>(
+      [this](const pv::interface::CurrentDeviceChanged &e) { on_current_device_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceOpenFailed>(
+      [this](const pv::interface::DeviceOpenFailed &e) { on_device_open_failed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::UsbDeviceArrived>(
+      [this](const pv::interface::UsbDeviceArrived &e) { on_usb_device_arrived(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceDetached>(
+      [this](const pv::interface::DeviceDetached &e) { on_device_detached(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SampleRateChanged>(
+      [this](const pv::interface::SampleRateChanged &e) { on_sample_rate_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SaveComplete>(
+      [this](const pv::interface::SaveComplete &e) { on_save_complete(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::StartCollectWork>(
+      [this](const pv::interface::StartCollectWork &e) { on_start_collect_work(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CollectStart>(
+      [this](const pv::interface::CollectStart &e) { on_collect_start(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CollectEnd>(
+      [this](const pv::interface::CollectEnd &e) { on_collect_end(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::EndCollectWork>(
+      [this](const pv::interface::EndCollectWork &e) { on_end_collect_work(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::EndDeviceOptions>(
+      [this](const pv::interface::EndDeviceOptions &e) { on_end_device_options(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceConfigUpdated>(
+      [this](const pv::interface::DeviceConfigUpdated &e) { on_device_config_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DemoModeChanged>(
+      [this](const pv::interface::DemoModeChanged &e) { on_demo_mode_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DataPoolChanged>(
+      [this](const pv::interface::DataPoolChanged &e) { on_data_pool_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SimpleTriggerChanged>(
+      [this](const pv::interface::SimpleTriggerChanged &e) { on_simple_trigger_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::GlitchFilterStarted>(
+      [this](const pv::interface::GlitchFilterStarted &e) { on_glitch_filter_started(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::GlitchFilterProgress>(
+      [this](const pv::interface::GlitchFilterProgress &e) { on_glitch_filter_progress(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::GlitchFilterCompleted>(
+      [this](const pv::interface::GlitchFilterCompleted &e) { on_glitch_filter_completed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::GlitchFilterCleared>(
+      [this](const pv::interface::GlitchFilterCleared &e) { on_glitch_filter_cleared(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SignalInvertStarted>(
+      [this](const pv::interface::SignalInvertStarted &e) { on_signal_invert_started(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SignalInvertCompleted>(
+      [this](const pv::interface::SignalInvertCompleted &e) { on_signal_invert_completed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SignalInvertCleared>(
+      [this](const pv::interface::SignalInvertCleared &e) { on_signal_invert_cleared(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CopyInProgressChanged>(
+      [this](const pv::interface::CopyInProgressChanged &e) { on_copy_in_progress_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::TrigNextCollect>(
+      [this](const pv::interface::TrigNextCollect &e) { on_trig_next_collect(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::ClearDecodeData>(
+      [this](const pv::interface::ClearDecodeData &e) { on_clear_decode_data(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::AppOptionsChanged>(
+      [this](const pv::interface::AppOptionsChanged &e) { on_app_options_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::FontOptionsChanged>(
+      [this](const pv::interface::FontOptionsChanged &e) { on_font_options_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::ShortcutChanged>(
+      [this](const pv::interface::ShortcutChanged &e) { on_shortcut_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::StyleChanged>(
+      [this](const pv::interface::StyleChanged &e) { on_style_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::StoreConfPrev>(
+      [this](const pv::interface::StoreConfPrev &e) { on_store_conf_prev(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CurrentDeviceChangePrev>(
+      [this](const pv::interface::CurrentDeviceChangePrev &e) { on_current_device_change_prev(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::StartCollectWorkPrev>(
+      [this](const pv::interface::StartCollectWorkPrev &e) { on_start_collect_work_prev(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::EndCollectWorkPrev>(
+      [this](const pv::interface::EndCollectWorkPrev &e) { on_end_collect_work_prev(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DataLenUpdated>(
+      [this](const pv::interface::DataLenUpdated &e) { on_data_len_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::HeaderReceived>(
+      [this](const pv::interface::HeaderReceived &e) { on_header_received(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::CaptureUpdated>(
+      [this](const pv::interface::CaptureUpdated &e) { on_capture_updated(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::ShowRegion>(
+      [this](const pv::interface::ShowRegion &e) { on_show_region(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::RepeatHold>(
+      [this](const pv::interface::RepeatHold &e) { on_repeat_hold(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::TriggerReceived>(
+      [this](const pv::interface::TriggerReceived &e) { on_trigger_received(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::ShowWaitTrigger>(
+      [this](const pv::interface::ShowWaitTrigger &e) { on_show_wait_trigger(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SessionError>(
+      [this](const pv::interface::SessionError &e) { on_session_error(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SaveRequested>(
+      [this](const pv::interface::SaveRequested &e) { on_save_requested(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DelayedPropMsg>(
+      [this](const pv::interface::DelayedPropMsg &e) { on_delayed_prop_msg(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::SampleLimitsChanged>(
+      [this](const pv::interface::SampleLimitsChanged &e) { on_sample_limits_changed(e); }));
+}
 // P0/P1: Safely resolve the current view. Returns nullptr if MainWindow is
 // gone (QPointer) or no tab is active. Callers MUST null-check the result
 // before dereferencing.

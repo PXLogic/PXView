@@ -257,16 +257,7 @@ public:
     int device_status;      // ST_INIT / ST_RUNNING / ST_STOPPED
     bool is_copy_in_progress;
   };
-  CaptureStateSnapshot get_capture_state_snapshot() const {
-    return CaptureStateSnapshot{
-      _is_working.load(std::memory_order_acquire),
-      _device_status.load(std::memory_order_acquire),
-      // is_copy_in_progress lives on DocumentRegistry — query it there.
-      // For the snapshot, we read it from the atomic on DocumentRegistry.
-      // If _document_registry is null (during early init), default to false.
-      _document_registry ? _document_registry->is_copy_in_progress() : false
-    };
-  }
+  CaptureStateSnapshot get_capture_state_snapshot() const;
 
   // --- Decode-stack handle id generator (kept on state for centralized
   // access by both SigSession::add_decoder and DecodeTaskManager) ---

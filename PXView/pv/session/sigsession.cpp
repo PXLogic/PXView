@@ -204,10 +204,7 @@ SigSession::~SigSession() {
     reconnect_timer_.reset();
   }
 
-  // Unregister as IEventListener before _event_bus is destroyed (unique_ptr
-  // member, destroyed after the destructor body runs).
-  if (_event_bus)
-    _event_bus->remove_event_listener(this);
+  // Subscriptions auto-unsubscribe via RAII (vector<Subscription> destructor).
 
   // _state destructor clears _data_list entries. Managers (unique_ptrs) are
   // destroyed before _state due to reverse declaration order in sigsession.h,
