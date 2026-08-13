@@ -348,12 +348,12 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
                   logic_signal->data()->get_ring_sample_count();
             logic_signal->paint_mid_align_sample(
                 dbp, 0, t->get_view_rect().right(), color, ctx.back,
-                end_align_sample);
+                end_align_sample, ctx.pctx);
             bFirst = false;
           } else if (!t->as_decode()) {
             // Non-logic, non-decoder traces go into the cached pixmap
             t->paint_mid(dbp, 0, t->get_view_rect().right(), ctx.fore,
-                         ctx.back);
+                         ctx.back, ctx.pctx);
           }
         }
       }
@@ -409,7 +409,7 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
           if (isLissa && t->signal_type() == SR_CHANNEL_MATH)
             continue;
           t->paint_mid(dbp, 0, t->get_view_rect().right(), ctx.fore,
-                       ctx.back);
+                       ctx.back, ctx.pctx);
         }
       }
       vp->need_update() = false;
@@ -443,7 +443,7 @@ void DecodeTracePass::render(QPainter &p, const RenderContext &ctx) {
 
   for (auto t : *ctx.traces) {
     if (t->enabled() && t->signal_type() == SR_CHANNEL_DECODER) {
-      t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore, ctx.back);
+      t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore, ctx.back, ctx.pctx);
     }
   }
   p.restore();

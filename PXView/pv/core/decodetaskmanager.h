@@ -74,7 +74,9 @@ public:
   void stop();
 
   /// Plan B Phase 3: access the shared thread pool for decode tasks.
-  /// DecodeTaskManager owns its own pool (2 threads) for decode work.
+  /// The pool starts with 2 threads and grows dynamically via grow()
+  /// to match the number of concurrent decode tasks, restoring the
+  /// pre-Plan-B one-thread-per-decoder parallelism.
   ThreadPool &decode_pool() { return _decode_pool; }
 
 private:

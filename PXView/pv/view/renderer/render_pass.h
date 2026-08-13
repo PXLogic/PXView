@@ -28,6 +28,7 @@
 #include <QRect>
 #include <cstdint>
 #include <vector>
+#include "pv/view/trace/paint_context.h"
 
 class QPainter;
 
@@ -61,6 +62,10 @@ struct RenderContext {
   const std::vector<SignalGroup> *groups = nullptr;
   int viewWidth = 0;
   bool is_logic_mode = false;
+
+  // PaintContext snapshot for Trace::paint_mid / paint_back / paint_fore.
+  // Populated by ViewportPainter before calling RenderPass::render.
+  PaintContext pctx;
 };
 
 /**

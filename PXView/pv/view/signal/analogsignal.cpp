@@ -433,7 +433,8 @@ void AnalogSignal::resize() {
  * Paint
  **/
 void AnalogSignal::paint_back(QPainter &p, int left, int right, QColor fore,
-                              QColor back) {
+                              QColor back, const PaintContext &ctx) {
+  (void)ctx;
   assert(_view);
 
   int i, j;
@@ -483,7 +484,7 @@ void AnalogSignal::paint_back(QPainter &p, int left, int right, QColor fore,
 }
 
 void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
-                             QColor back) {
+                             QColor back, const PaintContext &ctx) {
   (void)fore;
   (void)back;
 
@@ -503,11 +504,11 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   const float zeroY = ratio2pos(get_zero_ratio());
   const int width = right - left + 1;
 
-  const double scale = _view->scale();
+  const double scale = ctx.scale;
 
   if (scale <= 0)
     return;
-  const int64_t offset = _view->offset();
+  const int64_t offset = ctx.offset;
 
   const int order = _data->get_ch_order(get_index());
   if (order == -1)
@@ -556,7 +557,8 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
 }
 
 void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
-                              QColor back) {
+                              QColor back, const PaintContext &ctx) {
+  (void)ctx;
   assert(_view);
 
   fore.setAlpha(View::BackAlpha);
@@ -568,7 +570,7 @@ void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
   fore.setAlpha(View::ForeAlpha);
   if (enabled()) {
     // Paint measure
-    if (_data_source->is_stopped_status())
+    if (ctx.is_stopped_status)
       paint_hover_measure(p, fore, back);
   }
 }

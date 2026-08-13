@@ -55,8 +55,9 @@ LissajousTrace::~LissajousTrace()
 {
 }
 
-void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back)
+void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     assert(_view);
 
     fore.setAlpha(view::View::BackAlpha);
@@ -99,8 +100,9 @@ void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, Q
     _view->set_back(true);
 }
 
-void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back)
+void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     (void)fore;
     (void)back;
     (void)left;
@@ -157,8 +159,9 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
     }
 }
 
-void LissajousTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back)
+void LissajousTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     (void)p;
     (void)left;
     (void)right;

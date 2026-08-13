@@ -228,9 +228,17 @@ void DecodeTaskManager::start_all_decode_tasks() {
   // (single attach instead of N attaches).
   attach_data_to_signal(_state->view_data());
 
-  // Track C2: [PWMDBG] debug log removed
+  // Grow the thread pool to match the number of decode tasks so that
+  // each decoder can run on its own thread in parallel, restoring the
+  // pre-Plan-B behavior. The original code created one std::thread per
+  // decoder; commit c454899a replaced that with a fixed 2-thread pool,
+  // which serialized decoding. grow() adds worker threads as needed.
+  auto traces = _state->decode_traces();
+  if (!traces.empty()) {
+    _decode_pool.grow(traces.size());
+  }
 
-  for (auto stack : _state->decode_traces()) {
+  for (auto stack : traces) {
     stack->set_capture_end_flag(true);
     stack->frame_ended();
     add_decode_task(stack);

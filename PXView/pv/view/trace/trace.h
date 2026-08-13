@@ -31,6 +31,7 @@
 #include <QString>
 #include <cstdint>
 #include "pv/view/trace/selectableitem.h"
+#include "pv/view/trace/paint_context.h"
 #include "pv/view/component/dsldial.h"
 #include "pv/view/trace/trace_visitor.h"
 
@@ -232,23 +233,25 @@ public:
 	 * @param left the x-coordinate of the left edge of the signal
 	 * @param right the x-coordinate of the right edge of the signal
 	 **/
-    virtual void paint_back(QPainter &p, int left, int right, QColor fore, QColor back);
+    virtual void paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx);
 
 	/**
 	 * Paints the mid-layer of the trace with a QPainter
 	 * @param p the QPainter to paint into.
 	 * @param left the x-coordinate of the left edge of the signal
 	 * @param right the x-coordinate of the right edge of the signal
+	 * @param ctx rendering context snapshot (scale, offset, etc.)
 	 **/
-    virtual void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back);
+    virtual void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx);
 
 	/**
 	 * Paints the foreground layer of the trace with a QPainter
 	 * @param p the QPainter to paint into.
 	 * @param left the x-coordinate of the left edge of the signal
 	 * @param right the x-coordinate of the right edge of the signal
+	 * @param ctx rendering context snapshot (scale, offset, etc.)
 	 **/
-    virtual void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back);
+    virtual void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx);
 
 	/**
      * Paints the trace label.

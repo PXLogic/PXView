@@ -3028,28 +3028,38 @@ Result<void> SessionService::clear_all_decoders() {
         return Result<void>::Fail(ErrorCode::InternalError,
                                   "Session is nullptr");
 
-    // Snapshot the current decoder stacks BEFORE clearing so each removed
-    // stack can be reported via DecoderRemoved events (mirrors remove_decoder).
-    auto &stacks_before = _session->get_decoder_stacks(api_document());
-    std::vector<std::string> removed_ids;
-    removed_ids.reserve(stacks_before.size());
-    for (auto stack : stacks_before) {
-        if (!stack)
-            continue;
-        removed_ids.push_back(make_instance_id(stack.get()));
-    }
+    // clear_all_decoder() triggers signals_changed() (View layer updates) and
+    // rebuild_decoder_pannel() touches QWidget objects (ProtocolItemLayer
+    // creation/destruction, layout manipulation, signal connect/disconnect).
+    // All of these are Qt operations that MUST run on the main thread.
+    auto do_clear = [this]() -> Result<void> {
+        // Snapshot the current decoder stacks BEFORE clearing so each removed
+        // stack can be reported via DecoderRemoved events (mirrors remove_decoder).
+        auto &stacks_before = _session->get_decoder_stacks(api_document());
+        std::vector<std::string> removed_ids;
+        removed_ids.reserve(stacks_before.size());
+        for (auto stack : stacks_before) {
+            if (!stack)
+                continue;
+            removed_ids.push_back(make_instance_id(stack.get()));
+        }
 
-    // bUpdateView=true so the View layer refreshes; we emit DecoderRemoved
-    // events ourselves below so subscribers can react to each removal.
-    _session->clear_all_decoder(true);
-    // Rebuild the protocol dock UI to remove stale layer items
-    _session->rebuild_decoder_pannel();
+        // bUpdateView=true so the View layer refreshes; we emit DecoderRemoved
+        // events ourselves below so subscribers can react to each removal.
+        _session->clear_all_decoder(true);
+        // Rebuild the protocol dock UI to remove stale layer items
+        _session->rebuild_decoder_pannel();
 
-    for (const auto &instance_id : removed_ids) {
-        broadcast_event(ServiceEvent::DecoderRemoved,
-                        {{"instance_id", instance_id}});
-    }
-    return Result<void>::Success();
+        for (const auto &instance_id : removed_ids) {
+            broadcast_event(ServiceEvent::DecoderRemoved,
+                            {{"instance_id", instance_id}});
+        }
+        return Result<void>::Success();
+    };
+
+    // Dispatch to the main thread, invoking inline when already on the main
+    // thread (avoids the Qt::QueuedConnection + result_cv.wait() deadlock).
+    return run_void_on_main_thread(do_clear);
 }
 
 // ===========================================================================

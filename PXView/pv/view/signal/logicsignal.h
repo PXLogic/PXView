@@ -112,7 +112,7 @@ public:
 	 * @param left the x-coordinate of the left edge of the signal.
 	 * @param right the x-coordinate of the right edge of the signal.
 	 **/
-    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     bool measure(const QPointF &p, uint64_t &index0, uint64_t &index1, uint64_t &index2);
 
@@ -130,7 +130,7 @@ public:
 
     void paint_mark(QPainter &p, int xstart, int xend, int type);
 
-    void paint_mid_align_sample(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample);
+    void paint_mid_align_sample(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample, const PaintContext &ctx);
 
 protected:
     void paint_type_options(QPainter &p, int right, const QPoint pt, QColor fore);
@@ -141,7 +141,7 @@ private:
 		bool level, double samples_per_pixel, double pixels_offset,
 		float x_offset, float y_offset);
 
-    void paint_mid_align(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample);
+    void paint_mid_align(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample, const PaintContext &ctx);
 
 private:
 	std::shared_ptr<pv::data::LogicSnapshot> _data_ref; // keeps snapshot alive (prevents use-after-free)

@@ -176,8 +176,9 @@ void DecodeTrace::set_view(pv::view::View *view) {
 }
 
 void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
-                             QColor back) {
+                             QColor back, const PaintContext &ctx) {
   (void)back;
+  (void)ctx;
 
   // Skip paint if this trace has not been laid out yet. _v_offset is
   // initialized to INT_MAX by the Trace constructor and set to a real
@@ -202,7 +203,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   }
   const double samples_per_pixel =
       (doc_samplerate > 0 ? doc_samplerate : _data_source->cur_snap_samplerate()) *
-      _view->scale();
+      ctx.scale;
 
   uint64_t d_start = 0;
   uint64_t d_end = INT64_MAX;
@@ -212,8 +213,8 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
     if (d_end == 0) d_end = INT64_MAX;
   }
 
-  const double startX = d_start / samples_per_pixel - _view->offset();
-  const double endX = d_end / samples_per_pixel - _view->offset();
+  const double startX = d_start / samples_per_pixel - ctx.offset;
+  const double endX = d_end / samples_per_pixel - ctx.offset;
   const double regionY = get_y() - _totalHeight * 0.5 - ControlRectWidth;
 
   p.setBrush(View::Blue);
@@ -232,7 +233,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   // --draw headings
   const int row_height = (_totalHeight > 0 && _cur_row_headings.size() > 0)
                              ? _totalHeight / (int)_cur_row_headings.size()
-                             : _view->get_signalHeight();
+                             : ctx.signal_height;
   for (size_t i = 0; i < _cur_row_headings.size(); i++) {
     const int y = i * row_height + get_y() - _totalHeight * 0.5;
 
@@ -254,12 +255,14 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
 }
 
 void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
-                            QColor back) {
+                            QColor back, const PaintContext &ctx) {
   using namespace pv::data::decode;
 
   // Skip paint if not yet laid out (see paint_back for rationale).
   if (get_v_offset() == INT_MAX)
     return;
+
+  (void)back;
 
   assert(_decoder_stack);
   const QString err = _decoder_stack->error_message();
@@ -267,7 +270,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
     draw_error(p, err, left, right);
   }
 
-  const double scale = _view->scale();
+  const double scale = ctx.scale;
   if (scale <= 0)
     return;
 
@@ -279,7 +282,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   if (samplerate == 0.0)
     samplerate = 1.0;
 
-  const int64_t pixels_offset = _view->offset();
+  const int64_t pixels_offset = ctx.offset;
   const double samples_per_pixel = samplerate * scale;
 
   uint64_t start_sample =
@@ -301,7 +304,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
   const int row_count = rows_size();
   const int annotation_height =
-      (row_count > 0) ? (_totalHeight / row_count) : _view->get_signalHeight();
+      (row_count > 0) ? (_totalHeight / row_count) : ctx.signal_height;
 
   // Iterate through the rows
   assert(_view);
@@ -396,7 +399,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 }
 
 void DecodeTrace::paint_fore(QPainter &p, int left, int right, QColor fore,
-                             QColor back) {
+                             QColor back, const PaintContext &ctx) {
   using namespace pv::data::decode;
 
   (void)p;
@@ -404,6 +407,7 @@ void DecodeTrace::paint_fore(QPainter &p, int left, int right, QColor fore,
   (void)right;
   (void)fore;
   (void)back;
+  (void)ctx;
 }
 
 void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,

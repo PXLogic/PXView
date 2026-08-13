@@ -270,8 +270,9 @@ bool SpectrumTrace::measure(const QPoint &p)
 }
 
 
-void SpectrumTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back)
+void SpectrumTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     if(!_view)
         return;
 
@@ -286,8 +287,9 @@ void SpectrumTrace::paint_back(QPainter &p, int left, int right, QColor fore, QC
     p.drawRect(left, UpMargin, width, height);
 }
 
-void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back)
+void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     (void)fore;
     (void)back;
 
@@ -366,8 +368,9 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
     }
 }
 
-void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back)
+void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
+    (void)ctx;
     using namespace Qt;
 
     (void)back;

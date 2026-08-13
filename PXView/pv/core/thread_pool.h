@@ -72,6 +72,27 @@ public:
     });
   }
 
+  /// Grow the pool to at least min_threads worker threads.
+  /// If the pool already has >= min_threads workers, this is a no-op.
+  /// Safe to call concurrently with submit(). New threads start
+  /// immediately and can pick up queued tasks.
+  /// This restores the pre-Plan-B parallelism where each decoder ran
+  /// on its own dedicated thread.
+  void grow(size_t min_threads) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_stop_flag.load())
+      return;
+    while (_workers.size() < min_threads) {
+      _workers.emplace_back([this]() { worker_loop(); });
+    }
+  }
+
+  /// Return the current number of worker threads.
+  size_t worker_count() const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _workers.size();
+  }
+
   /// Signal all workers to stop and join them. Called by destructor.
   /// Can be called manually (e.g. from SigSession::Close()).
   void shutdown() {

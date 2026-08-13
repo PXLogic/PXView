@@ -177,9 +177,10 @@ void Trace::paint_prepare()
     _view->set_trig_hoff(0);
 }
 
-void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back)
+void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
     (void)back;
+    (void)ctx;
 
     fore.setAlpha(View::BackAlpha);
     QPen pen(fore);
@@ -189,22 +190,24 @@ void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor bac
     p.drawLine(left, sigY, right, sigY);
 }
 
-void Trace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back)
+void Trace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
 	(void)p;
 	(void)left;
 	(void)right;
     (void)fore;
     (void)back;
+    (void)ctx;
 }
 
-void Trace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back)
+void Trace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
 	(void)p;
 	(void)left;
 	(void)right;
-    (void)fore;
-    (void)back;
+	(void)fore;
+	(void)back;
+    (void)ctx;
 }
 
 void Trace::paint_label(QPainter &p, int right, const QPoint pt, QColor fore)

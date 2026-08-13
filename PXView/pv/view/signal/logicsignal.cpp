@@ -128,7 +128,7 @@ bool LogicSignal::commit_trig() {
 }
 
 void LogicSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
-                            QColor back) {
+                            QColor back, const PaintContext &ctx) {
   if (!_data)
     return;
   uint64_t ring_count = _data->get_ring_sample_count();
@@ -137,17 +137,19 @@ void LogicSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     return;
   }
   uint64_t end_align_sample = ring_count - 1;
-  paint_mid_align(p, left, right, fore, back, end_align_sample);
+  paint_mid_align(p, left, right, fore, back, end_align_sample, ctx);
 }
 
 void LogicSignal::paint_mid_align_sample(QPainter &p, int left, int right,
                                          QColor fore, QColor back,
-                                         uint64_t end_align_sample) {
-  paint_mid_align(p, left, right, fore, back, end_align_sample);
+                                         uint64_t end_align_sample,
+                                         const PaintContext &ctx) {
+  paint_mid_align(p, left, right, fore, back, end_align_sample, ctx);
 }
 
 void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
-                                  QColor back, uint64_t end_align_sample) {
+                                  QColor back, uint64_t end_align_sample,
+                                  const PaintContext &ctx) {
   using pv::view::View;
 
   (void)back;
@@ -158,10 +160,10 @@ void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
   assert(right >= left);
 
   const int y = get_y() + _totalHeight * 0.5;
-  const double scale = _view->scale();
+  const double scale = ctx.scale;
   if (scale <= 0)
     return;
-  const int64_t offset = _view->offset();
+  const int64_t offset = ctx.offset;
 
   const int high_offset = y - _totalHeight; // removed +0.5f: y and _totalHeight are both int, so 0.5f was silently truncated
   const int low_offset = y;
@@ -252,7 +254,7 @@ void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
   //     been glitch-filtered AND the user has enabled the overlay in the
   //     glitch filter panel; takes precedence over the live preview.
   if (_data && _data->is_glitch_filtered() &&
-      _view->session().show_glitch_filter_overlay()) {
+      ctx.show_glitch_overlay) {
     const auto &ranges = _data->get_filtered_ranges(sig_idx);
     if (!ranges.empty()) {
       p.setBrush(QColor(255, 82, 82, 90));

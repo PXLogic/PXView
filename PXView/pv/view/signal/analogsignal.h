@@ -152,7 +152,7 @@ public:
      * @param left the x-coordinate of the left edge of the signal
      * @param right the x-coordinate of the right edge of the signal
      **/
-    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
 	/**
 	 * Paints the signal with a QPainter
@@ -160,7 +160,7 @@ public:
 	 * @param left the x-coordinate of the left edge of the signal.
 	 * @param right the x-coordinate of the right edge of the signal.
 	 **/
-    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     /**
      * Paints the signal with a QPainter
@@ -168,7 +168,7 @@ public:
      * @param left the x-coordinate of the left edge of the signal.
      * @param right the x-coordinate of the right edge of the signal.
      **/
-    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
 private:
     void paint_trace(QPainter &p,

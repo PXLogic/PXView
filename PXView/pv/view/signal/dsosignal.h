@@ -254,7 +254,7 @@ return _vDial.get();
      * @param left the x-coordinate of the left edge of the signal
      * @param right the x-coordinate of the right edge of the signal
      **/
-    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
 	/**
 	 * Paints the signal with a QPainter
@@ -262,7 +262,7 @@ return _vDial.get();
 	 * @param left the x-coordinate of the left edge of the signal.
 	 * @param right the x-coordinate of the right edge of the signal.
 	 **/
-    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     /**
      * Paints the signal with a QPainter
@@ -270,7 +270,7 @@ return _vDial.get();
      * @param left the x-coordinate of the left edge of the signal.
      * @param right the x-coordinate of the right edge of the signal.
      **/
-    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     QRect get_view_rect();
 
@@ -296,13 +296,13 @@ private:
         const pv::data::DsoSnapshot* snapshot,
         int zeroY, int left, const int64_t start, const int64_t end, int hw_offset,
         const double pixels_offset, const double samples_per_pixel,
-        uint64_t num_channels);
+        uint64_t num_channels, double trig_hoff);
 
     void paint_envelope(QPainter &p,
         const pv::data::DsoSnapshot *snapshot,
         int zeroY, int left, const int64_t start, const int64_t end, int hw_offset,
         const double pixels_offset, const double samples_per_pixel,
-        uint64_t num_channels);
+        uint64_t num_channels, double trig_hoff);
 
     // New LDO path: per-pixel min/max. For each screen pixel, computes the
     // min and max of all samples falling into that pixel's sample-range,
@@ -314,7 +314,8 @@ private:
         const pv::data::DsoSnapshot *snapshot,
         int zeroY, int left, int right, const int64_t start, const int64_t end,
         int hw_offset, const double pixels_offset,
-        const double samples_per_pixel, uint64_t num_channels);
+        const double samples_per_pixel, uint64_t num_channels,
+        double trig_hoff);
 
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
     void auto_set();

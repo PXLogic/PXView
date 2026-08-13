@@ -110,7 +110,7 @@ public:
      * @param left the x-coordinate of the left edge of the signal
      * @param right the x-coordinate of the right edge of the signal
      **/
-    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
 	/**
 	 * Paints the signal with a QPainter
@@ -118,7 +118,7 @@ public:
 	 * @param left the x-coordinate of the left edge of the signal.
 	 * @param right the x-coordinate of the right edge of the signal.
 	 **/
-    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     /**
      * Paints the signal with a QPainter
@@ -126,7 +126,7 @@ public:
      * @param left the x-coordinate of the left edge of the signal.
      * @param right the x-coordinate of the right edge of the signal.
      **/
-    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back);
+    void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
     QRect get_view_rect();
 
@@ -142,11 +142,13 @@ protected:
 private:
     void paint_trace(QPainter &p,
         int zeroY, int left, const int64_t start, const int64_t end,
-        const double pixels_offset, const double samples_per_pixel);
+        const double pixels_offset, const double samples_per_pixel,
+        double trig_hoff);
 
     void paint_envelope(QPainter &p,
         int zeroY, int left, const int64_t start, const int64_t end,
-        const double pixels_offset, const double samples_per_pixel);
+        const double pixels_offset, const double samples_per_pixel,
+        double trig_hoff);
 
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
 

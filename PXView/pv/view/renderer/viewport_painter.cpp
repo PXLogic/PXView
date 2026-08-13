@@ -97,6 +97,20 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   std::vector<Trace *> traces;
   _viewport->view().get_traces(_viewport->type(), traces);
 
+  // Build PaintContext snapshot for all paint calls in this frame.
+  pv::view::PaintContext pctx;
+  pctx.scale = _viewport->view().scale();
+  pctx.offset = _viewport->view().offset();
+  pctx.trig_hoff = _viewport->view().trig_hoff();
+  pctx.signal_height = _viewport->view().get_signalHeight();
+  pctx.view_width = _viewport->view().get_view_width();
+  pctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+  pctx.is_stopped_status = _viewport->view().session().is_stopped_status();
+  pctx.is_loop_mode = _viewport->view().session().is_loop_mode();
+  pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();
+  pctx.show_glitch_overlay = _viewport->view().session().show_glitch_filter_overlay();
+  pctx.hover_point = _viewport->view().hover_point();
+
   p.save();
   p.translate(0, -_viewport->view().get_vOffset());
 
@@ -170,7 +184,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   for (auto t : traces) {
     if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
       continue;
-    t->paint_back(p, 0, _viewport->view().get_view_width(), fore, back);
+    t->paint_back(p, 0, _viewport->view().get_view_width(), fore, back, pctx);
     if (_viewport->view().back_ready())
       break;
   }
@@ -218,7 +232,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   p.translate(0, -_viewport->view().get_vOffset());
   for (auto t : traces) {
     if (t->enabled())
-      t->paint_fore(p, 0, _viewport->view().get_view_width(), fore, back);
+      t->paint_fore(p, 0, _viewport->view().get_view_width(), fore, back, pctx);
   }
   p.restore();
 
@@ -245,6 +259,20 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
   std::vector<Trace *> traces;
   _viewport->view().get_traces(_viewport->type(), traces);
 
+  // Build PaintContext snapshot for paint calls in this frame.
+  PaintContext pctx;
+  pctx.scale = _viewport->view().scale();
+  pctx.offset = _viewport->view().offset();
+  pctx.trig_hoff = _viewport->view().trig_hoff();
+  pctx.signal_height = _viewport->view().get_signalHeight();
+  pctx.view_width = _viewport->view().get_view_width();
+  pctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+  pctx.is_stopped_status = _viewport->view().session().is_stopped_status();
+  pctx.is_loop_mode = _viewport->view().session().is_loop_mode();
+  pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();
+  pctx.show_glitch_overlay = _viewport->view().session().show_glitch_filter_overlay();
+  pctx.hover_point = _viewport->view().hover_point();
+
   // Phase 5: Signal pixmap rebuild + blit via SignalPixmapPass.
   {
     RenderContext sctx;
@@ -257,6 +285,7 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     sctx.traces = &traces;
     sctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
     sctx.viewWidth = _viewport->view().get_view_width();
+    sctx.pctx = pctx;
 
     SignalPixmapPass pixmapPass;
     if (pixmapPass.should_run(sctx))
@@ -276,6 +305,7 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     dctx.back = back;
     dctx.traces = &traces;
     dctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+    dctx.pctx = pctx;
 
     DecodeTracePass decodePass;
     if (decodePass.should_run(dctx)) {

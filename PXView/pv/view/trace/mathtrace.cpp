@@ -189,16 +189,17 @@ QRect MathTrace::get_view_rect()
                   _viewport->height() - DsoSignal::UpMargin - DsoSignal::DownMargin);
 }
 
-void MathTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back)
+void MathTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
     (void)p;
     (void)left;
     (void)right;
     (void)fore;
     (void)back;
+    (void)ctx;
 }
 
-void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back)
+void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
     (void)fore;
     (void)back;
@@ -216,17 +217,17 @@ void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor 
         const int width = right - left;
         const float zeroY = _zero_vrate * height + top;
 
-        const double scale = _view->scale();
+        const double scale = ctx.scale;
         if (scale <= 0)
             return;
-        const int64_t offset = _view->offset();
+        const int64_t offset = ctx.offset;
 
         const double pixels_offset = offset;
         //const double samplerate = _view->session().cur_snap_samplerate();
         const double samplerate = _math_stack->samplerate();
         const int64_t last_sample = max((int64_t)(_math_stack->get_sample_num() - 1), (int64_t)0);
         const double samples_per_pixel = samplerate * scale;
-        const double start = offset * samples_per_pixel - _view->trig_hoff();
+        const double start = offset * samples_per_pixel - ctx.trig_hoff;
         const double end = start + samples_per_pixel * width;
 
         const int64_t start_sample = min(max((int64_t)floor(start),
@@ -240,17 +241,17 @@ void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor 
             _math_stack->enable_envelope(false);
             paint_trace(p, zeroY, left,
                 start_sample, end_sample,
-                pixels_offset, samples_per_pixel);
+                pixels_offset, samples_per_pixel, ctx.trig_hoff);
         } else {
             _math_stack->enable_envelope(true);
             paint_envelope(p, zeroY, left,
                 start_sample, end_sample,
-                pixels_offset, samples_per_pixel);
+                pixels_offset, samples_per_pixel, ctx.trig_hoff);
         }
     }
 }
 
-void MathTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back)
+void MathTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
     if (!_show)
         return;
@@ -265,13 +266,14 @@ void MathTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor
 
     // Paint measure
     fore.setAlpha(View::ForeAlpha);
-    if (_view->session().is_stopped_status())
+    if (ctx.is_stopped_status)
         paint_hover_measure(p, fore, back);
 }
 
 void MathTrace::paint_trace(QPainter &p,
     int zeroY, int left, const int64_t start, const int64_t end,
-    const double pixels_offset, const double samples_per_pixel)
+    const double pixels_offset, const double samples_per_pixel,
+    double trig_hoff)
 {
     const int64_t sample_count = end - start + 1;
 
@@ -291,7 +293,7 @@ void MathTrace::paint_trace(QPainter &p,
 
         double top = get_view_rect().top();
         double bottom = get_view_rect().bottom();
-        float x = (start / samples_per_pixel - pixels_offset) + left + _view->trig_hoff()/samples_per_pixel;
+        float x = (start / samples_per_pixel - pixels_offset) + left + trig_hoff/samples_per_pixel;
         double  pixels_per_sample = 1.0/samples_per_pixel;
 
         for (int64_t index = 0; index < sample_count; index++) {
@@ -313,7 +315,8 @@ void MathTrace::paint_trace(QPainter &p,
 
 void MathTrace::paint_envelope(QPainter &p,
     int zeroY, int left, const int64_t start, const int64_t end,
-    const double pixels_offset, const double samples_per_pixel)
+    const double pixels_offset, const double samples_per_pixel,
+    double trig_hoff)
 {
 	using namespace Qt;
 
@@ -342,7 +345,7 @@ void MathTrace::paint_envelope(QPainter &p,
 
     for(uint64_t sample = 0; sample < e.length-1; sample++) {
 		const float x = ((e.scale * sample + e.start) /
-            samples_per_pixel - pixels_offset) + left + _view->trig_hoff()/samples_per_pixel;
+            samples_per_pixel - pixels_offset) + left + trig_hoff/samples_per_pixel;
         const data::MathStack::EnvelopeSample *const s =
 			e.samples + sample;
 

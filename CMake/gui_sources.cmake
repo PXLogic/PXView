@@ -215,6 +215,7 @@ set(PXView_HEADERS
     PXView/pv/dialogs/about.h
     PXView/pv/dialogs/search.h
     PXView/pv/view/trace/trace.h
+    PXView/pv/view/trace/paint_context.h
     PXView/pv/view/trace/selectableitem.h
     PXView/pv/data/stack/decoderstack.h
     PXView/pv/view/trace/decodetrace.h

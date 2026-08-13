@@ -115,7 +115,7 @@ void DsoSignal::paint_prepare() {
 }
 
 void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
-                           QColor back) {
+                           QColor back, const PaintContext &ctx) {
   assert(_view);
 
   if (!_show)
@@ -139,10 +139,10 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
 
   const uint64_t sample_len = _data_source->cur_samplelimits();
   const double samplerate = _data_source->cur_snap_samplerate();
-  const double samples_per_pixel = samplerate * _view->scale();
+  const double samples_per_pixel = samplerate * ctx.scale;
   const double shown_rate =
       min(samples_per_pixel * width * 1.0 / sample_len, 1.0);
-  const double start = _view->offset() * samples_per_pixel;
+  const double start = ctx.offset * samples_per_pixel;
   const double shown_offset = min(start / sample_len, 1.0) * width;
   const double shown_len = max(shown_rate * width, 6.0);
   const QPointF left_edge[] = {QPoint(shown_offset + 3, UpMargin / 2 - 6),
@@ -193,7 +193,7 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
 }
 
 void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
-                          QColor back) {
+                          QColor back, const PaintContext &ctx) {
   (void)fore;
   (void)back;
 
@@ -214,10 +214,10 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const int width = right - left;
     const float zeroY = get_zero_vpos();
 
-    const double scale = _view->scale();
+    const double scale = ctx.scale;
     if (scale <= 0)
       return;
-    const int64_t offset = _view->offset();
+    const int64_t offset = ctx.offset;
 
     if (!_data || _data->empty() || !_data->has_data(index)) {
       return;
@@ -235,7 +235,7 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const int64_t last_sample =
         max((int64_t)(_data->get_sample_count() - 1), (int64_t)0);
     const double samples_per_pixel = samplerate * scale;
-    const double start = offset * samples_per_pixel - _view->trig_hoff();
+    const double start = offset * samples_per_pixel - ctx.trig_hoff;
     const double end = start + samples_per_pixel * width;
 
     const int64_t start_sample =
@@ -255,7 +255,7 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     s_dso_timing.get_samples_ms = 0; // reset before paint; accumulated inside
     paint_per_pixel(p, _data, zeroY, left, right, start_sample, end_sample,
                     hw_offset, pixels_offset, samples_per_pixel,
-                    enabled_channels);
+                    enabled_channels, ctx.trig_hoff);
     s_dso_timing.paint_draw_ms = dso_ft.elapsed() - dso_paint_start;
     s_dso_timing.active = true;
     s_dso_timing.sample_count = end_sample - start_sample + 1;
@@ -266,7 +266,7 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
 }
 
 void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
-                           QColor back) {
+                           QColor back, const PaintContext &ctx) {
   if (!_show)
     return;
 
@@ -280,7 +280,7 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
 
   fore.setAlpha(View::ForeAlpha);
   if (enabled()) {
-    const QPointF mouse_point = _view->hover_point();
+    const QPointF mouse_point = ctx.hover_point;
     const QRectF label_rect = get_trig_rect(left, right);
     const bool hover = label_rect.contains(mouse_point);
 
@@ -334,7 +334,7 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
                t_vol_s);
 
     // paint the _trig_vpos line
-    if (_view->get_dso_trig_moved()) {
+    if (ctx.dso_trig_moved) {
       p.setPen(QPen(_colour, 1, Qt::DotLine));
       p.drawLine(left, trigp,
                  right -
@@ -348,7 +348,7 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
                Qt::AlignCenter | Qt::AlignVCenter | Qt::TextDontClip, "T");
 
     // Paint measure
-    if (_data_source->is_stopped_status())
+    if (ctx.is_stopped_status)
       paint_hover_measure(p, fore, back);
 
     // autoset — throttled to every 10th frame (~3/sec at 30 FPS) to avoid
@@ -377,7 +377,7 @@ void DsoSignal::paint_trace(QPainter &p, const pv::data::DsoSnapshot *snapshot,
                             const int64_t end, int hw_offset,
                             const double pixels_offset,
                             const double samples_per_pixel,
-                            uint64_t num_channels) {
+                            uint64_t num_channels, double trig_hoff) {
   (void)num_channels;
 
   const int64_t sample_count = end - start + 1;
@@ -416,7 +416,7 @@ void DsoSignal::paint_trace(QPainter &p, const pv::data::DsoSnapshot *snapshot,
 
     uint8_t value;
     float x = (start / samples_per_pixel - pixels_offset) + left +
-              _view->trig_hoff() * pixels_per_sample;
+              trig_hoff * pixels_per_sample;
     float y;
 
     for (int64_t sample = 0; sample < sample_count; sample++) {
@@ -443,7 +443,7 @@ void DsoSignal::paint_envelope(QPainter &p,
                                int left, const int64_t start, const int64_t end,
                                int hw_offset, const double pixels_offset,
                                const double samples_per_pixel,
-                               uint64_t num_channels) {
+                               uint64_t num_channels, double trig_hoff) {
   using namespace Qt;
   using pv::data::DsoSnapshot;
 
@@ -476,7 +476,7 @@ void DsoSignal::paint_envelope(QPainter &p,
   for (uint64_t sample = 0; sample < e.length - 1; sample++) {
     const float x =
         ((e.scale * sample + e.start) / samples_per_pixel - pixels_offset) +
-        left + _view->trig_hoff() / samples_per_pixel;
+        left + trig_hoff / samples_per_pixel;
     const DsoSnapshot::EnvelopeSample *const s = e.samples + sample;
 
     const float b = min(
@@ -504,9 +504,11 @@ void DsoSignal::paint_per_pixel(QPainter &p,
                                 const int64_t start, const int64_t end,
                                 int hw_offset, const double pixels_offset,
                                 const double samples_per_pixel,
-                                uint64_t num_channels) {
+                                uint64_t num_channels,
+                                double trig_hoff) {
   (void)num_channels;
   (void)pixels_offset; // base_sample derived from `start` directly.
+  (void)trig_hoff;   // start_sample already accounts for trig_hoff offset.
 
   const int width = right - left;
   if (width <= 0 || end <= start)
