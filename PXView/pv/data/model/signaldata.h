@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <atomic>
 
 namespace pv {
 namespace data {
@@ -38,8 +39,11 @@ public:
     virtual ~SignalData() = 0;
 
 public:
-    inline double samplerate()const 
-        {return _samplerate; }
+    // Thread-safety P1: _samplerate is now std::atomic<double>.
+    // Reads (samplerate()) and writes (set_samplerate()) use
+    // atomic load/store, making them safe from any thread.
+    inline double samplerate() const
+        {return _samplerate.load(std::memory_order_acquire); }
 
     void set_samplerate(double samplerate);
     virtual void clear() = 0;
@@ -47,7 +51,7 @@ public:
 
 protected:
     mutable std::mutex _mutex;
-    double _samplerate;
+    std::atomic<double> _samplerate;
 };
 
 } // namespace data

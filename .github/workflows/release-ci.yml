@@ -58,6 +58,16 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Install Python 3.14 via deadsnakes PPA
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3.14 python3.14-dev python3.14-venv python3.14-distutils
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
+          python3 --version
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -65,7 +75,6 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev \
-            python3-dev python3-pip \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -77,7 +86,7 @@ jobs:
 
       - name: Install Qt via aqtinstall
         run: |
-          pip3 install aqtinstall
+          python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
 
@@ -116,7 +125,7 @@ jobs:
       - name: Setup Python for testing
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14.7'
 
       - name: Bundle Python standard library
         run: |
@@ -359,6 +368,16 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Install Python 3.14 via deadsnakes PPA
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3.14 python3.14-dev python3.14-venv python3.14-distutils
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
+          python3 --version
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -366,7 +385,6 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev \
-            python3-dev python3-pip \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -378,7 +396,7 @@ jobs:
 
       - name: Install Qt via aqtinstall
         run: |
-          pip3 install aqtinstall
+          python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
 
@@ -419,7 +437,7 @@ jobs:
       - name: Setup Python for testing
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14.7'
 
       - name: Bundle Python standard library
         run: |
@@ -555,6 +573,16 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Install Python 3.14 via deadsnakes PPA
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3.14 python3.14-dev python3.14-venv python3.14-distutils
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
+          python3 --version
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -562,7 +590,6 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev \
-            python3-dev python3-pip \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -574,7 +601,7 @@ jobs:
 
       - name: Install Qt via aqtinstall
         run: |
-          pip3 install aqtinstall
+          python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
 
@@ -614,7 +641,7 @@ jobs:
       - name: Setup Python for testing
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14.7'
 
       - name: Bundle Python standard library
         run: |
@@ -815,6 +842,16 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Install Python 3.14 via deadsnakes PPA
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3.14 python3.14-dev python3.14-venv python3.14-distutils
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
+          python3 --version
+
       - name: Install build dependencies + clang-tidy-20
         run: |
           sudo apt-get update
@@ -822,7 +859,6 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev \
-            python3-dev python3-pip \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -840,7 +876,7 @@ jobs:
 
       - name: Install Qt via aqtinstall
         run: |
-          pip3 install aqtinstall
+          python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             -m qtwebsockets --outputdir ${{ env.QT_PREFIX }}
 

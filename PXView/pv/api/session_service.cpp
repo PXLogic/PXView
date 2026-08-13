@@ -286,6 +286,80 @@ inline void invoke_or_call(QObject *ctx, F &&fn) {
 }
 
 // ---------------------------------------------------------------------------
+// Generic plain-value main-thread dispatch helper
+// ---------------------------------------------------------------------------
+//
+// run_value_on_main_thread<T>() dispatches a plain-T-returning lambda to the
+// Qt main thread. Used by getter methods that return structs/enums/scalars
+// (not wrapped in Result<T>). If the caller is already on the main thread,
+// the lambda runs inline.
+//
+template <typename T>
+inline T run_value_on_main_thread(const std::function<T()>& fn) {
+    if (on_main_thread())
+        return fn();
+
+    T result{};
+    std::mutex result_mutex;
+    std::condition_variable result_cv;
+    bool done = false;
+
+    pv::core::EventBus::post_async_dispatch([&fn, &result, &result_mutex, &result_cv, &done]() {
+        result = fn();
+        {
+            std::lock_guard<std::mutex> lock(result_mutex);
+            done = true;
+        }
+        result_cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(result_mutex);
+        result_cv.wait(lock, [&done]() { return done; });
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Generic Result<T> main-thread dispatch helper
+// ---------------------------------------------------------------------------
+//
+// run_result_on_main_thread<T>() dispatches a Result<T>-returning lambda to
+// the Qt main thread. If the caller is already on the main thread, the lambda
+// runs inline. Otherwise it is dispatched via post_async_dispatch and the
+// caller blocks on a condition_variable until the lambda completes.
+//
+// This is the generic version of run_string_on_main_thread /
+// run_void_on_main_thread, used by methods that return Result<int> etc.
+template <typename T>
+inline Result<T> run_result_on_main_thread(
+    const std::function<Result<T>()>& fn) {
+    if (on_main_thread())
+        return fn();
+
+    Result<T> result =
+        Result<T>::Fail(ErrorCode::InternalError, "Pending");
+    std::mutex result_mutex;
+    std::condition_variable result_cv;
+    bool done = false;
+
+    pv::core::EventBus::post_async_dispatch([&fn, &result, &result_mutex, &result_cv, &done]() {
+        result = fn();
+        {
+            std::lock_guard<std::mutex> lock(result_mutex);
+            done = true;
+        }
+        result_cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(result_mutex);
+        result_cv.wait(lock, [&done]() { return done; });
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Decoder instance_id helpers (<handle_id>:<version>)
 // ---------------------------------------------------------------------------
 //
@@ -595,7 +669,7 @@ void SessionService::apply_trigger_to_signal_models(
     if (trigger_channel_index < 0)
         return;
 
-    auto &sigs = _session->get_signal_models();
+    auto sigs = _session->get_signal_models_snapshot();
     for (auto m : sigs) {
         if (!m || m->type() != SR_CHANNEL_LOGIC)
             continue;
@@ -747,18 +821,21 @@ void SessionService::configure_capture_timing(
 // ===========================================================================
 
 Result<void> SessionService::start_capture(bool instant) {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is nullptr");
-    if (_session->is_working())
-        return Result<void>::Fail(ErrorCode::CaptureInProgress,
-                                 "Capture already in progress");
+    auto fn = [this, instant]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                     "Session is nullptr");
+        if (_session->is_working())
+            return Result<void>::Fail(ErrorCode::CaptureInProgress,
+                                     "Capture already in progress");
 
-    bool ok = _session->start_capture(instant, api_document());
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::DeviceError,
-                                 "Failed to start capture");
-    return Result<void>::Success();
+        bool ok = _session->start_capture(instant, api_document());
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::DeviceError,
+                                     "Failed to start capture");
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::stop_capture() {
@@ -769,12 +846,23 @@ Result<void> SessionService::stop_capture() {
         return Result<void>::Fail(ErrorCode::CaptureNotStarted,
                                  "No capture in progress");
 
-    bool ok = _session->stop_capture();
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::DeviceError,
-                                 "Failed to stop capture");
+    // Dispatch the actual stop to the main thread (touches Qt objects /
+    // libsigrok session state). The wait loop below reads only atomic
+    // flags (is_working, is_running_status) so it is safe to run on the
+    // caller thread without blocking the main thread's event loop.
+    auto fn = [this]() -> Result<void> {
+        bool ok = _session->stop_capture();
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::DeviceError,
+                                     "Failed to stop capture");
+        return Result<void>::Success();
+    };
+    auto result = run_void_on_main_thread(fn);
+    if (!result.ok())
+        return result;
 
-    // Wait for capture to actually stop (max 3 seconds)
+    // Wait for capture to actually stop (max 3 seconds).
+    // Reads atomic state only — safe from any thread.
     for (int i = 0; i < 30; i++) {
         if (!_session->is_working() && !_session->is_running_status())
             break;
@@ -785,46 +873,52 @@ Result<void> SessionService::stop_capture() {
 }
 
 Result<void> SessionService::switch_work_mode(WorkMode mode) {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is nullptr");
+    auto fn = [this, mode]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                     "Session is nullptr");
 
-    int sr_mode = 0;
-    switch (mode) {
-    case WorkMode::Logic:
-        sr_mode = LOGIC;
-        break;
-    case WorkMode::Analog:
-        sr_mode = ANALOG;
-        break;
-    case WorkMode::Dso:
-        sr_mode = DSO;
-        break;
-    case WorkMode::Mso:
-        sr_mode = MSO;
-        break;
-    default:
-        return Result<void>::Fail(ErrorCode::InvalidRequest,
-                                 "Unknown work mode");
-    }
+        int sr_mode = 0;
+        switch (mode) {
+        case WorkMode::Logic:
+            sr_mode = LOGIC;
+            break;
+        case WorkMode::Analog:
+            sr_mode = ANALOG;
+            break;
+        case WorkMode::Dso:
+            sr_mode = DSO;
+            break;
+        case WorkMode::Mso:
+            sr_mode = MSO;
+            break;
+        default:
+            return Result<void>::Fail(ErrorCode::InvalidRequest,
+                                     "Unknown work mode");
+        }
 
-    bool ok = _session->switch_work_mode(sr_mode);
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::DeviceError,
-                                 "Failed to switch work mode");
-    return Result<void>::Success();
+        bool ok = _session->switch_work_mode(sr_mode);
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::DeviceError,
+                                     "Failed to switch work mode");
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::restart_capture() {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is nullptr");
+    auto fn = [this]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                     "Session is nullptr");
 
-    bool ok = _session->re_start();
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::DeviceError,
-                                 "Failed to restart capture");
-    return Result<void>::Success();
+        bool ok = _session->re_start();
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::DeviceError,
+                                     "Failed to restart capture");
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::wait_capture_complete(uint64_t timeout_ms) {
@@ -924,6 +1018,29 @@ Result<int> SessionService::configure_and_start(
     int capture_ratio,
     double repeat_interval_seconds,
     uint64_t sample_count) {
+    (void)analog_sample_rate;
+    (void)min_pulse_width_seconds;
+    (void)max_pulse_width_seconds;
+
+    // Thread-safety P0: dispatch the entire configuration + capture-start
+    // sequence to the main thread. This method touches DeviceAgent, SigSession
+    // (signal_models, trigger_config, _clt_mode) and other non-atomic shared
+    // state that must only be accessed from the Qt main thread.
+    auto fn = [this,
+        digital_channels, analog_channels,
+        digital_sample_rate, analog_sample_rate,
+        digital_threshold_volts, glitch_filters,
+        capture_mode, duration_seconds, instant,
+        trigger_channel_index, trigger_type,
+        after_trigger_seconds, min_pulse_width_seconds,
+        max_pulse_width_seconds, linked_channels,
+        channel_mode, rle_enabled,
+        stream_buffer_size_gb, stream_mem_buffer_size_gb,
+        disk_cache_enabled, disk_cache_path,
+        threshold_preset, operation_mode,
+        buffer_options, digital_filter, pattern,
+        capture_ratio, repeat_interval_seconds, sample_count
+    ]() -> Result<int> {
     (void)analog_sample_rate;
     (void)min_pulse_width_seconds;
     (void)max_pulse_width_seconds;
@@ -1031,31 +1148,36 @@ Result<int> SessionService::configure_and_start(
     _capture_id++;
     broadcast_event(ServiceEvent::SampleConfigChanged, {});
     return Result<int>::Success(_capture_id);
+    };
+    return run_result_on_main_thread<int>(fn);
 }
 int SessionService::get_current_capture_id() const {
     return _capture_id;
 }
 
 Result<void> SessionService::close_capture() {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                 "Session is nullptr");
+    auto fn = [this]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                     "Session is nullptr");
 
-    // If capture is running, stop it first
-    if (_session->is_working()) {
-        bool ok = _session->stop_capture();
-        if (!ok)
-            return Result<void>::Fail(ErrorCode::DeviceError,
-                                     "Failed to stop running capture");
-    }
+        // If capture is running, stop it first
+        if (_session->is_working()) {
+            bool ok = _session->stop_capture();
+            if (!ok)
+                return Result<void>::Fail(ErrorCode::DeviceError,
+                                         "Failed to stop running capture");
+        }
 
-    // Note: We intentionally do NOT call clear_view_data() or
-    // clear_all_decoder() here because those trigger UI callbacks
-    // (data_updated, signals_changed) that can crash when invoked
-    // from the MCP context. The next start_capture() will implicitly
-    // clear old data via action_start_capture().
+        // Note: We intentionally do NOT call clear_view_data() or
+        // clear_all_decoder() here because those trigger UI callbacks
+        // (data_updated, signals_changed) that can crash when invoked
+        // from the MCP context. The next start_capture() will implicitly
+        // clear old data via action_start_capture().
 
-    return Result<void>::Success();
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 // ===========================================================================
@@ -1082,39 +1204,48 @@ CaptureState SessionService::get_capture_state() const {
 }
 
 CaptureStatus SessionService::get_capture_status() const {
-    CaptureStatus status;
-    if (!_session)
+    auto fn = [this]() -> CaptureStatus {
+        CaptureStatus status;
+        if (!_session)
+            return status;
+
+        status.state = get_capture_state();
+        status.is_instant = _session->is_instant();
+        status.is_saving = _session->is_saving();
+        status.have_view_data = _session->have_view_data();
+        status.have_hardware_data = _session->have_hardware_data();
+        status.have_decoded_result = _session->have_decoded_result();
+        status.is_copy_in_progress = _session->is_copy_in_progress();
+        status.is_glitch_filter_active = _session->is_glitch_filter_active();
+        status.is_signal_invert_active = _session->is_signal_invert_active();
+
+        bool triggered = false;
+        int progress = 0;
+        _session->get_capture_status(triggered, progress);
+        status.triggered = triggered;
+        status.progress = progress / 100.0;
+
         return status;
-
-    status.state = get_capture_state();
-    status.is_instant = _session->is_instant();
-    status.is_saving = _session->is_saving();
-    status.have_view_data = _session->have_view_data();
-    status.have_hardware_data = _session->have_hardware_data();
-    status.have_decoded_result = _session->have_decoded_result();
-    status.is_copy_in_progress = _session->is_copy_in_progress();
-    status.is_glitch_filter_active = _session->is_glitch_filter_active();
-    status.is_signal_invert_active = _session->is_signal_invert_active();
-
-    bool triggered = false;
-    int progress = 0;
-    _session->get_capture_status(triggered, progress);
-    status.triggered = triggered;
-    status.progress = progress / 100.0;
-
-    return status;
+    };
+    return run_value_on_main_thread<CaptureStatus>(fn);
 }
 
 bool SessionService::can_start_capture() const {
-    if (!_session)
-        return false;
-    return !_session->is_working() && _device && _device->have_instance();
+    auto fn = [this]() -> bool {
+        if (!_session)
+            return false;
+        return !_session->is_working() && _device && _device->have_instance();
+    };
+    return run_value_on_main_thread<bool>(fn);
 }
 
 bool SessionService::can_stop_capture() const {
-    if (!_session)
-        return false;
-    return _session->is_working();
+    auto fn = [this]() -> bool {
+        if (!_session)
+            return false;
+        return _session->is_working();
+    };
+    return run_value_on_main_thread<bool>(fn);
 }
 
 // ===========================================================================
@@ -1122,82 +1253,71 @@ bool SessionService::can_stop_capture() const {
 // ===========================================================================
 
 DeviceInfo SessionService::get_device_info() const {
-    DeviceInfo info;
-    if (!_device || !_device->have_instance())
+    auto fn = [this]() -> DeviceInfo {
+        DeviceInfo info;
+        if (!_device || !_device->have_instance())
+            return info;
+
+        info.driver_name = _device->driver_name().toStdString();
+        info.display_name = _device->name().toStdString();
+        info.path = _device->path().toStdString();
+        info.is_hardware = _device->is_hardware();
+        info.is_demo = _device->is_demo();
+        info.is_file = _device->is_file();
+        info.is_virtual = _device->is_virtual();
+        info.is_hardware_logic = _device->is_hardware_logic();
+        info.is_hardware_dso = _device->is_hardware_dso();
+        info.is_dsl_device = _device->is_dsl_device();
+        info.is_compat_device = _device->is_compat_device();
+
+        info.usb_speed = _device->get_usb_speed();
+
+        auto handle = _device->handle();
+        info.id = std::to_string(static_cast<intptr_t>(handle));
+
         return info;
-
-    info.driver_name = _device->driver_name().toStdString();
-    info.display_name = _device->name().toStdString();
-    info.path = _device->path().toStdString();
-    info.is_hardware = _device->is_hardware();
-    info.is_demo = _device->is_demo();
-    info.is_file = _device->is_file();
-    info.is_virtual = _device->is_virtual();
-    info.is_hardware_logic = _device->is_hardware_logic();
-    info.is_hardware_dso = _device->is_hardware_dso();
-    info.is_dsl_device = _device->is_dsl_device();
-    info.is_compat_device = _device->is_compat_device();
-
-    // SR_CONF_USB_SPEED fork key deleted — use DeviceAgent typed wrapper
-    // (reads libusb_get_device_speed via sr_dev_inst_usb_speed_get).
-    info.usb_speed = _device->get_usb_speed();
-
-    // Device ID from handle
-    auto handle = _device->handle();
-    // Convert handle to string representation
-    info.id = std::to_string(static_cast<intptr_t>(handle));
-
-    return info;
+    };
+    return run_value_on_main_thread<DeviceInfo>(fn);
 }
 
 WorkMode SessionService::get_work_mode() const {
-    if (!_device)
-        return WorkMode::Unknown;
-
-    int mode = _device->get_work_mode();
-    switch (mode) {
-    case LOGIC:
-        return WorkMode::Logic;
-    case ANALOG:
-        return WorkMode::Analog;
-    case DSO:
-        return WorkMode::Dso;
-    case MSO:
-        return WorkMode::Mso;
-    default:
-        return WorkMode::Unknown;
-    }
+    auto fn = [this]() -> WorkMode {
+        if (!_device)
+            return WorkMode::Unknown;
+        int mode = _device->get_work_mode();
+        switch (mode) {
+        case LOGIC:  return WorkMode::Logic;
+        case ANALOG: return WorkMode::Analog;
+        case DSO:    return WorkMode::Dso;
+        case MSO:    return WorkMode::Mso;
+        default:     return WorkMode::Unknown;
+        }
+    };
+    return run_value_on_main_thread<WorkMode>(fn);
 }
 
 Result<std::vector<WorkMode>> SessionService::get_supported_work_modes() const {
-    if (!_device || !_device->have_instance())
-        return Result<std::vector<WorkMode>>::Fail(
-            ErrorCode::MissingDevice, "No device connected");
-
-    std::vector<WorkMode> modes;
-    const GSList *mode_list = _device->get_device_mode_list();
-    for (const GSList *l = mode_list; l; l = l->next) {
-        auto *mode = static_cast<const sr_dev_mode *>(l->data);
-        if (mode) {
-            switch (mode->mode) {
-            case LOGIC:
-                modes.push_back(WorkMode::Logic);
-                break;
-            case ANALOG:
-                modes.push_back(WorkMode::Analog);
-                break;
-            case DSO:
-                modes.push_back(WorkMode::Dso);
-                break;
-            case MSO:
-                modes.push_back(WorkMode::Mso);
-                break;
-            default:
-                break;
+    auto fn = [this]() -> Result<std::vector<WorkMode>> {
+        if (!_device || !_device->have_instance())
+            return Result<std::vector<WorkMode>>::Fail(
+                ErrorCode::MissingDevice, "No device connected");
+        std::vector<WorkMode> modes;
+        const GSList *mode_list = _device->get_device_mode_list();
+        for (const GSList *l = mode_list; l; l = l->next) {
+            auto *mode = static_cast<const sr_dev_mode *>(l->data);
+            if (mode) {
+                switch (mode->mode) {
+                case LOGIC:  modes.push_back(WorkMode::Logic);  break;
+                case ANALOG: modes.push_back(WorkMode::Analog); break;
+                case DSO:    modes.push_back(WorkMode::Dso);    break;
+                case MSO:    modes.push_back(WorkMode::Mso);    break;
+                default: break;
+                }
             }
         }
-    }
-    return Result<std::vector<WorkMode>>::Success(modes);
+        return Result<std::vector<WorkMode>>::Success(modes);
+    };
+    return run_result_on_main_thread<std::vector<WorkMode>>(fn);
 }
 
 // ===========================================================================
@@ -1205,79 +1325,81 @@ Result<std::vector<WorkMode>> SessionService::get_supported_work_modes() const {
 // ===========================================================================
 
 std::vector<ChannelInfo> SessionService::get_channels() const {
-    std::vector<ChannelInfo> result;
-    if (!_device)
+    auto fn = [this]() -> std::vector<ChannelInfo> {
+        std::vector<ChannelInfo> result;
+        if (!_device)
+            return result;
+        GSList *channels = _device->get_channels();
+        for (GSList *l = channels; l; l = l->next) {
+            auto *ch = static_cast<sr_channel *>(l->data);
+            if (!ch)
+                continue;
+            ChannelInfo info;
+            info.index = static_cast<int32_t>(ch->index);
+            info.name = ch->name ? ch->name : "";
+            info.type = sr_channel_type_to_api(ch->type);
+            info.enabled = ch->enabled;
+            info.enabled_default = ch->enabled;
+            result.push_back(info);
+        }
         return result;
-
-    GSList *channels = _device->get_channels();
-    for (GSList *l = channels; l; l = l->next) {
-        auto *ch = static_cast<sr_channel *>(l->data);
-        if (!ch)
-            continue;
-
-        ChannelInfo info;
-        info.index = static_cast<int32_t>(ch->index);
-        info.name = ch->name ? ch->name : "";
-        info.type = sr_channel_type_to_api(ch->type);
-        info.enabled = ch->enabled;
-        info.enabled_default = ch->enabled;
-        result.push_back(info);
-    }
-    return result;
+    };
+    return run_value_on_main_thread<std::vector<ChannelInfo>>(fn);
 }
 
 Result<void> SessionService::set_channel_enabled(int16_t index, bool enabled) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, index, enabled]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    bool ok = _device->enable_probe(index, enabled);
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::ChannelNotFound,
-                                  "Failed to enable/disable channel");
-    broadcast_event(ServiceEvent::ChannelConfigChanged,
-                    {{"field", "enabled"},
-                     {"channel_index", std::to_string(index)},
-                     {"value", enabled ? "1" : "0"}});
-    return Result<void>::Success();
+        bool ok = _device->enable_probe(index, enabled);
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::ChannelNotFound,
+                                      "Failed to enable/disable channel");
+        broadcast_event(ServiceEvent::ChannelConfigChanged,
+                        {{"field", "enabled"},
+                         {"channel_index", std::to_string(index)},
+                         {"value", enabled ? "1" : "0"}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::set_channel_name(int16_t index,
                                               const std::string &name) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, index, name]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    bool ok = _device->set_channel_name(index, name.c_str());
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::ChannelNotFound,
-                                  "Failed to set channel name");
-    broadcast_event(ServiceEvent::ChannelConfigChanged,
-                    {{"field", "name"},
-                     {"channel_index", std::to_string(index)},
-                     {"value", name}});
-    return Result<void>::Success();
+        bool ok = _device->set_channel_name(index, name.c_str());
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::ChannelNotFound,
+                                      "Failed to set channel name");
+        broadcast_event(ServiceEvent::ChannelConfigChanged,
+                        {{"field", "name"},
+                         {"channel_index", std::to_string(index)},
+                         {"value", name}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 uint16_t SessionService::get_channel_count(ChannelType type) const {
-    if (!_session)
-        return 0;
-
-    int sr_type;
-    switch (type) {
-    case ChannelType::Logic:
-        sr_type = SR_CHANNEL_LOGIC;
-        break;
-    case ChannelType::Analog:
-        sr_type = SR_CHANNEL_ANALOG;
-        break;
-    case ChannelType::Dso:
-        sr_type = SR_CHANNEL_DSO;
-        break;
-    default:
-        return 0;
-    }
-    return _session->get_ch_num(sr_type);
+    auto fn = [this, type]() -> uint16_t {
+        if (!_session)
+            return 0;
+        int sr_type;
+        switch (type) {
+        case ChannelType::Logic:  sr_type = SR_CHANNEL_LOGIC;  break;
+        case ChannelType::Analog: sr_type = SR_CHANNEL_ANALOG; break;
+        case ChannelType::Dso:    sr_type = SR_CHANNEL_DSO;    break;
+        default: return 0;
+        }
+        return _session->get_ch_num(sr_type);
+    };
+    return run_value_on_main_thread<uint16_t>(fn);
 }
 
 // ===========================================================================
@@ -1285,141 +1407,155 @@ uint16_t SessionService::get_channel_count(ChannelType type) const {
 // ===========================================================================
 
 SampleConfig SessionService::get_sample_config() const {
-    SampleConfig config;
-    if (!_device || !_device->have_instance())
+    auto fn = [this]() -> SampleConfig {
+        SampleConfig config;
+        if (!_device || !_device->have_instance())
+            return config;
+        config.sample_rate = _device->get_sample_rate();
+        config.sample_limit = _device->get_sample_limit();
+        config.time_base = static_cast<double>(_device->get_time_base());
+        if (_session) {
+            config.collect_mode = static_cast<CollectMode>(_session->get_collect_mode());
+            config.repeat_interval = _session->get_repeat_intvl();
+            config.repeat_hold_percent = _session->get_repeat_hold() / 100.0;
+        }
+        config.stream_mode = _device->is_stream_mode();
         return config;
-
-    config.sample_rate = _device->get_sample_rate();
-    config.sample_limit = _device->get_sample_limit();
-    config.time_base = static_cast<double>(_device->get_time_base());
-
-    if (_session) {
-        config.collect_mode = static_cast<CollectMode>(_session->get_collect_mode());
-        config.repeat_interval = _session->get_repeat_intvl();
-        config.repeat_hold_percent = _session->get_repeat_hold() / 100.0;
-    }
-
-    config.stream_mode = _device->is_stream_mode();
-
-    return config;
+    };
+    return run_value_on_main_thread<SampleConfig>(fn);
 }
 
 Result<void> SessionService::set_sample_rate(uint64_t rate) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, rate]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    bool ok = _device->set_config_uint64(SR_CONF_SAMPLERATE, rate);
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set sample rate");
-    broadcast_event(ServiceEvent::SampleConfigChanged,
-                    {{"field", "sample_rate"},
-                     {"value", std::to_string(rate)}});
-    return Result<void>::Success();
+        bool ok = _device->set_config_uint64(SR_CONF_SAMPLERATE, rate);
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set sample rate");
+        broadcast_event(ServiceEvent::SampleConfigChanged,
+                        {{"field", "sample_rate"},
+                         {"value", std::to_string(rate)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::set_sample_limit(uint64_t limit) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, limit]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    // fx2lafw 等上游驱动支持 limit_samples 停止条件（protocol.c 中
-    // sent_samples >= limit_samples 时调用 fx2lafw_abort_acquisition）。
-    // Stream 模式下设置非零 limit 会让流式采集在到达后自动停止；
-    // 传 0 则保持持续流（hwdriver.c 拒绝 set 0，DeviceAgent 静默忽略）。
-    bool ok = _device->set_config_uint64(SR_CONF_LIMIT_SAMPLES, limit);
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set sample limit");
-    broadcast_event(ServiceEvent::SampleConfigChanged,
-                    {{"field", "sample_limit"},
-                     {"value", std::to_string(limit)}});
-    return Result<void>::Success();
+        bool ok = _device->set_config_uint64(SR_CONF_LIMIT_SAMPLES, limit);
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set sample limit");
+        broadcast_event(ServiceEvent::SampleConfigChanged,
+                        {{"field", "sample_limit"},
+                         {"value", std::to_string(limit)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::set_time_base(uint64_t tb) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, tb]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    bool ok = _device->set_config_uint64(SR_CONF_TIMEBASE, tb);
-    if (!ok)
-        return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set time base");
-    broadcast_event(ServiceEvent::SampleConfigChanged,
-                    {{"field", "time_base"},
-                     {"value", std::to_string(tb)}});
-    return Result<void>::Success();
+        bool ok = _device->set_config_uint64(SR_CONF_TIMEBASE, tb);
+        if (!ok)
+            return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set time base");
+        broadcast_event(ServiceEvent::SampleConfigChanged,
+                        {{"field", "time_base"},
+                         {"value", std::to_string(tb)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::set_collect_mode(CollectMode mode) {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is nullptr");
+    auto fn = [this, mode]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                      "Session is nullptr");
 
-    DEVICE_COLLECT_MODE cm = COLLECT_SINGLE;
-    switch (mode) {
-    case CollectMode::Single:
-        cm = COLLECT_SINGLE;
-        break;
-    case CollectMode::Repeat:
-        cm = COLLECT_REPEAT;
-        break;
-    case CollectMode::Loop:
-        cm = COLLECT_LOOP;
-        break;
-    }
+        DEVICE_COLLECT_MODE cm = COLLECT_SINGLE;
+        switch (mode) {
+        case CollectMode::Single:
+            cm = COLLECT_SINGLE;
+            break;
+        case CollectMode::Repeat:
+            cm = COLLECT_REPEAT;
+            break;
+        case CollectMode::Loop:
+            cm = COLLECT_LOOP;
+            break;
+        }
 
-    int old_mode = _session->get_collect_mode();
-    _session->set_collect_mode(cm);
-    if (old_mode == static_cast<int>(cm))
+        int old_mode = _session->get_collect_mode();
+        _session->set_collect_mode(cm);
+        if (old_mode == static_cast<int>(cm))
+            return Result<void>::Success();
+
+        broadcast_event(ServiceEvent::SampleConfigChanged,
+                        {{"field", "collect_mode"},
+                         {"value", std::to_string(static_cast<int>(mode))}});
         return Result<void>::Success();
-
-    broadcast_event(ServiceEvent::SampleConfigChanged,
-                    {{"field", "collect_mode"},
-                     {"value", std::to_string(static_cast<int>(mode))}});
-    return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<void> SessionService::set_repeat_interval(double seconds) {
-    if (!_session)
-        return Result<void>::Fail(ErrorCode::InternalError,
-                                  "Session is nullptr");
+    auto fn = [this, seconds]() -> Result<void> {
+        if (!_session)
+            return Result<void>::Fail(ErrorCode::InternalError,
+                                      "Session is nullptr");
 
-    double old_interval = _session->get_repeat_intvl();
-    _session->set_repeat_intvl(seconds);
-    if (old_interval == seconds)
+        double old_interval = _session->get_repeat_intvl();
+        _session->set_repeat_intvl(seconds);
+        if (old_interval == seconds)
+            return Result<void>::Success();
+
+        broadcast_event(ServiceEvent::SampleConfigChanged,
+                        {{"field", "repeat_interval"},
+                         {"value", std::to_string(seconds)}});
         return Result<void>::Success();
-
-    broadcast_event(ServiceEvent::SampleConfigChanged,
-                    {{"field", "repeat_interval"},
-                     {"value", std::to_string(seconds)}});
-    return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 Result<uint64_t> SessionService::get_actual_sample_rate() const {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    uint64_t rate = _session->cur_samplerate();
-    if (rate == 0)
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "Sample rate not available");
-    return Result<uint64_t>::Success(rate);
+    auto fn = [this]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        uint64_t rate = _session->cur_samplerate();
+        if (rate == 0)
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "Sample rate not available");
+        return Result<uint64_t>::Success(rate);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<uint64_t> SessionService::get_actual_sample_count() const {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    uint64_t count = _session->cur_samplelimits();
-    if (count == 0)
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "Sample count not available");
-    return Result<uint64_t>::Success(count);
+    auto fn = [this]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        uint64_t count = _session->cur_samplelimits();
+        if (count == 0)
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "Sample count not available");
+        return Result<uint64_t>::Success(count);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 // ===========================================================================
@@ -1427,118 +1563,114 @@ Result<uint64_t> SessionService::get_actual_sample_count() const {
 // ===========================================================================
 
 LogicTriggerConfig SessionService::get_logic_trigger_config() const {
-    LogicTriggerConfig config;
-    if (!_device || !_device->have_instance())
+    auto fn = [this]() -> LogicTriggerConfig {
+        LogicTriggerConfig config;
+        if (!_device || !_device->have_instance())
+            return config;
+        QJsonObject root;
+        if (_session) {
+            const auto& tcfg = _session->trigger_config();
+            root["enabled"] = (tcfg.mode() != data::TriggerConfig::Simple ||
+                               tcfg.stage_count() > 0) ? 1 : 0;
+            root["position"] = static_cast<int>(tcfg.trigger_pos());
+            root["trigger_config"] = tcfg.to_json();
+            config.stage_count = tcfg.stage_count();
+        } else {
+            root["enabled"] = 0;
+            root["position"] = 0;
+            config.stage_count = 0;
+        }
+        config.config_json =
+            QJsonDocument(root).toJson(QJsonDocument::Compact).toStdString();
         return config;
-
-    // Fork libsigrok's ds_trigger_get_en/get_pos are gone. Trigger state is
-    // now read from the Core TriggerConfig (single source of truth).
-    QJsonObject root;
-    if (_session) {
-        const auto& tcfg = _session->trigger_config();
-        root["enabled"] = (tcfg.mode() != data::TriggerConfig::Simple ||
-                           tcfg.stage_count() > 0) ? 1 : 0;
-        root["position"] = static_cast<int>(tcfg.trigger_pos());
-        root["trigger_config"] = tcfg.to_json();
-        config.stage_count = tcfg.stage_count();
-    } else {
-        root["enabled"] = 0;
-        root["position"] = 0;
-        config.stage_count = 0;
-    }
-
-    config.config_json =
-        QJsonDocument(root).toJson(QJsonDocument::Compact).toStdString();
-
-    return config;
+    };
+    return run_value_on_main_thread<LogicTriggerConfig>(fn);
 }
 
 Result<void> SessionService::set_logic_trigger_config(
     const LogicTriggerConfig &config) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, config]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    // Trigger state is written to the Core TriggerConfig (single source of
-    // truth) and synced to libsigrok via sync_trigger_to_libsigrok() at
-    // capture start. The config_json field carries the full trigger
-    // configuration as JSON (produced by TriggerConfig::to_json()).
-    if (_session) {
-        if (!config.config_json.empty()) {
-            // Parse the JSON and build a TriggerConfig from it.
-            QJsonParseError parse_err;
-            QJsonDocument doc = QJsonDocument::fromJson(
-                QByteArray::fromStdString(config.config_json), &parse_err);
-            if (parse_err.error != QJsonParseError::NoError || !doc.isObject()) {
-                return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                    "Invalid trigger config JSON: " + parse_err.errorString().toStdString());
+        if (_session) {
+            if (!config.config_json.empty()) {
+                QJsonParseError parse_err;
+                QJsonDocument doc = QJsonDocument::fromJson(
+                    QByteArray::fromStdString(config.config_json), &parse_err);
+                if (parse_err.error != QJsonParseError::NoError || !doc.isObject()) {
+                    return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                        "Invalid trigger config JSON: " + parse_err.errorString().toStdString());
+                }
+                auto tcfg = pv::data::TriggerConfig::from_json(doc.object());
+
+                if (config.stage_count > 0)
+                    tcfg.set_stage_count(config.stage_count);
+
+                _session->set_trigger_config(tcfg);
+            } else {
+                auto tcfg = _session->trigger_config();
+                if (config.stage_count > 0)
+                    tcfg.set_stage_count(config.stage_count);
+                _session->set_trigger_config(tcfg);
             }
-            auto tcfg = pv::data::TriggerConfig::from_json(doc.object());
-
-            // Override stage_count if explicitly provided.
-            if (config.stage_count > 0)
-                tcfg.set_stage_count(config.stage_count);
-
-            _session->set_trigger_config(tcfg);
-        } else {
-            // No JSON provided — just update stage_count on existing config.
-            auto tcfg = _session->trigger_config();
-            if (config.stage_count > 0)
-                tcfg.set_stage_count(config.stage_count);
-            _session->set_trigger_config(tcfg);
         }
-    }
 
-    broadcast_event(ServiceEvent::TriggerConfigChanged,
-                    {{"kind", "logic"},
-                     {"stage_count", std::to_string(config.stage_count)}});
-    return Result<void>::Success();
+        broadcast_event(ServiceEvent::TriggerConfigChanged,
+                        {{"kind", "logic"},
+                         {"stage_count", std::to_string(config.stage_count)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 DsoTriggerConfig SessionService::get_dso_trigger_config() const {
-    DsoTriggerConfig config;
-    if (!_device || !_device->have_instance())
+    auto fn = [this]() -> DsoTriggerConfig {
+        DsoTriggerConfig config;
+        if (!_device || !_device->have_instance())
+            return config;
+        int value = 0;
+        if (_device->get_config_int32(SR_CONF_TRIGGER_SOURCE, value))
+            config.source = static_cast<TriggerSource>(value);
+        if (_device->get_config_int32(SR_CONF_TRIGGER_SLOPE, value))
+            config.slope = static_cast<TriggerSlope>(value);
+        double dval = 0;
+        if (_device->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dval))
+            config.horiz_pos = dval;
         return config;
-
-    int value = 0;
-    if (_device->get_config_int32(SR_CONF_TRIGGER_SOURCE, value))
-        config.source = static_cast<TriggerSource>(value);
-
-    if (_device->get_config_int32(SR_CONF_TRIGGER_SLOPE, value))
-        config.slope = static_cast<TriggerSlope>(value);
-
-    double dval = 0;
-    if (_device->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dval))
-        config.horiz_pos = dval;
-
-    return config;
+    };
+    return run_value_on_main_thread<DsoTriggerConfig>(fn);
 }
 
 Result<void> SessionService::set_dso_trigger_config(
     const DsoTriggerConfig &config) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, config]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    bool any_ok = false;
+        bool any_ok = false;
 
-    if (_device->set_config_int32(SR_CONF_TRIGGER_SOURCE,
-                                  static_cast<int>(config.source)))
-        any_ok = true;
-    if (_device->set_config_int32(SR_CONF_TRIGGER_SLOPE,
-                                  static_cast<int>(config.slope)))
-        any_ok = true;
-    if (_device->set_config_double(SR_CONF_HORIZ_TRIGGERPOS,
-                                   config.horiz_pos))
-        any_ok = true;
+        if (_device->set_config_int32(SR_CONF_TRIGGER_SOURCE,
+                                      static_cast<int>(config.source)))
+            any_ok = true;
+        if (_device->set_config_int32(SR_CONF_TRIGGER_SLOPE,
+                                      static_cast<int>(config.slope)))
+            any_ok = true;
+        if (_device->set_config_double(SR_CONF_HORIZ_TRIGGERPOS,
+                                       config.horiz_pos))
+            any_ok = true;
 
-    if (!any_ok)
-        return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set any DSO trigger config");
-    broadcast_event(ServiceEvent::TriggerConfigChanged,
-                    {{"kind", "dso"},
-                     {"channel", std::to_string(config.channel)}});
-    return Result<void>::Success();
+        if (!any_ok)
+            return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set any DSO trigger config");
+        broadcast_event(ServiceEvent::TriggerConfigChanged,
+                        {{"kind", "dso"},
+                         {"channel", std::to_string(config.channel)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 // ===========================================================================
@@ -1546,70 +1678,69 @@ Result<void> SessionService::set_dso_trigger_config(
 // ===========================================================================
 
 ProbeConfig SessionService::get_probe_config(int16_t channel) const {
-    ProbeConfig config;
-    if (!_device || !_device->have_instance())
-        return config;
-
-    // Find the channel to get per-channel config
-    GSList *channels = _device->get_channels();
-    sr_channel *target_ch = nullptr;
-    for (GSList *l = channels; l; l = l->next) {
-        auto *ch = static_cast<sr_channel *>(l->data);
-        if (ch && ch->index == channel) {
-            target_ch = ch;
-            break;
+    auto fn = [this, channel]() -> ProbeConfig {
+        ProbeConfig config;
+        if (!_device || !_device->have_instance())
+            return config;
+        GSList *channels = _device->get_channels();
+        sr_channel *target_ch = nullptr;
+        for (GSList *l = channels; l; l = l->next) {
+            auto *ch = static_cast<sr_channel *>(l->data);
+            if (ch && ch->index == channel) {
+                target_ch = ch;
+                break;
+            }
         }
-    }
-
-    double dval = 0;
-
-    if (target_ch) {
-        if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval, target_ch))
-            config.vfactor = dval;
-    } else {
-        // Try without channel
-        if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval))
-            config.vfactor = dval;
-    }
-
-    return config;
+        double dval = 0;
+        if (target_ch) {
+            if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval, target_ch))
+                config.vfactor = dval;
+        } else {
+            if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval))
+                config.vfactor = dval;
+        }
+        return config;
+    };
+    return run_value_on_main_thread<ProbeConfig>(fn);
 }
 
 Result<void> SessionService::set_probe_config(int16_t channel,
                                               const ProbeConfig &config) {
-    if (!_device || !_device->have_instance())
-        return Result<void>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
+    auto fn = [this, channel, config]() -> Result<void> {
+        if (!_device || !_device->have_instance())
+            return Result<void>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
 
-    // Find the channel
-    GSList *channels = _device->get_channels();
-    sr_channel *target_ch = nullptr;
-    for (GSList *l = channels; l; l = l->next) {
-        auto *ch = static_cast<sr_channel *>(l->data);
-        if (ch && ch->index == channel) {
-            target_ch = ch;
-            break;
+        GSList *channels = _device->get_channels();
+        sr_channel *target_ch = nullptr;
+        for (GSList *l = channels; l; l = l->next) {
+            auto *ch = static_cast<sr_channel *>(l->data);
+            if (ch && ch->index == channel) {
+                target_ch = ch;
+                break;
+            }
         }
-    }
 
-    bool any_ok = false;
+        bool any_ok = false;
 
-    if (target_ch) {
-        if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor,
-                                       target_ch))
-            any_ok = true;
-    } else {
-        if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor))
-            any_ok = true;
-    }
+        if (target_ch) {
+            if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor,
+                                           target_ch))
+                any_ok = true;
+        } else {
+            if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor))
+                any_ok = true;
+        }
 
-    if (!any_ok)
-        return Result<void>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set probe config");
-    broadcast_event(ServiceEvent::ChannelConfigChanged,
-                    {{"field", "probe_config"},
-                     {"channel_index", std::to_string(channel)}});
-    return Result<void>::Success();
+        if (!any_ok)
+            return Result<void>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set probe config");
+        broadcast_event(ServiceEvent::ChannelConfigChanged,
+                        {{"field", "probe_config"},
+                         {"channel_index", std::to_string(channel)}});
+        return Result<void>::Success();
+    };
+    return run_void_on_main_thread(fn);
 }
 
 // ===========================================================================
@@ -1617,160 +1748,187 @@ Result<void> SessionService::set_probe_config(int16_t channel,
 // ===========================================================================
 
 Result<std::string> SessionService::get_config_string(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<std::string>::Fail(ErrorCode::MissingDevice,
-                                         "No device connected");
-
-    QString value;
-    bool ok = _device->get_config_string(key, value);
-    if (!ok)
-        return Result<std::string>::Fail(ErrorCode::ConfigNotSupported,
-                                         "Config key not supported");
-    return Result<std::string>::Success(value.toStdString());
+    auto fn = [this, key]() -> Result<std::string> {
+        if (!_device || !_device->have_instance())
+            return Result<std::string>::Fail(ErrorCode::MissingDevice,
+                                             "No device connected");
+        QString value;
+        bool ok = _device->get_config_string(key, value);
+        if (!ok)
+            return Result<std::string>::Fail(ErrorCode::ConfigNotSupported,
+                                             "Config key not supported");
+        return Result<std::string>::Success(value.toStdString());
+    };
+    return run_result_on_main_thread<std::string>(fn);
 }
 
 Result<bool> SessionService::set_config_string(int key,
                                                const std::string &value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_string(key, value.c_str());
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config string");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_string(key, value.c_str());
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config string");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<bool> SessionService::get_config_bool(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool value = false;
-    bool ok = _device->get_config_bool(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigNotSupported,
-                                  "Config key not supported");
-    return Result<bool>::Success(value);
+    auto fn = [this, key]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool value = false;
+        bool ok = _device->get_config_bool(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigNotSupported,
+                                      "Config key not supported");
+        return Result<bool>::Success(value);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<bool> SessionService::set_config_bool(int key, bool value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_bool(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config bool");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_bool(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config bool");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<uint64_t> SessionService::get_config_uint64(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<uint64_t>::Fail(ErrorCode::MissingDevice,
-                                      "No device connected");
-
-    uint64_t value = 0;
-    bool ok = _device->get_config_uint64(key, value);
-    if (!ok)
-        return Result<uint64_t>::Fail(ErrorCode::ConfigNotSupported,
-                                      "Config key not supported");
-    return Result<uint64_t>::Success(value);
+    auto fn = [this, key]() -> Result<uint64_t> {
+        if (!_device || !_device->have_instance())
+            return Result<uint64_t>::Fail(ErrorCode::MissingDevice,
+                                          "No device connected");
+        uint64_t value = 0;
+        bool ok = _device->get_config_uint64(key, value);
+        if (!ok)
+            return Result<uint64_t>::Fail(ErrorCode::ConfigNotSupported,
+                                          "Config key not supported");
+        return Result<uint64_t>::Success(value);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<bool> SessionService::set_config_uint64(int key, uint64_t value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_uint64(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config uint64");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_uint64(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config uint64");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<int32_t> SessionService::get_config_int32(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<int32_t>::Fail(ErrorCode::MissingDevice,
-                                     "No device connected");
-
-    int value = 0;
-    bool ok = _device->get_config_int32(key, value);
-    if (!ok)
-        return Result<int32_t>::Fail(ErrorCode::ConfigNotSupported,
-                                     "Config key not supported");
-    return Result<int32_t>::Success(static_cast<int32_t>(value));
+    auto fn = [this, key]() -> Result<int32_t> {
+        if (!_device || !_device->have_instance())
+            return Result<int32_t>::Fail(ErrorCode::MissingDevice,
+                                         "No device connected");
+        int value = 0;
+        bool ok = _device->get_config_int32(key, value);
+        if (!ok)
+            return Result<int32_t>::Fail(ErrorCode::ConfigNotSupported,
+                                         "Config key not supported");
+        return Result<int32_t>::Success(static_cast<int32_t>(value));
+    };
+    return run_result_on_main_thread<int32_t>(fn);
 }
 
 Result<bool> SessionService::set_config_int32(int key, int32_t value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_int32(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config int32");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_int32(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config int32");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<double> SessionService::get_config_double(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<double>::Fail(ErrorCode::MissingDevice,
-                                    "No device connected");
-
-    double value = 0;
-    bool ok = _device->get_config_double(key, value);
-    if (!ok)
-        return Result<double>::Fail(ErrorCode::ConfigNotSupported,
-                                    "Config key not supported");
-    return Result<double>::Success(value);
+    auto fn = [this, key]() -> Result<double> {
+        if (!_device || !_device->have_instance())
+            return Result<double>::Fail(ErrorCode::MissingDevice,
+                                        "No device connected");
+        double value = 0;
+        bool ok = _device->get_config_double(key, value);
+        if (!ok)
+            return Result<double>::Fail(ErrorCode::ConfigNotSupported,
+                                        "Config key not supported");
+        return Result<double>::Success(value);
+    };
+    return run_result_on_main_thread<double>(fn);
 }
 
 Result<bool> SessionService::set_config_double(int key, double value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_double(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config double");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_double(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config double");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 Result<uint8_t> SessionService::get_config_byte(int key) {
-    if (!_device || !_device->have_instance())
-        return Result<uint8_t>::Fail(ErrorCode::MissingDevice,
-                                     "No device connected");
-
-    int value = 0;
-    bool ok = _device->get_config_byte(key, value);
-    if (!ok)
-        return Result<uint8_t>::Fail(ErrorCode::ConfigNotSupported,
-                                     "Config key not supported");
-    return Result<uint8_t>::Success(static_cast<uint8_t>(value));
+    auto fn = [this, key]() -> Result<uint8_t> {
+        if (!_device || !_device->have_instance())
+            return Result<uint8_t>::Fail(ErrorCode::MissingDevice,
+                                         "No device connected");
+        int value = 0;
+        bool ok = _device->get_config_byte(key, value);
+        if (!ok)
+            return Result<uint8_t>::Fail(ErrorCode::ConfigNotSupported,
+                                         "Config key not supported");
+        return Result<uint8_t>::Success(static_cast<uint8_t>(value));
+    };
+    return run_result_on_main_thread<uint8_t>(fn);
 }
 
 Result<bool> SessionService::set_config_byte(int key, uint8_t value) {
-    if (!_device || !_device->have_instance())
-        return Result<bool>::Fail(ErrorCode::MissingDevice,
-                                  "No device connected");
-
-    bool ok = _device->set_config_byte(key, value);
-    if (!ok)
-        return Result<bool>::Fail(ErrorCode::ConfigInvalid,
-                                  "Failed to set config byte");
-    return Result<bool>::Success(true);
+    auto fn = [this, key, value]() -> Result<bool> {
+        if (!_device || !_device->have_instance())
+            return Result<bool>::Fail(ErrorCode::MissingDevice,
+                                      "No device connected");
+        bool ok = _device->set_config_byte(key, value);
+        if (!ok)
+            return Result<bool>::Fail(ErrorCode::ConfigInvalid,
+                                      "Failed to set config byte");
+        return Result<bool>::Success(true);
+    };
+    return run_result_on_main_thread<bool>(fn);
 }
 
 bool SessionService::has_config(int key) const {
-    if (!_device || !_device->have_instance())
-        return false;
-    return _device->have_config(key);
+    auto fn = [this, key]() -> bool {
+        if (!_device || !_device->have_instance())
+            return false;
+        return _device->have_config(key);
+    };
+    return run_value_on_main_thread<bool>(fn);
 }
 
 // ===========================================================================
@@ -1778,44 +1936,53 @@ bool SessionService::has_config(int key) const {
 // ===========================================================================
 
 TimeInfo SessionService::get_time_info() const {
-    TimeInfo info;
-    if (!_session)
+    auto fn = [this]() -> TimeInfo {
+        TimeInfo info;
+        if (!_session)
+            return info;
+        info.session_start_ms =
+            _session->get_session_time().toMSecsSinceEpoch();
+        info.trigger_pos = static_cast<int64_t>(_session->get_trigger_pos());
+        info.trigger_time_ms = _session->get_trig_time().toMSecsSinceEpoch();
+        info.is_triggered = _session->is_triged();
+        info.session_duration_sec = _session->cur_sampletime();
+        info.sample_time_sec = _session->cur_snap_sampletime();
+        info.view_time_sec = _session->cur_view_time();
         return info;
-
-    info.session_start_ms =
-        _session->get_session_time().toMSecsSinceEpoch();
-    info.trigger_pos = static_cast<int64_t>(_session->get_trigger_pos());
-    info.trigger_time_ms = _session->get_trig_time().toMSecsSinceEpoch();
-    info.is_triggered = _session->is_triged();
-    info.session_duration_sec = _session->cur_sampletime();
-    info.sample_time_sec = _session->cur_snap_sampletime();
-    info.view_time_sec = _session->cur_view_time();
-
-    return info;
+    };
+    return run_value_on_main_thread<TimeInfo>(fn);
 }
 
 uint64_t SessionService::get_samplerate() const {
-    if (!_session)
-        return 0;
-    return _session->cur_samplerate();
+    auto fn = [this]() -> uint64_t {
+        if (!_session) return 0;
+        return _session->cur_samplerate();
+    };
+    return run_value_on_main_thread<uint64_t>(fn);
 }
 
 uint64_t SessionService::get_sample_count() const {
-    if (!_session)
-        return 0;
-    return _session->cur_samplelimits();
+    auto fn = [this]() -> uint64_t {
+        if (!_session) return 0;
+        return _session->cur_samplelimits();
+    };
+    return run_value_on_main_thread<uint64_t>(fn);
 }
 
 double SessionService::get_sample_time() const {
-    if (!_session)
-        return 0.0;
-    return _session->cur_sampletime();
+    auto fn = [this]() -> double {
+        if (!_session) return 0.0;
+        return _session->cur_sampletime();
+    };
+    return run_value_on_main_thread<double>(fn);
 }
 
 uint64_t SessionService::get_trigger_pos() const {
-    if (!_session)
-        return 0;
-    return _session->get_trigger_pos();
+    auto fn = [this]() -> uint64_t {
+        if (!_session) return 0;
+        return _session->get_trigger_pos();
+    };
+    return run_value_on_main_thread<uint64_t>(fn);
 }
 
 // ===========================================================================
@@ -1823,31 +1990,29 @@ uint64_t SessionService::get_trigger_pos() const {
 // ===========================================================================
 
 std::vector<SignalInfo> SessionService::get_signal_list() const {
-    std::vector<SignalInfo> result;
-    if (!_session)
-        return result;
-
-    auto &sig_list = _session->get_signal_models();
-    for (auto m : sig_list) {
-        if (!m)
-            continue;
-
-        SignalInfo info;
-        info.index = m->index();
-        info.name = m->name();
-        info.type = sr_channel_type_to_api(m->type());
-        info.enabled = m->enabled();
-        info.color = m->color();
-
-        // Probe config for analog/dso signals
-        if (info.type == ChannelType::Analog ||
-            info.type == ChannelType::Dso) {
-            info.probe = get_probe_config(static_cast<int16_t>(info.index));
+    auto fn = [this]() -> std::vector<SignalInfo> {
+        std::vector<SignalInfo> result;
+        if (!_session)
+            return result;
+        auto sig_list = _session->get_signal_models_snapshot();
+        for (auto m : sig_list) {
+            if (!m)
+                continue;
+            SignalInfo info;
+            info.index = m->index();
+            info.name = m->name();
+            info.type = sr_channel_type_to_api(m->type());
+            info.enabled = m->enabled();
+            info.color = m->color();
+            if (info.type == ChannelType::Analog ||
+                info.type == ChannelType::Dso) {
+                info.probe = get_probe_config(static_cast<int16_t>(info.index));
+            }
+            result.push_back(info);
         }
-
-        result.push_back(info);
-    }
-    return result;
+        return result;
+    };
+    return run_value_on_main_thread<std::vector<SignalInfo>>(fn);
 }
 
 // ===========================================================================
@@ -1858,121 +2023,116 @@ Result<uint64_t> SessionService::get_logic_samples(
     uint64_t start_sample, uint64_t end_sample,
     const std::vector<int16_t> &channel_indices,
     std::vector<uint8_t> &out_data) {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    auto *snapshot = _session->get_logic_snapshot();
-    if (!snapshot || !snapshot->have_data())
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "No logic data available");
-
-    out_data.clear();
-    uint64_t total_copied = 0;
-
-    for (auto ch_idx : channel_indices) {
-        uint64_t actual_end = end_sample;
-        const uint8_t *data = snapshot->get_samples(start_sample, actual_end,
-                                                     static_cast<int>(ch_idx));
-        if (!data)
-            continue;
-
-        uint64_t count = actual_end - start_sample + 1;
-        size_t byte_count = static_cast<size_t>(count);
-        out_data.insert(out_data.end(), data, data + byte_count);
-        total_copied += count;
-    }
-
-    return Result<uint64_t>::Success(total_copied);
+    auto fn = [this, start_sample, end_sample,
+               &channel_indices, &out_data]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        auto *snapshot = _session->get_logic_snapshot();
+        if (!snapshot || !snapshot->have_data())
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "No logic data available");
+        out_data.clear();
+        uint64_t total_copied = 0;
+        for (auto ch_idx : channel_indices) {
+            uint64_t actual_end = end_sample;
+            const uint8_t *data = snapshot->get_samples(start_sample, actual_end,
+                                                         static_cast<int>(ch_idx));
+            if (!data)
+                continue;
+            uint64_t count = actual_end - start_sample + 1;
+            size_t byte_count = static_cast<size_t>(count);
+            out_data.insert(out_data.end(), data, data + byte_count);
+            total_copied += count;
+        }
+        return Result<uint64_t>::Success(total_copied);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<uint64_t> SessionService::get_analog_samples(
     uint64_t start_sample, uint64_t end_sample,
     int16_t channel_index,
     std::vector<float> &out_data) {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    auto *snapshot = _session->get_analog_snapshot();
-    if (!snapshot || !snapshot->have_data())
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "No analog data available");
-
-    out_data.clear();
-
-    const uint8_t *raw = snapshot->get_samples(static_cast<int64_t>(start_sample));
-    if (!raw)
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "Failed to read analog samples");
-
-    uint64_t count = end_sample - start_sample + 1;
-    int pitch = snapshot->get_scale_factor();
-
-    out_data.reserve(static_cast<size_t>(count));
-    for (uint64_t i = 0; i < count; i++) {
-        uint8_t byte_val = raw[i * pitch + channel_index];
-        out_data.push_back(static_cast<float>(byte_val) / 255.0f);
-    }
-
-    return Result<uint64_t>::Success(count);
+    auto fn = [this, start_sample, end_sample,
+               channel_index, &out_data]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        auto *snapshot = _session->get_analog_snapshot();
+        if (!snapshot || !snapshot->have_data())
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "No analog data available");
+        out_data.clear();
+        const uint8_t *raw = snapshot->get_samples(static_cast<int64_t>(start_sample));
+        if (!raw)
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "Failed to read analog samples");
+        uint64_t count = end_sample - start_sample + 1;
+        int pitch = snapshot->get_scale_factor();
+        out_data.reserve(static_cast<size_t>(count));
+        for (uint64_t i = 0; i < count; i++) {
+            uint8_t byte_val = raw[i * pitch + channel_index];
+            out_data.push_back(static_cast<float>(byte_val) / 255.0f);
+        }
+        return Result<uint64_t>::Success(count);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<uint64_t> SessionService::get_dso_samples(
     uint64_t start_sample, uint64_t end_sample,
     int16_t channel_index,
     std::vector<float> &out_data) {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    auto *snapshot = _session->get_dso_snapshot();
-    if (!snapshot || !snapshot->have_data())
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "No DSO data available");
-
-    out_data.clear();
-
-    const uint8_t *raw = snapshot->get_samples(
-        static_cast<int64_t>(start_sample),
-        static_cast<int64_t>(end_sample),
-        static_cast<uint16_t>(channel_index));
-    if (!raw)
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "Failed to read DSO samples");
-
-    uint64_t count = end_sample - start_sample + 1;
-    float data_scale = snapshot->get_data_scale(channel_index);
-
-    out_data.reserve(static_cast<size_t>(count));
-    for (uint64_t i = 0; i < count; i++) {
-        out_data.push_back(static_cast<float>(raw[i]) * data_scale);
-    }
-
-    return Result<uint64_t>::Success(count);
+    auto fn = [this, start_sample, end_sample,
+               channel_index, &out_data]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        auto *snapshot = _session->get_dso_snapshot();
+        if (!snapshot || !snapshot->have_data())
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "No DSO data available");
+        out_data.clear();
+        const uint8_t *raw = snapshot->get_samples(
+            static_cast<int64_t>(start_sample),
+            static_cast<int64_t>(end_sample),
+            static_cast<uint16_t>(channel_index));
+        if (!raw)
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "Failed to read DSO samples");
+        uint64_t count = end_sample - start_sample + 1;
+        float data_scale = snapshot->get_data_scale(channel_index);
+        out_data.reserve(static_cast<size_t>(count));
+        for (uint64_t i = 0; i < count; i++) {
+            out_data.push_back(static_cast<float>(raw[i]) * data_scale);
+        }
+        return Result<uint64_t>::Success(count);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<uint64_t> SessionService::find_next_edge(
     uint64_t from_sample, int16_t channel_index, bool rising_edge) {
-    if (!_session)
-        return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                      "Session is nullptr");
-
-    auto *snapshot = _session->get_logic_snapshot();
-    if (!snapshot || !snapshot->have_data())
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "No logic data available");
-
-    uint64_t index = from_sample;
-    bool last_sample = !rising_edge;
-    uint64_t end = snapshot->get_sample_count() - 1;
-    bool found = snapshot->get_nxt_edge(index, last_sample, end, 0,
-                                         static_cast<int>(channel_index));
-    if (!found)
-        return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                      "No edge found");
-
-    return Result<uint64_t>::Success(index);
+    auto fn = [this, from_sample, channel_index, rising_edge]() -> Result<uint64_t> {
+        if (!_session)
+            return Result<uint64_t>::Fail(ErrorCode::InternalError,
+                                          "Session is nullptr");
+        auto *snapshot = _session->get_logic_snapshot();
+        if (!snapshot || !snapshot->have_data())
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "No logic data available");
+        uint64_t index = from_sample;
+        bool last_sample = !rising_edge;
+        uint64_t end = snapshot->get_sample_count() - 1;
+        bool found = snapshot->get_nxt_edge(index, last_sample, end, 0,
+                                             static_cast<int>(channel_index));
+        if (!found)
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "No edge found");
+        return Result<uint64_t>::Success(index);
+    };
+    return run_result_on_main_thread<uint64_t>(fn);
 }
 
 Result<uint64_t> SessionService::find_pattern(
@@ -2216,7 +2376,7 @@ Result<json> SessionService::get_decoder_options(const std::string& decoder_id) 
     // Available signals for channel mapping (matching create_probe_selector logic)
     json available_signals = json::array();
     if (_session) {
-        auto &sig_list = _session->get_signal_models();
+        auto sig_list = _session->get_signal_models_snapshot();
         for (auto m : sig_list) {
             if (!m || !m->enabled())
                 continue;
@@ -2235,45 +2395,40 @@ Result<json> SessionService::get_decoder_options(const std::string& decoder_id) 
 }
 
 std::vector<DecoderInstance> SessionService::get_active_decoders() const {
-    std::vector<DecoderInstance> result;
-    if (!_session)
-        return result;
-
-    auto &stacks = _session->get_decoder_stacks(api_document());
-    for (size_t i = 0; i < stacks.size(); i++) {
-        auto stack = stacks[i];
-        if (!stack)
-            continue;
-
-        DecoderInstance inst;
-        inst.instance_id = make_instance_id(stack.get());
-        inst.row_index = static_cast<int32_t>(i);
-
-        inst.is_running = stack->IsRunning();
-        inst.progress = stack->get_progress() / 100.0;
-        const char *root_id = stack->get_root_decoder_id();
-        inst.decoder_id = root_id ? root_id : "";
-
-        // Derive display name from the root decoder's name. If a custom label
-        // is set on the stack, append it in parentheses so multiple instances
-        // of the same decoder can be distinguished (e.g. "SPI(CH2.SPI)").
-        std::string display_name;
-        auto &dec_list = stack->stack();
-        if (!dec_list.empty()) {
-            auto *root_dec = dec_list.front().get();
-            if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
-                display_name = root_dec->decoder()->name;
+    auto fn = [this]() -> std::vector<DecoderInstance> {
+        std::vector<DecoderInstance> result;
+        if (!_session)
+            return result;
+        auto &stacks = _session->get_decoder_stacks(api_document());
+        for (size_t i = 0; i < stacks.size(); i++) {
+            auto stack = stacks[i];
+            if (!stack)
+                continue;
+            DecoderInstance inst;
+            inst.instance_id = make_instance_id(stack.get());
+            inst.row_index = static_cast<int32_t>(i);
+            inst.is_running = stack->IsRunning();
+            inst.progress = stack->get_progress() / 100.0;
+            const char *root_id = stack->get_root_decoder_id();
+            inst.decoder_id = root_id ? root_id : "";
+            std::string display_name;
+            auto &dec_list = stack->stack();
+            if (!dec_list.empty()) {
+                auto *root_dec = dec_list.front().get();
+                if (root_dec && root_dec->decoder() && root_dec->decoder()->name)
+                    display_name = root_dec->decoder()->name;
+            }
+            QString custom_label = stack->label();
+            if (custom_label.isEmpty())
+                custom_label = stack->auto_label();
+            if (!custom_label.isEmpty())
+                display_name += "(" + custom_label.toStdString() + ")";
+            inst.display_name = display_name;
+            result.push_back(inst);
         }
-        QString custom_label = stack->label();
-        if (custom_label.isEmpty())
-            custom_label = stack->auto_label();
-        if (!custom_label.isEmpty())
-            display_name += "(" + custom_label.toStdString() + ")";
-        inst.display_name = display_name;
-
-        result.push_back(inst);
-    }
-    return result;
+        return result;
+    };
+    return run_value_on_main_thread<std::vector<DecoderInstance>>(fn);
 }
 
 Result<std::string> SessionService::add_decoder(
@@ -3069,6 +3224,7 @@ Result<void> SessionService::clear_all_decoders() {
 Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
     const std::string &instance_id, uint64_t start_sample,
     uint64_t end_sample, int max_count) {
+    auto fn = [this, instance_id, start_sample, end_sample, max_count]() -> Result<std::vector<DecoderAnnotation>> {
     if (!_session)
         return Result<std::vector<DecoderAnnotation>>::Fail(
             ErrorCode::InternalError, "Session is nullptr");
@@ -3157,6 +3313,8 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
              result.size());
 
     return Result<std::vector<DecoderAnnotation>>::Success(result);
+    };
+    return run_result_on_main_thread<std::vector<DecoderAnnotation>>(fn);
 }
 
 // ===========================================================================
@@ -3523,7 +3681,7 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
     // If no channels specified, export all enabled channels
     std::vector<int32_t> channels = config.channels;
     if (channels.empty()) {
-        auto &sig_list = _session->get_signal_models();
+        auto sig_list = _session->get_signal_models_snapshot();
         for (auto m : sig_list) {
             if (m && m->enabled())
                 channels.push_back(m->index());
@@ -3532,7 +3690,7 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
 
     for (auto ch_idx : channels) {
         // Determine channel type from SignalModel
-        auto &sig_list = _session->get_signal_models();
+        auto sig_list = _session->get_signal_models_snapshot();
         ChannelType ch_type = ChannelType::Logic;
         for (auto m : sig_list) {
             if (m && m->index() == ch_idx) {
@@ -3867,7 +4025,7 @@ Result<void> SessionService::export_raw_data_binary(
 
     if (all_channels.empty()) {
         // Default to all enabled channels
-        auto &sig_list = _session->get_signal_models();
+        auto sig_list = _session->get_signal_models_snapshot();
         for (auto m : sig_list) {
             if (m && m->enabled())
                 all_channels.push_back(m->index());
@@ -4081,7 +4239,7 @@ Result<void> SessionService::enable_math(int16_t ch1, int16_t ch2,
     // view::DsoSignal pointers).
     bool found_ch1 = false;
     bool found_ch2 = false;
-    auto &sig_list = _session->get_signal_models();
+    auto sig_list = _session->get_signal_models_snapshot();
     for (auto m : sig_list) {
         if (!m) continue;
         if (m->type() != SR_CHANNEL_DSO) continue;
@@ -4578,45 +4736,31 @@ Result<void> SessionService::set_save_range(uint64_t start_sample,
 // ---------------------------------------------------------------------------
 
 Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
-    if (!_session)
-        return Result<std::vector<DeviceInfo>>::Fail(ErrorCode::InternalError,
-                                                     "Session is nullptr");
-
-    // Trigger a hot-plug rescan of all upstream drivers. This refreshes
-    // DeviceAgent's cached scanned_sdi() list (get_device_list reuses the
-    // cache to avoid LIBUSB_ERROR_ACCESS on already-opened devices).
-    _session->refresh_device_list();
-
-    // Build the device list from the refreshed cache. get_device_list
-    // returns a calloc'd array of ds_device_base_info (handle + name);
-    // we expand each entry into a DeviceInfo using the underlying sdi.
-    int count = 0;
-    int actived_index = -1;
-    struct ds_device_base_info *array = _session->get_device_list(count, actived_index);
-
-    std::vector<DeviceInfo> result;
-    if (!array || count <= 0) {
-        if (array)
-            free(array);
-        return Result<std::vector<DeviceInfo>>::Success(result);
-    }
-
-    // Enrich each entry with driver/connection info from the underlying
-    // sr_dev_inst. The handle is an opaque 1-based index into the
-    // scanned_sdi() vector (handle = index + 1). refresh_device_list()
-    // above called DeviceAgent::set_scanned_devices() so the cache is fresh.
-    DeviceAgent *agent = _session->get_device();
-    static const std::vector<struct sr_dev_inst*> empty_vec;
-    const std::vector<struct sr_dev_inst*> &scanned =
-        agent ? agent->scanned_sdi() : empty_vec;
-    const std::vector<struct sr_dev_inst*> &file_devs =
-        agent ? agent->file_devices() : empty_vec;
-
-    for (int i = 0; i < count; i++) {
-        struct ds_device_base_info *entry = &array[i];
-        DeviceInfo info;
-        info.id = std::to_string(static_cast<intptr_t>(entry->handle));
-        info.display_name = entry->name;
+    auto fn = [this]() -> Result<std::vector<DeviceInfo>> {
+        if (!_session)
+            return Result<std::vector<DeviceInfo>>::Fail(ErrorCode::InternalError,
+                                                         "Session is nullptr");
+        _session->refresh_device_list();
+        int count = 0;
+        int actived_index = -1;
+        struct ds_device_base_info *array = _session->get_device_list(count, actived_index);
+        std::vector<DeviceInfo> result;
+        if (!array || count <= 0) {
+            if (array)
+                free(array);
+            return Result<std::vector<DeviceInfo>>::Success(result);
+        }
+        DeviceAgent *agent = _session->get_device();
+        static const std::vector<struct sr_dev_inst*> empty_vec;
+        const std::vector<struct sr_dev_inst*> &scanned =
+            agent ? agent->scanned_sdi() : empty_vec;
+        const std::vector<struct sr_dev_inst*> &file_devs =
+            agent ? agent->file_devices() : empty_vec;
+        for (int i = 0; i < count; i++) {
+            struct ds_device_base_info *entry = &array[i];
+            DeviceInfo info;
+            info.id = std::to_string(static_cast<intptr_t>(entry->handle));
+            info.display_name = entry->name;
 
         // Resolve the underlying sdi to fill driver/connection fields.
         struct sr_dev_inst *sdi = nullptr;
@@ -4658,10 +4802,12 @@ Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
         result.push_back(info);
     }
 
-    free(array);
+        free(array);
 
-    broadcast_event(ServiceEvent::DeviceListUpdated);
-    return Result<std::vector<DeviceInfo>>::Success(result);
+        broadcast_event(ServiceEvent::DeviceListUpdated);
+        return Result<std::vector<DeviceInfo>>::Success(result);
+    };
+    return run_result_on_main_thread<std::vector<DeviceInfo>>(fn);
 }
 
 // ---------------------------------------------------------------------------

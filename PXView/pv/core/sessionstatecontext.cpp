@@ -202,11 +202,11 @@ uint16_t SessionStateContext::get_ch_num(int type) {
 }
 
 uint64_t SessionStateContext::cur_samplelimits() {
-  return _capture_data->_cur_samplelimits;
+  return _capture_data.load()->_cur_samplelimits;
 }
 
 uint64_t SessionStateContext::cur_snap_samplerate() {
-  return _capture_data->_cur_snap_samplerate;
+  return _capture_data.load()->_cur_snap_samplerate;
 }
 
 void SessionStateContext::set_cur_snap_samplerate(uint64_t samplerate) {
@@ -215,19 +215,19 @@ void SessionStateContext::set_cur_snap_samplerate(uint64_t samplerate) {
     return;
   }
 
-  _capture_data->_cur_snap_samplerate = samplerate;
-  _capture_data->get_logic()->set_samplerate(samplerate);
-  _capture_data->get_analog()->set_samplerate(samplerate);
-  _capture_data->get_dso()->set_samplerate(samplerate);
+  _capture_data.load()->_cur_snap_samplerate = samplerate;
+_capture_data.load()->get_logic()->set_samplerate(samplerate);
+_capture_data.load()->get_analog()->set_samplerate(samplerate);
+_capture_data.load()->get_dso()->set_samplerate(samplerate);
 
   int mode = _device_agent.get_work_mode();
 
   if (mode == DSO) {
     for (auto m : _signal_models) {
       if (m->type() == SR_CHANNEL_DSO) {
-        _capture_data->get_dso()->set_measure_voltage_factor(
+        _capture_data.load()->get_dso()->set_measure_voltage_factor(
             (uint64_t)m->vfactor(), m->index());
-        _capture_data->get_dso()->set_data_scale(m->vdiv(), m->index());
+        _capture_data.load()->get_dso()->set_data_scale(m->vdiv(), m->index());
       }
     }
   }
@@ -250,7 +250,7 @@ void SessionStateContext::set_cur_samplelimits(uint64_t samplelimits) {
     pxv_warn("SessionStateContext::set_cur_samplelimits: samplelimits=0, ignoring (device may not support SR_CONF_LIMIT_SAMPLES)");
     return;
   }
-  _capture_data->_cur_samplelimits = samplelimits;
+  _capture_data.load()->_cur_samplelimits = samplelimits;
   _event_bus->broadcast_async<interface::SampleLimitsChanged>({});
 }
 
@@ -404,11 +404,11 @@ void SessionStateContext::clear_glitch_filter_state_for_capture() {
   // 但保留 thresholds/modes(供 auto-apply 使用)。
   // 不恢复数据 — _view_data->get_logic() 已被 clear(),无数据可恢复。
   // Track B3: _logic_backup is now unique_ptr — use reset() instead of delete
-  if (_view_data->_logic_backup) {
-    _view_data->_logic_backup.reset();
+  if (_view_data.load()->_logic_backup) {
+    _view_data.load()->_logic_backup.reset();
   }
-  if (_view_data->_glitch_filter_active) {
-    _view_data->_glitch_filter_active = false;
+  if (_view_data.load()->_glitch_filter_active) {
+    _view_data.load()->_glitch_filter_active = false;
     _event_bus->broadcast_async<interface::GlitchFilterCleared>({});
   }
 }

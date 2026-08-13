@@ -1934,12 +1934,18 @@ void SigSession::math_disable() {
 }
 
 data::Snapshot *SigSession::get_snapshot(int type) {
+  // Memory-safety: view_data() can return nullptr during startup/shutdown
+  // or when called from the StoreSession worker thread during a tab switch.
+  // Guard against null dereference.
+  auto *vd = _state->view_data();
+  if (!vd)
+    return nullptr;
   if (type == SR_CHANNEL_LOGIC)
-    return _state->view_data()->get_logic();
+    return vd->get_logic();
   else if (type == SR_CHANNEL_ANALOG)
-    return _state->view_data()->get_analog();
+    return vd->get_analog();
   else if (type == SR_CHANNEL_DSO)
-    return _state->view_data()->get_dso();
+    return vd->get_dso();
   else
     return nullptr;
 }
@@ -2534,16 +2540,19 @@ void SigSession::update_dso_data_scale() {
 
 int64_t SigSession::get_ring_sample_count() {
   int mode = _state->device_agent().get_work_mode();
-  // MSO (Mixed Signal Oscilloscope) = LOGIC + 模拟通道。Core 层其他位置
-  // (sigsession.cpp:1605/1612) 已通过 `mode == LOGIC || mode == MSO` 将二者
-  // 合并处理；此处 ring sample count 也应一致 —— MSO 模式下逻辑通道是主要
-  // 数据源，应当返回 logic ring 的样本数，而非误走 analog 分支。
+  // Memory-safety: view_data() can return nullptr during startup/shutdown.
+  auto *vd = _state->view_data();
+  if (!vd)
+    return 0;
   if (mode == LOGIC || mode == MSO) {
-    return _state->view_data()->get_logic()->get_ring_sample_count();
+    auto *logic = vd->get_logic();
+    return logic ? logic->get_ring_sample_count() : 0;
   } else if (mode == DSO) {
-    return _state->view_data()->get_dso()->get_ring_sample_count();
+    auto *dso = vd->get_dso();
+    return dso ? dso->get_ring_sample_count() : 0;
   } else {
-    return _state->view_data()->get_analog()->get_ring_sample_count();
+    auto *analog = vd->get_analog();
+    return analog ? analog->get_ring_sample_count() : 0;
   }
 }
 
@@ -2568,14 +2577,14 @@ bool SigSession::have_decoded_result() {
 void SigSession::apply_samplerate() { on_load_config_end(); }
 
 data::LogicSnapshot *SigSession::get_logic_snapshot() {
-  // During realtime refresh in double-buffer mode (stream + repeat),
-  // capture_data != view_data. The live data is in capture_data (being
-  // filled by the driver), while view_data holds the previous capture.
-  // Return capture_data's logic so the view shows live scrolling data.
+  // Memory-safety: view_data()/capture_data() can return nullptr.
   if (_capture_manager->is_realtime_refresh() &&
-      _state->capture_data() != _state->view_data())
-    return _state->capture_data()->get_logic();
-  return _state->view_data()->get_logic();
+      _state->capture_data() != _state->view_data()) {
+    auto *cd = _state->capture_data();
+    return cd ? cd->get_logic() : nullptr;
+  }
+  auto *vd = _state->view_data();
+  return vd ? vd->get_logic() : nullptr;
 }
 
 std::shared_ptr<data::LogicSnapshot> SigSession::get_logic_snapshot_shared() {
@@ -2587,16 +2596,22 @@ std::shared_ptr<data::LogicSnapshot> SigSession::get_logic_snapshot_shared() {
 
 data::AnalogSnapshot *SigSession::get_analog_snapshot() {
   if (_capture_manager->is_realtime_refresh() &&
-      _state->capture_data() != _state->view_data())
-    return _state->capture_data()->get_analog();
-  return _state->view_data()->get_analog();
+      _state->capture_data() != _state->view_data()) {
+    auto *cd = _state->capture_data();
+    return cd ? cd->get_analog() : nullptr;
+  }
+  auto *vd = _state->view_data();
+  return vd ? vd->get_analog() : nullptr;
 }
 
 data::DsoSnapshot *SigSession::get_dso_snapshot() {
   if (_capture_manager->is_realtime_refresh() &&
-      _state->capture_data() != _state->view_data())
-    return _state->capture_data()->get_dso();
-  return _state->view_data()->get_dso();
+      _state->capture_data() != _state->view_data()) {
+    auto *cd = _state->capture_data();
+    return cd ? cd->get_dso() : nullptr;
+  }
+  auto *vd = _state->view_data();
+  return vd ? vd->get_dso() : nullptr;
 }
 
 // Task C1.5: DSO measurement computation via core::MeasureCalculator.

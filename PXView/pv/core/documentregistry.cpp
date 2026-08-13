@@ -167,7 +167,7 @@ std::unique_ptr<CaptureOwnerGuard> guard_to_reset;
 {
 std::lock_guard<std::mutex> lock(_capture_state_mutex);
 if (_capture_owner_guard &&
-get_document_by_index(_capture_owner_index) == doc) {
+get_document_by_index(_capture_owner_index.load(std::memory_order_acquire)) == doc) {
 guard_to_reset = std::move(_capture_owner_guard);
 }
 }

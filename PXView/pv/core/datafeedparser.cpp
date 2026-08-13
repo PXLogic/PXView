@@ -68,12 +68,19 @@ void DataFeedParser::feed_in_trigger() {
   // and viewport "Trig'd" status display was permanently wrong.
   _coord->set_trigger_flag(true);
 
+  // Memory-safety: capture_data() can return nullptr during early init.
+  auto *cd = _state->capture_data();
+  if (!cd) {
+    pxv_warn("feed_in_trigger: capture_data is nullptr");
+    return;
+  }
+
   // Read the trigger position reported by the driver.
-  _state->capture_data()->_trig_pos = _state->device_agent().get_trigger_pos();
+  cd->_trig_pos = _state->device_agent().get_trigger_pos();
 
   // Update trig position for current view.
-  if (_state->capture_data() == _state->view_data()) {
-    _coord->receive_trigger(_state->capture_data()->_trig_pos);
+  if (cd == _state->view_data()) {
+    _coord->receive_trigger(cd->_trig_pos);
   }
 }
 
@@ -85,7 +92,13 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
             (unsigned long long)o.length);
     return;
   }
-  if (_state->capture_data()->get_logic()->memory_failed()) {
+  // Memory-safety: capture_data() can return nullptr during early init.
+  auto *cd = _state->capture_data();
+  if (!cd) {
+    pxv_warn("feed_in_logic: capture_data is nullptr");
+    return;
+  }
+  if (cd->get_logic()->memory_failed()) {
     pxv_err("Unexpected logic packet");
     return;
   }
@@ -95,8 +108,8 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     _coord->set_trig_time(QDateTime::currentDateTime());
   }
 
-  if (_state->capture_data()->get_logic()->last_ended()) {
-    _state->capture_data()->get_logic()->set_loop(
+  if (cd->get_logic()->last_ended()) {
+    cd->get_logic()->set_loop(
         _capture_mgr->is_loop_mode());
 
     // ═══════════════════════════════════════════════════════════════════
@@ -163,9 +176,9 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     // In stream mode (view_data != capture_data), the UI reads from
     // view_data (previous capture's buffer), so decommitting blocks in
     // the capture buffer is safe.
-    bool bNotFree = (_state->view_data() == _state->capture_data());
+    bool bNotFree = (_state->view_data() == cd);
 
-    _state->capture_data()->get_logic()->first_payload(
+    cd->get_logic()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),
         _state->device_agent().get_channels(), !bNotFree);
 
@@ -176,10 +189,10 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     _coord->frame_began();
   } else {
     // Append to the existing data snapshot
-    _state->capture_data()->get_logic()->append_payload(o);
+    cd->get_logic()->append_payload(o);
   }
 
-  if (_state->capture_data()->get_logic()->memory_failed()) {
+  if (cd->get_logic()->memory_failed()) {
     _coord->set_error(SessionStateContext::Malloc_err);
     _coord->session_error();
     return;
@@ -218,26 +231,32 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
             (unsigned long long)o.num_samples);
     return;
   }
-  if (_state->capture_data()->get_analog()->memory_failed()) {
+  // Memory-safety: capture_data() can return nullptr.
+  auto *cd = _state->capture_data();
+  if (!cd) {
+    pxv_warn("feed_in_analog: capture_data is nullptr");
+    return;
+  }
+  if (cd->get_analog()->memory_failed()) {
     pxv_err("Unexpected analog packet");
     return; // This analog packet was not expected.
   }
 
-  if (_state->capture_data()->get_analog()->last_ended()) {
+  if (cd->get_analog()->last_ended()) {
     // In multi-tab architecture, SigSession::_signals do not have viewports,
     // so we cannot and should not call UI rendering methods on them.
 
     // first payload
-    _state->capture_data()->get_analog()->first_payload(
+    cd->get_analog()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),
         _state->device_agent().get_channels());
     _coord->frame_began();
   } else {
     // Append to the existing data snapshot
-    _state->capture_data()->get_analog()->append_payload(o);
+    cd->get_analog()->append_payload(o);
   }
 
-  if (_state->capture_data()->get_analog()->memory_failed()) {
+  if (cd->get_analog()->memory_failed()) {
     _coord->set_error(SessionStateContext::Malloc_err);
     _coord->session_error();
     return;
@@ -266,7 +285,13 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
             (unsigned long long)o.num_samples);
     return;
   }
-  if (_state->capture_data()->get_dso()->memory_failed()) {
+  // Memory-safety: capture_data() can return nullptr.
+  auto *cd = _state->capture_data();
+  if (!cd) {
+    pxv_warn("feed_in_dso: capture_data is nullptr");
+    return;
+  }
+  if (cd->get_dso()->memory_failed()) {
     pxv_err("Unexpected dso packet");
     return;
   }
@@ -280,11 +305,11 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // to compute the absolute trigger position from o.trig_offset (which
   // is relative to the current packet's first sample).
   const uint64_t pre_sample_count =
-      _state->capture_data()->get_dso()->get_sample_count();
+      cd->get_dso()->get_sample_count();
 
-  if (_state->capture_data()->get_dso()->last_ended()) {
+  if (cd->get_dso()->last_ended()) {
     // first payload
-    _state->capture_data()->get_dso()->first_payload(
+    cd->get_dso()->first_payload(
         o, _state->device_agent().get_ring_sample_count(),
         _state->device_agent().get_channels(),
         _capture_mgr->is_instant(),
@@ -292,10 +317,10 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     _coord->frame_began();
   } else {
     // Append to the existing data snapshot
-    _state->capture_data()->get_dso()->append_payload(o);
+    cd->get_dso()->append_payload(o);
   }
 
-  if (_state->capture_data()->get_dso()->memory_failed()) {
+  if (cd->get_dso()->memory_failed()) {
     _coord->set_error(SessionStateContext::Malloc_err);
     _coord->session_error();
     return;
@@ -318,12 +343,12 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     // original DSView used in its feed_in_trigger DSO else-branch.
     uint64_t abs_trig_pos = pre_sample_count +
                             (o.trig_offset > 0 ? (uint64_t)o.trig_offset : 0);
-    _state->capture_data()->_trig_pos = abs_trig_pos;
+    cd->_trig_pos = abs_trig_pos;
 
     // Update trig position for current view (DSO mode has
     // capture_data == view_data, so the receive_trigger path is taken).
-    if (_state->capture_data() == _state->view_data()) {
-      _coord->receive_trigger(_state->capture_data()->_trig_pos);
+    if (cd == _state->view_data()) {
+      _coord->receive_trigger(cd->_trig_pos);
     }
   }
 
@@ -421,9 +446,15 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     break;
 
   case SR_DF_END: {
-    _state->capture_data()->get_logic()->capture_ended();
-    _state->capture_data()->get_dso()->capture_ended();
-    _state->capture_data()->get_analog()->capture_ended();
+    // Memory-safety: capture_data() can return nullptr.
+    auto *cd = _state->capture_data();
+    if (!cd) {
+      pxv_warn("SR_DF_END: capture_data is nullptr, skipping");
+      break;
+    }
+    cd->get_logic()->capture_ended();
+    cd->get_dso()->capture_ended();
+    cd->get_analog()->capture_ended();
 
     // CRITICAL FIX: fork 迁移遗漏 — 采集正常结束时设置 device_status =
     // ST_STOPPED。旧 fork libsigrok 在 ds_stop_collect 内部会通过 sr_status

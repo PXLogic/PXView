@@ -176,17 +176,29 @@ public:
   // --- Device ---
   DeviceAgent &device_agent() { return _device_agent; }
 
-  // --- Data buffers (view_data getter/setter; capture_data getter only, setter is ISessionCoordination override) ---
-  SessionData *view_data() { return _view_data; }
-  void set_view_data(SessionData *d) { _view_data = d; }
-  SessionData *capture_data() { return _capture_data; }
+  // --- Data buffers ---
+  // Thread-safety P1: _view_data / _capture_data are now
+  // std::atomic<SessionData*> for safe cross-thread reads.
+  // Writers (main thread) use store(); readers (decode thread,
+  // data feed thread) use load().
+  SessionData *view_data() { return _view_data.load(std::memory_order_acquire); }
+  void set_view_data(SessionData *d) { _view_data.store(d, std::memory_order_release); }
+  SessionData *capture_data() { return _capture_data.load(std::memory_order_acquire); }
   // Track B1: _data_list owns SessionData via unique_ptr
   std::vector<std::unique_ptr<SessionData>> &data_list() { return _data_list; }
-  bool is_single_buffer() const { return _view_data == _capture_data; }
+  bool is_single_buffer() const { return _view_data.load() == _capture_data.load(); }
 
   // --- Trigger config ---
+  // Thread-safety P2: set_trigger_config() is protected by
+  // _trigger_config_mutex. trigger_config() returns const ref for
+  // interface compatibility (ISessionState / ISignalSource) and is
+  // main-thread-only — all mutation paths now dispatch to main thread
+  // via run_void_on_main_thread (P0 fix).
   const data::TriggerConfig &trigger_config() const { return _trigger_config; }
-  void set_trigger_config(const data::TriggerConfig &c) { _trigger_config = c; }
+  void set_trigger_config(const data::TriggerConfig &c) {
+      std::lock_guard<std::mutex> lk(_trigger_config_mutex);
+      _trigger_config = c;
+  }
 
   // --- Cursor registry (Task C2: cursor position state lives in Core so
   //     headless MCP clients can enumerate/mutate cursors without a View).
@@ -349,12 +361,13 @@ private:
 
   DeviceAgent _device_agent;
 
-  SessionData *_view_data = nullptr;
-  SessionData *_capture_data = nullptr;
+  std::atomic<SessionData *> _view_data{nullptr};
+  std::atomic<SessionData *> _capture_data{nullptr};
   // Track B1: data buffers owned via unique_ptr
   std::vector<std::unique_ptr<SessionData>> _data_list;
 
   data::TriggerConfig _trigger_config;
+  mutable std::mutex _trigger_config_mutex;
 
   // Task C2: cursor position state mirror. Owned by the state context so
   // both SigSession (Core) and the View layer (via DataSource) share one

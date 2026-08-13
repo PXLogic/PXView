@@ -447,7 +447,10 @@ void DecoderStack::clear() { init(); }
 
 void DecoderStack::init() {
   _sample_count.store(0);
-  _samples_decoded = 0;
+  {
+    std::lock_guard<std::mutex> lk(_state_mutex);
+    _samples_decoded = 0;
+  }
 set_error_message(QString());
 _no_memory = false;
   _snapshot.reset();
@@ -586,8 +589,8 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
     return;
   }
 
-  _samplerate = _snapshot->samplerate();
-  if (_samplerate == 0.0) {
+  _samplerate.store(_snapshot->samplerate(), std::memory_order_release);
+  if (_samplerate.load(std::memory_order_acquire) == 0.0) {
     pxv_err("ERROR:Decode data got an invalid sample rate.");
     return;
   }
@@ -912,7 +915,7 @@ srd_session_destroy(session);
   }
 
   srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
-                           g_variant_new_uint64((uint64_t)_samplerate));
+                           g_variant_new_uint64((uint64_t)_samplerate.load(std::memory_order_acquire)));
 
   // P3-11 fix: obtain status shared_ptr under _status_mutex for the callback
   std::shared_ptr<decode_task_status> status_for_callback;
@@ -947,7 +950,7 @@ uint64_t DecoderStack::sample_count() {
     return 0;
 }
 
-uint64_t DecoderStack::sample_rate() { return _samplerate; }
+uint64_t DecoderStack::sample_rate() { return _samplerate.load(std::memory_order_acquire); }
 
 // P2-7 fix: annotation_callback now uses emplace_annotation instead of
 // new/delete. The Annotation is stored as a value in RowData's deque,

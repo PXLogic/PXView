@@ -28,9 +28,9 @@
 namespace pv {
 namespace data {
 
-SignalData::SignalData() :
-    _samplerate(0)
+SignalData::SignalData()
 {
+    _samplerate.store(0.0, std::memory_order_release);
 }
 
 SignalData::~SignalData() {}
@@ -39,7 +39,7 @@ SignalData::~SignalData() {}
 void SignalData::set_samplerate(double samplerate)
 {
     assert(samplerate > 0);
-    _samplerate = samplerate;
+    _samplerate.store(samplerate, std::memory_order_release);
 }
 
 } // namespace data

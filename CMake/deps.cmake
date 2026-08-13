@@ -66,8 +66,29 @@ if (Python3_FOUND)
 		endif()
 		message(STATUS "	 [OK] MinGW Python confirmed (not python.org MSVC build)")
 	endif()
-	include_directories(${Python3_INCLUDE_DIRS})
+ include_directories(${Python3_INCLUDE_DIRS})
 	set(PY_LIB ${Python3_LIBRARIES})
+
+	# Detect free-threaded Python (PEP 703, Python 3.13t+).
+	# Py_GIL_DISABLED is defined by Python.h when the GIL is disabled.
+	# Our C code uses #ifdef Py_GIL_DISABLED to switch between explicit
+	# locking (free-threaded) and GIL-reliant code paths.
+	include(CheckCSourceCompiles)
+	set(CMAKE_REQUIRED_INCLUDES "${Python3_INCLUDE_DIRS}")
+	check_c_source_compiles("
+		#include <Python.h>
+		#if !defined(Py_GIL_DISABLED)
+		#error GIL not disabled
+		#endif
+		int main(void) { return 0; }"
+		SRD_FREE_THREADED_PYTHON)
+	set(CMAKE_REQUIRED_INCLUDES)
+	if(SRD_FREE_THREADED_PYTHON)
+		message(STATUS "	 [OK] Free-threaded Python detected (PEP 703) — decoders run truly parallel")
+		add_compile_definitions(SRD_FREE_THREADED_PYTHON=1)
+	else()
+		message(STATUS "	 [OK] Standard GIL Python — Python decoders serialised by GIL, C decoders parallel")
+	endif()
 else()
 	message(FATAL_ERROR  "Please install lib python3!")
 endif()

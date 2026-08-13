@@ -185,7 +185,9 @@ protected:
 
     // B-6: Memory optimisation request flag. When set, free_unused_memory()
     // will attempt to release unused chunk memory on the next call.
-    bool                _mem_optimization_requested = false;
+    // Atomic: set by capture_ended() (data-feed thread) and read by
+    // free_unused_memory() (main/view thread).
+    std::atomic<bool>   _mem_optimization_requested{false};
 
     // B-1: Multi-segment state.
     // _segment_count: number of segments (1 for single-segment mode).

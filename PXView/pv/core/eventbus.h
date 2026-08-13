@@ -207,8 +207,16 @@ private:
     mutable std::shared_mutex _callbacks_mutex;
 
     // ---- Re-entrancy guard ----
+    // CRITICAL: broadcast() and the _deferred_broadcasts queue are NOT
+    // thread-safe. They must only be called from the main (GUI) thread.
+    // The _broadcast_depth counter is thread_local, so re-entrant calls
+    // from the same thread are correctly deferred, but concurrent calls
+    // from different threads would race on _deferred_broadcasts.
+    // In practice this is safe because broadcast() is only invoked from
+    // broadcast_async()'s main-thread dispatch. Direct broadcast() calls
+    // from worker threads are prohibited by contract.
     static thread_local int _broadcast_depth;
-    std::queue<std::function<void()>> _deferred_broadcasts;
+    std::queue<std::function<void()>> _deferred_broadcasts; // main-thread-only
 
     void drain_deferred() {
         while (!_deferred_broadcasts.empty()) {

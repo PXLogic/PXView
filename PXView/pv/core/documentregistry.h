@@ -115,9 +115,9 @@ public:
 
   // --- Capture owner / copy thread ---
   inline data::SessionDocument *get_capture_owner_document() const {
-    return get_document_by_index(_capture_owner_index);
+    return get_document_by_index(_capture_owner_index.load(std::memory_order_acquire));
   }
-  inline size_t get_capture_owner_index() const { return _capture_owner_index; }
+  inline size_t get_capture_owner_index() const { return _capture_owner_index.load(std::memory_order_acquire); }
 inline bool is_copy_in_progress() const { return _copy_in_progress; }
 void clear_capture_owner_document(data::SessionDocument *doc);
 
@@ -142,7 +142,7 @@ inline std::atomic<bool> &copy_in_progress() { return _copy_in_progress; }
   // there is no active document in headless mode). Caller MUST hold
   // capture_state_mutex().
   inline void set_capture_owner_index_locked(size_t index) {
-    _capture_owner_index = index;
+    _capture_owner_index.store(index, std::memory_order_release);
   }
 
 private:
@@ -159,7 +159,7 @@ private:
   // (marked deletion) so all other indices remain stable.
   std::vector<std::unique_ptr<data::SessionDocument>> _owned_documents;
   size_t _active_document_index;
-  size_t _capture_owner_index;
+  std::atomic<size_t> _capture_owner_index{SIZE_MAX};
 
   // Capture owner / copy thread state
 mutable std::mutex _capture_state_mutex;
