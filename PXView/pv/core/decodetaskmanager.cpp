@@ -81,15 +81,16 @@ void DecodeTaskManager::attach_data_to_signal(SessionData *data) {
 
 void DecodeTaskManager::add_decode_task(
     std::shared_ptr<data::DecoderStack> stack) {
-  // Ensure SignalModels have valid snapshot pointers before the decode thread
-  // starts. SignalModels may have been recreated with nullptr snapshots (e.g. by
-  // reload() during TabContext::activate()). Without this, decoders fail with
-  // "没有设置需要解码哪些通道的数据". This matches the pattern in
-  // start_all_decode_tasks() and rst_decoder().
   attach_data_to_signal(_state->view_data());
+
+  if (!stack)
+    return;
 
   // Plan B Phase 3: use ThreadPool instead of raw std::thread.
   // ThreadPool manages thread lifetime — no manual join needed.
+  //
+  // Repeat/decode race fix: check + push atomically under the same lock so
+  // that a duplicate task cannot slip in between the check and the push.
   {
     std::lock_guard<std::mutex> lock(_running_tasks_mutex);
     // 防止重复添加:RevEndPacket 和 CopyToDocDone 都会调用
@@ -170,7 +171,8 @@ void DecodeTaskManager::clear_all_decode_task2() {
 
 void DecodeTaskManager::decode_single_task(
     std::shared_ptr<data::DecoderStack> task) {
-  pxv_info("------->decode thread start");
+  if (PXV_VERBOSE_REPEAT_LOG)
+    pxv_info("------->decode thread start");
 
   // P0-3 fix: _delete_flag is removed. The task's lifetime is managed by
   // shared_ptr. Simply call begin_decode_work() — if the task was stopped
@@ -214,7 +216,8 @@ void DecodeTaskManager::decode_single_task(
     }
   }
 
-  pxv_info("------->decode thread end");
+  if (PXV_VERBOSE_REPEAT_LOG)
+    pxv_info("------->decode thread end");
 }
 
 void DecodeTaskManager::start_all_decode_tasks() {

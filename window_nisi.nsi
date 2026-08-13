@@ -80,6 +80,15 @@ Var PREV_UNINSTALLER
 Var NEED_REBOOT_AFTER_INSTALL
 
 Section "MainSection" SEC01
+  ; If PXView-Agent.exe (Tauri desktop wrapper) exists in package, check if it's running
+  ${If} ${FileExists} "$INSTDIR\PXView-Agent.exe"
+    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq PXView-Agent.exe" /NH | find /I "PXView-Agent.exe"'
+    Pop $R0
+    ${If} $R0 == 0
+      nsExec::Exec 'cmd /c taskkill /F /IM PXView-Agent.exe'
+      Sleep 500
+    ${EndIf}
+  ${EndIf}
   ; If a previous uninstaller was found and executed, reboot if needed
   ${If} $NEED_REBOOT_AFTER_INSTALL == 1
     SetRebootFlag true
@@ -92,6 +101,13 @@ Section "MainSection" SEC01
   CreateDirectory "$SMPROGRAMS\PXView"
   CreateShortCut "$SMPROGRAMS\PXView\PXView.lnk" "$INSTDIR\PXView.exe"
   CreateShortCut "$DESKTOP\PXView.lnk" "$INSTDIR\PXView.exe"
+  ; Install Tauri desktop app (PXView Agent) if it exists in the package
+  ; The binary is placed alongside PXView.exe so it can find and spawn it --headless
+  ${If} ${FileExists} "$EXEDIR\package\PXView-Agent.exe"
+    File "package\PXView-Agent.exe"
+    CreateShortCut "$SMPROGRAMS\PXView\PXView Agent.lnk" "$INSTDIR\PXView-Agent.exe"
+    CreateShortCut "$DESKTOP\PXView Agent.lnk" "$INSTDIR\PXView-Agent.exe"
+  ${EndIf}
   File /r "package\*.*"
 SectionEnd
 
@@ -196,14 +212,19 @@ FunctionEnd
  ******************************/
 
 Section Uninstall
+  ; Kill PXView-Agent if running
+  nsExec::Exec 'cmd /c taskkill /F /IM PXView-Agent.exe' 2>/dev/null
   Delete "$INSTDIR\${PRODUCT_NAME}.url"
   Delete "$INSTDIR\uninst.exe"
   Delete "$INSTDIR\PXView.exe"
+  Delete "$INSTDIR\PXView-Agent.exe"
 
   Delete "$SMPROGRAMS\PXView\Uninstall.lnk"
   Delete "$SMPROGRAMS\PXView\Website.lnk"
   Delete "$DESKTOP\PXView.lnk"
   Delete "$SMPROGRAMS\PXView\PXView.lnk"
+  Delete "$DESKTOP\PXView Agent.lnk"
+  Delete "$SMPROGRAMS\PXView\PXView Agent.lnk"
 
   RMDir "$SMPROGRAMS\PXView"
 
@@ -223,6 +244,8 @@ Section Uninstall
   RMDir /r "$INSTDIR\decoders"
   RMDir /r "$INSTDIR\bearer"
   RMDir /r "$INSTDIR\translations"
+  RMDir /r "$INSTDIR\webview2loader"
+  RMDir /r "$INSTDIR\webui"
   RMDir /r "$INSTDIR\Qt*"
   ; Remove any remaining files and subdirectories
   RMDir /r "$INSTDIR"

@@ -240,6 +240,11 @@ bool MmapAllocator::decommit_block(void* ptr, uint64_t size) {
         // The virtual address range stays reserved, so get_block_data can
         // re-commit it later via VirtualAlloc(MEM_COMMIT).
         // VirtualFree(MEM_DECOMMIT) returns pages to the system pool.
+        //
+        // Return false: section-view pages may retain content after decommit;
+        // the caller (push_to_free_list) must keep the written flag so the
+        // allocator explicitly memsets on reuse rather than relying on OS
+        // zero-fill (which is NOT guaranteed for SEC_RESERVE section views).
         if (!VirtualFree(ptr, size, MEM_DECOMMIT)) {
             pxv_warn("MmapAllocator: VirtualFree(MEM_DECOMMIT) failed, error %lu (non-fatal)",
                      GetLastError());
@@ -247,11 +252,14 @@ bool MmapAllocator::decommit_block(void* ptr, uint64_t size) {
     } else {
         // Disk-file-backed mapping: VirtualUnlock triggers decommit,
         // dirty page writes back to file, RAM page is reclaimed.
+        // Return false: file-backed pages may retain content after decommit.
         (void)VirtualUnlock(ptr, size);
     }
-    return true;
+    return false;
 #else
-    // RAM 页：madvise MADV_DONTNEED 释放页，后续读返回零（匿名映射）。
+    // RAM pages: madvise MADV_DONTNEED releases pages; subsequent reads
+    // return zero (anonymous mapping). Return true: the OS guarantees
+    // zero-fill, so the caller can safely skip memset on reuse.
     if (madvise(ptr, size, MADV_DONTNEED) != 0) {
         pxv_warn("MmapAllocator: madvise MADV_DONTNEED failed, errno %d (non-fatal)", errno);
     }
@@ -464,7 +472,7 @@ void MmapAllocator::set_loop_mode(bool is_loop) {
 void MmapAllocator::decommit_range(uint64_t start_bytes, uint64_t end_bytes) {
     if (!_base_ptr || start_bytes >= end_bytes || end_bytes > _total_bytes) return;
 
-    // 对齐到页边界
+    // Align to page boundaries.
     uint64_t start = (start_bytes + PREFAULT_PAGE_SIZE - 1) & ~(PREFAULT_PAGE_SIZE - 1);
     uint64_t end = end_bytes & ~(PREFAULT_PAGE_SIZE - 1);
 
@@ -472,15 +480,18 @@ void MmapAllocator::decommit_range(uint64_t start_bytes, uint64_t end_bytes) {
         void* page = (uint8_t*)_base_ptr + off;
 #ifdef _WIN32
         if (_hFile == INVALID_HANDLE_VALUE && _hMap) {
-            // SEC_RESERVE anonymous mapping: decommit physical pages.
-            VirtualFree(page, PREFAULT_PAGE_SIZE, MEM_DECOMMIT);
+            // SEC_RESERVE anonymous mapping: do NOT call VirtualFree(MEM_DECOMMIT)
+            // here. Section-view decommit is unreliable for SEC_RESERVE mappings;
+            // decommit_block() handles per-block decommit and returns false to
+            // signal the caller to memset on reuse. Skipping here avoids the
+            // problematic bulk decommit entirely.
         } else {
             // Disk-file-backed mapping: VirtualUnlock triggers decommit.
             (void)VirtualUnlock(page, PREFAULT_PAGE_SIZE);
         }
 #else
         if (madvise(page, PREFAULT_PAGE_SIZE, MADV_DONTNEED) != 0) {
-            // 非致命：madvise 失败忽略
+            // Non-fatal: ignore madvise failure.
         }
 #endif
     }

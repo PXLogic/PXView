@@ -44,6 +44,7 @@
 // → <atomic>,<thread>,<QString>) from 59 downstream includers.
 namespace data { class AnalogSnapshot; class DsoSnapshot; class LogicSnapshot; }
 #include "pv/data/datasource.h"
+#include "pv/data/decoderanalogdata.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/document/sessiondata.h"
 #include "pv/data/model/signalmodel.h"
@@ -244,6 +245,13 @@ std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   void set_collect_mode(DEVICE_COLLECT_MODE m) { _capture_manager->set_collect_mode(m); }
   int get_collect_mode() { return _capture_manager->get_collect_mode(); }
   bool is_repeat_mode() override { return _capture_manager->is_repeat_mode(); }
+  // UI pre-HOLD query used before the very first Repeat acquisition starts.
+  bool repeat_analog_display_trigger_enabled_for_ui() {
+    return repeat_analog_display_trigger_enabled();
+  }
+  uint64_t repeat_analog_trigger_ui_generation_for_ui() const {
+    return _repeat_analog_trigger_ui_generation.load(std::memory_order_acquire);
+  }
   bool is_single_mode() { return _capture_manager->is_single_mode(); }
   bool is_loop_mode() { return _capture_manager->is_loop_mode(); }
   bool is_realtime_refresh() override { return _capture_manager->is_realtime_refresh(); }
@@ -385,6 +393,7 @@ private:
   void on_device_speed_not_match();
   void on_session_stopped_event();
   void on_decode_done_event();
+  void on_end_collect_work_prev();
 static sr_input_format *determine_input_file_format(const std::string &filename);
 data::Snapshot *get_signal_snapshot(); void clear_signals();
 std::shared_ptr<data::SignalModel> get_channel_by_index(int orgIndex);
@@ -416,6 +425,23 @@ std::vector<core::Subscription> _event_subscriptions;
   std::unique_ptr<core::DataFeedParser> _data_feed_parser;
   std::unique_ptr<core::DocumentRegistry> _document_registry;
   std::unique_ptr<core::CaptureManager> _capture_manager;
+
+  // Repeat + decoder gate. SessionStopped and DecodeDone may arrive in either order.
+  bool _repeat_wait_decode = false;
+  bool _repeat_session_stopped = false;
+  bool _repeat_decode_done = false;
+  bool _repeat_analog_trigger_active = false;
+  bool _repeat_analog_trigger_match = false;
+  bool _repeat_analog_trigger_display_hold = false;
+  std::atomic<uint64_t> _repeat_analog_trigger_ui_generation{1};
+  uint64_t _repeat_analog_trigger_sample = 0;
+  data::DecoderAnalogTriggerConfig _repeat_analog_trigger_config;
+
+  bool repeat_analog_display_trigger_enabled();
+  void reset_repeat_analog_trigger_frame();
+  void evaluate_repeat_analog_trigger();
+  void set_repeat_analog_trigger_display_hold(bool hold);
+  void continue_repeat_after_decode_if_ready();
   // Upstream libsigrok 0.6.0 context (single-lib architecture).
   // sr_context is created by sr_init() in init() and destroyed by sr_exit()
   // in uninit(). sr_session is now owned by DeviceAgent (created in

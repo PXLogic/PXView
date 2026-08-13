@@ -1,4 +1,3 @@
-﻿##
 ## This file is part of the PXView project.
 ##
 ## Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>

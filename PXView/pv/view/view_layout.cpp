@@ -279,6 +279,12 @@ void ViewLayout::get_scroll_layout(int64_t &length, int64_t &offset) {
 void ViewLayout::update_scroll() {
   assert(_view->viewcenter_widget());
 
+  // Defer scroll updates during decoder analog trigger display-hold to
+  // avoid intermediate-frame geometry changes while the new frame is being
+  // decoded and aligned.
+  if (_view->is_decoder_analog_trigger_hold())
+    return;
+
   int width = _view->get_view_width();
   if (width == 0) {
     return;

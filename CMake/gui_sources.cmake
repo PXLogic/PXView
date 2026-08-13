@@ -61,6 +61,7 @@ PXView/pv/view/signal/dsosignal_paint.cpp
     PXView/pv/view/component/pulsehistogramwidget.cpp
     PXView/pv/view/component/glitchfilterpopup.cpp
     PXView/pv/view/component/waveform_copy_helper.cpp
+    PXView/pv/view/component/decoderaudioplayer.cpp
     # Toolbars
     PXView/pv/toolbars/samplingbar.cpp
     PXView/pv/toolbars/trigbar.cpp
@@ -264,6 +265,7 @@ set(PXView_HEADERS
     PXView/pv/view/component/pulsehistogramwidget.h
     PXView/pv/view/component/glitchfilterpopup.h
     PXView/pv/view/component/waveform_copy_helper.h
+PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/view/signal/signal.h
     PXView/pv/view/signal/logicsignal.h
     PXView/pv/view/signal/analogsignal.h

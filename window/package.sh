@@ -165,10 +165,28 @@ if [ -d ../web/dist ]; then
     cp -r ../web/dist/* webui/
 fi
 
+# --- Tauri desktop app (PXView Agent) ---
+# The Tauri binary wraps the web UI and spawns PXView.exe --headless.
+# It is placed alongside PXView.exe so it can find and launch it.
+TAURI_BIN="../web/src-tauri/target/release/pxview-agent.exe"
+if [ -f "$TAURI_BIN" ]; then
+    echo "=== Copying Tauri desktop app ==="
+    cp "$TAURI_BIN" "PXView-Agent.exe"
+    # Copy WebView2 bootstrapper if Tauri bundled one
+    WEBVIEW2_DIR="../web/src-tauri/target/release/webview2loader"
+    if [ -d "$WEBVIEW2_DIR" ]; then
+        cp -r "$WEBVIEW2_DIR" .
+    fi
+    echo "   [OK] PXView-Agent.exe copied"
+else
+    echo "NOTE: Tauri desktop app not built (skipping). Run: ninja tauri-desktop"
+fi
+
 # --- Summary ---
 echo "=== package.sh summary ==="
 echo "DLLs in package: $(ls *.dll 2>/dev/null | wc -l)"
 echo "Python DLLs: $(ls *python*.*.dll 2>/dev/null || echo 'NONE')"
+echo "Tauri desktop app: $([ -f PXView-Agent.exe ] && echo 'PXView-Agent.exe [OK]' || echo 'not built')
 if [ -n "$PY_VER" ] && [ -d "lib/python${PY_VER}" ]; then
     echo "Python stdlib: lib/python${PY_VER}/ ($(du -sh lib/python${PY_VER}/ 2>/dev/null | awk '{print $1}'))"
 else

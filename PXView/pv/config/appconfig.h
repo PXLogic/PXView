@@ -81,6 +81,26 @@ struct AppOptions
     bool  swapBackBufferAlways;
     bool  autoScrollLatestData;
     bool  promptSaveOnExit;
+
+    // TDM realtime decode and analog display-trigger UI persistence.
+    bool  tdmRealtimeDecode = false;
+
+    bool    analogDisplayTriggerTdmValid = false;
+    bool    analogDisplayTriggerTdmEnable = false;
+    QString analogDisplayTriggerTdmMode = "auto";
+    int     analogDisplayTriggerTdmChannel = 0;
+    QString analogDisplayTriggerTdmEdge = "rising";
+    double  analogDisplayTriggerTdmLevel = 0.0;
+    int     analogDisplayTriggerTdmPosition = 50;
+
+    bool    analogDisplayTriggerPwmValid = false;
+    bool    analogDisplayTriggerPwmEnable = false;
+    QString analogDisplayTriggerPwmMode = "auto";
+    int     analogDisplayTriggerPwmChannel = 0;
+    QString analogDisplayTriggerPwmEdge = "rising";
+    double  analogDisplayTriggerPwmLevel = 50.0;
+    int     analogDisplayTriggerPwmPosition = 50;
+
     float fontSize;
 
     std::vector<StringPair> m_protocolFormats;

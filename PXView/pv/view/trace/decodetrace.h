@@ -25,11 +25,14 @@
 
 #include <QElapsedTimer>
 #include <QFormLayout>
+#include <QRectF>
 #include <QString>
 #include <QWidget>
 #include <list>
 #include <map>
+#include <memory>
 
+#include "pv/data/decoderanalogdata.h"
 #include "pv/dialogs/pxdialog.h"
 #include "pv/prop/binding/decoderoptions.h"
 #include "pv/view/trace/trace.h"
@@ -86,6 +89,7 @@ public:
   static QColor getErrorBgColor();
   static QColor getNoDecodeColor();
   static QColor getAnnColor(int channelIndex);
+  static QColor getAnalogChannelColor(int channelIndex);
   static QColor getAnnOutlineColor(int channelIndex);
 
   static const QColor OutlineColours[16];
@@ -129,6 +133,27 @@ public:
   void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
   int rows_size();
+
+  // TDM/PWM analog port: per-channel decoded analog display controls.
+  bool hit_test_analog_channel(int viewportY, int vOffset, int &ch_index,
+      std::shared_ptr<pv::data::DecoderAnalogData> &out_data);
+  bool get_analog_channel_rect(int ch_index, int vOffset, QRectF &screen_row_rect);
+  bool get_analog_hover(int viewportX, int viewportY, int vOffset,
+      uint64_t capture_sample, int &ch_index,
+      pv::data::DecoderAnalogSample &sample, double &engineering_value,
+      std::string &unit, QPointF &screen_point, QRectF &screen_row_rect);
+  void set_indicator_heading_row(int row);
+  void set_indicator_analog_channel(int ch_index);
+  bool hit_test_indicator_auto_fit(
+      int viewportX, int viewportY, int vOffset, int &out_ch_index,
+      std::shared_ptr<pv::data::DecoderAnalogData> &out_data);
+  void auto_fit_visible_analog(
+      const std::shared_ptr<pv::data::DecoderAnalogData> &ch_data,
+      uint64_t vis_start_sample, uint64_t vis_end_sample);
+  void sync_analog_display_options(
+      const std::shared_ptr<pv::data::DecoderAnalogData> &ch_data,
+      bool sync_vpos, bool sync_vzoom);
+  int analog_channel_count() const;
 
   QRectF get_rect(DecodeSetRegions type, int y, int right);
 
@@ -196,6 +221,10 @@ private:
   uint64_t _decode_cursor2;
 
   std::vector<QString> _cur_row_headings;
+
+  // Ctrl-hover analog V-ZOOM locator / auto-fit button.
+  int _indicator_heading_row = -1;
+  QRectF _indicator_button_rect;
 
   QElapsedTimer _update_timer;
   QElapsedTimer _decode_elapsed_timer; // tracks total decode duration

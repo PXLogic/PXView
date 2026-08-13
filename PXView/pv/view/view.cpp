@@ -573,8 +573,45 @@ void View::dso_factor_updated() { _data_sync->dso_factor_updated(); }
 
 // -- lissajous figure
 void View::show_lissajous(bool show) {
-  _show_lissajous = show;
-  signals_changed(nullptr);
+	_show_lissajous = show;
+	signals_changed(nullptr);
+}
+
+void View::set_decoder_analog_trigger_position(uint64_t sample_position,
+                                                int display_position_percent) {
+	// If hold is active, stage the trigger position for later commit.
+	// Otherwise apply immediately.
+	if (_decoder_analog_trigger_hold) {
+		_decoder_analog_trigger_pending = true;
+		_decoder_analog_trigger_pending_sample = sample_position;
+		_decoder_analog_trigger_pending_percent = display_position_percent;
+	} else {
+		set_trig_pos(display_position_percent);
+	}
+}
+
+void View::set_decoder_analog_trigger_display_hold(bool hold) {
+	if (hold && !_decoder_analog_trigger_hold) {
+		// Entering hold: freeze viewport updates until the trigger is committed.
+		_decoder_analog_trigger_hold = true;
+		_decoder_analog_trigger_pending = false;
+	} else if (!hold && _decoder_analog_trigger_hold) {
+		// Leaving hold: commit the staged trigger position (if any) and
+		// resume normal viewport updates atomically.
+		if (_decoder_analog_trigger_pending) {
+			set_trig_pos(_decoder_analog_trigger_pending_percent);
+			_decoder_analog_trigger_pending = false;
+		}
+		_decoder_analog_trigger_hold = false;
+		viewport_update();
+	}
+}
+
+void View::force_release_decoder_analog_trigger_display_hold() {
+	if (_decoder_analog_trigger_hold) {
+		_decoder_analog_trigger_hold = false;
+		_decoder_analog_trigger_pending = false;
+	}
 }
 
 void View::show_region(uint64_t start, uint64_t end, bool keep) {
@@ -582,15 +619,21 @@ void View::show_region(uint64_t start, uint64_t end, bool keep) {
 }
 
 void View::viewport_update() {
-  // Mark decode pixmap dirty so it will be rebuilt on next paint.
-  // This is needed because decode data can change independently of
-  // view parameters (e.g. new decode data arriving).
-  if (_time_viewport)
-    _time_viewport->set_decode_dirty();
+// Suppress viewport updates during decoder analog trigger display-hold.
+// This prevents intermediate-frame flicker while a new repeat frame is
+// being decoded and aligned to the trigger position.
+if (_decoder_analog_trigger_hold)
+return;
 
-  _viewcenter->update();
-  for (QWidget *viewport : _viewport_list)
-    viewport->update();
+// Mark decode pixmap dirty so it will be rebuilt on next paint.
+// This is needed because decode data can change independently of
+// view parameters (e.g. new decode data arriving).
+if (_time_viewport)
+_time_viewport->set_decode_dirty();
+
+_viewcenter->update();
+for (QWidget *viewport : _viewport_list)
+viewport->update();
 }
 
 void View::request_delayed_update() {

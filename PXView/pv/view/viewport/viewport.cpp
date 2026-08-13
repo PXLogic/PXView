@@ -36,18 +36,43 @@
 #include "pv/view/trace/spectrumtrace.h"
 
 #include <QAction>
+#include <QAbstractItemView>
+#include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QCursor>
 #include <QDebug>
+#include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QHeaderView>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QPainter>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QSettings>
+#include <QTableWidget>
+#include <QUrl>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 #include <cmath>
 
 #include "pv/config/appconfig.h"
+#include "pv/ui/msgbox.h"
+#include "pv/data/stack/decoderstack.h"
+#include "pv/view/trace/decodetrace.h"
+#include "pv/view/component/waveform_copy_helper.h"
+#include "pv/view/component/decoderaudioplayer.h"
+
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
@@ -65,6 +90,65 @@ using namespace std;
 
 namespace pv {
 namespace view {
+
+// Analog measurement options persistence (QSettings group).
+static const char *kAnalogMeasurementSettingsGroup = "AnalogMeasurementV2";
+
+static AnalogMeasurementV2Options load_analog_measurement_options()
+{
+  AnalogMeasurementV2Options options;
+  QSettings settings(QApplication::organizationName(),
+                     QApplication::applicationName());
+  settings.beginGroup(kAnalogMeasurementSettingsGroup);
+  options.show_channel = settings.value("showChannel", true).toBool();
+  options.show_time = settings.value("showTime", true).toBool();
+  options.show_normalized = settings.value("showNormalized", true).toBool();
+  options.show_engineering_value =
+      settings.value("showEngineeringValue", true).toBool();
+  options.rise_time = settings.value("riseTime", true).toBool();
+  options.fall_time = settings.value("fallTime", true).toBool();
+  options.positive_overshoot =
+      settings.value("positiveOvershoot", true).toBool();
+  options.negative_overshoot =
+      settings.value("negativeOvershoot", true).toBool();
+  options.period = settings.value("period", true).toBool();
+  options.frequency = settings.value("frequency", true).toBool();
+  options.positive_width = settings.value("positiveWidth", true).toBool();
+  options.negative_width = settings.value("negativeWidth", true).toBool();
+  options.positive_duty_cycle =
+      settings.value("positiveDutyCycle", true).toBool();
+  options.negative_duty_cycle =
+      settings.value("negativeDutyCycle", true).toBool();
+  options.cycle_rms = settings.value("cycleRms", true).toBool();
+  settings.endGroup();
+  return options;
+}
+
+static void save_analog_measurement_options(
+    const AnalogMeasurementV2Options &options)
+{
+  QSettings settings(QApplication::organizationName(),
+                     QApplication::applicationName());
+  settings.beginGroup(kAnalogMeasurementSettingsGroup);
+  settings.setValue("version", 2);
+  settings.setValue("showChannel", options.show_channel);
+  settings.setValue("showTime", options.show_time);
+  settings.setValue("showNormalized", options.show_normalized);
+  settings.setValue("showEngineeringValue", options.show_engineering_value);
+  settings.setValue("riseTime", options.rise_time);
+  settings.setValue("fallTime", options.fall_time);
+  settings.setValue("positiveOvershoot", options.positive_overshoot);
+  settings.setValue("negativeOvershoot", options.negative_overshoot);
+  settings.setValue("period", options.period);
+  settings.setValue("frequency", options.frequency);
+  settings.setValue("positiveWidth", options.positive_width);
+  settings.setValue("negativeWidth", options.negative_width);
+  settings.setValue("positiveDutyCycle", options.positive_duty_cycle);
+  settings.setValue("negativeDutyCycle", options.negative_duty_cycle);
+  settings.setValue("cycleRms", options.cycle_rms);
+  settings.endGroup();
+  settings.sync();
+}
 
 const double Viewport::DragDamping = 1.05;
 const double Viewport::MinorDragRateUp = 10;
@@ -111,8 +195,9 @@ Viewport::Viewport(View &parent, View_type type)
   _mm_period = View::Unknown_Str;
   _mm_freq = View::Unknown_Str;
   _mm_duty = View::Unknown_Str;
-  _measure_en = true;
-  _edge_hit = false;
+_measure_en = true;
+_analog_measure_options = load_analog_measurement_options();
+_edge_hit = false;
   _transfer_started = false;
   _timer_cnt = 0;
   _sample_received = 0;
@@ -158,16 +243,36 @@ Viewport::Viewport(View &parent, View_type type)
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_DECODER_TRACK), "Copy Decoder Waveform Data"));
   _copy_decoder_group_action = _logic_cmenu->addAction(
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_DECODER_GROUP), "Copy Decoder Group Waveform Data"));
-  _copy_all_channels_action = _logic_cmenu->addAction(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ALL_CHANNELS), "Copy All Channels Waveform Data"));
-  connect(_copy_this_channel_action, &QAction::triggered,
-          this, &Viewport::copy_waveform_this_channel);
-  connect(_copy_decoder_track_action, &QAction::triggered,
-          this, &Viewport::copy_waveform_decoder_track);
-  connect(_copy_decoder_group_action, &QAction::triggered,
-          this, &Viewport::copy_waveform_decoder_group);
-  connect(_copy_all_channels_action, &QAction::triggered,
-          this, &Viewport::copy_waveform_all_channels);
+_copy_all_channels_action = _logic_cmenu->addAction(
+L_S(STR_PAGE_DLG, S_ID(IDS_DLG_COPY_ALL_CHANNELS), "Copy All Channels Waveform Data"));
+_logic_cmenu->addSeparator();
+_export_decoder_wav_action = _logic_cmenu->addAction(
+QStringLiteral("导出模拟音频 WAV..."));
+_play_decoder_audio_action = _logic_cmenu->addAction(
+QStringLiteral("播放模拟音频 / 多通道混音..."));
+_logic_cmenu->addSeparator();
+_clear_analog_measure_action = _logic_cmenu->addAction(
+QStringLiteral("清除模拟区间测量"));
+_configure_analog_measure_action = _logic_cmenu->addAction(
+QStringLiteral("模拟测量显示项..."));
+connect(_copy_this_channel_action, &QAction::triggered,
+this, &Viewport::copy_waveform_this_channel);
+connect(_copy_decoder_track_action, &QAction::triggered,
+this, &Viewport::copy_waveform_decoder_track);
+connect(_copy_decoder_group_action, &QAction::triggered,
+this, &Viewport::copy_waveform_decoder_group);
+connect(_copy_all_channels_action, &QAction::triggered,
+this, &Viewport::copy_waveform_all_channels);
+connect(_export_decoder_wav_action, &QAction::triggered,
+this, &Viewport::export_decoder_audio_wav);
+connect(_play_decoder_audio_action, &QAction::triggered,
+this, &Viewport::play_decoder_audio);
+connect(&DecoderAudioPlayer::instance(), &DecoderAudioPlayer::playbackError,
+this, [](const QString &message) { MsgBox::Show(message); });
+connect(_clear_analog_measure_action, &QAction::triggered,
+this, &Viewport::clear_analog_measurement);
+connect(_configure_analog_measure_action, &QAction::triggered,
+this, &Viewport::configure_analog_measurement);
 
   connect(&_fps_timer, &QTimer::timeout, this, [this]() {
     if (_paint_in_this_second > 0) {
@@ -708,10 +813,153 @@ void Viewport::show_logic_contextmenu(const QPoint &pos) {
     has_decoder = (hit_dt != nullptr);
   _copy_decoder_group_action->setVisible(has_decoder);
 
-  // "复制所有通道波形数据" always visible in logic mode — outputs all logic signals + decoders
-  _copy_all_channels_action->setVisible(true);
+// "复制所有通道波形数据" always visible in logic mode — outputs all logic signals + decoders
+_copy_all_channels_action->setVisible(true);
 
-  _logic_cmenu->exec(QCursor::pos());
+const bool has_audio_decoder =
+    hit_dt && hit_dt->decoder() && !hit_dt->decoder()->analog_data_copy().empty();
+if (_export_decoder_wav_action)
+    _export_decoder_wav_action->setVisible(has_audio_decoder);
+if (_play_decoder_audio_action) {
+    _play_decoder_audio_action->setVisible(has_audio_decoder);
+    _play_decoder_audio_action->setText(
+        DecoderAudioPlayer::instance().isPlaying()
+            ? QStringLiteral("停止模拟音频播放")
+            : QStringLiteral("播放模拟音频 / 多通道混音..."));
+}
+
+if (_clear_analog_measure_action)
+    _clear_analog_measure_action->setVisible(_analog_measure_valid);
+if (_configure_analog_measure_action) {
+    const bool has_analog_decoder =
+        hit_dt && hit_dt->decoder() &&
+        !hit_dt->decoder()->analog_data_copy().empty();
+    _configure_analog_measure_action->setVisible(has_analog_decoder);
+}
+
+_logic_cmenu->exec(QCursor::pos());
+}
+
+void Viewport::clear_analog_measurement() {
+  _analog_measure_data.reset();
+  _analog_measure_channel = -1;
+  _analog_measure_start = 0;
+  _analog_measure_end = 0;
+  _analog_measure_stats = pv::data::DecoderAnalogStatistics{};
+  _analog_measure_cycle = pv::data::DecoderAnalogCycleMetrics{};
+  _analog_measure_valid = false;
+  if (_action_type == ANALOG_RANGE_DRAG)
+    set_action(NO_ACTION);
+  setCursor(Qt::ArrowCursor);
+  update(UpdateEventType::UPDATE_EV_GENERIC);
+}
+
+void Viewport::configure_analog_measurement() {
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("模拟波形测量显示项"));
+  auto *layout = new QVBoxLayout(&dialog);
+
+  auto make_check = [](QWidget *parent, const QString &text, bool checked) {
+    auto *check = new QCheckBox(text, parent);
+    check->setChecked(checked);
+    return check;
+  };
+
+  auto *basic_group = new QGroupBox(QStringLiteral("鼠标点测"), &dialog);
+  auto *basic_layout = new QGridLayout(basic_group);
+  QCheckBox *show_channel = make_check(
+      basic_group, QStringLiteral("通道"), _analog_measure_options.show_channel);
+  QCheckBox *show_time = make_check(
+      basic_group, QStringLiteral("时间 / 采样点"), _analog_measure_options.show_time);
+  QCheckBox *show_normalized = make_check(
+      basic_group, QStringLiteral("归一化值"), _analog_measure_options.show_normalized);
+  QCheckBox *show_value = make_check(
+      basic_group, QStringLiteral("工程值"),
+      _analog_measure_options.show_engineering_value);
+  basic_layout->addWidget(show_channel, 0, 0);
+  basic_layout->addWidget(show_time, 0, 1);
+  basic_layout->addWidget(show_normalized, 1, 0);
+  basic_layout->addWidget(show_value, 1, 1);
+  layout->addWidget(basic_group);
+
+  auto *pulse_group = new QGroupBox(QStringLiteral("区间脉冲参数"), &dialog);
+  auto *pulse_layout = new QGridLayout(pulse_group);
+  QCheckBox *rise_time = make_check(
+      pulse_group, QStringLiteral("上升时间 10%-90%"),
+      _analog_measure_options.rise_time);
+  QCheckBox *fall_time = make_check(
+      pulse_group, QStringLiteral("下降时间 90%-10%"),
+      _analog_measure_options.fall_time);
+  QCheckBox *positive_overshoot = make_check(
+      pulse_group, QStringLiteral("正过冲"),
+      _analog_measure_options.positive_overshoot);
+  QCheckBox *negative_overshoot = make_check(
+      pulse_group, QStringLiteral("负过冲"),
+      _analog_measure_options.negative_overshoot);
+  pulse_layout->addWidget(rise_time, 0, 0);
+  pulse_layout->addWidget(fall_time, 0, 1);
+  pulse_layout->addWidget(positive_overshoot, 1, 0);
+  pulse_layout->addWidget(negative_overshoot, 1, 1);
+  layout->addWidget(pulse_group);
+
+  auto *time_group = new QGroupBox(QStringLiteral("区间周期参数"), &dialog);
+  auto *time_layout = new QGridLayout(time_group);
+  QCheckBox *period = make_check(
+      time_group, QStringLiteral("周期"), _analog_measure_options.period);
+  QCheckBox *frequency = make_check(
+      time_group, QStringLiteral("频率"), _analog_measure_options.frequency);
+  QCheckBox *positive_width = make_check(
+      time_group, QStringLiteral("正脉宽"), _analog_measure_options.positive_width);
+  QCheckBox *negative_width = make_check(
+      time_group, QStringLiteral("负脉宽"), _analog_measure_options.negative_width);
+  QCheckBox *positive_duty = make_check(
+      time_group, QStringLiteral("正占空比"),
+      _analog_measure_options.positive_duty_cycle);
+  QCheckBox *negative_duty = make_check(
+      time_group, QStringLiteral("负占空比"),
+      _analog_measure_options.negative_duty_cycle);
+  time_layout->addWidget(period, 0, 0);
+  time_layout->addWidget(frequency, 0, 1);
+  time_layout->addWidget(positive_width, 1, 0);
+  time_layout->addWidget(negative_width, 1, 1);
+  time_layout->addWidget(positive_duty, 2, 0);
+  time_layout->addWidget(negative_duty, 2, 1);
+  layout->addWidget(time_group);
+
+  auto *cycle_group = new QGroupBox(QStringLiteral("整周期统计"), &dialog);
+  auto *cycle_layout = new QGridLayout(cycle_group);
+  QCheckBox *cycle_rms = make_check(
+      cycle_group, QStringLiteral("整周期 RMS"), _analog_measure_options.cycle_rms);
+  cycle_layout->addWidget(cycle_rms, 0, 0);
+  layout->addWidget(cycle_group);
+
+  auto *buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+      Qt::Horizontal, &dialog);
+  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  layout->addWidget(buttons);
+
+  if (dialog.exec() != QDialog::Accepted)
+    return;
+
+  _analog_measure_options.show_channel = show_channel->isChecked();
+  _analog_measure_options.show_time = show_time->isChecked();
+  _analog_measure_options.show_normalized = show_normalized->isChecked();
+  _analog_measure_options.show_engineering_value = show_value->isChecked();
+  _analog_measure_options.rise_time = rise_time->isChecked();
+  _analog_measure_options.fall_time = fall_time->isChecked();
+  _analog_measure_options.positive_overshoot = positive_overshoot->isChecked();
+  _analog_measure_options.negative_overshoot = negative_overshoot->isChecked();
+  _analog_measure_options.period = period->isChecked();
+  _analog_measure_options.frequency = frequency->isChecked();
+  _analog_measure_options.positive_width = positive_width->isChecked();
+  _analog_measure_options.negative_width = negative_width->isChecked();
+  _analog_measure_options.positive_duty_cycle = positive_duty->isChecked();
+  _analog_measure_options.negative_duty_cycle = negative_duty->isChecked();
+  _analog_measure_options.cycle_rms = cycle_rms->isChecked();
+  save_analog_measurement_options(_analog_measure_options);
+  update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 void Viewport::copy_waveform_this_channel() {
@@ -744,6 +992,520 @@ void Viewport::copy_waveform_all_channels() {
       WaveformCopyHelper::Scope::AllChannels);
   if (!text.isEmpty())
     QGuiApplication::clipboard()->setText(text);
+}
+
+void Viewport::export_decoder_audio_wav() {
+  DecodeTrace *dt = WaveformCopyHelper::hit_test_decode_trace(
+      _view, _logic_menu_pos.x(), _logic_menu_pos.y());
+  if (!dt) {
+    MsgBox::Show(QStringLiteral("鼠标位置没有可用的模拟解码器，请在解码器轨道上右键。"));
+    return;
+  }
+
+  auto stack = dt->decoder();
+  if (!stack)
+    return;
+
+  auto analog_data = stack->analog_data_copy();
+  if (analog_data.empty()) {
+    MsgBox::Show(QStringLiteral("该解码器没有产生模拟/音频数据。"));
+    return;
+  }
+
+  uint64_t logic_rate = stack->sample_rate();
+  uint32_t derived_rate = 0;
+  for (const auto &ad : analog_data) {
+    if (!ad || ad->get_sample_count() < 2)
+      continue;
+    auto sample_view = ad->read_samples();
+    const auto &samples = sample_view.samples();
+    uint64_t span = samples.back().start_sample - samples.front().start_sample;
+    if (span > 0) {
+      double interval = (double)span / (double)(samples.size() - 1);
+      if (interval >= 1.0 && logic_rate > 0) {
+        derived_rate = (uint32_t)((double)logic_rate / interval);
+        break;
+      }
+    }
+  }
+  if (derived_rate == 0 && logic_rate > 0 && logic_rate <= UINT32_MAX)
+    derived_rate = (uint32_t)logic_rate;
+  if (derived_rate == 0)
+    derived_rate = 48000;
+
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("导出模拟音频 WAV"));
+  auto *form = new QFormLayout(&dlg);
+
+  QComboBox *rate_combo = new QComboBox(&dlg);
+  const uint32_t presets[] = {8000, 11025, 16000, 22050, 32000, 44100,
+                              48000, 88200, 96000, 176400, 192000};
+  int default_idx = 0;
+  bool found_preset = false;
+  for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
+    rate_combo->addItem(QString("%1 Hz").arg(presets[i]), presets[i]);
+    if (presets[i] == derived_rate) {
+      default_idx = (int)i;
+      found_preset = true;
+    }
+  }
+  if (!found_preset) {
+    rate_combo->insertItem(0, QString("%1 Hz (auto)").arg(derived_rate),
+                           derived_rate);
+    default_idx = 0;
+  }
+  rate_combo->setCurrentIndex(default_idx);
+  form->addRow(QStringLiteral("采样率"), rate_combo);
+
+  QComboBox *bits_combo = new QComboBox(&dlg);
+  bits_combo->addItem("8 bit", 8);
+  bits_combo->addItem("16 bit", 16);
+  bits_combo->addItem("24 bit", 24);
+  bits_combo->addItem("32 bit", 32);
+  bits_combo->setCurrentIndex(1);
+  form->addRow(QStringLiteral("位深"), bits_combo);
+
+  QWidget *ch_widget = new QWidget(&dlg);
+  QVBoxLayout *ch_layout = new QVBoxLayout(ch_widget);
+  ch_layout->setContentsMargins(0, 0, 0, 0);
+  std::vector<QCheckBox*> ch_boxes;
+  std::vector<int> ch_indices;
+  for (const auto &ad : analog_data) {
+    if (!ad)
+      continue;
+    auto *cb = new QCheckBox(
+        QString("Ch%1").arg(ad->channel()), ch_widget);
+    cb->setChecked(ad->visible());
+    ch_layout->addWidget(cb);
+    ch_boxes.push_back(cb);
+    ch_indices.push_back(ad->channel());
+  }
+  form->addRow(QStringLiteral("导出通道"), ch_widget);
+
+  QCheckBox *wav_mix_enable = new QCheckBox(QStringLiteral("使用多通道混音矩阵"), &dlg);
+  form->addRow(wav_mix_enable);
+
+  QComboBox *wav_out_channels = new QComboBox(&dlg);
+  for (int channels = 1; channels <= 8; ++channels)
+    wav_out_channels->addItem(QStringLiteral("%1 ch").arg(channels), channels);
+  wav_out_channels->setCurrentIndex(1);
+  wav_out_channels->setEnabled(false);
+  form->addRow(QStringLiteral("混音输出"), wav_out_channels);
+
+  QGroupBox *wav_mix_box = new QGroupBox(QStringLiteral("WAV 混音矩阵"), &dlg);
+  auto *wav_mix_layout = new QVBoxLayout(wav_mix_box);
+  auto *wav_matrix = new QTableWidget(wav_mix_box);
+  wav_matrix->setColumnCount(9);
+  wav_matrix->setRowCount(0);
+  wav_matrix->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  wav_matrix->setSelectionMode(QAbstractItemView::NoSelection);
+  wav_matrix->verticalHeader()->setDefaultSectionSize(28);
+  QStringList wav_headers;
+  wav_headers << QStringLiteral("启用");
+  for (int output = 0; output < 8; ++output) {
+    QString label = QStringLiteral("O%1 %").arg(output + 1);
+    if (output == 0) label = QStringLiteral("L/O1 %");
+    if (output == 1) label = QStringLiteral("R/O2 %");
+    wav_headers << label;
+  }
+  wav_matrix->setHorizontalHeaderLabels(wav_headers);
+
+  std::vector<QCheckBox *> wav_mix_on;
+  std::vector<std::array<QSpinBox *, 8>> wav_mix_gains;
+  std::vector<int> wav_mix_ch;
+  for (const auto &ad : analog_data) {
+    if (!ad) continue;
+    const int ch = ad->channel();
+    const int row = wav_matrix->rowCount();
+    wav_matrix->insertRow(row);
+    wav_matrix->setVerticalHeaderItem(row,
+        new QTableWidgetItem(QStringLiteral("CH%1").arg(ch)));
+    auto *on = new QCheckBox(wav_matrix);
+    on->setChecked(ad->visible());
+    std::array<QSpinBox *, 8> gains{};
+    for (int output = 0; output < 8; ++output) {
+      auto *gain = new QSpinBox(wav_matrix);
+      gain->setRange(0, 100);
+      gain->setSuffix("%");
+      const int default_output = (ch >= 0) ? (ch % 2) : 0;
+      const int sources_per_side = std::max(
+          1, (static_cast<int>(analog_data.size()) + 1) / 2);
+      const int default_gain = std::max(1, 100 / sources_per_side);
+      gain->setValue(output == default_output ? default_gain : 0);
+      wav_matrix->setCellWidget(row, output + 1, gain);
+      gains[(size_t)output] = gain;
+    }
+    wav_matrix->setCellWidget(row, 0, on);
+    wav_mix_on.push_back(on);
+    wav_mix_gains.push_back(gains);
+    wav_mix_ch.push_back(ch);
+  }
+
+  auto update_wav_columns = [wav_matrix, wav_out_channels](int) {
+    const int outputs = wav_out_channels->currentData().toInt();
+    for (int output = 0; output < 8; ++output)
+      wav_matrix->setColumnHidden(output + 1, output >= outputs);
+    wav_matrix->resizeColumnsToContents();
+  };
+  QObject::connect(wav_out_channels, &QComboBox::currentIndexChanged,
+                   &dlg, update_wav_columns);
+  QObject::connect(wav_mix_enable, &QCheckBox::toggled, &dlg,
+                   [ch_widget, wav_out_channels, wav_mix_box](bool on) {
+                     ch_widget->setEnabled(!on);
+                     wav_out_channels->setEnabled(on);
+                     wav_mix_box->setEnabled(on);
+                   });
+  update_wav_columns(wav_out_channels->currentIndex());
+  wav_matrix->setMinimumHeight(wav_matrix->rowCount() * 30 + 30);
+  wav_matrix->setMinimumWidth(620);
+  wav_mix_layout->addWidget(wav_matrix);
+  wav_mix_box->setEnabled(false);
+  form->addRow(wav_mix_box);
+
+  QDialogButtonBox *buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dlg);
+  form->addRow(buttons);
+  QObject::connect(buttons, &QDialogButtonBox::accepted,
+                   &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected,
+                   &dlg, &QDialog::reject);
+
+  if (dlg.exec() != QDialog::Accepted)
+    return;
+
+  WaveformCopyHelper::WavExportConfig cfg;
+  cfg.sample_rate = rate_combo->currentData().toUInt();
+  cfg.bits = bits_combo->currentData().toInt();
+  if (wav_mix_enable->isChecked()) {
+    cfg.output_channels = wav_out_channels->currentData().toInt();
+    for (size_t i = 0; i < wav_mix_on.size(); ++i) {
+      if (!wav_mix_on[i]->isChecked()) continue;
+      WaveformCopyHelper::WavExportConfig::MixRow row;
+      row.channel = wav_mix_ch[i];
+      bool routed = false;
+      for (int output = 0; output < cfg.output_channels; ++output) {
+        row.outputs[(size_t)output] =
+            wav_mix_gains[i][(size_t)output]->value() / 100.0f;
+        routed = routed || row.outputs[(size_t)output] > 0.0f;
+      }
+      row.enabled = routed;
+      if (routed) cfg.mix.push_back(row);
+    }
+    if (cfg.mix.empty()) {
+      MsgBox::Show(QStringLiteral("混音矩阵没有启用任何有效路由"));
+      return;
+    }
+  } else {
+    for (size_t i = 0; i < ch_boxes.size(); i++) {
+      if (ch_boxes[i]->isChecked())
+        cfg.channel_indices.push_back(ch_indices[i]);
+    }
+  }
+
+  QString default_name = QString("decoder_audio_%1Hz_%2bit.wav")
+                             .arg(cfg.sample_rate)
+                             .arg(cfg.bits);
+  QString filepath = QFileDialog::getSaveFileName(
+      this, QStringLiteral("保存 WAV 音频文件"),
+      default_name, "WAV Audio (*.wav)");
+  if (filepath.isEmpty())
+    return;
+
+  QString message;
+  if (!WaveformCopyHelper::export_decoder_audio_wav(
+          dt, filepath, cfg, message)) {
+    MsgBox::Show(message);
+    return;
+  }
+
+  QDesktopServices::openUrl(
+      QUrl::fromLocalFile(QFileInfo(filepath).absolutePath()));
+}
+
+void Viewport::play_decoder_audio() {
+  if (DecoderAudioPlayer::instance().isPlaying()) {
+    DecoderAudioPlayer::instance().stop();
+    return;
+  }
+
+  DecodeTrace *dt = WaveformCopyHelper::hit_test_decode_trace(
+      _view, _logic_menu_pos.x(), _logic_menu_pos.y());
+  if (!dt) {
+    MsgBox::Show(QStringLiteral("鼠标位置没有可用的模拟解码器，请在解码器轨道上右键。"));
+    return;
+  }
+
+  auto stack = dt->decoder();
+  if (!stack)
+    return;
+
+  auto analog_data = stack->analog_data_copy();
+  if (analog_data.empty()) {
+    MsgBox::Show(QStringLiteral("该解码器没有产生模拟/音频数据。"));
+    return;
+  }
+
+  uint64_t logic_rate = stack->sample_rate();
+  uint32_t derived_rate = 0;
+  for (const auto &ad : analog_data) {
+    if (!ad || ad->get_sample_count() < 2)
+      continue;
+    auto sample_view = ad->read_samples();
+    const auto &samples = sample_view.samples();
+    uint64_t span = samples.back().start_sample - samples.front().start_sample;
+    if (span > 0) {
+      double interval = (double)span / (double)(samples.size() - 1);
+      if (interval >= 1.0 && logic_rate > 0) {
+        derived_rate = (uint32_t)((double)logic_rate / interval);
+        break;
+      }
+    }
+  }
+  if (derived_rate == 0 && logic_rate > 0 && logic_rate <= UINT32_MAX)
+    derived_rate = (uint32_t)logic_rate;
+  if (derived_rate == 0)
+    derived_rate = 48000;
+
+  DecoderAudioPlayer::PlayConfig saved_cfg;
+  DecoderAudioPlayer::loadPlayConfig(saved_cfg);
+
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("模拟音频播放 / 多通道混音"));
+  auto *form = new QFormLayout(&dlg);
+
+  QComboBox *device_combo = new QComboBox(&dlg);
+  {
+    const auto devices = DecoderAudioPlayer::listOutputDevices();
+    int saved_idx = 0;
+    for (size_t i = 0; i < devices.size(); i++) {
+      const QString label = QStringLiteral("%1 (%2 ch)")
+                                .arg(devices[i].name)
+                                .arg(devices[i].max_channels);
+      device_combo->addItem(label, devices[i].id);
+      device_combo->setItemData((int)i, devices[i].max_channels,
+                                Qt::UserRole + 1);
+      if (devices[i].id == saved_cfg.device_id)
+        saved_idx = (int)i;
+    }
+    device_combo->setCurrentIndex(saved_idx);
+  }
+  form->addRow(QStringLiteral("输出设备"), device_combo);
+
+  QComboBox *rate_combo = new QComboBox(&dlg);
+  const uint32_t presets[] = {8000, 11025, 16000, 22050, 32000, 44100,
+                              48000, 88200, 96000, 176400, 192000};
+  int default_idx = 0;
+  bool found_preset = false;
+  uint32_t default_rate = saved_cfg.sample_rate > 0
+                              ? saved_cfg.sample_rate : derived_rate;
+  for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
+    rate_combo->addItem(QString("%1 Hz").arg(presets[i]), presets[i]);
+    if (presets[i] == default_rate) {
+      default_idx = (int)i;
+      found_preset = true;
+    }
+  }
+  if (!found_preset) {
+    rate_combo->insertItem(0, QString("%1 Hz").arg(default_rate),
+                           default_rate);
+    default_idx = 0;
+  }
+  rate_combo->setCurrentIndex(default_idx);
+  form->addRow(QStringLiteral("采样率"), rate_combo);
+
+  QComboBox *bits_combo = new QComboBox(&dlg);
+  bits_combo->addItem("8 bit", 8);
+  bits_combo->addItem("16 bit", 16);
+  bits_combo->addItem("24 bit", 24);
+  bits_combo->addItem("32 bit", 32);
+  {
+    const int b = saved_cfg.bits;
+    const int idx = (b == 8 || b == 16 || b == 24 || b == 32)
+                        ? bits_combo->findData(b) : 1;
+    bits_combo->setCurrentIndex(idx >= 0 ? idx : 1);
+  }
+  form->addRow(QStringLiteral("位深"), bits_combo);
+
+  QComboBox *ch_mode_combo = new QComboBox(&dlg);
+  auto refresh_output_channels = [device_combo, ch_mode_combo](int preferred) {
+    const int device_max = qBound(
+        1, device_combo->currentData(Qt::UserRole + 1).toInt(), 8);
+    QSignalBlocker blocker(ch_mode_combo);
+    ch_mode_combo->clear();
+    for (int channels = 1; channels <= device_max; ++channels) {
+      ch_mode_combo->addItem(QStringLiteral("%1 ch").arg(channels),
+                             channels);
+    }
+    const int selected =
+        (preferred >= 1 && preferred <= device_max) ? preferred : device_max;
+    ch_mode_combo->setCurrentIndex(ch_mode_combo->findData(selected));
+  };
+  refresh_output_channels(saved_cfg.channels);
+  QObject::connect(device_combo, &QComboBox::currentIndexChanged, &dlg,
+                   [refresh_output_channels](int) {
+                     refresh_output_channels(0);
+                   });
+  form->addRow(QStringLiteral("输出通道"), ch_mode_combo);
+
+  QCheckBox *repeat_check = new QCheckBox(
+      QStringLiteral("循环播放"),
+      &dlg);
+  repeat_check->setChecked(saved_cfg.repeat);
+  form->addRow(repeat_check);
+
+  QGroupBox *mix_box = new QGroupBox(
+      QStringLiteral("多通道混音矩阵"),
+      &dlg);
+  QVBoxLayout *mix_layout = new QVBoxLayout(mix_box);
+
+  auto *matrix = new QTableWidget(&dlg);
+  matrix->setColumnCount(9);
+  matrix->setRowCount(0);
+  matrix->horizontalHeader()->setStretchLastSection(false);
+  matrix->verticalHeader()->setDefaultSectionSize(28);
+  matrix->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  matrix->setSelectionMode(QAbstractItemView::NoSelection);
+
+  QStringList matrix_headers;
+  matrix_headers << QStringLiteral("启用");
+  for (int output = 0; output < 8; ++output) {
+    QString name = QStringLiteral("OUT%1 %").arg(output + 1);
+    if (output == 0)
+      name = QStringLiteral("OUT1 (L) %");
+    else if (output == 1)
+      name = QStringLiteral("OUT2 (R) %");
+    matrix_headers << name;
+  }
+  matrix->setHorizontalHeaderLabels(matrix_headers);
+
+  std::vector<QCheckBox *> mix_on;
+  std::vector<std::array<QSpinBox *, 8>> mix_gains;
+  std::vector<int>         mix_ch;
+
+  for (const auto &ad : analog_data) {
+    if (!ad)
+      continue;
+    const int ch = ad->channel();
+
+    const DecoderAudioPlayer::PlayConfig::MixRow *saved_row = nullptr;
+    for (const auto &sr : saved_cfg.mix) {
+      if (sr.channel == ch) {
+        saved_row = &sr;
+        break;
+      }
+    }
+
+    const int row = matrix->rowCount();
+    matrix->insertRow(row);
+    matrix->setVerticalHeaderItem(row, new QTableWidgetItem(
+        QString("Ch%1").arg(ch)));
+
+    auto *on = new QCheckBox(matrix);
+    std::array<QSpinBox *, 8> gains{};
+    for (int output = 0; output < 8; ++output) {
+      gains[(size_t)output] = new QSpinBox(matrix);
+      gains[(size_t)output]->setRange(0, 100);
+      gains[(size_t)output]->setSuffix("%");
+    }
+
+    if (saved_row) {
+      on->setChecked(saved_row->enabled);
+      for (int output = 0; output < 8; ++output) {
+        gains[(size_t)output]->setValue(
+            (int)(saved_row->outputs[(size_t)output] * 100.0f));
+      }
+    } else {
+      const int initial_outputs = qBound(1, ch_mode_combo->currentData().toInt(), 8);
+      const int sources_per_bus = std::max(
+          1, (static_cast<int>(analog_data.size()) + initial_outputs - 1) / initial_outputs);
+      const int default_gain = std::max(1, 100 / sources_per_bus);
+      const int default_output = ch >= 0 ? (ch % initial_outputs) : 0;
+      on->setChecked(ad->visible());
+      for (int output = 0; output < 8; ++output)
+        gains[(size_t)output]->setValue(
+            output == default_output ? default_gain : 0);
+    }
+
+    matrix->setCellWidget(row, 0, on);
+    for (int output = 0; output < 8; ++output)
+      matrix->setCellWidget(row, output + 1, gains[(size_t)output]);
+
+    mix_on.push_back(on);
+    mix_gains.push_back(gains);
+    mix_ch.push_back(ch);
+  }
+
+  auto update_matrix_columns = [matrix, ch_mode_combo](int) {
+    const int outputs = ch_mode_combo->currentData().toInt();
+    for (int output = 0; output < 8; ++output)
+      matrix->setColumnHidden(output + 1, output >= outputs);
+    matrix->resizeColumnsToContents();
+  };
+  QObject::connect(ch_mode_combo, &QComboBox::currentIndexChanged, &dlg,
+                   update_matrix_columns);
+  QObject::connect(device_combo, &QComboBox::currentIndexChanged, &dlg,
+                   update_matrix_columns);
+  update_matrix_columns(ch_mode_combo->currentIndex());
+
+  matrix->setMinimumHeight(matrix->rowCount() * 30 + 30);
+  matrix->setMinimumWidth(640);
+  mix_layout->addWidget(matrix);
+  form->addRow(mix_box);
+
+  QDialogButtonBox *buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dlg);
+  form->addRow(buttons);
+  QObject::connect(buttons, &QDialogButtonBox::accepted,
+                   &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected,
+                   &dlg, &QDialog::reject);
+
+  if (dlg.exec() != QDialog::Accepted)
+    return;
+
+  DecoderAudioPlayer::PlayConfig cfg;
+  cfg.sample_rate = rate_combo->currentData().toUInt();
+  cfg.bits = bits_combo->currentData().toInt();
+  cfg.channels = ch_mode_combo->currentData().toInt();
+  cfg.device_id = device_combo->currentData().toInt();
+  cfg.repeat = repeat_check->isChecked();
+
+  const int output_channels = cfg.channels;
+  for (size_t i = 0; i < mix_on.size(); i++) {
+    if (!mix_on[i]->isChecked())
+      continue;
+    DecoderAudioPlayer::PlayConfig::MixRow row;
+    row.channel = mix_ch[i];
+    bool routed = false;
+    for (int output = 0; output < output_channels; ++output) {
+      row.outputs[(size_t)output] =
+          mix_gains[i][(size_t)output]->value() / 100.0f;
+      routed = routed || row.outputs[(size_t)output] > 0.0f;
+    }
+    row.enabled = routed;
+    if (routed)
+      cfg.mix.push_back(row);
+  }
+
+  if (cfg.mix.empty()) {
+    for (const auto &ad : analog_data) {
+      if (ad && ad->visible())
+        cfg.channel_indices.push_back(ad->channel());
+    }
+  }
+
+  QString message;
+  if (!DecoderAudioPlayer::instance().playDecoder(dt, cfg, message)) {
+    MsgBox::Show(message);
+    return;
+  }
+
+  DecoderAudioPlayer::savePlayConfig(cfg);
+
+  pxv_info("Decoder audio playback started: %u Hz, %d bit, mode=%d, "
+           "mix=%d row(s), repeat=%d",
+           cfg.sample_rate, cfg.bits, cfg.channels, (int)cfg.mix.size(),
+           cfg.repeat ? 1 : 0);
 }
 
 void Viewport::UpdateLanguage() {

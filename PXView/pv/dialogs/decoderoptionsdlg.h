@@ -31,6 +31,15 @@
 class QGridLayout;
 class DsComboBox;
 class QFormLayout;
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
+class QSpinBox;
+class QLineEdit;
+class QLabel;
+class QRadioButton;
+class QStackedWidget;
+class QToolButton;
 
 struct srd_channel;
 
@@ -69,6 +78,84 @@ private:
         const pv::data::decode::Decoder *_decoder;
 		const srd_channel *_pdch;
 	};
+
+    struct TdmFastUi
+    {
+        pv::data::decode::Decoder *decoder = nullptr;
+        prop::binding::DecoderOptions *binding = nullptr;
+
+        QSpinBox *bits = nullptr;
+        QComboBox *channels = nullptr;
+        QComboBox *align = nullptr;
+        QComboBox *data_format = nullptr;
+        QComboBox *edge = nullptr;
+        QComboBox *frame_edge = nullptr;
+        QCheckBox *realtime_decode = nullptr;
+        QCheckBox *hide_decode_text = nullptr;
+
+        QToolButton *select_button[8] = {};
+        QCheckBox *wave_enable[8] = {};
+        QCheckBox *text_enable[8] = {};
+        QLabel *zoom_summary[8] = {};
+        QLabel *pos_summary[8] = {};
+        QRadioButton *trigger_channel[8] = {};
+
+        QDoubleSpinBox *vzoom[8] = {};
+        QDoubleSpinBox *vpos[8] = {};
+        QComboBox *range_mode[8] = {};
+        QDoubleSpinBox *eng_min[8] = {};
+        QDoubleSpinBox *eng_max[8] = {};
+        QLineEdit *unit[8] = {};
+
+        QLabel *selected_label = nullptr;
+        QComboBox *selected_combo = nullptr;
+        QStackedWidget *advanced_stack = nullptr;
+        QCheckBox *trigger_enable = nullptr;
+        QComboBox *trigger_mode = nullptr;
+        QComboBox *trigger_edge = nullptr;
+        QDoubleSpinBox *trigger_level = nullptr;
+        QSpinBox *trigger_position = nullptr;
+        int selected_channel = 0;
+    };
+    struct PwmFastUi
+    {
+        pv::data::decode::Decoder *decoder = nullptr;
+        prop::binding::DecoderOptions *binding = nullptr;
+
+        QComboBox *polarity_a = nullptr;
+        QComboBox *polarity_b = nullptr;
+        QComboBox *output = nullptr;
+        QComboBox *analog_mode = nullptr;
+        QComboBox *filter = nullptr;
+        QComboBox *filter_cycles = nullptr;
+        QDoubleSpinBox *filter_cutoff = nullptr;
+        QComboBox *duty_decimals = nullptr;
+        QComboBox *time_decimals = nullptr;
+        QComboBox *freq_decimals = nullptr;
+        QCheckBox *realtime_decode = nullptr;
+
+        QToolButton *select_button[4] = {};
+        QCheckBox *wave_enable[4] = {};
+        QLabel *zoom_summary[4] = {};
+        QLabel *pos_summary[4] = {};
+        QRadioButton *trigger_channel[4] = {};
+        QDoubleSpinBox *vzoom[4] = {};
+        QDoubleSpinBox *vpos[4] = {};
+        QComboBox *range_mode[4] = {};
+        QDoubleSpinBox *eng_min[4] = {};
+        QDoubleSpinBox *eng_max[4] = {};
+        QLineEdit *unit[4] = {};
+
+        QLabel *selected_label = nullptr;
+        QComboBox *selected_combo = nullptr;
+        QStackedWidget *advanced_stack = nullptr;
+        QCheckBox *trigger_enable = nullptr;
+        QComboBox *trigger_mode = nullptr;
+        QComboBox *trigger_edge = nullptr;
+        QDoubleSpinBox *trigger_level = nullptr;
+        QSpinBox *trigger_position = nullptr;
+        int selected_channel = 0;
+    };
 
 public:
     DecoderOptionsDlg(QWidget *parent);
@@ -112,6 +199,14 @@ private:
  
     void create_decoder_form(pv::data::decode::Decoder *dec,
             QWidget *parent, QFormLayout *form);
+    void create_tdm_audio_fast_options(pv::data::decode::Decoder *dec,
+            QWidget *parent, QFormLayout *decoder_form,
+            prop::binding::DecoderOptions *binding);
+    void commit_tdm_audio_fast_options();
+    void create_pwm_fast_options(pv::data::decode::Decoder *dec,
+            QWidget *parent, QFormLayout *decoder_form,
+            prop::binding::DecoderOptions *binding);
+    void commit_pwm_fast_options();
 
     void commit_probes();    
     void commit_decoder_probes(data::decode::Decoder *dec);
@@ -124,6 +219,8 @@ private slots:
 
 private: 
     std::vector<prop::binding::DecoderOptions*> _bindings;
+    std::vector<TdmFastUi*> _tdm_fast_ui;
+    std::vector<PwmFastUi*> _pwm_fast_ui;
     DsComboBox 		*_start_comboBox;
 	DsComboBox 		*_end_comboBox;
     view::DecodeTrace   *_trace;

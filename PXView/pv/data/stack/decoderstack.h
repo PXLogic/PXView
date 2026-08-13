@@ -37,6 +37,7 @@
 #include "pv/data/decode/row.h" 
 #include "pv/data/model/signaldata.h"
 #include "pv/data/decode/decoderstatus.h"
+#include "pv/data/decoderanalogdata.h"
 
 
 namespace DecoderStackTest {
@@ -114,6 +115,13 @@ public:
 
     const char* get_root_decoder_id();
 
+    // post-decode analog display trigger for TDM/PWM repeat.
+    bool get_analog_display_trigger_config(
+        DecoderAnalogTriggerConfig &config) const;
+    bool find_analog_display_trigger(
+        uint64_t &sample_position,
+        DecoderAnalogTriggerConfig *config_out = nullptr) const;
+
 	void add_sub_decoder(std::unique_ptr<decode::Decoder> decoder);
     void remove_sub_decoder(decode::Decoder *decoder);
     void remove_decoder_by_handel(const srd_decoder *dec);
@@ -180,6 +188,13 @@ public:
     int64_t get_mark_index();
     void frame_ended();
 
+    // decoded analog output exposed to DecodeTrace.
+    std::vector<std::shared_ptr<DecoderAnalogData>> analog_data_copy() const;
+    size_t analog_data_size() const;
+    void clear_analog_data();
+    bool analog_visible() const { return _analog_visible; }
+    void set_analog_visible(bool v) { _analog_visible = v; }
+
     inline QString error_message(){
         std::lock_guard<std::mutex> lock(_state_mutex);
         return _error_message;
@@ -243,6 +258,7 @@ private:
 	void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
 	void execute_decode_stack();
 	static void annotation_callback(srd_proto_data *pdata, void *self);
+    static void analog_callback(srd_proto_data *pdata, void *self);
     void do_decode_work();
 
     // P0-A: Centralised error-message setter that emits error_message_changed
@@ -306,6 +322,12 @@ private:
     std::atomic<int> _progress{0};
     std::atomic<bool> _is_decoding{false};
     std::atomic<uint64_t> _result_count{0};
+
+    // decoder-generated analog samples (TDM/PWM).
+    std::vector<std::shared_ptr<DecoderAnalogData>> _analog_data;
+    mutable std::mutex _analog_mutex;
+    bool _analog_visible = true;
+
     // [PWMDBG] diagnostics: annotations dropped in annotation_callback()
     std::atomic<uint64_t> _ann_dropped_stop{0};
     std::atomic<uint64_t> _ann_dropped_mem{0};

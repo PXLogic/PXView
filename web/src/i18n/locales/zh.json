@@ -65,6 +65,10 @@
     "COLLAPSE": "收起",
     "EXPAND": "展开",
     "LANG_TOGGLE": "切换语言",
-    "HW_CONTROL_DECK": "硬件控制面板"
+    "HW_CONTROL_DECK": "硬件控制面板",
+    "WIN_MINIMIZE": "最小化",
+    "WIN_MAXIMIZE": "最大化",
+    "WIN_RESTORE": "还原",
+    "WIN_CLOSE": "关闭"
   }
 }

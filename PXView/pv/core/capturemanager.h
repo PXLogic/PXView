@@ -54,6 +54,11 @@ public:
   static constexpr int RepeatHoldDiv = 20;
   static constexpr int FeedInterval = 50;
   static constexpr int WaitShowTime = 500;
+  // Repeat capture restart can transiently fail while the previous USB/libsigrok
+  // session is still finishing. Retry instead of silently leaving Repeat mode
+  // stuck in an "is_working but no capture running" state.
+  static constexpr int RepeatRestartRetryMs = 50;
+  static constexpr int RepeatRestartMaxRetries = 40; // ~2 seconds total
 
   CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
   ~CaptureManager();
@@ -167,6 +172,7 @@ private:
   std::atomic<double> _repeat_intvl; // The progress wait timer interval.
   std::atomic<int> _repeat_hold_prg; // The time sleep progress
   std::atomic<int> _repeat_wait_prog_step;
+  std::atomic<int> _repeat_restart_failures{0};
   std::atomic<bool> _is_instant;
   std::atomic<int> _work_time_id;
   std::atomic<int> _capture_times;

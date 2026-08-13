@@ -368,11 +368,20 @@ void DeviceOptionsDock::logic_probes(QVBoxLayout &layout) {
   //    available channels for the device. For PXLogic this equals the
   //    profile's max channel count; for upstream drivers (fx2lafw/demo) it
   //    is the full channel list.
-  int vld_ch_num = 0;
-  for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
-    vld_ch_num++;
-  int cur_ch_num = 0;
-  int contentHeight = 0;
+int vld_ch_num = 0;
+for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
+vld_ch_num++;
+
+// DSLogic channel_mode may allow fewer simultaneous channels than the
+// physical channel list. Respect the driver's per-mode vld_num.
+if (_device_agent->driver_name() == QStringLiteral("DSLogic")) {
+int dslogic_vld_ch_num = 0;
+if (_device_agent->get_config_int32(SR_CONF_VLD_CH_NUM, dslogic_vld_ch_num) &&
+dslogic_vld_ch_num > 0)
+vld_ch_num = dslogic_vld_ch_num;
+}
+int cur_ch_num = 0;
+int contentHeight = 0;
 
   _probes_checkBox_list.clear();
 
@@ -635,11 +644,19 @@ void DeviceOptionsDock::enable_max_probes() {
   // SR_CONF_VLD_CH_NUM fork key deleted — derive vld_ch_num from sdi->channels.
   // The driver's scan() callback populates the channel list with the maximum
   // available channels for the device, so this equals the channel_mode cap.
-  int vld_ch_num = 0;
-  for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
-    vld_ch_num++;
-  if (vld_ch_num <= 0)
-    return;
+int vld_ch_num = 0;
+for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
+vld_ch_num++;
+
+if (_device_agent->driver_name() == QStringLiteral("DSLogic")) {
+int dslogic_vld_ch_num = 0;
+if (_device_agent->get_config_int32(SR_CONF_VLD_CH_NUM, dslogic_vld_ch_num) &&
+dslogic_vld_ch_num > 0)
+vld_ch_num = dslogic_vld_ch_num;
+}
+
+if (vld_ch_num <= 0)
+return;
 
   for (auto box : _probes_checkBox_list) {
     if (cur_ch_num >= vld_ch_num) {
@@ -810,11 +827,18 @@ void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
     // The driver's scan() populates sdi->channels with the maximum available
     // channels for the current channel_mode, which is exactly what the old
     // SR_CONF_VLD_CH_NUM used to report.
-    int vld_ch_num = 0;
-    for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
-      vld_ch_num++;
+int vld_ch_num = 0;
+for (const GSList *l = _device_agent->get_channels(); l; l = l->next)
+vld_ch_num++;
 
-    if (cur_ch_num > vld_ch_num) {
+if (_device_agent->driver_name() == QStringLiteral("DSLogic")) {
+int dslogic_vld_ch_num = 0;
+if (_device_agent->get_config_int32(SR_CONF_VLD_CH_NUM, dslogic_vld_ch_num) &&
+dslogic_vld_ch_num > 0)
+vld_ch_num = dslogic_vld_ch_num;
+}
+
+if (cur_ch_num > vld_ch_num) {
       QString msg_str(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_MAX_CHANNEL_COUNT_WARNING),
                           "max count of channels!"));
       msg_str = msg_str.replace("{0}", QString::number(vld_ch_num));

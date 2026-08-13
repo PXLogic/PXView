@@ -32,6 +32,7 @@
 #include "pv/view/signal/dsosignal.h"
 #include "pv/view/signal/analogsignal.h"
 #include "pv/view/trace/lissajoustrace.h"
+#include "pv/view/trace/decodetrace.h"
 #include "pv/view/component/ruler.h"
 
 #include <QPainter>
@@ -927,6 +928,217 @@ void MeasureOverlayPass::draw_logic_jump(QPainter &p,
   }
 }
 
+static QString zbFormatDecodedDuration(double captureSamples, uint64_t sampleRate) {
+  if (!std::isfinite(captureSamples) || captureSamples < 0.0 || sampleRate == 0)
+    return QStringLiteral("--");
+  const double seconds = captureSamples / static_cast<double>(sampleRate);
+  const double mag = std::abs(seconds);
+  double scale = 1.0;
+  const char *suffix = "s";
+  if (mag < 1e-9) { scale = 1e12; suffix = "ps"; }
+  else if (mag < 1e-6) { scale = 1e9; suffix = "ns"; }
+  else if (mag < 1e-3) { scale = 1e6; suffix = "us"; }
+  else if (mag < 1.0) { scale = 1e3; suffix = "ms"; }
+  return QString::number(seconds * scale, 'g', 7) + " " + suffix;
+}
+
+void MeasureOverlayPass::draw_decoder_analog_hover(
+    QPainter &p, const RenderContext &ctx, const MeasureCtx &m) {
+  Viewport *vp = m.vp;
+  if (!vp || vp->action_type() != NO_ACTION ||
+      ctx.type != TIME_VIEW || !ctx.is_logic_mode || !ctx.traces)
+    return;
+
+  const QPoint hover = m.view->hover_point();
+  const uint64_t capture_sample = m.view->pixel2index(hover.x());
+  for (Trace *trace : *ctx.traces) {
+    DecodeTrace *dt = trace ? trace->as_decode() : nullptr;
+    if (!dt || !dt->enabled()) continue;
+
+    int channel = -1;
+    pv::data::DecoderAnalogSample sample{};
+    double engineering = 0.0;
+    std::string unit;
+    QPointF sample_point;
+    QRectF row_rect;
+    if (!dt->get_analog_hover(hover.x(), hover.y(), m.v_offset,
+                              capture_sample, channel, sample, engineering,
+                              unit, sample_point, row_rect))
+      continue;
+
+    const QColor c = DecodeTrace::getChannelColor(channel % 16);
+    p.setPen(QPen(c, 1, Qt::DashLine));
+    p.setBrush(c);
+    p.drawLine(QPointF(sample_point.x(), row_rect.top()),
+               QPointF(sample_point.x(), row_rect.bottom()));
+    p.drawEllipse(sample_point, 3.5, 3.5);
+
+    const uint64_t sr = m.view->session().cur_snap_samplerate();
+    const QString timeText = Ruler::format_real_time(sample.start_sample, sr) +
+                             " / " + QString::number(sample.start_sample);
+    const QString engText = QString::number(engineering, 'g', 7) +
+        (unit.empty() ? QString() : " " + QString::fromStdString(unit));
+    const AnalogMeasurementV2Options &options = vp->analog_measure_options();
+    std::vector<std::pair<QString, QString>> rows;
+    if (options.show_channel)
+      rows.push_back({QStringLiteral("通道"), QString("DecCh%1").arg(channel)});
+    if (options.show_time)
+      rows.push_back({QStringLiteral("时间/采样点"), timeText});
+    if (options.show_normalized)
+      rows.push_back({QStringLiteral("归一化值"),
+                      QString::number(sample.value, 'g', 7)});
+    if (options.show_engineering_value)
+      rows.push_back({QStringLiteral("工程值"), engText});
+    if (rows.empty())
+      break;
+    drawFloatingPanel(p, m.screen_hover_point, m.view->get_view_width(),
+                      m.view->viewport()->height(), ctx.back,
+                      vp->panelBgColor(), vp->panelTextColor(), rows);
+    break;
+  }
+}
+
+void MeasureOverlayPass::draw_decoder_analog_range(
+    QPainter &p, const RenderContext &ctx, const MeasureCtx &m) {
+  Viewport *vp = m.vp;
+  if (!vp || !vp->analog_measure_valid() || !vp->analog_measure_data() ||
+      ctx.type != TIME_VIEW || !ctx.is_logic_mode || !ctx.traces)
+    return;
+
+  DecodeTrace *owner = nullptr;
+  QRectF row_rect;
+  for (Trace *trace : *ctx.traces) {
+    DecodeTrace *dt = trace ? trace->as_decode() : nullptr;
+    if (!dt || !dt->enabled()) continue;
+    const auto channels = dt->decoder()->analog_data_copy();
+    if (std::find(channels.begin(), channels.end(), vp->analog_measure_data()) == channels.end())
+      continue;
+    if (dt->get_analog_channel_rect(vp->analog_measure_channel(), m.v_offset, row_rect)) {
+      owner = dt;
+      break;
+    }
+  }
+  if (!owner) return;
+
+  const uint64_t a = std::min(vp->analog_measure_start(), vp->analog_measure_end());
+  const uint64_t b = std::max(vp->analog_measure_start(), vp->analog_measure_end());
+  const qreal x0 = m.view->index2pixel(a);
+  const qreal x1 = m.view->index2pixel(b);
+  const QColor c = DecodeTrace::getChannelColor(vp->analog_measure_channel() % 16);
+
+  QRectF sel(QPointF(std::min(x0, x1), row_rect.top()),
+             QPointF(std::max(x0, x1), row_rect.bottom()));
+  QRectF clipped = sel.intersected(QRectF(m.view->get_view_rect()));
+  if (clipped.isValid()) {
+    QColor fill = c; fill.setAlpha(38); p.fillRect(clipped, fill);
+  }
+  p.setPen(QPen(c, 1.5, Qt::DashLine));
+  p.drawLine(QPointF(x0, row_rect.top()), QPointF(x0, row_rect.bottom()));
+  p.drawLine(QPointF(x1, row_rect.top()), QPointF(x1, row_rect.bottom()));
+  p.setPen(Qt::NoPen); p.setBrush(c);
+  p.drawEllipse(QPointF(x0, row_rect.top() + 5.0), 3.5, 3.5);
+  p.drawEllipse(QPointF(x1, row_rect.top() + 5.0), 3.5, 3.5);
+
+  const uint64_t sr = m.view->session().cur_snap_samplerate();
+  std::vector<std::pair<QString, QString>> rows;
+  rows.push_back({QStringLiteral("通道"), QString("DecCh%1").arg(vp->analog_measure_channel())});
+  rows.push_back({QStringLiteral("区间"), Ruler::format_real_time(b - a, sr)});
+
+  const auto &st = vp->analog_measure_stats();
+  const auto data = vp->analog_measure_data();
+  if (st.valid && data) {
+    const double lo = data->engineering_minimum();
+    const double hi = data->engineering_maximum();
+    const double gain = (hi - lo) * 0.5;
+    const double offset = (hi + lo) * 0.5;
+    auto eng = [gain, offset](double n) { return gain * n + offset; };
+    const double vmin = eng(st.minimum);
+    const double vmax = eng(st.maximum);
+    const double avg = eng(st.mean);
+    const double rms2 = gain * gain * st.rms * st.rms +
+                        2.0 * gain * offset * st.mean + offset * offset;
+    const double rms = std::sqrt(std::max(0.0, rms2));
+    const QString unit = QString::fromStdString(data->engineering_unit());
+    auto txt = [&unit](double v) {
+      return QString::number(v, 'g', 7) + (unit.isEmpty() ? QString() : " " + unit);
+    };
+    rows.push_back({QStringLiteral("采样数"), QString::number(st.sample_count)});
+    rows.push_back({QStringLiteral("最小值"), txt(vmin)});
+    rows.push_back({QStringLiteral("最大值"), txt(vmax)});
+    rows.push_back({QStringLiteral("峰峰值"), txt(vmax - vmin)});
+    rows.push_back({QStringLiteral("平均值"), txt(avg)});
+    rows.push_back({QStringLiteral("RMS"), txt(rms)});
+
+    if (st.sample_count > 1 && sr > 0 && st.last_sample > st.first_sample) {
+      const double decoded_rate =
+          (st.sample_count - 1.0) * static_cast<double>(sr) /
+          static_cast<double>(st.last_sample - st.first_sample);
+      if (decoded_rate > 0.0)
+        rows.push_back({QStringLiteral("解码采样率"),
+                        Ruler::format_freq(1.0 / decoded_rate)});
+    }
+
+    const auto &cy = vp->analog_measure_cycle();
+    const AnalogMeasurementV2Options &options = vp->analog_measure_options();
+    const QString unavailable = QStringLiteral("--");
+    if (options.rise_time)
+      rows.push_back({QStringLiteral("上升时间"), cy.rise_valid
+          ? zbFormatDecodedDuration(cy.rise_samples, sr) : unavailable});
+    if (options.fall_time)
+      rows.push_back({QStringLiteral("下降时间"), cy.fall_valid
+          ? zbFormatDecodedDuration(cy.fall_samples, sr) : unavailable});
+    if (options.positive_overshoot)
+      rows.push_back({QStringLiteral("正过冲"), cy.overshoot_valid
+          ? QString::number(cy.positive_overshoot, 'g', 6) + " %"
+          : unavailable});
+    if (options.negative_overshoot)
+      rows.push_back({QStringLiteral("负过冲"), cy.overshoot_valid
+          ? QString::number(cy.negative_overshoot, 'g', 6) + " %"
+          : unavailable});
+    if (options.period)
+      rows.push_back({QStringLiteral("周期"), cy.time_valid
+          ? zbFormatDecodedDuration(cy.period_samples, sr) : unavailable});
+    if (options.frequency)
+      rows.push_back({QStringLiteral("频率"), cy.time_valid && sr > 0
+          ? Ruler::format_freq(cy.period_samples / static_cast<double>(sr))
+          : unavailable});
+    if (options.positive_width)
+      rows.push_back({QStringLiteral("正脉宽"), cy.time_valid
+          ? zbFormatDecodedDuration(cy.positive_width_samples, sr)
+          : unavailable});
+    if (options.negative_width)
+      rows.push_back({QStringLiteral("负脉宽"), cy.time_valid
+          ? zbFormatDecodedDuration(cy.negative_width_samples, sr)
+          : unavailable});
+    if (options.positive_duty_cycle)
+      rows.push_back({QStringLiteral("正占空比"), cy.time_valid
+          ? QString::number(cy.positive_duty_cycle, 'g', 6) + " %"
+          : unavailable});
+    if (options.negative_duty_cycle)
+      rows.push_back({QStringLiteral("负占空比"), cy.time_valid
+          ? QString::number(cy.negative_duty_cycle, 'g', 6) + " %"
+          : unavailable});
+    if (options.cycle_rms) {
+      QString cycleRms = unavailable;
+      if (cy.cycle_rms_valid) {
+        const double crms2 = gain * gain * cy.cycle_rms * cy.cycle_rms +
+                             2.0 * gain * offset * cy.cycle_mean +
+                             offset * offset;
+        cycleRms = txt(std::sqrt(std::max(0.0, crms2)));
+      }
+      rows.push_back({QStringLiteral("整周期 RMS"), cycleRms});
+    }
+  } else {
+    rows.push_back({QStringLiteral("测量"), QStringLiteral("拖动中…")});
+  }
+
+  const qreal anchor = std::clamp(std::max(x0, x1), 0.0,
+                                  static_cast<double>(m.view->get_view_width()));
+  drawFloatingPanel(p, QPointF(anchor, row_rect.center().y()),
+                    m.view->get_view_width(), m.view->viewport()->height(),
+                    ctx.back, vp->panelBgColor(), vp->panelTextColor(), rows);
+}
+
 void MeasureOverlayPass::render(QPainter &p, const RenderContext &ctx) {
   Viewport *vp = ctx.viewport;
   View *view = ctx.view;
@@ -947,8 +1159,10 @@ void MeasureOverlayPass::render(QPainter &p, const RenderContext &ctx) {
   draw_dso_hover_lines(p, ctx, m);
   draw_dso_y_measure(p, ctx, m);
   draw_dso_x_measure(p, ctx, m);
-  draw_logic_edge(p, ctx, m);
-  draw_logic_jump(p, ctx, m);
+draw_logic_edge(p, ctx, m);
+draw_logic_jump(p, ctx, m);
+draw_decoder_analog_hover(p, ctx, m);
+draw_decoder_analog_range(p, ctx, m);
 }
 
 // ---------------------------------------------------------------------------

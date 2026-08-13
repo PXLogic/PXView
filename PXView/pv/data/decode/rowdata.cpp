@@ -50,6 +50,7 @@ void RowData::clear() {
   _annotations.clear();
   _item_count = 0;
   _min_annotation = 0;
+  _max_annotation = 0;
 }
 
 uint64_t RowData::get_max_sample() {

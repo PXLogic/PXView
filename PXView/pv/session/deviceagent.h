@@ -30,6 +30,8 @@
 #include <QVector>
 #include <map>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <vector>
 
 #include "pv/base/pxvdef.h"
@@ -328,7 +330,9 @@ public:
 
 private:
     void config_changed();
-    void stop_session_thread(); // join _session_thread if joinable
+    void ensure_session_thread();
+    void session_thread_proc();
+    void stop_session_thread(); // shutdown persistent worker and join
 
     ds_device_handle _dev_handle = NULL_HANDLE;
     int         _dev_type = 0;
@@ -345,12 +349,21 @@ private:
     sr_datafeed_callback _datafeed_cb = nullptr;
     void *_datafeed_cb_data = nullptr;
 
-    // Session run thread — pumps the GLib main loop so that event sources
-    // registered by sr_session_source_add() (e.g. demo's 100ms prepare_data
-    // timer) actually fire. Fork libsigrok did this internally via
-    // collect_thread/g_main_loop_run; upstream libsigrok 0.6.0 leaves it
-    // to the caller.
+    // V11: persistent session worker.  Older code created/destroyed one
+    // std::thread per Repeat frame.  On Windows, hundreds of worker exits also
+    // repeatedly tear down GLib/CRT thread-local state and were observed to
+    // correlate with rare long-run crashes immediately after
+    // DeviceSessionStopped().  Keep one worker + one thread-default GMainContext
+    // alive for the lifetime of the opened device instead.
     std::thread _session_thread;
+    std::mutex _session_thread_mutex;
+    std::condition_variable _session_thread_cv;
+    bool _session_worker_exit = false;
+    bool _session_start_requested = false;
+    bool _session_start_result_ready = false;
+    bool _session_start_result = false;
+    bool _session_run_active = false;
+    uint64_t _session_run_sequence = 0;
 
     // Tracked devices: scanned (from sr_driver_scan) + file-loaded.
     std::vector<struct sr_dev_inst*> _scanned_sdi;

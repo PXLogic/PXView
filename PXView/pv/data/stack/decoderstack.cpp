@@ -28,6 +28,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/config/appconfig.h"
 #include "pv/session/sigsession.h"
 #include "pv/ui/langresource.h"
 #include "pv/view/signal/logicsignal.h"
@@ -39,6 +40,10 @@
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"
 #include <ds_types.h>
+#include <cstdio>
+#include <cstring>
+#include <cmath>
+#include <limits>
 
 using namespace pv::data::decode;
 using namespace std;
@@ -188,13 +193,28 @@ void DecoderStack::build_row() {
 
     dec->reset_start();
 
+    // TDM Fast text-output state detection
+    const bool is_tdm_fast =
+        decc->id && std::strcmp(decc->id, "tdm_audio_fast") == 0;
+    const char *tdm_output_mode = "waveform";
+    if (is_tdm_fast) {
+      const auto &opts = dec->options();
+      auto out = opts.find("output");
+      if (out != opts.end() && out->second &&
+          g_variant_is_of_type(out->second, G_VARIANT_TYPE_STRING))
+        tdm_output_mode = g_variant_get_string(out->second, nullptr);
+    }
+    const bool tdm_text_output =
+        is_tdm_fast && tdm_output_mode &&
+        std::strcmp(tdm_output_mode, "waveform") != 0;
+
     if (!decc->annotation_rows) {
       const Row row(decc);
       _rows[row] = std::make_unique<decode::RowData>();
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
-        _rows_gshow[row] = true;
+        _rows_gshow[row] = is_tdm_fast ? tdm_text_output : true;
         if (row.title().contains("bit", Qt::CaseInsensitive) ||
             row.title().contains("warning", Qt::CaseInsensitive)) {
           _rows_lshow[row] = false;
@@ -220,7 +240,7 @@ void DecoderStack::build_row() {
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
-        _rows_gshow[row] = true;
+        _rows_gshow[row] = is_tdm_fast ? tdm_text_output : true;
         if (row.title().contains("bit", Qt::CaseInsensitive) ||
             row.title().contains("warning", Qt::CaseInsensitive)) {
           _rows_lshow[row] = false;
@@ -234,6 +254,20 @@ void DecoderStack::build_row() {
       }
 
       order++;
+    }
+
+    // TDM Fast: sync hidden output option with the effective state.
+    if (is_tdm_fast) {
+      bool any_row_enabled = false;
+      for (const auto &entry : _rows_gshow) {
+        if (entry.first.decoder() == decc && entry.second) {
+          any_row_enabled = true;
+          break;
+        }
+      }
+      const bool emit_text = dec->shown() && any_row_enabled;
+      dec->set_option("output",
+                      g_variant_new_string(emit_text ? "both" : "waveform"));
     }
   }
 }
@@ -446,6 +480,7 @@ QString DecoderStack::auto_label() const {
 void DecoderStack::clear() { init(); }
 
 void DecoderStack::init() {
+  clear_analog_data();
   _sample_count.store(0);
   {
     std::lock_guard<std::mutex> lk(_state_mutex);
@@ -626,8 +661,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   }
 
   uint64_t last_cnt = 0;
-  uint64_t notify_cnt = (decode_end - decode_start + 1) / 1000;
-  if (notify_cnt == 0) notify_cnt = 1;
+  uint64_t notify_cnt = 1;
   srd_decoder_inst *logic_di = nullptr;
 
   for (const GSList *d = srd_session_inst_list_get(session); d; d = d->next) {
@@ -645,6 +679,12 @@ void DecoderStack::decode_data(const uint64_t decode_start,
     return;
   }
   assert(logic_di);
+
+  // Adaptive decode chunk for batch-oriented analog decoders.
+  const bool adaptive_tdm_fast = logic_di->decoder && logic_di->decoder->id &&
+      std::strstr(logic_di->decoder->id, "tdm_audio_fast") != nullptr;
+  const bool adaptive_pwm_fast = logic_di->decoder && logic_di->decoder->id &&
+      std::strstr(logic_di->decoder->id, "pwm_waveform_c") != nullptr;
 
   uint64_t entry_cnt = 0;
   uint64_t i = decode_start;
@@ -779,8 +819,18 @@ return;
 
     if (chunk_end > end_index)
       chunk_end = end_index;
-    if (chunk_end - i > MaxChunkSize)
-      chunk_end = i + MaxChunkSize;
+    uint64_t chunk_limit = MaxChunkSize;
+    if ((adaptive_tdm_fast || adaptive_pwm_fast) && _samplerate.load(std::memory_order_acquire) > 0.0) {
+      const uint64_t available_samples = _snapshot->get_sample_count();
+      const uint64_t capture_seconds = static_cast<uint64_t>(
+          static_cast<double>(available_samples) / _samplerate.load(std::memory_order_acquire));
+      if (available_samples >= 10000000ULL || capture_seconds >= 10ULL)
+        chunk_limit = 64 * 1024;
+      else if (available_samples >= 1000000ULL || capture_seconds >= 1ULL)
+        chunk_limit = 32 * 1024;
+    }
+    if (chunk_end - i > chunk_limit)
+      chunk_end = i + chunk_limit;
 
     bEndTime = (chunk_end == end_index);
 
@@ -844,9 +894,7 @@ return;
   _progress.store(100);
   _is_decoding.store(false);
 
-  // Final progress notification
   auto self = shared_from_this();
-  _session->event_bus_post([self]() { self->new_decode_data(); });
 
   if (!bError && bEndTime) {
     if (srd_session_end(session, nullptr) != SRD_OK) {
@@ -858,6 +906,10 @@ return;
       srd_clear_last_error();
     }
   }
+
+  // Publish final-data notification AFTER srd_session_end().
+  if (adaptive_tdm_fast || !bError)
+    _session->event_bus_post([self]() { self->new_decode_data(); });
 
   if (!_session->is_closed()) {
     _session->event_bus_post([self]() { self->decode_done(); });
@@ -917,6 +969,13 @@ srd_session_destroy(session);
   srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64((uint64_t)_samplerate.load(std::memory_order_acquire)));
 
+  // Let batch decoders choose an efficient path.
+  uint64_t decode_sample_count = _sample_count.load(std::memory_order_acquire);
+  if (decode_end != UINT64_MAX && decode_end >= decode_start)
+    decode_sample_count = decode_end - decode_start + 1;
+  srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
+                           g_variant_new_uint64(decode_sample_count));
+
   // P3-11 fix: obtain status shared_ptr under _status_mutex for the callback
   std::shared_ptr<decode_task_status> status_for_callback;
   {
@@ -926,6 +985,10 @@ srd_session_destroy(session);
 
   srd_pd_output_callback_add(session, SRD_OUTPUT_ANN,
                              DecoderStack::annotation_callback,
+                             status_for_callback.get());
+
+  srd_pd_output_callback_add(session, SRD_OUTPUT_ANALOG,
+                             DecoderStack::analog_callback,
                              status_for_callback.get());
 
   int srd_ret = srd_session_start(session, nullptr);
@@ -1031,6 +1094,203 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   // inside the deque — no new/delete, no memory pool needed.
   if (!(*row_iter).second->emplace_annotation(pdata, d->_decoder_status.get()))
     d->_no_memory = true;
+}
+
+void DecoderStack::analog_callback(srd_proto_data *pdata, void *self) {
+  if (!pdata || !self)
+    return;
+  auto *st = static_cast<decode_task_status *>(self);
+  auto d = st->_decoder;
+  if (!d || st->_bStop.load(std::memory_order_relaxed))
+    return;
+  if (!pdata->pdo || pdata->pdo->output_type != SRD_OUTPUT_ANALOG)
+    return;
+  const auto *pda = static_cast<const srd_proto_data_analog *>(pdata->data);
+  if (!pda || !pda->data || pda->num_samples == 0)
+    return;
+  std::lock_guard<std::mutex> lock(d->_analog_mutex);
+  std::shared_ptr<DecoderAnalogData> ch_data;
+  for (const auto &ad : d->_analog_data) {
+    if (ad && ad->channel() == pda->channel) { ch_data = ad; break; }
+  }
+  if (!ch_data) {
+    char label[32];
+    std::snprintf(label, sizeof(label), "CH%d", pda->channel);
+    ch_data = std::make_shared<DecoderAnalogData>(pda->channel, pda->num_channels, label);
+    d->_analog_data.push_back(ch_data);
+    srd_decoder_inst *di = pdata->pdo->di;
+    if (di && di->c_options) {
+      char key[40]; GVariant *v = nullptr;
+      std::snprintf(key, sizeof(key), "ch%d_enable", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_INT64))
+        ch_data->set_visible(g_variant_get_int64(v) != 0);
+      std::snprintf(key, sizeof(key), "ch%d_vpos", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE))
+        ch_data->set_v_offset(static_cast<float>(g_variant_get_double(v)));
+      std::snprintf(key, sizeof(key), "ch%d_vzoom", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE))
+        ch_data->set_v_scale(static_cast<float>(g_variant_get_double(v)));
+      DecoderAnalogRangeMode range_mode = DecoderAnalogRangeMode::Bipolar;
+      double eng_min = -1.0, eng_max = 1.0;
+      std::string unit = "V";
+      std::snprintf(key, sizeof(key), "ch%d_range_mode", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_STRING)) {
+        const char *mode = g_variant_get_string(v, nullptr);
+        if (mode && std::strcmp(mode, "unipolar") == 0) range_mode = DecoderAnalogRangeMode::Unipolar;
+        else if (mode && std::strcmp(mode, "custom") == 0) range_mode = DecoderAnalogRangeMode::Custom;
+      }
+      std::snprintf(key, sizeof(key), "ch%d_eng_min", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE)) eng_min = g_variant_get_double(v);
+      std::snprintf(key, sizeof(key), "ch%d_eng_max", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE)) eng_max = g_variant_get_double(v);
+      std::snprintf(key, sizeof(key), "ch%d_unit", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_STRING)) unit = g_variant_get_string(v, nullptr);
+      ch_data->set_engineering_config(range_mode, eng_min, eng_max, unit);
+    }
+  }
+  if (pda->start_samples && pda->end_samples)
+    ch_data->append_samples_timed(pda->start_samples, pda->end_samples, pda->data, static_cast<size_t>(pda->num_samples));
+  else
+    ch_data->append_samples(pdata->start_sample, pdata->end_sample, pda->data, static_cast<size_t>(pda->num_samples));
+}
+
+void DecoderStack::clear_analog_data() {
+  std::lock_guard<std::mutex> lock(_analog_mutex);
+  _analog_data.clear();
+}
+
+std::vector<std::shared_ptr<DecoderAnalogData>> DecoderStack::analog_data_copy() const {
+  std::lock_guard<std::mutex> lock(_analog_mutex);
+  return _analog_data;
+}
+
+size_t DecoderStack::analog_data_size() const {
+  std::lock_guard<std::mutex> lock(_analog_mutex);
+  return _analog_data.size();
+}
+
+namespace {
+GVariant *zb_decoder_option_value(pv::data::decode::Decoder *decoder, const char *id) {
+  if (!decoder || !id) return nullptr;
+  const auto &options = decoder->options();
+  const auto it = options.find(id);
+  if (it != options.end()) return it->second;
+  const srd_decoder *definition = decoder->decoder();
+  if (!definition) return nullptr;
+  for (GSList *item = definition->options; item; item = item->next) {
+    const auto *option = static_cast<const srd_decoder_option *>(item->data);
+    if (option && option->id && !strcmp(option->id, id)) return option->def;
+  }
+  return nullptr;
+}
+}
+
+bool DecoderStack::get_analog_display_trigger_config(DecoderAnalogTriggerConfig &config) const {
+  config = DecoderAnalogTriggerConfig{};
+  if (_stack.empty()) return false;
+  decode::Decoder *decoder = _stack.front().get();
+  const srd_decoder *definition = decoder ? decoder->decoder() : nullptr;
+  if (!definition || !definition->id) return false;
+  const bool is_tdm = strncmp(definition->id, "tdm_audio", strlen("tdm_audio")) == 0;
+  const bool is_pwm = strncmp(definition->id, "pwm_waveform", strlen("pwm_waveform")) == 0;
+  if (!is_tdm && !is_pwm) return false;
+  const AppOptions &app_options = AppConfig::Instance().appOptions;
+  const bool remembered_valid = is_tdm ? app_options.analogDisplayTriggerTdmValid
+                                       : app_options.analogDisplayTriggerPwmValid;
+  if (remembered_valid) {
+    config.enabled = is_tdm ? app_options.analogDisplayTriggerTdmEnable
+                            : app_options.analogDisplayTriggerPwmEnable;
+    if (!config.enabled) return false;
+    const QString mode = is_tdm ? app_options.analogDisplayTriggerTdmMode
+                                : app_options.analogDisplayTriggerPwmMode;
+    if (mode == "normal") config.mode = DecoderAnalogTriggerMode::Normal;
+    config.channel = is_tdm ? app_options.analogDisplayTriggerTdmChannel
+                            : app_options.analogDisplayTriggerPwmChannel;
+    config.channel = std::clamp(config.channel, 0, is_pwm ? 3 : 7);
+    const QString edge = is_tdm ? app_options.analogDisplayTriggerTdmEdge
+                                : app_options.analogDisplayTriggerPwmEdge;
+    if (edge == "falling") config.edge = DecoderAnalogTriggerEdge::Falling;
+    else if (edge == "either") config.edge = DecoderAnalogTriggerEdge::Either;
+    config.level = is_tdm ? app_options.analogDisplayTriggerTdmLevel
+                          : app_options.analogDisplayTriggerPwmLevel;
+    config.display_position_percent = is_tdm ? app_options.analogDisplayTriggerTdmPosition
+                                             : app_options.analogDisplayTriggerPwmPosition;
+    config.display_position_percent = std::clamp(config.display_position_percent, 0, 100);
+    return true;
+  }
+  GVariant *value = zb_decoder_option_value(decoder, "display_trigger_enable");
+  if (!value || !g_variant_is_of_type(value, G_VARIANT_TYPE_BOOLEAN) || !g_variant_get_boolean(value)) return false;
+  config.enabled = true;
+  value = zb_decoder_option_value(decoder, "display_trigger_mode");
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)) {
+    const char *mode = g_variant_get_string(value, nullptr);
+    if (mode && !strcmp(mode, "normal")) config.mode = DecoderAnalogTriggerMode::Normal;
+  }
+  value = zb_decoder_option_value(decoder, "display_trigger_channel");
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.channel = (int)g_variant_get_int64(value);
+  config.channel = std::clamp(config.channel, 0, is_pwm ? 3 : 7);
+  value = zb_decoder_option_value(decoder, "display_trigger_edge");
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)) {
+    const char *edge = g_variant_get_string(value, nullptr);
+    if (edge && !strcmp(edge, "falling")) config.edge = DecoderAnalogTriggerEdge::Falling;
+    else if (edge && !strcmp(edge, "either")) config.edge = DecoderAnalogTriggerEdge::Either;
+  }
+  value = zb_decoder_option_value(decoder, "display_trigger_level");
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_DOUBLE)) config.level = g_variant_get_double(value);
+  value = zb_decoder_option_value(decoder, "display_trigger_position");
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.display_position_percent = (int)g_variant_get_int64(value);
+  config.display_position_percent = std::clamp(config.display_position_percent, 0, 100);
+  return true;
+}
+
+bool DecoderStack::find_analog_display_trigger(uint64_t &sample_position, DecoderAnalogTriggerConfig *config_out) const {
+  DecoderAnalogTriggerConfig config;
+  if (!get_analog_display_trigger_config(config)) return false;
+  std::shared_ptr<DecoderAnalogData> channel_data;
+  for (const auto &data : analog_data_copy()) {
+    if (data && data->channel() == config.channel) { channel_data = data; break; }
+  }
+  if (!channel_data) return false;
+  auto read_view = channel_data->read_samples();
+  const auto &samples = read_view.samples();
+  if (samples.size() < 2) return false;
+  const uint64_t range_start = samples.front().start_sample;
+  const uint64_t range_end = samples.back().start_sample;
+  const uint64_t target = range_start + (range_end - range_start) * (uint64_t)config.display_position_percent / 100U;
+  bool found = false;
+  uint64_t best_sample = 0;
+  uint64_t best_distance = std::numeric_limits<uint64_t>::max();
+  for (size_t i = 1; i < samples.size(); ++i) {
+    const auto &previous = samples[i - 1];
+    const auto &current = samples[i];
+    if (current.start_sample <= previous.start_sample) continue;
+    const double previous_value = channel_data->engineering_value(previous.value);
+    const double current_value = channel_data->engineering_value(current.value);
+    const bool rising = previous_value < config.level && current_value >= config.level;
+    const bool falling = previous_value > config.level && current_value <= config.level;
+    const bool matches = config.edge == DecoderAnalogTriggerEdge::Rising ? rising
+                         : config.edge == DecoderAnalogTriggerEdge::Falling ? falling : (rising || falling);
+    if (!matches) continue;
+    double fraction = 0.0;
+    const double delta = current_value - previous_value;
+    if (std::isfinite(delta) && std::abs(delta) > 1e-20)
+      fraction = std::clamp((config.level - previous_value) / delta, 0.0, 1.0);
+    const double interpolated = (double)previous.start_sample + fraction * (double)(current.start_sample - previous.start_sample);
+    const uint64_t crossing = interpolated <= 0.0 ? 0U : (uint64_t)std::llround(interpolated);
+    const uint64_t distance = crossing > target ? crossing - target : target - crossing;
+    if (!found || distance < best_distance) { found = true; best_sample = crossing; best_distance = distance; }
+  }
+  if (!found) return false;
+  sample_position = best_sample;
+  if (config_out) *config_out = config;
+  return true;
 }
 
 void DecoderStack::frame_ended() {

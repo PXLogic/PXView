@@ -101,6 +101,8 @@ private:
     void on_save_requested(const interface::SaveRequested &);
     void on_delayed_prop_msg(const interface::DelayedPropMsg &);
     void on_sample_limits_changed(const interface::SampleLimitsChanged &);
+  void on_decoder_analog_trigger_found(const interface::DecoderAnalogTriggerFound &);
+  void on_decoder_analog_trigger_display_hold(const interface::DecoderAnalogTriggerDisplayHold &);
 
     // Throttle timer for SignalsChanged events: when multiple
     // SignalsChanged arrive in rapid succession (e.g. when MCP adds

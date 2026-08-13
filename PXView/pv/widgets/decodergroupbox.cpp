@@ -40,6 +40,9 @@
 #include <cassert>
 
 
+#include <cstring>
+
+
 namespace pv {
 namespace widgets {
 
@@ -114,6 +117,9 @@ DecoderGroupBox::DecoderGroupBox(data::DecoderStack *decoder_stack,
     _row_num++;
   }
 
+  if (is_tdm_fast())
+    refresh_tdm_fast_row_eyes();
+
   _layout->addLayout(dec_layout, _row_show_button.size() + 1, 0, 1, 3);
   _widget->setLayout(_layout);
 
@@ -130,6 +136,51 @@ bool DecoderGroupBox::eventFilter(QObject *o, QEvent *e) {
   return false;
 }
 
+bool DecoderGroupBox::is_tdm_fast() const {
+  return _dec && _dec->decoder() && _dec->decoder()->id &&
+         std::strcmp(_dec->decoder()->id, "tdm_audio_fast") == 0;
+}
+
+void DecoderGroupBox::sync_tdm_fast_output() {
+  if (!is_tdm_fast())
+    return;
+
+  bool any_row_enabled = false;
+  const auto rows = _decoder_stack->get_rows_gshow();
+  for (const auto &entry : rows) {
+    if (entry.first.decoder() == _dec->decoder() && entry.second) {
+      any_row_enabled = true;
+      break;
+    }
+  }
+
+  // Master eye is a gate only. Child row states are never overwritten.
+  // Text generation is enabled only when master AND at least one child are on.
+  const bool emit_text = _dec->shown() && any_row_enabled;
+  _dec->set_option("output", g_variant_new_string(emit_text ? "both" : "waveform"));
+}
+
+void DecoderGroupBox::refresh_tdm_fast_row_eyes() {
+  if (!is_tdm_fast())
+    return;
+
+  const QString iconPath = GetIconPath();
+  const bool master = _dec->shown();
+  const auto rows = _decoder_stack->get_rows_gshow();
+  auto button = _row_show_button.begin();
+  for (const auto &entry : rows) {
+    if (entry.first.decoder() != _dec->decoder())
+      continue;
+    if (button == _row_show_button.end())
+      break;
+    QPushButton *btn = *button++;
+    const bool effective_visible = master && entry.second;
+    btn->setEnabled(master);
+    btn->setIcon(IconCache::Instance().icon(
+        effective_visible ? iconPath + "/shown.svg" : iconPath + "/hidden.svg"));
+  }
+}
+
 void DecoderGroupBox::tog_icon() {
   QString iconPath = GetIconPath();
   QPushButton *sc = dynamic_cast<QPushButton *>(sender());
@@ -144,6 +195,12 @@ for (auto &up : _decoder_stack->stack()) {
       dec->show(!dec->shown());
         sc->setIcon(IconCache::Instance().icon(
             dec->shown() ? iconPath + "/shown.svg" : iconPath + "/hidden.svg"));
+        if (is_tdm_fast()) {
+          // V16.4: master annotation eye gates the child rows but does not
+          // destroy their saved per-channel selection.
+          sync_tdm_fast_output();
+          refresh_tdm_fast_row_eyes();
+        }
         break;
       }
     }
@@ -152,11 +209,18 @@ for (auto &up : _decoder_stack->stack()) {
 
     for (auto i = rows.begin(); i != rows.end(); i++) {
       if (index-- == 0) {
-        _decoder_stack->set_rows_gshow((*i).first, !(*i).second);
-        // rows[(*i).first] = !(*i).second;
-        sc->setIcon(IconCache::Instance().icon(rows[(*i).first]
-                                                   ? iconPath + "/hidden.svg"
-                                                   : iconPath + "/shown.svg"));
+        const bool new_show = !(*i).second;
+        _decoder_stack->set_rows_gshow((*i).first, new_show);
+
+        if (is_tdm_fast()) {
+          // Per-channel eye changes only this row. The master eye remains a
+          // pure gate and the other CH states are untouched.
+          sync_tdm_fast_output();
+          refresh_tdm_fast_row_eyes();
+        } else {
+          sc->setIcon(IconCache::Instance().icon(
+              new_show ? iconPath + "/shown.svg" : iconPath + "/hidden.svg"));
+        }
         break;
       }
     }

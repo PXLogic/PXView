@@ -27,6 +27,8 @@
 #include "pv/prop/property.h"
 
 class QCheckBox;
+class QPushButton;
+class QWidget;
 
 namespace pv {
 namespace prop {
@@ -36,7 +38,8 @@ class Bool : public Property
     Q_OBJECT;
 
 public:
-    Bool(QString name, QString label, Getter getter, Setter setter);
+    Bool(QString name, QString label, Getter getter, Setter setter,
+         bool eye_button = false, bool int64_storage = false);
 
 	virtual ~Bool();
 
@@ -53,7 +56,13 @@ private slots:
     void on_state_changed(int);
 
 private:
-	QCheckBox *_check_box;
+    void update_eye_icon();
+
+    QCheckBox *_check_box;
+    QPushButton *_eye_button;
+    QWidget *_eye_widget;
+    bool _eye_button_mode;
+    bool _int64_storage;
 };
 
 } // prop

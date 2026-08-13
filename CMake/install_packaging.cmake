@@ -79,6 +79,120 @@ else()
 endif()
 
 #===============================================================================
+#= Tauri desktop app build (optional, run: cmake --build . --target tauri-desktop)
+#
+#= Builds the PXView Agent desktop wrapper (Tauri v2 + React/Vite).
+#= The Tauri binary wraps the web UI and spawns PXView --headless on startup.
+#= When enabled, the binary is installed alongside PXView and provides a
+#= native desktop window for the AI agent interface.
+#
+#= Prerequisites (build-time):
+#=   - Rust toolchain (rustc, cargo) in PATH  [Cargo.toml: rust-version = "1.77"]
+#=   - Node.js 18+ + npm (for frontend Vite build)
+#=   - Tauri CLI v2 (installed via npm devDependencies)
+#
+#= Platform Compatibility (runtime minimums):
+#
+#=   Windows:
+#=     Minimum:  Windows 10 1809 (build 17763, Oct 2018 Update)
+#=     WebView2 Runtime requirement (preinstalled on Win11 and Win10 since
+#=     April 2023; for older Win10 the downloadBootstrapper mode auto-installs).
+#=     PXView also requires UCRT (MinGW-w64 UCRT64 target) + Python 3.14,
+#=     both of which require Windows 10+. Windows 7/8/8.1 are NOT supported.
+#
+#=   Linux:
+#=     Minimum:  Ubuntu 22.04 (jammy) / Debian 12 (bookworm) / Fedora 36
+#=     Tauri v2 requires webkit2gtk-4.1 (NOT 4.0). Ubuntu 20.04 only has
+#=     webkit2gtk-4.0 and is NOT supported. AppImage bundles libstdc++/libgcc_s
+#=     but webkit2gtk must be installed on the target system.
+#=     Also requires: libgtk-3, librsvg, libayatana-appindicator3.
+#
+#=   macOS:
+#=     Minimum:  macOS 14.0 (Sonoma) — matches PXView CMAKE_OSX_DEPLOYMENT_TARGET.
+#=     Tauri uses WKWebView (system WebKit framework, no extra deps).
+#=     Tauri v2 itself can target macOS 10.15+, but since PXView requires 14.0,
+#=     that is the effective binding constraint.
+#
+#= Summary table:
+#=   +---------+-------------------+-------------------------------------------+
+#=   | Platform| Minimum OS        | WebView runtime                           |
+#=   +---------+-------------------+-------------------------------------------+
+#=   | Windows | Win10 1809 (17763)| WebView2 (auto-download bootstrapper)     |
+#=   | Linux   | Ubuntu 22.04      | webkit2gtk-4.1 (system-installed)         |
+#=   | macOS   | macOS 14.0 Sonoma | WKWebView (system framework)              |
+#=   +---------+-------------------+-------------------------------------------+
+#-------------------------------------------------------------------------------
+
+if(ENABLE_TAURI)
+    find_program(CARGO_EXECUTABLE cargo)
+    find_program(RUSTC_EXECUTABLE rustc)
+
+    if(NPM_EXECUTABLE AND CARGO_EXECUTABLE AND RUSTC_EXECUTABLE)
+        # The Tauri binary name from Cargo.toml package name
+        if(WIN32)
+            set(TAURI_BIN_NAME "pxview-agent.exe")
+        else()
+            set(TAURI_BIN_NAME "pxview-agent")
+        endif()
+
+        # Output location of the release binary (cargo build --release)
+        set(TAURI_BIN_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/src-tauri/target/release/${TAURI_BIN_NAME}")
+
+        # The Tauri build uses `npx tauri build --no-bundle` which:
+        #   1. Runs the beforeBuildCommand (npm run build → Vite → web/dist/)
+        #   2. Compiles Rust code in release mode (cargo build --release)
+        #   3. Skips platform bundling (NSIS/deb/dmg) — we do our own packaging
+        #
+        # The --no-bundle flag requires Tauri CLI v2.1+; for older versions,
+        # the binary is still produced at target/release/ even if bundling fails.
+        add_custom_command(
+            OUTPUT ${TAURI_BIN_PATH}
+            COMMAND ${NPM_EXECUTABLE} install
+            COMMAND ${NPM_EXECUTABLE} run tauri -- build --no-bundle
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/web
+            COMMENT "Building Tauri desktop app (PXView Agent)..."
+            DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/web/package.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/web/src-tauri/Cargo.toml
+                ${CMAKE_CURRENT_SOURCE_DIR}/web/src-tauri/tauri.conf.json
+        )
+
+        add_custom_target(tauri-desktop
+            DEPENDS ${TAURI_BIN_PATH}
+            COMMENT "Build the Tauri desktop wrapper (PXView Agent)"
+        )
+
+        # Make `ninja` (default target = PXView) also build the Tauri desktop app.
+        # This way users don't need to run `ninja tauri-desktop` separately —
+        # a plain `ninja` will compile both PXView and the Tauri wrapper.
+        add_dependencies(${PROJECT_NAME} tauri-desktop)
+
+        # Standalone install target for CI convenience
+        add_custom_target(install-tauri-desktop
+            COMMAND ${CMAKE_COMMAND} -E copy
+                ${TAURI_BIN_PATH}
+                ${CMAKE_INSTALL_PREFIX}/bin/PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}
+            COMMENT "Copy Tauri desktop app to install directory"
+            DEPENDS tauri-desktop
+        )
+
+        message(STATUS "Tauri desktop build target available: cmake --build . --target tauri-desktop")
+        message(STATUS "Tauri binary will be installed as: PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}")
+    else()
+        if(NOT NPM_EXECUTABLE)
+            message(WARNING "ENABLE_TAURI is ON but npm not found. Install Node.js.")
+        endif()
+        if(NOT CARGO_EXECUTABLE OR NOT RUSTC_EXECUTABLE)
+            message(WARNING "ENABLE_TAURI is ON but cargo/rustc not found. "
+                "Install Rust toolchain from https://rustup.rs/ or disable ENABLE_TAURI.")
+        endif()
+    endif()
+else()
+    message(STATUS "Tauri desktop build disabled (enable with -DENABLE_TAURI=ON)")
+endif()
+
+#===============================================================================
 #= Installation
 #-------------------------------------------------------------------------------
 
@@ -220,6 +334,21 @@ install(CODE "
         message(STATUS \"Web client not built, skipping. Run: ninja webui\")
     endif()
 ")
+
+# Install Tauri desktop app if it has been built
+# The binary is placed alongside PXView so it can find and spawn PXView --headless
+if(ENABLE_TAURI AND NPM_EXECUTABLE AND CARGO_EXECUTABLE AND RUSTC_EXECUTABLE)
+    install(CODE "
+        if(EXISTS \"${TAURI_BIN_PATH}\")
+            file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin\"
+                 TYPE FILE FILES \"${TAURI_BIN_PATH}\"
+                 RENAME \"PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}\")
+            message(STATUS \"Installing Tauri desktop app to: \${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}\")
+        else()
+            message(STATUS \"Tauri desktop app not built, skipping. Run: ninja tauri-desktop\")
+        endif()
+    ")
+endif()
 
 #===============================================================================
 #= Packaging (handled by CPack)

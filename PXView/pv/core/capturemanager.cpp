@@ -168,6 +168,7 @@ bool CaptureManager::action_start_capture(bool instant,
   _coord->clear_glitch_filter_state_for_capture();
   _is_stream_mode.store(false);
   _capture_times.store(0);
+  _repeat_restart_failures.store(0);
   _dso_packet_count.store(0);
 
   _coord->set_capture_data(_state->view_data());
@@ -439,11 +440,18 @@ bool CaptureManager::exec_capture() {
   // bind to the old, cleared document snapshot and fail to show results.
   _state->attach_data_to_signal(_state->capture_data());
 
-  // 将应用层 _is_instant 同步到驱动 SR_CONF_INSTANT。
-  // demo 驱动读取 devc->instant 决定 DSO 单帧/连续采集语义；其他驱动
-  // 不支持此 key 时 set_config_bool 静默失败（pxv_dbg 日志），无副作用。
-  // 旧注释"driver no longer reads instant mode"是错误的——demo 驱动确实读取。
-    _state->device_agent().set_config_bool(SR_CONF_INSTANT, _is_instant.load());
+  // 仅向真正实现 SR_CONF_INSTANT 的驱动下发。
+  // PXLogic 已删除该 key；每帧无条件 set 会返回 SR_ERR_ARG 并刷日志。
+  // 当前 fork 中 demo 与 dreamsourcelab-dslogic(前端归一化为 DSLogic/DSCope)
+  // 实现了 SR_CONF_INSTANT。应用层 _is_instant 仍是 PXLogic 的唯一真值。
+  {
+    const QString instant_drv = _state->device_agent().driver_name();
+    if (instant_drv == "demo" || instant_drv == "DSLogic" ||
+        instant_drv == "DSCope") {
+      _state->device_agent().set_config_bool(SR_CONF_INSTANT,
+                                             _is_instant.load());
+    }
+  }
 
   // Core→libsigrok 触发配置唯一同步点。在 ds_start_collect 前一次性同步，
   // 消除 TriggerDock/SessionService 各自调 ds_trigger_* 导致的互相覆盖。
@@ -496,6 +504,15 @@ bool CaptureManager::action_stop_capture() {
 
   pxv_info("Stop collect.");
 
+  // V12: Repeat has a deliberate between-frame window: the previous
+  // sr_session_run() has already stopped, TDM/analog-trigger UI has committed,
+  // and TrigNextCollect has been queued but the next sr_session_start() has not
+  // happened yet.  In that window _state->is_working() is intentionally true
+  // while there is no active libsigrok session.  Treating it like an active
+  // capture used to fabricate a second CollectEnd below and could re-enter
+  // MainWindow::on_frame_ended() while decoder/UI events were still draining.
+  const bool had_active_session = _state->device_agent().is_collecting();
+
   if (_coord->bClose()) {
     _coord->set_is_working(false);
     _repeat_timer.Stop();
@@ -531,7 +548,14 @@ bool CaptureManager::action_stop_capture() {
     // Plan B Phase 1: broadcast_sync → broadcast_async.
     _event_bus->broadcast_async<interface::EndCollectWorkPrev>({});
 
-    exit_capture();
+    if (is_repeat_mode() && !had_active_session) {
+      // V12: Stop was pressed after the previous frame/session had already
+      // ended but before the queued next Repeat frame started.  There is
+      // nothing at the libsigrok layer to stop; only cancel the Repeat state.
+      pxv_info("Manual stop: between Repeat frames; no active session to stop.");
+    } else {
+      exit_capture();
+    }
 
     // CRITICAL FIX: fork 迁移遗漏 — 手动停止采集时设置 device_status =
     // ST_STOPPED。SR_DF_END 路径只覆盖采集正常完成的情况；用户手动点击
@@ -539,13 +563,17 @@ bool CaptureManager::action_stop_capture() {
     // SR_DF_END，因此需要在此显式设置。
     _state->set_device_status(ST_STOPPED);
 
-    // CRITICAL FIX: 手动停止时也需要调用 frame_ended() 来触发
-    // MainWindow::on_frame_ended()，后者会调用 update_toolbar_view_status()
-    // 来更新按钮状态。正常采集结束时，LOGIC 模式通过
-    // SigSession::on_event(RevEndPacket) → frame_ended() 调用，
-    // 非 LOGIC 模式通过 DataFeedParser::SR_DF_END → _state->frame_ended() 调用。
-    // 手动停止时这两个路径都不会触发，导致按钮保持禁用状态（无法添加解码器）。
-    _state->frame_ended();
+    // V12: Never synthesize an extra CollectEnd in Repeat mode.  An active
+    // hardware frame already emits SR_DF_END -> RevEndPacket -> frame_ended(),
+    // while a between-frame Stop has no new frame to end at all.  The old
+    // unconditional _state->frame_ended() therefore produced duplicate (or
+    // completely fictitious) MainWindow::on_frame_ended() callbacks.
+    // UI enable/disable state is already refreshed by CaptureStateChanged below.
+    // Keep the legacy synthetic CollectEnd only for non-Repeat modes.
+    if (!is_repeat_mode())
+      _state->frame_ended();
+    else
+      pxv_info("Manual stop Repeat: synthetic CollectEnd suppressed.");
 
     data_unlock();
 
@@ -723,10 +751,38 @@ void CaptureManager::repeat_capture_wait_timeout() {
 
   _repeat_hold_prg.store(0);
 
-  if (_state->is_working()) {
-    _state->repeat_hold(_repeat_hold_prg.load());
-    exec_capture();
+  if (!_state->is_working() || !is_repeat_mode())
+    return;
+
+  _state->repeat_hold(_repeat_hold_prg.load());
+
+  // Repeat-mode robustness fix:
+  // SessionStopped -> TrigNextCollect can arrive immediately after
+  // sr_session_run() returns, while a device/USB backend is still completing
+  // its final cleanup.  A transient exec_capture() failure used to be ignored.
+  // Because this timer is stopped above, that left _is_working=true forever
+  // with no active capture and no future retry (the UI looked frozen).
+  if (exec_capture()) {
+    _repeat_restart_failures.store(0);
+    return;
   }
+
+  const int failures = _repeat_restart_failures.fetch_add(1) + 1;
+  if (_state->is_working() && is_repeat_mode() &&
+      failures <= RepeatRestartMaxRetries) {
+    if (failures == 1 || (failures % 10) == 0) {
+      pxv_warn("Repeat restart deferred: attempt %d/%d; retrying in %d ms.",
+               failures, RepeatRestartMaxRetries, RepeatRestartRetryMs);
+    }
+    _repeat_timer.Start(RepeatRestartRetryMs);
+    return;
+  }
+
+  pxv_err("Repeat capture restart failed %d times; stopping repeat mode cleanly.",
+          failures);
+  _repeat_restart_failures.store(0);
+  if (_state->is_working())
+    action_stop_capture();
 }
 
 void CaptureManager::repeat_wait_prog_timeout() {

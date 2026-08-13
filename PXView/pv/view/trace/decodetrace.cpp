@@ -59,6 +59,10 @@ using namespace std;
 namespace pv {
 namespace view {
 #include "pv/config/appconfig.h"
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <vector>
 
 const int DecodeTrace::ArrowSize = 4;
 const double DecodeTrace::EndCapWidth = 5;
@@ -100,6 +104,15 @@ QColor DecodeTrace::getAnnColor(int channelIndex) {
   if (c.isValid())
     return c;
   return getChannelColor(channelIndex);
+}
+
+QColor DecodeTrace::getAnalogChannelColor(int channelIndex) {
+  // Keep the decoder-generated analog row title and its waveform on exactly
+  // the same colour source. CH0 keeps the established bright-green waveform
+  // colour; the remaining channels follow the decoder annotation palette.
+  return channelIndex == 0
+      ? QColor(0x4E, 0xDC, 0x44)
+      : getAnnColor((channelIndex + 1) % 16);
 }
 
 QColor DecodeTrace::getAnnOutlineColor(int channelIndex) {
@@ -230,27 +243,83 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   p.drawPolygon(start_points, countof(start_points));
   p.drawPolygon(end_points, countof(end_points));
 
-  // --draw headings
-  const int row_height = (_totalHeight > 0 && _cur_row_headings.size() > 0)
-                             ? _totalHeight / (int)_cur_row_headings.size()
-                             : ctx.signal_height;
-  for (size_t i = 0; i < _cur_row_headings.size(); i++) {
-    const int y = i * row_height + get_y() - _totalHeight * 0.5;
+  // --draw headings. Analog channels occupy two normal height units, so use
+  // the same mixed-height geometry as paint_mid().
+  const int unit_count = rows_size();
+  const int base_h = unit_count > 0 ? _totalHeight / unit_count
+                                     : ctx.signal_height;
+  const int analog_h = base_h * 2;
+  std::vector<std::shared_ptr<pv::data::DecoderAnalogData>> visible_analog;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible())
+      visible_analog.push_back(ch);
+  const int analog_count = static_cast<int>(visible_analog.size());
+  const int annotation_rows = std::max(
+      0, static_cast<int>(_cur_row_headings.size()) - analog_count);
+  int cur_y = get_y() - _totalHeight / 2;
+  _indicator_button_rect = QRectF();
 
+  for (size_t i = 0; i < _cur_row_headings.size(); i++) {
+    const bool is_analog = static_cast<int>(i) >= annotation_rows;
+    const int row_h = is_analog ? analog_h : base_h;
     p.setPen(QPen(Qt::NoPen));
     p.setBrush(QApplication::palette().brush(QPalette::WindowText));
 
-    const QRect r(left + ArrowSize * 2, y, right - left, row_height);
+    const QRect r(left + ArrowSize * 2, cur_y, right - left, row_h);
     const QString h(_cur_row_headings[i]);
     const int f = Qt::AlignLeft | Qt::AlignVCenter | Qt::TextDontClip;
     const QPointF points[] = {QPointF(left, r.center().y() - ArrowSize),
                               QPointF(left + ArrowSize, r.center().y()),
                               QPointF(left, r.center().y() + ArrowSize)};
     p.drawPolygon(points, countof(points));
-
-    // Draw the text
-    p.setPen(fore);
+    QColor heading_color = fore;
+    if (is_analog) {
+      // Analog headings are appended in the same visible-channel order used
+      // by paint_mid(). Resolve the real decoder channel and reuse the exact
+      // waveform colour so CH0/CH1/... labels visually match their curves.
+      const int analog_index = static_cast<int>(i) - annotation_rows;
+      if (analog_index >= 0 &&
+          analog_index < static_cast<int>(visible_analog.size()) &&
+          visible_analog[analog_index]) {
+        heading_color = getAnalogChannelColor(
+            visible_analog[analog_index]->channel());
+      }
+    }
+    p.setPen(heading_color);
     p.drawText(r, f, h);
+
+    // V-ZOOM/V-POS indicator buttons for analog channels
+    if (is_analog && _indicator_heading_row == static_cast<int>(i)) {
+      const int cy = r.center().y();
+      const int cx = r.left() + p.fontMetrics().horizontalAdvance(h) + 8;
+      const int gap = 4;
+      const int ah = 5;
+      QColor c(heading_color);
+      c.setAlpha(210);
+      p.setPen(Qt::NoPen);
+      p.setBrush(c);
+      const QPointF up[] = {QPointF(cx, cy-gap), QPointF(cx-ah, cy-gap-6),
+                            QPointF(cx+ah, cy-gap-6)};
+      const QPointF dn[] = {QPointF(cx, cy+gap), QPointF(cx-ah, cy+gap+6),
+                            QPointF(cx+ah, cy+gap+6)};
+      p.drawPolygon(up, 3);
+      p.drawPolygon(dn, 3);
+
+      const int bx = cx + ah + 6;
+      const int bw = 14;
+      const int bh = std::max(12, row_h - 6);
+      const int by = cy - bh/2;
+      _indicator_button_rect = QRectF(bx, by, bw, bh);
+      p.setBrush(Qt::NoBrush);
+      p.setPen(QPen(c, 1, Qt::DashLine));
+      p.drawRoundedRect(_indicator_button_rect, 2, 2);
+      const int mx = bx + bw/2, my = by + bh/2, rr = 3;
+      p.setPen(QPen(c, 1));
+      p.drawLine(mx-rr, my, mx+rr, my);
+      p.drawLine(mx, my-rr, mx, my+rr);
+      p.drawEllipse(QPointF(mx, my), rr, rr);
+    }
+    cur_y += row_h;
   }
 }
 
@@ -325,13 +394,18 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           if ((*i).second) {
             const Row &row = (*i).first;
 
-            const uint64_t min_annotation =
-                _decoder_stack->get_min_annotation(row);
-            const double min_annWidth = min_annotation / samples_per_pixel;
+            // Use the maximum annotation width to decide whether the whole row
+            // is truly dense; inside the normal path, tiny individual fragments
+            // still fall back to a cheap color block.
+            const uint64_t max_annotation =
+                _decoder_stack->get_max_annotation(row);
+            const double max_ann_width = max_annotation / samples_per_pixel;
 
             RowData *row_data = _decoder_stack->get_row_data(row);
             if (row_data) {
-              if (min_annWidth < 2.0) {
+              if (max_ann_width < 2.0) {
+                // Entire visible row is sub-pixel/dense: keep the old bounded
+                // block walk so zoomed-out long captures remain fast.
                 uint64_t current_sample = start_sample;
                 const size_t base_colour = 0;
 
@@ -374,10 +448,33 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                     const Annotation *a = row_data->annotation_at(idx);
                     if (!a)
                       break;
-                    draw_annotation(*a, p, get_text_colour(), annotation_height,
-                                    left, right, samples_per_pixel,
-                                    pixels_offset, y, 0, min_annWidth, fore,
-                                    back, last_x, last_drawn_start);
+
+                    const uint64_t span_samples =
+                        a->end_sample() > a->start_sample()
+                            ? a->end_sample() - a->start_sample()
+                            : 0;
+                    const double ann_width =
+                        span_samples / samples_per_pixel;
+                    if (ann_width < 2.0) {
+                      // Tiny individual fragment: cheap color block fallback
+                      const double x = a->start_sample() / samples_per_pixel -
+                                       pixels_offset;
+                      if (x < left - DrawPadding || x > right + DrawPadding)
+                        continue;
+                      const size_t colour = (a->type() % MaxAnnType) % 16;
+                      const QColor fill = getAnnColor(colour);
+                      p.fillRect(QRectF(x, y - annotation_height * 0.5,
+                                        std::max(1.0, ann_width),
+                                        annotation_height),
+                                 fill);
+                      last_drawn_start = x;
+                      last_x = std::max(last_x, x + std::max(1.0, ann_width));
+                    } else {
+                      draw_annotation(*a, p, get_text_colour(), annotation_height,
+                                      left, right, samples_per_pixel,
+                                      pixels_offset, y, 0, ann_width, fore,
+                                      back, last_x, last_drawn_start);
+                    }
                   }
                 }
               }
@@ -395,6 +492,170 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
       y += annotation_height;
       _cur_row_headings.push_back(dec->decoder()->name);
     }
+  }
+
+  // TDM/PWM analog port: draw decoder-generated waveforms.
+  const auto analog_data = _decoder_stack->analog_data_copy();
+  if (!analog_data.empty() && _decoder_stack->analog_visible()) {
+    const int analog_ch_height = annotation_height * 2;
+    y -= annotation_height / 2; // next annotation centre -> analog row top
+    p.save();
+
+    const size_t pixel_width = static_cast<size_t>(std::max(1, right - left + 1));
+    const size_t render_budget = std::max<size_t>(64, pixel_width * 8);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    std::vector<pv::data::DecoderAnalogSample> render_samples;
+    render_samples.reserve(render_budget + 1);
+
+    pv::data::DecoderAnalogTriggerConfig trigger_cfg;
+    const bool trigger_visual =
+        _decoder_stack->get_analog_display_trigger_config(trigger_cfg);
+
+    for (const auto &ch_data : analog_data) {
+      if (!ch_data || !ch_data->visible())
+        continue;
+
+      float min_val = -1.0f;
+      float max_val = 1.0f;
+      render_samples.clear();
+      ch_data->copy_samples_for_render(start_sample, end_sample,
+                                       render_budget, render_samples,
+                                       min_val, max_val);
+
+      const float mid_y = static_cast<float>(y) +
+          ch_data->v_offset() * analog_ch_height * 0.5f;
+      const float base_h = static_cast<float>(analog_ch_height) * 0.45f;
+      const float v_scale = ch_data->v_scale();
+      const bool is_auto = v_scale < 0.001f;
+      const float value_center = (min_val + max_val) * 0.5f;
+      const float value_range = max_val - min_val;
+      const float scale_factor = is_auto
+          ? (value_range > 0.001f ? (base_h * 1.8f / value_range) : base_h)
+          : (base_h * v_scale);
+
+      p.setPen(QPen(QColor(128, 128, 128), 1, Qt::DotLine));
+      p.drawLine(left, static_cast<int>(mid_y), right, static_cast<int>(mid_y));
+
+      // Continuous line + independent per-pixel envelope.
+      std::vector<QPointF> line_points;
+      std::vector<QPointF> envelope_points;
+      line_points.reserve(pixel_width);
+      envelope_points.reserve(pixel_width * 2);
+      if (!render_samples.empty()) {
+        const double inv_spp = 1.0 / samples_per_pixel;
+        int cur_col = std::numeric_limits<int>::min();
+        float col_min = 0.0f;
+        float col_max = 0.0f;
+        float col_last = 0.0f;
+        bool col_has = false;
+
+        auto value_to_y = [&](float value) -> double {
+          const float display_value = is_auto ? (value - value_center) : value;
+          return (double)(mid_y - display_value * scale_factor);
+        };
+
+        auto flush_col = [&](int px) {
+          if (!col_has || px < left || px > right)
+            return;
+          line_points.emplace_back((double)px, value_to_y(col_last));
+          if (col_max > col_min) {
+            envelope_points.emplace_back((double)px, value_to_y(col_min));
+            envelope_points.emplace_back((double)px, value_to_y(col_max));
+          }
+          col_has = false;
+        };
+
+        for (const auto &sample : render_samples) {
+          const uint64_t sp = std::max(start_sample, sample.start_sample);
+          const int px = static_cast<int>(sp * inv_spp - pixels_offset);
+          if (px < left || px > right)
+            continue;
+
+          if (px != cur_col) {
+            flush_col(cur_col);
+            cur_col = px;
+            col_min = col_max = col_last = sample.value;
+            col_has = true;
+          } else {
+            if (!col_has)
+              col_min = col_max = sample.value;
+            col_min = std::min(col_min, sample.value);
+            col_max = std::max(col_max, sample.value);
+            col_last = sample.value;
+            col_has = true;
+          }
+        }
+        flush_col(cur_col);
+      }
+
+      const QColor wave_color = getAnalogChannelColor(ch_data->channel());
+      if (envelope_points.size() >= 2) {
+        p.setPen(QPen(wave_color, 1.0));
+        p.drawLines(envelope_points.data(),
+                    static_cast<int>(envelope_points.size() / 2));
+      }
+      if (line_points.size() > 1) {
+        p.setPen(QPen(wave_color, 1.5));
+        p.setBrush(Qt::NoBrush);
+        p.drawPolyline(line_points.data(), static_cast<int>(line_points.size()));
+      }
+
+      // Analog display-trigger visualization.
+      if (trigger_visual && trigger_cfg.enabled &&
+          ch_data->channel() == trigger_cfg.channel) {
+        const double eng_lo = ch_data->engineering_minimum();
+        const double eng_hi = ch_data->engineering_maximum();
+        const double gain = (eng_hi - eng_lo) * 0.5;
+        const double offset = (eng_hi + eng_lo) * 0.5;
+        double normalized_level = 0.0;
+        if (std::abs(gain) > 1e-15)
+          normalized_level = (trigger_cfg.level - offset) / gain;
+        const double display_level = is_auto
+            ? normalized_level - value_center : normalized_level;
+        const double level_y = mid_y - display_level * scale_factor;
+        const double row_top = y;
+        const double row_bottom = y + analog_ch_height;
+        const QColor trig_color(235, 80, 80);
+
+        p.save();
+        p.setPen(QPen(trig_color, 1.2, Qt::DashLine));
+        if (level_y >= row_top && level_y <= row_bottom)
+          p.drawLine(QPointF(left, level_y), QPointF(right, level_y));
+
+        const double tx = left + (right - left) *
+            std::clamp(trigger_cfg.display_position_percent, 0, 100) / 100.0;
+        p.setPen(QPen(trig_color, 1.5));
+        p.drawLine(QPointF(tx, row_top), QPointF(tx, row_bottom));
+        const QPointF tri[3] = {
+            QPointF(tx, row_top + 2), QPointF(tx - 5, row_top + 10),
+            QPointF(tx + 5, row_top + 10)};
+        p.setBrush(trig_color);
+        p.drawPolygon(tri, 3);
+
+        QString edge_text = QStringLiteral("\u2191");
+        if (trigger_cfg.edge == pv::data::DecoderAnalogTriggerEdge::Falling)
+          edge_text = QStringLiteral("\u2193");
+        else if (trigger_cfg.edge == pv::data::DecoderAnalogTriggerEdge::Either)
+          edge_text = QStringLiteral("\u2195");
+        const QString mode_text =
+            trigger_cfg.mode == pv::data::DecoderAnalogTriggerMode::Normal
+                ? QStringLiteral("N") : QStringLiteral("A");
+        const QString unit = QString::fromStdString(ch_data->engineering_unit());
+        const QString label = QStringLiteral("TRIG CH%1 %2 %3 %4%5 @%6%")
+            .arg(ch_data->channel()).arg(mode_text).arg(edge_text)
+            .arg(QString::number(trigger_cfg.level, 'g', 7))
+            .arg(unit.isEmpty() ? QString() : QStringLiteral(" ") + unit)
+            .arg(std::clamp(trigger_cfg.display_position_percent, 0, 100));
+        p.setPen(trig_color);
+        p.setBrush(Qt::NoBrush);
+        p.drawText(QPointF(left + 6, row_top + 14), label);
+        p.restore();
+      }
+
+      _cur_row_headings.push_back(QString::fromStdString(ch_data->label()));
+      y += analog_ch_height;
+    }
+    p.restore();
   }
 }
 
@@ -472,7 +733,36 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
   if (a.start_sample() == a.end_sample()) {
     draw_instant(a, p, fill, outline, text_color, h, start, y, min_annWidth);
   } else {
-    draw_range(a, p, fill, outline, text_color, h, start, end, y, fore, back);
+    // TDM value bubbles carry long PCM hex text. At medium zoom the
+    // time-span rectangle can be narrower than the readable label, so
+    // enlarge only the visual capsule around its true time centre.
+    // The annotation's real start/end samples are unchanged for measurement
+    // and hit-testing.
+    double visual_start = start;
+    double visual_end = end;
+    bool tdm_audio_value = false;
+    if (!_decoder_stack->stack().empty()) {
+      auto &top_up = _decoder_stack->stack().front();
+      auto *top_decoder = top_up.get();
+      const srd_decoder *definition = top_decoder ? top_decoder->decoder() : nullptr;
+      tdm_audio_value = definition && definition->id &&
+                        (std::strcmp(definition->id, "tdm_audio_fast") == 0 ||
+                         std::strcmp(definition->id, "tdm_audio_c") == 0);
+    }
+    if (tdm_audio_value && !a.annotations().empty() && end - start > 2.0) {
+      const QFontMetrics fm(theme_font_decoder());
+      const int text_width = fm.horizontalAdvance(a.annotations().front());
+      const double wanted = std::min(160.0, std::max(48.0, text_width + 24.0));
+      if (visual_end - visual_start < wanted) {
+        const double center = (visual_start + visual_end) * 0.5;
+        visual_start = center - wanted * 0.5;
+        visual_end = center + wanted * 0.5;
+      }
+    }
+    draw_range(a, p, fill, outline, text_color, h, visual_start, visual_end,
+               y, fore, back);
+
+    // SDA sampling-edge marker deferred to Task 26 (requires paint_mark edge_dir parameter)
 
     if ((a.type() / 100 == 2) && (end - start > 20)) {
   for (auto &up : _decoder_stack->stack()) {
@@ -756,14 +1046,14 @@ void DecodeTrace::on_decode_done() {
   // elapsed < 20ms, leaving the progress bar stuck at 99%.
   decoded_progress(_decoder_stack->get_progress());
 
-  // Always recalculate layout after decode completes.
-  // This is critical for MCP-initiated decodes where set_data_document()
-  // may have been called without triggering signals_changed(), leaving
-  // the DecodeTrace at an incorrect y position (e.g. off-screen).
-  // Without this, the decode track appears empty until the user manually
-  // triggers a layout recalculation (e.g. by re-capturing).
+  // Recalculate the full signal layout only when the decoder trace height
+  // actually changed.  TDM/PWM Repeat normally keeps the same channel/row
+  // layout, so doing signals_changed() every frame needlessly rebuilds
+  // groups, margins, scrollbars and calls data_updated() again.
   if (_view) {
-    _view->signals_changed(nullptr);
+    const int expectedHeight = rows_size() * _view->get_signalHeight();
+    if (_totalHeight != expectedHeight)
+      _view->signals_changed(nullptr);
   }
 
   if (_view && _data_source->is_stopped_status()) {
@@ -785,26 +1075,246 @@ void DecodeTrace::on_error_message_changed(const QString &msg) {
   }
 }
 
-int DecodeTrace::rows_size() {
-  using pv::data::decode::Decoder;
-  int size = 0;
+// TDM/PWM analog port helper methods
+
+int DecodeTrace::analog_channel_count() const {
+  if (!_decoder_stack || !_decoder_stack->analog_visible())
+    return 0;
+  int count = 0;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible())
+      ++count;
+  return count;
+}
+
+bool DecodeTrace::hit_test_analog_channel(
+    int viewportY, int vOffset, int &ch_index,
+    std::shared_ptr<pv::data::DecoderAnalogData> &out_data) {
+  ch_index = -1;
+  out_data.reset();
+  if (!_decoder_stack || !_decoder_stack->analog_visible())
+    return false;
+
+  std::vector<std::shared_ptr<pv::data::DecoderAnalogData>> visible;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible()) visible.push_back(ch);
+  if (visible.empty()) return false;
+
+  const int units = rows_size();
+  const int base_h = units > 0 ? _totalHeight / units : _view->get_signalHeight();
+  const int analog_h = base_h * 2;
+  const int annotation_units = std::max(0, units - 2 * static_cast<int>(visible.size()));
+  const int content_y = viewportY + vOffset;
+  const int analog_top = get_y() - _totalHeight / 2 + annotation_units * base_h;
+
+  for (size_t i = 0; i < visible.size(); ++i) {
+    const int y0 = analog_top + static_cast<int>(i) * analog_h;
+    if (content_y >= y0 && content_y < y0 + analog_h) {
+      ch_index = visible[i]->channel();
+      out_data = visible[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DecodeTrace::get_analog_channel_rect(int ch_index, int vOffset,
+                                          QRectF &screen_row_rect) {
+  if (!_decoder_stack) return false;
+  std::vector<std::shared_ptr<pv::data::DecoderAnalogData>> visible;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible()) visible.push_back(ch);
+
+  int row = -1;
+  for (size_t i = 0; i < visible.size(); ++i)
+    if (visible[i]->channel() == ch_index) { row = static_cast<int>(i); break; }
+  if (row < 0) return false;
+
+  const int units = rows_size();
+  const int base_h = units > 0 ? _totalHeight / units : _view->get_signalHeight();
+  const int analog_h = base_h * 2;
+  const int annotation_units = std::max(0, units - 2 * static_cast<int>(visible.size()));
+  const int row_top = get_y() - _totalHeight / 2 + annotation_units * base_h + row * analog_h;
+  screen_row_rect = QRectF(0, row_top - vOffset, _view->get_view_width(), analog_h);
+  return true;
+}
+
+bool DecodeTrace::get_analog_hover(
+    int viewportX, int viewportY, int vOffset, uint64_t capture_sample,
+    int &ch_index, pv::data::DecoderAnalogSample &sample,
+    double &engineering_value, std::string &unit, QPointF &screen_point,
+    QRectF &screen_row_rect) {
+  std::shared_ptr<pv::data::DecoderAnalogData> ch_data;
+  if (!hit_test_analog_channel(viewportY, vOffset, ch_index, ch_data) ||
+      !ch_data || !ch_data->visible() ||
+      !ch_data->get_sample_at(capture_sample, sample))
+    return false;
+  if (!get_analog_channel_rect(ch_index, vOffset, screen_row_rect))
+    return false;
+
+  const float analog_h = static_cast<float>(screen_row_rect.height());
+  const float mid_y = static_cast<float>(screen_row_rect.top()) +
+      ch_data->v_offset() * analog_h * 0.5f;
+  const float base_h = analog_h * 0.45f;
+  float point_y = mid_y;
+  const float v_scale = ch_data->v_scale();
+  if (v_scale < 0.001f) {
+    const uint64_t vis_start = _view->pixel2index(0);
+    const uint64_t vis_end = _view->pixel2index(_view->get_view_width());
+    std::vector<pv::data::DecoderAnalogSample> tmp;
+    float min_val = -1.0f, max_val = 1.0f;
+    ch_data->copy_samples_for_render(std::min(vis_start, vis_end),
+                                     std::max(vis_start, vis_end),
+                                     1024, tmp, min_val, max_val);
+    const float center = (min_val + max_val) * 0.5f;
+    const float range = max_val - min_val;
+    const float factor = range > 0.001f ? (base_h * 1.8f / range) : base_h;
+    point_y -= (sample.value - center) * factor;
+  } else {
+    point_y -= sample.value * base_h * v_scale;
+  }
+
+  engineering_value = ch_data->engineering_value(sample.value);
+  unit = ch_data->engineering_unit();
+  screen_point = QPointF(viewportX, point_y);
+  return true;
+}
+
+void DecodeTrace::set_indicator_heading_row(int row) {
+  _indicator_heading_row = row;
+}
+
+void DecodeTrace::set_indicator_analog_channel(int ch_index) {
+  std::vector<std::shared_ptr<pv::data::DecoderAnalogData>> visible;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible()) visible.push_back(ch);
+  int ai = -1;
+  for (size_t i = 0; i < visible.size(); ++i) {
+    if (visible[i]->channel() == ch_index) { ai = static_cast<int>(i); break; }
+  }
+  if (ai < 0) { _indicator_heading_row = -1; return; }
+  const int ann_rows = std::max(
+      0, static_cast<int>(_cur_row_headings.size()) - static_cast<int>(visible.size()));
+  _indicator_heading_row = ann_rows + ai;
+}
+
+bool DecodeTrace::hit_test_indicator_auto_fit(
+    int viewportX, int viewportY, int vOffset, int &out_ch_index,
+    std::shared_ptr<pv::data::DecoderAnalogData> &out_data) {
+  out_ch_index = -1;
+  out_data.reset();
+  if (_indicator_heading_row < 0 || !_indicator_button_rect.isValid())
+    return false;
+
+  std::vector<std::shared_ptr<pv::data::DecoderAnalogData>> visible;
+  for (const auto &ch : _decoder_stack->analog_data_copy())
+    if (ch && ch->visible()) visible.push_back(ch);
+  const int ann_rows = std::max(
+      0, static_cast<int>(_cur_row_headings.size()) - static_cast<int>(visible.size()));
+  const int ai = _indicator_heading_row - ann_rows;
+  if (ai < 0 || ai >= static_cast<int>(visible.size()))
+    return false;
+
+  const QPointF pos(viewportX, viewportY + vOffset);
+  if (!_indicator_button_rect.contains(pos))
+    return false;
+  out_data = visible[ai];
+  out_ch_index = out_data ? out_data->channel() : -1;
+  return out_data != nullptr;
+}
+
+void DecodeTrace::auto_fit_visible_analog(
+    const std::shared_ptr<pv::data::DecoderAnalogData> &ch_data,
+    uint64_t vis_start_sample, uint64_t vis_end_sample) {
+  if (!ch_data) return;
+  auto view = ch_data->read_samples();
+  const auto &samples = view.samples();
+  if (samples.empty()) return;
+
+  size_t lo = 0, hi = samples.size();
+  while (lo < hi) {
+    const size_t mid = lo + (hi-lo)/2;
+    if (samples[mid].end_sample < vis_start_sample) lo = mid + 1;
+    else hi = mid;
+  }
+  float mn = 0.0f, mx = 0.0f;
+  bool found = false;
+  for (size_t i = lo; i < samples.size(); ++i) {
+    if (samples[i].start_sample > vis_end_sample) break;
+    const float v = samples[i].value;
+    if (!found) { mn = mx = v; found = true; }
+    else { mn = std::min(mn, v); mx = std::max(mx, v); }
+  }
+  if (!found) return;
+  const float range = mx - mn;
+  if (range < 0.0001f) {
+    ch_data->set_v_scale(1.0f);
+    ch_data->set_v_offset(1.0f);
+    return;
+  }
+  float vs = 2.0f / range;
+  vs = std::min(100.0f, std::max(0.05f, vs));
+  ch_data->set_v_scale(vs);
+  float vo = 1.0f + 0.9f * ((mn + mx) * 0.5f) * vs;
+  vo = std::min(3.0f, std::max(-3.0f, vo));
+  ch_data->set_v_offset(vo);
+}
+
+void DecodeTrace::sync_analog_display_options(
+    const std::shared_ptr<pv::data::DecoderAnalogData> &ch_data,
+    bool sync_vpos, bool sync_vzoom) {
+  if (!ch_data || (!sync_vpos && !sync_vzoom)) return;
+  const int channel = ch_data->channel();
+  if (channel < 0) return;
+
+  const std::string vpos_key = "ch" + std::to_string(channel) + "_vpos";
+  const std::string vzoom_key = "ch" + std::to_string(channel) + "_vzoom";
 
   for (auto &up : _decoder_stack->stack()) {
     auto dec = up.get();
-    if (dec->shown()) {
-      auto rows = _decoder_stack->get_rows_gshow();
+    const srd_decoder *definition = dec ? dec->decoder() : nullptr;
+    if (!definition || !definition->id) continue;
+    const bool target = std::strstr(definition->id, "tdm_audio") != nullptr ||
+                        std::strstr(definition->id, "pwm_waveform") != nullptr;
+    if (!target) continue;
 
-      for (auto i = rows.begin(); i != rows.end(); i++) {
-        pv::data::decode::Row _row = (*i).first;
-        if (_row.decoder() == dec->decoder() &&
-            _decoder_stack->has_annotations((*i).first) && (*i).second)
-          size++;
-      }
-    } else {
-      size++;
+    bool has_vpos = false, has_vzoom = false;
+    for (GSList *l = definition->options; l; l = l->next) {
+      const auto *option = static_cast<const srd_decoder_option *>(l->data);
+      if (!option || !option->id) continue;
+      has_vpos = has_vpos || vpos_key == option->id;
+      has_vzoom = has_vzoom || vzoom_key == option->id;
     }
+    if (sync_vpos && has_vpos)
+      dec->set_option(vpos_key.c_str(), g_variant_new_double(ch_data->v_offset()));
+    if (sync_vzoom && has_vzoom)
+      dec->set_option(vzoom_key.c_str(), g_variant_new_double(ch_data->v_scale()));
   }
-  return size == 0 ? 1 : size;
+}
+
+int DecodeTrace::rows_size() {
+using pv::data::decode::Decoder;
+int size = 0;
+
+for (auto &up : _decoder_stack->stack()) {
+auto dec = up.get();
+if (dec->shown()) {
+auto rows = _decoder_stack->get_rows_gshow();
+
+for (auto i = rows.begin(); i != rows.end(); i++) {
+pv::data::decode::Row _row = (*i).first;
+if (_row.decoder() == dec->decoder() &&
+_decoder_stack->has_annotations((*i).first) && (*i).second)
+size++;
+}
+} else {
+size++;
+}
+}
+// analog rows use two standard height units.
+size += 2 * analog_channel_count();
+
+return size == 0 ? 1 : size;
 }
 
 void DecodeTrace::paint_type_options(QPainter &p, int right, const QPoint pt,

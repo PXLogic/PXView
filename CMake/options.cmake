@@ -54,3 +54,27 @@ option(ENABLE_CLANG_TIDY "Enable Clang-Tidy static analysis (requires clang-tidy
 #= decoder_test option
 #-------------------------------------------------------------------------------
 option(BUILD_DECODER_TEST "Build the C decoder test program" OFF)
+
+#===============================================================================
+#= Tauri desktop wrapper option
+#-------------------------------------------------------------------------------
+# Builds the PXView Agent desktop wrapper (Tauri v2 + React/Vite).
+# The Tauri binary wraps the web UI and spawns PXView --headless on startup.
+# Requires Rust toolchain (rustc, cargo) and Node.js (npm) in PATH.
+# Platform WebView runtime requirements:
+#   Windows: WebView2 Runtime (preinstalled on Win10/11, or download bootstrapper)
+#   Linux:   webkit2gtk-4.1, libgtk-3, librsvg
+#   macOS:   WKWebView (system framework, no extra deps)
+#-------------------------------------------------------------------------------
+#
+#= Windows platform compatibility
+#-------------------------------------------------------------------------------
+# PXView has deeply integrated Qt6, which uses WinRT API sets (Win8+) as hard
+# imports. Win7 SP1 compatibility is therefore NOT supported and will not be
+# pursued. The effective minimum is Windows 10 1809 (matching WebView2).
+#
+# Technical note: The MinGW-w64 UCRT64 toolchain links against msvcrt.dll
+# (available since Win95), NOT ucrtbase.dll, so no UCRT runtime bundling is
+# needed. The Win7 blocker is Qt6Core.dll's WinRT API imports, not UCRT.
+#-------------------------------------------------------------------------------
+option(ENABLE_TAURI "Build the Tauri desktop wrapper (PXView Agent)" ON)

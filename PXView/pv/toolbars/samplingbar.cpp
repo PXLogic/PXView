@@ -665,7 +665,8 @@ void SamplingBar::update_sample_count_selector() {
   double pre_duration = SR_SEC(1);
   double duration;
 
-  pxv_info("Update sample count list.");
+  if (PXV_VERBOSE_REPEAT_LOG)
+pxv_info("Update sample count list.");
 
   // DSO 模式下拉内容是 time/div（时基），非 DSO 模式是采样深度（总捕获时长）。
   // 标签需要随模式切换，否则用户看到"采样深度"标签下显示"ms/div"会误解为电压刻度。

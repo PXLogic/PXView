@@ -671,6 +671,18 @@ public slots:
   void set_trig_pos(int percent);
   void show_lissajous(bool show);
 
+  // -- decoder analog trigger display-hold (atomic page-flip)
+  // Stage or commit a decoder analog trigger position. When hold is
+  // active, the position is staged but not applied until hold is released.
+  void set_decoder_analog_trigger_position(uint64_t sample_position,
+                                           int display_position_percent);
+  // Enter or leave display-hold. When hold=true, viewport updates are
+  // frozen until layout converges; when hold=false, the staged trigger
+  // position is committed and normal rendering resumes.
+  void set_decoder_analog_trigger_display_hold(bool hold);
+  // Force-release hold (e.g. on manual stop) without committing a trigger.
+  void force_release_decoder_analog_trigger_display_hold();
+
 signals:
   void hover_point_changed();
   void cursor_update();
@@ -726,6 +738,7 @@ public:
   inline bool header_collapsed() const { return _header_collapsed; }
   inline bool destroying() const { return _destroying; }
   inline void set_destroying(bool v) { _destroying = v; }
+  inline bool is_decoder_analog_trigger_hold() const { return _decoder_analog_trigger_hold; }
   inline Viewport* active_viewport() { return _active_viewport; }
   inline void set_active_viewport(Viewport* vp) { _active_viewport = vp; }
   inline ViewLayout* layout_delegate() { return _layout.get(); }
@@ -824,6 +837,17 @@ private:
   bool _show_lissajous;
   bool _destroying = false;
   DeviceAgent *_device_agent;
+
+  // ---- Decoder analog trigger display-hold (atomic page-flip) ----
+  // When _decoder_analog_trigger_hold is true, viewport updates are
+  // suppressed so the old frame stays visible while a new frame is
+  // being decoded and aligned. Once the trigger position is committed,
+  // hold is released and the viewport updates atomically.
+  bool _decoder_analog_trigger_hold = false;
+  // Pending trigger position (sample + display percent) staged during HOLD.
+  bool _decoder_analog_trigger_pending = false;
+  uint64_t _decoder_analog_trigger_pending_sample = 0;
+  int _decoder_analog_trigger_pending_percent = 50;
 
 };
 

@@ -2642,12 +2642,18 @@ void LogicSnapshot::decode_end() {
 void LogicSnapshot::push_to_free_list(void* ptr) {
   if (!ptr) return;
   if (_mmap_alloc && _mmap_alloc->is_mmap_address(ptr)) {
-    // 归还物理页给 OS（RAM 模式 decommit / 磁盘模式 punch hole），并清除 written 位
-    // 使该槽位下次分配时被视为 fresh（跳过 memset，由 OS 零填充）。
-    _mmap_alloc->decommit_block(ptr, LeafBlockSpace);
-    uint64_t abs_slot = 0;
-    if (_mmap_alloc->block_absolute_slot(ptr, LeafBlockSpace, abs_slot)) {
-      clear_mmap_slot_by_abs(abs_slot);
+    // Decommit physical pages back to OS. If decommit_block() returns true
+    // (Linux madvise on anonymous mapping), the OS guarantees zero-fill on
+    // next access — clear the written flag so the slot is treated as fresh
+    // (skip memset, rely on OS zero-fill). If it returns false (Windows
+    // SEC_RESERVE or file-backed), pages may retain content — keep the
+    // written flag so the allocator explicitly memsets on reuse.
+    const bool os_zeroed = _mmap_alloc->decommit_block(ptr, LeafBlockSpace);
+    if (os_zeroed) {
+      uint64_t abs_slot = 0;
+      if (_mmap_alloc->block_absolute_slot(ptr, LeafBlockSpace, abs_slot)) {
+        clear_mmap_slot_by_abs(abs_slot);
+      }
     }
     return;
   }

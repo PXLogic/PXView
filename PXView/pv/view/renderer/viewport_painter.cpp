@@ -330,14 +330,17 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
 
     // Phase 5: measurement overlay via MeasureOverlayPass.
     {
-      RenderContext mctx;
-      mctx.view = &_viewport->view();
-      mctx.viewport = _viewport;
-      mctx.type = _viewport->type();
-      mctx.fore = fore;
-      mctx.back = back;
+RenderContext mctx;
+mctx.view = &_viewport->view();
+mctx.viewport = _viewport;
+mctx.type = _viewport->type();
+mctx.fore = fore;
+mctx.back = back;
+mctx.traces = &traces;
+mctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+mctx.viewWidth = _viewport->view().get_view_width();
 
-      MeasureOverlayPass measurePass;
+MeasureOverlayPass measurePass;
       if (measurePass.should_run(mctx))
         measurePass.render(p, mctx);
     }

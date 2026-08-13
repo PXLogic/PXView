@@ -96,4 +96,10 @@ QString get_pxv_log_path();
 #undef assert
 #define assert(cond) pxv_assert(cond, "Assertion failed: %s, file %s, line %d", #cond, __FILE__, __LINE__)
 
+// Verbose repeat-mode logging gate. Set to 1 to enable per-frame repeat
+// diagnostics (capture restart, decode done, analog trigger evaluation).
+#ifndef PXV_VERBOSE_REPEAT_LOG
+#define PXV_VERBOSE_REPEAT_LOG 0
+#endif
+
 #endif

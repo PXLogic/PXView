@@ -88,6 +88,7 @@ static QString print_pattern(GVariant *const gvar);
 
 private:
 	DeviceAgent *_device_agent;
+    SigSession *_session = nullptr;
  
 };
 

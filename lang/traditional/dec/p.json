@@ -442,5 +442,229 @@
     {
         "id": "dec_tlc5620_opt_vref_d",
         "text": "參考電壓 DACD(V)"
+    },
+    {
+        "id": "dec_tdm_audio_fast_chan_clock",
+        "text": "位元時脈"
+    },
+    {
+        "id": "dec_tdm_audio_fast_chan_frame",
+        "text": "幀同步"
+    },
+    {
+        "id": "dec_tdm_audio_fast_chan_data",
+        "text": "資料"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_bps",
+        "text": "每取樣位元數"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_channels",
+        "text": "每幀通道數"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_edge",
+        "text": "BCK 取樣邊緣"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_frame_edge",
+        "text": "FSYNC/LRCK 極性"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_align",
+        "text": "資料對齊"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_data_format",
+        "text": "資料格式"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_output",
+        "text": "輸出模式"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_realtime_decode",
+        "text": "即時解碼"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_vzoom",
+        "text": "垂直縮放 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch1_vzoom",
+        "text": "垂直縮放 Ch1"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch2_vzoom",
+        "text": "垂直縮放 Ch2"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch3_vzoom",
+        "text": "垂直縮放 Ch3"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch4_vzoom",
+        "text": "垂直縮放 Ch4"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch5_vzoom",
+        "text": "垂直縮放 Ch5"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch6_vzoom",
+        "text": "垂直縮放 Ch6"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch7_vzoom",
+        "text": "垂直縮放 Ch7"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_vpos",
+        "text": "垂直位置 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch1_vpos",
+        "text": "垂直位置 Ch1"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch2_vpos",
+        "text": "垂直位置 Ch2"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch3_vpos",
+        "text": "垂直位置 Ch3"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch4_vpos",
+        "text": "垂直位置 Ch4"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch5_vpos",
+        "text": "垂直位置 Ch5"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch6_vpos",
+        "text": "垂直位置 Ch6"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch7_vpos",
+        "text": "垂直位置 Ch7"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_enable",
+        "text": "顯示 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch1_enable",
+        "text": "顯示 Ch1"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch2_enable",
+        "text": "顯示 Ch2"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch3_enable",
+        "text": "顯示 Ch3"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch4_enable",
+        "text": "顯示 Ch4"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch5_enable",
+        "text": "顯示 Ch5"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch6_enable",
+        "text": "顯示 Ch6"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch7_enable",
+        "text": "顯示 Ch7"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_range_mode",
+        "text": "量程模式 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_eng_min",
+        "text": "工程最小值 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_eng_max",
+        "text": "工程最大值 Ch0"
+    },
+    {
+        "id": "dec_tdm_audio_fast_opt_ch0_eng_unit",
+        "text": "工程單位 Ch0"
+    },
+    {
+        "id": "dec_pwm_waveform_chan_a",
+        "text": "PWM A / PWM+"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_chan_b",
+        "text": "PWM B / PWM-"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_polarity",
+        "text": "PWM A 有效極性"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_polarity_b",
+        "text": "PWM B 有效極性"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_filter_cutoff_hz",
+        "text": "RC 低通截止頻率 (Hz)"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_vzoom",
+        "text": "垂直縮放 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_vpos",
+        "text": "垂直位置 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_range_mode",
+        "text": "量程模式 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_eng_min",
+        "text": "工程最小值 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_eng_max",
+        "text": "工程最大值 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch0_eng_unit",
+        "text": "工程單位 主輸出"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch1_vzoom",
+        "text": "垂直縮放 占空比 A"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch1_vpos",
+        "text": "垂直位置 占空比 A"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch2_vzoom",
+        "text": "垂直縮放 占空比 B"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch2_vpos",
+        "text": "垂直位置 占空比 B"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch3_vzoom",
+        "text": "垂直縮放 共模"
+    },
+    {
+        "id": "dec_pwm_waveform_opt_ch3_vpos",
+        "text": "垂直位置 共模"
     }
 ]

@@ -128,7 +128,7 @@ public:
 
     QRectF get_rect(LogicSetRegions type, int y, int right);
 
-    void paint_mark(QPainter &p, int xstart, int xend, int type);
+    void paint_mark(QPainter &p, int xstart, int xend, int type, int edge_dir = 0);
 
     void paint_mid_align_sample(QPainter &p, int left, int right, QColor fore, QColor back, uint64_t end_align_sample, const PaintContext &ctx);
 

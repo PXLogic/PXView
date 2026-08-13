@@ -92,11 +92,11 @@ export default function SettingsDrawer({ open, onClose }: { open: boolean; onClo
 
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/80 z-40" onClick={onClose} />
+      {/* Backdrop — starts below TopBar so window controls stay accessible */}
+      <div className="fixed top-16 left-0 right-0 bottom-0 bg-black/80 z-40" onClick={onClose} />
 
-      {/* Drawer */}
-      <div className="fixed top-0 right-0 h-full w-[450px] max-w-full bg-bg-casing border-l-4 border-border z-50 flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
+      {/* Drawer — starts below TopBar (h-16 = 64px) */}
+      <div className="fixed top-16 right-0 bottom-0 w-[450px] max-w-full bg-bg-casing border-l-4 border-border z-50 flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b-4 border-border bg-bg-casing-dark">
           <div className="flex items-center gap-3">

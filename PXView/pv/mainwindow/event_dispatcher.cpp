@@ -187,6 +187,10 @@ SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBu
       [this](const pv::interface::DelayedPropMsg &e) { on_delayed_prop_msg(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::SampleLimitsChanged>(
       [this](const pv::interface::SampleLimitsChanged &e) { on_sample_limits_changed(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DecoderAnalogTriggerFound>(
+      [this](const pv::interface::DecoderAnalogTriggerFound &e) { on_decoder_analog_trigger_found(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::DecoderAnalogTriggerDisplayHold>(
+      [this](const pv::interface::DecoderAnalogTriggerDisplayHold &e) { on_decoder_analog_trigger_display_hold(e); }));
 }
 // P0/P1: Safely resolve the current view. Returns nullptr if MainWindow is
 // gone (QPointer) or no tab is active. Callers MUST null-check the result
@@ -943,4 +947,30 @@ void SessionEventDispatcher::on_delayed_prop_msg(const pv::interface::DelayedPro
 
 void SessionEventDispatcher::on_sample_limits_changed(const pv::interface::SampleLimitsChanged &) {
   // Was ICaptureCallback::cur_samplelimits_changed() — empty default in original.
+}
+
+void SessionEventDispatcher::on_decoder_analog_trigger_found(
+    const pv::interface::DecoderAnalogTriggerFound &e) {
+  PV_WIN_GUARD();
+  // Generation token check: if the session's current generation has advanced
+  // past the event's generation, this event is stale (from a previous repeat
+  // frame) and should be discarded to avoid displaying an outdated trigger.
+  if (_window->session() &&
+      e.generation != _window->session()->repeat_analog_trigger_ui_generation_for_ui())
+    return;
+  if (auto *v = safe_current_view())
+    v->set_decoder_analog_trigger_position(e.sample_position,
+                                          e.display_position_percent);
+}
+
+void SessionEventDispatcher::on_decoder_analog_trigger_display_hold(
+    const pv::interface::DecoderAnalogTriggerDisplayHold &e) {
+  PV_WIN_GUARD();
+  // Generation token check: discard stale hold/release events from a
+  // previous repeat frame.
+  if (_window->session() &&
+      e.generation != _window->session()->repeat_analog_trigger_ui_generation_for_ui())
+    return;
+  if (auto *v = safe_current_view())
+    v->set_decoder_analog_trigger_display_hold(e.hold);
 }

@@ -270,6 +270,13 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(sdi);
     if (drv) {
         _driver_name = QString::fromLocal8Bit(drv->name);
+        // Keep historical PXView family names so DSLogic-specific channel
+        // mode / valid-channel UI paths are enabled.
+        if (_driver_name == "dreamsourcelab-dslogic") {
+            const char *model = sr_dev_inst_model_get(sdi);
+            _driver_name = model && !std::strncmp(model, "DSCope", 6)
+                ? "DSCope" : "DSLogic";
+        }
         if (_driver_name == "demo") {
             _dev_type = DEV_TYPE_DEMO;
             // Demo device declares both LOGIC_ANALYZER + OSCILLOSCOPE (implicit
@@ -305,7 +312,12 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
     }
 
     // Create upstream sr_session and add the device.
+    // Be defensive if an old session somehow remains: stop the persistent
+    // worker before destroying the session it may reference.
     if (_sr_session) {
+        if (sr_session_is_running(_sr_session) > 0)
+            sr_session_stop(_sr_session);
+        stop_session_thread();
         sr_session_destroy(_sr_session);
         _sr_session = nullptr;
     }
@@ -360,10 +372,9 @@ void DeviceAgent::release()
         if (sr_session_is_running(_sr_session)) {
             sr_session_stop(_sr_session);
         }
-        // Always join the worker thread BEFORE sr_session_destroy —
-        // the thread is blocked inside sr_session_run() which references
-        // the session object. Destroying the session underneath it would
-        // cause a use-after-free.
+        // Shut down and join the persistent worker BEFORE sr_session_destroy.
+        // The worker may be blocked in sr_session_run() or waiting for the
+        // next Repeat request, and in both cases holds access to this session.
         stop_session_thread();
         sr_session_destroy(_sr_session);
         _sr_session = nullptr;
@@ -413,11 +424,116 @@ void DeviceAgent::release()
     }
 }
 
+void DeviceAgent::ensure_session_thread()
+{
+    std::lock_guard<std::mutex> lk(_session_thread_mutex);
+    if (_session_thread.joinable())
+        return;
+
+    _session_worker_exit = false;
+    _session_start_requested = false;
+    _session_start_result_ready = false;
+    _session_start_result = false;
+    _session_run_active = false;
+    _session_run_sequence = 0;
+    _session_thread = std::thread(&DeviceAgent::session_thread_proc, this);
+}
+
+void DeviceAgent::session_thread_proc()
+{
+    // Give this long-lived worker its own GLib thread-default context.  Every
+    // sr_session_start() performed below therefore binds event sources to the
+    // same context and sr_session_run() pumps that exact context.  The context
+    // is created/destroyed once per opened device, not once per Repeat frame.
+    GMainContext *worker_context = g_main_context_new();
+    g_main_context_push_thread_default(worker_context);
+    pxv_info("DeviceAgent: persistent session worker started.");
+
+    for (;;) {
+        struct sr_session *session = nullptr;
+        struct sr_dev_driver *drv = nullptr;
+        IDeviceAgentCallback *callback = nullptr;
+        uint64_t run_seq = 0;
+
+        {
+            std::unique_lock<std::mutex> lk(_session_thread_mutex);
+            _session_thread_cv.wait(lk, [this]() {
+                return _session_worker_exit || _session_start_requested;
+            });
+            if (_session_worker_exit)
+                break;
+
+            _session_start_requested = false;
+            _session_start_result_ready = false;
+            _session_run_active = true;
+            session = _sr_session;
+            drv = _di ? sr_dev_inst_driver_get(_di) : nullptr;
+            callback = _callback;
+            run_seq = ++_session_run_sequence;
+        }
+
+        bool start_ok = false;
+        if (!session) {
+            pxv_err("DeviceAgent session worker[%llu]: session is null",
+                    (unsigned long long)run_seq);
+        } else if (!drv) {
+            // Input-module device: data was already fed synchronously.
+            start_ok = true;
+        } else {
+            start_ok = (sr_session_start(session) == SR_OK);
+            if (!start_ok)
+                pxv_err("DeviceAgent session worker[%llu]: sr_session_start failed",
+                        (unsigned long long)run_seq);
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(_session_thread_mutex);
+            _session_start_result = start_ok;
+            _session_start_result_ready = true;
+        }
+        _session_thread_cv.notify_all();
+
+        if (start_ok && drv) {
+            // Block until the driver removes all sources / sr_session_stop()
+            // quits the GLib loop.  The worker itself remains alive afterwards.
+            sr_session_run(session);
+        }
+
+        if (start_ok && callback)
+            callback->DeviceSessionStopped();
+
+        if (PXV_VERBOSE_REPEAT_LOG)
+          pxv_info("DeviceAgent: persistent session worker[%llu] run complete.",
+                 (unsigned long long)run_seq);
+
+        {
+            std::lock_guard<std::mutex> lk(_session_thread_mutex);
+            _session_run_active = false;
+        }
+        _session_thread_cv.notify_all();
+    }
+
+    g_main_context_pop_thread_default(worker_context);
+    g_main_context_unref(worker_context);
+    pxv_info("DeviceAgent: persistent session worker stopped.");
+}
+
 void DeviceAgent::stop_session_thread()
 {
-    if (_session_thread.joinable()) {
-        _session_thread.join();
+    {
+        std::lock_guard<std::mutex> lk(_session_thread_mutex);
+        _session_worker_exit = true;
+        _session_start_requested = false;
     }
+    _session_thread_cv.notify_all();
+    if (_session_thread.joinable())
+        _session_thread.join();
+
+    std::lock_guard<std::mutex> lk(_session_thread_mutex);
+    _session_worker_exit = false;
+    _session_start_result_ready = false;
+    _session_start_result = false;
+    _session_run_active = false;
 }
 
 void DeviceAgent::update()
@@ -450,6 +566,11 @@ void DeviceAgent::update()
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(_di);
     if (drv) {
         _driver_name = QString::fromLocal8Bit(drv->name);
+        if (_driver_name == "dreamsourcelab-dslogic") {
+            const char *model = sr_dev_inst_model_get(_di);
+            _driver_name = model && !std::strncmp(model, "DSCope", 6)
+                ? "DSCope" : "DSLogic";
+        }
     }
 
     // dev_type is set in open_by_handle; keep it here for consistency.
@@ -947,97 +1068,36 @@ bool DeviceAgent::start()
         return false;
     }
 
-    // Defensive: a previous thread should have been joined in stop()/release().
-    // If one is somehow still alive, join it before starting a new run.
-    stop_session_thread();
+    // V11: do not create/destroy one std::thread per Repeat frame.  Reuse the
+    // persistent worker and wait until the previous run is fully back at its
+    // command loop before requesting the next one.
+    ensure_session_thread();
 
-    // Input module devices (VCD, CSV, binary, Saleae, etc.) have no driver
-    // (sdi->driver == NULL). sr_session_start() calls sr_config_commit(sdi)
-    // which requires a driver, so it would fail/crash for these devices.
-    //
-    // PulseView handles this by making InputFile::start() a no-op — data is
-    // fed directly via sr_input_send() in InputFile::run(), which calls
-    // sr_session_send() internally (bypassing sr_session_start/run entirely).
-    //
-    // PXView's import_file() also feeds data directly via sr_input_send().
-    // When CurrentDeviceChanged fires 100ms later and triggers start_capture(),
-    // we must NOT call sr_session_start/run for input module devices — the
-    // data has already been fed and SR_DF_END has already been sent.
-    //
-    // Start a minimal thread that immediately calls DeviceSessionStopped() so
-    // the CaptureManager lifecycle completes normally (ST_RUNNING → SessionStopped
-    // → release guard → EndCollectWork). The SessionStopped event is broadcast
-    // async, so it won't be processed until exec_capture() returns and sets
-    // ST_RUNNING — no race condition.
-    struct sr_dev_driver *drv = _di ? sr_dev_inst_driver_get(_di) : nullptr;
-    if (!drv) {
-        pxv_info("DeviceAgent::start: input-module device (no driver), "
-                 "skipping sr_session_start/run — data already fed by import_file");
-        std::promise<bool> start_promise;
-        std::future<bool> start_future = start_promise.get_future();
-        _session_thread = std::thread([this, &start_promise]() {
-            start_promise.set_value(true);
-            // Immediately notify that the "session" has stopped.
-            // Data was already fed by import_file, so there's nothing to run.
-            if (_callback) {
-                _callback->DeviceSessionStopped();
-            }
-        });
-        bool ok = start_future.get();
-        if (!ok) {
-            stop_session_thread();
-        }
-        return ok;
+    std::unique_lock<std::mutex> lk(_session_thread_mutex);
+
+    // V14: never let the UI/repeat control thread wait forever for a previous
+    // session run that failed to drain.  With a healthy driver this condition
+    // is normally satisfied immediately.  A timeout means the previous USB /
+    // GLib run is still alive; fail this start cleanly and let the caller's
+    // Repeat retry/backoff path try again instead of freezing the application.
+    if (!_session_thread_cv.wait_for(lk, std::chrono::milliseconds(100),
+            [this]() {
+                return !_session_run_active && !_session_start_requested;
+            })) {
+        pxv_warn("DeviceAgent::start: previous session run still active after "
+                 "100 ms; refusing this start without blocking UI.");
+        return false;
     }
 
-    // CRITICAL: Both sr_session_start() and sr_session_run() MUST execute in
-    // the SAME thread. This is how PulseView does it (sample_thread_proc calls
-    // device_->start() then device_->run() sequentially).
-    //
-    // Reason: sr_session_start() calls set_main_context() which captures the
-    // calling thread's GLib thread-default main context via
-    // g_main_context_ref_thread_default(). sr_session_run() then creates a
-    // GMainLoop bound to that context and runs g_main_loop_run(). If start()
-    // runs on the GUI thread but run() on a worker thread, the main context
-    // belongs to the wrong thread — on Windows this causes
-    // libusb_get_pollfds() to fail (nullptr) and USB event sources are never
-    // properly dispatched, resulting in incomplete or no data capture.
-    //
-    // Use std::promise to synchronize the start result back to the caller.
-    std::promise<bool> start_promise;
-    std::future<bool> start_future = start_promise.get_future();
+    _session_start_result_ready = false;
+    _session_start_result = false;
+    _session_start_requested = true;
+    _session_thread_cv.notify_all();
 
-    _session_thread = std::thread([this, &start_promise]() {
-        if (sr_session_start(_sr_session) != SR_OK) {
-            pxv_err("DeviceAgent::start: sr_session_start failed");
-            start_promise.set_value(false);
-            return;
-        }
-        start_promise.set_value(true);
-
-        // Block until sr_session_stop() causes the main loop to quit.
-        sr_session_run(_sr_session);
-
-        // sr_session_run() has returned → the libsigrok session is fully
-        // stopped (main loop quit, event sources removed, running=FALSE).
-        // This is the upstream equivalent of fork libsigrok's
-        // DS_EV_COLLECT_TASK_END — the reliable "session really stopped"
-        // signal. SR_DF_END fires earlier (while the main loop is still
-        // running), so it cannot be used to synchronise the next capture.
-        // Notify the application layer so it can release the CaptureOwnerGuard
-        // and broadcast EndCollectWork. Must be the last statement — the
-        // callback must not touch _session_thread (which is this thread).
-        if (_callback) {
-            _callback->DeviceSessionStopped();
-        }
+    _session_thread_cv.wait(lk, [this]() {
+        return _session_start_result_ready || _session_worker_exit;
     });
-
-    // Wait for the worker thread to report sr_session_start() result.
-    bool ok = start_future.get();
-    if (!ok) {
-        stop_session_thread();  // join the thread on failure
-    }
-    return ok;
+    return !_session_worker_exit && _session_start_result;
 }
 
 bool DeviceAgent::stop()
@@ -1047,14 +1107,48 @@ bool DeviceAgent::stop()
         return false;
     }
 
-    // Signal the session's main loop to quit. The worker thread will return
-    // from sr_session_run() shortly after.
-    if (sr_session_stop(_sr_session) != SR_OK) {
-        pxv_warn("%s", "DeviceAgent::stop: sr_session_stop failed");
+    bool worker_active = false;
+    {
+        std::lock_guard<std::mutex> lk(_session_thread_mutex);
+        worker_active = _session_run_active;
     }
 
-    // Join the worker thread so is_collecting() / start() see a clean state.
-    stop_session_thread();
+    const int session_running = sr_session_is_running(_sr_session);
+    pxv_info("DeviceAgent::stop: request begin session_running=%d worker_active=%d.",
+             session_running > 0 ? 1 : 0, worker_active ? 1 : 0);
+
+    // Signal only the current run. Keep the persistent worker and its GLib
+    // context alive for the next Repeat/Start operation. sr_session_stop() is
+    // asynchronous: it posts acquisition_stop into the worker GMainContext.
+    if (session_running > 0) {
+        const int stop_ret = sr_session_stop(_sr_session);
+        if (stop_ret != SR_OK)
+            pxv_warn("DeviceAgent::stop: sr_session_stop failed ret=%d", stop_ret);
+        else
+            pxv_info("DeviceAgent::stop: stop request queued to session context.");
+    }
+
+    // V14 hard rule: a broken USB/libusb source is never allowed to freeze the
+    // GUI indefinitely. Normally the four cancelled transfers drain in a few
+    // milliseconds. Wait a short bounded interval for the worker so ordinary
+    // Stop still completes synchronously, then return control to the UI if the
+    // worker is stuck. The persistent worker/session remain valid and may
+    // finish asynchronously; a subsequent start() also has a bounded guard.
+    std::unique_lock<std::mutex> lk(_session_thread_mutex);
+    if (_session_thread.joinable() && _session_run_active) {
+        const bool drained = _session_thread_cv.wait_for(
+            lk, std::chrono::milliseconds(300), [this]() {
+                return !_session_run_active;
+            });
+        if (!drained) {
+            pxv_warn("DeviceAgent::stop: session worker still active after 300 ms; "
+                     "returning without blocking GUI. Cleanup will continue "
+                     "asynchronously.");
+            return true;
+        }
+    }
+
+    pxv_info("DeviceAgent::stop: session worker drained.");
     return true;
 }
 

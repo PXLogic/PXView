@@ -65,6 +65,10 @@
     "COLLAPSE": "Collapse",
     "EXPAND": "Expand",
     "LANG_TOGGLE": "Language",
-    "HW_CONTROL_DECK": "Hardware Control"
+    "HW_CONTROL_DECK": "Hardware Control",
+    "WIN_MINIMIZE": "Minimize",
+    "WIN_MAXIMIZE": "Maximize",
+    "WIN_RESTORE": "Restore",
+    "WIN_CLOSE": "Close"
   }
 }

@@ -71,6 +71,41 @@ ViewportInteraction::~ViewportInteraction() {}
 void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
   assert(event);
 
+  // 1.5.3-ZB -> 1.5.7: Shift + left-drag selects a persistent range on
+  // one decoder-generated analog waveform (TDM Fast / PWM Fast).
+  if (_viewport->action_type() == NO_ACTION &&
+      event->button() == Qt::LeftButton &&
+      (event->modifiers() & Qt::ShiftModifier) &&
+      _viewport->type() == TIME_VIEW &&
+      _viewport->view().is_logic_rendering_mode()) {
+    std::vector<Trace *> traces;
+    _viewport->view().get_traces(TIME_VIEW, traces);
+    const int y = event->position().toPoint().y();
+    const int vo = _viewport->view().get_vOffset();
+    for (Trace *trace : traces) {
+      DecodeTrace *dt = trace ? trace->as_decode() : nullptr;
+      if (!dt || !dt->enabled()) continue;
+      int ch = -1;
+      std::shared_ptr<pv::data::DecoderAnalogData> data;
+      if (!dt->hit_test_analog_channel(y, vo, ch, data) || !data ||
+          !data->visible())
+        continue;
+      const uint64_t sample = _viewport->view().pixel2index(
+          event->position().toPoint().x());
+      _viewport->analog_measure_data() = data;
+      _viewport->analog_measure_channel() = ch;
+      _viewport->analog_measure_start() = sample;
+      _viewport->analog_measure_end() = sample;
+      _viewport->analog_measure_stats() = pv::data::DecoderAnalogStatistics{};
+      _viewport->analog_measure_cycle() = pv::data::DecoderAnalogCycleMetrics{};
+      _viewport->analog_measure_valid() = true;
+      _viewport->set_action(ANALOG_RANGE_DRAG);
+      _viewport->setCursor(Qt::CrossCursor);
+      _viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+      return;
+    }
+  }
+
   _viewport->mouse_down_point() = event->position().toPoint();
   _viewport->mouse_down_offset() = _viewport->view().offset();
   _viewport->drag_strength() = 0;
@@ -280,6 +315,13 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
 void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
   assert(event);
   _viewport->hover_hit() = false;
+
+  if (_viewport->action_type() == ANALOG_RANGE_DRAG) {
+    _viewport->analog_measure_end() = _viewport->view().pixel2index(
+        _viewport->mouse_point().x());
+    _viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+    return;
+  }
 
   if (_viewport->action_type() == NO_ACTION && _viewport->type() == TIME_VIEW &&
       _viewport->view().is_logic_rendering_mode()) {
@@ -629,6 +671,29 @@ void ViewportInteraction::onAnalogMouseRelease(QMouseEvent *event) {
 
 void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
   assert(event);
+
+  if (_viewport->action_type() == ANALOG_RANGE_DRAG) {
+    _viewport->analog_measure_end() = _viewport->view().pixel2index(
+        event->position().toPoint().x());
+    _viewport->analog_measure_stats() = pv::data::DecoderAnalogStatistics{};
+    _viewport->analog_measure_cycle() = pv::data::DecoderAnalogCycleMetrics{};
+    _viewport->analog_measure_valid() =
+        _viewport->analog_measure_data() &&
+        _viewport->analog_measure_data()->get_statistics(
+            _viewport->analog_measure_start(),
+            _viewport->analog_measure_end(),
+            _viewport->analog_measure_stats());
+    if (_viewport->analog_measure_valid()) {
+      _viewport->analog_measure_data()->get_range_cycle_metrics(
+          _viewport->analog_measure_start(),
+          _viewport->analog_measure_end(),
+          _viewport->analog_measure_cycle());
+    }
+    _viewport->set_action(NO_ACTION);
+    _viewport->setCursor(Qt::ArrowCursor);
+    _viewport->update(UpdateEventType::UPDATE_EV_GENERIC);
+    return;
+  }
 
   _viewport->drag_frame_timer().stop();
   if (_viewport->drag_frame_pending()) {
@@ -985,7 +1050,13 @@ void ViewportInteraction::leaveEvent(QEvent *) {
 }
 
 void ViewportInteraction::keyPressEvent(QKeyEvent *event) {
-  // Alt+Left / Alt+Right for edge navigation
+// Escape clears analog range measurement
+if (event->key() == Qt::Key_Escape && _viewport->analog_measure_valid()) {
+_viewport->clear_analog_measurement();
+return;
+}
+
+// Alt+Left / Alt+Right for edge navigation
   if (event->modifiers() & Qt::AltModifier) {
     if (_viewport->hover_logic_signal() &&
         _viewport->view().is_logic_rendering_mode() &&

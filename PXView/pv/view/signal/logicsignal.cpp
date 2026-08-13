@@ -654,7 +654,7 @@ QRectF LogicSignal::get_rect(LogicSetRegions type, int y, int right) {
     return QRectF(0, 0, 0, 0);
 }
 
-void LogicSignal::paint_mark(QPainter &p, int xstart, int xend, int type) {
+void LogicSignal::paint_mark(QPainter &p, int xstart, int xend, int type, int edge_dir) {
   const int ypos = get_y();
   const int msize = 3;
   if (ypos < -10000 || ypos > 10000)
@@ -681,6 +681,28 @@ void LogicSignal::paint_mark(QPainter &p, int xstart, int xend, int type) {
     if (mid < -10000 || mid > 10000)
       return;
     p.drawEllipse(QPoint(mid, ypos), msize, msize);
+  }
+
+  // Rising/falling edge triangle markers (edge_dir: 1=rising, -1=falling, 0=none)
+  if (edge_dir != 0) {
+    const int ts = 5;  // triangle size
+    if (edge_dir > 0) {
+      // Rising edge: upward-pointing triangle
+      const QPoint tri[] = {
+          QPoint(xstart, ypos - ts),
+          QPoint(xstart - ts, ypos + ts),
+          QPoint(xstart + ts, ypos + ts),
+      };
+      p.drawPolygon(tri, 3);
+    } else {
+      // Falling edge: downward-pointing triangle
+      const QPoint tri[] = {
+          QPoint(xstart, ypos + ts),
+          QPoint(xstart - ts, ypos - ts),
+          QPoint(xstart + ts, ypos - ts),
+      };
+      p.drawPolygon(tri, 3);
+    }
   }
 }
 

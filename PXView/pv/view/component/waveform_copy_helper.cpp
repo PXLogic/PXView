@@ -38,6 +38,7 @@
 
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QFile>
 #include <cmath>
 #include <set>
 
@@ -501,6 +502,174 @@ for (auto &dt : traces) {
     }
 
     return QString();
+}
+
+// --- WAV export helpers ---
+
+void WaveformCopyHelper::write_wav_pcm_sample(QByteArray &buf, float sample, int bitsPerSample)
+{
+    // Clamp to [-1, 1]
+    sample = std::max(-1.0f, std::min(1.0f, sample));
+
+    switch (bitsPerSample) {
+    case 8: {
+        // 8-bit PCM is unsigned (0-255), centered at 128
+        uint8_t val = static_cast<uint8_t>((sample + 1.0f) * 127.5f);
+        buf.append(reinterpret_cast<const char *>(&val), 1);
+        break;
+    }
+    case 16: {
+        int16_t val = static_cast<int16_t>(sample * 32767.0f);
+        buf.append(reinterpret_cast<const char *>(&val), 2);
+        break;
+    }
+    case 24: {
+        int32_t val = static_cast<int32_t>(sample * 8388607.0f);
+        // Write 3 bytes (little-endian)
+        buf.append(reinterpret_cast<const char *>(&val), 3);
+        break;
+    }
+    case 32: {
+        int32_t val = static_cast<int32_t>(sample * 2147483647.0f);
+        buf.append(reinterpret_cast<const char *>(&val), 4);
+        break;
+    }
+    default:
+        // Default to 16-bit
+        int16_t val = static_cast<int16_t>(sample * 32767.0f);
+        buf.append(reinterpret_cast<const char *>(&val), 2);
+        break;
+    }
+}
+
+bool WaveformCopyHelper::export_decoder_audio_wav(DecodeTrace *dt,
+                                                 const QString &filepath,
+                                                 const WavExportConfig &cfg,
+                                                 QString &message)
+{
+    if (!dt) {
+        message = QStringLiteral("No decode trace provided");
+        return false;
+    }
+    if (filepath.isEmpty()) {
+        message = QStringLiteral("Empty file path");
+        return false;
+    }
+
+    auto stack = dt->decoder();
+    if (!stack) {
+        message = QStringLiteral("No decoder stack");
+        return false;
+    }
+
+    auto analog_data = stack->analog_data_copy();
+    if (analog_data.empty()) {
+        message = QStringLiteral("Decoder has no analog/audio data");
+        return false;
+    }
+
+    // Determine total sample count (max across all channels).
+    size_t totalSamples = 0;
+    for (const auto &ch : analog_data) {
+        if (!ch) continue;
+        totalSamples = std::max(totalSamples, ch->get_sample_count());
+    }
+    if (totalSamples == 0) {
+        message = QStringLiteral("No samples to export");
+        return false;
+    }
+
+    // Determine output channel count.
+    int numChannels;
+    if (!cfg.mix.empty())
+        numChannels = std::max(1, std::min(cfg.output_channels, 8));
+    else
+        numChannels = std::max(1, std::min((int)cfg.channel_indices.size(), 8));
+
+    const int bitsPerSample = cfg.bits;
+    const int blockAlign = numChannels * (bitsPerSample / 8);
+    const uint32_t dataSize = static_cast<uint32_t>(totalSamples * blockAlign);
+
+    // Build WAV file in memory.
+    QByteArray wav;
+
+    // RIFF header
+    wav.append("RIFF", 4);
+    uint32_t chunkSize = 36 + dataSize;
+    wav.append(reinterpret_cast<const char *>(&chunkSize), 4);
+    wav.append("WAVE", 4);
+
+    // fmt chunk
+    wav.append("fmt ", 4);
+    uint32_t fmtSize = 16;
+    wav.append(reinterpret_cast<const char *>(&fmtSize), 4);
+    uint16_t audioFormat = 1; // PCM
+    wav.append(reinterpret_cast<const char *>(&audioFormat), 2);
+    wav.append(reinterpret_cast<const char *>(&numChannels), 2);
+    uint32_t sampleRate = cfg.sample_rate;
+    wav.append(reinterpret_cast<const char *>(&sampleRate), 4);
+    uint32_t byteRate = sampleRate * blockAlign;
+    wav.append(reinterpret_cast<const char *>(&byteRate), 4);
+    wav.append(reinterpret_cast<const char *>(&blockAlign), 2);
+    wav.append(reinterpret_cast<const char *>(&bitsPerSample), 2);
+
+    // data chunk
+    wav.append("data", 4);
+    wav.append(reinterpret_cast<const char *>(&dataSize), 4);
+
+    // Write samples (interleaved for multi-channel).
+    if (!cfg.mix.empty()) {
+        // Mix-matrix mode: for each output channel, sum input channels
+        // weighted by their gain.
+        for (size_t i = 0; i < totalSamples; ++i) {
+            for (int out = 0; out < numChannels; ++out) {
+                float mixed = 0.0f;
+                for (const auto &row : cfg.mix) {
+                    if (!row.enabled)
+                        continue;
+                    // Find the input channel by channel index.
+                    for (const auto &ad : analog_data) {
+                        if (ad && ad->channel() == row.channel) {
+                            mixed += ad->get_value_at(static_cast<uint64_t>(i))
+                                     * row.outputs[(size_t)out];
+                            break;
+                        }
+                    }
+                }
+                write_wav_pcm_sample(wav, mixed, bitsPerSample);
+            }
+        }
+    } else {
+        // Simple selection mode: output selected channels directly.
+        for (size_t i = 0; i < totalSamples; ++i) {
+            for (int c = 0; c < numChannels; ++c) {
+                float val = 0.0f;
+                if ((size_t)c < cfg.channel_indices.size()) {
+                    int ch_idx = cfg.channel_indices[(size_t)c];
+                    for (const auto &ad : analog_data) {
+                        if (ad && ad->channel() == ch_idx) {
+                            val = ad->get_value_at(static_cast<uint64_t>(i));
+                            break;
+                        }
+                    }
+                }
+                write_wav_pcm_sample(wav, val, bitsPerSample);
+            }
+        }
+    }
+
+    // Write to file
+    QFile file(filepath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        message = QStringLiteral("Cannot open file: %1").arg(filepath);
+        return false;
+    }
+    file.write(wav);
+    file.close();
+
+    pxv_info("export_decoder_audio_wav: wrote %u bytes to %s",
+             dataSize, filepath.toUtf8().constData());
+    return true;
 }
 
 } // namespace view

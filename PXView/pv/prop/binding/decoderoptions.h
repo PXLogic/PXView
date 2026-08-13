@@ -61,6 +61,7 @@ private:
 
 private:
 	pv::data::decode::Decoder 	*_decoder;
+	std::weak_ptr<pv::data::DecoderStack> _decoder_stack;
 };
 
 } // binding

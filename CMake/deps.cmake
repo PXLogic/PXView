@@ -176,7 +176,7 @@ include_directories(${ZLIB_INCLUDE_DIRS})
 #-------------------------------------------------------------------------------
 
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Widgets Gui GuiPrivate Svg Concurrent WebSockets)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Widgets Gui GuiPrivate Svg Concurrent WebSockets Multimedia)
 message("----- Qt6:")
 message(STATUS "	 includes:" ${Qt6Core_INCLUDE_DIRS})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Qt6Widgets_EXECUTABLE_COMPILE_FLAGS}")
@@ -186,7 +186,7 @@ set(QT_LIBRARIES Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Svg Qt6::Concurrent 
 # - pxview-core (Core layer): QtCore + QtGui + QtNetwork + QtConcurrent + QtWebSockets (NO QtWidgets, NO QtSvg)
 # - pxview executable (View layer): adds QtWidgets + QtSvg on top of QT_CORE_LIBS
 set(QT_CORE_LIBS Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Network Qt6::Concurrent Qt6::WebSockets)
-set(QT_GUI_LIBS Qt6::Widgets Qt6::Svg)
+set(QT_GUI_LIBS Qt6::Widgets Qt6::Svg Qt6::Multimedia)
 add_definitions(${Qt6Gui_DEFINITIONS} ${Qt6Widgets_DEFINITIONS})
 if(APPLE)
 	find_package(Qt6DBus REQUIRED)

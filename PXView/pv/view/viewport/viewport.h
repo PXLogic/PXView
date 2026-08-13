@@ -36,6 +36,7 @@
 
 
 #include "pv/base/pxvdef.h"
+#include "pv/data/decoderanalogdata.h"
 #include "pv/interface/icallbacks.h"
 #include "pv/ui/uimanager.h"
 #include "pv/view/view.h"
@@ -96,10 +97,29 @@ enum ActionType {
   DSO_XM_STEP1,
   DSO_XM_STEP2,
   DSO_YM,
-  DSO_TRIG_MOVE
+  DSO_TRIG_MOVE,
+  ANALOG_RANGE_DRAG
 };
 
 enum MeasureType { NO_MEASURE, LOGIC_FREQ, LOGIC_EDGE_CNT, DSO_VALUE };
+
+struct AnalogMeasurementV2Options {
+  bool show_channel = true;
+  bool show_time = true;
+  bool show_normalized = true;
+  bool show_engineering_value = true;
+  bool rise_time = true;
+  bool fall_time = true;
+  bool positive_overshoot = true;
+  bool negative_overshoot = true;
+  bool period = true;
+  bool frequency = true;
+  bool positive_width = true;
+  bool negative_width = true;
+  bool positive_duty_cycle = true;
+  bool negative_duty_cycle = true;
+  bool cycle_rms = true;
+};
 
 // main graph view port, in the middle region
 // draw the left and right rule scale
@@ -168,6 +188,10 @@ public:
   // Delegate-accessed slots (moved from private to public).
   void applyDragFrame();
   void show_logic_contextmenu(const QPoint &pos);
+  void clear_analog_measurement();
+  void configure_analog_measurement();
+  void export_decoder_audio_wav();
+  void play_decoder_audio();
 
 protected:
   bool event(QEvent *event) override;
@@ -287,6 +311,14 @@ public:
   bool& hover_hit() { return _hover_hit; }
   uint16_t& hover_sig_index() { return _hover_sig_index; }
   double& hover_sig_value() { return _hover_sig_value; }
+  std::shared_ptr<pv::data::DecoderAnalogData>& analog_measure_data() { return _analog_measure_data; }
+  int& analog_measure_channel() { return _analog_measure_channel; }
+  uint64_t& analog_measure_start() { return _analog_measure_start; }
+  uint64_t& analog_measure_end() { return _analog_measure_end; }
+  pv::data::DecoderAnalogStatistics& analog_measure_stats() { return _analog_measure_stats; }
+  pv::data::DecoderAnalogCycleMetrics& analog_measure_cycle() { return _analog_measure_cycle; }
+  bool& analog_measure_valid() { return _analog_measure_valid; }
+  AnalogMeasurementV2Options& analog_measure_options() { return _analog_measure_options; }
 
   // E. Trigger state (TriggerInfoPass)
   bool& transfer_started() { return _transfer_started; }
@@ -313,6 +345,10 @@ public:
   QAction*& copy_decoder_track_action() { return _copy_decoder_track_action; }
   QAction*& copy_decoder_group_action() { return _copy_decoder_group_action; }
   QAction*& copy_all_channels_action() { return _copy_all_channels_action; }
+  QAction*& export_decoder_wav_action() { return _export_decoder_wav_action; }
+  QAction*& play_decoder_audio_action() { return _play_decoder_audio_action; }
+  QAction*& clear_analog_measure_action() { return _clear_analog_measure_action; }
+  QAction*& configure_analog_measure_action() { return _configure_analog_measure_action; }
   QPoint& logic_menu_pos() { return _logic_menu_pos; }
   QAction*& yAction() { return _yAction; }
   QAction*& xAction() { return _xAction; }
@@ -390,6 +426,16 @@ private:
   uint16_t _hover_sig_index;
   double _hover_sig_value;
 
+  // ZB-FENG: 1.5.3-ZB style decoder-analog point/range measurement.
+  std::shared_ptr<pv::data::DecoderAnalogData> _analog_measure_data;
+  int _analog_measure_channel = -1;
+  uint64_t _analog_measure_start = 0;
+  uint64_t _analog_measure_end = 0;
+  pv::data::DecoderAnalogStatistics _analog_measure_stats;
+  pv::data::DecoderAnalogCycleMetrics _analog_measure_cycle;
+  bool _analog_measure_valid = false;
+  AnalogMeasurementV2Options _analog_measure_options;
+
   QElapsedTimer _elapsed_time;
   QTimer _drag_timer;
   int _drag_strength;
@@ -424,6 +470,10 @@ private:
   QAction *_copy_decoder_track_action;
   QAction *_copy_decoder_group_action;
   QAction *_copy_all_channels_action;
+  QAction *_export_decoder_wav_action = nullptr;
+  QAction *_play_decoder_audio_action = nullptr;
+  QAction *_clear_analog_measure_action = nullptr;
+  QAction *_configure_analog_measure_action = nullptr;
   QPoint _logic_menu_pos;
 
   QColor _panelBgColor;

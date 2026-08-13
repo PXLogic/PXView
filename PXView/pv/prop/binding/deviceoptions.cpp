@@ -50,6 +50,7 @@ DeviceOptions::DeviceOptions(SigSession *session)
 	gsize num_opts;
 
 	_device_agent = session->get_device();
+	_session = session;
 
     pxv_info("DeviceOptions binding: driver=%s, is_hardware=%d, is_dsl=%d, is_stream=%d",
              _device_agent->driver_name().toUtf8().constData(),
@@ -128,6 +129,11 @@ DeviceOptions::DeviceOptions(SigSession *session)
              * INSTANT 由 sidebar 的 SIDEBAR_INSTANT 按钮控制。
              * 驱动 devopts[] 保留声明，其它路径仍可 get/set/list。 */
             continue;
+
+		case SR_CONF_NUM_LOGIC_CHANNELS:
+			// SLogic Combo8 hardware packing mode: 2 / 4 / 8 channels.
+			bind_enum(name, label, key, gvar_list);
+			break;
 
 		case SR_CONF_PATTERN_MODE:
 			/* DSO mode: per-channel pattern is already bound via
@@ -277,7 +283,11 @@ GVariant* DeviceOptions::config_getter(int key)
 
 void DeviceOptions::config_setter(int key, GVariant* value)
 {
-    _device_agent->set_config(key, value);
+const bool ok = _device_agent->set_config(key, value);
+if (ok && key == SR_CONF_NUM_LOGIC_CHANNELS && _session) {
+// SLogic packing changes active sr_channel objects; rebuild signal UI.
+_session->reload();
+}
 }
 
 void DeviceOptions::bind_bool(const QString &name, const QString label, int key)

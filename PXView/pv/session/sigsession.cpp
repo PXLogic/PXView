@@ -139,6 +139,9 @@ SigSession::SigSession() {
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::DecodeDone>(
           [this](const interface::DecodeDone &) { on_decode_done_event(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::EndCollectWorkPrev>(
+          [this](const interface::EndCollectWorkPrev &) { on_end_collect_work_prev(); }));
 
   // Managers are constructed after _event_bus (they hold a raw pointer to it)
   // and after _state (they hold a raw pointer to it). FilterProcessor accesses
@@ -2240,6 +2243,23 @@ void SigSession::on_rev_end_packet() {
           _state->view_data()->_glitch_filter_modes);
     }
 
+    if (is_repeat_mode()) {
+      _repeat_wait_decode =
+          is_repeat_mode() && _state->is_working() && !_state->decode_traces().empty();
+      _repeat_session_stopped = false;
+      _repeat_decode_done = !_repeat_wait_decode;
+      if (_state->is_working()) {
+        reset_repeat_analog_trigger_frame();
+        if (_repeat_analog_trigger_active)
+          set_repeat_analog_trigger_display_hold(true);
+      } else {
+        _repeat_analog_trigger_active = false;
+        _repeat_wait_decode = false;
+        _repeat_session_stopped = false;
+        _repeat_decode_done = false;
+        set_repeat_analog_trigger_display_hold(false);
+      }
+    }
     frame_ended();
   }
 }
@@ -2311,6 +2331,11 @@ void SigSession::on_session_stopped_event() {
   if (!_document_registry->has_capture_owner()) {
     pxv_info("SigSession::on_event(SessionStopped): capture owner already "
              "released (manual stop path). Skipping cleanup.");
+    _repeat_wait_decode = false;
+    _repeat_session_stopped = false;
+    _repeat_decode_done = false;
+    _repeat_analog_trigger_active = false;
+    set_repeat_analog_trigger_display_hold(false);
     return;
   }
 
@@ -2323,11 +2348,24 @@ void SigSession::on_session_stopped_event() {
   // TrigNextCollect to trigger the next collection. In all other modes,
   // release the guard and broadcast EndCollectWork.
   if (is_repeat_mode()) {
-    pxv_info("SigSession::on_event(SessionStopped): repeat mode — keeping "
-             "guard alive, broadcasting TrigNextCollect.");
     _capture_manager->data_unlock();
-    _event_bus->broadcast_async<interface::TrigNextCollect>({});
+    _repeat_session_stopped = true;
+    if (_repeat_wait_decode) {
+      pxv_info("SigSession::on_event(SessionStopped): repeat mode — waiting "
+               "for decoder completion before next collection.");
+      continue_repeat_after_decode_if_ready();
+    } else {
+      pxv_info("SigSession::on_event(SessionStopped): repeat mode — keeping "
+               "guard alive, broadcasting TrigNextCollect.");
+      _repeat_session_stopped = false;
+      _event_bus->broadcast_async<interface::TrigNextCollect>({});
+    }
   } else {
+    _repeat_wait_decode = false;
+    _repeat_session_stopped = false;
+    _repeat_decode_done = false;
+    _repeat_analog_trigger_active = false;
+    set_repeat_analog_trigger_display_hold(false);
     pxv_info("SigSession::on_event(SessionStopped): releasing CaptureOwnerGuard "
              "(auto-stop path).");
     _capture_manager->data_unlock();
@@ -2342,6 +2380,149 @@ void SigSession::on_decode_done_event() {
   // Phase 3: Signal the SharedState so that wait_for_decode_complete()
   // (API/RPC layer) is woken without depending on the Qt event queue.
   _state->notify_decode_complete();
+
+  // Repeat analog trigger evaluation
+  if (!_repeat_wait_decode || !_state->is_working() || !is_repeat_mode())
+    return;
+  if (_repeat_analog_trigger_active)
+    evaluate_repeat_analog_trigger();
+  _repeat_decode_done = true;
+  if (PXV_VERBOSE_REPEAT_LOG)
+    pxv_info("Repeat decode gate: done trigger=%d match=%d session_stopped=%d",
+           _repeat_analog_trigger_active ? 1 : 0,
+           _repeat_analog_trigger_match ? 1 : 0,
+           _repeat_session_stopped ? 1 : 0);
+  continue_repeat_after_decode_if_ready();
+}
+
+void SigSession::on_end_collect_work_prev() {
+  // Manual-stop cleanup: cancel every pending repeat/trigger gate on a manual stop.
+  if (_repeat_wait_decode || _repeat_session_stopped || _repeat_decode_done ||
+      _repeat_analog_trigger_active || _repeat_analog_trigger_display_hold) {
+    pxv_info("Manual stop cleanup: cancel repeat/decode trigger gate and release analog HOLD.");
+  }
+
+  _repeat_wait_decode = false;
+  _repeat_session_stopped = false;
+  _repeat_decode_done = false;
+  _repeat_analog_trigger_active = false;
+  _repeat_analog_trigger_match = false;
+  _repeat_analog_trigger_sample = 0;
+  _repeat_analog_trigger_config = data::DecoderAnalogTriggerConfig{};
+
+  // Invalidate every queued analog trigger UI event from the just-stopped generation.
+  const uint64_t old_generation =
+      _repeat_analog_trigger_ui_generation.fetch_add(1, std::memory_order_acq_rel);
+  _repeat_analog_trigger_display_hold = false;
+  pxv_info("Manual stop cleanup: invalidated analog trigger UI generation %llu -> %llu.",
+           (unsigned long long)old_generation,
+           (unsigned long long)(old_generation + 1));
+}
+
+bool SigSession::repeat_analog_display_trigger_enabled() {
+  if (!is_repeat_mode())
+    return false;
+  for (const auto &stack : _state->decode_traces()) {
+    data::DecoderAnalogTriggerConfig config;
+    if (stack && stack->get_analog_display_trigger_config(config))
+      return true;
+  }
+  return false;
+}
+
+void SigSession::reset_repeat_analog_trigger_frame() {
+  _repeat_analog_trigger_active = repeat_analog_display_trigger_enabled();
+  _repeat_analog_trigger_match = false;
+  _repeat_analog_trigger_sample = 0;
+  _repeat_analog_trigger_config = data::DecoderAnalogTriggerConfig{};
+  if (_repeat_analog_trigger_active) {
+    for (const auto &stack : _state->decode_traces()) {
+      if (stack && stack->get_analog_display_trigger_config(
+                       _repeat_analog_trigger_config))
+        break;
+    }
+    if (PXV_VERBOSE_REPEAT_LOG)
+      pxv_info("Analog display trigger armed: mode=%s ch=%d edge=%d level=%.9g pos=%d%%",
+             _repeat_analog_trigger_config.mode == data::DecoderAnalogTriggerMode::Normal ? "normal" : "auto",
+             _repeat_analog_trigger_config.channel,
+             (int)_repeat_analog_trigger_config.edge,
+             _repeat_analog_trigger_config.level,
+             _repeat_analog_trigger_config.display_position_percent);
+  }
+}
+
+void SigSession::evaluate_repeat_analog_trigger() {
+  _repeat_analog_trigger_match = false;
+  for (const auto &stack : _state->decode_traces()) {
+    if (!stack)
+      continue;
+    uint64_t sample = 0;
+    data::DecoderAnalogTriggerConfig config;
+    if (!stack->get_analog_display_trigger_config(config))
+      continue;
+    _repeat_analog_trigger_config = config;
+    if (stack->find_analog_display_trigger(sample, &config)) {
+      _repeat_analog_trigger_match = true;
+      _repeat_analog_trigger_sample = sample;
+      _repeat_analog_trigger_config = config;
+      break;
+    }
+  }
+  if (PXV_VERBOSE_REPEAT_LOG)
+    pxv_info("Analog display trigger evaluated: match=%d sample=%llu mode=%s",
+           _repeat_analog_trigger_match ? 1 : 0,
+           (unsigned long long)_repeat_analog_trigger_sample,
+           _repeat_analog_trigger_config.mode == data::DecoderAnalogTriggerMode::Normal ? "normal" : "auto");
+}
+
+void SigSession::set_repeat_analog_trigger_display_hold(bool hold) {
+  if (_repeat_analog_trigger_display_hold == hold && hold)
+    return;
+  _repeat_analog_trigger_display_hold = hold;
+  const uint64_t generation =
+      _repeat_analog_trigger_ui_generation.load(std::memory_order_acquire);
+  _event_bus->broadcast_async<interface::DecoderAnalogTriggerDisplayHold>(
+      {hold, generation});
+}
+
+void SigSession::continue_repeat_after_decode_if_ready() {
+  if (!_repeat_wait_decode || !_repeat_session_stopped || !_repeat_decode_done)
+    return;
+  if (!_state->is_working() || !is_repeat_mode()) {
+    _repeat_wait_decode = false;
+    _repeat_session_stopped = false;
+    _repeat_decode_done = false;
+    _repeat_analog_trigger_active = false;
+    set_repeat_analog_trigger_display_hold(false);
+    return;
+  }
+
+  if (_repeat_analog_trigger_active) {
+    if (_repeat_analog_trigger_match) {
+      _state->view_data()->_trig_pos = _repeat_analog_trigger_sample;
+      if (auto *document = _document_registry->get_active_document())
+        document->set_trigger_pos(_repeat_analog_trigger_sample);
+      _event_bus->broadcast_async<interface::DecoderAnalogTriggerFound>({
+          _repeat_analog_trigger_sample,
+          _repeat_analog_trigger_config.display_position_percent,
+          _repeat_analog_trigger_config.channel,
+          _repeat_analog_trigger_config.level,
+          _repeat_analog_trigger_ui_generation.load(std::memory_order_acquire)});
+      set_repeat_analog_trigger_display_hold(false);
+      set_repeat_analog_trigger_display_hold(true);
+    } else if (_repeat_analog_trigger_config.mode == data::DecoderAnalogTriggerMode::Auto) {
+      set_repeat_analog_trigger_display_hold(false);
+      set_repeat_analog_trigger_display_hold(true);
+    } else {
+      pxv_info("Analog display trigger NORMAL: no match, keeping previous frame.");
+    }
+  }
+
+  _repeat_wait_decode = false;
+  _repeat_session_stopped = false;
+  _repeat_decode_done = false;
+  _repeat_analog_trigger_active = false;
+  _event_bus->broadcast_async<interface::TrigNextCollect>({});
 }
 
 void SigSession::force_release_capture_state() {

@@ -134,6 +134,14 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Setup Rust toolchain (for Tauri desktop app)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+
       - name: Install Qt via aqtinstall
         run: |
           python3 -m pip install aqtinstall
@@ -167,6 +175,7 @@ jobs:
           rm -rf build && mkdir -p build && cd build
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TAURI=ON \
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
@@ -174,6 +183,9 @@ jobs:
         run: |
           export PATH="/c/Program Files/nodejs:$PATH"
           cd build && ninja install-webui
+
+      - name: Build Tauri desktop app
+        run: cd build && ninja tauri-desktop
 
       - name: Build PXView
         run: cd build && ninja -j $(nproc)
@@ -405,6 +417,9 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Setup Rust toolchain (for Tauri desktop app)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Build fx2lafw firmware
         run: |
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
@@ -422,12 +437,16 @@ jobs:
           fi
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
+            -DENABLE_TAURI=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_INSTALL_PREFIX=../install.dir
 
       - name: Build and Package Web UI
         run: cd build && ninja && ninja install-webui
+
+      - name: Build Tauri desktop app
+        run: cd build && ninja tauri-desktop
 
       - name: Install
         run: cd build && ninja install
@@ -796,6 +815,9 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Setup Rust toolchain (for Tauri desktop app)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Build fx2lafw firmware
         run: |
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
@@ -805,6 +827,7 @@ jobs:
           mkdir -p build && cd build
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TAURI=ON \
             -DCMAKE_INSTALL_PREFIX=../install.dir \
             -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd"
 
@@ -812,6 +835,9 @@ jobs:
         run: |
           export PATH="/c/Program Files/nodejs:$PATH"
           cd build && ninja install-webui
+
+      - name: Build Tauri desktop app
+        run: cd build && ninja tauri-desktop
 
       - name: Build PXView
         run: cd build && ninja -j $(nproc)

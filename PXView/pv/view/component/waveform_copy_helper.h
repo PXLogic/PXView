@@ -5,8 +5,11 @@
 #include <utility>
 #include <vector>
 #include <cstdint>
+#include <memory>
+#include <array>
 
 namespace pv {
+namespace data { class DecoderAnalogData; }
 namespace view {
 
 class View;
@@ -21,6 +24,20 @@ public:
         DecoderTrack,
         ThisDecoderGroup,
         AllChannels
+    };
+
+    /** Configuration for exporting decoder analog audio as a WAV file. */
+    struct WavExportConfig {
+        struct MixRow {
+            int channel = 0;
+            bool enabled = false;
+            std::array<float, 8> outputs{};
+        };
+        uint32_t sample_rate = 44100;
+        int bits = 16;
+        int output_channels = 2;
+        std::vector<int> channel_indices;
+        std::vector<MixRow> mix;
     };
 
     /**
@@ -78,11 +95,28 @@ public:
      */
     static std::vector<LogicSignal*> collect_all_logic_signals(View &view);
 
+    /**
+     * Export decoder analog audio data to a WAV file.
+     * @param dt        Decode trace with analog data.
+     * @param filepath  Output WAV file path.
+     * @param cfg       Export configuration (sample rate, bit depth, mix matrix).
+     * @param message   Error message on failure.
+     * @return true on success, false on error.
+     */
+    static bool export_decoder_audio_wav(DecodeTrace *dt, const QString &filepath,
+                                         const WavExportConfig &cfg,
+                                         QString &message);
+
 private:
     /**
      * Pick the best annotation text (longest non-empty).
      */
     static QString pick_annotation_text(const std::vector<QString> &ann_list);
+
+    /**
+     * Write a single PCM sample to a QByteArray at the given bit depth.
+     */
+    static void write_wav_pcm_sample(QByteArray &buf, float sample, int bitsPerSample);
 };
 
 } // namespace view

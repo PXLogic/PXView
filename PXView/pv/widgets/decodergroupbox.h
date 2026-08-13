@@ -62,6 +62,10 @@ private slots:
   void on_del_stack();
 
 private:
+  bool is_tdm_fast() const;
+  void sync_tdm_fast_output();
+  void refresh_tdm_fast_row_eyes();
+
   QWidget *_widget;
 
   pv::data::DecoderStack *_decoder_stack;

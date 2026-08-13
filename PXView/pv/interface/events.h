@@ -371,6 +371,24 @@ struct SampleLimitsChanged {};
 // EventBus::subscribe<T>(lambda) with RAII Subscription management.
 // See pv/core/eventbus.h for the new API.
 
+// DecoderAnalogTriggerFound — post-decode analog display trigger found.
+// Emitted when a TDM/PWM analog waveform trigger crossing is located.
+struct DecoderAnalogTriggerFound {
+    uint64_t sample_position;
+    int display_position_percent;
+    int channel;
+    double level;
+    uint64_t generation;
+};
+
+// DecoderAnalogTriggerDisplayHold — request atomic page-flip for display.
+// When hold=true, viewport updates are frozen until the trigger position
+// is committed. When hold=false, normal rendering resumes.
+struct DecoderAnalogTriggerDisplayHold {
+    bool hold;
+    uint64_t generation;
+};
+
 } // namespace interface
 } // namespace pv
 

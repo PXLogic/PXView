@@ -183,6 +183,10 @@ private:
                         const MeasureCtx &m);
   void draw_logic_jump(QPainter &p, const RenderContext &ctx,
                         const MeasureCtx &m);
+  void draw_decoder_analog_hover(QPainter &p, const RenderContext &ctx,
+                                 const MeasureCtx &m);
+  void draw_decoder_analog_range(QPainter &p, const RenderContext &ctx,
+                                 const MeasureCtx &m);
 };
 
 /**

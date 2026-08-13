@@ -117,6 +117,17 @@ static void setFiled(const char *key, QSettings &st, float f)
     AppConfig::Instance().notify_setting_changed(st.group(), key, f);
 }
 
+static void getFiled(const char *key, QSettings &st, double &f, double dv)
+{
+    f = st.value(key, dv).toDouble();
+}
+
+static void setFiled(const char *key, QSettings &st, double f)
+{
+    st.setValue(key, f);
+    AppConfig::Instance().notify_setting_changed(st.group(), key, f);
+}
+
 ///------ app
 static void _loadApp(AppOptions &o, QSettings &st)
 {
@@ -134,6 +145,24 @@ static void _loadApp(AppOptions &o, QSettings &st)
     getFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize, 9.0);
     getFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData, true);
     getFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit, true);
+    getFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode, false);
+
+    getFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid, false);
+    getFiled("analogDisplayTriggerTdmEnable", st, o.analogDisplayTriggerTdmEnable, false);
+    getFiled("analogDisplayTriggerTdmMode", st, o.analogDisplayTriggerTdmMode, "auto");
+    getFiled("analogDisplayTriggerTdmChannel", st, o.analogDisplayTriggerTdmChannel, 0);
+    getFiled("analogDisplayTriggerTdmEdge", st, o.analogDisplayTriggerTdmEdge, "rising");
+    getFiled("analogDisplayTriggerTdmLevel", st, o.analogDisplayTriggerTdmLevel, 0.0);
+    getFiled("analogDisplayTriggerTdmPosition", st, o.analogDisplayTriggerTdmPosition, 50);
+
+    getFiled("analogDisplayTriggerPwmValid", st, o.analogDisplayTriggerPwmValid, false);
+    getFiled("analogDisplayTriggerPwmEnable", st, o.analogDisplayTriggerPwmEnable, false);
+    getFiled("analogDisplayTriggerPwmMode", st, o.analogDisplayTriggerPwmMode, "auto");
+    getFiled("analogDisplayTriggerPwmChannel", st, o.analogDisplayTriggerPwmChannel, 0);
+    getFiled("analogDisplayTriggerPwmEdge", st, o.analogDisplayTriggerPwmEdge, "rising");
+    getFiled("analogDisplayTriggerPwmLevel", st, o.analogDisplayTriggerPwmLevel, 50.0);
+    getFiled("analogDisplayTriggerPwmPosition", st, o.analogDisplayTriggerPwmPosition, 50);
+
     getFiled(keys::App::version.toUtf8().constData(), st, o.version, 1);
 
     o.warnofMultiTrig = true;
@@ -172,6 +201,24 @@ static void _saveApp(AppOptions &o, QSettings &st)
     setFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize);
     setFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData);
     setFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit);
+    setFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode);
+
+    setFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid);
+    setFiled("analogDisplayTriggerTdmEnable", st, o.analogDisplayTriggerTdmEnable);
+    setFiled("analogDisplayTriggerTdmMode", st, o.analogDisplayTriggerTdmMode);
+    setFiled("analogDisplayTriggerTdmChannel", st, o.analogDisplayTriggerTdmChannel);
+    setFiled("analogDisplayTriggerTdmEdge", st, o.analogDisplayTriggerTdmEdge);
+    setFiled("analogDisplayTriggerTdmLevel", st, o.analogDisplayTriggerTdmLevel);
+    setFiled("analogDisplayTriggerTdmPosition", st, o.analogDisplayTriggerTdmPosition);
+
+    setFiled("analogDisplayTriggerPwmValid", st, o.analogDisplayTriggerPwmValid);
+    setFiled("analogDisplayTriggerPwmEnable", st, o.analogDisplayTriggerPwmEnable);
+    setFiled("analogDisplayTriggerPwmMode", st, o.analogDisplayTriggerPwmMode);
+    setFiled("analogDisplayTriggerPwmChannel", st, o.analogDisplayTriggerPwmChannel);
+    setFiled("analogDisplayTriggerPwmEdge", st, o.analogDisplayTriggerPwmEdge);
+    setFiled("analogDisplayTriggerPwmLevel", st, o.analogDisplayTriggerPwmLevel);
+    setFiled("analogDisplayTriggerPwmPosition", st, o.analogDisplayTriggerPwmPosition);
+
     setFiled(keys::App::version.toUtf8().constData(), st, APP_CONFIG_VERSION);
 
     QString fmt =  FormatArrayToString(o.m_protocolFormats);

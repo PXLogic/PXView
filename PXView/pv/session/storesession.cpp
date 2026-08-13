@@ -1840,6 +1840,26 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                 }
             }
 
+            // TDM Fast: sync hidden output option with effective row visibility.
+            if (!decoder_list.empty()) {
+                auto *tdm_dec = decoder_list.front().get();
+                const srd_decoder *tdm_def = tdm_dec ? tdm_dec->decoder() : nullptr;
+                if (tdm_def && tdm_def->id &&
+                    QString::fromUtf8(tdm_def->id) == QStringLiteral("tdm_audio_fast")) {
+                    bool any_text_row_enabled = false;
+                    const auto final_rows = stack->get_rows_gshow();
+                    for (const auto &entry : final_rows) {
+                        if (entry.first.decoder() == tdm_def && entry.second) {
+                            any_text_row_enabled = true;
+                            break;
+                        }
+                    }
+                    const bool emit_text = tdm_dec->shown() && any_text_row_enabled;
+                    tdm_dec->set_option(
+                        "output", g_variant_new_string(emit_text ? "both" : "waveform"));
+                }
+            }
+
             // Call frame_ended() to set _options_changed flag, allowing decode to work properly
             new_dsig->frame_ended();
         }
