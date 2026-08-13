@@ -8,7 +8,7 @@
 # Prerequisites:
 #   - CMake build + install completed (install.dir/ must exist)
 #   - UCRT64 environment active (/ucrt64)
-#   - Python embeddable zip downloaded to python/ (for stdlib .pyc)
+#   - Python installed in UCRT64 (mingw-w64-python provides stdlib + .pyd)
 # =============================================================================
 set -e
 

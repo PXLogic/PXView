@@ -1,6 +1,7 @@
-import { Settings, MessageSquarePlus } from 'lucide-react';
+import { Settings, MessageSquarePlus, Monitor } from 'lucide-react';
 import { useAppStore } from '../hooks/useAppStore';
 import { useTranslation } from 'react-i18next';
+import { isTauri } from '../lib/tauri-bridge';
 
 export default function TopBar({
   onSettingsClick,
@@ -29,6 +30,12 @@ export default function TopBar({
         <div className="font-bold truncate text-text-casing hidden sm:block border-l-2 border-border pl-4">
           {t('APP_SUBTITLE')}
         </div>
+        {isTauri() && (
+          <div className="hidden md:flex items-center gap-1 px-2 py-0.5 border-2 border-border bg-accent text-bg-casing font-bold text-xs uppercase tracking-widest">
+            <Monitor className="w-3.5 h-3.5" />
+            Desktop
+          </div>
+        )}
       </div>
 
 

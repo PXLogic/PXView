@@ -819,20 +819,6 @@ jobs:
       - name: Install
         run: cd build && ninja install
 
-      - name: Download Python embeddable package
-        shell: msys2 {0}
-        run: |
-          PYVER=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
-          echo "MSYS2 Python version: $PYVER"
-          URL="https://www.python.org/ftp/python/$PYVER/python-$PYVER-embed-amd64.zip"
-          echo "Downloading: $URL"
-          curl -L -o python/python-embed.zip "$URL"
-          cd python
-          unzip -o python-embed.zip
-          rm -f python-embed.zip
-          echo "=== Python embeddable files ==="
-          ls -la *.dll *.zip *.pyd 2>/dev/null || echo "No binary files found"
-
       - name: Package (bundle DLLs and resources)
         run: |
           chmod +x window/copy-deps.sh

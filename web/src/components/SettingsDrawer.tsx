@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../hooks/useAppStore';
 import { useTranslation } from 'react-i18next';
+import { isTauri, pxviewRestart, type PxViewStatus } from '../lib/tauri-bridge';
 
 interface Settings {
   mcpServerUrl: string;
@@ -35,10 +36,26 @@ export default function SettingsDrawer({ open, onClose }: { open: boolean; onClo
     }
   }, [open, settings]);
 
+  const [backendStatus, setBackendStatus] = useState<PxViewStatus | null>(null);
+  const [restarting, setRestarting] = useState(false);
+
   const handleSave = () => {
     updateSettings(form);
     onClose();
   };
+
+  const handleRestartBackend = async () => {
+    setRestarting(true);
+    const result = await pxviewRestart();
+    setBackendStatus(result);
+    setRestarting(false);
+  };
+
+  useEffect(() => {
+    if (open && isTauri()) {
+      import('../lib/tauri-bridge').then(m => m.pxviewStatus()).then(setBackendStatus);
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -98,6 +115,33 @@ export default function SettingsDrawer({ open, onClose }: { open: boolean; onClo
           {field(t('AI_AUTH'), 'llmApiKey', 'password')}
           {field(t('AI_MDL'), 'llmModel')}
           {field(t('SYS_PROMPT'), 'systemPrompt', 'textarea')}
+
+          {/* Tauri desktop mode: backend management */}
+          {isTauri() && (
+            <div className="border-2 border-border bg-bg-casing-dark p-4 space-y-3">
+              <label className="text-xs font-bold text-text-casing-muted uppercase tracking-widest block">
+                Backend Process (Desktop Mode)
+              </label>
+              <div className="flex items-center gap-2 text-sm">
+                <div className={`w-3 h-3 rounded-full border border-border ${backendStatus?.running ? 'bg-success' : 'bg-error'}`} />
+                <span className="font-mono text-text-casing">
+                  {backendStatus?.running ? `Running (PID: ${backendStatus.pid})` : 'Not running'}
+                </span>
+              </div>
+              {backendStatus?.path && (
+                <div className="text-xs text-text-casing-muted font-mono break-all">
+                  {backendStatus.path}
+                </div>
+              )}
+              <button
+                onClick={handleRestartBackend}
+                disabled={restarting}
+                className="w-full px-4 py-2 border-2 border-border bg-accent text-bg-casing font-bold uppercase tracking-widest shadow-[2px_2px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#000] transition-all disabled:opacity-50"
+              >
+                {restarting ? 'Restarting...' : 'Restart Backend'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Save */}
