@@ -115,7 +115,7 @@ private:
   bool _rebuild_in_progress = false;
 
   // --- signals_changed() split helpers (was 300-line God-method) ---
-  void sort_signal_groups_by_view_index();
+  void normalize_view_indices();
   void classify_traces(std::vector<Trace *> &time_traces,
                         std::vector<Trace *> &fft_traces,
                         std::vector<Trace *> &logic_traces,

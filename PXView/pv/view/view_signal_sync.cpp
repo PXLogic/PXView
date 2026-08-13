@@ -108,8 +108,10 @@ void ViewSignalSync::compute_signal_groups() {
       logic_traces.push_back(t);
   }
 
-  // 按 view_index 排序，确保分组顺序与布局顺序一致
-  // view_index 相同时用 channel index 做 tiebreaker，避免不稳定排序导致顺序错乱
+  // 按.view_index 排序，确保分组顺序与布局顺序一致。
+  // normalize_view_indices() 已在 signals_changed() 中先于本函数调用，
+  // 保证所有 view_index >= 0 且连续无冲突。此处排序仅用于确定分组顺序。
+  // view_index 相同时用 channel index 做 tiebreaker，确保稳定排序。
   sort(decode_traces.begin(), decode_traces.end(), [](Trace *a, Trace *b) {
     int va = a->get_view_index(), vb = b->get_view_index();
     if (va != vb)
@@ -122,55 +124,6 @@ void ViewSignalSync::compute_signal_groups() {
       return va < vb;
     return a->get_index() < b->get_index();
   });
-
-  // 归一化 view_index：消除空洞与 -1，保持相对顺序
-  // 后续连续性检查要求 view_index 严格连续（相差1）才合并同组。两种情况会出问题：
-  // 1. view_index 有空洞（拖拽/删除解码器/.pxc 配置恢复留下跳号）→ unassigned
-  //    被误切成多个小组，按"组最小 view_index"重排后产生通道号逆序块。
-  // 2. view_index=-1（SignalFactory::create_signals 新建的 Signal 默认值）→
-  //    所有 -1 的 trace 各自独立成组，组排序时 min_vi 全为 INT_MAX，std::sort
-  //    不保证稳定 → 产生完全乱序（如 18,16,14,13,...）。
-  // 修复：把所有 trace 纳入归一化池，view_index>=0 的按 view_index 排在前，
-  // view_index<0 的按 channel index 排在后，然后统一赋值 0,1,2,... 连续序列。
-  {
-    std::vector<Trace *> normalize_pool;
-    normalize_pool.reserve(decode_traces.size() + logic_traces.size());
-    for (auto t : decode_traces) {
-      normalize_pool.push_back(t);
-    }
-    for (auto t : logic_traces) {
-      normalize_pool.push_back(t);
-    }
-    // view_index>=0 的按 view_index 排在前，view_index<0 的按 channel index 排在后
-    // view_index 相同时用 channel index 做 tiebreaker，确保稳定排序
-    sort(normalize_pool.begin(), normalize_pool.end(), [](Trace *a, Trace *b) {
-      int va = a->get_view_index();
-      int vb = b->get_view_index();
-      if (va >= 0 && vb >= 0) {
-        if (va != vb)
-          return va < vb;
-        return a->get_index() < b->get_index();
-      }
-      if (va >= 0 && vb < 0)
-        return true;
-      if (va < 0 && vb >= 0)
-        return false;
-      // 两者都 < 0，按 channel index 排序
-      return a->get_index() < b->get_index();
-    });
-    int idx = 0;
-    for (auto t : normalize_pool) {
-      t->set_view_index(idx++);
-    }
-    // 归一化后重新对 decode_traces/logic_traces 按新 view_index 排序，
-    // 确保后续分组逻辑使用归一化后的顺序
-    sort(decode_traces.begin(), decode_traces.end(), [](Trace *a, Trace *b) {
-      return a->get_view_index() < b->get_view_index();
-    });
-    sort(logic_traces.begin(), logic_traces.end(), [](Trace *a, Trace *b) {
-      return a->get_view_index() < b->get_view_index();
-    });
-  }
 
   std::set<int> assigned_signals;
   int group_id = 0;
@@ -300,39 +253,94 @@ void ViewSignalSync::compute_signal_groups() {
   }
 }
 
-void ViewSignalSync::sort_signal_groups_by_view_index() {
-  if (!(_view->is_logic_rendering_mode() && !_signal_groups.empty()))
+void ViewSignalSync::normalize_view_indices() {
+  // ====================================================================
+  // 统一 view_index 归一化函数 (redesign-channel-order-architecture)
+  // ====================================================================
+  // 这是系统中唯一负责 view_index 赋值的函数。所有其他函数
+  // (compute_signal_groups, classify_traces, rebuild_signals_from_config,
+  //  rebuild_signals) 只设置初始值 (用户配置值或 -1)，不赋递增值。
+  //
+  // 排序规则 (按优先级):
+  // 1. 有用户自定义 view_index (≥0) 的通道按 view_index 排前
+  //    - 相同 view_index (冲突) 时按类型优先级 + channel index 决定先后
+  // 2. 无 view_index (-1) 的通道按类型优先级 + channel index 排后:
+  //    LOGIC (index 升序) → ANALOG (index 升序) → DSO (index 升序)
+  //    → DECODER (插入序) → 其他
+  // 3. 统一赋值 0, 1, 2, ... 连续序列
+  //
+  // 这保证了:
+  // - 默认情况下 LOGIC 通道在前 (按 index 排序), ANALOG/DSO 在后, 不交错
+  // - 用户拖拽后的自定义位置被保留 (vi ≥ 0)
+  // - 模式切换时从旧配置继承的过期 vi 会被类型优先级 + index 覆盖排序
+  // ====================================================================
+
+  std::vector<Trace *> all_traces;
+  _view->get_traces(ALL_VIEW, all_traces);
+
+  if (all_traces.empty())
     return;
 
-  std::vector<size_t> group_order(_signal_groups.size());
-  for (size_t i = 0; i < _signal_groups.size(); i++)
-    group_order[i] = i;
-  sort(group_order.begin(), group_order.end(), [this](size_t a, size_t b) {
-    int minA = INT_MAX, minB = INT_MAX;
-    for (auto gt : _signal_groups[a].traces) {
-      if (gt->get_view_index() >= 0)
-        minA = min(minA, gt->get_view_index());
+  // 类型优先级: LOGIC(0) < ANALOG(1) < DSO(2) < DECODER(3) < 其他(4)
+  auto type_priority = [](Trace *t) -> int {
+    switch (t->get_type()) {
+    case SR_CHANNEL_LOGIC:   return 0;
+    case SR_CHANNEL_ANALOG:  return 1;
+    case SR_CHANNEL_DSO:     return 2;
+    case SR_CHANNEL_DECODER: return 3;
+    default:                 return 4;
     }
-    for (auto gt : _signal_groups[b].traces) {
-      if (gt->get_view_index() >= 0)
-        minB = min(minB, gt->get_view_index());
-    }
-    return minA < minB;
-  });
+  };
 
-  int new_index = 0;
-  for (size_t gi : group_order) {
-    sort(_signal_groups[gi].traces.begin(),
-         _signal_groups[gi].traces.end(),
-         [](Trace *a, Trace *b) {
-           int va = a->get_view_index(), vb = b->get_view_index();
-           if (va != vb)
-             return va < vb;
-           return a->get_index() < b->get_index();
-         });
-    for (auto gt : _signal_groups[gi].traces) {
-      gt->set_view_index(new_index++);
-    }
+  // 分离: 有显式 view_index (≥0) 的通道 vs 未设置 (-1) 的通道
+  std::vector<Trace *> explicit_order;
+  std::vector<Trace *> unset_order;
+  explicit_order.reserve(all_traces.size());
+  unset_order.reserve(all_traces.size());
+
+  for (auto t : all_traces) {
+    if (t->get_view_index() >= 0)
+      explicit_order.push_back(t);
+    else
+      unset_order.push_back(t);
+  }
+
+  // 排序显式通道: 按 view_index, 冲突时按类型优先级 + index
+  sort(explicit_order.begin(), explicit_order.end(),
+       [&type_priority](Trace *a, Trace *b) {
+         int va = a->get_view_index();
+         int vb = b->get_view_index();
+         if (va != vb)
+           return va < vb;
+         int pa = type_priority(a);
+         int pb = type_priority(b);
+         if (pa != pb)
+           return pa < pb;
+         return a->get_index() < b->get_index();
+       });
+
+  // 排序未设置通道: 按类型优先级 + channel index
+  sort(unset_order.begin(), unset_order.end(),
+       [&type_priority](Trace *a, Trace *b) {
+         int pa = type_priority(a);
+         int pb = type_priority(b);
+         if (pa != pb)
+           return pa < pb;
+         return a->get_index() < b->get_index();
+       });
+
+  // 合并: 显式通道在前, 未设置通道在后
+  std::vector<Trace *> sorted;
+  sorted.reserve(explicit_order.size() + unset_order.size());
+  for (auto t : explicit_order)
+    sorted.push_back(t);
+  for (auto t : unset_order)
+    sorted.push_back(t);
+
+  // 统一赋值 0, 1, 2, ... 连续序列
+  int idx = 0;
+  for (auto t : sorted) {
+    t->set_view_index(idx++);
   }
 }
 
@@ -357,21 +365,8 @@ void ViewSignalSync::classify_traces(std::vector<Trace *> &time_traces,
       decoder_traces.push_back(t);
   }
 
-  // 兜底：为未分到 signal_groups 的 TIME_VIEW 通道（如 ANALOG/DSO/Lissajous/
-  // Math）补 view_index。
-  {
-    int max_view_index = -1;
-    for (auto t : time_traces) {
-      if (t->get_view_index() > max_view_index)
-        max_view_index = t->get_view_index();
-    }
-    int next_index = max_view_index + 1;
-    for (auto t : time_traces) {
-      if (t->get_view_index() < 0 && t->enabled()) {
-        t->set_view_index(next_index++);
-      }
-    }
-  }
+  // classify_traces 仅做分类，不赋值或修改 view_index。
+  // view_index 的统一赋值由 normalize_view_indices() 负责。
 }
 
 void ViewSignalSync::update_fft_viewport(const std::vector<Trace *> &fft_traces) {
@@ -580,9 +575,12 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
 
   _view->mark_derived_traces_dirty();
 
-  compute_signal_groups();
+  // 统一归一化 view_index (redesign-channel-order-architecture)
+  // 必须在 compute_signal_groups 之前调用，因为分组逻辑依赖
+  // 已归一化的 view_index 来判断通道是否连续。
+  normalize_view_indices();
 
-  sort_signal_groups_by_view_index();
+  compute_signal_groups();
 
   std::vector<Trace *> time_traces;
   std::vector<Trace *> fft_traces;
@@ -623,7 +621,11 @@ _own_signals.clear();
   // 正确做法：以每个 ChannelConfig.type 作为单一真相源决定 Signal 子类。
   int work_mode = config.work_mode;
 
-  int view_index = 0;
+  // Do NOT assign a sequential default view_index here.
+  // Leave view_index=-1 for all channels without a saved value.
+  // normalize_view_indices() will assign correct view_index values
+  // that group channels by type (LOGIC first, then ANALOG/DSO),
+  // preventing interleaving.
   for (const auto &ch : config.channels) {
     // Create a temporary SignalModel for the channel configuration.
     // This SignalModel is not connected to a real device (no sr_channel),
@@ -724,7 +726,7 @@ _own_signals.clear();
       // uiLayout section of .pxc.
 
       // UI 布局状态从 ChannelConfig 恢复（单一持久化状态源）：
-      // - view_index: 配置值 >= 0 时使用，否则按启用顺序派生（向后兼容）
+      // - view_index: 配置值 >= 0 时使用，否则保持 -1，由下游归一化处理
       // - v_offset: 直接使用配置值
       // - own_height: 配置值 >= 0 时使用，否则 DSO/Analog 保持 -1（自动高度），
       //   Logic 不调用 set_own_height（由 Trace 构造函数处理主题默认）
@@ -734,13 +736,14 @@ _own_signals.clear();
       } else if (config.work_mode == DSO || config.work_mode == ANALOG) {
         signal->set_own_height(-1);
       }
-      if (ch.view_index >= 0) {
+    if (ch.view_index >= 0) {
         signal->set_view_index(ch.view_index);
-      } else if (ch.enabled) {
-        signal->set_view_index(view_index++);
-      } else {
-        signal->set_view_index(-1);
-      }
+    } else {
+      // Leave -1: normalize_view_indices() will assign a correct
+      // view_index that groups channels by type (LOGIC first,
+      // then ANALOG/DSO), preventing interleaving.
+      signal->set_view_index(-1);
+    }
       _own_signals.push_back(std::unique_ptr<Signal>(signal));
     }
   }
@@ -824,8 +827,12 @@ if (sig && sig->model()) {
   }
   if (restore_doc && restore_doc->has_signal_config()) {
     const auto &cfg = restore_doc->get_signal_config();
-    int view_index_seq = 0;
-    for (auto &sig : _own_signals) {
+  // Do NOT assign a sequential default view_index here.
+  // Leave view_index=-1 for channels without a saved value.
+  // normalize_view_indices() will assign correct view_index values
+  // that group channels by type (LOGIC first, then ANALOG/DSO),
+  // preventing interleaving.
+  for (auto &sig : _own_signals) {
       auto it = std::find_if(cfg.channels.begin(), cfg.channels.end(),
                              [&](const data::ChannelConfig &ch) {
                                return ch.index == sig->get_index();
@@ -839,8 +846,6 @@ if (sig && sig->model()) {
         }
         if (it->view_index >= 0) {
           sig->set_view_index(it->view_index);
-        } else if (it->enabled) {
-          sig->set_view_index(view_index_seq++);
         } else {
           sig->set_view_index(-1);
         }

@@ -157,9 +157,9 @@ void SignalConfigStore::save_signal_config(
     _signal_config.demo_operation_mode = agent->get_demo_operation_mode();
 
   // 保存旧配置的布局信息，用于为不在 channel_layout 中的通道（被禁用且
-  // 已从 View 的 _own_signals 中移除的通道）保留其 view_index/v_offset/
-  // own_height。否则这些通道的 view_index 会被写为默认值 -1，重新启用时
-  // 归一化排序会将其排到末尾，导致通道顺序错乱。
+  // 已从 View 的 _own_signals 中移除的通道）保留其 v_offset / own_height。
+  // view_index 不继承（写 -1），由 normalize_view_indices() 按类型 + index
+  // 统一赋值，防止过期 view_index 跨模式传播导致通道交错排序。
   std::map<int, ChannelConfig> old_channels;
   for (const auto &ch : _signal_config.channels)
     old_channels[ch.index] = ch;
@@ -259,7 +259,9 @@ void SignalConfigStore::save_signal_config(
     }
 
     // UI 布局状态：从 channel_layout 按 index 匹配写入；map 中无此 index
-    // 时从旧配置保留，避免被禁用的通道丢失 view_index 导致重新启用时顺序错乱
+    // 时不从旧配置继承 view_index（防止过期值跨模式传播），只继承
+    // v_offset / own_height（不影响排序）。view_index 写 -1，由
+    // normalize_view_indices() 按类型 + index 赋正确默认值。
     auto layout_it = channel_layout.find(cfg.index);
     if (layout_it != channel_layout.end()) {
       cfg.view_index = layout_it->second.view_index;
@@ -268,7 +270,8 @@ void SignalConfigStore::save_signal_config(
     } else {
       auto old_it = old_channels.find(cfg.index);
       if (old_it != old_channels.end()) {
-        cfg.view_index = old_it->second.view_index;
+        // 只继承 v_offset / own_height，不继承 view_index
+        cfg.view_index = -1;
         cfg.v_offset = old_it->second.v_offset;
         cfg.own_height = old_it->second.own_height;
       }
