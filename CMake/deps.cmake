@@ -33,38 +33,60 @@ link_directories(${GLIB_LIBDIR})
 # instead. Mixing them causes "python314.dll not found" at runtime because
 # package.sh only copies MinGW DLLs.
 #
-# Fix: in MSYS2 environments, force CMake to find the MinGW Python by:
-# 1. Setting Python3_FIND_REGISTRY=NEVER (skip Windows registry search)
-# 2. Setting Python3_ROOT_DIR to the MSYS2 prefix (/ucrt64)
-# This ensures PXView.exe links against libpython3.XX.dll (MinGW naming),
-# which copy-deps.sh will bundle correctly.
+# Fix: detect UCRT64 prefix directly (not just $ENV{MSYSTEM}) so this works
+# even when running CMake from PowerShell with UCRT64 tools in PATH.
+# Use standard GIL Python (not free-threaded) — MSYS2's free-threaded Python
+# (python3.14t) has broken sys.path and ABI conflicts in extension modules.
 
-if(DEFINED ENV{MSYSTEM})
-	# MSYS2/UCRT64 environment detected
-	set(Python3_FIND_REGISTRY NEVER)
-	if(EXISTS "/ucrt64/bin/python3.exe")
-		set(Python3_ROOT_DIR "/ucrt64")
+set(_ucrt64_prefix "")
+# Detect UCRT64 prefix on Windows. CMake's EXISTS uses Windows paths,
+# so /ucrt64 (MSYS2 internal path) won't work outside the MSYS2 shell.
+if(EXISTS "/ucrt64/bin")
+	# Inside MSYS2 shell — Unix-style path works
+	set(_ucrt64_prefix "/ucrt64")
+elseif(EXISTS "C:/msys64/ucrt64/bin")
+	# Windows native — common MSYS2 installation path
+	set(_ucrt64_prefix "C:/msys64/ucrt64")
+else()
+	# Try to derive from MSYSTEM_PREFIX or C compiler path
+	if(DEFINED ENV{MSYSTEM_PREFIX} AND EXISTS "$ENV{MSYSTEM_PREFIX}/bin")
+		set(_ucrt64_prefix "$ENV{MSYSTEM_PREFIX}")
+	elseif(CMAKE_C_COMPILER)
+		get_filename_component(_cc_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+		get_filename_component(_cc_parent "${_cc_dir}" DIRECTORY)
+		if(EXISTS "${_cc_parent}/bin/python3.exe")
+			set(_ucrt64_prefix "${_cc_parent}")
+		endif()
 	endif()
-	message(STATUS "MSYS2 environment detected (MSYSTEM=$ENV{MSYSTEM})")
-	message(STATUS "Forcing MSYS2 Python: Python3_ROOT_DIR=${Python3_ROOT_DIR}")
 endif()
 
-find_package(Python3 COMPONENTS Interpreter Development)
+if(_ucrt64_prefix)
+	set(Python3_FIND_REGISTRY NEVER)
+	if(EXISTS "${_ucrt64_prefix}/bin/python3.exe")
+		set(Python3_ROOT_DIR "${_ucrt64_prefix}")
+		set(_py_source "ucrt64-standard")
+		message(STATUS "UCRT64 standard Python detected")
+	endif()
+endif()
+
+if(NOT Python3_FOUND)
+	find_package(Python3 COMPONENTS Interpreter Development)
+endif()
 
 if (Python3_FOUND)
 	message("----- python3:")
 	message(STATUS "	 includes:" ${Python3_INCLUDE_DIRS})
 	message(STATUS "	 libraries:" ${Python3_LIBRARIES})
 	# Diagnostic: verify we got the MinGW Python, not python.org MSVC build
-	if(DEFINED ENV{MSYSTEM})
+	if(_ucrt64_prefix)
 		get_filename_component(_py_lib_dir "${Python3_LIBRARIES}" DIRECTORY)
-		if(_py_lib_dir MATCHES "hostedtoolcache|Python3[0-9]+\\\\libs")
+		if(_py_lib_dir MATCHES "hostedtoolcache|Python3[0-9]+\\\\libs|Program Files")
 			message(FATAL_ERROR "FATAL: CMake found python.org MSVC Python at ${Python3_LIBRARIES} "
 				"instead of MinGW Python. PXView.exe would link against python314.dll "
 				"(MSVC build) which is not available at runtime. "
 				"Check Python3_ROOT_DIR=${Python3_ROOT_DIR}")
 		endif()
-		message(STATUS "	 [OK] MinGW Python confirmed (not python.org MSVC build)")
+		message(STATUS "	 [OK] MinGW Python confirmed (source: ${_py_source})")
 	endif()
  include_directories(${Python3_INCLUDE_DIRS})
 	set(PY_LIB ${Python3_LIBRARIES})
