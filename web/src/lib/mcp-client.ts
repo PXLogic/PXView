@@ -30,6 +30,7 @@ export class McpClient {
   private requestId = 0;
   private tools: McpTool[] = [];
   private _connected = false;
+  private _instructions: string | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -37,14 +38,25 @@ export class McpClient {
 
   get connected() { return this._connected; }
   get availableTools() { return this.tools; }
+  /** Instructions from the MCP server's initialize response (authoritative system prompt). */
+  get instructions() { return this._instructions; }
 
   async connect(): Promise<void> {
-    // Send initialize request
-    await this.sendRequest('initialize', {
+    // Send initialize request and capture instructions from the response
+    const initResult = await this.sendRequest('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'PXView MCP Web', version: '1.0.0' },
     });
+
+    // Extract instructions field from initialize result (MCP spec: server-side
+    // system prompt that guides the LLM on how to use the tools).
+    if (initResult && typeof initResult === 'object' && 'instructions' in (initResult as any)) {
+      const instr = (initResult as any).instructions;
+      if (typeof instr === 'string' && instr.trim()) {
+        this._instructions = instr;
+      }
+    }
 
     // Send notifications/initialized (fire-and-forget, no response expected)
     await this.sendNotification('notifications/initialized');
@@ -211,6 +223,7 @@ export class McpClient {
   disconnect(): void {
     this._connected = false;
     this.tools = [];
+    this._instructions = null;
   }
 
   private async sendRequest(method: string, params: unknown): Promise<unknown> {

@@ -12,6 +12,7 @@
 #include "pv/config/appconfig.h"
 #include "pv/ui/langresource.h"
 #include "pv/ui/dockfonts.h"
+#include "pv/mcp/mcp_instructions_gen.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -121,28 +122,9 @@ void McpControlDock::setup_ui()
     _section3_desc->setFont(content_font);
     layout->addWidget(_section3_desc);
 
-    QString system_prompt =
-        "You are an AI assistant that controls a PXView logic analyzer through MCP tools. You help users capture signals, decode protocols, and analyze data.\n\n"
-        "## Recommended Workflow\n"
-        "1. **get_devices** — Find connected devices first\n"
-        "2. **add_analyzer** — Add decoders BEFORE starting capture (this is critical for auto-decode)\n"
-        "3. **start_capture** — Start signal capture with device and channel config\n"
-        "4. **wait_capture** — Wait for capture to complete\n"
-        "5. **get_analyzer_results** — Read decoded protocol data\n\n"
-        "## Key Rules\n"
-        "- Always call get_devices first to discover available devices and their IDs\n"
-        "- Add analyzers BEFORE starting capture so auto-decode triggers on capture completion\n"
-        "- Use list_analyzers to discover available protocol decoders\n"
-        "- Use get_analyzer_options to see required channels and options for each decoder\n"
-        "- When presenting decode results, summarize key findings (frequencies, duty cycles, data bytes, etc.)\n"
-        "- If a tool call fails, explain the error and suggest alternatives\n\n"
-        "## Available Operations\n"
-        "- Device discovery and configuration\n"
-        "- Signal capture (logic/analog/DSO modes)\n"
-        "- Protocol decoding (SPI, I2C, UART, CAN, PWM, etc.)\n"
-        "- Data export (CSV, binary)\n"
-        "- Signal measurements\n\n"
-        "Respond in the same language as the user's message.";
+    // System prompt is embedded at compile time from mcp_instructions.txt
+    // (single source of truth — same content the MCP SDK sends to clients)
+    QString system_prompt = QString::fromUtf8(pv::mcp::kInstructions);
 
     QFrame *prompt_frame = new QFrame(this);
     prompt_frame->setFrameShape(QFrame::StyledPanel);

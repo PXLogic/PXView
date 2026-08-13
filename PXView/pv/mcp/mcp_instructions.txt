@@ -16,6 +16,21 @@ mode before configuring channels, triggers, or probes:
   3 = MSO    — Mixed Signal Oscilloscope (both digital + analog channels,
                all features available)
 
+## Default Behavior
+
+If the user does not specify a work mode, default to Logic mode (0).
+Logic mode covers the most common use cases: digital signal analysis,
+protocol decoding (SPI, I2C, UART, CAN, etc.), and digital triggers.
+
+Do NOT ask the user which mode to use. Instead, infer from context:
+- User mentions oscilloscope/probe/vdiv/coupling/math/spectrum → DSO mode (1)
+- User mentions analog/DAQ/sensor → Analog mode (2)
+- User explicitly needs mixed digital + analog → MSO mode (3)
+- Otherwise → Logic mode (0), proceed silently
+
+Only ask the user to clarify if their request is genuinely ambiguous
+across multiple modes and the correct choice cannot be inferred.
+
 ## Standard Workflow
 
 1. get_devices                    — discover available devices and their IDs

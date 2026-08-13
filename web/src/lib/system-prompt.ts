@@ -1,3 +1,16 @@
+/**
+ * OFFLINE FALLBACK system prompt.
+ *
+ * The authoritative system prompt is `PXView/pv/mcp/mcp_instructions.txt`,
+ * served by the MCP SDK via the `initialize` response `instructions` field.
+ * When the web client connects to the MCP server, it uses those instructions
+ * directly (see useAppStore.ts → mcpInstructions).
+ *
+ * This fallback is ONLY used when the MCP server is unreachable (e.g. app not
+ * running, connection failed) and the LLM still needs a system prompt to
+ * attempt basic tool calls. It is intentionally minimal and may be outdated
+ * relative to the authoritative instructions.
+ */
 export const SYSTEM_PROMPT = `You are an AI assistant that controls a PXView logic analyzer through MCP tools. You help users capture signals, decode protocols, and analyze data.
 
 ## Recommended Workflow

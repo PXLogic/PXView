@@ -166,6 +166,10 @@ let llmClient: LlmClient | null = null;
 let abortController: AbortController | null = null;
 let devicePollTimer: ReturnType<typeof setInterval> | null = null;
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
+// MCP instructions from the server's initialize response — used as the
+// authoritative system prompt when available (single source of truth).
+// Falls back to settings.systemPrompt (from system-prompt.ts) when null.
+let mcpInstructions: string | null = null;
 
 function updateMessage(messages: ConversationMessage[], id: string, patch: Partial<ConversationMessage>): ConversationMessage[] {
   return messages.map(m => m.id === id ? { ...m, ...patch } : m);
@@ -214,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         mcpClient = new McpClient(settings.mcpServerUrl);
         await mcpClient.connect();
+        mcpInstructions = mcpClient.instructions;
         const tools = await mcpClient.listTools();
         set({ mcpConnected: true, mcpTools: tools });
 
@@ -316,6 +321,7 @@ export const useAppStore = create<AppState>((set, get) => {
         mcpClient.disconnect();
         mcpClient = null;
       }
+      mcpInstructions = null;
       set({ mcpConnected: false, mcpTools: [], deviceInfo: null, captureStatus: 'idle', captureProgress: null, reconnectStatus: 'idle' });
     },
 
@@ -459,8 +465,12 @@ export const useAppStore = create<AppState>((set, get) => {
           let streamContent = '';
           const streamToolCalls: ToolCallStatus[] = [];
 
+          // Prefer MCP server instructions (authoritative, from mcp_instructions.txt)
+          // over the local settings.systemPrompt (fallback for offline/disconnected).
+          const effectiveSystemPrompt = mcpInstructions || settings.systemPrompt;
+
           const finalMessage = await llmClient.chatStream(
-            [{ role: 'system', content: settings.systemPrompt }, ...chatHistory],
+            [{ role: 'system', content: effectiveSystemPrompt }, ...chatHistory],
             openaiTools,
             {
               onText: (delta) => {
@@ -730,6 +740,7 @@ export const useAppStore = create<AppState>((set, get) => {
           await newClient.connect();
 
           mcpClient = newClient;
+          mcpInstructions = newClient.instructions;
 
           const tools = await newClient.listTools();
 

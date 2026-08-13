@@ -1,0 +1,10 @@
+#pragma once
+// Auto-generated from mcp_instructions.txt at CMake configure time — do not edit.
+// The MCP instructions text is embedded as a compile-time constant so that
+// mcpcontroldock.cpp can display it without any runtime file I/O.
+// Source of truth: PXView/pv/mcp/mcp_instructions.txt
+namespace pv::mcp {
+inline constexpr const char* kInstructions = R"MCP_DELIM(
+@MCP_INSTRUCTIONS_CONTENT@
+)MCP_DELIM";
+} // namespace pv::mcp

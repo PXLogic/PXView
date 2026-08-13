@@ -40,6 +40,24 @@ configure_file (
 )
 
 #===============================================================================
+#= MCP instructions — embed mcp_instructions.txt as a compile-time C++ constant
+# Single source of truth: PXView/pv/mcp/mcp_instructions.txt
+# At configure time, the file content is read and baked into a generated header
+# (pv/mcp/mcp_instructions_gen.h) via configure_file + raw string literal.
+# This avoids any runtime file I/O in mcpcontroldock.cpp.
+#-------------------------------------------------------------------------------
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/mcp/mcp_instructions.txt" MCP_INSTRUCTIONS_CONTENT)
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/mcp/mcp_instructions_gen.h.in"
+	"${CMAKE_CURRENT_BINARY_DIR}/pv/mcp/mcp_instructions_gen.h"
+	@ONLY
+)
+# Re-run configure when the txt file changes
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/mcp/mcp_instructions.txt"
+)
+
+#===============================================================================
 #=pkg config
 #-------------------------------------------------------------------------------
 include(FindPkgConfig)
