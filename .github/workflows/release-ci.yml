@@ -206,7 +206,7 @@ jobs:
             local url="http://127.0.0.1:${port}/mcp"
 
             echo "=== [$group_name] Running: $tests ==="
-            cd tests
+            cd tests/suites
             PXVIEW_NO_AUTO_START=1 \
             PXVIEW_MCP_URL="$url" \
             PXVIEW_STARTUP_TIMEOUT=30 \
