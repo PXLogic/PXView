@@ -26,6 +26,7 @@
 #include "pv/session/sigsession.h"
 #include "pv/session/deviceagent.h"
 #include "pv/base/log.h"
+#include "pv/base/pxvdef.h"
 
 #include <cassert>
 
