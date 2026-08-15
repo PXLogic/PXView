@@ -207,6 +207,8 @@ jobs:
 
             echo "=== [$group_name] Running: $tests ==="
             cd tests/suites
+            # helpers package lives at tests/helpers; add tests/ to sys.path
+            export PYTHONPATH="$PWD/..:$PYTHONPATH"
             PXVIEW_NO_AUTO_START=1 \
             PXVIEW_MCP_URL="$url" \
             PXVIEW_STARTUP_TIMEOUT=30 \
@@ -216,7 +218,7 @@ jobs:
               --junitxml="$GITHUB_WORKSPACE/${group_name}_report.xml" \
               --self-contained-html \
               2>&1 | sed "s/^/[$group_name] /" \
-              || echo "WARNING: [$group_name] Tests had failures"
+              || touch /tmp/e2e_group_failed_${group_name}
             cd ..
 
             # Fallback XML
@@ -254,6 +256,11 @@ jobs:
             wait $PID_T2
             wait $PID_T3
             echo "=== All 3 test groups completed ==="
+            # Any test group with failures makes the CI step fail (real red)
+            if ls /tmp/e2e_group_failed_* >/dev/null 2>&1; then
+              echo "FAIL: one or more E2E test groups reported failures"
+              exit 1
+            fi
           else
             echo "ERROR: One or more PXView instances failed to start"
             echo "--- PXView1 log ---"; cat /tmp/pxv1.log 2>/dev/null || true
@@ -517,6 +524,7 @@ jobs:
             echo "test_03: capture basic (13 tests)"
             echo "test_05: data integrity"
             cd tests
+            export PYTHONPATH="$PWD:$PYTHONPATH"
             export PXVIEW_NO_AUTO_START=1
             export PXVIEW_MCP_URL="$MCP_URL"
             export PXVIEW_STARTUP_TIMEOUT=30
@@ -734,6 +742,7 @@ jobs:
           if [ "$READY" -eq 1 ]; then
             echo "=== Running MCP protocol tests under TSan ==="
             cd tests
+            export PYTHONPATH="$PWD:$PYTHONPATH"
             python -m pytest suites/test_01_mcp_protocol.py -v \
               --tb=short --timeout=300 --timeout-method=thread \
               --html="$GITHUB_WORKSPACE/tsan_headless_report.html" \
@@ -788,6 +797,7 @@ jobs:
           if [ "$READY" -eq 1 ]; then
             echo "=== Running MCP + capture tests under TSan (GUI mode) ==="
             cd tests
+            export PYTHONPATH="$PWD:$PYTHONPATH"
             python -m pytest \
               suites/test_01_mcp_protocol.py \
               suites/test_03_capture_basic.py \

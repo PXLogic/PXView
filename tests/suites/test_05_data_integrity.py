@@ -85,7 +85,7 @@ class TestDataIntegrity:
         assert len(mcp_samples) > 0
 
         # 3. Export to CSV
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         # 4. Find and read CSV
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
@@ -113,7 +113,7 @@ class TestDataIntegrity:
         assert len(mcp_samples) > 0
 
         # 3. Export to binary
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0])
 
         # 4. Find and read binary file
         bin_files = find_exported_binary(tmp_capture_dir)
@@ -182,7 +182,7 @@ class TestDataIntegrity:
         mcp.set_export_config(start_sample=100, end_sample=1000)
 
         # Export
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         # Verify CSV has data
         csv_files = find_exported_csv(tmp_capture_dir, "channel")

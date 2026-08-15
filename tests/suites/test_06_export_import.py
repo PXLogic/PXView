@@ -34,7 +34,7 @@ class TestExportImport:
         """Export multi-channel CSV."""
         do_timed_capture(mcp, device_id, channels=[0, 1, 2, 3],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) >= 1
 
@@ -44,7 +44,7 @@ class TestExportImport:
         """Export CSV with ISO 8601 timestamps."""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0],
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0],
                                 iso8601_timestamp=True)
         csv_files = find_exported_csv(tmp_capture_dir)
         assert len(csv_files) > 0
@@ -55,7 +55,7 @@ class TestExportImport:
         """Export multi-channel binary."""
         do_timed_capture(mcp, device_id, channels=[0, 1, 2, 3],
                          sample_rate=1000000, duration_seconds=0.3)
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
+        mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0, 1, 2, 3])
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) >= 1
 

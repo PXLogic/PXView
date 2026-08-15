@@ -54,7 +54,7 @@ class TestErrorHandling:
                                     cleanup_after_test):
         """Export without capture returns error."""
         with pytest.raises(McpError):
-            mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+            mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
     def test_load_nonexistent_file(self, mcp: McpClient, cleanup_after_test):
         """load_capture with non-existent file returns error."""

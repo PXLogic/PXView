@@ -128,5 +128,5 @@ class TestStress:
         for i in range(3):
             subdir = os.path.join(tmp_capture_dir, f"export_{i}")
             os.makedirs(subdir, exist_ok=True)
-            mcp.export_raw_data(format="csv", subdir, digital_channels=[0])
-            mcp.export_raw_data(format="binary", subdir, digital_channels=[0])
+            mcp.export_raw_data("csv", subdir, digital_channels=[0])
+            mcp.export_raw_data("binary", subdir, digital_channels=[0])

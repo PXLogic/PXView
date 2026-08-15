@@ -30,7 +30,7 @@ class TestVcdExport:
         do_timed_capture(mcp, device_id, channels=[0, 1],
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp.export_raw_data(format="vcd", tmp_capture_dir,
+        mcp.export_raw_data("vcd", tmp_capture_dir,
                             digital_channels=[0, 1])
 
         # Find VCD files
@@ -68,7 +68,7 @@ class TestHexExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp.export_raw_data(format="hex", tmp_capture_dir,
+        mcp.export_raw_data("hex", tmp_capture_dir,
                             digital_channels=[0])
 
         # Find hex files
@@ -118,7 +118,7 @@ class TestBitsExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
 
-        mcp.export_raw_data(format="bits", tmp_capture_dir,
+        mcp.export_raw_data("bits", tmp_capture_dir,
                             digital_channels=[0])
 
         # Find bits files

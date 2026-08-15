@@ -110,7 +110,7 @@ class TestLeftCursorExport:
 
         left = 500
         mcp.set_export_config(start_sample=left, end_sample=total_samples)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0, "No CSV files exported"
@@ -129,7 +129,7 @@ class TestLeftCursorExport:
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left = 500
         mcp.set_export_config(start_sample=left, end_sample=total_samples)
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0, "No binary files exported"
@@ -158,7 +158,7 @@ class TestRightCursorExport:
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         right = 5000
         mcp.set_export_config(start_sample=0, end_sample=right)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
@@ -176,7 +176,7 @@ class TestRightCursorExport:
 
         right = 5000
         mcp.set_export_config(start_sample=0, end_sample=right)
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
@@ -203,7 +203,7 @@ class TestBothCursorsExport:
         total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
         left, right = 1000, 5000
         mcp.set_export_config(start_sample=left, end_sample=right)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
@@ -222,7 +222,7 @@ class TestBothCursorsExport:
 
         left, right = 1000, 5000
         mcp.set_export_config(start_sample=left, end_sample=right)
-        mcp.export_raw_data(format="binary", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0])
 
         bin_files = find_exported_binary(tmp_capture_dir)
         assert len(bin_files) > 0
@@ -244,7 +244,7 @@ class TestBothCursorsExport:
 
         left, right = 100, 800
         mcp.set_export_config(start_sample=left, end_sample=right)
-        mcp.export_raw_data(format="csv", tmp_capture_dir, digital_channels=[0])
+        mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
 
         csv_files = find_exported_csv(tmp_capture_dir, "channel")
         assert len(csv_files) > 0
