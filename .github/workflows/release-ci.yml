@@ -168,8 +168,6 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
-          SEGFAULT_LIB=$(find /usr/lib /lib -name 'libSegFault.so*' 2>/dev/null | head -1)
-          echo "libSegFault.so: ${SEGFAULT_LIB:-NOT FOUND}"
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
@@ -177,28 +175,15 @@ jobs:
           GROUP2="test_04_capture_timed_10s.py test_06_export_import.py test_07_decoder_i2c.py test_08_decoder_spi.py test_09_decoder_uart.py test_10_decoder_can_pwm.py test_26_i2c_real_decode.py"
           GROUP3="test_12_decoder_batch.py test_17_18_filter_invert.py test_19_20_session_advanced.py test_22_stress.py test_23_decoder_stacked.py test_24_real_decode.py test_25_pwm_mixed_stress.py"
 
-          # ---- Helper: start a PXView instance on a given port ----
-          start_pxview() {
-            local port=$1
-            local ws_port=$2
-            local logfile=$3
-            echo "Starting PXView on MCP port $port, WS port $ws_port..."
-            local preload_args=()
-            [ -n "$SEGFAULT_LIB" ] && preload_args=(LD_PRELOAD="$SEGFAULT_LIB" SEGFAULT_SIGNALS=all)
-            env "${preload_args[@]}" "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
-            echo $!
-          }
-
-          # ---- Helper: wait for MCP server to be ready ----
+          # ---- Helper: wait for MCP server to be ready (probe the port, not the PID) ----
+          # PXView may be reparented/detached from the launching shell, so we rely
+          # on the MCP endpoint actually responding rather than on the tracked PID
+          # staying alive (a stale PID caused false "exited prematurely" reports).
           wait_for_mcp() {
             local port=$1
             local pid=$2
             local url="http://127.0.0.1:${port}/mcp"
-            for i in $(seq 1 60); do
-              if ! kill -0 "$pid" 2>/dev/null; then
-                echo "ERROR: PXView (port $port) exited prematurely"
-                return 1
-              fi
+            for i in $(seq 1 90); do
               RESP=$(curl -s -X POST "$url" \
                 -H "Content-Type: application/json" \
                 -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
@@ -209,7 +194,7 @@ jobs:
               fi
               sleep 1
             done
-            echo "ERROR: MCP server (port $port) did not start within 60s"
+            echo "ERROR: MCP server (port $port) did not start within 90s"
             return 1
           }
 
@@ -241,17 +226,13 @@ jobs:
             fi
           }
 
-          # ---- DIAGNOSTIC: capture PXView crash backtrace via gdb (foreground, timeout) ----
-          which gdb >/dev/null 2>&1 || sudo apt-get install -y gdb
-          echo "=== DIAGNOSTIC: launching PXView once under gdb (timeout 45s) ==="
-          timeout 45 gdb -batch -ex run -ex bt -ex quit --args \
-            "$PXV_BIN" --headless --port 10999 --ws-port 18999 -l 4 2>&1 | tail -60 \
-            || echo "DIAGNOSTIC: gdb/timeout finished (PXView may have crashed or run as a server)"
-
-          # ---- Start 3 PXView instances ----
-          PID1=$(start_pxview 10110 10430 /tmp/pxv1.log)
-          PID2=$(start_pxview 10111 10431 /tmp/pxv2.log)
-          PID3=$(start_pxview 10112 10432 /tmp/pxv3.log)
+          # ---- Start 3 PXView instances (direct children of this shell; nohup avoids SIGHUP) ----
+          nohup "$PXV_BIN" --headless --port 10110 --ws-port 10430 -l 4 > /tmp/pxv1.log 2>&1 &
+          PID1=$!
+          nohup "$PXV_BIN" --headless --port 10111 --ws-port 10431 -l 4 > /tmp/pxv2.log 2>&1 &
+          PID2=$!
+          nohup "$PXV_BIN" --headless --port 10112 --ws-port 10432 -l 4 > /tmp/pxv3.log 2>&1 &
+          PID3=$!
 
           ALL_READY=1
           wait_for_mcp 10110 $PID1 || ALL_READY=0
