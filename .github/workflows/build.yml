@@ -344,11 +344,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: ARM64
-            cross_compile: false
-          - arch: x86_64
-            cross_compile: true
+        # Default (push / PR / manual without "all"): build only ARM64 (fast).
+        # x86_64 cross-compile is slow and only built on explicit manual opt-in
+        # (workflow_dispatch with mac_arch == "all").
+        include: ${{ fromJson((github.event_name == 'workflow_dispatch' && github.event.inputs.mac_arch == 'all') && '[{"arch":"ARM64","cross_compile":false},{"arch":"x86_64","cross_compile":true}]' || '[{"arch":"ARM64","cross_compile":false}]') }}
     runs-on: macos-14
     steps:
       - name: Resolve ref

@@ -1512,16 +1512,13 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
             auto dec = up.get();
             QJsonArray ch_array;
             const srd_decoder *const d = dec->decoder();;
-            const bool have_probes = (d->channels || d->opt_channels) != 0;
 
-            if (have_probes) {
-                auto binded_probes = dec->binded_probe_list();
-                for(auto probe : binded_probes) {
-                    QJsonObject ch_obj;
-                    int binded_index = dec->binded_probe_index(probe);
-                    ch_obj[probe->id] = QJsonValue::fromVariant(binded_index);
-                    ch_array.push_back(ch_obj);
-                }
+            auto binded_probes = dec->binded_probe_list();
+            for(auto probe : binded_probes) {
+                QJsonObject ch_obj;
+                int binded_index = dec->binded_probe_index(probe);
+                ch_obj[probe->id] = QJsonValue::fromVariant(binded_index);
+                ch_array.push_back(ch_obj);
             }
 
             QJsonObject options_obj;
@@ -1559,13 +1556,22 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
                 }
             }
 
-            if (have_probes) {
+            // The base (front) decoder always goes into dec_obj, while every
+            // sub decoder goes into "stacked decoders". This must mirror the
+            // read side in load_decoders(), which restores options/channel for
+            // the front decoder from dec_obj and sub decoders from the stacked
+            // array. Previously this branch keyed on whether the decoder defined
+            // input probes (have_probes), which overwrote the same dec_obj
+            // fields for every probe-bearing decoder in the stack and dropped
+            // sub-decoder options/channel mappings entirely.
+            if (dec == decoderList.front().get()) {
                 dec_obj["id"] = QJsonValue::fromVariant(QString(d->id));
                 dec_obj["channel"] = ch_array;
                 dec_obj["options"] = options_obj;
             } else {
                 QJsonObject stack_obj;
                 stack_obj["id"] = QJsonValue::fromVariant(QString(d->id));
+                stack_obj["channel"] = ch_array;
                 stack_obj["options"] = options_obj;
                 stack_array.push_back(stack_obj);
             }
@@ -1690,15 +1696,35 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                 auto dec = up.get();
                 const srd_decoder *const d = dec->decoder();
                 QJsonObject options_obj;
+                QJsonArray channel_array;
 
                 if (dec == decoder_list.front().get()) {
+                    options_obj = dec_obj["options"].toObject();
+                    channel_array = dec_obj["channel"].toArray();
+                }
+                else {
+                    for(const QJsonValue &value : dec_obj["stacked decoders"].toArray()) {
+                        QJsonObject stacked_obj = value.toObject();
+                        if (QString::fromUtf8(d->id) == stacked_obj["id"].toString()) {
+                            options_obj = stacked_obj["options"].toObject();
+                            channel_array = stacked_obj["channel"].toArray();
+                            break;
+                        }
+                    }
+                }
+
+                // Restore the probe (channel) mapping for this decoder.
+                // Both the base decoder (from dec_obj) and sub decoders (from
+                // their stacked entry) carry a "channel" array that maps each
+                // channel id to a bound signal index.
+                {
                     std::map<const srd_channel*, int> probe_map;
                     // Load the mandatory channels
                     for(l = d->channels; l; l = l->next) {
                         const struct srd_channel *const pdch = (struct srd_channel *)l->data;
                         pxv_info("StoreSession::load_decoders: checking mandatory channel '%s'", pdch->id);
 
-                        for (const QJsonValue &value : dec_obj["channel"].toArray()) {
+                        for (const QJsonValue &value : channel_array) {
                             QJsonObject ch_obj = value.toObject();
                             if (ch_obj.contains(pdch->id)) {
                                 int bind_chan = ch_obj[pdch->id].toInt();
@@ -1718,7 +1744,7 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                         const struct srd_channel *const pdch = (struct srd_channel *)l->data;
                         pxv_info("StoreSession::load_decoders: checking optional channel '%s'", pdch->id);
 
-                        for (const QJsonValue &value : dec_obj["channel"].toArray()) {
+                        for (const QJsonValue &value : channel_array) {
                             QJsonObject ch_obj = value.toObject();
                             if (ch_obj.contains(pdch->id)) {
                                 int bind_chan = ch_obj[pdch->id].toInt();
@@ -1733,17 +1759,8 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                         }
                     }
                     pxv_info("StoreSession::load_decoders: setting %d probes on decoder", (int)probe_map.size());
-                    dec->set_probes(probe_map);
-                    options_obj = dec_obj["options"].toObject();
-                }
-                else {
-                    for(const QJsonValue &value : dec_obj["stacked decoders"].toArray()) {
-                        QJsonObject stacked_obj = value.toObject();
-                        if (QString::fromUtf8(d->id) == stacked_obj["id"].toString()) {
-                            options_obj = stacked_obj["options"].toObject();
-                            break;
-                        }
-                    }
+                    if (!probe_map.empty())
+                        dec->set_probes(probe_map);
                 }
 
                 for (l = d->options; l; l = l->next) {
