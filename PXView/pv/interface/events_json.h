@@ -20,18 +20,14 @@
 #include "pv/interface/events.h"
 
 // ---- QString support for nlohmann::json ----
-// A free `to_json`/`from_json` in `namespace nlohmann` is NOT enough on system
-// nlohmann 3.11.x: there `json` lives behind an inline ABI namespace
-// (json_abi_v3_11_3), so the unqualified call from the macro-generated code
-// fails ADL. The version-robust, officially recommended mechanism is to
-// specialize `nlohmann::adl_serializer<QString>` (see below).
-namespace nlohmann {
-// Specialize adl_serializer for QString so any nlohmann::json <-> QString
-// conversion (e.g. a NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE member of type QString)
-// works on every nlohmann build — including system 3.11.x, which hides `json`
+// Specialize adl_serializer<QString> so that nlohmann::json <-> QString
+// conversions (e.g. a NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE member of type QString)
+// work on every nlohmann build, including system 3.11.x where `json` lives
 // behind an inline ABI namespace (json_abi_v3_11_3) that breaks ADL lookup of a
-// free `to_json` declared in `namespace nlohmann`. Specializing adl_serializer is
-// the version-robust, officially recommended mechanism (no reliance on ADL).
+// free to_json. This specialization MUST appear before any NLOHMANN_DEFINE_* macro
+// that references a QString member, otherwise GCC diagnoses "specialization after
+// instantiation". The adl_serializer mechanism is version-robust (no ADL reliance).
+namespace nlohmann {
 template <>
 struct adl_serializer<QString> {
     static void to_json(json& j, const QString& s) {
