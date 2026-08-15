@@ -23,6 +23,7 @@
 #include "pv/dialogs/fftoptions.h"
 #include <QFormLayout>
 #include <QListWidget>
+#include <QtConcurrent>
 #include "pv/session/sigsession.h"
 #include "pv/data/stack/spectrumstack.h"
 #include "pv/view/trace/trace.h"
@@ -257,7 +258,10 @@ void FftOptions::accept()
             // (void)_dbv_combobox->currentData().toInt();
 
             if (_data_src->is_stopped_status() && _en_checkbox->isChecked()){
-                stack->calc_fft();
+                // #4 FFT 计算 (fftw_execute) 移 worker 线程, 避免阻塞 GUI;
+                // 完成后 SpectrumStack::fft_updated 触发 GUI 线程刷新频谱.
+                auto s = stack;
+                QtConcurrent::run([s]() { s->calc_fft(); });
             }
             break;
         }

@@ -97,6 +97,12 @@ SpectrumTrace::SpectrumTrace(pv::SigSession *session,
   
     _spectrum_stack = spectrum_stack;
 
+    // #4 FFT 计算在 worker 线程完成后, 由 SpectrumStack::fft_updated 通知 GUI
+    // 线程刷新. signal 跨线程 queued 到 GUI 执行, 通过 session->update_view()
+    // 广播 DataUpdated → Viewport 重绘 (context=this 在析构时自动断开连接).
+    connect(_spectrum_stack.get(), &SpectrumStack::fft_updated,
+            this, [session]() { session->update_view(); });
+
     update_lang_text();
 }
 

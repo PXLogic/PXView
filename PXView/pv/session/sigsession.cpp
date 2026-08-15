@@ -2816,17 +2816,27 @@ data::DsoSnapshot *SigSession::get_dso_snapshot() {
 // original DsoMeasure computation exactly.
 std::vector<api::MeasurementValue>
 SigSession::get_measurements(int channel_index, int view_rect_height) {
-  std::vector<api::MeasurementValue> result;
-
   SessionData *data = _state->view_data();
   if (!data)
-    return result;
+    return {};
 
   auto *dso = data->get_dso();
   if (!dso || dso->empty())
-    return result;
+    return {};
+
+  const uint64_t ring = dso->get_sample_count();
+  // #3 缓存查询: 键 (data 指针, channel, ring, h). running 时 ring 增长自动
+  // 失效, stopped hover 时命中, 消除主线程 O(N) 重复计算.
+  {
+    std::lock_guard<std::mutex> lk(_measure_cache_mutex);
+    if (_measure_cache_valid && _measure_cache_data == (void*)data &&
+        _measure_cache_ch == channel_index && _measure_cache_ring == ring &&
+        _measure_cache_h == view_rect_height)
+      return _measure_cache_val;
+  }
 
   auto signal_models = get_signal_models_snapshot();
+  std::vector<api::MeasurementValue> result;
 
   // Step 1: compute raw MeasurementResult list (max/min/rms/mean per channel)
   auto raw_results = core::MeasureCalculator::compute(
@@ -2867,6 +2877,16 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
     }
   }
 
+  // #3 写缓存: 键见上文. 数据变更 (ring 增长 / 文档切换) 时下次调用失效.
+  {
+    std::lock_guard<std::mutex> lk(_measure_cache_mutex);
+    _measure_cache_data = (void*)data;
+    _measure_cache_ch = channel_index;
+    _measure_cache_ring = ring;
+    _measure_cache_h = view_rect_height;
+    _measure_cache_val = result;
+    _measure_cache_valid = true;
+  }
   return result;
 }
 

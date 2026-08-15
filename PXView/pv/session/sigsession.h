@@ -494,6 +494,18 @@ std::vector<core::Subscription> _event_subscriptions;
   // releasing the current device (set_device, close_file, destructor).
   // Blocks until the background import thread finishes its current chunk.
   void wait_for_import_complete_();
+
+  // --- DSO 测量缓存 (#3, 源自 c6cd59fd 非 RLE 部分) ---
+  // MeasureCalculator::compute 在主线程 O(样本数) 遍历, hover 测量时频繁触发.
+  // 缓存按 (data 指针, channel, ring_sample_count, view_rect_height) 键,
+  // 数据变更 (running 时 ring 增长 / 文档切换) 自动失效, stopped hover 命中.
+  mutable std::mutex _measure_cache_mutex;
+  void *_measure_cache_data = nullptr;
+  int _measure_cache_ch = -1;
+  uint64_t _measure_cache_ring = 0;
+  int _measure_cache_h = 0;
+  bool _measure_cache_valid = false;
+  std::vector<api::MeasurementValue> _measure_cache_val;
 };
 
 } // namespace pv

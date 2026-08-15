@@ -115,15 +115,15 @@ void SpectrumStack::set_sample_interval(int interval)
 
 const std::vector<double> SpectrumStack::get_fft_spectrum()
 {
-    std::vector<double> empty;
+    std::lock_guard<std::mutex> lk(_fft_mutex);
     if (_spectrum_state == Stopped)
         return _power_spectrum;
-    else
-        return empty;
+    return {};
 }
 
 double SpectrumStack::get_fft_spectrum(uint64_t index)
 {
+    std::lock_guard<std::mutex> lk(_fft_mutex);
     double ret = -1;
     if (_spectrum_state == Stopped && index < _power_spectrum.size())
         ret = _power_spectrum[index];
@@ -181,14 +181,19 @@ void SpectrumStack::calc_fft()
     // fft
     fftw_execute(_fft_plan);
 
-    // calculate power spectrum
-    _power_spectrum[0] = abs(_xk[0])/wsum;  /* DC component */
-    for (unsigned int k = 1; k < (_sample_num + 1) / 2; ++k)  /* (k < N/2 rounded up) */
-         _power_spectrum[k] = sqrt((_xk[k]*_xk[k] + _xk[_sample_num-k]*_xk[_sample_num-k]) * 2) / wsum;
-    if (_sample_num % 2 == 0) /* N is even */
-         _power_spectrum[_sample_num/2] = abs(_xk[_sample_num/2])/wsum;  /* Nyquist freq. */
+    // calculate power spectrum (锁保护: GUI 线程可能并发读 get_fft_spectrum)
+    {
+      std::lock_guard<std::mutex> lk(_fft_mutex);
+      _power_spectrum[0] = abs(_xk[0])/wsum;  /* DC component */
+      for (unsigned int k = 1; k < (_sample_num + 1) / 2; ++k)  /* (k < N/2 rounded up) */
+           _power_spectrum[k] = sqrt((_xk[k]*_xk[k] + _xk[_sample_num-k]*_xk[_sample_num-k]) * 2) / wsum;
+      if (_sample_num % 2 == 0) /* N is even */
+           _power_spectrum[_sample_num/2] = abs(_xk[_sample_num/2])/wsum;  /* Nyquist freq. */
 
-    _spectrum_state = Stopped;
+      _spectrum_state = Stopped;
+    }
+    // 计算完成 (在 worker 线程触发 → queued 到 GUI 线程刷新频谱 trace)
+    emit fft_updated();
 }
 
 double SpectrumStack::window(uint64_t i, int type)

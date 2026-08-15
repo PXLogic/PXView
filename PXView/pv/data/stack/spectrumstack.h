@@ -30,6 +30,8 @@
   
 #include <fftw3.h>
 
+#include <mutex>
+
 #include <QObject>
 #include <QString>
 
@@ -83,6 +85,10 @@ public:
 
     double window(uint64_t i, int type); 
 
+signals:
+    // #4 FFT 计算完成 (在 worker 线程触发, queued 到 GUI 线程刷新频谱)
+    void fft_updated();
+
 private:
     pv::SigSession *_session;
 
@@ -97,6 +103,10 @@ private:
     std::vector<double> _xn;
     std::vector<double> _xk;
     std::vector<double> _power_spectrum;
+
+    // #4 保护 _power_spectrum / _spectrum_state 的并发读写 (calc_fft 在
+    // worker 线程写, get_fft_spectrum 在 GUI 线程读).
+    mutable std::mutex _fft_mutex;
 };
 
 } // namespace data
