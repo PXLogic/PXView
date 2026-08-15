@@ -19,16 +19,23 @@
 
 #include "pv/interface/events.h"
 
-namespace pv {
-namespace interface {
-
 // ---- QString support for nlohmann::json ----
-inline void to_json(nlohmann::json& j, const QString& s) {
+// Must live in the nlohmann NAMESPACE (not global, not pv::interface): the
+// NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE macro expands inside pv::interface and the
+// generated code calls an unqualified from_json, so ADL must be able to find
+// these. Putting them in `namespace nlohmann` is the canonical, version-robust
+// location (works for both system nlohmann 3.11 and FetchContent builds).
+namespace nlohmann {
+inline void to_json(json& j, const QString& s) {
     j = s.toStdString();
 }
-inline void from_json(const nlohmann::json& j, QString& s) {
+inline void from_json(const json& j, QString& s) {
     s = QString::fromStdString(j.get<std::string>());
 }
+} // namespace nlohmann
+
+namespace pv {
+namespace interface {
 
 // ---- Events with simple fields: auto-generate to_json / from_json ----
 

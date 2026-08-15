@@ -836,7 +836,11 @@ jobs:
           cd build && ninja install-webui
 
       - name: Build Tauri desktop app
-        run: cd build && ninja tauri-desktop
+        run: |
+          # Node must be on PATH for `npm run tauri` to invoke `node` (the
+          # export in the Configure step does not carry over to this step).
+          export PATH="$CARGO_HOME/bin:/c/Program Files/nodejs:$PATH"
+          cd build && ninja tauri-desktop
 
       - name: Build PXView
         run: cd build && ninja -j $(nproc)
