@@ -266,6 +266,15 @@ private:
     bool get_nxt_edge_self(uint64_t &index, bool last_sample, uint64_t end,
                       double min_length, int sig_index);
 
+    // P5 diff 扫描 (spec 阶段3): 直接对 raw 块字节做 u64 差分 + ctz
+    // (bsf_folded) 定位 [start, end] 内第一个与 expected_level 不同的采样点,
+    // 输出到 out_pos 并返回 true. 相比 mipmap 树搜索 (get_nxt_edge_self),
+    // 稠密数据下 O(bytes) 常量级扫描, 供毛刺滤波主循环复用 (spec:
+    // "毛刺滤波走 diff+ctz, 吞吐不低于 RLE 版"). order 是 _ch_data 通道序,
+    // 调用方保证 start 处电平 == expected_level.
+    bool find_first_different_raw(int order, uint64_t start, uint64_t end,
+                                  bool expected_level, uint64_t &out_pos);
+
     bool get_pre_edge_self(uint64_t &index, bool last_sample,
                       double min_length, int sig_index);
 

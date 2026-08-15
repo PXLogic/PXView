@@ -280,13 +280,15 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
   while (scan_pos < end_pos) {
     bool current_scan_level = _host->get_sample_self(scan_pos, sig_index);
 
-    // 寻找下一个边缘（跳出当前电平）
+    // 寻找下一个边缘（跳出当前电平）— P5 diff+ctz raw 扫描 (spec 阶段3):
+    // 直接扫 raw 块字节定位跳变, 不做 mipmap 树遍历, 稠密数据吞吐更高.
     uint64_t edge_pos = scan_pos;
-    bool found = _host->get_nxt_edge_self(edge_pos, current_scan_level,
-                                          end_pos - 1, 0, sig_index);
+    bool found = _host->find_first_different_raw(
+        order, scan_pos, end_pos - 1, current_scan_level, edge_pos);
 
-    if (!found) {
-      pxv_info("[GlitchFilter] no more edges at scan_pos=%llu",
+    // 防死循环: edge_pos 未严格前进说明调用方电平不变式被破坏 (理论上不可达).
+    if (!found || edge_pos <= scan_pos) {
+      pxv_warn("[GlitchFilter] no valid edge at scan_pos=%llu (raw scan)",
                (unsigned long long)scan_pos);
       break;
     }
@@ -294,8 +296,8 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
     uint64_t pulse_start = edge_pos;
     uint64_t pulse_end = pulse_start;
     // 寻找脉冲的结束边缘（电平回归原始位置）
-    bool found_end = _host->get_nxt_edge_self(pulse_end, !current_scan_level,
-                                               end_pos - 1, 0, sig_index);
+    bool found_end = _host->find_first_different_raw(
+        order, pulse_start, end_pos - 1, !current_scan_level, pulse_end);
 
     if (!found_end) {
       pulse_end = end_pos;

@@ -52,6 +52,97 @@ using namespace std;
 namespace pv {
 namespace data {
 
+namespace {
+/* [PathDiag] 窗口累计器 — 每 50 个 payload 打印一次 avg/max 汇总。
+ *
+ * raw 版三段时间口径 (spec 阶段3): 锁等待 (lockwait, 唯一未被覆盖的盲区) /
+ * 写块 (write, 锁外 memcpy 写 mmap 页) / metadata (meta, 锁内
+ * allocate_block + calc_mipmap + 计数, 由 total−lockwait−write 导出). raw
+ * 无显式 mmap flush 段 (OS 页缓存管理). 旧版"每 50 个打印瞬时值"会漏掉窗口
+ * 内极慢 payload, 窗口 max 专抓它们. */
+struct PathDiagWindow {
+    uint64_t count = 0;
+    double sum_ms = 0, max_ms = 0;
+    double lockwait_sum = 0, lockwait_max = 0;
+    double write_sum = 0, write_max = 0;
+    double meta_sum = 0, meta_max = 0;
+    uint64_t max_payload = 0;
+
+    void add(uint64_t payload_no, uint64_t payload_bytes,
+             double total_ms, double lockwait_ms, double write_ms) {
+        double meta_ms = total_ms - lockwait_ms - write_ms;
+        if (meta_ms < 0) meta_ms = 0;  // 计时噪声兜底
+        count++;
+        sum_ms += total_ms;
+        lockwait_sum += lockwait_ms;
+        write_sum += write_ms;
+        meta_sum += meta_ms;
+        if (lockwait_ms > lockwait_max) lockwait_max = lockwait_ms;
+        if (write_ms > write_max) write_max = write_ms;
+        if (meta_ms > meta_max) meta_max = meta_ms;
+        if (total_ms > max_ms) { max_ms = total_ms; max_payload = payload_no; }
+        if (count % 50 == 0) {
+            const double avg = sum_ms / 50.0;
+            const double mbps = avg > 0
+                ? (double)payload_bytes / 1e6 / (avg / 1000.0) : 0.0;
+            pxv_info("[PathDiag] win#%llu (50 payloads): avg=%.2fms (%.0f MB/s) "
+                     "max=%.1fms @#%llu | lockwait avg=%.2f max=%.2f | "
+                     "write avg=%.2f max=%.2f | meta avg=%.2f max=%.2f",
+                     (unsigned long long)(count / 50), avg, mbps, max_ms,
+                     (unsigned long long)max_payload,
+                     lockwait_sum / 50.0, lockwait_max,
+                     write_sum / 50.0, write_max,
+                     meta_sum / 50.0, meta_max);
+            sum_ms = 0; max_ms = 0;
+            lockwait_sum = 0; lockwait_max = 0;
+            write_sum = 0; write_max = 0;
+            meta_sum = 0; meta_max = 0;
+        }
+    }
+};
+
+/* [RenderDiag] get_display_edges 逐帧耗时统计 (GUI 线程).
+ *
+ * 定位渲染卡顿 (spec 阶段3 Render 诊断日志体系): 慢调用 (>100ms) 打印带
+ * 1s throttle; 每 1000 次汇总 avg/max. RAII 覆盖所有 return 路径. */
+struct RenderDiagRec {
+    uint64_t start, end;
+    uint16_t width;
+    inline static unsigned long long calls = 0;
+    inline static double total_ms = 0, max_ms = 0;
+    std::chrono::steady_clock::time_point t0;
+    inline static std::chrono::steady_clock::time_point t_last{};
+
+    RenderDiagRec(uint64_t s, uint64_t e, uint16_t w)
+        : start(s), end(e), width(w),
+          t0(std::chrono::steady_clock::now()) {}
+
+    ~RenderDiagRec() {
+        const double ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+        calls++;
+        total_ms += ms;
+        if (ms > max_ms) max_ms = ms;
+        const auto now = std::chrono::steady_clock::now();
+        if (ms >= 100.0 &&
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - t_last).count() >= 1000) {
+            t_last = now;
+            pxv_warn("[RenderDiag] get_display_edges slow: %.1fms "
+                     "(start=%llu end=%llu width=%u)",
+                     ms, (unsigned long long)start,
+                     (unsigned long long)end, (unsigned)width);
+        }
+        if (calls % 1000 == 0) {
+            pxv_info("[RenderDiag] get_display_edges: %llu calls "
+                     "avg=%.2fms max=%.1fms",
+                     calls, total_ms / 1000.0, max_ms);
+            total_ms = 0; max_ms = 0;
+        }
+    }
+};
+} // anonymous namespace
+
 const uint64_t LogicSnapshot::LevelMask[LogicSnapshot::ScaleLevel] = {
     ~(~0ULL << ScalePower) << 0 * ScalePower,
     ~(~0ULL << ScalePower) << 1 * ScalePower,
@@ -429,6 +520,27 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
       uint64_t total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
 
       bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
+      // P4 整文件预分配上限 (spec 阶段3): 磁盘模式按 DiskCacheConfig 的
+      // total_cache_depth_gb 封顶, 采集深度由盘容量决定而非内存. 每通道均分
+      // (layout 已按 channel * max_blocks_per_channel 分片). 超过盘容量时截断
+      // _max_blocks_per_channel 与 total_bytes, 采集超出时由 allocate_block /
+      // get_block_data 越界报错并回退 LeafBlockPool.
+      if (use_disk) {
+        const uint64_t disk_cap_bytes =
+            _disk_cache_writer->disk_cache_config().total_cache_depth_gb *
+            (1024ULL * 1024 * 1024);
+        if (disk_cap_bytes > 0 && total_bytes > disk_cap_bytes) {
+          pxv_warn("LogicSnapshot::first_payload: capture needs %llu bytes > "
+                   "disk cap %llu GB, clamping (depth becomes disk-limited)",
+                   (unsigned long long)total_bytes,
+                   (unsigned long long)_disk_cache_writer->disk_cache_config().total_cache_depth_gb);
+          // 均分到每通道后折算成每通道块数 (整块对齐)
+          _max_blocks_per_channel =
+              disk_cap_bytes / (LeafBlockSpace * _channel_num);
+          total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
+        }
+      }
+
       QString disk_dir = QString::fromStdString(_disk_cache_writer->disk_cache_config().cache_path);
       auto _mmap_t0 = std::chrono::steady_clock::now();
       bool mmap_ok = _mmap_alloc->configure(use_disk, disk_dir, total_bytes,
@@ -580,12 +692,31 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
 
   if (num_samples == 0) return;
 
+  // [PathDiag] 入口计时起点 (含 _mutex 获取等待 — 唯一未被写块/元数据覆盖的盲区)
+  static PathDiagWindow pd_win;
+  static uint64_t pd_seq = 0;
+  const auto pd_entry = std::chrono::steady_clock::now();
+  double pd_lockwait_ms = 0.0, pd_write_ms = 0.0;
+  // RAII 汇总器: 函数所有 return 路径统一记账 (只统计真正处理的 payload)
+  struct PdFinalize {
+    PathDiagWindow &w; uint64_t &seq; uint64_t bytes;
+    std::chrono::steady_clock::time_point t0;
+    double &lw; double &wr;
+    ~PdFinalize() {
+      const double total = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - t0).count();
+      w.add(++seq, bytes, total, lw, wr);
+    }
+  } pd_fin{pd_win, pd_seq, (uint64_t)logic.length, pd_entry, pd_lockwait_ms, pd_write_ms};
+
   // Segmented locking: metadata ops (allocate_block, _sample_count/
   // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
   // mmap data writes (page-fault-prone) release it so UI's get_samples can
   // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
   // and safe to touch without the lock during write loops.
   std::unique_lock<std::recursive_mutex> lock(_mutex);
+  pd_lockwait_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - pd_entry).count();
 
   // Update _sample_count (cap at _total_sample_count)
   if (_sample_count + num_samples < _total_sample_count) {
@@ -713,13 +844,18 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
 
     // mmap data write — release _mutex to avoid blocking UI during page faults
     lock.unlock();
-    for (unsigned int ch = 0; ch < _channel_num; ch++) {
-      auto [byte_pos, bit_mask] = ch_ctx[ch];
-      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
-      for (uint64_t k = 0; k < have; k++) {
-        if (src[k * unitsize + byte_pos] & bit_mask)
-          *dest_byte |= static_cast<uint8_t>(1u << (_byte_fraction + k));
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      for (unsigned int ch = 0; ch < _channel_num; ch++) {
+        auto [byte_pos, bit_mask] = ch_ctx[ch];
+        uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+        for (uint64_t k = 0; k < have; k++) {
+          if (src[k * unitsize + byte_pos] & bit_mask)
+            *dest_byte |= static_cast<uint8_t>(1u << (_byte_fraction + k));
+        }
       }
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire for metadata (advance_leaf_block)
 
@@ -746,15 +882,20 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   while (samples_left >= 8 && (offset % Scale) != 0) {
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    for (unsigned int ch = 0; ch < _channel_num; ch++) {
-      auto [byte_pos, bit_mask] = ch_ctx[ch];
-      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
-      uint8_t byte = 0;
-      for (uint8_t k = 0; k < 8; k++) {
-        if (src[k * unitsize + byte_pos] & bit_mask)
-          byte |= static_cast<uint8_t>(1u << k);
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      for (unsigned int ch = 0; ch < _channel_num; ch++) {
+        auto [byte_pos, bit_mask] = ch_ctx[ch];
+        uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+        uint8_t byte = 0;
+        for (uint8_t k = 0; k < 8; k++) {
+          if (src[k * unitsize + byte_pos] & bit_mask)
+            byte |= static_cast<uint8_t>(1u << k);
+        }
+        *dest_byte = byte;
       }
-      *dest_byte = byte;
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire for metadata (advance_leaf_block)
 
@@ -771,20 +912,25 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   while (samples_left >= Scale && _byte_fraction == 0) {
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    for (unsigned int ch = 0; ch < _channel_num; ch++) {
-      auto [byte_pos, bit_mask] = ch_ctx[ch];
-      uint64_t *write_ptr =
-          reinterpret_cast<uint64_t *>(ch_lbp[ch]) + offset / Scale;
-      uint64_t value = 0;
-      for (unsigned int m = 0; m < ScaleSize; m++) {
-        uint8_t byte = 0;
-        for (unsigned int k = 0; k < 8; k++) {
-          if (src[(m * 8 + k) * unitsize + byte_pos] & bit_mask)
-            byte |= static_cast<uint8_t>(1u << k);
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      for (unsigned int ch = 0; ch < _channel_num; ch++) {
+        auto [byte_pos, bit_mask] = ch_ctx[ch];
+        uint64_t *write_ptr =
+            reinterpret_cast<uint64_t *>(ch_lbp[ch]) + offset / Scale;
+        uint64_t value = 0;
+        for (unsigned int m = 0; m < ScaleSize; m++) {
+          uint8_t byte = 0;
+          for (unsigned int k = 0; k < 8; k++) {
+            if (src[(m * 8 + k) * unitsize + byte_pos] & bit_mask)
+              byte |= static_cast<uint8_t>(1u << k);
+          }
+          value |= static_cast<uint64_t>(byte) << (m * 8);
         }
-        value |= static_cast<uint64_t>(byte) << (m * 8);
+        *write_ptr = value;
       }
-      *write_ptr = value;
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire for metadata (advance_leaf_block)
 
@@ -799,15 +945,20 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   while (samples_left >= 8 && _byte_fraction == 0) {
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    for (unsigned int ch = 0; ch < _channel_num; ch++) {
-      auto [byte_pos, bit_mask] = ch_ctx[ch];
-      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
-      uint8_t byte = 0;
-      for (uint8_t k = 0; k < 8; k++) {
-        if (src[k * unitsize + byte_pos] & bit_mask)
-          byte |= static_cast<uint8_t>(1u << k);
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      for (unsigned int ch = 0; ch < _channel_num; ch++) {
+        auto [byte_pos, bit_mask] = ch_ctx[ch];
+        uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+        uint8_t byte = 0;
+        for (uint8_t k = 0; k < 8; k++) {
+          if (src[k * unitsize + byte_pos] & bit_mask)
+            byte |= static_cast<uint8_t>(1u << k);
+        }
+        *dest_byte = byte;
       }
-      *dest_byte = byte;
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire for metadata (advance_leaf_block)
 
@@ -822,13 +973,18 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   if (samples_left > 0 && _byte_fraction == 0) {
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    for (unsigned int ch = 0; ch < _channel_num; ch++) {
-      auto [byte_pos, bit_mask] = ch_ctx[ch];
-      uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
-      for (uint64_t k = 0; k < samples_left; k++) {
-        if (src[k * unitsize + byte_pos] & bit_mask)
-          *dest_byte |= static_cast<uint8_t>(1u << k);
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      for (unsigned int ch = 0; ch < _channel_num; ch++) {
+        auto [byte_pos, bit_mask] = ch_ctx[ch];
+        uint8_t *dest_byte = static_cast<uint8_t *>(ch_lbp[ch]) + offset / 8;
+        for (uint64_t k = 0; k < samples_left; k++) {
+          if (src[k * unitsize + byte_pos] & bit_mask)
+            *dest_byte |= static_cast<uint8_t>(1u << k);
+        }
       }
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire for mipmap calc & finalize
 
@@ -909,12 +1065,31 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // samples = total samples per channel in this packet
   uint64_t samples = (logic.length * 8) / _channel_num;
 
+  // [PathDiag] 入口计时起点 (含 _mutex 获取等待 — 唯一未被写块/元数据覆盖的盲区)
+  static PathDiagWindow pd_win;
+  static uint64_t pd_seq = 0;
+  const auto pd_entry = std::chrono::steady_clock::now();
+  double pd_lockwait_ms = 0.0, pd_write_ms = 0.0;
+  // RAII 汇总器: 函数所有 return 路径统一记账 (只统计真正处理的 payload)
+  struct PdFinalize {
+    PathDiagWindow &w; uint64_t &seq; uint64_t bytes;
+    std::chrono::steady_clock::time_point t0;
+    double &lw; double &wr;
+    ~PdFinalize() {
+      const double total = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - t0).count();
+      w.add(++seq, bytes, total, lw, wr);
+    }
+  } pd_fin{pd_win, pd_seq, (uint64_t)logic.length, pd_entry, pd_lockwait_ms, pd_write_ms};
+
   // Segmented locking: metadata ops (allocate_block, _sample_count/
   // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
   // mmap data writes (page-fault-prone) release it so UI's get_samples can
   // proceed. _dest_ptr/_ch_fraction/_byte_fraction are async-writer-private
   // and safe to touch without the lock during write loops.
   std::unique_lock<std::recursive_mutex> lock(_mutex);
+  pd_lockwait_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - pd_entry).count();
 
   // Update _sample_count (cap at _total_sample_count)
   if (_sample_count + samples < _total_sample_count) {
@@ -971,11 +1146,16 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    do {
-      *_dest_ptr++ = *data_src_ptr++;
-      _byte_fraction = (_byte_fraction + 1) % 8;
-      len--;
-    } while (_byte_fraction != 0 && len > 0);
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      do {
+        *_dest_ptr++ = *data_src_ptr++;
+        _byte_fraction = (_byte_fraction + 1) % 8;
+        len--;
+      } while (_byte_fraction != 0 && len > 0);
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
+    }
     lock.lock();  // re-acquire for metadata (allocate_block/calc_mipmap)
 
     if (_byte_fraction == 0) {
@@ -1058,10 +1238,15 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   while (len >= 8) {
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    *write_ptr++ = *read_ptr;
-    read_ptr += _channel_num;
-    len -= 8;
-    filled_sample += Scale;
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      *write_ptr++ = *read_ptr;
+      read_ptr += _channel_num;
+      len -= 8;
+      filled_sample += Scale;
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
+    }
 
     last_chan++;
     if (last_chan == _channel_num) {
@@ -1168,9 +1353,14 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
     // mmap data write — release _mutex during page faults
     lock.unlock();
-    while (len > 0) {
-      *_dest_ptr++ = *src_ptr++;
-      len--;
+    {
+      const auto pd_w0 = std::chrono::steady_clock::now();
+      while (len > 0) {
+        *_dest_ptr++ = *src_ptr++;
+        len--;
+      }
+      pd_write_ms += std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - pd_w0).count();
     }
     lock.lock();  // re-acquire before method exit (destructor releases)
   }
@@ -1761,6 +1951,9 @@ bool LogicSnapshot::get_display_edges(
     std::vector<std::pair<uint16_t, bool>> &togs, uint64_t start, uint64_t end,
     uint16_t width, uint16_t max_togs, double pixels_offset, double min_length,
     uint16_t sig_index) {
+  // [RenderDiag] 逐帧渲染耗时统计 (RAII, 覆盖所有 return 路径)
+  RenderDiagRec rd_diag(start, end, width);
+
   if (!edges.empty())
     edges.clear();
   if (!togs.empty())
@@ -1971,6 +2164,66 @@ bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
   }
 
   return edge_hit;
+}
+
+bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
+                                             uint64_t end, bool expected_level,
+                                             uint64_t &out_pos) {
+  // P5 diff 扫描: 直接扫 raw 块字节, 不做 mipmap 树遍历.
+  // 逐 u64 与 expected_level 求差分 (v ^ (expected ? ~0 : 0)), 用 bsf_folded
+  // (ctz) 定位第一个差异位. 未实例化块 (nullptr) 由 first/last 常量值判定.
+  // 调用方持有 _mutex (filter 在 apply_glitch_filter 内调用).
+  if (start > end)
+    return false;
+  if ((unsigned int)order >= _ch_data.size())
+    return false;
+
+  uint64_t idx0 = start / (LeafBlockSamples * RootScale);
+  uint64_t idx1 = (start / LeafBlockSamples) % RootScale;
+  uint64_t pos = start;
+
+  while (pos <= end && idx0 < (uint64_t)_ch_data[order].size()) {
+    void *lbp = _ch_data[order][idx0].lbp[idx1];
+    const uint64_t blk_start = (idx0 * RootScale + idx1) * LeafBlockSamples;
+
+    if (lbp == nullptr) {
+      // 常量块 (未实例化): 整块电平 = first bit. start 处电平 == expected,
+      // 故 const == expected 时本块无差异, 跳到下一块; 否则防御性返回 start.
+      const bool const_val =
+          (_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
+      if (const_val != expected_level) {
+        out_pos = start;
+        return true;
+      }
+      pos = blk_start + LeafBlockSamples;
+      if (++idx1 >= RootScale) { idx1 = 0; idx0++; }
+      continue;
+    }
+
+    const uint64_t *u64s = (const uint64_t *)lbp;
+    uint64_t local = pos - blk_start;
+    while (local < LeafBlockSamples && pos <= end) {
+      const uint64_t u64_idx = local >> ScalePower;   // /64
+      const uint64_t bit_in_u64 = local & (Scale - 1); // %64
+      const uint64_t v = u64s[u64_idx];
+      const uint64_t diff = v ^ (expected_level ? ~0ULL : 0ULL);
+      const uint64_t t = diff & (~0ULL << bit_in_u64);
+      if (t != 0) {
+        const uint64_t found = blk_start + (u64_idx << ScalePower) +
+                               bsf_folded(t);
+        if (found > end)
+          return false;
+        out_pos = found;
+        return true;
+      }
+      local = (u64_idx + 1) << ScalePower;  // 跳到下一 u64
+      pos = blk_start + local;
+    }
+
+    pos = blk_start + LeafBlockSamples;
+    if (++idx1 >= RootScale) { idx1 = 0; idx0++; }
+  }
+  return false;
 }
 
 bool LogicSnapshot::get_pre_edge(uint64_t &index, bool last_sample,
