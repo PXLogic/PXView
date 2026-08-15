@@ -1192,23 +1192,37 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         uint64_t written_bytes = 0;
 
         for (int blk = 0; !_canceled  &&  blk < blk_num; blk++) {
+            // 先做范围过滤，跳过不需要导出的块（避免被跳过的块仍计入 written_bytes）
+            if (blk < start_block)
+                continue;
+            if (blk > end_block && end_block > 0)
+                break;
+
             uint64_t blk_bytes = logic_snapshot->get_block_size(blk);
-            uint64_t buf_sample_num = blk_bytes * 8;
-            if (written_bytes + blk_bytes > total_out_bytes) {
+            uint64_t block_samples = blk_bytes * 8;
+
+            // 光标偏移处理：起始块跳过 start_offset 个采样，结束块截断到 end_offset。
+            // 与 RLE 时代 7a635336 的 actual_start/actual_end 语义对齐（raw 版为采样级）。
+            uint64_t exp_start = 0;
+            if (blk == start_block && start_offset > 0)
+                exp_start = start_offset;
+            uint64_t exp_end = block_samples - 1;
+            if (blk == end_block && end_block > 0 && end_offset > 0)
+                exp_end = (end_offset < block_samples) ? end_offset : block_samples - 1;
+            if (exp_start > exp_end)
+                continue;
+
+            uint64_t buf_sample_num = exp_end - exp_start + 1;
+            if (written_bytes + (buf_sample_num + 7) / 8 > total_out_bytes) {
                 // Last (partial) block: write only the remaining valid bytes.
                 uint64_t remain = total_out_bytes - written_bytes;
                 if (remain == 0)
                     break;
                 buf_sample_num = remain * 8;
             }
-            written_bytes += buf_sample_num / 8;
+            written_bytes += (buf_sample_num + 7) / 8;
             buf_vec.clear();
             buf_sample.clear();
-
-            if (blk < start_block)
-                continue;
-            if (blk > end_block && end_block > 0)
-                break;
 
             std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
                 if (!_export_channels.empty() && std::find(_export_channels.begin(), _export_channels.end(), m->index()) == _export_channels.end()) {
@@ -1245,7 +1259,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
                         if (buf_vec[k] == nullptr && buf_sample[k])
                             xbuf[j*unitsize+k/8] +=  1 << k%8;
-                        else if (buf_vec[k] && (buf_vec[k][(i+j)/8] & (1 << j%8)))
+                        else if (buf_vec[k] && (buf_vec[k][(exp_start+i+j)/8] & (1 << (exp_start+i+j)%8)))
                             xbuf[j*unitsize+k/8] +=  1 << k%8;
                     }
                 }
