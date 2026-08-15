@@ -101,3 +101,20 @@ pv_add_qtest(test_view_layout
 pv_add_qtest(test_trace_visitor
     view/test_trace_visitor.cpp
 )
+
+# ==== LogicSnapshot raw 存储路径 (P5 diff+ctz 毛刺滤波) ====
+# 直接编译 raw 数据层源文件 (不链接 pxview-data), 内部 stub xlog.
+# 依赖: snapshot / logicsnapshot / diskcache_writer / glitch_filter / mmap_allocator
+#       + leaf_block_pool (header-only) + libsigrok 头 + common (xlog.h).
+pv_add_qtest(test_logic_snapshot_raw
+    data/test_logic_snapshot_raw.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_snapshot_raw PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
