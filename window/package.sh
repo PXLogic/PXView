@@ -186,7 +186,7 @@ fi
 echo "=== package.sh summary ==="
 echo "DLLs in package: $(ls *.dll 2>/dev/null | wc -l)"
 echo "Python DLLs: $(ls *python*.*.dll 2>/dev/null || echo 'NONE')"
-echo "Tauri desktop app: $([ -f PXView-Agent.exe ] && echo 'PXView-Agent.exe [OK]' || echo 'not built')
+echo "Tauri desktop app: $([ -f PXView-Agent.exe ] && echo 'PXView-Agent.exe [OK]' || echo 'not built')"
 if [ -n "$PY_VER" ] && [ -d "lib/python${PY_VER}" ]; then
     echo "Python stdlib: lib/python${PY_VER}/ ($(du -sh lib/python${PY_VER}/ 2>/dev/null | awk '{print $1}'))"
 else
