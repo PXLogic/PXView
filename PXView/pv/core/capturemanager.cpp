@@ -65,7 +65,14 @@ void CaptureManager::capture_init() {
   // not snapshot state). set_cur_snap_samplerate() will be called again
   // AFTER clear() to inject the samplerate into the NEW snapshots.
   const uint64_t dev_samplerate = _state->device_agent().get_sample_rate();
-  const uint64_t dev_samplelimits = _state->device_agent().get_sample_limit();
+  // stream 模式: 视图时间范围用 ring buffer 容量 (内存/磁盘缓冲决定的样本
+  // 上限), 不能用 get_sample_limit() —— demo 驱动在 loop 模式启动后会清
+  // limit_samples=0, 第二次采集时 get_sample_limit() 回落 default_sample_limit()
+  // (1M), 覆盖掉 action_start_capture 里设置的正确 ring buffer 值, 导致
+  // stream 视图被限制在 0-1s. buffer 模式: 用驱动停止条件 get_sample_limit().
+  const uint64_t dev_samplelimits =
+      _is_stream_mode.load() ? _state->device_agent().get_ring_sample_count()
+                             : _state->device_agent().get_sample_limit();
 
   _data_updated.store(false);
   _coord->set_trigger_flag(false);
@@ -173,22 +180,47 @@ bool CaptureManager::action_start_capture(bool instant,
 
   _coord->set_capture_data(_state->view_data());
   _coord->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
-  _coord->set_cur_samplelimits(_state->device_agent().get_sample_limit());
 
-  _coord->set_session_time(QDateTime::currentDateTime());
-
+  /* 提前确定 stream 模式 (在 set_cur_samplelimits 之前):
+   * demo 设备应用层强制 stream, 且需先把驱动 operation mode 同步为
+   * Stream Mode —— 否则 DeviceAgent::is_stream_mode() 返回 false
+   * (demo 驱动默认 Buffer Mode), get_ring_sample_count() 走非 stream 分支
+   * 返回 default_sample_limit() (=1M samples). 此时 loop 模式采集到 1M
+   * 样本 (1MHz 下 1s) 后 _ring_sample_count 封顶, 屏幕停止滚动, 但数据
+   * 仍在追加/写盘, 造成"屏幕不动但内存占用在涨"的假象. */
   int mode = _state->device_agent().get_work_mode();
   if (mode == LOGIC) {
-    if (is_repeat_mode() && _state->device_agent().is_hardware() &&
-        _state->device_agent().is_stream_mode()) {
-      set_repeat_intvl(0.1);
-    }
-
     if (_state->device_agent().is_hardware()) {
       _is_stream_mode.store(_state->device_agent().is_stream_mode());
     } else if (_state->device_agent().is_demo() ||
                _state->device_agent().is_file()) {
       _is_stream_mode.store(true);
+      if (_state->device_agent().is_demo()) {
+        _state->device_agent().set_config_string(SR_CONF_OPERATION_MODE,
+                                                 "Stream Mode");
+      }
+    }
+  }
+
+  /* 视图时间范围 (cur_sampletime = samplelimits / samplerate) 的来源:
+   * - stream 模式: 用 ring buffer 容量 get_ring_sample_count() (内存/磁盘缓冲
+   *   决定的样本上限). 不能用 get_sample_limit() —— demo 驱动在
+   *   dev_acquisition_start 的 loop 分支会清 limit_samples=0, 第一次采集后
+   *   驱动 limit_samples 归零, 第二次采集时 get_sample_limit() 回落
+   *   default_sample_limit() (1M samples), 1MHz 下 cur_sampletime=1s,
+   *   导致 stream 视图被限制在 0-1s.
+   * - buffer 模式: 用驱动停止条件 get_sample_limit(). */
+  _coord->set_cur_samplelimits(
+      _is_stream_mode.load()
+          ? _state->device_agent().get_ring_sample_count()
+          : _state->device_agent().get_sample_limit());
+
+  _coord->set_session_time(QDateTime::currentDateTime());
+
+  if (mode == LOGIC) {
+    if (is_repeat_mode() && _state->device_agent().is_hardware() &&
+        _state->device_agent().is_stream_mode()) {
+      set_repeat_intvl(0.1);
     }
 
     if (is_loop_mode() && !_is_stream_mode.load()) {
@@ -429,7 +461,9 @@ bool CaptureManager::exec_capture() {
     _coord->set_capture_data(_state->data_list()[buf_index].get());
     _state->capture_data()->clear();
     _coord->set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
-    _coord->set_cur_samplelimits(_state->device_agent().get_sample_limit());
+    _coord->set_cur_samplelimits(
+        _is_stream_mode.load() ? _state->device_agent().get_ring_sample_count()
+                               : _state->device_agent().get_sample_limit());
   }
 
   capture_init();

@@ -168,6 +168,10 @@ public:
     uint64_t get_working_set_bytes();
     uint64_t get_async_queue_bytes();
 
+    // raw 版内存/磁盘指示口径（raw 复原 spec，用户拍板）：
+    // 逻辑落盘字节 = 已采集样本数/8（8 samples/byte），磁盘占用 = mmap 分配器文件大小。
+    uint64_t get_mmap_total_bytes();
+
     bool has_data(int sig_index);
     int get_block_num();
     uint64_t get_block_size(int block_index);

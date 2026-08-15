@@ -137,12 +137,13 @@ void MainWindowStatusBar::update_disk_cache_status() {
             QString("%1").arg(pf);
 
     if (logic->is_disk_cache_active()) {
-      uint64_t total_blocks = logic->get_disk_total_blocks_written();
-      double disk_gb = total_blocks * 2105376 / (1024.0 * 1024.0 * 1024.0);
+      // raw 口径 (raw 复原 spec, 用户拍板): mmap 分配器文件大小 = "磁盘当内存"
+      // 的实际占用, 比块数启发式 (total_blocks * 2105376) 更准确.
+      uint64_t disk_bytes = session->get_logic_disk_bytes();
       text +=
           " | " +
           QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DISK_CACHE_DISK), "Disk: ")) +
-          QString("%1 GB").arg(disk_gb, 0, 'f', 2);
+          QString("%1 GB").arg(disk_bytes / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
     }
   }
 

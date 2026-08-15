@@ -243,6 +243,12 @@ uint64_t LogicSnapshot::get_async_queue_bytes() {
   return _disk_cache_writer->get_async_queue_bytes();
 }
 
+uint64_t LogicSnapshot::get_mmap_total_bytes() {
+  if (_mmap_alloc)
+    return _mmap_alloc->get_total_bytes();
+  return 0;
+}
+
 void LogicSnapshot::ensure_all_blocks_hot() {
   _disk_cache_writer->ensure_all_blocks_hot();
 }

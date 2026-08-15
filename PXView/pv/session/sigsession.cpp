@@ -3055,6 +3055,29 @@ double SigSession::get_disk_write_speed_mbps() {
 
 bool SigSession::is_disk_write_disk_full() { return false; }
 
+uint64_t SigSession::get_logic_memory_bytes() {
+  // raw 口径: 已采集逻辑字节数 (样本数/8, 8 samples/byte). 与 RLE 时代
+  // get_total_bytes() 的"驻留字节"语义不同 —— raw 存储无压缩, 逻辑字节即
+  // 数据 footprint 的代理. 语义为"当前数据占用磁盘/内存多少".
+  auto *snap = get_logic_snapshot();
+  if (!snap)
+    return 0;
+  return snap->get_sample_count() / 8;
+}
+
+uint64_t SigSession::get_logic_disk_bytes() {
+  // raw 口径: mmap 分配器当前文件大小 (磁盘当内存, OS 页缓存管理).
+  auto *snap = get_logic_snapshot();
+  if (snap)
+    return snap->get_mmap_total_bytes();
+  return 0;
+}
+
+bool SigSession::get_logic_disk_cache_active() {
+  auto *snap = get_logic_snapshot();
+  return snap && snap->is_disk_cache_active();
+}
+
 // ============================================================================
 // USB hotplug (libsigrok sr_listen_hotplug) — Tasks 9/10/11 + Task 4/5.
 //
