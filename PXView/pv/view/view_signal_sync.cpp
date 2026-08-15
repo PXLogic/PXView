@@ -943,6 +943,28 @@ void ViewSignalSync::on_signals_changed() {
     signals_changed(nullptr);
     break;
   }
+
+  // Sync ProtocolDock layers with the View's DecodeTrace list when the
+  // derived-trace (decoder/spectrum) set changed.
+  //
+  // Why this is needed: MCP/API paths (SessionService::add_decoder,
+  // clear_all_decoders) call SigSession::rebuild_decoder_pannel() at a moment
+  // when the View's _own_decode_traces has NOT been synced yet — the async
+  // SignalsChanged event that drives sync_derived_traces() is still queued,
+  // so _derived_traces_dirty is false and sync_derived_traces() bails out
+  // early. rebuild_protocol_layers() therefore sees the STALE DecodeTrace
+  // list and keeps ProtocolItemLayers whose Core DecoderStack was already
+  // removed. By the time this method returns, the layout helpers above have
+  // synced _own_decode_traces (via mark_derived_traces_dirty + the trace
+  // accessors inside compute_signal_groups / classify_traces), so rebuilding
+  // the dock here always reflects the current Core state and removes stale
+  // layers (and adds newly-synced ones).
+  //
+  // rebuild_decoder_pannel() only broadcasts SignalsChanged asynchronously
+  // (no synchronous re-entry), and the throttle timer coalesces it, so this
+  // cannot cause infinite recursion.
+  if (derived_changed && _view->session_ptr())
+    _view->session_ptr()->rebuild_decoder_pannel();
 }
 
 void ViewSignalSync::signals_added_layout() {
