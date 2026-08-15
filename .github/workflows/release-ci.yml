@@ -168,6 +168,7 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
+          which catchsegv >/dev/null 2>&1 || sudo apt-get install -y catchsegv
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
@@ -181,7 +182,7 @@ jobs:
             local ws_port=$2
             local logfile=$3
             echo "Starting PXView on MCP port $port, WS port $ws_port..."
-            "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
+            catchsegv "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
             echo $!
           }
 
@@ -274,6 +275,8 @@ jobs:
               echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/${g}_report.xml"
               echo "<testsuites><testsuite name=\"$g\" tests=\"0\" failures=\"0\" errors=\"1\" time=\"0\"><testcase name=\"startup-failure\"><error message=\"PXView MCP server did not start\"/></testcase></testsuite></testsuites>" >> "$GITHUB_WORKSPACE/${g}_report.xml"
             done
+            echo "Failing CI step: PXView failed to start (see backtrace above)"
+            exit 1
           fi
 
           # ---- Stop all PXView instances ----
