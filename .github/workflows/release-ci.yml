@@ -168,7 +168,7 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
-          which catchsegv >/dev/null 2>&1 || sudo apt-get install -y catchsegv
+          which gdb >/dev/null 2>&1 || sudo apt-get install -y gdb
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
@@ -182,7 +182,7 @@ jobs:
             local ws_port=$2
             local logfile=$3
             echo "Starting PXView on MCP port $port, WS port $ws_port..."
-            catchsegv "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
+            gdb -batch -ex run -ex bt -ex quit --args "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
             echo $!
           }
 
