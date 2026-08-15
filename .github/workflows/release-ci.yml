@@ -241,6 +241,13 @@ jobs:
             fi
           }
 
+          # ---- DIAGNOSTIC: capture PXView crash backtrace via gdb (foreground, timeout) ----
+          which gdb >/dev/null 2>&1 || sudo apt-get install -y gdb
+          echo "=== DIAGNOSTIC: launching PXView once under gdb (timeout 45s) ==="
+          timeout 45 gdb -batch -ex run -ex bt -ex quit --args \
+            "$PXV_BIN" --headless --port 10999 --ws-port 18999 -l 4 2>&1 | tail -60 \
+            || echo "DIAGNOSTIC: gdb/timeout finished (PXView may have crashed or run as a server)"
+
           # ---- Start 3 PXView instances ----
           PID1=$(start_pxview 10110 10430 /tmp/pxv1.log)
           PID2=$(start_pxview 10111 10431 /tmp/pxv2.log)
