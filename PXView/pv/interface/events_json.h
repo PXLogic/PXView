@@ -20,18 +20,27 @@
 #include "pv/interface/events.h"
 
 // ---- QString support for nlohmann::json ----
-// Must live in the nlohmann NAMESPACE (not global, not pv::interface): the
-// NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE macro expands inside pv::interface and the
-// generated code calls an unqualified from_json, so ADL must be able to find
-// these. Putting them in `namespace nlohmann` is the canonical, version-robust
-// location (works for both system nlohmann 3.11 and FetchContent builds).
+// A free `to_json`/`from_json` in `namespace nlohmann` is NOT enough on system
+// nlohmann 3.11.x: there `json` lives behind an inline ABI namespace
+// (json_abi_v3_11_3), so the unqualified call from the macro-generated code
+// fails ADL. The version-robust, officially recommended mechanism is to
+// specialize `nlohmann::adl_serializer<QString>` (see below).
 namespace nlohmann {
-inline void to_json(json& j, const QString& s) {
-    j = s.toStdString();
-}
-inline void from_json(const json& j, QString& s) {
-    s = QString::fromStdString(j.get<std::string>());
-}
+// Specialize adl_serializer for QString so any nlohmann::json <-> QString
+// conversion (e.g. a NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE member of type QString)
+// works on every nlohmann build — including system 3.11.x, which hides `json`
+// behind an inline ABI namespace (json_abi_v3_11_3) that breaks ADL lookup of a
+// free `to_json` declared in `namespace nlohmann`. Specializing adl_serializer is
+// the version-robust, officially recommended mechanism (no reliance on ADL).
+template <>
+struct adl_serializer<QString> {
+    static void to_json(json& j, const QString& s) {
+        j = s.toStdString();
+    }
+    static void from_json(const json& j, QString& s) {
+        s = QString::fromStdString(j.get<std::string>());
+    }
+};
 } // namespace nlohmann
 
 namespace pv {

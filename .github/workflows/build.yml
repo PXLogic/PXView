@@ -1,4 +1,4 @@
-name: PXView Build
+﻿name: PXView Build
 
 on:
   workflow_dispatch:
@@ -10,13 +10,19 @@ on:
       version:
         description: 'Version number for package naming (e.g. 1.5.4)'
         required: true
-        default: '1.5.7'
+        default: '1.6.0'
       targets:
         description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
         default: 'all'
         type: choice
         options: [linux, mac, windows, both, all]
+      mac_arch:
+        description: 'Which macOS architectures to build. "arm64" is fast (default); "all" also builds the slow x86_64 cross-compile. Note: scheduled/push builds always use "arm64" regardless of this value.'
+        required: true
+        default: 'arm64'
+        type: choice
+        options: [arm64, all]
       publish_release:
         description: 'Publish build artifacts to a GitHub Release (only applies to manual runs; tag pushes always publish)'
         required: true
@@ -87,7 +93,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.7" >> $GITHUB_OUTPUT
+            echo "value=1.6.0" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -102,13 +108,12 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y \
-            python3.14 python3.14-dev python3.14-venv python3.14-distutils
-          # Make python3.14 the default python3
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
-          # Install pip for python3.14
+            python3.14 python3.14-dev python3.14-venv
+          # Install pip for python3.14 (without overriding the system python3,
+          # which would break apt's apt_pkg C extension used by cnf-update-db)
           curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-          python3 --version
-          python3 -m pip --version
+          python3.14 --version
+          python3.14 -m pip --version
 
       - name: Install build dependencies
         run: |
@@ -117,7 +122,7 @@ jobs:
           sudo apt-get install -y \
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
-            libboost-dev libfftw3-dev libssl-dev \
+            libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -338,7 +343,7 @@ jobs:
 
   mac:
     name: macOS (${{ matrix.arch }})
-    if: ${{ github.event.inputs.targets == 'mac' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
+    if: ${{ github.event.inputs.targets == 'mac' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' || github.event_name == 'pull_request' }}
     permissions:
       contents: write
     strategy:
@@ -376,7 +381,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.7" >> $GITHUB_OUTPUT
+            echo "value=1.6.0" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -409,7 +414,7 @@ jobs:
           else
             BREW_OVERWRITE=""
           fi
-          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc
+          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v4
@@ -760,6 +765,7 @@ jobs:
             mingw-w64-ucrt-x86_64-qt6-base
             mingw-w64-ucrt-x86_64-qt6-svg
             mingw-w64-ucrt-x86_64-qt6-websockets
+            mingw-w64-ucrt-x86_64-qt6-multimedia
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-boost
             mingw-w64-ucrt-x86_64-fftw
@@ -799,7 +805,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.7" >> $GITHUB_OUTPUT
+            echo "value=1.6.0" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -823,12 +829,19 @@ jobs:
 
       - name: Configure CMake
         run: |
+          # Make Rust toolchain (cargo/rustc) discoverable in the MSYS2 UCRT64 shell.
+          # dtolnay/rust-toolchain installs to $CARGO_HOME/bin, which is NOT on PATH
+          # for the MSYS2 shell by default — so find_program(cargo) fails and the
+          # tauri-desktop target is never registered (→ "unknown target 'tauri-desktop'").
+          export PATH="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin" 2>/dev/null || echo /c/Users/runner/.cargo/bin):/c/Program Files/nodejs:$PATH"
           mkdir -p build && cd build
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
             -DCMAKE_INSTALL_PREFIX=../install.dir \
-            -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd"
+            -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd" \
+            -DCARGO_EXECUTABLE="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin/cargo.exe" 2>/dev/null || echo /c/Users/runner/.cargo/bin/cargo.exe)" \
+            -DRUSTC_EXECUTABLE="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin/rustc.exe" 2>/dev/null || echo /c/Users/runner/.cargo/bin/rustc.exe)"
 
       - name: Build and Install Web UI
         run: |
@@ -839,7 +852,7 @@ jobs:
         run: |
           # Node must be on PATH for `npm run tauri` to invoke `node` (the
           # export in the Configure step does not carry over to this step).
-          export PATH="$CARGO_HOME/bin:/c/Program Files/nodejs:$PATH"
+          export PATH="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin" 2>/dev/null || echo /c/Users/runner/.cargo/bin):/c/Program Files/nodejs:$PATH"
           cd build && ninja tauri-desktop
 
       - name: Build PXView

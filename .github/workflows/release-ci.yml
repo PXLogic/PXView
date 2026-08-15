@@ -63,10 +63,10 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y \
-            python3.14 python3.14-dev python3.14-venv python3.14-distutils
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+            python3.14 python3.14-dev python3.14-venv
           curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-          python3 --version
+          python3.14 -m pip install -U setuptools
+          python3.14 --version
 
       - name: Install build dependencies
         run: |
@@ -74,7 +74,7 @@ jobs:
           sudo apt-get install -y \
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
-            libboost-dev libfftw3-dev libssl-dev \
+            libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -373,10 +373,10 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y \
-            python3.14 python3.14-dev python3.14-venv python3.14-distutils
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+            python3.14 python3.14-dev python3.14-venv
           curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-          python3 --version
+          python3.14 -m pip install -U setuptools
+          python3.14 --version
 
       - name: Install build dependencies
         run: |
@@ -384,7 +384,7 @@ jobs:
           sudo apt-get install -y \
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
-            libboost-dev libfftw3-dev libssl-dev \
+            libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -578,10 +578,10 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y \
-            python3.14 python3.14-dev python3.14-venv python3.14-distutils
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+            python3.14 python3.14-dev python3.14-venv
           curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-          python3 --version
+          python3.14 -m pip install -U setuptools
+          python3.14 --version
 
       - name: Install build dependencies
         run: |
@@ -589,7 +589,7 @@ jobs:
           sudo apt-get install -y \
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
-            libboost-dev libfftw3-dev libssl-dev \
+            libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -847,10 +847,10 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y \
-            python3.14 python3.14-dev python3.14-venv python3.14-distutils
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 2
+            python3.14 python3.14-dev python3.14-venv
           curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-          python3 --version
+          python3.14 -m pip install -U setuptools
+          python3.14 --version
 
       - name: Install build dependencies + clang-tidy-20
         run: |
@@ -858,7 +858,7 @@ jobs:
           sudo apt-get install -y \
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
-            libboost-dev libfftw3-dev libssl-dev \
+            libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \

@@ -198,6 +198,12 @@ def tmp_pxc_file(tmp_capture_dir: str) -> str:
     return os.path.join(tmp_capture_dir, "test_capture.pxc")
 
 
+@pytest.fixture
+def tmp_pxl_file(tmp_capture_dir: str) -> str:
+    """Provide a temporary .pxl file path."""
+    return os.path.join(tmp_capture_dir, "test_capture.pxl")
+
+
 @pytest.fixture(autouse=True)
 def cleanup_after_test(mcp: McpClient):
     """Ensure clean state before and after each test."""
