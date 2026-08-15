@@ -166,7 +166,7 @@ jobs:
 
       - name: Run full E2E test suite (Release mode, 3-way parallel)
         run: |
-          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
@@ -267,6 +267,8 @@ jobs:
             echo "--- PXView1 log ---"; cat /tmp/pxv1.log 2>/dev/null || true
             echo "--- PXView2 log ---"; cat /tmp/pxv2.log 2>/dev/null || true
             echo "--- PXView3 log ---"; cat /tmp/pxv3.log 2>/dev/null || true
+            echo "--- PXView real file log (~/PXView.log) ---"; cat "$HOME/PXView.log" 2>/dev/null || true
+            echo "--- ldd PXView ---"; ldd "$PXV_BIN" 2>&1 | grep -i "not found" || echo "no missing shared libs"
             # Generate failure XML for all groups
             for g in group1 group2 group3; do
               echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/${g}_report.xml"
