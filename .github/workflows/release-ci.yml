@@ -168,7 +168,8 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
-          which gdb >/dev/null 2>&1 || sudo apt-get install -y gdb
+          SEGFAULT_LIB=$(find /usr/lib /lib -name 'libSegFault.so*' 2>/dev/null | head -1)
+          echo "libSegFault.so: ${SEGFAULT_LIB:-NOT FOUND}"
           PXV_BIN="$PWD/install.dir/usr/bin/PXView"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
@@ -182,7 +183,9 @@ jobs:
             local ws_port=$2
             local logfile=$3
             echo "Starting PXView on MCP port $port, WS port $ws_port..."
-            gdb -batch -ex run -ex bt -ex quit --args "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
+            local preload_args=()
+            [ -n "$SEGFAULT_LIB" ] && preload_args=(LD_PRELOAD="$SEGFAULT_LIB" SEGFAULT_SIGNALS=all)
+            env "${preload_args[@]}" "$PXV_BIN" --headless --port "$port" --ws-port "$ws_port" -l 4 > "$logfile" 2>&1 &
             echo $!
           }
 
