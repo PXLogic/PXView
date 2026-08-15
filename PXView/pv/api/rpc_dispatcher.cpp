@@ -106,16 +106,8 @@ json RpcDispatcher::to_json(const SampleConfig& s) {
 json RpcDispatcher::to_json(const CaptureStatus& s) {
     // Map numeric CaptureState enum to human-readable string.
     // Tests and MCP clients expect string values: idle, capturing, completed, etc.
-    const char* state_str = "idle";
-    switch (s.state) {
-        case CaptureState::Empty:    state_str = "idle";       break;
-        case CaptureState::Starting: state_str = "capturing";  break;
-        case CaptureState::Recording:state_str = "capturing";  break;
-        case CaptureState::Stopping: state_str = "capturing";  break;
-        case CaptureState::Stopped:  state_str = "completed";  break;
-        case CaptureState::Paused:   state_str = "paused";     break;
-        case CaptureState::Error:    state_str = "error";      break;
-    }
+    // Shared mapping (types.h) keeps RPC + MCP serializers in sync.
+    const char* state_str = capture_state_to_str(s.state);
     return json{
         {"state",                   state_str},
         {"state_code",              static_cast<int>(s.state)},

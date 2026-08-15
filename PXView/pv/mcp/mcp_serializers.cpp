@@ -61,7 +61,11 @@ json sample_config_to_json(const SampleConfig& s) {
 
 json capture_status_to_json(const CaptureStatus& s) {
     return json{
-        {"state",                  static_cast<int>(s.state)},
+        // String contract matches RpcDispatcher to_json(CaptureStatus):
+        // idle/capturing/completed/paused/error. Numeric code exposed
+        // separately as state_code for parity.
+        {"state",                  capture_state_to_str(s.state)},
+        {"state_code",             static_cast<int>(s.state)},
         {"is_instant",             s.is_instant},
         {"is_saving",              s.is_saving},
         {"have_view_data",         s.have_view_data},

@@ -33,6 +33,22 @@ enum class CaptureState : int8_t {
     Error    = 6
 };
 
+// Shared CaptureState → string mapping. Single source of truth for the JSON
+// `state` field in BOTH RpcDispatcher and MCP serializers, so the two APIs
+// never drift apart. String contract: idle/capturing/completed/paused/error.
+inline const char* capture_state_to_str(CaptureState s) {
+    switch (s) {
+        case CaptureState::Empty:    return "idle";
+        case CaptureState::Starting: return "capturing";
+        case CaptureState::Recording:return "capturing";
+        case CaptureState::Stopping: return "capturing";
+        case CaptureState::Stopped:  return "completed";
+        case CaptureState::Paused:   return "paused";
+        case CaptureState::Error:    return "error";
+    }
+    return "idle";
+}
+
 enum class CollectMode : int8_t {
     Single = 0,
     Repeat = 1,
