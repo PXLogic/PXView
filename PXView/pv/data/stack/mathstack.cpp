@@ -27,7 +27,6 @@
 #include  "pv/data/snapshot/dsosnapshot.h"
 #include  "pv/data/model/signalmodel.h"
 #include  "pv/data/isignal_model_source.h"
-#include "pv/view/component/dsldial.h"
 #include "pv/base/log.h"
 
 #define PI 3.1415
@@ -272,10 +271,11 @@ uint64_t MathStack::default_factor()
     return value;
 }
 
-view::dslDial* MathStack::get_vDial()
+void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
+                               QVector<QString> &vUnit) const
 {
-    QVector<uint64_t> vValue;
-    QVector<QString> vUnit;
+    vValue.clear();
+    vUnit.clear();
 
     // SR_CONF_PROBE_VDIV fork DSO key deleted; DSO mode is deprecated and the
     // vdiv list is no longer queried from the device. dial_values stays empty,
@@ -326,8 +326,6 @@ view::dslDial* MathStack::get_vDial()
         break;
     }
 
-    view::dslDial *vDial = new view::dslDial(vValue.count(), vDialValueStep, vValue, vUnit, true);
-    return vDial;
 }
 
 QString MathStack::get_unit(int level)

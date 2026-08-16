@@ -35,10 +35,6 @@
 
 namespace pv {
 
-namespace view {
-class dslDial;
-}
-
 namespace data {
 
 class DsoSnapshot;
@@ -91,7 +87,6 @@ private:
     static const float LogEnvelopeScaleFactor;
     static const uint64_t EnvelopeDataUnit;
 
-    static const uint64_t vDialValueStep = 1000;
     static const int vDialValueCount = 19;
     static const uint64_t vDialValue[vDialValueCount];
     static const int vDialUnitCount = 3;
@@ -120,7 +115,12 @@ public:
     uint64_t default_vDialValue();
     uint64_t default_factor();
 
-    view::dslDial *get_vDial();
+    // dslDial 相邻档位步进 — View 层 (MathTrace) 构造 dslDial 需要.
+    static constexpr uint64_t vDialValueStep = 1000;
+    // 纯数据 vDial 配置 (依赖倒置: Core 层不得实例化 view::dslDial — QWidget).
+    // View 层 (MathTrace) 消费此数据自行创建控件. (d93e20a5 重放)
+    void get_vdial_data(QVector<uint64_t> &vValue,
+                        QVector<QString> &vUnit) const;
     QString get_unit(int level);
     double get_math_scale();
 

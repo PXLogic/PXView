@@ -26,6 +26,7 @@
 #include "pv/view/trace/mathtrace.h"
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/stack/mathstack.h"
+#include "pv/view/component/dsldial.h"
 #include "pv/view/view.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/signal/dsosignal.h"
@@ -54,7 +55,12 @@ MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
     _hover_point(QPointF(0, 0)),
     _hover_voltage(0)
 {
-    _vDial = _math_stack->get_vDial();
+    QVector<uint64_t> vDialValue;
+    QVector<QString> vDialUnit;
+    _math_stack->get_vdial_data(vDialValue, vDialUnit);
+    _vDial = new view::dslDial(vDialValue.count(),
+                               (uint64_t)data::MathStack::vDialValueStep,
+                               vDialValue, vDialUnit, true);
     update_vDial();
     _colour = View::Red;
     _ref_min = dsoSig1->get_ref_min();

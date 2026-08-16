@@ -98,6 +98,7 @@ void ViewDerivedTraces::mark_derived_traces_dirty() {
 std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
     std::shared_ptr<pv::data::DecoderStack> stack, int index) {
   auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, index);
+  dt->set_view(_view);
   dt->set_view_index((int)_view->get_own_signals().size() + index);
   if (!stack->stack().empty() && !stack->stack().front()->shown())
     dt->set_visible(false);
@@ -108,6 +109,7 @@ std::unique_ptr<SpectrumTrace> ViewDerivedTraces::create_spectrum_trace(
     std::shared_ptr<pv::data::SpectrumStack> stack) {
   auto st = std::make_unique<SpectrumTrace>(
       _view->session_ptr(), stack, stack->get_index());
+  st->set_view(_view);
   return st;
 }
 
