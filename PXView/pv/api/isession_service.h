@@ -1,6 +1,7 @@
 #pragma once
 #include "pv/api/types.h"
 #include <nlohmann/json.hpp>
+#include <optional>
 
 namespace pv::api {
 
@@ -228,7 +229,8 @@ public:
         const std::string& instance_id,
         uint64_t start_sample = 0,
         uint64_t end_sample = UINT64_MAX,
-        int max_count = 1000) = 0;
+        int max_count = 1000,
+        std::optional<int> ann_class = std::nullopt) = 0;
     // Read a decoder's binary output stream. output_id selects which binary
     // output class to read (matches srd_decoder_binary::bin_class).
     virtual Result<std::vector<uint8_t>> get_decoder_binary_output(

@@ -115,11 +115,15 @@ class TestDecoderPersistence:
                                                           max_wait=30.0)
         assert len(stacked_results) > 0, "EEPROM stacked decoder produced 0 results"
 
-        # 5. Count decoders before save
+        # 5. Count decoders before save. get_active_decoders() counts Decoder
+        # Stacks (one entry per stack, identified by its root decoder), and a
+        # stacked sub-decoder (EEPROM) lives INSIDE the I2C stack rather than
+        # as a separate instance — so the I2C stack counts as 1. Assert the
+        # I2C stack exists; stacking presence is verified separately.
         decoders_before = mcp.get_active_decoders()
         count_before = len(decoders_before)
-        assert count_before >= 2, \
-            f"Expected >=2 decoders (I2C + EEPROM), got {count_before}"
+        assert count_before >= 1, \
+            f"Expected >=1 decoder stacks (I2C root), got {count_before}"
 
         # 6. Save
         mcp.save_capture(tmp_pxl_file)

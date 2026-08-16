@@ -40,6 +40,7 @@
 #include "pv/data/triggerconfig.h"
 #include "pv/session/storesession.h"
 #include "pv/base/log.h"
+#include "pv/base/ZipMaker.h"
 
 #include <libsigrok/libsigrok.h>
 #include <libsigrokdecode/libsigrokdecode.h>
@@ -50,6 +51,7 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QTimeZone>
 #include <QDir>
 #include <QFile>
@@ -3211,18 +3213,26 @@ Result<void> SessionService::clear_all_decoders() {
     auto do_clear = [this]() -> Result<void> {
         // Snapshot the current decoder stacks BEFORE clearing so each removed
         // stack can be reported via DecoderRemoved events (mirrors remove_decoder).
-        auto &stacks_before = _session->get_decoder_stacks(api_document());
+        // IMPORTANT: operate on api_document() (the same document used by
+        // add_decoder / remove_decoder / get_active_decoders). SigSession::
+        // clear_all_decoder() clears the View's _active_document cursor, which
+        // is a different document in headless mode — using it would leave the
+        // API document's stacks intact (observable as stale get_active_decoders).
+        auto &stacks = _session->get_decoder_stacks(api_document());
         std::vector<std::string> removed_ids;
-        removed_ids.reserve(stacks_before.size());
-        for (auto stack : stacks_before) {
+        removed_ids.reserve(stacks.size());
+        for (auto stack : stacks) {
             if (!stack)
                 continue;
             removed_ids.push_back(make_instance_id(stack.get()));
         }
 
-        // bUpdateView=true so the View layer refreshes; we emit DecoderRemoved
-        // events ourselves below so subscribers can react to each removal.
-        _session->clear_all_decoder(true);
+        // Remove from the end to keep indices valid as the list shrinks.
+        // Snapshot the original count before starting removal (each
+        // remove_decoder modifies the list in-place).
+        size_t count = stacks.size();
+        for (size_t i = count; i-- > 0;)
+            _session->remove_decoder(static_cast<int>(i), api_document());
         // Rebuild the protocol dock UI to remove stale layer items
         _session->rebuild_decoder_pannel();
 
@@ -3244,8 +3254,8 @@ Result<void> SessionService::clear_all_decoders() {
 
 Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
     const std::string &instance_id, uint64_t start_sample,
-    uint64_t end_sample, int max_count) {
-    auto fn = [this, instance_id, start_sample, end_sample, max_count]() -> Result<std::vector<DecoderAnnotation>> {
+    uint64_t end_sample, int max_count, std::optional<int> ann_class) {
+    auto fn = [this, instance_id, start_sample, end_sample, max_count, ann_class]() -> Result<std::vector<DecoderAnnotation>> {
     if (!_session)
         return Result<std::vector<DecoderAnnotation>>::Fail(
             ErrorCode::InternalError, "Session is nullptr");
@@ -3306,6 +3316,21 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
 
         pxv_info("[PWMDBG] get_decoder_annotations: row=%d ann_count=%llu",
                  row, (unsigned long long)ann_count);
+
+        // Row/class filter: each decoder row is homogeneous in ann class, so
+        // peek the first annotation's type and skip the whole row when it does
+        // not match the requested ann_class. This lets callers read a later
+        // row (e.g. increment/count/interval) whose annotations would otherwise
+        // be starved by the row-major max_count cutoff when an early row (e.g.
+        // millions of 'phase' annotations) overflows max_count first.
+        if (ann_class.has_value() && ann_count > 0) {
+            decode::Annotation probe;
+            if (!decoder_stack->list_annotation(&probe,
+                    static_cast<uint16_t>(row), 0))
+                continue;
+            if (static_cast<int>(probe.type()) != ann_class.value())
+                continue;
+        }
 
         for (uint64_t col = 0; col < ann_count && result.size() < static_cast<size_t>(max_count); col++) {
             decode::Annotation ann;
@@ -3590,6 +3615,58 @@ Result<void> SessionService::load_file(const std::string &path) {
     if (!ok)
         return Result<void>::Fail(ErrorCode::LoadFailed,
                                   "Failed to load file: " + path);
+
+    // Restore decoders persisted in the .pxl/.pxc "decoders" zip entry.
+    // GUI loads restore analyzers via StoreSession::load_decoders(ProtocolDock*);
+    // there is no dock in headless, so reconstruct the DecoderStacks directly
+    // on the Core layer (mirrors load_decoders, needs no View). This makes
+    // save→load preserve analyzers in MCP/headless sessions too.
+    try {
+        ZipReader zip(path.c_str());
+        if (zip.HaveArchive()) {
+            ZipInnerFileData *dec_data = zip.GetInnterFileData("decoders");
+            if (dec_data && dec_data->data() && dec_data->size() > 0) {
+                QByteArray raw(dec_data->data(), dec_data->size());
+                QJsonParseError perr;
+                QJsonDocument jdoc = QJsonDocument::fromJson(raw, &perr);
+                if (perr.error == QJsonParseError::NoError && jdoc.isArray()) {
+                    const QJsonArray dec_array = jdoc.array();
+                    if (!dec_array.isEmpty()) {
+                        _session->restore_decoders(dec_array, api_document());
+                        // Kick off decode against the just-replayed capture data
+                        // so restored analyzers produce results. In headless the
+                        // replay fills capture_data but may leave view_data stale,
+                        // so promote it first (mirrors the RevEndPacket swap).
+                        _session->promote_capture_to_view();
+                        if (_session->have_view_data()) {
+                            auto &st = _session->get_decoder_stacks(api_document());
+                            for (size_t i = 0; i < st.size(); i++) {
+                                size_t idx = i;
+                                QTimer::singleShot(0, qApp, [this, idx]() {
+                                    if (!_session)
+                                        return;
+                                    auto &stacks = _session->get_decoder_stacks(
+                                        api_document());
+                                    if (idx < stacks.size())
+                                        _session->rst_decoder(static_cast<int>(idx),
+                                                              api_document());
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    pxv_warn("load_file: 'decoders' entry is not a valid JSON array (%s)",
+                             perr.errorString().toUtf8().constData());
+                }
+            }
+            if (dec_data)
+                zip.ReleaseInnerFileData(dec_data);
+            zip.Close();
+        }
+    } catch (...) {
+        pxv_warn("load_file: failed to restore decoders from zip entry.");
+    }
+
     broadcast_event(ServiceEvent::LoadComplete,
                     {{"path", path}});
     return Result<void>::Success();
@@ -3606,6 +3683,10 @@ Result<void> SessionService::save_file(const std::string &path) {
     HeadlessSessionDataGetter getter(_session, _device);
     store._sessionDataGetter = &getter;
     store.SetFileName(QString::fromStdString(path));
+    // Serialize MCP decoders (they live on the API document in headless,
+    // which differs from the active document) so save→load round-trips them.
+    if (data::SessionDocument *api_doc = api_document())
+        store.set_decoder_doc(api_doc);
     bool ok = store.save_start();
     if (!ok)
         return Result<void>::Fail(ErrorCode::SaveFailed,
@@ -3748,6 +3829,14 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
             uint64_t max_count = (valid > start) ? (valid - start) : 0;
             if (count > max_count)
                 count = max_count;
+            // Additionally cap `count` to the REQUESTED export range [start, end].
+            // Without this, a bounded range (end < total) gets inflated to the
+            // whole capture because get_samples() rounds actual_end up to the
+            // enclosing leaf block (millions of samples) and the trim above only
+            // bounds by the total sample count, not the requested end.
+            uint64_t req_count = (end > start) ? (end - start + 1) : 0;
+            if (count > req_count)
+                count = req_count;
             // Logic: 1 bit per channel per sample, packed into bytes
             size_t byte_count = static_cast<size_t>((count + 7) / 8);
             file.write(reinterpret_cast<const char*>(data), byte_count);
@@ -4038,6 +4127,10 @@ Result<void> SessionService::export_raw_data_binary(
 
     ExportConfig config;
     config.analog_downsample_ratio = static_cast<uint64_t>(analog_downsample_ratio);
+    // Honor the save/sample range set via set_export_config (end==0 -> full
+    // range resolved inside export_binary).
+    config.start_sample = _session->get_save_start();
+    config.end_sample = _session->get_save_end();
 
     // Combine all channels
     std::vector<int32_t> all_channels;
@@ -4110,6 +4203,12 @@ Result<void> SessionService::export_raw_data(
         return export_raw_data_binary(directory, digital_channels,
                                       analog_channels, analog_downsample_ratio);
 
+    // Honor the save/sample range set via set_export_config
+    // (set_save_range -> SigSession::_save_start/_save_end). Without this the
+    // exported file covers the WHOLE capture, ignoring the cursor/save range.
+    uint64_t range_start = _session->get_save_start();
+    uint64_t range_end = _session->get_save_end();
+
     QDir dir(QString::fromStdString(directory));
     if (!dir.exists()) {
         if (!dir.mkpath(".")) {
@@ -4126,6 +4225,8 @@ Result<void> SessionService::export_raw_data(
         config.include_headers = true;
         config.analog_downsample_ratio = static_cast<uint64_t>(analog_downsample_ratio);
         config.iso8601_timestamp = iso8601_timestamp;
+        config.start_sample = range_start;
+        config.end_sample = range_end; // 0 -> full range handled by export_data/StoreSession
 
         auto r = export_data(config);
         if (!r)
@@ -4140,6 +4241,8 @@ Result<void> SessionService::export_raw_data(
         config.include_headers = true;
         config.analog_downsample_ratio = static_cast<uint64_t>(analog_downsample_ratio);
         config.iso8601_timestamp = iso8601_timestamp;
+        config.start_sample = range_start;
+        config.end_sample = range_end; // 0 -> full range handled by export_data/StoreSession
 
         auto r = export_data(config);
         if (!r)

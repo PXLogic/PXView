@@ -36,6 +36,7 @@
 #include "pv/core/measurecalculator.h"  // Task C1.5: MeasureCalculator::compute
 #include "pv/data/snapshot/analogsnapshot.h"
 #include "pv/data/decode/decoder.h"
+#include "pv/data/decode/row.h"
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/cache/disk_cache_config.h"
 #include "pv/data/snapshot/dsosnapshot.h"
@@ -52,6 +53,8 @@
 #include <QFile>
 #include <QObject>
 #include <QString>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -1811,6 +1814,208 @@ bool SigSession::add_decoder(
   return false;
 }
 
+bool SigSession::restore_decoders(const QJsonArray &dec_array,
+                                  data::SessionDocument *doc) {
+  if (dec_array.isEmpty())
+    return false;
+
+  pxv_info("restore_decoders: processing %d decoder stacks", dec_array.size());
+
+  data::SessionDocument *target =
+      doc ? doc : _document_registry->get_active_document();
+
+  for (const QJsonValue &dec_value : dec_array) {
+    if (!dec_value.isObject())
+      continue;
+    QJsonObject dec_obj = dec_value.toObject();
+
+    // Resolve the base (front) decoder by id.
+    const QString root_id = dec_obj["id"].toString();
+    srd_decoder *root_dec = root_id.isEmpty()
+        ? nullptr
+        : srd_decoder_get_by_id(root_id.toUtf8().constData());
+    if (!root_dec) {
+      pxv_warn("restore_decoders: root decoder '%s' not found, skipping",
+               root_id.toUtf8().constData());
+      continue;
+    }
+
+    // Build the stacked (sub) decoder list before creating the stack. On
+    // success add_decoder() takes ownership of these pointers (moves each into
+    // the stack via unique_ptr and clears the list); on failure we must free
+    // them ourselves to avoid a leak.
+    std::list<pv::data::decode::Decoder *> sub_decoders;
+    if (dec_obj.contains("stacked decoders")) {
+      for (const QJsonValue &value : dec_obj["stacked decoders"].toArray()) {
+        if (!value.isObject())
+          continue;
+        const QString sid = value.toObject()["id"].toString();
+        srd_decoder *sub = sid.isEmpty()
+            ? nullptr
+            : srd_decoder_get_by_id(sid.toUtf8().constData());
+        if (sub)
+          sub_decoders.push_back(new pv::data::decode::Decoder(sub));
+      }
+    }
+
+    std::shared_ptr<data::DecoderStack> out_stack;
+    DecoderStatus *dstatus = new DecoderStatus();  // owned by DecoderStack
+    dstatus->m_format = (int)DecoderDataFormat::hex;
+
+    const bool ok =
+        add_decoder(root_dec, true, dstatus, sub_decoders, out_stack, target);
+    if (!ok || !out_stack) {
+      // add_decoder did NOT transfer ownership (it only does so on success).
+      delete dstatus;
+      for (auto sub : sub_decoders)
+        delete sub;
+      sub_decoders.clear();
+      continue;
+    }
+    // On success add_decoder() cleared sub_decoders (ownership moved to stack).
+
+    auto stack = out_stack;
+
+    // Restore the custom label.
+    if (dec_obj.contains("label"))
+      stack->set_label(dec_obj["label"].toString());
+
+    auto &decoder_list = stack->stack();
+    for (auto &up : decoder_list) {
+      auto *dec = up.get();
+      const srd_decoder *d = dec->decoder();
+      if (!d) {
+        dec->commit();
+        continue;
+      }
+
+      // Identify the options/channel JSON for this decoder: base decoder from
+      // dec_obj, each stacked sub-decoder from its matching "stacked decoders"
+      // entry.
+      QJsonObject options_obj;
+      QJsonArray channel_array;
+      if (dec == decoder_list.front().get()) {
+        options_obj = dec_obj["options"].toObject();
+        channel_array = dec_obj["channel"].toArray();
+      } else {
+        for (const QJsonValue &value : dec_obj["stacked decoders"].toArray()) {
+          const QJsonObject stacked_obj = value.toObject();
+          if (stacked_obj["id"].toString() == QString::fromUtf8(d->id)) {
+            options_obj = stacked_obj["options"].toObject();
+            channel_array = stacked_obj["channel"].toArray();
+            break;
+          }
+        }
+      }
+
+      // Restore the probe (channel) mapping for mandatory + optional channels.
+      std::map<const srd_channel *, int> probe_map;
+      const auto load_channel_map = [&](const GSList *list) {
+        for (const GSList *l = list; l; l = l->next) {
+          const struct srd_channel *const pdch =
+              (struct srd_channel *)l->data;
+          for (const QJsonValue &value : channel_array) {
+            const QJsonObject ch_obj = value.toObject();
+            if (ch_obj.contains(pdch->id)) {
+              probe_map[pdch] = ch_obj[pdch->id].toInt();
+              break;
+            }
+          }
+        }
+      };
+      load_channel_map(d->channels);
+      load_channel_map(d->opt_channels);
+      if (!probe_map.empty())
+        dec->set_probes(probe_map);
+
+      // Restore configured options.
+      for (const GSList *l = d->options; l; l = l->next) {
+        const srd_decoder_option *const opt = (srd_decoder_option *)l->data;
+        if (!opt || !opt->id || !options_obj.contains(opt->id))
+          continue;
+        GVariant *new_value = nullptr;
+        const QString vs = options_obj[opt->id].toString();
+        if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("d"))) {
+          double vi = options_obj[opt->id].toDouble();
+          if (vs != "")
+            vi = vs.toDouble();
+          new_value = g_variant_new_double(vi);
+        } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("x"))) {
+          const GVariantType *const type = g_variant_get_type(opt->def);
+          int vi = options_obj[opt->id].toInt();
+          if (vs != "")
+            vi = vs.toInt();
+          if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
+            new_value = g_variant_new_byte(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
+            new_value = g_variant_new_int16(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
+            new_value = g_variant_new_uint16(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
+            new_value = g_variant_new_int32(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
+            new_value = g_variant_new_uint32(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
+            new_value = g_variant_new_int64(vi);
+          else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
+            new_value = g_variant_new_uint64(vi);
+        } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("s"))) {
+          new_value = g_variant_new_string(vs.toUtf8().data());
+        }
+        if (new_value != nullptr)
+          dec->set_option(opt->id, new_value);
+      }
+      dec->commit();
+
+      if (dec_obj.contains("show")) {
+        const QJsonObject show_obj = dec_obj["show"].toObject();
+        if (show_obj.contains(d->id))
+          dec->show(show_obj[d->id].toBool());
+      }
+    }
+
+    // Restore per-row visibility.
+    if (dec_obj.contains("show")) {
+      const QJsonObject show_obj = dec_obj["show"].toObject();
+      const int decoder_cfg_version = dec_obj.value("version").toInt(-1);
+      auto rows = stack->get_rows_gshow();
+      for (auto i = rows.begin(); i != rows.end(); i++) {
+        const QString key = (decoder_cfg_version == -1)
+            ? (*i).first.title()
+            : (*i).first.title_id();
+        if (show_obj.contains(key)) {
+          const pv::data::decode::Row r = (*i).first;
+          stack->set_rows_gshow(r, show_obj[key].toBool());
+        }
+      }
+    }
+
+    // Mark the stack changed + frame ended so decode starts correctly once the
+    // capture/data replay attaches the snapshot (mirrors load_decoders).
+    stack->set_options_changed(true);
+    stack->frame_ended();
+  }
+
+  return true;
+}
+
+void SigSession::promote_capture_to_view() {
+  // Mirror the RevEndPacket double-buffer swap (sigession.cpp RevEndPacket
+  // handler): move the freshly-replayed capture buffer into the view buffer so
+  // decoders / consumers reading view_data() see the loaded samples. After a
+  // headless load_file replay this swap may not have happened (capture_data
+  // populated but view_data left stale/empty).
+  auto *cap = _state->capture_data();
+  if (!cap)
+    return;
+  if (_state->view_data() != cap) {
+    if (_state->view_data())
+      _state->view_data()->clear();
+    _state->set_view_data(cap);
+  }
+  attach_data_to_signal(_state->view_data());
+}
+
 int SigSession::get_trace_index_by_key_handel(void *handel,
                                               data::SessionDocument *doc) {
   int dex = 0;
@@ -2629,7 +2834,10 @@ bool SigSession::switch_work_mode(int mode) {
 
     return true;
   }
-  return false;
+  // Already in the requested work mode — switching is an idempotent no-op
+  // (e.g. switching to LOGIC when already in LOGIC). Treat it as success
+  // instead of returning false ("Failed to switch work mode").
+  return true;
 }
 
 void SigSession::clear_signals() {

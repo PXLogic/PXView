@@ -96,7 +96,12 @@ class TestHexExport:
                 if not line:
                     continue
                 # Remove common prefixes/suffixes (e.g. "0x", commas, spaces)
-                cleaned = line.replace("0x", "").replace(",", "").replace(" ", "")
+                cleaned = line.replace("0x", "").replace(",", "")
+                # libsigrok hexdump-sr format prefixes each row with a channel
+                # label like "D0:" — strip it so the hex digits parse cleanly.
+                if ":" in cleaned:
+                    cleaned = cleaned.split(":", 1)[1]
+                cleaned = cleaned.replace(" ", "")
                 # Check if it looks like hex data
                 try:
                     int(cleaned[:8], 16)  # Try parsing first 8 chars as hex
@@ -147,6 +152,9 @@ class TestBitsExport:
                     continue
                 # Check if line consists only of 0s and 1s (at least 8 chars)
                 cleaned = line.replace(" ", "").replace(",", "")
+                # Strip libsigrok channel prefix like "D0:" (contains non-binary).
+                if ":" in cleaned:
+                    cleaned = cleaned.split(":", 1)[1]
                 if len(cleaned) >= 8 and all(c in "01" for c in cleaned[:8]):
                     bit_line_count += 1
 

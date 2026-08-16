@@ -124,3 +124,34 @@ target_include_directories(test_logic_snapshot_raw PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
     ${CMAKE_SOURCE_DIR}/common
 )
+
+# ==== LogicSnapshot 查询原语对拍 (B5: get_samples / nxt/pre edge / display edges) ====
+# 依赖链同 test_logic_snapshot_raw。
+pv_add_qtest(test_logic_snapshot_query
+    data/test_logic_snapshot_query.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_snapshot_query PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== C1/C2 性能门禁 + B5 mmap round-trip ====
+# CROSS 位拷贝吞吐 / mmap 持续写吞吐 / mmap 读回哈希一致。
+# 依赖链同 test_logic_snapshot_raw。
+pv_add_qtest(test_logic_snapshot_cross_throughput
+    data/test_logic_snapshot_cross_throughput.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_snapshot_cross_throughput PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)

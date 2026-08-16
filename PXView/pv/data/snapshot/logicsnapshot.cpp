@@ -244,6 +244,7 @@ void LogicSnapshot::init() {
 void LogicSnapshot::init_all() {
   _sample_count = 0;
   _ring_sample_count = 0;
+  _ring_published.store(0, std::memory_order_release);
   _byte_fraction = 0;
   _ch_fraction = 0;
   _dest_ptr = nullptr;
@@ -468,6 +469,10 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 
   _sample_count = 0;
   _ring_sample_count = 0;
+  // C3: reset published count so a concurrent finite reader does not observe
+  // stale samples from a prior capture during the reuse (config-unchanged)
+  // window before the first append of this capture publishes fresh counts.
+  _ring_published.store(0, std::memory_order_release);
   // CRITICAL FIX: 重置 _loop_offset。first_payload 在配置未变（reuse 同样
   // total_sample_count/channel_num）的复用路径下不会调用 free_data()/init_all()，
   // 导致上一次 capture 在 append_payload_impl 中错误累积的 _loop_offset 残留，
@@ -1013,6 +1018,13 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
     _ring_sample_count = _total_sample_count;
   }
 
+  // C3: publish committed count (release) for lock-free finite readers.
+  // calc_mipmap for the region completed above (the `calc_mipmap` calls
+  // happen before _ring_sample_count is finalized), so any reader that
+  // acquire-loads `_ring_published` sees consistent metadata + leaf data.
+  if (!_is_loop)
+    _ring_published.store(_ring_sample_count, std::memory_order_release);
+
   _ch_fraction = 0;
   _dest_ptr = nullptr;
 }
@@ -1202,6 +1214,119 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   assert(_ring_sample_count % Scale == 0);
 
   uint64_t align_sample_count = _ring_sample_count;
+  // chunk_size already declared above (line ~1067) — reuse it.
+  // Shared across the blocked-transpose fast path and the per-channel
+  // fallback below; consumed by the shared tail/finalize section.
+  void *end_read_ptr = (uint8_t *)data_src_ptr + len;
+  uint16_t last_chan = _ch_fraction;
+
+  // C1 (P9-on-raw): blocked-transpose main phase. The original loop performed
+  // one strided re-scan of the payload per channel (read_ptr += _channel_num
+  // every u64 → 256B stride @32ch → the whole payload is read once per
+  // channel = Nx read amplification → ingest ~1620 MB/s, below the 2400 MB/s
+  // gate). Replace with a single sequential pass that transposes each chunk
+  // into the per-channel leaf blocks: contiguous input reads + contiguous
+  // per-channel writes ≈ memcpy bandwidth. Taken only when the payload is
+  // chunk-aligned AND we're at a chunk boundary (no pending partial u64) —
+  // the demo/hw always send chunk-aligned payloads; anything else falls back
+  // to the original per-channel loop below (identical semantics).
+  if (len >= chunk_size && (len % chunk_size == 0) &&
+      _ch_fraction == 0 && _byte_fraction == 0) {
+    uint64_t idx0 = align_sample_count / LeafBlockSamples / RootScale;
+    uint64_t idx1 = (align_sample_count / LeafBlockSamples) % RootScale;
+    uint64_t blk_off = align_sample_count % LeafBlockSamples;
+
+    // Per-channel destination u64 pointers into their current leaf blocks.
+    // All channels share the same sample position in CROSS format.
+    uint64_t *dst[CHANNEL_MAX_COUNT];
+    for (uint64_t c = 0; c < _channel_num; c++) {
+      if (idx0 >= _ch_data[c].size()) {
+        pxv_err("append_cross_payload: idx0 %llu out of range (blocked)",
+                (unsigned long long)idx0);
+        _ring_sample_count = align_sample_count - _loop_offset;
+        _dest_ptr = nullptr;
+        return;
+      }
+      void *blk = allocate_block(c, (uint16_t)idx0, (uint16_t)idx1);
+      if (blk == nullptr) {
+        pxv_err("append_cross_payload: alloc failed (blocked)");
+        _ring_sample_count = align_sample_count - _loop_offset;
+        _dest_ptr = nullptr;
+        return;
+      }
+      dst[c] = (uint64_t *)blk + blk_off / Scale;
+    }
+
+    const uint64_t *src = (const uint64_t *)data_src_ptr;
+    uint64_t full_chunks = len / chunk_size;
+    uint64_t processed = 0;  // samples per channel consumed this payload
+
+    while (full_chunks > 0) {
+      // Chunks until the leaf-block boundary (all channels together).
+      uint64_t chunks_to_boundary = (LeafBlockSamples - blk_off) / Scale;
+      uint64_t nb = std::min(full_chunks, chunks_to_boundary);
+      if (nb == 0)
+        break;  // defensive: boundary already reached in a prior iteration
+
+      // Lock-free transpose of nb chunks. Data written here is uncommitted
+      // and writer-private (readers only see samples released via
+      // _ring_published / under _mutex in loop mode) → no lock needed.
+      lock.unlock();
+      {
+        const auto pd_w0 = std::chrono::steady_clock::now();
+        for (uint64_t k = 0; k < nb; k++) {
+          const uint64_t *chunk = src + k * _channel_num;
+          for (uint64_t c = 0; c < _channel_num; c++)
+            dst[c][k] = chunk[c];
+        }
+        pd_write_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - pd_w0).count();
+      }
+      lock.lock();  // re-acquire for metadata (calc_mipmap/allocate_block)
+
+      processed += nb * Scale;
+      blk_off += nb * Scale;
+      full_chunks -= nb;
+      src += nb * _channel_num;
+
+      if (blk_off == LeafBlockSamples) {
+        // All channels completed this leaf block simultaneously → calc
+        // mipmap for every channel, then advance all to the next block.
+        for (uint64_t c = 0; c < _channel_num; c++)
+          calc_mipmap(c, (uint8_t)idx0, (uint8_t)idx1, LeafBlockSamples, true);
+
+        idx1++;
+        if (idx1 == RootScale) {
+          idx1 = 0;
+          idx0++;
+        }
+        blk_off = 0;
+
+        if (idx0 >= _ch_data[0].size()) {
+          pxv_err("append_cross_payload: idx0 %llu out of range (blocked adv)",
+                  (unsigned long long)idx0);
+          break;
+        }
+        for (uint64_t c = 0; c < _channel_num; c++) {
+          void *blk = allocate_block(c, (uint16_t)idx0, (uint16_t)idx1);
+          if (blk == nullptr) {
+            pxv_err("append_cross_payload: alloc failed (blocked adv)");
+            break;
+          }
+          dst[c] = (uint64_t *)blk;
+        }
+      }
+    }
+
+    align_sample_count += processed;
+    len = 0;  // all full chunks consumed (payload was chunk-aligned)
+    index0 = idx0;
+    index1 = idx1;
+    offset = blk_off;
+    last_chan = 0;  // every channel advanced equally → next payload starts at ch0
+  } else {
+  // ---- Original per-channel strided loop (fallback: non-chunk-aligned
+  //      payload, or pending partial u64 from a previous call) ----
   uint64_t *read_ptr = (uint64_t *)data_src_ptr;
   void *end_read_ptr = (uint8_t *)data_src_ptr + len;
 
@@ -1213,7 +1338,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   }
 
   uint16_t fill_chan = _ch_fraction;
-  uint16_t last_chan = _ch_fraction;
+  last_chan = _ch_fraction;
   index0 = align_sample_count / LeafBlockSamples / RootScale;
   index1 = (align_sample_count / LeafBlockSamples) % RootScale;
   offset = align_sample_count % LeafBlockSamples;
@@ -1236,21 +1361,22 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   uint64_t *write_ptr = (uint64_t *)lbp + offset / Scale;
 
   while (len >= 8) {
-    // mmap data write — release _mutex during page faults
     lock.unlock();
     {
       const auto pd_w0 = std::chrono::steady_clock::now();
-      *write_ptr++ = *read_ptr;
-      read_ptr += _channel_num;
-      len -= 8;
-      filled_sample += Scale;
+      do {
+        *write_ptr++ = *read_ptr;
+        read_ptr += _channel_num;
+        len -= 8;
+        filled_sample += Scale;
+        last_chan++;
+        if (last_chan == _channel_num) {
+          last_chan = 0;
+        }
+      } while (len >= 8 && filled_sample < LeafBlockSamples &&
+               read_ptr < end_read_ptr);
       pd_write_ms += std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - pd_w0).count();
-    }
-
-    last_chan++;
-    if (last_chan == _channel_num) {
-      last_chan = 0;
     }
     lock.lock();  // re-acquire for metadata (calc_mipmap/allocate_block)
 
@@ -1315,14 +1441,27 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
       read_ptr = chans_read_addr[fill_chan];
     }
   }
+  }
 
   _ring_sample_count = align_sample_count;
   _ring_sample_count -= _loop_offset;
 
   if (align_sample_count > _total_sample_count) {
-    _loop_offset = align_sample_count - _total_sample_count;
+    // Loop-mode overflow handling. FINITE (non-loop): the demo driver may
+    // overshoot the configured sample limit (e.g. 64-sample chunk alignment:
+    // 1,048,064 sent vs 1,000,000 requested) — clamp the ring count but do
+    // NOT set `_loop_offset` (loop-only rebase; a non-zero `_loop_offset` in
+    // finite mode corrupts get_block_buf/get_block_size/get_samples — the
+    // save→load round-trip reads data shifted by _loop_offset/8 bytes).
+    // Mirrors append_payload_impl's `_is_loop` guard.
+    if (_is_loop)
+      _loop_offset = align_sample_count - _total_sample_count;
     _ring_sample_count = _total_sample_count;
   }
+
+  // C3: publish committed count (release) for lock-free finite readers.
+  if (!_is_loop)
+    _ring_published.store(_ring_sample_count, std::memory_order_release);
 
   _ch_fraction = last_chan;
 
@@ -1689,13 +1828,22 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
 const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
                                           uint64_t &end_sample, int sig_index,
                                           void **lbp) {
-  std::lock_guard<std::recursive_mutex> lock(_mutex);
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free — reads only the
+  // committed sample range (`_ring_published`, release-published after mipmap
+  // completes) from the immutable non-loop tree. Loop/∞ mode keeps the lock
+  // (it rotates + frees blocks and rebases via `_loop_offset`).
+  const bool looped = _is_loop;
+  std::unique_lock<std::recursive_mutex> lock(_mutex, std::defer_lock);
+  if (looped)
+    lock.lock();
 
   // P1-6 fix: Increment iterator count so that free_data/free_head_blocks
   // will skip memory optimization while this pointer is in use.
   IteratorGuard iter_guard(this);
 
-  uint64_t sample_count = _ring_sample_count;
+  uint64_t sample_count =
+      looped ? _ring_sample_count
+             : _ring_published.load(std::memory_order_acquire);
 
   // Guard: sample_count may be 0 when opening a saved waveform file
   // (data not fully loaded or race condition). Original asserts crash via
@@ -1715,7 +1863,8 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
     return nullptr;
   }
 
-  start_sample += _loop_offset;
+  if (looped)
+    start_sample += _loop_offset;
   // Note: previously _ring_sample_count was temporarily modified here
   // (_ring_sample_count += _loop_offset) and restored later. This was
   // unnecessary — all calculations use the local `sample_count` captured
@@ -1773,16 +1922,20 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
     memset(s_const_buf.data(), fill, need);
     if (lbp != nullptr)
       *lbp = nullptr;
-    _cur_ref_block_indexs[order].root_index = index0;
-    _cur_ref_block_indexs[order].lbp_index = index1;
+    if (looped) {
+      _cur_ref_block_indexs[order].root_index = index0;
+      _cur_ref_block_indexs[order].lbp_index = index1;
+    }
     return s_const_buf.data();
   }
 
   if (lbp != nullptr)
     *lbp = ptr;
 
-  _cur_ref_block_indexs[order].root_index = index0;
-  _cur_ref_block_indexs[order].lbp_index = index1;
+  if (looped) {
+    _cur_ref_block_indexs[order].root_index = index0;
+    _cur_ref_block_indexs[order].lbp_index = index1;
+  }
 
   return (uint8_t *)ptr + offset;
 }
@@ -1796,6 +1949,39 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
 
 std::unique_ptr<LogicSnapshot::SegmentDataIterator>
 LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
+  // C3: FINITE (non-loop) fast path is lock-free — iterates the immutable
+  // non-loop tree (`_loop_offset`==0). The iterator refcount still guards
+  // against post-capture free_unused_memory/free_head_blocks.
+  if (!_is_loop) {
+    auto it = std::make_unique<SegmentDataIterator>();
+    begin_iteration();  // increment _iterator_count
+    it->current_sample = start;
+    it->ch_order = get_ch_order(sig_index);
+    if (it->ch_order < 0 || (unsigned int)it->ch_order >= _ch_data.size()) {
+      it->exhausted = true;
+      it->chunk_data = nullptr;
+      it->chunk_remaining = 0;
+      return it;
+    }
+    it->root_index = start >> (LeafBlockPower + RootScalePower);
+    it->lbp_index = (start & RootMask) >> LeafBlockPower;
+    it->byte_offset = (start & LeafMask) / 8;
+    if (it->root_index < _ch_data[it->ch_order].size()) {
+      void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
+      if (ptr) {
+        it->chunk_data = (const uint8_t*)ptr;
+        uint64_t leaf_bytes = LeafBlockSamples / 8;
+        it->chunk_remaining = leaf_bytes - it->byte_offset;
+      } else {
+        it->chunk_data = nullptr;
+        it->chunk_remaining = 0;
+      }
+    } else {
+      it->exhausted = true;
+    }
+    return it;
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   auto it = std::make_unique<SegmentDataIterator>();
@@ -1839,6 +2025,47 @@ void LogicSnapshot::continue_sample_iteration(SegmentDataIterator* it,
                                                uint64_t increase) {
   if (!it || it->exhausted)
     return;
+
+  // C3: FINITE (non-loop) fast path is lock-free; exhaustion is bounded by
+  // the release-published committed count.
+  if (!_is_loop) {
+    it->current_sample += increase;
+    uint64_t new_root = it->current_sample >> (LeafBlockPower + RootScalePower);
+    uint64_t new_lbp  = (it->current_sample & RootMask) >> LeafBlockPower;
+    uint64_t new_off  = (it->current_sample & LeafMask) / 8;
+    if (new_root != it->root_index || new_lbp != it->lbp_index) {
+      it->root_index = new_root;
+      it->lbp_index = new_lbp;
+      it->byte_offset = new_off;
+      if ((unsigned int)it->ch_order < _ch_data.size() &&
+          it->root_index < _ch_data[it->ch_order].size()) {
+        void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
+        if (ptr) {
+          it->chunk_data = (const uint8_t*)ptr;
+          uint64_t leaf_bytes = LeafBlockSamples / 8;
+          it->chunk_remaining = leaf_bytes - it->byte_offset;
+        } else {
+          it->chunk_data = nullptr;
+          it->chunk_remaining = 0;
+        }
+      } else {
+        it->exhausted = true;
+        it->chunk_data = nullptr;
+        it->chunk_remaining = 0;
+      }
+    } else {
+      uint64_t advance_bytes = new_off - it->byte_offset;
+      it->byte_offset = new_off;
+      if (advance_bytes >= it->chunk_remaining) {
+        it->chunk_remaining = 0;
+      } else {
+        it->chunk_remaining -= advance_bytes;
+      }
+    }
+    if (it->current_sample >= _ring_published.load(std::memory_order_acquire))
+      it->exhausted = true;
+    return;
+  }
 
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
@@ -1896,6 +2123,34 @@ void LogicSnapshot::end_sample_iteration(std::unique_ptr<SegmentDataIterator> it
 }
 
 bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free. The committed
+  // sample count is acquire-loaded; only fully-captured samples are read, so
+  // there is no data race with mipmap metadata mutation or block writes, and
+  // (non-loop) no block is ever freed during capture, so the leaf pointer is
+  // always valid. `_loop_offset` is 0 for finite captures — not read here.
+  if (!_is_loop) {
+    const uint64_t N = _ring_published.load(std::memory_order_acquire);
+    if (index >= N)
+      return false;
+    int order = get_ch_order(sig_index);
+    if (order == -1 || (unsigned int)order >= _ch_data.size())
+      return false;
+    uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
+    if (index0 >= _ch_data[order].size())
+      return false;
+    const RootNode &rn = _ch_data[order][index0];
+    uint64_t index1 = (index & RootMask) >> LeafBlockPower;
+    uint64_t root_pos_mask = 1ULL << index1;
+    if ((rn.tog & root_pos_mask) == 0)
+      return (rn.first & root_pos_mask) != 0;
+    const uint64_t *ptr = (const uint64_t *)rn.lbp[index1];
+    if (ptr == nullptr)
+      return (rn.first & root_pos_mask) != 0;
+    uint64_t u64_idx = (index & LeafMask) >> ScalePower;
+    uint64_t index_mask = 1ULL << (index & LevelMask[0]);
+    return ptr[u64_idx] & index_mask;
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
   return get_sample_unlock(index, sig_index);
 }
@@ -1917,9 +2172,9 @@ bool LogicSnapshot::get_sample_self(uint64_t index, int sig_index) {
     return false;
   }
 
-  if (index >= _ring_sample_count) {
+  if (index >= committed_sample_count()) {
     pxv_warn("LogicSnapshot::get_sample_self: index=%llu >= ring=%llu",
-             (unsigned long long)index, (unsigned long long)_ring_sample_count);
+             (unsigned long long)index, (unsigned long long)committed_sample_count());
     return false;
   }
 
@@ -1959,6 +2214,32 @@ bool LogicSnapshot::get_display_edges(
   if (!togs.empty())
     togs.clear();
 
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free. Reads only the
+  // committed sample range (`_ring_published`, release-published after mipmap
+  // completes), so it never races with in-place mipmap metadata mutation or
+  // block writes. `_loop_offset` is 0 for finite captures — not read here.
+  if (!_is_loop) {
+    const uint64_t sample_count = committed_sample_count();
+    if (sample_count == 0)
+      return false;
+
+    // Guard: end/start may be invalid when called during file loading or
+    // after a stale config restore. Clamp `end` to the committed range.
+    if (end >= sample_count)
+      end = sample_count - 1;
+    if (start > end || min_length <= 0) {
+      pxv_warn("LogicSnapshot::get_display_edges: committed=%llu start=%llu "
+               "end=%llu min_len=%f",
+               (unsigned long long)sample_count, (unsigned long long)start,
+               (unsigned long long)end, min_length);
+      return false;
+    }
+
+    return get_display_edges_common(edges, togs, start, end, width, max_togs,
+                                    pixels_offset, min_length, sig_index,
+                                    sample_count);
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   if (_ring_sample_count == 0)
@@ -1967,23 +2248,43 @@ bool LogicSnapshot::get_display_edges(
   // Guard: end/start may be invalid when called during file loading or
   // after a stale config restore. Original asserts crash via MSVC dialog.
   if (end >= _ring_sample_count || start > end || min_length <= 0) {
-    pxv_warn("LogicSnapshot::get_nxt_edge_self: end=%llu ring=%llu start=%llu min_len=%f",
-             (unsigned long long)end, (unsigned long long)_ring_sample_count,
-             (unsigned long long)start, min_length);
+    pxv_warn("LogicSnapshot::get_display_edges: ring=%llu start=%llu "
+             "end=%llu min_len=%f",
+             (unsigned long long)_ring_sample_count, (unsigned long long)start,
+             (unsigned long long)end, min_length);
     return false;
   }
+
+  return get_display_edges_common(edges, togs, start, end, width, max_togs,
+                                  pixels_offset, min_length, sig_index,
+                                  _ring_sample_count);
+}
+
+bool LogicSnapshot::get_display_edges_common(
+    std::vector<std::pair<bool, bool>> &edges,
+    std::vector<std::pair<uint16_t, bool>> &togs, uint64_t start, uint64_t end,
+    uint16_t width, uint16_t max_togs, double pixels_offset, double min_length,
+    uint16_t sig_index, uint64_t sample_count) {
+  (void)sample_count;  // bounds already validated by the caller
 
   uint64_t index = start;
   bool last_sample;
   bool start_sample;
 
-  // Get the initial state
-  start_sample = last_sample = get_sample_unlock(index++, sig_index);
+  // Get the initial state. FINITE path (caller holds no lock): index is
+  // physical == user (loop_offset==0), use the `_self` read (lock-free).
+  // LOOP path (caller holds _mutex): index is user coords; use the `_unlock`
+  // wrapper which rebases by `_loop_offset` and temporarily bumps
+  // `_ring_sample_count` so `_self` sees the loop-adjusted committed count.
+  start_sample = last_sample = _is_loop ? get_sample_unlock(index++, sig_index)
+                                        : get_sample_self(index++, sig_index);
   togs.push_back(pair<uint16_t, bool>(0, last_sample));
 
   while (edges.size() < width) {
     // search next edge
-    bool has_edge = get_nxt_edge_unlock(index, last_sample, end, 0, sig_index);
+    bool has_edge = _is_loop
+                        ? get_nxt_edge_unlock(index, last_sample, end, 0, sig_index)
+                        : get_nxt_edge_self(index, last_sample, end, 0, sig_index);
 
     // calc the edge position
     int64_t gap = (index / min_length) - pixels_offset;
@@ -1995,10 +2296,16 @@ bool LogicSnapshot::get_display_edges(
     }
 
     if (index > end)
-      last_sample = get_sample_unlock(end, sig_index);
+      last_sample = _is_loop ? get_sample_unlock(end, sig_index)
+                             : get_sample_self(end, sig_index);
     else
-      last_sample = get_sample_unlock(index - 1, sig_index);
+      last_sample = _is_loop ? get_sample_unlock(index - 1, sig_index)
+                             : get_sample_self(index - 1, sig_index);
 
+    // NOTE: the has_edge push below may bring `edges` to width+1 when the
+    // gap loop already filled it to `width` — this is the renderer's intended
+    // contract (logicsignal.cpp asserts _cur_pulses.size() >= width and uses
+    // the boundary toggle at index `width`), NOT an overflow bug.
     if (has_edge) {
       edges.push_back(pair<bool, bool>(true, last_sample));
       if (togs.size() < max_togs)
@@ -2009,8 +2316,9 @@ bool LogicSnapshot::get_display_edges(
       edges.push_back(pair<bool, bool>(false, last_sample));
   }
 
-  if (togs.size() < max_togs) {
-    last_sample = get_sample_unlock(end, sig_index);
+  if (togs.size() < max_togs && !edges.empty()) {
+    last_sample = _is_loop ? get_sample_unlock(end, sig_index)
+                           : get_sample_self(end, sig_index);
     togs.push_back(pair<uint16_t, bool>(edges.size() - 1, last_sample));
   }
 
@@ -2020,6 +2328,15 @@ bool LogicSnapshot::get_display_edges(
 bool LogicSnapshot::get_nxt_edge(uint64_t &index, bool last_sample,
                                  uint64_t end, double min_length,
                                  int sig_index) {
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free — see
+  // committed_sample_count() for the publication protocol.
+  if (!_is_loop) {
+    const uint64_t sample_count = committed_sample_count();
+    if (sample_count == 0 || index > end || index >= sample_count)
+      return false;
+    return get_nxt_edge_self(index, last_sample, end, min_length, sig_index);
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
   return get_nxt_edge_unlock(index, last_sample, end, min_length, sig_index);
 }
@@ -2078,16 +2395,19 @@ bool LogicSnapshot::get_nxt_edge_self(uint64_t &index, bool last_sample,
           (_ch_data[order][i].first & cur_mask);
       uint64_t lbp_tog = lbp_tog_raw;
 
-      // 修复：清除超出 _ring_sample_count 的虚假 lbp_tog bit。
+      // 修复：清除超出 committed sample count 的虚假 lbp_tog bit。
       // 未使用的 lbp 块 first/last=0，会与已使用块的 last 产生虚假边沿
       // （例如 D7 全高时，lbp[0] last=1，lbp[1] first=0 → 误报下降沿，
       //  导致 lbp_nxt_edge 把 index 推到 lbp[1] 起始位置 2^24，
       //  渲染端画出垂直线毛刺）。
-      // 只有 lbp_tog_index < _ring_sample_count 的 bit 才是有效边沿。
+      // 只有 lbp_tog_index < committed count 的 bit 才是有效边沿。
+      // C3: 有限采集下用原子 `_ring_published`（无锁读），loop 下用
+      // 调用方临时抬高的 `_ring_sample_count`。
       {
+        const uint64_t committed = committed_sample_count();
         uint64_t root_start = (i << (LeafBlockPower + RootScalePower));
-        if (root_start < _ring_sample_count) {
-          uint64_t valid_lbp_count = (_ring_sample_count - root_start +
+        if (root_start < committed) {
+          uint64_t valid_lbp_count = (committed - root_start +
                                       LeafBlockSamples - 1) >> LeafBlockPower;
           uint64_t valid_mask = (valid_lbp_count >= Scale)
                                     ? ~0ULL
@@ -2230,6 +2550,15 @@ bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
 
 bool LogicSnapshot::get_pre_edge(uint64_t &index, bool last_sample,
                                  double min_length, int sig_index) {
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free — see
+  // committed_sample_count() for the publication protocol.
+  if (!_is_loop) {
+    const uint64_t sample_count = committed_sample_count();
+    if (sample_count == 0 || index >= sample_count)
+      return false;
+    return get_pre_edge_self(index, last_sample, min_length, sig_index);
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   index += _loop_offset;
@@ -2244,13 +2573,16 @@ bool LogicSnapshot::get_pre_edge(uint64_t &index, bool last_sample,
 
 bool LogicSnapshot::get_pre_edge_self(uint64_t &index, bool last_sample,
                                       double min_length, int sig_index) {
-  // Guard: when opening a saved waveform file, _ring_sample_count may be 0
-  // (data not fully loaded or race condition during file open). The original
-  // assert(index < _ring_sample_count) crashes via the MSVC assertion dialog.
-  // Replace with a safe bounds check that returns false.
-  if (_ring_sample_count == 0 || index >= _ring_sample_count) {
-    pxv_warn("LogicSnapshot::get_pre_edge_self: index=%llu ring=%llu, skipping",
-             (unsigned long long)index, (unsigned long long)_ring_sample_count);
+  // Guard: when opening a saved waveform file, the committed sample count may
+  // be 0 (data not fully loaded or race condition during file open). The
+  // original assert(index < _ring_sample_count) crashes via the MSVC assertion
+  // dialog. Replace with a safe bounds check that returns false.
+  // C3: 有限采集下用原子 `_ring_published`（无锁读），loop 下用调用方临时
+  // 抬高的 `_ring_sample_count`。
+  const uint64_t committed = committed_sample_count();
+  if (committed == 0 || index >= committed) {
+    pxv_warn("LogicSnapshot::get_pre_edge_self: index=%llu committed=%llu, skipping",
+             (unsigned long long)index, (unsigned long long)committed);
     return false;
   }
 
@@ -2652,6 +2984,21 @@ bool LogicSnapshot::block_pre_edge(uint64_t *lbp, uint64_t &index,
 bool LogicSnapshot::pattern_search(int64_t start, int64_t end, int64_t &index,
                                    std::map<uint16_t, QString> &pattern,
                                    bool isNext) {
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free — see
+  // committed_sample_count() for the publication protocol. `_loop_offset` is
+  // 0 for finite captures, so the search works directly on user coords.
+  if (!_is_loop) {
+    const uint64_t sample_count = committed_sample_count();
+    if (sample_count == 0)
+      return false;
+    // Clamp the search window to the committed range.
+    if (start < 0)
+      start = 0;
+    if (end >= (int64_t)sample_count)
+      end = (int64_t)sample_count - 1;
+    return pattern_search_self(start, end, index, pattern, isNext);
+  }
+
   std::lock_guard<std::recursive_mutex> lock(_mutex);
 
   start += _loop_offset;
@@ -2687,7 +3034,7 @@ bool LogicSnapshot::pattern_search_self(int64_t start, int64_t end,
     char flag = *(it->second.toStdString().c_str());
     int channel = it->first;
 
-    if (flag != 'X' && has_data(channel)) {
+    if (flag != 'X' && flag != 'x' && has_data(channel)) {
       flagList[count] = flag;
       chanIndexs[count] = channel;
       count++;

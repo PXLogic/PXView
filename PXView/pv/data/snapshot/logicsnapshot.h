@@ -255,11 +255,37 @@ public:
         return _loop_offset;
     }
 
+    // C3 (P9-on-raw): committed sample count for a lock-free reader.
+    // FINITE (non-loop) mode: release-published `_ring_published` — a reader
+    // acquire-loads it and only ever observes fully-committed samples (mipmap
+    // metadata + leaf data written before the release-store). LOOP/∞ mode:
+    // returns `_ring_sample_count` — caller MUST hold `_mutex` (loop mode
+    // rotates + frees blocks and rebases via `_loop_offset`, so reads need
+    // the lock). `_loop_offset` is 0 for finite captures, so never read here.
+    inline uint64_t committed_sample_count() const {
+        return _is_loop ? _ring_sample_count
+                        : _ring_published.load(std::memory_order_acquire);
+    }
+
     static int get_block_with_sample(uint64_t index, uint64_t *out_offset);
 
 private:
     bool get_sample_unlock(uint64_t index, int sig_index);
     bool get_sample_self(uint64_t index, int sig_index);
+
+    // C3 (P9-on-raw): shared display-edge scan body, operating on PHYSICAL
+    // sample coordinates. Caller guarantees start/end are physical (loop:
+    // pre-adjusted by +_loop_offset; finite: user coords == physical) and the
+    // required synchronization is in effect (finite: lock-free via
+    // committed_sample_count(); loop: caller holds _mutex and has temporarily
+    // added _loop_offset to _ring_sample_count). `sample_count` is the upper
+    // bound the scan may touch.
+    bool get_display_edges_common(
+        std::vector<std::pair<bool, bool>> &edges,
+        std::vector<std::pair<uint16_t, bool>> &togs,
+        uint64_t start, uint64_t end, uint16_t width, uint16_t max_togs,
+        double pixels_offset, double min_length, uint16_t sig_index,
+        uint64_t sample_count);
 
     bool get_nxt_edge_unlock(uint64_t &index, bool last_sample, uint64_t end,
                       double min_length, int sig_index);
@@ -383,6 +409,17 @@ private:
     uint64_t    _last_calc_count[CHANNEL_MAX_COUNT];
     bool        _is_loop;
     uint64_t    _loop_offset;
+
+    // C3 (P9-on-raw): committed-sample-count publication for lock-free FINITE
+    // (non-loop) readers. The data-feed thread writes `_ring_sample_count`
+    // and finishes calc_mipmap for a region BEFORE release-storing this
+    // atomic; lock-free readers acquire-load it, so they only ever observe
+    // fully-committed samples and never race with in-place mipmap metadata
+    // mutation or with blocks still being written. Loop/∞ mode keeps the
+    // existing `_mutex` path (it rotates + frees blocks), so this atomic is
+    // only advanced for finite captures. `_loop_offset` is 0 for finite
+    // captures, so lock-free readers never read it.
+    std::atomic<uint64_t> _ring_published{0};
     bool        _able_free;
     std::vector<void*> _free_block_list;
     struct BlockIndex _cur_ref_block_indexs[CHANNEL_MAX_COUNT];

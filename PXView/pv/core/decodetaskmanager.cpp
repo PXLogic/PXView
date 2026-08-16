@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <thread>
 
 namespace pv {
 namespace core {
@@ -130,6 +131,30 @@ bool DecodeTaskManager::is_task_running(
   return false;
 }
 
+void DecodeTaskManager::wait_for_task_finished(
+    std::shared_ptr<data::DecoderStack> stack) {
+  if (!stack)
+    return;
+  // The worker thread removes itself from _running_tasks in
+  // decode_single_task() once begin_decode_work() returns. stop_decode_work()
+  // (called before this) sets _bStop and wakes the worker via _data_cond, so
+  // a maximally-blocked worker exits its wait promptly. Poll with a bounded
+  // timeout so we never hang forever if something goes wrong.
+  const int kMaxWaitMs = 10000;
+  const int kPollMs = 10;
+  int waited = 0;
+  while (is_task_running(stack)) {
+    if (waited >= kMaxWaitMs) {
+      pxv_warn("DecodeTaskManager::wait_for_task_finished: stack %p still "
+               "running after %d ms; proceeding anyway",
+               stack.get(), kMaxWaitMs);
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kPollMs));
+    waited += kPollMs;
+  }
+}
+
 void DecodeTaskManager::clear_all_decode_task(int &runningDex) {
   // Phase 1: request all decoders to stop (under lock).
   {
@@ -237,6 +262,30 @@ void DecodeTaskManager::start_all_decode_tasks() {
   // decoder; commit c454899a replaced that with a fixed 2-thread pool,
   // which serialized decoding. grow() adds worker threads as needed.
   auto traces = _state->decode_traces();
+  // Headless/MCP: decoders added via add_analyzer are registered on the
+  // dedicated API document (SessionService::api_document()), which can differ
+  // from the active document that decode_traces() returns, and from the
+  // document a capture/load replay ran on. If we only iterate the active
+  // document, decoders on another document are never re-decoded when the
+  // capture completes -> 0 results. Cover ALL registered documents (plus the
+  // capture-owner document) so any capture/load replay, on any document,
+  // re-decodes every registered stack, de-duplicating by pointer.
+  // add_decode_task()'s running-set guard is a second safety net.
+  auto document_registry = _state->document_registry();
+  auto add_stack = [&traces](const std::shared_ptr<data::DecoderStack> &stack) {
+    if (stack && std::find(traces.begin(), traces.end(), stack) == traces.end())
+      traces.push_back(stack);
+  };
+  for (auto *doc : document_registry->get_all_documents()) {
+    if (doc) {
+      for (auto stack : doc->get_decoder_stacks())
+        add_stack(stack);
+    }
+  }
+  if (auto *owner_doc = document_registry->get_capture_owner_document()) {
+    for (auto stack : owner_doc->get_decoder_stacks())
+      add_stack(stack);
+  }
   if (!traces.empty()) {
     _decode_pool.grow(traces.size());
   }
@@ -261,7 +310,16 @@ void DecodeTaskManager::rst_decoder(int index, data::SessionDocument *doc) {
   // Track C2: [PWMDBG] debug log removed
 
   if (stack) {
-    remove_decode_task(stack); // remove old task
+    // Request the old decode task to stop. stop_decode_work() only sets a
+    // flag + wakes the worker; it does NOT join. Because add_decode_task()
+    // skips a stack that is already in _running_tasks, and because the worker
+    // thread may still be inside decode_data() using _snapshot, we must wait
+    // for the worker to actually finish (i.e. be removed from _running_tasks)
+    // BEFORE clear()/init() releases _snapshot. Otherwise the worker can call
+    // _snapshot->end_sample_iteration() on a reset (null) snapshot and crash
+    // (SIGSEGV, this=0x0) — reproducing the test_23 stacked-decoder race.
+    remove_decode_task(stack); // remove old task (async stop)
+    wait_for_task_finished(stack);
     stack->clear();
     // SignalModels may have been recreated by reload() (e.g. during
     // TabContext::activate()) with nullptr snapshot pointers. The

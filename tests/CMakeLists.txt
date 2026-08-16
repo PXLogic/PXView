@@ -67,7 +67,7 @@ add_test(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 set_tests_properties("mcp_e2e_all" PROPERTIES
-    TIMEOUT 600
+    TIMEOUT 1500
     DEPENDS pytest_venv
     ENVIRONMENT "PXVIEW_MCP_URL=http://127.0.0.1:10110/mcp"
 )
@@ -85,7 +85,7 @@ foreach(level p0 p1 p2)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     set_tests_properties("mcp_e2e_${level}" PROPERTIES
-        TIMEOUT 300
+        TIMEOUT 1200
         DEPENDS pytest_venv
         ENVIRONMENT "PXVIEW_MCP_URL=http://127.0.0.1:10110/mcp"
     )

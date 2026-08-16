@@ -712,12 +712,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   uint64_t sended_len = 0;
   _is_decoding.store(true);
 
-  void *lbp_array[35];
-
-  for (int j = 0; j < logic_di->dec_num_channels; j++) {
-    lbp_array[j] = nullptr;
-  }
-
   while (i < end_index && !_no_memory && !status->_bStop) {
     chunk.clear();
     chunk_const.clear();
@@ -780,7 +774,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
     for (int j = 0; j < logic_di->dec_num_channels; j++) {
       int sig_index = logic_di->dec_channelmap[j];
-      void *lbp = nullptr;
 
       if (sig_index == -1) {
         chunk.push_back(nullptr);
@@ -790,22 +783,18 @@ void DecoderStack::decode_data(const uint64_t decode_start,
           // P1-B: Use iterator protocol instead of get_samples().
           // The iterator holds a raw pointer into the leaf block and
           // advances incrementally, avoiding repeated index computation.
+          // NOTE: block memory safety is handled by the iterator refcount
+          // (begin_sample_iteration/end_sample_iteration → _iterator_count);
+          // free_head_blocks/calc_mipmap defer while iterators are active, so
+          // no per-chunk free_decode_lpb bookkeeping is needed here (the old
+          // lbp_array[35] mechanism passed a data pointer as a block pointer
+          // and was a no-op with a fixed-array overflow hazard).
           auto *it = iterators[j].get();
           const uint8_t *data_ptr = nullptr;
-          if (it && !it->exhausted) {
+          if (it && !it->exhausted)
             data_ptr = LogicSnapshot::get_iterator_value(it);
-            lbp = (void*)data_ptr;  // lbp tracks current leaf block pointer
-          }
           chunk.push_back(data_ptr);
           chunk_const.push_back(_snapshot->get_sample(i, sig_index));
-
-          if (_snapshot->is_able_free() == false) {
-            if (lbp_array[j] != lbp) {
-              if (lbp_array[j] != nullptr)
-                _snapshot->free_decode_lpb(lbp_array[j]);
-              lbp_array[j] = lbp;
-            }
-          }
 } else {
 set_error_message(QString::fromStdString(s_kChannelsNotEnabled));
 // P1-B: Clean up iterators before early return.

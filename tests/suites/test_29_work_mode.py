@@ -22,8 +22,14 @@ class TestWorkMode:
     """Test work mode management tools."""
 
     def test_get_supported_work_modes(self, mcp: McpClient, device_id: str,
+                                       ensure_device_connected,
                                        cleanup_after_test):
-        """get_supported_work_modes returns a list including Logic (0)."""
+        """get_supported_work_modes returns a list including Logic (0).
+
+        get_supported_work_modes reads the connected device's mode list, so
+        the demo device must be connected first (unlike get_work_mode /
+        switch_work_mode which operate on session state alone).
+        """
         modes = mcp.get_supported_work_modes()
         assert isinstance(modes, list), f"Expected list, got {type(modes)}"
         assert len(modes) > 0, "No supported work modes returned"
@@ -46,6 +52,7 @@ class TestWorkMode:
         assert mode == 0, f"After switch to Logic, get_work_mode returned {mode}"
 
     def test_switch_and_verify_all_modes(self, mcp: McpClient, device_id: str,
+                                          ensure_device_connected,
                                           cleanup_after_test):
         """Switch to each supported mode and verify get_work_mode reflects it.
 
@@ -73,6 +80,7 @@ class TestWorkMode:
 
     def test_get_supported_work_modes_consistent(self, mcp: McpClient,
                                                    device_id: str,
+                                                   ensure_device_connected,
                                                    cleanup_after_test):
         """get_supported_work_modes returns consistent results across calls."""
         modes1 = mcp.get_supported_work_modes()

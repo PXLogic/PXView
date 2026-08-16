@@ -204,7 +204,10 @@ ToolResult handle_get_analyzer_results(ISessionService* session,
     auto start = p.get_or<uint64_t>("startSample", 0);
     auto end = p.get_or<uint64_t>("endSample", UINT64_MAX);
     auto max_count = p.get_or<int>("maxCount", 1000);
-    auto r = session->get_decoder_annotations(id, start, end, max_count);
+    std::optional<int> ann_class = std::nullopt;
+    if (p.has("annClass"))
+        ann_class = p.get<int>("annClass");
+    auto r = session->get_decoder_annotations(id, start, end, max_count, ann_class);
     if (!r)
         throw ToolError(r.error().message);
     json arr = json::array();
@@ -1013,6 +1016,9 @@ static void register_core_workflow_tools(McpServer& server,
         .param<uint64_t>("startSample", "Start sample (default 0)")
         .param<uint64_t>("endSample", "End sample (default = all)")
         .param<int>("maxCount", "Max annotations to return (default 1000)")
+        .param<int>("annClass",
+            "Optional: only return annotations of this ann_class. "
+            "Use includeMetadata to discover class names. Default = all classes")
         .param<bool>("includeMetadata",
             "If true, include annotation class names in 'metadata' field")
         .read_only()

@@ -15,14 +15,23 @@ pytestmark = pytest.mark.p2
 
 class TestSessionManagement:
 
+    @staticmethod
+    def _sessions(mcp):
+        """Extract the session list from the dict-wrapped list_sessions result."""
+        result = mcp.list_sessions()
+        if isinstance(result, list):
+            return result
+        return result.get("sessions", []) if isinstance(result, dict) else []
+
     def test_list_sessions(self, mcp: McpClient):
-        """list_sessions returns a list."""
-        sessions = mcp.list_sessions()
-        assert isinstance(sessions, list)
+        """list_sessions returns a dict wrapping a session list."""
+        result = mcp.list_sessions()
+        assert isinstance(result, dict)
+        assert isinstance(result.get("sessions"), list)
 
     def test_get_session_count(self, mcp: McpClient):
         """get_session_count returns a number."""
-        count = len(mcp.list_sessions())
+        count = len(self._sessions(mcp))
         assert count >= 1, "Should have at least 1 session"
 
     def test_create_session_empty(self, mcp: McpClient):
@@ -46,7 +55,7 @@ class TestSessionManagement:
 
     def test_set_active_session(self, mcp: McpClient):
         """set_active_session switches sessions."""
-        sessions = mcp.list_sessions()
+        sessions = self._sessions(mcp)
         if sessions:
             sid = sessions[0].get("id") or sessions[0].get("session_id")
             if sid is not None:
@@ -54,9 +63,9 @@ class TestSessionManagement:
 
     def test_multi_session_count(self, mcp: McpClient):
         """Creating sessions increases session count."""
-        count_before = len(mcp.list_sessions())
+        count_before = len(self._sessions(mcp))
         mcp.create_session()
-        count_after = len(mcp.list_sessions())
+        count_after = len(self._sessions(mcp))
         assert count_after >= count_before
 
 

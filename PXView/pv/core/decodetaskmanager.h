@@ -70,6 +70,12 @@ public:
   /// processed by a decode thread. Locks the mutex for a consistent read.
   bool is_task_running(std::shared_ptr<data::DecoderStack> stack);
 
+  /// Block (with a timeout) until the given stack's decode worker has
+  /// actually finished (i.e. has been removed from _running_tasks). Used by
+  /// rst_decoder() before clear()/init() so the worker thread can no longer
+  /// be inside decode_data() touching _snapshot when it is released.
+  void wait_for_task_finished(std::shared_ptr<data::DecoderStack> stack);
+
   /// Stop all decode threads. Called from SigSession::Close().
   void stop();
 

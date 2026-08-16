@@ -44,6 +44,7 @@ class Snapshot;
 class LogicSnapshot;
 class AnalogSnapshot;
 class DsoSnapshot;
+class SessionDocument;
 }
 
 namespace dock {
@@ -104,6 +105,14 @@ public:
     }
 
     bool IsLogicDataType();
+
+    // Optional document whose decoder stacks are serialized by decoders_gen().
+    // In headless mode MCP decoders live on the dedicated API document (not
+    // the active document), so SessionService::save_file() points this at
+    // api_document() to persist them. nullptr (default) → active document.
+    inline void set_decoder_doc(data::SessionDocument *doc) {
+        _decoder_doc = doc;
+    }
 
     inline void SetDataRange(uint64_t start_index, uint64_t end_index){
         _start_index = start_index;
@@ -170,6 +179,7 @@ private:
     bool            _iso8601_timestamp = false;
     std::vector<int32_t> _export_channels;
     int             _export_channel_type = -1;
+    data::SessionDocument *_decoder_doc = nullptr;
 };
 
 } // pv

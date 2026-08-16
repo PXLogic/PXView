@@ -783,6 +783,7 @@ class McpClient:
         start_sample: Optional[int] = None,
         end_sample: Optional[int] = None,
         max_count: int = 1000,
+        ann_class: Optional[int] = None,
         timeout: Optional[float] = None,
     ) -> List[dict]:
         """Get protocol analyzer decoded annotations.
@@ -792,6 +793,7 @@ class McpClient:
             start_sample: Start sample index (0-based).
             end_sample:   End sample index (exclusive).
             max_count:    Maximum annotations to return.
+            ann_class:    If given, only return annotations of this class.
 
         Returns:
             List of annotation dicts: ``ann_class``, ``ann_class_id``,
@@ -802,6 +804,8 @@ class McpClient:
             args["startSample"] = start_sample
         if end_sample is not None:
             args["endSample"] = end_sample
+        if ann_class is not None:
+            args["annClass"] = ann_class
         return self._call_tool(
             "get_analyzer_results", args, timeout=timeout
         )
@@ -1232,13 +1236,24 @@ class McpClient:
         """Get all cursor positions.
 
         Returns a list of dicts with ``sample_position`` and
-        ``index`` fields.
+        ``index`` fields.  The ``configure_cursors`` tool returns
+        ``sample_pos`` on the wire; it is normalized here to the
+        documented ``sample_position`` name.
 
         Uses the consolidated ``configure_cursors`` tool with action='get'.
         """
-        return self._call_tool(
+        raw = self._call_tool(
             "configure_cursors", {"action": "get"}, timeout=timeout
         )
+        if not isinstance(raw, list):
+            return raw
+        out = []
+        for c in raw:
+            if isinstance(c, dict) and "sample_pos" in c:
+                c = dict(c)
+                c["sample_position"] = c.pop("sample_pos")
+            out.append(c)
+        return out
 
     def add_cursor(self, sample_pos: int, timeout: Optional[float] = None) -> Any:
         """Add a cursor at the given sample position.

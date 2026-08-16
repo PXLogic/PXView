@@ -27,6 +27,7 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QString>
+#include <QJsonArray>
 #include <atomic>
 #include <future>
 #include <list>
@@ -302,6 +303,17 @@ void on_load_config_end();
   void clear_view_data();
   void set_trace_name(std::shared_ptr<data::SignalModel> model, QString name);
   void set_decoder_row_label(int index, QString label);
+  // Headless decoder persistence restore. Rebuilds DecoderStacks into `doc`
+  // (default: active document) from a .pxl/.pxc "decoders" JSON array,
+  // mirroring StoreSession::load_decoders() but without the View ProtocolDock
+  // dependency — uses SigSession::add_decoder() + per-decoder probe/option
+  // binding so headless loads restore analyzers too.
+  bool restore_decoders(const QJsonArray &dec_array, data::SessionDocument *doc = nullptr);
+  // Promote the freshly-replayed capture buffer (capture_data) to the view
+  // buffer (view_data), mirroring the RevEndPacket double-buffer swap, so
+  // headless load_file re-decode can read the loaded samples. No-op if no
+  // capture data is available.
+  void promote_capture_to_view();
   void set_decoder_pannel(IDecoderPannel *pannel) { _decoder_pannel = pannel; }
   void rebuild_decoder_pannel() {
       if (_decoder_pannel) _decoder_pannel->rebuild_layers();

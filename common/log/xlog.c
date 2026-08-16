@@ -90,6 +90,7 @@ static void print_to_file(struct xlog_receiver_info *info, const char *domain, c
     int fmtl;
     int wr=0;
     int strl;
+    int cap;
 
     if (info->_file == NULL){
         return;
@@ -97,13 +98,22 @@ static void print_to_file(struct xlog_receiver_info *info, const char *domain, c
 
     if (domain && *domain){
         strl = strlen(domain);
+        if (strl > LOG_MAX_LENGTH / 2)
+            strl = LOG_MAX_LENGTH / 2;
         strcpy(buf + wr, domain);
         wr += strl;
         strcpy(buf + wr, ": ");
         wr += 2;
     }
 
-    fmtl = vsnprintf(buf + wr, LOG_MAX_LENGTH - wr - 1, format, args);
+    cap = LOG_MAX_LENGTH - wr - 1;
+    fmtl = vsnprintf(buf + wr, cap, format, args);
+    /* vsnprintf returns the length that WOULD have been written; clamp it
+     * to the actually written size to avoid writing past buf[]. */
+    if (fmtl < 0)
+        fmtl = 0;
+    if (fmtl > cap)
+        fmtl = cap;
     wr += fmtl;
     *(buf + wr) = '\n';
     wr += 1;
@@ -121,6 +131,7 @@ static void print_to_user_callback(struct xlog_receiver_info *info, const char *
     int fmtl;
     int wr=0;
     int strl;
+    int cap;
 
     if (info->_rev == NULL){
         return;
@@ -128,17 +139,25 @@ static void print_to_user_callback(struct xlog_receiver_info *info, const char *
 
     if (domain && *domain){
         strl = strlen(domain);
+        if (strl > LOG_MAX_LENGTH / 2)
+            strl = LOG_MAX_LENGTH / 2;
         strcpy(buf + wr, domain);
         wr += strl;
         strcpy(buf + wr, ": ");
         wr += 2;
     }
 
-    fmtl = vsnprintf(buf + wr, LOG_MAX_LENGTH - wr - 1, format, args);
+    cap = LOG_MAX_LENGTH - wr - 1;
+    fmtl = vsnprintf(buf + wr, cap, format, args);
+    /* See print_to_file(): clamp to the actually written size. */
+    if (fmtl < 0)
+        fmtl = 0;
+    if (fmtl > cap)
+        fmtl = cap;
     wr += fmtl;
     *(buf + wr) = '\n';
     wr += 1;
- 
+
 	info->_rev(buf, wr);
 }
 

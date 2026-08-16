@@ -89,17 +89,28 @@ def _pxview_process() -> Iterator[Optional[PXViewProcess]]:
     # If no exe path given, try common build/package locations relative to repo
     if not exe:
         repo_root = Path(__file__).resolve().parent.parent
-        # Linux/macOS uses "PXView", Windows uses "PXView.exe"
-        candidates = [
-            repo_root / "build" / "PXView",            # Linux build dir
-            repo_root / "build" / "PXView.exe",        # Windows build dir
-            repo_root / "package" / "PXView.exe",      # Windows package dir
-            repo_root / "package" / "PXView",          # Linux package dir
-            repo_root / "install.dir" / "usr" / "bin" / "PXView",  # Linux install dir
-            repo_root / "PXView" / "build" / "PXView.exe",
-        ]
+        # Platform-aware: on Windows only *.exe is runnable (a stray
+        # extension-less `build/PXView` Linux binary must not shadow it);
+        # on POSIX prefer the extension-less binary.
+        win = sys.platform.startswith("win")
+        candidates = []
+        if win:
+            candidates = [
+                repo_root / "build" / "PXView.exe",        # Windows build dir
+                repo_root / "build.dir" / "PXView.exe",    # Windows MSYS2 build out
+                repo_root / "package" / "PXView.exe",      # Windows package dir
+                repo_root / "install.dir" / "bin" / "PXView.exe",  # Windows install
+                repo_root / "PXView" / "build" / "PXView.exe",
+            ]
+        else:
+            candidates = [
+                repo_root / "build" / "PXView",            # Linux build dir
+                repo_root / "package" / "PXView",          # Linux package dir
+                repo_root / "install.dir" / "usr" / "bin" / "PXView",  # Linux install
+                repo_root / "PXView" / "build" / "PXView",
+            ]
         for c in candidates:
-            if c.exists():
+            if c.is_file():
                 exe = str(c)
                 break
 

@@ -105,7 +105,7 @@ class TestDecoderStacked:
                                   cleanup_after_test):
         """SPI -> SPI Flash stacked decoding on PATTERN_MIXED."""
         spi_id = add_decoder_safe(mcp, "spi_c",
-                                  channel_map={"cs": 2, "sclk": 3,
+                                  channel_map={"cs": 2, "clk": 3,
                                                "mosi": 4, "miso": 5},
                                   device_id=device_id)
         assert spi_id
@@ -141,7 +141,7 @@ class TestDecoderStacked:
         should recognize these as READ commands and produce annotations.
         """
         spi_id = add_decoder_safe(mcp, "spi_c",
-                                  channel_map={"cs": 2, "sclk": 3,
+                                  channel_map={"cs": 2, "clk": 3,
                                                "mosi": 4, "miso": 5},
                                   device_id=device_id)
 

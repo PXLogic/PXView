@@ -1478,6 +1478,24 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         g_slist_free(analog_ch_list);
     }
 
+    // Buffering output modules (notably "csv") only flush their accumulated
+    // sample data when they receive SR_DF_END — the SR_DF_LOGIC/DSO/ANALOG
+    // receive() calls merely buffer into per-packet sample arrays. Without
+    // this final packet the CSV export would be silently empty even though
+    // every data packet was consumed. Emit SR_DF_END to trigger the module's
+    // end-of-stream dump_saved_values().
+    // SR_DF_END carries no payload (see enum sr_packettype in libsigrok.h).
+    p.type = SR_DF_END;
+    p.payload = nullptr;
+    sr_output_send(output, &p, &data_out);
+    if (data_out) {
+        if (is_binary_output)
+            file.write(data_out->str, data_out->len);
+        else
+            out << QString::fromUtf8((char*) data_out->str);
+        g_string_free(data_out, TRUE);
+    }
+
     // optional, as QFile destructor will already do it:
     file.close();
     // Upstream libsigrok: sr_output_free() replaces fork _outModule->cleanup().
@@ -1501,7 +1519,10 @@ bool StoreSession::decoders_gen(std::string &str)
 
 bool StoreSession::gen_decoders_json(QJsonArray &array)
 {
-    for(auto stack : _session->get_decoder_stacks()) {
+    // Serialize the decoder stacks of _decoder_doc if set (headless API save
+    // has MCP decoders on the dedicated API document), else the active doc.
+    auto &stacks = _session->get_decoder_stacks(_decoder_doc);
+    for(auto stack : stacks) {
         QJsonObject dec_obj;
         QJsonArray stack_array;
         QJsonObject show_obj;

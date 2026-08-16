@@ -173,11 +173,15 @@ const char* AnnotationResTable::format_to_string(const char *hex_str, int fmt)
 		 }
 		 else{
 			 pxv_err("is not a hex string");
+			 rd--;
 			 continue;
 		 }
 
          char *ptable = (char*)g_bin_cvt_table + dex * 4;
 
+		 if (buf < g_bin_format_tmp_buffer + 4){ //out of buffer
+			 break;
+		 }
 		 buf -= 4; //move to left for 4 bytes
 		 buf[0] = ptable[0];
 		 buf[1] = ptable[1];

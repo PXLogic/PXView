@@ -32,6 +32,11 @@ GRAYCODE_ANN_COUNT = 9      # count: 累计计数 (0, -1, -128, -129, ...)
 GRAYCODE_ANN_INTERVAL = 11  # interval: "63.9 ns, 15.6 MHz"
 GRAYCODE_ANN_AVERAGE = 12   # average: "1.00 ns, 1.00 GHz"
 
+# PWM 解码器注释类型：MCP ann_class = C 解码器 ANN 枚举 + 7（同 graycode）
+# （pwm 枚举 ANN_DUTY=0 -> 7, ANN_PERIOD=1 -> 8）
+PWM_ANN_DUTY = 7
+PWM_ANN_PERIOD = 8
+
 
 def do_buffer_capture_with_pattern(
     mcp: McpClient,
@@ -162,7 +167,8 @@ class TestPwmRealDecode:
             pattern="random",
         )
 
-        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0)
+        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0,
+                                                 ann_class=PWM_ANN_PERIOD)
         assert len(results) > 0, "No PWM results"
 
         # period 文本格式: "XX.X ns" / "XX.X µs" / "XX.X ms" / "X.X s"
@@ -308,7 +314,8 @@ class TestGrayCodeRealDecode:
             pattern="graycode",
         )
 
-        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0)
+        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0,
+                                                 ann_class=GRAYCODE_ANN_INCREMENT)
         assert len(results) > 0, "No GrayCode results"
 
         # 提取 increment 值（ann_class == GRAYCODE_ANN_INCREMENT）
@@ -357,7 +364,8 @@ class TestGrayCodeRealDecode:
             pattern="graycode",
         )
 
-        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0)
+        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0,
+                                                 ann_class=GRAYCODE_ANN_COUNT)
         assert len(results) > 0, "No GrayCode results"
 
         # 提取 count 值（ann_class == GRAYCODE_ANN_COUNT）
@@ -423,7 +431,8 @@ class TestGrayCodeRealDecode:
             pattern="graycode",
         )
 
-        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0)
+        results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=60.0,
+                                                 ann_class=GRAYCODE_ANN_INTERVAL)
         assert len(results) > 0, "No GrayCode results"
 
         # 提取 interval 值（ann_class == GRAYCODE_ANN_INTERVAL）

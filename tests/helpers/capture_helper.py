@@ -147,10 +147,12 @@ def configure_pwm(mcp: McpClient, channel: int, enable: bool,
     if pwm_idx not in (0, 1):
         raise ValueError(f"PWM channel must be 6 or 7, got {channel}")
 
-    # SR_CONF keys for PWM (these match the libsigrok demo driver)
-    SR_CONF_PWM_ENABLE = 0x40001 + pwm_idx
-    SR_CONF_PWM_FREQ   = 0x40003 + pwm_idx
-    SR_CONF_PWM_DUTY   = 0x40005 + pwm_idx
+    # SR_CONF keys for PWM (libsigrok.h): PWM0_EN=60004/FREQ=60005/DUTY=60006,
+    # PWM1_EN=60007/FREQ=60008/DUTY=60009. pwm_idx=0 -> PWM0, 1 -> PWM1.
+    base = 60004 + pwm_idx * 3
+    SR_CONF_PWM_ENABLE = base        # boolean
+    SR_CONF_PWM_FREQ   = base + 1    # double, Hz
+    SR_CONF_PWM_DUTY   = base + 2    # double, percent 0.0-100.0
 
     mcp.set_config(key=SR_CONF_PWM_ENABLE, type="bool", value=enable)
     mcp.set_config(key=SR_CONF_PWM_FREQ,   type="double", value=freq)

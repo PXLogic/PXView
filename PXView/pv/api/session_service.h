@@ -218,7 +218,8 @@ explicit SessionService(SigSession *session, DeviceAgent *device);
         const std::string &instance_id,
         uint64_t start_sample = 0,
         uint64_t end_sample = UINT64_MAX,
-        int max_count = 1000) override;
+        int max_count = 1000,
+        std::optional<int> ann_class = std::nullopt) override;
     Result<std::vector<uint8_t>> get_decoder_binary_output(
         const std::string &instance_id, int output_id) override;
 
