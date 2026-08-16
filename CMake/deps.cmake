@@ -9,35 +9,8 @@ include_directories(
 )
 
 #===============================================================================
-#= glib-2.0
+#= UCRT64 prefix detection (needed by both glib path fix and Python3)
 #-------------------------------------------------------------------------------
-pkg_search_module(GLIB glib-2.0)
-
-if(NOT GLIB_FOUND)
-	message(FATAL_ERROR  "Please install glib!")
-endif()
-
-message("----- glib-2.0:")
-message(STATUS "	 includes:" ${GLIB_INCLUDE_DIRS})
-message(STATUS "	 libraries:" ${GLIB_LIBDIR}/libglib-2.0.*)
-include_directories(${GLIB_INCLUDE_DIRS})
-link_directories(${GLIB_LIBDIR})
-
-#===============================================================================
-#= python3
-#-------------------------------------------------------------------------------
-# On MSYS2/MinGW (GitHub Actions windows-2022 runners pre-install python.org
-# MSVC Python at C:/hostedtoolcache/), CMake's find_package(Python3) would find
-# the MSVC build first (via registry + PATH), linking PXView.exe against
-# python314.dll (MSVC naming). The MinGW build produces libpython3.14.dll
-# instead. Mixing them causes "python314.dll not found" at runtime because
-# package.sh only copies MinGW DLLs.
-#
-# Fix: detect UCRT64 prefix directly (not just $ENV{MSYSTEM}) so this works
-# even when running CMake from PowerShell with UCRT64 tools in PATH.
-# Use standard GIL Python (not free-threaded) — MSYS2's free-threaded Python
-# (python3.14t) has broken sys.path and ABI conflicts in extension modules.
-
 set(_ucrt64_prefix "")
 # Detect UCRT64 prefix on Windows. CMake's EXISTS uses Windows paths,
 # so /ucrt64 (MSYS2 internal path) won't work outside the MSYS2 shell.
@@ -59,6 +32,44 @@ else()
 		endif()
 	endif()
 endif()
+
+#===============================================================================
+#= glib-2.0
+#-------------------------------------------------------------------------------
+pkg_search_module(GLIB glib-2.0)
+
+if(NOT GLIB_FOUND)
+	message(FATAL_ERROR  "Please install glib!")
+endif()
+
+message("----- glib-2.0:")
+message(STATUS "	 includes:" ${GLIB_INCLUDE_DIRS})
+message(STATUS "	 libraries:" ${GLIB_LIBDIR}/libglib-2.0.*)
+# FindPkgConfig (pkg_search_module) on this setup can emit MSYS-style paths
+# (/ucrt64/...) which the native Windows compiler cannot resolve. Convert any
+# such prefix back to the real MSYS2 install path when detected.
+if(CMAKE_HOST_WIN32 AND _ucrt64_prefix AND GLIB_INCLUDE_DIRS MATCHES "^/ucrt64/")
+	string(REPLACE "/ucrt64/" "${_ucrt64_prefix}/" GLIB_INCLUDE_DIRS "${GLIB_INCLUDE_DIRS}")
+	string(REPLACE "/ucrt64/" "${_ucrt64_prefix}/" GLIB_LIBDIR "${GLIB_LIBDIR}")
+	message(STATUS "	 [fixed] glib paths -> ${GLIB_INCLUDE_DIRS}")
+endif()
+include_directories(${GLIB_INCLUDE_DIRS})
+link_directories(${GLIB_LIBDIR})
+
+#===============================================================================
+#= python3
+#-------------------------------------------------------------------------------
+# On MSYS2/MinGW (GitHub Actions windows-2022 runners pre-install python.org
+# MSVC Python at C:/hostedtoolcache/), CMake's find_package(Python3) would find
+# the MSVC build first (via registry + PATH), linking PXView.exe against
+# python314.dll (MSVC naming). The MinGW build produces libpython3.14.dll
+# instead. Mixing them causes "python314.dll not found" at runtime because
+# package.sh only copies MinGW DLLs.
+#
+# Fix: detect UCRT64 prefix directly (not just $ENV{MSYSTEM}) so this works
+# even when running CMake from PowerShell with UCRT64 tools in PATH.
+# Use standard GIL Python (not free-threaded) — MSYS2's free-threaded Python
+# (python3.14t) has broken sys.path and ABI conflicts in extension modules.
 
 if(_ucrt64_prefix)
 	set(Python3_FIND_REGISTRY NEVER)
