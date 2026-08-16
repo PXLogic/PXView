@@ -2185,14 +2185,16 @@ bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
   while (pos <= end && idx0 < (uint64_t)_ch_data[order].size()) {
     void *lbp = _ch_data[order][idx0].lbp[idx1];
     const uint64_t blk_start = (idx0 * RootScale + idx1) * LeafBlockSamples;
-
     if (lbp == nullptr) {
       // 常量块 (未实例化): 整块电平 = first bit. start 处电平 == expected,
-      // 故 const == expected 时本块无差异, 跳到下一块; 否则防御性返回 start.
+      // 故 const == expected 时本块无差异, 跳到下一块; 否则返回本块起点 pos.
+      // 注意: 后续块 (非首块) 的 pos == blk_start > start, 必须返回 pos 而非
+      // start — start 可能在更早块, 其电平仍 == expected (原实现 out_pos=start
+      // 会错误回跳, 毛刺滤波把跳变误判到搜索起点).
       const bool const_val =
           (_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
       if (const_val != expected_level) {
-        out_pos = start;
+        out_pos = pos;
         return true;
       }
       pos = blk_start + LeafBlockSamples;

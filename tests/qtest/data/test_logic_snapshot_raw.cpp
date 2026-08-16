@@ -119,6 +119,7 @@ private slots:
     void test_find_first_different_matches_tree();
     void test_find_first_different_matches_tree_multi_block();
     void test_find_first_different_constant_tail();
+    void test_find_first_different_uninstantiated_block();
 
     // 毛刺滤波正确性
     void test_glitch_filter_removes_narrow_pulses();
@@ -270,6 +271,78 @@ void TestLogicSnapshotRaw::test_find_first_different_constant_tail()
     if (found_raw2) {
         QCOMPARE(out_raw2, idx_tree2);
         QVERIFY(out_raw2 == 70000);   // 交替段结束处
+    }
+}
+
+void TestLogicSnapshotRaw::test_find_first_different_uninstantiated_block()
+{
+    // 未实例化块 (lbp==nullptr): calc_mipmap 对"整块无跳变"的完整块调用
+    // push_to_free_list 释放, 常量值编码在 _ch_data[order][idx0].first bit idx1.
+    //
+    // 真实块几何: LeafBlockSamples = 2^24 (16M 样本/叶块)。旧版本用例假设
+    // 65536 样本/块, 数据全落在块 0 内, nullptr 分支从未执行, 回归失效。
+    //
+    // 数据布局 (3 个叶块, ~33.6M 样本):
+    //   块0 [0, LB):      低电平 + [1000,2000) 高脉冲 → 有跳变, 保持分配
+    //   块1 [LB, 2LB):    常量高 (完整块) → 被释放 (lbp==nullptr)
+    //   块2 [2LB, N):     部分写入, 常量低
+    //
+    // 回归: 原实现命中 nullptr 块时 out_pos=start 错误回跳到搜索起点
+    // (start 处电平仍 == expected), 毛刺滤波把跳变误判到 start。
+    const uint64_t LB = LogicSnapshot::LeafBlockSamples;
+    const size_t N = (size_t)(2 * LB + 65536);
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [LB](size_t s, int ch) {
+        if (ch != 0) return false;
+        if (s < LB) return s >= 1000 && s < 2000;   // 块0: 低 + 窄脉冲
+        if (s < 2 * LB) return true;                // 块1: 常量高
+        return false;                               // 块2: 常量低
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    const int order = snap.get_ch_order(sig);
+    QVERIFY(order >= 0);
+    QVERIFY(snap._ch_data[order].size() > 0);
+    auto &root = snap._ch_data[order][0];
+
+    // 前提: 块1 (完整常量高) 被释放; 块0 因脉冲有跳变保持分配
+    QVERIFY(root.lbp[0] != nullptr);
+    QVERIFY(root.lbp[1] == nullptr);
+
+    // A: 块0 内 (脉冲后, 电平=低) 搜索 → 扫完块0 尾部 + 命中 nullptr 块1
+    //    起点 LB。回归点: bug 版返回 start=5000。
+    {
+        uint64_t out = 0;
+        const bool f = snap.find_first_different_raw(order, 5000, N - 1, false, out);
+        QVERIFY(f);
+        QCOMPARE(out, LB);
+        // 与 mipmap 树搜索一致
+        uint64_t idx_tree = 5000;
+        QVERIFY(snap.get_nxt_edge_self(idx_tree, false, N - 1, 0, sig));
+        QCOMPARE(idx_tree, LB);
+    }
+
+    // B: nullptr 块1 内 (电平=高 == 常量块值) → 跳过块1, 命中块2 起点 2LB
+    {
+        uint64_t out = 0;
+        const bool f = snap.find_first_different_raw(order, LB + 1000, N - 1, true, out);
+        QVERIFY(f);
+        QCOMPARE(out, 2 * LB);
+        uint64_t idx_tree = LB + 1000;
+        QVERIFY(snap.get_nxt_edge_self(idx_tree, true, N - 1, 0, sig));
+        QCOMPARE(idx_tree, 2 * LB);
+    }
+
+    // C: nullptr 块1 内, 常量值 != expected → 返回块内当前位置 (首块时
+    //    pos==start, 与 bug 版不可区分, 仅正确性校验)
+    {
+        uint64_t out = 0;
+        const bool f = snap.find_first_different_raw(order, LB + 1000, N - 1, false, out);
+        QVERIFY(f);
+        QCOMPARE(out, LB + 1000);
     }
 }
 
