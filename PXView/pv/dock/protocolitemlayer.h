@@ -23,13 +23,15 @@
 #pragma once
 
 #include <QHBoxLayout>
+#include <QPointer>
 #include <QPushButton>
 #include <QLabel>
 #include <QString>
 #include "pv/ui/dscombobox.h"
+#include "pv/data/stack/decoderstack.h"
 
 class DecoderStatus;
- 
+
 namespace pv{
 
 namespace data{
@@ -81,7 +83,10 @@ private slots:
 public:
     DecoderStatus *m_decoderStatus;
     QString        m_protocolId;
-    pv::data::DecoderStack *_trace;
+    // QPointer auto-nulls when the DecoderStack QObject is destroyed, so
+    // stale layers left behind by removal paths that skip the dock rebuild
+    // never dereference a freed stack.
+    QPointer<pv::data::DecoderStack> _trace;
     bool           m_expanded;
   
 private:

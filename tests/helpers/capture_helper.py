@@ -9,6 +9,8 @@ from typing import Optional
 
 from pxview_automation import McpClient
 
+from helpers.decoder_helper import extract_annotations
+
 
 def do_timed_capture(mcp: McpClient, device_id: str,
                      channels: list = None,
@@ -61,18 +63,25 @@ def do_manual_capture(mcp: McpClient, device_id: str,
 def wait_for_decode(mcp: McpClient, analyzer_id: str,
                     max_wait: float = 30.0,
                     poll_interval: float = 1.0) -> list:
-    """Wait for decoder to produce results, polling periodically."""
+    """Wait for decoder to produce results, polling periodically.
+
+    Returns the annotation list unwrapped from the get_analyzer_results
+    dict contract ({"annotations": [...]}).
+    """
     deadline = time.time() + max_wait
     while time.time() < deadline:
         try:
-            results = mcp.get_analyzer_results(analyzer_id, max_count=1)
-            if results and len(results) > 0:
-                return mcp.get_analyzer_results(analyzer_id, max_count=10000)
+            probe = extract_annotations(
+                mcp.get_analyzer_results(analyzer_id, max_count=1))
+            if probe:
+                return extract_annotations(
+                    mcp.get_analyzer_results(analyzer_id, max_count=10000))
         except Exception:
             pass
         time.sleep(poll_interval)
     # Final attempt
-    return mcp.get_analyzer_results(analyzer_id, max_count=10000)
+    return extract_annotations(
+        mcp.get_analyzer_results(analyzer_id, max_count=10000))
 
 
 # SR_CONF_PATTERN_MODE — demo device pattern selection (string type).

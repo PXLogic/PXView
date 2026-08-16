@@ -331,6 +331,12 @@ bool CaptureManager::action_start_capture(bool instant,
     // manual _is_working=true / _capture_owner_document=... pattern.
     _state->document_registry()->acquire_capture_owner(
         owner ? owner : _state->document_registry()->get_active_document());
+    // A2.2: reset the capture-complete SharedState AFTER acquire_capture_owner
+    // has set _is_working=true — a stale set_result() from the previous
+    // capture otherwise makes wait_capture_complete() return immediately with
+    // completed:true from capture #2 onward. Ordered this way, any subsequent
+    // wait_for_capture_complete() blocks until this capture's notify_capture_complete().
+    _state->reset_capture_complete();
     _event_bus->broadcast_async<interface::StartCollectWork>({});
 
     // Start a timer, for able to refresh the view per (1000 / 30)ms.

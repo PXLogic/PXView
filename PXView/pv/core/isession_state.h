@@ -139,6 +139,10 @@ public:
     // --- SharedState signaling (Phase 3) ---
     /// Signal that decode is complete (wakes wait_for_decode_complete).
     virtual void notify_decode_complete() = 0;
+    /// Reset the capture-complete SharedState before starting a new capture
+    /// (a stale set_result() from the previous capture would otherwise make
+    /// wait_for_capture_complete() return immediately from capture #2 on).
+    virtual void reset_capture_complete() = 0;
 };
 
 } // namespace pv

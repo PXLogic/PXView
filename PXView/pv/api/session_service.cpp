@@ -2319,6 +2319,20 @@ Result<json> SessionService::get_decoder_options(const std::string& decoder_id) 
                 for (const GSList *v = opt->values; v; v = v->next, idx++) {
                     auto *val = static_cast<GVariant*>(v->data);
                     if (!val) continue;
+                    // A3.2: g_variant_compare is undefined for mismatched
+                    // variant types (e.g. eeprom93xx's uint64 default vs an
+                    // enum value of a different numeric type). Guard before
+                    // comparing; a type mismatch is treated as non-default.
+                    if (!g_variant_is_of_type(val, g_variant_get_type(opt->def))) {
+                        pxv_warn("get_decoder_options [%s]: option '%s' enum "
+                                 "value type %s differs from default type %s, "
+                                 "skipping compare",
+                                 decoder_id.c_str(),
+                                 opt->id ? opt->id : "",
+                                 g_variant_get_type_string(val),
+                                 g_variant_get_type_string(opt->def));
+                        continue;
+                    }
                     if (g_variant_compare(val, opt->def) == 0) {
                         // Return the same representation as in the values array
                         if (idx < static_cast<int>(values.size()))
@@ -3133,6 +3147,9 @@ Result<std::string> SessionService::add_decoder(
                             if (stacks[i].get() == decoder_stack.get()) {
                                 _session->remove_decoder(
                                     static_cast<int>(i), api_document());
+                                // Refresh the ProtocolDock so the failed
+                                // stack's layer is dropped immediately.
+                                _session->rebuild_decoder_pannel();
                                 break;
                             }
                         }
@@ -3163,6 +3180,10 @@ Result<void> SessionService::remove_decoder(const std::string &instance_id) {
 
             if (make_instance_id(stack.get()) == instance_id) {
                 _session->remove_decoder(static_cast<int>(i), api_document());
+                // Mirror clear_all_decoders: refresh the ProtocolDock so no
+                // layer outlives its DecoderStack (belt-and-suspenders with
+                // the QPointer in ProtocolItemLayer).
+                _session->rebuild_decoder_pannel();
 
                 broadcast_event(ServiceEvent::DecoderRemoved,
                                 {{"instance_id", instance_id}});

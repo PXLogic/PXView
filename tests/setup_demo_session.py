@@ -217,8 +217,11 @@ def setup_demo_session(output_path: str, sample_count: int = 1_000_000,
             aid = d.get("instance_id") or d.get("id")
             name = d.get("decoder_id") or d.get("name", "?")
             try:
-                results = client.get_analyzer_results(analyzer_id=aid, max_count=10)
-                count = len(results) if results else 0
+                result = client.get_analyzer_results(analyzer_id=aid, max_count=10)
+                if isinstance(result, dict):
+                    count = len(result.get("annotations", []))
+                else:
+                    count = len(result) if result else 0
                 total_annotations += count
                 status_str = "OK" if count > 0 else "EMPTY"
                 print(f"  [{status_str}] {name} (id={aid}): {count} annotations")

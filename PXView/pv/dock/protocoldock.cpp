@@ -1533,7 +1533,7 @@ void ProtocolDock::update_view_status() {
 void ProtocolDock::update_deocder_item_name(void *trace_handel,
                                             const char *name) {
   for (auto p : _protocol_lay_items) {
-    if (p->_trace == trace_handel) {
+    if (p->_trace.data() == trace_handel) {
       p->set_label_name(QString(name));
       break;
     }

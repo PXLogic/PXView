@@ -41,19 +41,34 @@ def add_decoder_safe(mcp: McpClient, decoder_name: str,
     raise McpError(f"Cannot parse analyzer_id from result: {result}")
 
 
+def extract_annotations(result) -> list:
+    """Unwrap the get_analyzer_results dict contract into an annotation list.
+
+    Server contract (mcp_tool_registry.cpp handle_get_analyzer_results):
+        {"annotations": [ann, ...]}
+    where each ann is {"start_sample", "end_sample", "ann_class", "texts"}
+    (see mcp_serializers.cpp decoder_ann_to_json).
+    """
+    if isinstance(result, dict):
+        anns = result.get("annotations")
+        return anns if isinstance(anns, list) else []
+    return result or []
+
+
 def get_decoder_results_with_retry(mcp: McpClient, analyzer_id: str,
                                    max_count: int = 10000,
                                    max_wait: float = 30.0,
                                    poll_interval: float = 1.0) -> list:
     """Get decoder results, retrying until data appears or timeout."""
     deadline = time.time() + max_wait
-    last_result = []
+    last_result: list = []
     while time.time() < deadline:
         try:
-            results = mcp.get_analyzer_results(analyzer_id, max_count=max_count)
-            if results and len(results) > 0:
+            results = extract_annotations(
+                mcp.get_analyzer_results(analyzer_id, max_count=max_count))
+            if results:
                 return results
-            last_result = results or []
+            last_result = results
         except Exception:
             pass
         time.sleep(poll_interval)

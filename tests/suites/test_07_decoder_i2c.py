@@ -143,10 +143,13 @@ class TestDecoderI2c:
                          sample_rate=1000000,
                          duration_seconds=1.0)
 
-        results = mcp.get_analyzer_results(analyzer_id, max_count=5)
-        if results:
-            assert len(results) <= 5, \
-                f"maxCount=5 but got {len(results)} results"
+        result = mcp.get_analyzer_results(analyzer_id, max_count=5)
+        assert isinstance(result, dict), \
+            f"Expected dict contract {{'annotations': [...]}}, got: {type(result)}"
+        annotations = result.get("annotations", [])
+        if annotations:
+            assert len(annotations) <= 5, \
+                f"maxCount=5 but got {len(annotations)} annotations"
 
     def test_i2c_results_sample_range(self, mcp: McpClient, device_id: str,
                                       cleanup_after_test):
@@ -159,10 +162,12 @@ class TestDecoderI2c:
                          sample_rate=1000000,
                          duration_seconds=1.0)
 
-        results = mcp.get_analyzer_results(analyzer_id,
-                                           start_sample=0,
-                                           end_sample=500000,
-                                           max_count=1000)
-        for ann in results:
+        result = mcp.get_analyzer_results(analyzer_id,
+                                          start_sample=0,
+                                          end_sample=500000,
+                                          max_count=1000)
+        assert isinstance(result, dict), \
+            f"Expected dict contract {{'annotations': [...]}}, got: {type(result)}"
+        for ann in result.get("annotations", []):
             assert ann["start_sample"] <= 500000, \
                 f"Annotation outside range: {ann}"

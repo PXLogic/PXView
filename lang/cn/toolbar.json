@@ -220,10 +220,6 @@
         "text": "采样深度"
     },
     {
-        "id": "IDS_TOOLBAR_SAMPLE_COUNT_INF",
-        "text": "∞ 持续"
-    },
-    {
         "id": "IDS_TOOLBAR_SAMPLE_RATE",
         "text": "采样率"
     },
