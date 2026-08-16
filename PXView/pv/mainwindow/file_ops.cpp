@@ -65,7 +65,7 @@ void MainWindowFileOps::on_load_file(QString file_name) {
   pv::view::View *new_view = new pv::view::View(_wnd->session(), _wnd->sampling_bar(), _wnd);
   // phase 2: document owned by DocumentRegistry.
   size_t new_doc_idx = _wnd->session()->document_registry()->take_document(
-      std::make_unique<pv::data::SessionDocument>(_wnd->session()));
+      std::make_unique<pv::data::SessionDocument>(_wnd->session()->device()));
   pv::data::SessionDocument *new_doc =
       _wnd->session()->document_registry()->get_document_by_index(new_doc_idx);
   pv::TabContext *ctx =
@@ -113,7 +113,7 @@ void MainWindowFileOps::on_import_file(QString file_name) {
   pv::view::View *new_view = new pv::view::View(_wnd->session(), _wnd->sampling_bar(), _wnd);
   // phase 2: document owned by DocumentRegistry.
   size_t new_doc_idx = _wnd->session()->document_registry()->take_document(
-      std::make_unique<pv::data::SessionDocument>(_wnd->session()));
+      std::make_unique<pv::data::SessionDocument>(_wnd->session()->device()));
   pv::data::SessionDocument *new_doc =
       _wnd->session()->document_registry()->get_document_by_index(new_doc_idx);
   pv::TabContext *ctx =

@@ -23,6 +23,7 @@
 #define PXVIEW_PV_DATA_SPECTRUMSTACK_H
 
 #include "pv/data/model/signaldata.h"
+#include "pv/data/isignal_model_source.h"
 
 #include <list>
 
@@ -36,8 +37,6 @@
 #include <QString>
 
 namespace pv {
-
-class SigSession;
 
 namespace view {
 class DsoSignal;
@@ -59,7 +58,7 @@ public:
     };
 
 public:
-    SpectrumStack(pv::SigSession *_session, int index);
+    SpectrumStack(pv::data::ISignalModelSource *_source, int index);
     virtual ~SpectrumStack();
     void clear();
     void init();
@@ -90,7 +89,7 @@ signals:
     void fft_updated();
 
 private:
-    pv::SigSession *_session;
+    pv::data::ISignalModelSource *_source;
 
     int _index;
     uint64_t _sample_num;

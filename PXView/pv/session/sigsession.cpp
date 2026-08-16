@@ -1337,9 +1337,9 @@ void SigSession::init_signals() {
       model->set_enabled(probe->enabled);
 
       // Inject weak references so the model can write back to the
-      // sr_channel struct and the DeviceAgent API. See
-      // SignalModel::commit_to_device() and the enhanced setters.
-      model->set_session(this);
+      // sr_channel struct and the device config API (narrow port).
+      // See SignalModel::commit_to_device() and the enhanced setters.
+      model->set_device_config_port(&_state->device_agent());
       model->set_sr_channel(probe);
 
       // Read probe configuration for DSO/ANALOG channels.
@@ -1552,9 +1552,9 @@ void SigSession::reload() {
       model->set_enabled(probe->enabled);
 
       // Inject weak references (same as init_signals) so the rebuilt model
-      // can write back to sr_channel / DeviceAgent and so
+      // can write back to sr_channel / device config port and so
       // commit_to_device() works after reload.
-      model->set_session(this);
+      model->set_device_config_port(&_state->device_agent());
       model->set_sr_channel(probe);
 
       if (ch_type == SR_CHANNEL_DSO ||

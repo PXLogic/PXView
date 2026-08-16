@@ -23,6 +23,7 @@
 #define PXVIEW_PV_DATA_MATHSTACK_H
 
 #include "pv/data/model/signaldata.h"
+#include "pv/data/isignal_model_source.h"
 
 #include <list>
 
@@ -33,8 +34,6 @@
 #include <QString>
 
 namespace pv {
-
-class SigSession;
 
 namespace view {
 class dslDial;
@@ -101,7 +100,7 @@ private:
     static const QString vDialDivUnit[vDialUnitCount];
 
 public:
-    MathStack(pv::SigSession *_session,
+    MathStack(pv::data::ISignalModelSource *_source,
               int ch1_index,
               int ch2_index, MathType type);
     virtual ~MathStack();
@@ -136,7 +135,7 @@ public:
 signals:
 
 private:
-    pv::SigSession  *_session;
+    pv::data::ISignalModelSource  *_source;
     int              _ch1_index;
     int              _ch2_index;
 

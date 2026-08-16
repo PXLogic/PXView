@@ -38,6 +38,7 @@
 #include "pv/data/model/signaldata.h"
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/data/decoderanalogdata.h"
+#include "pv/data/isession_host.h"
 
 
 namespace DecoderStackTest {
@@ -45,8 +46,6 @@ class TwoDecoderStack;
 }
  
 namespace pv {
-
-class SigSession;
 
 namespace view {
 class LogicSignal;
@@ -97,7 +96,7 @@ public:
     };
 
 public:
-   	DecoderStack(pv::SigSession *_session,
+   	DecoderStack(pv::data::ISessionHost *_host,
 		const srd_decoder *const decoder, DecoderStatus *decoder_status);
 
 public:
@@ -282,7 +281,7 @@ private:
     std::map<const decode::Row, bool>       _rows_lshow;
     std::map<std::pair<const srd_decoder*, int>, decode::Row> _class_rows;
   
-    SigSession      *_session;
+    pv::data::ISessionHost *_host;
     data::SessionDocument *_owner_document;
     uint64_t        _handle_id = 0;
     uint64_t        _version = 0;

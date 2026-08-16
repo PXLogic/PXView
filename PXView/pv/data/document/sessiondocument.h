@@ -29,7 +29,6 @@
 
 namespace pv {
 
-class SigSession;
 class TabContext;
 
 namespace data {
@@ -37,16 +36,17 @@ namespace data {
 class DecoderStack;
 class SpectrumStack;
 class MathStack;
+class IDeviceConfigPort;
 
 // SessionDocument is now a pure data container. Signal/pending config and
 // DeviceAgent interaction have been extracted to SignalConfigStore
 // (accessed via signal_config_store()). trigger_config remains here as a
-// SessionDocument-owned field. The SigSession* is injected so SignalConfigStore
-// can reach DeviceAgent via _session->get_device() without SessionDocument
-// itself depending on DeviceAgent.
+// SessionDocument-owned field. The narrow IDeviceConfigPort* (implemented by
+// DeviceAgent) is injected so SignalConfigStore can reach the device config
+// API without SessionDocument itself depending on DeviceAgent or SigSession.
 class SessionDocument : public DataSource {
 public:
-  explicit SessionDocument(SigSession *session);
+  explicit SessionDocument(IDeviceConfigPort *device_port);
   ~SessionDocument();
 
   LogicSnapshot *get_logic_snapshot() override;

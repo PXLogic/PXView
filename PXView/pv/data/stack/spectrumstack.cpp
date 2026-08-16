@@ -23,7 +23,8 @@
 #include <cmath>
 #include <memory>
 #include "pv/data/snapshot/dsosnapshot.h"
-#include "pv/session/sigsession.h"
+#include "pv/data/model/signalmodel.h"
+#include "pv/data/isignal_model_source.h"
 #include "pv/view/signal/dsosignal.h"
 #include "pv/ui/langresource.h"
 
@@ -35,8 +36,8 @@ using namespace std;
 namespace pv {
 namespace data {
 
-SpectrumStack::SpectrumStack(pv::SigSession *session, int index) :
-    _session(session),
+SpectrumStack::SpectrumStack(pv::data::ISignalModelSource *source, int index) :
+    _source(source),
     _index(index),
     _dc_ignore(true),
     _sample_interval(1),
@@ -139,7 +140,7 @@ void SpectrumStack::calc_fft()
     std::shared_ptr<pv::data::DsoSnapshot> data_snap;
     std::shared_ptr<pv::data::SignalModel> model;
 
-    for(auto m : _session->get_signal_models()) {
+    for(auto m : _source->get_signal_models()) {
         if (m->type() == SR_CHANNEL_DSO) {
             if (m->index() == _index && m->enabled()) {
                 data_snap = std::static_pointer_cast<pv::data::DsoSnapshot>(m->snapshot());

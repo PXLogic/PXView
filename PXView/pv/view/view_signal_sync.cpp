@@ -670,8 +670,10 @@ _own_signals.clear();
       model->set_vfactor(ch.vfactor > 0 ? ch.vfactor : 1);
     }
 
-    // Set session for the model (so it can call session methods if needed)
-    model->set_session(_view->session_ptr());
+    // Inject the device config port (narrow IDeviceConfigPort) so the model
+    // can write back probe/trigger config to the device. SigSession's device()
+    // returns the concrete DeviceAgent, which implements IDeviceConfigPort.
+    model->set_device_config_port(_view->session_ptr()->device());
 
     Signal *old_signal = nullptr;
     for (auto &os : old_signals) {

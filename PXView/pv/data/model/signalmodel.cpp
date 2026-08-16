@@ -22,9 +22,8 @@
 
 #include "pv/data/model/signalmodel.h"
 #include "pv/data/snapshot/snapshot.h"
+#include "pv/data/idevice_config_port.h"
 
-#include "pv/session/sigsession.h"
-#include "pv/session/deviceagent.h"
 #include "pv/base/log.h"
 #include "pv/base/pxvdef.h"
 
@@ -118,8 +117,8 @@ void SignalModel::set_coupling(int coupling) {
         // to the driver here, set_acCoupling() only updates the model field;
         // the next load_settings() reads the STALE driver value and resets
         // the UI back to the old coupling (e.g. GND→DC after start_capture).
-        if (_sr_channel && _session) {
-            DeviceAgent *device = _session->get_device();
+        if (_sr_channel && _device_port) {
+            IDeviceConfigPort *device = _device_port;
             if (device && device->have_instance()) {
                 device->set_config_int32(SR_CONF_PROBE_COUPLING, coupling,
                                          _sr_channel, nullptr);
@@ -133,8 +132,8 @@ void SignalModel::set_vfactor(double vfactor) {
     if (_vfactor != vfactor) {
         _vfactor = vfactor;
         // SR_CONF_PROBE_FACTOR is uint64 (matches DsoSignal::commit_settings).
-        if (_sr_channel && _session) {
-            DeviceAgent *device = _session->get_device();
+        if (_sr_channel && _device_port) {
+            IDeviceConfigPort *device = _device_port;
             if (device && device->have_instance()) {
                 device->set_config_uint64(SR_CONF_PROBE_FACTOR,
                                           (uint64_t)vfactor, _sr_channel, nullptr);
@@ -147,8 +146,8 @@ void SignalModel::set_vfactor(double vfactor) {
 void SignalModel::set_map_default(bool map_default) {
     if (_map_default != map_default) {
         _map_default = map_default;
-        if (_sr_channel && _session) {
-            DeviceAgent *device = _session->get_device();
+        if (_sr_channel && _device_port) {
+            IDeviceConfigPort *device = _device_port;
             if (device && device->have_instance()) {
                 device->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default,
                                         _sr_channel, nullptr);
@@ -167,8 +166,8 @@ void SignalModel::set_probe_enabled(bool enabled, struct sr_channel *probe) {
     if (_enabled != enabled) {
         _enabled = enabled;
         struct sr_channel *ch = probe ? probe : _sr_channel;
-        if (ch && _session) {
-            DeviceAgent *device = _session->get_device();
+        if (ch && _device_port) {
+            IDeviceConfigPort *device = _device_port;
             if (device && device->have_instance()) {
                 device->set_config_bool(SR_CONF_PROBE_EN, enabled, ch, nullptr);
             }
@@ -182,8 +181,8 @@ void SignalModel::set_probe_enabled(bool enabled, struct sr_channel *probe) {
 
 void SignalModel::set_probe_offset(uint16_t offset, struct sr_channel *probe) {
     struct sr_channel *ch = probe ? probe : _sr_channel;
-    if (ch && _session) {
-        DeviceAgent *device = _session->get_device();
+    if (ch && _device_port) {
+        IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
                                       ch, nullptr);
@@ -197,8 +196,8 @@ void SignalModel::set_probe_offset(uint16_t offset, struct sr_channel *probe) {
 
 void SignalModel::set_probe_factor(uint64_t factor, struct sr_channel *probe) {
     struct sr_channel *ch = probe ? probe : _sr_channel;
-    if (ch && _session) {
-        DeviceAgent *device = _session->get_device();
+    if (ch && _device_port) {
+        IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
             device->set_config_uint64(SR_CONF_PROBE_FACTOR, factor,
                                       ch, nullptr);
@@ -234,8 +233,8 @@ void SignalModel::set_trigger_value(double value, struct sr_channel *probe) {
      * Without this, the driver keeps the default trigger value and the
      * waveform does not respond to cursor movement. */
     struct sr_channel *ch = probe ? probe : _sr_channel;
-    if (ch && _session) {
-        DeviceAgent *device = _session->get_device();
+    if (ch && _device_port) {
+        IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
             device->set_config_int32(SR_CONF_TRIGGER_VALUE, (int)value, ch, nullptr);
         }
@@ -265,8 +264,8 @@ void SignalModel::set_zero_offset(double offset) {
     if (_zero_offset == offset) return;
     _zero_offset = offset;
     // SR_CONF_PROBE_OFFSET is uint16 (matches DsoSignal::commit_settings).
-    if (_sr_channel && _session) {
-        DeviceAgent *device = _session->get_device();
+    if (_sr_channel && _device_port) {
+        IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
                                       _sr_channel, nullptr);
@@ -279,8 +278,8 @@ void SignalModel::set_hw_offset(double offset) {
     _hw_offset = offset;
     // SR_CONF_PROBE_HW_OFFSET is uint16 (matches DsoSignal::get_hw_offset
     // which calls get_config_uint16).
-    if (_sr_channel && _session) {
-        DeviceAgent *device = _session->get_device();
+    if (_sr_channel && _device_port) {
+        IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
             device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, (int)offset,
                                       _sr_channel, nullptr);
@@ -318,8 +317,8 @@ void SignalModel::commit_to_device()
     // ---- Hardware-relevant fields via DeviceAgent set_config_* ----
     // Same keys/types as DsoSignal::commit_settings() so the driver receives
     // the same updates it would get from the View layer.
-    if (_session == nullptr) return;
-    DeviceAgent *device = _session->get_device();
+    if (_device_port == nullptr) return;
+    IDeviceConfigPort *device = _device_port;
     if (device == nullptr || !device->have_instance()) return;
 
     device->set_config_bool(SR_CONF_PROBE_EN, _enabled, _sr_channel, nullptr);

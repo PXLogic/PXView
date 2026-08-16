@@ -44,6 +44,8 @@
 // → <atomic>,<thread>,<QString>) from 59 downstream includers.
 namespace data { class AnalogSnapshot; class DsoSnapshot; class LogicSnapshot; }
 #include "pv/data/datasource.h"
+#include "pv/data/isession_host.h"
+#include "pv/data/isignal_model_source.h"
 #include "pv/data/decoderanalogdata.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/document/sessiondata.h"
@@ -103,7 +105,10 @@ using namespace pv::data;
  * View/API layers. Inline method bodies that previously touched private
  * fields now forward to `_state->xxx()` accessors.
  */
-class SigSession : public IDeviceAgentCallback, public pv::data::DataSource {
+class SigSession : public IDeviceAgentCallback,
+                   public pv::data::DataSource,
+                   public pv::data::ISessionHost,
+                   public pv::data::ISignalModelSource {
 private:
   static constexpr float Oversampling = 2.0f;
   SigSession(SigSession &o);
@@ -177,7 +182,7 @@ public:
   /// Mutex protecting the signal_models vector. Non-UI thread callers
   /// (decode thread, save/export thread) must hold a shared_lock before
   /// iterating; writers (init_signals) hold a unique_lock.
-  std::shared_mutex &signal_models_mutex() { return _state->signal_models_mutex(); }
+  std::shared_mutex &signal_models_mutex() override { return _state->signal_models_mutex(); }
   bool add_decoder(srd_decoder *const dec, bool silent, DecoderStatus *dstatus, std::list<pv::data::decode::Decoder *> &sub_decoders, std::shared_ptr<data::DecoderStack> &out_stack, data::SessionDocument *doc = nullptr) override;
   int get_trace_index_by_key_handel(void *handel, data::SessionDocument *doc = nullptr);
   void remove_decoder(int index, data::SessionDocument *doc = nullptr);
@@ -236,7 +241,7 @@ std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   void set_save_end(uint64_t end) { _state->set_save_end(end); }
   uint64_t get_save_end() { return _state->save_end(); }
   void clear_all_decoder(bool bUpdateView = true) override;
-  bool is_closed() { return _state->bClose(); }
+  bool is_closed() override { return _state->bClose(); }
   bool is_instant() override { return _capture_manager->is_instant(); }
   bool is_working() override { return _state->is_working() || _state->device_status() == ST_RUNNING; }
   bool is_init_status() { return _state->device_status() == ST_INIT; }
@@ -283,7 +288,7 @@ template <typename EventType> void broadcast_async(const EventType &ev) { _event
   // DecoderStack) that need to emit Qt signals from a worker thread —
   // emitting the signal on the main thread avoids QThreadData creation on
   // the worker thread (which crashes on thread exit, see eventbus.h:100-111).
-  void event_bus_post(std::function<void()> fn) { _event_bus->dispatch_async(std::move(fn)); }
+  void event_bus_post(std::function<void()> fn) override { _event_bus->dispatch_async(std::move(fn)); }
   bool have_new_realtime_refresh(bool keep) { return _capture_manager->have_new_realtime_refresh(keep); }
   std::shared_ptr<data::DecoderStack> get_decoder_trace(int index, data::SessionDocument *doc = nullptr);
   std::shared_ptr<data::SignalModel> get_signal_by_index(int index);
@@ -309,7 +314,7 @@ void on_load_config_end();
   void update_dso_data_scale() override;
   void remove_decode_task(std::shared_ptr<data::DecoderStack> stack);
   double get_logic_data_view_time() override;
-  int64_t get_ring_sample_count();
+  int64_t get_ring_sample_count() override;
   bool dso_data_is_out_off_range() { return _state->view_data()->get_dso()->data_is_out_off_range(); }
   void set_active_document(data::SessionDocument *doc);
   data::SessionDocument *get_active_document() override;

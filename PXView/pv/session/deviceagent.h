@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "pv/base/pxvdef.h"
+#include "pv/data/idevice_config_port.h"
 
 class IDeviceAgentCallback
 {
@@ -81,7 +82,7 @@ class IDeviceAgentCallback
  * The datafeed callback is injected via set_datafeed_callback() by
  * SessionStateContext (which owns the DataFeedParser).
  */
-class DeviceAgent
+class DeviceAgent : public pv::data::IDeviceConfigPort
 {
 public:
     DeviceAgent();
@@ -120,7 +121,7 @@ public:
     void set_datafeed_callback(sr_datafeed_callback cb, void *user_data);
 
     // --- Accessors ---
-    inline bool have_instance() const { return _dev_handle != NULL_HANDLE; }
+    inline bool have_instance() const override { return _dev_handle != NULL_HANDLE; }
     inline QString name() const { return _dev_name; }
     inline QString path() const { return _path; }
     inline QString driver_name() const { return _driver_name; }
@@ -135,7 +136,7 @@ public:
      * import_file(), so start_capture() must NOT be called for them — it
      * would clear the already-loaded data and crash in sr_session_start(). */
     inline bool is_input_module() const { return _driver_name == "input-module"; }
-    inline bool is_demo() const { return _dev_type == DEV_TYPE_DEMO; }
+    inline bool is_demo() const override { return _dev_type == DEV_TYPE_DEMO; }
     /* Demo devices are treated as hardware to maximize real-device simulation.
      * The demo driver implements the same config keys (OPERATION_MODE,
      * CHANNEL_MODE, SAMPLERATE, etc.) as PXLogic, so routing it through the
@@ -173,11 +174,11 @@ public:
     }
 
     // --- Channel operations ---
-    bool enable_probe(const sr_channel *probe, bool enable);
+    bool enable_probe(const sr_channel *probe, bool enable) override;
     bool enable_probe(int probe_index, bool enable);
     bool set_channel_name(int ch_index, const char *name);
     bool channel_is_enable(int index);
-    GSList* get_channels();
+    GSList* get_channels() override;
     int get_channel_count();
     bool have_enabled_channel();
 
@@ -205,13 +206,13 @@ public:
     double get_sample_time();
 
     // --- Mode ---
-    int get_work_mode();
-    void set_work_mode(int mode);
+    int get_work_mode() override;
+    void set_work_mode(int mode) override;
     const GSList* get_device_mode_list();
     int get_hardware_operation_mode();
     bool is_stream_mode();
     bool detect_stream_mode();
-    QString get_demo_operation_mode();
+    QString get_demo_operation_mode() override;
     bool check_firmware_version();
 
     // --- Trigger ---
@@ -230,16 +231,16 @@ public:
     bool have_config(int key, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
     bool get_config_string(int key, QString &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
-    bool set_config_string(int key, const char *value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_string(int key, const char *value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr) override;
 
     bool get_config_bool(int key, bool &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
-    bool set_config_bool(int key, bool value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_bool(int key, bool value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr) override;
 
     bool get_config_uint64(int key, uint64_t &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
-    bool set_config_uint64(int key, uint64_t value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_uint64(int key, uint64_t value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr) override;
 
     bool get_config_uint16(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
-    bool set_config_uint16(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_uint16(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr) override;
 
     bool get_config_uint32(int key, uint32_t &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
     bool set_config_uint32(int key, uint32_t value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
@@ -248,7 +249,7 @@ public:
     bool set_config_int16(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
 
     bool get_config_int32(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
-    bool set_config_int32(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
+    bool set_config_int32(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr) override;
 
     bool get_config_byte(int key, int &value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);
     bool set_config_byte(int key, int value, const sr_channel *ch = nullptr, const sr_channel_group *cg = nullptr);

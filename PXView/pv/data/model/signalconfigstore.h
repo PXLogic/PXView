@@ -18,15 +18,12 @@
 #include <cstdint>
 #include <vector>
 
-class DeviceAgent;
-
 namespace pv {
-
-class SigSession;
 
 namespace data {
 
 class SignalModel;
+class IDeviceConfigPort;
 
 // NOTE: view_index/v_offset/own_height are UI layout fields that conceptually
 // belong to the View layer. They remain in ChannelConfig for .pxc serialization
@@ -95,12 +92,13 @@ struct SignalConfig {
 };
 
 // SignalConfigStore: owns signal/pending device config and handles
-// serialization + DeviceAgent sync. Decoupled from SessionDocument so that
+// serialization + device config sync. Decoupled from SessionDocument so that
 // SessionDocument no longer needs to depend on DeviceAgent directly.
-// The DeviceAgent is obtained internally via the injected SigSession.
+// The device port is injected via the narrow IDeviceConfigPort interface
+// (implemented by DeviceAgent) — no SigSession/DeviceAgent concrete dep.
 class SignalConfigStore {
 public:
-  SignalConfigStore(SigSession *session);
+  SignalConfigStore(IDeviceConfigPort *device_port);
   ~SignalConfigStore();
 
   // Serialize signal config (work_mode/channels/...) to JSON.
@@ -131,7 +129,7 @@ public:
   }
 
 private:
-  SigSession *_session;
+  IDeviceConfigPort *_device_port;
   SignalConfig _signal_config;
   SignalConfig _pending_device_config;
 };

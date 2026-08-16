@@ -26,8 +26,7 @@
 
 #include  "pv/data/snapshot/dsosnapshot.h"
 #include  "pv/data/model/signalmodel.h"
-#include  "pv/session/sigsession.h"
-#include  "pv/session/deviceagent.h"
+#include  "pv/data/isignal_model_source.h"
 #include "pv/view/component/dsldial.h"
 #include "pv/base/log.h"
 
@@ -80,13 +79,15 @@ const QString MathStack::vDialDivUnit[MathStack::vDialUnitCount] = {
     "kV/V",
 };
 
-// Helper: look up a SignalModel by channel index via the SigSession.
-// Returns the matching DSO SignalModel, or nullptr if not found / not a DSO.
-static data::SignalModel *lookup_dso_model(pv::SigSession *session, int index)
+// Helper: look up a SignalModel by channel index via the injected
+// ISignalModelSource. Returns the matching DSO SignalModel, or nullptr if
+// not found / not a DSO.
+static data::SignalModel *lookup_dso_model(
+    pv::data::ISignalModelSource *source, int index)
 {
-    if (!session)
+    if (!source)
         return nullptr;
-    for (auto m : session->get_signal_models()) {
+    for (auto m : source->get_signal_models()) {
         if (m && m->index() == index &&
             m->type() == SR_CHANNEL_DSO) {
             return m.get();
@@ -95,11 +96,11 @@ static data::SignalModel *lookup_dso_model(pv::SigSession *session, int index)
     return nullptr;
 }
 
-MathStack::MathStack(pv::SigSession *session,
+MathStack::MathStack(pv::data::ISignalModelSource *source,
                      int ch1_index,
                      int ch2_index,
                      MathType type) :
-    _session(session),
+    _source(source),
     _ch1_index(ch1_index),
     _ch2_index(ch2_index),
     _type(type),
@@ -113,8 +114,8 @@ MathStack::MathStack(pv::SigSession *session,
 
     // Resolve both channel indices against SignalModel so we fail fast if
     // the caller passed a non-existent / non-DSO channel.
-    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
-    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    data::SignalModel *m1 = lookup_dso_model(_source, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
     if (m1 == nullptr || m2 == nullptr){
         pxv_info("ERROR: MathStack::MathStack, DSO SignalModel not found for "
                  "ch1=%d or ch2=%d.", ch1_index, ch2_index);
@@ -186,8 +187,8 @@ void MathStack::enable_envelope(bool enable)
 uint64_t MathStack::default_vDialValue()
 {
     uint64_t value = 0;
-    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
-    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    data::SignalModel *m1 = lookup_dso_model(_source, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
     assert(m1 && m2);
 
     const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
@@ -230,8 +231,8 @@ uint64_t MathStack::default_vDialValue()
 uint64_t MathStack::default_factor()
 {
     uint64_t value = 0;
-    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
-    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    data::SignalModel *m1 = lookup_dso_model(_source, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
     assert(m1 && m2);
 
     const uint64_t factor1 = static_cast<uint64_t>(m1->vfactor());
@@ -418,8 +419,8 @@ void MathStack::calc_math(uint64_t mathFactor)
 
     _math_state = Running;
 
-    data::SignalModel *m1 = lookup_dso_model(_session, _ch1_index);
-    data::SignalModel *m2 = lookup_dso_model(_session, _ch2_index);
+    data::SignalModel *m1 = lookup_dso_model(_source, _ch1_index);
+    data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
     if (m1 == nullptr || m2 == nullptr)
         return;
 

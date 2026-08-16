@@ -10,7 +10,6 @@
 
 #include "pv/data/document/sessiondocument.h"
 #include "pv/base/log.h"
-#include "pv/session/sigsession.h"
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/model/signalmodel.h"
@@ -23,9 +22,9 @@ namespace data {
 
 class DecoderStack;
 
-SessionDocument::SessionDocument(SigSession *session)
+SessionDocument::SessionDocument(data::IDeviceConfigPort *device_port)
     : _samplerate(0), _samplelimits(0), _trigger_pos(0),
-      _signal_config_store(std::make_unique<SignalConfigStore>(session)) {}
+      _signal_config_store(std::make_unique<SignalConfigStore>(device_port)) {}
 
 SessionDocument::~SessionDocument() {}
 

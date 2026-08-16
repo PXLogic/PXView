@@ -29,7 +29,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/config/appconfig.h"
-#include "pv/session/sigsession.h"
+#include "pv/data/isession_host.h"
 #include "pv/ui/langresource.h"
 #include "pv/view/signal/logicsignal.h"
 #include "pv/data/decode/annotation.h"
@@ -69,13 +69,13 @@ const double DecoderStack::DecodeThreshold = 0.2;
 const int64_t DecoderStack::DecodeChunkLength = 4 * 1024;
 const unsigned int DecoderStack::DecodeNotifyPeriod = 1024;
 
-DecoderStack::DecoderStack(pv::SigSession *session,
+DecoderStack::DecoderStack(pv::data::ISessionHost *host,
                            const srd_decoder *const dec,
                            DecoderStatus *decoder_status)
-    : _session(session) {
-  if (!session) {
-    pxv_warn("%s", "DecoderStack::DecoderStack: session is nullptr");
-    throw std::invalid_argument("DecoderStack: session is nullptr");
+    : _host(host) {
+  if (!host) {
+    pxv_warn("%s", "DecoderStack::DecoderStack: host is nullptr");
+    throw std::invalid_argument("DecoderStack: host is nullptr");
   }
   if (!dec) {
     pxv_warn("%s", "DecoderStack::DecoderStack: dec is nullptr");
@@ -85,7 +85,7 @@ DecoderStack::DecoderStack(pv::SigSession *session,
     pxv_warn("%s", "DecoderStack::DecoderStack: decoder_status is nullptr");
     throw std::invalid_argument("DecoderStack: decoder_status is nullptr");
   }
-  assert(session);
+  assert(host);
   assert(dec);
   assert(decoder_status);
 
@@ -131,7 +131,7 @@ void DecoderStack::set_error_message(const QString &msg) {
     _error_message = msg;
   }
   auto self = shared_from_this();
-  _session->event_bus_post([self, msg]() {
+  _host->event_bus_post([self, msg]() {
     emit self->error_message_changed(msg);
   });
 }
@@ -460,7 +460,7 @@ bool DecoderStack::list_row_description(int row, QString &desc) {
 }
 
 QString DecoderStack::auto_label() const {
-  if (_stack.empty() || !_session)
+  if (_stack.empty() || !_host)
     return QString();
   auto *dec = _stack.front().get();
   if (!dec || !dec->have_probes())
@@ -468,8 +468,8 @@ QString DecoderStack::auto_label() const {
   int probe_idx = dec->first_probe_index();
   if (probe_idx < 0)
     return QString();
-  std::shared_lock<std::shared_mutex> lk(_session->signal_models_mutex());
-  const auto &models = _session->get_signal_models();
+  std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
+  const auto &models = _host->get_signal_models();
   for (auto &m : models) {
     if (m && m->index() == probe_idx)
       return QString::fromStdString(m->name());
@@ -575,8 +575,8 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
 
   std::vector<std::shared_ptr<data::SignalModel>> models_snapshot;
   {
-    std::shared_lock<std::shared_mutex> lk(_session->signal_models_mutex());
-    models_snapshot = _session->get_signal_models();
+    std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
+    models_snapshot = _host->get_signal_models();
   }
 
   pxv_info("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
@@ -619,7 +619,7 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
     return;
   }
 
-  if (_session->is_realtime_refresh() == false && _snapshot->empty()) {
+  if (_host->is_realtime_refresh() == false && _snapshot->empty()) {
     pxv_err("ERROR:Decode data is empty.");
     return;
   }
@@ -878,7 +878,7 @@ return;
       // use-after-free if the DecoderStack is destroyed before the
       // lambda executes on the main thread.
       auto self = shared_from_this();
-      _session->event_bus_post([self]() { self->new_decode_data(); });
+      _host->event_bus_post([self]() { self->new_decode_data(); });
     }
 
     entry_cnt++;
@@ -909,10 +909,10 @@ return;
 
   // Publish final-data notification AFTER srd_session_end().
   if (adaptive_tdm_fast || !bError)
-    _session->event_bus_post([self]() { self->new_decode_data(); });
+    _host->event_bus_post([self]() { self->new_decode_data(); });
 
-  if (!_session->is_closed()) {
-    _session->event_bus_post([self]() { self->decode_done(); });
+  if (!_host->is_closed()) {
+    _host->event_bus_post([self]() { self->decode_done(); });
   }
 }
 
@@ -953,7 +953,7 @@ srd_session_destroy(session);
     prev_di = di;
     decode_start = dec->decode_start();
 
-    if (_session->is_realtime_refresh() == false) {
+    if (_host->is_realtime_refresh() == false) {
       uint64_t dec_end = dec->decode_end();
       if (dec_end == 0)
         dec_end = _sample_count - 1;
@@ -1296,8 +1296,8 @@ bool DecoderStack::find_analog_display_trigger(uint64_t &sample_position, Decode
 void DecoderStack::frame_ended() {
   _options_changed = true;
 
-  if (_session) {
-    const uint64_t limit = _session->get_ring_sample_count();
+  if (_host) {
+    const uint64_t limit = _host->get_ring_sample_count();
     const uint64_t last_samples = limit > 0 ? limit - 1 : 0;
 
     for (auto &up : _stack) {

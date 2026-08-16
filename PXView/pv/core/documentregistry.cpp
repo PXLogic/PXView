@@ -99,7 +99,8 @@ void DocumentRegistry::release_document(size_t index) {
 }
 
 size_t DocumentRegistry::create_api_document(pv::SigSession *session) {
-  return take_document(std::make_unique<pv::data::SessionDocument>(session));
+  return take_document(
+      std::make_unique<pv::data::SessionDocument>(session->device()));
 }
 
 data::SessionDocument *

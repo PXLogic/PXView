@@ -9,17 +9,19 @@
  */
 
 #include "pv/data/model/signalconfigstore.h"
-#include "pv/session/deviceagent.h"
+#include "pv/data/idevice_config_port.h"
 #include "pv/base/log.h"
-#include "pv/session/sigsession.h"
+#include "pv/base/pxvdef.h"
 #include "pv/data/model/signalmodel.h"
 #include <QDebug>
+#include <QJsonArray>
 #include <libsigrok/libsigrok.h>
 
 namespace pv {
 namespace data {
 
-SignalConfigStore::SignalConfigStore(SigSession *session) : _session(session) {}
+SignalConfigStore::SignalConfigStore(IDeviceConfigPort *device_port)
+    : _device_port(device_port) {}
 
 SignalConfigStore::~SignalConfigStore() {}
 
@@ -139,7 +141,7 @@ void SignalConfigStore::save_signal_config(
     const std::vector<std::shared_ptr<SignalModel>> &signal_models,
     const std::map<int, ChannelLayoutState> &channel_layout,
     const std::map<int, std::string> &channel_colours) {
-  DeviceAgent *agent = _session ? _session->get_device() : nullptr;
+  IDeviceConfigPort *agent = _device_port;
   if (!agent || !agent->have_instance()) {
     return;
   }
@@ -284,7 +286,7 @@ void SignalConfigStore::save_signal_config(
 }
 
 void SignalConfigStore::apply_signal_config() {
-  DeviceAgent *agent = _session ? _session->get_device() : nullptr;
+  IDeviceConfigPort *agent = _device_port;
   if (!agent || !agent->have_instance() || !_signal_config.is_valid) {
     return;
   }

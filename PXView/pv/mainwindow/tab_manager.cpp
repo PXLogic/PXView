@@ -86,7 +86,7 @@ void TabManager::init_initial_tab() {
   // phase 2: document ownership moved into DocumentRegistry. take_document
   // returns a stable index; get_document_by_index yields a weak pointer.
   size_t initial_doc_idx = _session->document_registry()->take_document(
-      std::make_unique<pv::data::SessionDocument>(_session));
+      std::make_unique<pv::data::SessionDocument>(_session->device()));
   pv::data::SessionDocument *initial_doc =
       _session->document_registry()->get_document_by_index(initial_doc_idx);
 
@@ -403,7 +403,7 @@ void TabManager::on_new_tab_requested() {
   pv::view::View *new_view = new pv::view::View(_session, _sampling_bar, _wnd);
   // phase 2: document owned by DocumentRegistry.
   size_t new_doc_idx = _session->document_registry()->take_document(
-      std::make_unique<pv::data::SessionDocument>(_session));
+      std::make_unique<pv::data::SessionDocument>(_session->device()));
   pv::data::SessionDocument *new_doc =
       _session->document_registry()->get_document_by_index(new_doc_idx);
 
@@ -458,7 +458,7 @@ void TabManager::on_tab_attached_extended(QWidget *widget,
       if (!existing_ctx) {
         // phase 2: document owned by DocumentRegistry.
         size_t doc_idx = _session->document_registry()->take_document(
-            std::make_unique<pv::data::SessionDocument>(_session));
+            std::make_unique<pv::data::SessionDocument>(_session->device()));
         pv::data::SessionDocument *doc =
             _session->document_registry()->get_document_by_index(doc_idx);
         pv::TabContext *ctx =

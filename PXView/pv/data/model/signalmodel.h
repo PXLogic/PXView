@@ -31,11 +31,10 @@
 
 namespace pv {
 
-class SigSession;  // forward declaration — Core layer; full include in .cpp
-
 namespace data {
 
 class Snapshot;  // forward declaration — shared_ptr<Snapshot> member below
+class IDeviceConfigPort;  // narrow device-config port — see idevice_config_port.h
 
 class SignalModel : public QObject
 {
@@ -149,9 +148,10 @@ public:
     // ---- Device/session binding (Core layer only) ----
     // Injected by SigSession::init_signals() / reload() so the model can
     // write back to the underlying libsigrok sr_channel struct and the
-    // DeviceAgent API. Both are weak references — SignalModel does NOT own
-    // them.
-    void set_session(SigSession *session) { _session = session; }
+    // device config API (via the narrow IDeviceConfigPort abstraction —
+    // implemented by DeviceAgent). Both are weak references — SignalModel
+    // does NOT own them.
+    void set_device_config_port(IDeviceConfigPort *port) { _device_port = port; }
     void set_sr_channel(struct sr_channel *ch) { _sr_channel = ch; }
 
     /// Core-layer only. View layer MUST NOT call this — use property
@@ -202,8 +202,8 @@ private:
 
     std::shared_ptr<Snapshot> _snapshot;  // shared ownership — prevents UAF
 
-    // Weak references — see set_session() / set_sr_channel().
-    SigSession         *_session = nullptr;
+    // Weak references — see set_device_config_port() / set_sr_channel().
+    IDeviceConfigPort  *_device_port = nullptr;
     struct sr_channel  *_sr_channel = nullptr;
 };
 
