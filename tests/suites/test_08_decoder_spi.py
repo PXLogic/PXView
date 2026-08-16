@@ -31,7 +31,7 @@ class TestDecoderSpi:
                                     cleanup_after_test):
         """Add SPI decoder before capture."""
         analyzer_id = add_decoder_safe(mcp, "spi_c",
-                                       channel_map={"sclk": 0, "mosi": 1,
+                                       channel_map={"clk": 0, "mosi": 1,
                                                     "miso": 2, "cs": 3},
                                        device_id=device_id)
         assert analyzer_id
@@ -46,7 +46,7 @@ class TestDecoderSpi:
                                 cleanup_after_test):
         """SPI decoder produces valid results."""
         analyzer_id = add_decoder_safe(mcp, "spi_c",
-                                       channel_map={"sclk": 0, "mosi": 1,
+                                       channel_map={"clk": 0, "mosi": 1,
                                                     "miso": 2, "cs": 3},
                                        device_id=device_id)
         do_timed_capture(mcp, device_id,
@@ -66,7 +66,7 @@ class TestDecoderSpi:
                              cleanup_after_test):
         """SPI works without CS channel (optional)."""
         analyzer_id = add_decoder_safe(mcp, "spi_c",
-                                       channel_map={"sclk": 0, "mosi": 1},
+                                       channel_map={"clk": 0, "mosi": 1},
                                        device_id=device_id)
         assert analyzer_id
 

@@ -1120,12 +1120,34 @@ class McpClient:
             List of ``{class_id, class_name}`` dicts, or empty list
             if the decoder cannot be queried.
         """
-        # Try to add the decoder temporarily (no channel map needed
-        # — the server accepts decoders without channel mapping).
+        # Build a channel map from the decoder's options first: the server
+        # rejects add_analyzer when required channels are unmapped ("Required
+        # channel(s) not mapped"), so the old assumption that decoders can be
+        # added without a channelMap no longer holds. Map each declared
+        # channel to its own index (0, 1, 2, ...).
+        channel_map: dict = {}
         try:
-            result = self._call_tool(
-                "add_analyzer", {"decoderId": decoder_name}, timeout=timeout
+            opts = self._call_tool(
+                "get_analyzer_options", {"decoderId": decoder_name},
+                timeout=timeout,
             )
+            if isinstance(opts, dict):
+                for i, ch in enumerate(opts.get("channels") or []):
+                    ch_id = (
+                        ch.get("id")
+                        or ch.get("name")
+                        or ch.get("idn")
+                        or f"ch{i}"
+                    )
+                    channel_map[ch_id] = i
+        except (McpError, Exception):
+            pass
+
+        try:
+            args: dict = {"decoderId": decoder_name}
+            if channel_map:
+                args["channelMap"] = channel_map
+            result = self._call_tool("add_analyzer", args, timeout=timeout)
             analyzer_id = None
             if isinstance(result, dict):
                 analyzer_id = (

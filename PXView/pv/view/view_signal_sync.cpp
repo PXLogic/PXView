@@ -337,6 +337,83 @@ void ViewSignalSync::normalize_view_indices() {
   for (auto t : unset_order)
     sorted.push_back(t);
 
+  // ====================================================================
+  // 解码轨道跟随绑定通道 (redesign-channel-order-architecture)
+  // ====================================================================
+  // 新添加的解码轨道 (create_decode_trace 赋 view_index = 信号数 + 序号)
+  // 会被上面的全局排序推到所有信号之后 (最下面)。这里在逻辑渲染模式下把
+  // 解码轨道重新锚定到其绑定的逻辑通道之后: 解码轨道始终紧跟绑定通道
+  // (与 1.5.8 sort_signal_groups_by_view_index 的分组行为一致)。
+  // 无绑定或绑定通道不在布局中的解码轨道保持原位置 (追加到末尾)。
+  if (_view->is_logic_rendering_mode()) {
+    // 逻辑通道 index -> 在 sorted 中的位置
+    std::map<int, size_t> logic_pos;
+    for (size_t i = 0; i < sorted.size(); i++)
+      if (sorted[i]->get_type() == SR_CHANNEL_LOGIC)
+        logic_pos[sorted[i]->get_index()] = i;
+
+    // 解码轨道 -> 锚点 (其绑定的逻辑通道中在 sorted 里最靠后的那个)
+    // 锚点 -> 解码轨道列表 (按 sorted 顺序, 同一锚点多个解码时保持相对顺序)
+    std::map<Trace *, std::vector<Trace *>> decodes_by_anchor;
+    std::vector<Trace *> unanchored_decodes;
+
+    for (auto t : sorted) {
+      if (t->get_type() != SR_CHANNEL_DECODER)
+        continue;
+      DecodeTrace *dtrace = t->as_decode();
+      if (!dtrace)
+        continue;
+
+      auto decoder_stack = dtrace->decoder();
+      // 收集该解码轨道绑定的逻辑通道 index
+      std::set<int> bound_indices;
+      if (decoder_stack) {
+        for (auto &up : decoder_stack->stack()) {
+          auto decoder = up.get();
+          auto probe_list = decoder->binded_probe_list();
+          for (auto probe : probe_list)
+            bound_indices.insert(decoder->binded_probe_index(probe));
+        }
+      }
+
+      // 锚点 = 绑定的逻辑通道中在 sorted 里位置最靠后的
+      Trace *anchor = nullptr;
+      size_t anchor_pos = 0;
+      bool found = false;
+      for (int idx : bound_indices) {
+        auto it = logic_pos.find(idx);
+        if (it != logic_pos.end() && (!found || it->second > anchor_pos)) {
+          found = true;
+          anchor = sorted[it->second];
+          anchor_pos = it->second;
+        }
+      }
+
+      if (found && anchor)
+        decodes_by_anchor[anchor].push_back(t);
+      else
+        unanchored_decodes.push_back(t);
+    }
+
+    // 重新排序: 非解码轨道保持原序, 锚点逻辑通道之后紧跟其解码轨道
+    std::vector<Trace *> reordered;
+    reordered.reserve(sorted.size());
+    for (auto t : sorted) {
+      if (t->get_type() == SR_CHANNEL_DECODER)
+        continue; // 解码轨道经由锚点放置
+      reordered.push_back(t);
+      auto it = decodes_by_anchor.find(t);
+      if (it != decodes_by_anchor.end())
+        for (auto d : it->second)
+          reordered.push_back(d);
+    }
+    // 无有效锚点的解码轨道追加到末尾
+    for (auto d : unanchored_decodes)
+      reordered.push_back(d);
+
+    sorted.swap(reordered);
+  }
+
   // 统一赋值 0, 1, 2, ... 连续序列
   int idx = 0;
   for (auto t : sorted) {

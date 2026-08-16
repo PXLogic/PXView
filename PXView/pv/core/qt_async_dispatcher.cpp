@@ -41,7 +41,11 @@ QtAsyncDispatcher::QtAsyncDispatcher()
 }
 
 QtAsyncDispatcher::~QtAsyncDispatcher() {
-    if (_filter) {
+    // The static default dispatcher (EventBus::post_async_dispatch) is
+    // destroyed via atexit AFTER main() returns, at which point the
+    // QApplication/QCoreApplication stack object is already gone and
+    // qApp is null.  Guard against it to avoid a null-deref SIGSEGV on exit.
+    if (_filter && qApp) {
         qApp->removeEventFilter(_filter.get());
     }
 }
