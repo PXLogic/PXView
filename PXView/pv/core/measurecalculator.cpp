@@ -21,6 +21,7 @@
  */
 
 #include "pv/core/measurecalculator.h"
+#include "pv/core/measure_format.h"
 
 #include <algorithm>
 #include <cmath>
@@ -559,7 +560,7 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
 }
 
 // ---------------------------------------------------------------------------
-// Formatting helpers (reused by view::DsoMeasure for QString output)
+// Formatting helpers — delegate to measure_format.h (extracted for testability)
 // ---------------------------------------------------------------------------
 
 double MeasureCalculator::convert_voltage(double raw_adc,
@@ -568,51 +569,23 @@ double MeasureCalculator::convert_voltage(double raw_adc,
                                           uint64_t vfactor,
                                           int view_rect_height)
 {
-    if (view_rect_height <= 0) {
-        view_rect_height = DefaultViewRectHeight;
-    }
-    // Same formula as DsoMeasure::get_voltage(double v, int p, scaled=false):
-    //   v_mV = v * data_scale * k * vDial_factor * DS_CONF_DSO_VDIVS
-    //          / view_rect_height
-    return raw_adc * data_scale * (double)measure_vf * (double)vfactor
-           * (double)DS_CONF_DSO_VDIVS / (double)view_rect_height;
+    return pv::core::convert_voltage(raw_adc, data_scale, measure_vf,
+                                     vfactor, view_rect_height);
 }
 
 QString MeasureCalculator::format_voltage(double v_mv, int precision)
 {
-    // Matches DsoMeasure::get_voltage(double v, int p) return formatting:
-    // abs(v) >= 1000 ? "X.XXV" : "X.XXmV"
-    return std::abs(v_mv) >= 1000.0
-               ? QString::number(v_mv / 1000.0, 'f', precision) + "V"
-               : QString::number(v_mv, 'f', precision) + "mV";
+    return pv::core::format_voltage(v_mv, precision);
 }
 
 QString MeasureCalculator::format_time(double t_ns)
 {
-    // Matches DsoMeasure::get_time formatting:
-    // abs(t) > 1e9 ? "X.XXS" : > 1e6 ? "X.XXmS" : > 1e3 ? "X.XXuS" : "X.XXnS"
-    return (std::abs(t_ns) > 1000000000.0
-                ? QString::number(t_ns / 1000000000.0, 'f', 2) + "S"
-            : std::abs(t_ns) > 1000000.0
-                ? QString::number(t_ns / 1000000.0, 'f', 2) + "mS"
-            : std::abs(t_ns) > 1000.0
-                ? QString::number(t_ns / 1000.0, 'f', 2) + "uS"
-                : QString::number(t_ns, 'f', 2) + "nS");
+    return pv::core::format_time(t_ns);
 }
 
 QString MeasureCalculator::format_frequency(double period_ns)
 {
-    // Matches DSO_MS_FREQ case in DsoMeasure::get_measure:
-    if (period_ns == 0.0) {
-        return "--";
-    }
-    if (std::abs(period_ns) > 1000000.0) {
-        return QString::number(1000000000.0 / period_ns, 'f', 2) + "Hz";
-    } else if (std::abs(period_ns) > 1000.0) {
-        return QString::number(1000000.0 / period_ns, 'f', 2) + "kHz";
-    } else {
-        return QString::number(1000.0 / period_ns, 'f', 2) + "MHz";
-    }
+    return pv::core::format_frequency(period_ns);
 }
 
 } // namespace core

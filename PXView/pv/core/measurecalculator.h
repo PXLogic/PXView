@@ -203,7 +203,7 @@ public:
     static constexpr int DefaultViewRectHeight = 256;
     static constexpr int DefaultPixelsPerDiv = 32;
 
-private:
+public:
     /**
      * Compute level-dependent measurements (high/low/period/rise_time/
      * fall_time/high_time/burst_time/pcount) from the raw DSO sample buffer.
