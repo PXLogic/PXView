@@ -9,6 +9,21 @@
 # Requires PXView to be running in --headless mode.
 #===============================================================================
 
+#===============================================================================
+#= C++ unit tests (QTest + CTest)
+#-------------------------------------------------------------------------------
+# QTest-based unit tests for Core/Data/API/View layers.
+# Test files live in tests/qtest/ with subdirectories: core/, data/, api/, view/.
+#
+# NOTE: add_subdirectory(qtest) MUST come before the Python3 gate below —
+# qtest is pure C++/Qt and has no Python dependency. The previous layout ran
+# find_package(Python3) first and return()'d on failure, which silently
+# dropped all C++ unit tests whenever Python wasn't discoverable in the
+# current shell (find_package results from the root scope are not visible
+# in this subdirectory scope, and a failed lookup caches NOTFOUND).
+#===============================================================================
+add_subdirectory(qtest)
+
 find_package(Python3 COMPONENTS Interpreter)
 
 if(NOT Python3_FOUND)
@@ -46,8 +61,8 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/suites/"
             -v
             --tb=short
-            --html="${CMAKE_BINARY_DIR}/test_report.html"
-            --junitxml="${CMAKE_BINARY_DIR}/test_report.xml"
+            --html=${CMAKE_BINARY_DIR}/test_report.html
+            --junitxml=${CMAKE_BINARY_DIR}/test_report.xml
             --self-contained-html
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
@@ -66,7 +81,7 @@ foreach(level p0 p1 p2)
                 -v
                 --tb=short
                 -m "${level}"
-                --junitxml="${CMAKE_BINARY_DIR}/test_report_${level}.xml"
+                --junitxml=${CMAKE_BINARY_DIR}/test_report_${level}.xml
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     set_tests_properties("mcp_e2e_${level}" PROPERTIES
@@ -77,11 +92,6 @@ foreach(level p0 p1 p2)
 endforeach()
 
 #===============================================================================
-#= C++ unit tests (QTest + CTest)
-#-------------------------------------------------------------------------------
-# QTest-based unit tests for Core/Data/API/View layers. Uses qt6_add_test()
-# for automatic CTest registration. Tests run headless via QT_QPA_PLATFORM=offscreen.
-#
-# Test files live in tests/qtest/ with subdirectories: core/, data/, api/, view/.
+#= C++ unit tests (QTest + CTest) — registered at the top of this file
+# (add_subdirectory(qtest) runs before the Python3 gate; see NOTE above).
 #===============================================================================
-add_subdirectory(qtest)
