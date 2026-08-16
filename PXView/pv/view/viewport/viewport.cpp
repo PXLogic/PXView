@@ -550,7 +550,20 @@ void Viewport::measure() {
   _measure_type = NO_MEASURE;
 
   if (_type == TIME_VIEW) {
-    const uint64_t sample_rate = _view.session().cur_snap_samplerate();
+    // CRITICAL: samplerate must come from document_snapshot_source() to match
+    // index2pixel/pixel2index/ruler/cursor/paint_mid_align coordinate mapping.
+    // Using _view.session().cur_snap_samplerate() (capture_data) or
+    // _data->samplerate() (snapshot) can be out of sync with the document
+    // samplerate, causing waveform/ruler/cursor/arrow misalignment.
+    const uint64_t sample_rate =
+        _view.document_snapshot_source()
+            ? _view.document_snapshot_source()->cur_snap_samplerate()
+            : _view.session().cur_snap_samplerate();
+
+    // 列映射与 paint_mid_align 完全一致：
+    // start_index=floor(offset*spp)，跳变画在列 floor((idx-start_index)/spp)。
+    // 箭头必须用同一映射，否则高倍缩放下 offset*spp 的小数部分会被放大成
+    // 数像素偏差（= frac(offset*spp)/spp，可达成数十像素）。
 
     for (auto &s : _view.get_own_signals()) {
       if (s->signal_type() == SR_CHANNEL_LOGIC) {

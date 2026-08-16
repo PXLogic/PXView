@@ -284,9 +284,9 @@ public:
   uint64_t& dso_ym_index() { return _dso_ym_index; }
   int& dso_ym_start() { return _dso_ym_start; }
   int& dso_ym_end() { return _dso_ym_end; }
-  int64_t& cur_preX() { return _cur_preX; }
-  int64_t& cur_aftX() { return _cur_aftX; }
-  int64_t& cur_thdX() { return _cur_thdX; }
+  double& cur_preX() { return _cur_preX; }
+  double& cur_aftX() { return _cur_aftX; }
+  double& cur_thdX() { return _cur_thdX; }
   int& cur_midY() { return _cur_midY; }
   int& cur_preY() { return _cur_preY; }
   int& cur_preY_top() { return _cur_preY_top; }
@@ -394,9 +394,9 @@ private:
   uint64_t _cur_sample;
   uint64_t _nxt_sample;
   uint64_t _thd_sample;
-  int64_t _cur_preX;
-  int64_t _cur_aftX;
-  int64_t _cur_thdX;
+  double _cur_preX;
+  double _cur_aftX;
+  double _cur_thdX;
   int _cur_midY;
   int _cur_preY;
   int _cur_preY_top;

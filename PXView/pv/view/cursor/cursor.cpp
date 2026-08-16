@@ -78,7 +78,13 @@ Cursor::Cursor(View &view, int order, uint64_t sampleIndex) :
 
 QRect Cursor::get_label_rect(const QRect &rect, bool &visible, bool has_hoff)
 {
-    const double samples_per_pixel = _view.session().cur_snap_samplerate() * _view.scale();
+    auto *src = _view.document_snapshot_source();
+    if (!src) {
+        visible = false;
+        return QRect(-1, -1, 0, 0);
+    }
+    const double samples_per_pixel =
+        src->cur_snap_samplerate() * _view.scale();
     const double cur_offset = _index / samples_per_pixel;
     if (cur_offset < _view.offset() ||
         cur_offset > (_view.offset() + _view.width())) {
@@ -142,8 +148,12 @@ void Cursor::paint_label(QPainter &p, const QRect &rect,
     p.drawLine(close.left() + 2, close.top() + 2, close.right() - 2, close.bottom() - 2);
     p.drawLine(close.left() + 2, close.bottom() - 2, close.right() - 2, close.top() + 2);
 
-	p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
-        Ruler::format_real_time(_index, _view.session().cur_snap_samplerate()));
+    auto *src = _view.document_snapshot_source();
+    if (!src)
+        return;
+    p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
+        Ruler::format_real_time(_index,
+        src->cur_snap_samplerate()));
 
     const QRect arrowRect = QRect(r.bottomLeft().x(), r.bottomLeft().y(), r.width(), ArrowSize);
     p.drawText(arrowRect, Qt::AlignCenter | Qt::AlignVCenter, QString::number(_order));
@@ -172,9 +182,13 @@ void Cursor::paint_fix_label(QPainter &p, const QRect &rect,
     p.drawPolygon(points, countof(points));
 
     p.setPen(Qt::white);
-    if (has_hoff)
-        p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
-            Ruler::format_real_time(_index, _view.session().cur_snap_samplerate()));
+    if (has_hoff) {
+        auto *src = _view.document_snapshot_source();
+        if (src)
+            p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
+                Ruler::format_real_time(_index,
+                src->cur_snap_samplerate()));
+    }
 
     const QRect arrowRect = QRect(r.bottomLeft().x(), r.bottomLeft().y(), r.width(), ArrowSize);
     p.drawText(arrowRect, Qt::AlignCenter | Qt::AlignVCenter, label);
@@ -183,8 +197,12 @@ void Cursor::paint_fix_label(QPainter &p, const QRect &rect,
 void Cursor::compute_text_size(QPainter &p, unsigned int prefix)
 {
     (void)prefix;
+    auto *src = _view.document_snapshot_source();
+    if (!src)
+        return;
     _text_size = p.boundingRect(QRect(), 0,
-        Ruler::format_real_time(_index, _view.session().cur_snap_samplerate())).size();
+        Ruler::format_real_time(_index,
+        src->cur_snap_samplerate())).size();
 }
  
 } // namespace view

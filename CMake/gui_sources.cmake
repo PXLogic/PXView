@@ -34,11 +34,13 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/view/view_signal_sync.cpp
     PXView/pv/view/view_glitch_filter.cpp
     PXView/pv/view/view_data_sync.cpp
+    PXView/pv/view/view_context.cpp
     PXView/pv/view/renderer/render_pass.cpp
     PXView/pv/view/cursor/timemarker.cpp
     PXView/pv/view/signal/signal.cpp
     PXView/pv/view/signal/signalfactory.cpp
     PXView/pv/view/component/ruler.cpp
+    PXView/pv/view/component/ruler_format.cpp
     PXView/pv/view/component/header.cpp
     PXView/pv/view/cursor/cursor.cpp
     PXView/pv/view/signal/logicsignal.cpp

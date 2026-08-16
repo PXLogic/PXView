@@ -33,6 +33,7 @@
 // update_scale_offset, viewport_update).
 
 #include "pv/view/view_data_sync.h"
+#include "pv/view/view_context.h"
 
 #include <algorithm>
 #include <cmath>
@@ -378,43 +379,18 @@ void ViewDataSync::set_receive_len(uint64_t len) {
 // =============================================================================
 
 double ViewDataSync::index2pixel(uint64_t index, bool has_hoff) {
-  const uint64_t rateValue = _view->document_snapshot_source()->cur_snap_samplerate();
-  const double scaleValue = _view->scale();
-  const int64_t offsetValue = _view->offset();
-  const double hoffValue = _view->trig_hoff();
-
-  double pixels = 0;
-  const double samples_per_pixel = rateValue * scaleValue;
-
-  if (has_hoff) {
-    pixels =
-        index / samples_per_pixel - offsetValue + hoffValue / samples_per_pixel;
-  } else {
-    pixels = index / samples_per_pixel - offsetValue;
-  }
-
-  return pixels;
+  // Delegate to ViewContext (extracted for testability)
+  const ViewContext ctx = ViewContext::from_view(_view, has_hoff);
+  return ctx.index2pixel(index, has_hoff);
 }
 
 uint64_t ViewDataSync::pixel2index(double pixel) {
-  const uint64_t rateValue = _view->document_snapshot_source()->cur_snap_samplerate();
-  const double scaleValue = _view->scale();
-  const int64_t offsetValue = _view->offset();
-  const double hoffValue = _view->trig_hoff();
-
-  const double samples_per_pixel = rateValue * scaleValue;
-  const double index = (pixel + offsetValue) * samples_per_pixel - hoffValue;
+  // Delegate to ViewContext (extracted for testability)
+  const ViewContext ctx = ViewContext::from_view(_view, true);
+  const uint64_t sampleIndex = ctx.pixel2index(pixel);
 
   /* Clamp to [0, sample_limit-1] to prevent cursor indices from exceeding
-   * the valid sample range. Without this, dragging a cursor to the view's
-   * right edge (or negative pixel values wrapping to uint64_t max) produces
-   * an out-of-bounds index that corrupts measurements and can crash
-   * snapshot accessors. cur_samplelimits() is the configured capture depth —
-   * the maximum valid sample index for the current session. */
-  if (index < 0)
-    return 0;
-
-  const uint64_t sampleIndex = (uint64_t)std::round(index);
+   * the valid sample range. */
   const uint64_t sample_limit = _view->document_snapshot_source()->cur_samplelimits();
   if (sample_limit > 0 && sampleIndex >= sample_limit)
     return sample_limit - 1;
@@ -688,6 +664,29 @@ void ViewDataSync::resizeEvent(QResizeEvent *event) {
   _view->set_update(_view->fft_viewport(), true);
   _view->resize();
   _view->schedule_visible_range_notify();
+}
+
+// =============================================================================
+// ViewContext::from_view implementation
+// Defined here (not in view_context.cpp) because it needs View's full
+// definition, which would pull in View/Session/Snapshot dependencies that
+// unit tests should not need to link.
+// =============================================================================
+
+ViewContext ViewContext::from_view(View *view, bool has_hoff)
+{
+    if (!view)
+        return ViewContext{};
+
+    const double sr = view->document_snapshot_source()
+        ? (double)view->document_snapshot_source()->cur_snap_samplerate()
+        : 0;
+    return ViewContext(
+        sr,
+        view->scale(),
+        view->offset(),
+        has_hoff ? view->trig_hoff() : 0.0
+    );
 }
 
 } // namespace view

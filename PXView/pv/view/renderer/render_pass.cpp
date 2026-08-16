@@ -734,7 +734,10 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
       p.boundingRect(0, 0, INT_MAX, INT_MAX, Qt::AlignLeft | Qt::AlignTop,
                      "W")
           .height();
-  const uint64_t sample_rate = m.view->session().cur_snap_samplerate();
+  auto *src = m.view->document_snapshot_source();
+  if (!src)
+      return;
+  const uint64_t sample_rate = src->cur_snap_samplerate();
   std::vector<QLineF> measure_lines_vec(measure_line_count);
   QLineF *const measure_lines = measure_lines_vec.data();
   QLineF *line = measure_lines;
@@ -874,32 +877,32 @@ void MeasureOverlayPass::draw_logic_jump(QPainter &p,
 
   p.setPen(m.active_color);
   p.setBrush(Qt::NoBrush);
-  const QPoint pre_points[] = {
-      QPoint(vp->cur_preX(), m.screen_preY),
-      QPoint(vp->cur_preX() - 1, m.screen_preY - 1),
-      QPoint(vp->cur_preX() + 1, m.screen_preY - 1),
-      QPoint(vp->cur_preX() - 1, m.screen_preY + 1),
-      QPoint(vp->cur_preX() + 1, m.screen_preY + 1),
-      QPoint(vp->cur_preX() - 2, m.screen_preY - 2),
-      QPoint(vp->cur_preX() + 2, m.screen_preY - 2),
-      QPoint(vp->cur_preX() - 2, m.screen_preY + 2),
-      QPoint(vp->cur_preX() + 2, m.screen_preY + 2),
+  const QPointF pre_points[] = {
+      QPointF(vp->cur_preX(), m.screen_preY),
+      QPointF(vp->cur_preX() - 1, m.screen_preY - 1),
+      QPointF(vp->cur_preX() + 1, m.screen_preY - 1),
+      QPointF(vp->cur_preX() - 1, m.screen_preY + 1),
+      QPointF(vp->cur_preX() + 1, m.screen_preY + 1),
+      QPointF(vp->cur_preX() - 2, m.screen_preY - 2),
+      QPointF(vp->cur_preX() + 2, m.screen_preY - 2),
+      QPointF(vp->cur_preX() - 2, m.screen_preY + 2),
+      QPointF(vp->cur_preX() + 2, m.screen_preY + 2),
   };
   p.drawPoints(pre_points, countof(pre_points));
-  if (abs(vp->cur_aftX() - vp->cur_preX()) +
-          abs(vp->cur_aftY() - vp->cur_preY()) >
+  if (std::abs(vp->cur_aftX() - vp->cur_preX()) +
+          std::abs((double)(vp->cur_aftY() - vp->cur_preY())) >
       20) {
     if (vp->edge_hit()) {
-      const QPoint aft_points[] = {
-          QPoint(vp->cur_aftX(), m.screen_aftY),
-          QPoint(vp->cur_aftX() - 1, m.screen_aftY - 1),
-          QPoint(vp->cur_aftX() + 1, m.screen_aftY - 1),
-          QPoint(vp->cur_aftX() - 1, m.screen_aftY + 1),
-          QPoint(vp->cur_aftX() + 1, m.screen_aftY + 1),
-          QPoint(vp->cur_aftX() - 2, m.screen_aftY - 2),
-          QPoint(vp->cur_aftX() + 2, m.screen_aftY - 2),
-          QPoint(vp->cur_aftX() - 2, m.screen_aftY + 2),
-          QPoint(vp->cur_aftX() + 2, m.screen_aftY + 2),
+      const QPointF aft_points[] = {
+          QPointF(vp->cur_aftX(), m.screen_aftY),
+          QPointF(vp->cur_aftX() - 1, m.screen_aftY - 1),
+          QPointF(vp->cur_aftX() + 1, m.screen_aftY - 1),
+          QPointF(vp->cur_aftX() - 1, m.screen_aftY + 1),
+          QPointF(vp->cur_aftX() + 1, m.screen_aftY + 1),
+          QPointF(vp->cur_aftX() - 2, m.screen_aftY - 2),
+          QPointF(vp->cur_aftX() + 2, m.screen_aftY - 2),
+          QPointF(vp->cur_aftX() - 2, m.screen_aftY + 2),
+          QPointF(vp->cur_aftX() + 2, m.screen_aftY + 2),
       };
       p.drawPoints(aft_points, countof(aft_points));
     }
@@ -918,12 +921,12 @@ void MeasureOverlayPass::draw_logic_jump(QPainter &p,
                       vp->panelBgColor(), vp->panelTextColor(),
                       rows);
 
-    QPainterPath path(QPoint(vp->cur_preX(), m.screen_preY));
-    QPoint c1((vp->cur_preX() + vp->cur_aftX()) / 2,
+    QPainterPath path(QPointF(vp->cur_preX(), m.screen_preY));
+    QPointF c1((vp->cur_preX() + vp->cur_aftX()) / 2.0,
               m.screen_preY);
-    QPoint c2((vp->cur_preX() + vp->cur_aftX()) / 2,
+    QPointF c2((vp->cur_preX() + vp->cur_aftX()) / 2.0,
               m.screen_aftY);
-    path.cubicTo(c1, c2, QPoint(vp->cur_aftX(), m.screen_aftY));
+    path.cubicTo(c1, c2, QPointF(vp->cur_aftX(), m.screen_aftY));
     p.drawPath(path);
   }
 }
@@ -973,7 +976,8 @@ void MeasureOverlayPass::draw_decoder_analog_hover(
                QPointF(sample_point.x(), row_rect.bottom()));
     p.drawEllipse(sample_point, 3.5, 3.5);
 
-    const uint64_t sr = m.view->session().cur_snap_samplerate();
+    auto *src = m.view->document_snapshot_source();
+    const uint64_t sr = src ? src->cur_snap_samplerate() : 1;
     const QString timeText = Ruler::format_real_time(sample.start_sample, sr) +
                              " / " + QString::number(sample.start_sample);
     const QString engText = QString::number(engineering, 'g', 7) +
@@ -1039,7 +1043,8 @@ void MeasureOverlayPass::draw_decoder_analog_range(
   p.drawEllipse(QPointF(x0, row_rect.top() + 5.0), 3.5, 3.5);
   p.drawEllipse(QPointF(x1, row_rect.top() + 5.0), 3.5, 3.5);
 
-  const uint64_t sr = m.view->session().cur_snap_samplerate();
+  auto *src = m.view->document_snapshot_source();
+  const uint64_t sr = src ? src->cur_snap_samplerate() : 1;
   std::vector<std::pair<QString, QString>> rows;
   rows.push_back({QStringLiteral("通道"), QString("DecCh%1").arg(vp->analog_measure_channel())});
   rows.push_back({QStringLiteral("区间"), Ruler::format_real_time(b - a, sr)});

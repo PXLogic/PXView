@@ -533,7 +533,8 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   }
 
   const double pixels_offset = offset;
-  const double samplerate = _data->samplerate();
+  // Use document_snapshot_source samplerate for coordinate consistency
+  const double samplerate = _data_source->cur_snap_samplerate();
   const int64_t cur_sample_count = _data->get_sample_count();
   const double samples_per_pixel = samplerate * scale;
   const uint64_t ring_start = _data->get_ring_start();

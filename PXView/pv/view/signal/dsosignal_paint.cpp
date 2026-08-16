@@ -225,7 +225,8 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
 
     const uint16_t enabled_channels = _data->get_channel_num();
     const double pixels_offset = offset;
-    const double samplerate = _data->samplerate();
+    // Use document_snapshot_source samplerate for coordinate consistency
+    const double samplerate = _data_source->cur_snap_samplerate();
 
     if (samplerate <= 0) {
         pxv_warn("DsoSignal::paint_mid: samplerate <= 0, skipping paint");
