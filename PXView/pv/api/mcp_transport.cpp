@@ -615,14 +615,23 @@ void McpTransport::handle_sse_wait_capture(QPointer<QTcpSocket> socket_guard,
 
     // Parse timeout from arguments
     double timeout_seconds = 300.0;
+    JsonRpcRequest tool_req = req; // mutable copy: timeoutMs is injected below
     try {
         json args = json::parse(req.mcp_tool_args);
         if (args.contains("timeoutSeconds") && args["timeoutSeconds"].is_number())
             timeout_seconds = args["timeoutSeconds"].get<double>();
         else if (args.contains("timeout_seconds") && args["timeout_seconds"].is_number())
             timeout_seconds = args["timeout_seconds"].get<double>();
+        // Inject as timeoutMs so the wait_capture tool handler (which reads
+        // p.get_or<uint64_t>("timeoutMs", 300000)) honors the client's
+        // timeout. Without this, clients sending "timeoutSeconds" (the
+        // pxview-automation client does) always hit the 300 s default,
+        // turning any stuck capture into a multi-minute hang.
+        if (!args.contains("timeoutMs") && timeout_seconds > 0) {
+            args["timeoutMs"] = static_cast<uint64_t>(timeout_seconds * 1000.0);
+            tool_req.mcp_tool_args = args.dump();
+        }
     } catch (const std::exception& e) { (void)e; }
-    (void)timeout_seconds;
 
     // Progress pusher: runs on a separate std::thread, posts SSE events
     // to the IO thread for socket write (no cross-thread socket access).
@@ -650,7 +659,7 @@ void McpTransport::handle_sse_wait_capture(QPointer<QTcpSocket> socket_guard,
     // This call blocks using SharedState::wait() — no Qt event queue pumping.
     // The IO thread is free to process posted events (on_service_event,
     // progress_thread SSE events) while we wait.
-    JsonRpcResponse resp = _handler->handle_request(req);
+    JsonRpcResponse resp = _handler->handle_request(tool_req);
 
     progress_done.store(true);
     progress_thread.join();

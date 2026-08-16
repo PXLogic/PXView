@@ -179,7 +179,7 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     bool bNotFree = (_state->view_data() == cd);
 
     cd->get_logic()->first_payload(
-        o, _state->device_agent().get_ring_sample_count(),
+        o, _state->device_agent().get_sample_limit(),
         _state->device_agent().get_channels(), !bNotFree);
 
     // @todo Putting this here means that only listeners querying
@@ -248,7 +248,7 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
 
     // first payload
     cd->get_analog()->first_payload(
-        o, _state->device_agent().get_ring_sample_count(),
+        o, _state->device_agent().get_sample_limit(),
         _state->device_agent().get_channels());
     _coord->frame_began();
   } else {
