@@ -122,19 +122,9 @@ std::vector<std::unique_ptr<Signal>> SignalFactory::create_signals(data::DataSou
 SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
     const std::vector<std::unique_ptr<Signal>> &current_signals,
     const std::vector<std::shared_ptr<data::SignalModel>> &models) {
-  // Empty current + non-empty models → first creation → AllReplaced
-  if (current_signals.empty() && !models.empty())
-    return AllReplaced;
-
-  // Non-empty current + empty models → all removed → AllReplaced
-  if (!current_signals.empty() && models.empty())
-    return AllReplaced;
-
-  // Both empty → no change, but Modified is safe fallback
-  if (current_signals.empty() && models.empty())
-    return Modified;
-
-  // Build sets of channel indices
+  // Extract the raw channel indices + model pointers, then delegate the
+  // classification algorithm to the pure function (unit-testable without
+  // linking the View layer concrete classes).
   std::set<int> current_indices;
   for (auto &sig : current_signals) {
     if (sig)
@@ -147,18 +137,20 @@ SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
       model_indices.insert(model->index());
   }
 
-  // Check if index sets are identical → Modified (properties may have changed)
-  if (current_indices == model_indices) {
-    // Pointer-identity check: even when channel indices match, if any existing
-    // Signal's _model points to a SignalModel object that is NOT in the new
-    // models list (by raw pointer identity), Core has rebuilt the SignalModels
-    // wholesale (init_signals/reload/switch_work_mode). The shared_ptr stored
-    // in view::Signal keeps the old SignalModel alive so this .get() read is
-    // safe, but the View must fully rebuild (AllReplaced) so each Signal
-    // rebinds its _model to the new SignalModel. Without this, the stale
-    // _model causes UAF (this=0xfeeefeeefeeefeee) when handlers later access it
-    // (e.g. DsoSignal::set_zero_ratio -> SignalModel::set_zero_offset).
-    std::set<data::SignalModel *> model_ptrs;
+  const ChangeEventKind kind =
+      compute_change_event_pure(current_indices, model_indices, {});
+
+  // Pointer-identity check: even when channel indices match, if any existing
+  // Signal's _model points to a SignalModel object that is NOT in the new
+  // models list (by raw pointer identity), Core has rebuilt the SignalModels
+  // wholesale (init_signals/reload/switch_work_mode). The shared_ptr stored
+  // in view::Signal keeps the old SignalModel alive so this .get() read is
+  // safe, but the View must fully rebuild (AllReplaced) so each Signal
+  // rebinds its _model to the new SignalModel. Without this, the stale
+  // _model causes UAF (this=0xfeeefeeefeeefeee) when handlers later access it
+  // (e.g. DsoSignal::set_zero_ratio -> SignalModel::set_zero_offset).
+  if (kind == ChangeEventKind::Modified && !current_signals.empty()) {
+    std::set<const void *> model_ptrs;
     for (auto &model : models) {
       if (model)
         model_ptrs.insert(model.get());
@@ -171,51 +163,11 @@ SignalFactory::SignalChangeEvent SignalFactory::compute_change_event(
         return AllReplaced;
       }
     }
-    return Modified;
   }
 
-  // Check if models is pure superset of current → Added
-  // (all current indices exist in models, and models has extra indices)
-  bool all_current_in_models = true;
-  bool some_new_not_in_current = false;
-  for (int idx : current_indices) {
-    if (model_indices.find(idx) == model_indices.end()) {
-      all_current_in_models = false;
-      break;
-    }
-  }
-  for (int idx : model_indices) {
-    if (current_indices.find(idx) == current_indices.end()) {
-      some_new_not_in_current = true;
-      break;
-    }
-  }
-
-  if (all_current_in_models && some_new_not_in_current)
-    return Added;
-
-  // Check if current is pure superset of models → Removed
-  // (all model indices exist in current, and current has extra indices)
-  bool all_models_in_current = true;
-  bool some_current_not_in_models = false;
-  for (int idx : model_indices) {
-    if (current_indices.find(idx) == current_indices.end()) {
-      all_models_in_current = false;
-      break;
-    }
-  }
-  for (int idx : current_indices) {
-    if (model_indices.find(idx) == model_indices.end()) {
-      some_current_not_in_models = true;
-      break;
-    }
-  }
-
-  if (all_models_in_current && some_current_not_in_models)
-    return Removed;
-
-  // Mixed: both additions and removals → conservative fallback to AllReplaced
-  return AllReplaced;
+  // Enum value order matches ChangeEventKind (Added, Removed, Modified,
+  // AllReplaced).
+  return static_cast<SignalChangeEvent>(kind);
 }
 
 void SignalFactory::update_signals(std::vector<std::unique_ptr<Signal>> &current_signals,

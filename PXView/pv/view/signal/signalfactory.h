@@ -28,6 +28,8 @@
 #include <vector>
 #include <map>
 
+#include "pv/view/signal/change_event.h"
+
 namespace pv {
 
 class SigSession;

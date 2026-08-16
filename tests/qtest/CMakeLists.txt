@@ -98,6 +98,12 @@ pv_add_qtest(test_view_layout
     view/test_view_layout.cpp
 )
 
+# SignalFactory change-event classification — pure header-only function
+# (change_event.h), zero View-layer concrete dependencies.
+pv_add_qtest(test_change_event
+    view/test_change_event.cpp
+)
+
 pv_add_qtest(test_trace_visitor
     view/test_trace_visitor.cpp
 )

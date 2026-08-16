@@ -660,6 +660,8 @@ void SamplingBar::on_samplerate_sel(int index) {
 
 void SamplingBar::update_sample_count_selector() {
   bool stream_mode = false;
+  // stream + 循环(LOOP) = 无限时间轴: 采样时长只提供 ∞ 选项.
+  bool infinite_mode = false;
   uint64_t hw_depth = 0;
   uint64_t sw_depth;
   double pre_duration = SR_SEC(1);
@@ -745,24 +747,33 @@ pxv_info("Update sample count list.");
     // Stream mode: data flows continuously via mmap, not limited by hardware
     // FIFO. mmap is backed by either memory (no disk cache) or disk file (with
     // cache). The two modes are mutually exclusive — not additive.
-    // - No disk cache: use SR_CONF_STREAM_MEM_BUFF (memory mmap size)
-    // - Disk cache:    use SR_CONF_STREAM_BUFF (disk mmap size)
-    int ch_num = _session->get_ch_num(SR_CHANNEL_LOGIC);
-    if (ch_num <= 0)
-      ch_num = 1;
-    bool disk_cache_enabled = false;
-    if (_device_agent->is_dsl_device())
-      _device_agent->get_config_bool(SR_CONF_DISK_CACHE_ENABLE,
-                                     disk_cache_enabled);
-
-    double buff_gb = 16.0;
-    if (disk_cache_enabled) {
-      _device_agent->get_config_double(SR_CONF_STREAM_BUFF, buff_gb);
+    //
+    // 循环 (LOOP / Scroll) 模式: 无限时间轴. 采样时长下拉
+    // 只提供 "∞ 持续" 选项 (duration=0 → sample_count=0 → 驱动 limit_samples=0
+    // 持续流, hwdriver.c 接受 0 作为不限制; DeviceAgent 静默忽略 set 0).
+    // 内存压力由磁盘缓存 + 透明 mmap 兜底控制, 不再用 buff_gb 算固定时长.
+    if (_session->get_collect_mode() == COLLECT_LOOP) {
+      duration = 0;   // ∞: 持续采集
+      infinite_mode = true;
     } else {
-      _device_agent->get_config_double(SR_CONF_STREAM_MEM_BUFF, buff_gb);
+      // 单次/重复 + stream: 仍需有限时长作为停止条件, 用内存缓冲上限派生.
+      int ch_num = _session->get_ch_num(SR_CHANNEL_LOGIC);
+      if (ch_num <= 0)
+        ch_num = 1;
+      bool disk_cache_enabled = false;
+      if (_device_agent->is_dsl_device())
+        _device_agent->get_config_bool(SR_CONF_DISK_CACHE_ENABLE,
+                                       disk_cache_enabled);
+
+      double buff_gb = 16.0;
+      if (disk_cache_enabled) {
+        _device_agent->get_config_double(SR_CONF_STREAM_BUFF, buff_gb);
+      } else {
+        _device_agent->get_config_double(SR_CONF_STREAM_MEM_BUFF, buff_gb);
+      }
+      uint64_t total_samples = (uint64_t)(buff_gb * SR_GB(1)) * 8 / ch_num;
+      duration = total_samples / (samplerate * (1.0 / SR_SEC(1)));
     }
-    uint64_t total_samples = (uint64_t)(buff_gb * SR_GB(1)) * 8 / ch_num;
-    duration = total_samples / (samplerate * (1.0 / SR_SEC(1)));
   } else if (hw_duration > 0)
     duration = hw_duration;
   else
@@ -772,6 +783,21 @@ pxv_info("Update sample count list.");
     duration = sw_depth / (samplerate * (1.0 / SR_SEC(1)));
 
   if (duration <= 0) {
+    if (infinite_mode) {
+      // ∞ 持续: 采样深度下拉只提供这一个选项, sample_count=0 → 驱动持续流.
+      // 直接 reconnect 并返回, 不做 device LIMIT_SAMPLES 同步 (保持 0=持续流).
+      _sample_count->addItem(
+          QString(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_SAMPLE_COUNT_INF),
+                      "∞ 持续")),
+          QVariant::fromValue(0.0));
+      _updating_sample_count = true;
+      _sample_count->setCurrentIndex(_sample_count->count() - 1);
+      _updating_sample_count = false;
+      connect(_sample_count,
+              QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+              &SamplingBar::on_samplecount_sel);
+      return;
+    }
     // Final fallback: 1 second (should rarely hit after sw_depth fallback)
     duration = SR_SEC(1);
   }

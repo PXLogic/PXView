@@ -399,7 +399,10 @@ DsComboBox* DecoderOptionsDlg::create_probe_selector(
 	assert(dec);
     assert(_trace);
 
-    const auto &sigs = _trace->get_view()->session().get_signal_models();
+    auto *view = _trace->get_view();
+    if (!view)
+        return nullptr;
+    const auto &sigs = view->session().get_signal_models();
 
     data::decode::Decoder *decoder = const_cast<data::decode::Decoder*>(dec);
 
@@ -438,12 +441,12 @@ void DecoderOptionsDlg::update_decode_range()
 {
     if (!_trace) return;
     assert(_trace);
-    const uint64_t last_samples = _trace->get_view()->session().cur_samplelimits() - 1;
+    auto *view = _trace->get_view();
+    if (!view) return;
+    const uint64_t last_samples = view->session().cur_samplelimits() - 1;
     const int index1 = _start_comboBox->currentIndex();
     const int index2 = _end_comboBox->currentIndex();
     uint64_t decode_start, decode_end;
-
-    auto view = _trace->get_view();
 
     if (index1 == 0) {
         decode_start = 0;
@@ -1629,7 +1632,12 @@ void DecoderOptionsDlg::commit_decoder_probes(data::decode::Decoder *dec)
     assert(_trace);
 
     std::map<const srd_channel*, int> probe_map;
-    const auto &sigs = _trace->get_view()->session().get_signal_models();
+    auto *view = _trace->get_view();
+    if (!view) {
+        dec->set_probes(probe_map);
+        return;
+    }
+    const auto &sigs = view->session().get_signal_models();
 
     std::list<int> index_list;
 

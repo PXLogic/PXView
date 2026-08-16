@@ -229,11 +229,11 @@
     },
     {
         "id": "Mem Buff Size (no cache)",
-        "text": "記憶體緩衝區大小(無磁碟快取時)"
+        "text": "記憶體緩衝區大小（無磁碟快取時）"
     },
     {
         "id": "Disk Buff Size (with cache)",
-        "text": "磁碟緩衝區大小(開啟磁碟快取時)"
+        "text": "磁碟緩衝區大小（開啟磁碟快取時）"
     },
     {
         "id": "Disk Cache Enable",
