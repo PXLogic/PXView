@@ -44,6 +44,7 @@
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/document/sessionsnapshot.h"
+#include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/data/stack/spectrumstack.h"
 #include "pv/interface/events.h"
@@ -2202,16 +2203,33 @@ data::Snapshot *SigSession::get_snapshot(int type) {
   // or when called from the StoreSession worker thread during a tab switch.
   // Guard against null dereference.
   auto *vd = _state->view_data();
-  if (!vd)
-    return nullptr;
+  data::Snapshot *snap = nullptr;
   if (type == SR_CHANNEL_LOGIC)
-    return vd->get_logic();
+    snap = vd ? vd->get_logic() : nullptr;
   else if (type == SR_CHANNEL_ANALOG)
-    return vd->get_analog();
+    snap = vd ? vd->get_analog() : nullptr;
   else if (type == SR_CHANNEL_DSO)
-    return vd->get_dso();
+    snap = vd ? vd->get_dso() : nullptr;
   else
     return nullptr;
+
+  // 修复（切回旧 tab 保存显示"无数据"）：多 tab 架构下，切回已采集数据的
+  // demo/hardware tab 时 set_device() 会清空 session 的 view_data，但数据
+  // 仍在当前 tab 的 SessionDocument 里（文档快照）。保存/导出等逻辑通过
+  // get_snapshot() 取数，若 view_data 的 snapshot 为空则回退到 active
+  // document 的对应快照，避免误报"no snapshot with data found"。
+  if (!snap || snap->empty()) {
+    data::SessionDocument *doc = _document_registry->get_active_document();
+    if (doc && doc->has_data()) {
+      if (type == SR_CHANNEL_LOGIC)
+        snap = doc->get_active_logic();
+      else if (type == SR_CHANNEL_ANALOG)
+        snap = doc->get_active_analog();
+      else if (type == SR_CHANNEL_DSO)
+        snap = doc->get_active_dso();
+    }
+  }
+  return snap;
 }
 
 void SigSession::clear_error() {

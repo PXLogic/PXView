@@ -284,8 +284,15 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   }
 
   if (_window->device_agent()->get_work_mode() == LOGIC &&
-      _window->device_agent()->is_file() == false)
-    if (auto *v = safe_current_view()) v->auto_set_max_scale();
+      _window->device_agent()->is_file() == false) {
+    // 修复：切回已采集数据的旧 tab 时保留其视图位置（缩放/滚动），
+    // 不要重置为"适配全部数据"。只有当前 tab 文档无数据（首次加载/新建）
+    // 时才 auto_set_max_scale 自动适配。
+    pv::TabContext *cur = _window->current_context();
+    const bool tab_has_data = cur && cur->document() && cur->document()->has_data();
+    if (!tab_has_data)
+      if (auto *v = safe_current_view()) v->auto_set_max_scale();
+  }
 
   if (_window->device_agent()->is_file()) {
     _window->check_config_file_version();
@@ -317,7 +324,12 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
     if (_window->device_agent()->get_work_mode() == LOGIC) {
       _window->pattern_mode() = _window->device_agent()->get_demo_operation_mode();
       _window->dock_manager()->protocol_widget()->del_all_protocol();
-      if (auto *v = safe_current_view()) v->auto_set_max_scale();
+      // 修复：切回已采集数据的旧 tab 时保留其视图位置，不要重置为
+      // "适配全部数据"（与上面 LOGIC 分支同理）。
+      pv::TabContext *cur = _window->current_context();
+      const bool tab_has_data = cur && cur->document() && cur->document()->has_data();
+      if (!tab_has_data)
+        if (auto *v = safe_current_view()) v->auto_set_max_scale();
 
       if (_window->pattern_mode() != "random") {
         _window->load_demo_decoder_config(_window->pattern_mode());
