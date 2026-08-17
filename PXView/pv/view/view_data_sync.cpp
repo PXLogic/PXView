@@ -80,15 +80,11 @@ namespace view {
 void ViewDataSync::apply_source_to_signals(pv::data::DataSource *source) {
   for (auto &sig : _view->get_own_signals())
     sig->set_data_from_source(source);
-  pxv_info("[PX3-DEBUG] apply_source_to_signals: source=%p (doc=%p session=%p) -> signals_with_data=%d",
-           (void *)source, (void *)_document, (void *)_view->session_ptr(),
-           count_signals_with_data());
 }
 
 void ViewDataSync::clear_all_signal_data() {
   for (auto &sig : _view->get_own_signals())
     sig->clear_data();
-  pxv_info("[PX3-DEBUG] clear_all_signal_data: signals_with_data after=%d", count_signals_with_data());
 }
 
 void ViewDataSync::refresh_dso_signal_paint(pv::data::DataSource *source,
@@ -152,28 +148,6 @@ void ViewDataSync::set_signal_data_from_source(
   _view->update();
 }
 
-int ViewDataSync::count_signals_with_data() const {
-  int n = 0;
-  for (auto &sig : _view->get_own_signals()) {
-    if (!sig)
-      continue;
-    if (auto *l = sig->as_logic()) { if (l->data()) n++; }
-    else if (auto *a = sig->as_analog()) { if (a->data()) n++; }
-    else if (auto *d = sig->as_dso()) { if (d->data()) n++; }
-  }
-  return n;
-}
-
-void ViewDataSync::log_data_state(const char *tag) const {
-  pxv_info("[PX3-DEBUG] %s: signals=%d with_data=%d doc=%p doc_has_data=%d is_working=%d",
-           tag ? tag : "?",
-           (int)_view->get_own_signals().size(),
-           count_signals_with_data(),
-           (void *)_document,
-           _document ? (_document->has_data() ? 1 : 0) : 0,
-           _view->session_ptr() ? (_view->session_ptr()->is_working() ? 1 : 0) : 0);
-}
-
 void ViewDataSync::set_data_document(pv::data::SessionDocument *doc) {
   // A2 fix: handle nullptr to detach the document pointer. Without this, the
   // early return left _document pointing at a soon-to-be-destroyed object,
@@ -183,8 +157,6 @@ void ViewDataSync::set_data_document(pv::data::SessionDocument *doc) {
     _document = nullptr;
     // Clear signal data pointers so paint events don't dereference freed data.
     clear_all_signal_data();
-    pxv_info("[PX3-DEBUG] set_data_document(nullptr): detached doc, signals_with_data=%d",
-             count_signals_with_data());
     return;
   }
 
@@ -192,8 +164,6 @@ void ViewDataSync::set_data_document(pv::data::SessionDocument *doc) {
   _view->mark_derived_traces_dirty();
 
   if (!doc->has_data()) {
-    pxv_info("[PX3-DEBUG] set_data_document: doc=%p has_data=0 -> NOT binding (signals_with_data=%d)",
-             (void *)doc, count_signals_with_data());
     return;
   }
 
@@ -208,8 +178,6 @@ void ViewDataSync::set_data_document(pv::data::SessionDocument *doc) {
   // SessionDocument::get_*_snapshot() delegates to get_active_*(),
   // so apply_source_to_signals(doc) correctly binds all signals.
   apply_source_to_signals(doc);
-  pxv_info("[PX3-DEBUG] set_data_document: doc=%p BOUND, signals_with_data=%d",
-           (void *)doc, count_signals_with_data());
 
   // CRITICAL: Now that all signal raw pointers have been rebound to the new
   // snapshots, it is safe to release the document's deferred (old) shared_ptrs.
@@ -541,8 +509,6 @@ void ViewDataSync::mode_changed() {
 void ViewDataSync::auto_set_max_scale() {
   const double limitTime = _view->document_snapshot_source()->cur_sampletime();
   const int width = _view->get_view_width();
-  pxv_info("[PX3-DEBUG] auto_set_max_scale: limitTime=%g width=%d (src=%p)",
-           limitTime, width, (void *)_view->document_snapshot_source());
 
   if (width > 0) {
     _view->layout_delegate()->set_maxscale(limitTime / (width * View::MaxViewRate));

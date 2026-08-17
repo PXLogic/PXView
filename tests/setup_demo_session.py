@@ -21,6 +21,7 @@ Each bus gets one C decoder + one Python decoder = 16 decoders total.
 
 Usage:
     python setup_demo_session.py [--output demo.pxc] [--samples 1000000]
+    python setup_demo_session.py --no-cleanup   # keep decoders after exit
 """
 
 from __future__ import annotations
@@ -89,7 +90,7 @@ BUSES = [
 
 
 def setup_demo_session(output_path: str, sample_count: int = 1_000_000,
-                        sample_rate: int = 1_000_000):
+                        sample_rate: int = 1_000_000, no_cleanup: bool = False):
     """Create a demo session with PATTERN_MIXED and 16 decoders (C+Python)."""
     mcp_url = os.environ.get("PXVIEW_MCP_URL", "http://127.0.0.1:10110/mcp")
     mcp_port = int(os.environ.get("PXVIEW_MCP_PORT", "10110"))
@@ -131,15 +132,17 @@ def setup_demo_session(output_path: str, sample_count: int = 1_000_000,
         except Exception:
             pass
 
-        # Clear any existing state
-        try:
-            client.clear_all_decoders()
-        except Exception:
-            pass
-        try:
-            client.close_capture()
-        except Exception:
-            pass
+        # Clear any existing state (skipped with --no-cleanup to preserve
+        # decoders/capture already present in the connected session).
+        if not no_cleanup:
+            try:
+                client.clear_all_decoders()
+            except Exception:
+                pass
+            try:
+                client.close_capture()
+            except Exception:
+                pass
 
         # Add decoders BEFORE capture so auto-decode triggers.
         # Each bus gets one C decoder + one Python decoder = 16 total.
@@ -231,14 +234,17 @@ def setup_demo_session(output_path: str, sample_count: int = 1_000_000,
         print(f"\nTotal annotations (max 10/decoder): {total_annotations}")
 
     finally:
-        try:
-            client.clear_all_decoders()
-        except Exception:
-            pass
-        try:
-            client.close_capture()
-        except Exception:
-            pass
+        # Reset session state on exit unless --no-cleanup was passed
+        # (keeps the created decoders/capture in the live session).
+        if not no_cleanup:
+            try:
+                client.clear_all_decoders()
+            except Exception:
+                pass
+            try:
+                client.close_capture()
+            except Exception:
+                pass
         client.disconnect()
         if proc:
             proc.stop()
@@ -265,12 +271,19 @@ def main():
         type=int, default=1_000_000,
         help="Sample rate in Hz (default: 1000000)",
     )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Do NOT clear decoders/capture at start or exit; leave the "
+             "created decoders in the live session after the script finishes",
+    )
     args = parser.parse_args()
 
     setup_demo_session(
         output_path=args.output,
         sample_count=args.samples,
         sample_rate=args.rate,
+        no_cleanup=args.no_cleanup,
     )
 
 

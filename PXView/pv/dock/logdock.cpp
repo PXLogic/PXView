@@ -120,26 +120,37 @@ LogDock::LogDock(QWidget *parent)
     _open_btn->setEnabled(false);
   }
 
-  QHBoxLayout *toolbar_layout = new QHBoxLayout();
-  toolbar_layout->setContentsMargins(0, 0, 0, 0);
-  toolbar_layout->setSpacing(6);
+  // Two-row toolbar so the right-side action buttons always stay fully
+  // visible and clickable regardless of the dock width: row 1 keeps the
+  // level selector + the primary actions (open/clear, right-aligned),
+  // row 2 keeps the two checkboxes + the auto-scroll toggle on the right.
+  QHBoxLayout *row1_layout = new QHBoxLayout();
+  row1_layout->setContentsMargins(0, 0, 0, 0);
+  row1_layout->setSpacing(6);
 
   _level_label = new QLabel(_widget);
   _level_label->setObjectName("dock_label");
   _level_label->setText(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LOG_LEVEL), "Log Level"));
-  toolbar_layout->addWidget(_level_label);
-  toolbar_layout->addWidget(_level_combo);
-  toolbar_layout->addWidget(_save_file_check);
-  toolbar_layout->addWidget(_append_mode_check);
-  toolbar_layout->addStretch(1);
-  toolbar_layout->addWidget(_scroll_bottom_btn);
-  toolbar_layout->addWidget(_open_btn);
-  toolbar_layout->addWidget(_clear_btn);
+  _level_label->setMaximumWidth(120);  // guard so a long translation never squeezes the buttons
+  row1_layout->addWidget(_level_label);
+  row1_layout->addWidget(_level_combo);
+  row1_layout->addStretch(1);
+  row1_layout->addWidget(_open_btn);
+  row1_layout->addWidget(_clear_btn);
+
+  QHBoxLayout *row2_layout = new QHBoxLayout();
+  row2_layout->setContentsMargins(0, 0, 0, 0);
+  row2_layout->setSpacing(6);
+  row2_layout->addWidget(_save_file_check);
+  row2_layout->addWidget(_append_mode_check);
+  row2_layout->addStretch(1);
+  row2_layout->addWidget(_scroll_bottom_btn);
 
   QVBoxLayout *main_layout = new QVBoxLayout(_widget);
   main_layout->setContentsMargins(12, 8, 12, 8);
   main_layout->setSpacing(6);
-  main_layout->addLayout(toolbar_layout);
+  main_layout->addLayout(row1_layout);
+  main_layout->addLayout(row2_layout);
   main_layout->addWidget(_log_view, 1);
 
   _widget->setLayout(main_layout);

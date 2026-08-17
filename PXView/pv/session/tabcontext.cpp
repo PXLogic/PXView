@@ -129,7 +129,6 @@ void TabContext::activate()
         // 已绑定的文档快照。
         if (!_session->is_working()) {
             _session->set_stopped_status();
-            pxv_info("TabContext::activate() restored STOPPED status for data doc");
         }
     } else if (_session->have_view_data() &&
                (_session->is_working() || _session->is_copy_in_progress() ||
@@ -164,8 +163,6 @@ void TabContext::activate()
     }
     _view->update_scale_offset();
     _view->signals_changed(nullptr);
-    pxv_info("TabContext::activate() completed, signals_with_data=%d",
-        _view->data_sync_delegate()->count_signals_with_data());
 }
 
 void TabContext::deactivate()

@@ -491,8 +491,6 @@ void MainWindow::on_signals_changed() {
   // refresh layout. This ensures LogicSignals pick up new SignalModel pointers
   // and Qt signal/slot connections are re-established after
   // init_signals()/reload() recreates models.
-  pxv_info("[PX3-DEBUG] MainWindow::on_signals_changed() fired (throttled timer), signals_with_data=%d",
-           current_view() ? current_view()->data_sync_delegate()->count_signals_with_data() : -1);
   current_view()->on_signals_changed();
 }
 

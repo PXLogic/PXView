@@ -602,7 +602,6 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   _state->view_data()->clear();
   _state->capture_data()->clear();
   _state->set_capture_data(_state->view_data());
-  pxv_info("[PX3-DEBUG] set_device: view_data CLEARED, then init_signals()");
 
   // 架构修复：从 AppConfig 恢复 auto_apply 默认值。
   // 这样即使没有打开 .pxl 文件（如新建采集），auto_apply 勾选状态
@@ -630,14 +629,6 @@ void SigSession::save_current_device_handle()
       !_state->device_agent().is_file() &&
       !_state->device_agent().is_input_module()) {
     _saved_device_handle = _state->device_agent().handle();
-    pxv_info("[PX2-DEBUG] saved device handle %llu (driver=%s) before file switch",
-             (unsigned long long)_saved_device_handle,
-             _state->device_agent().driver_name().toUtf8().data());
-  } else {
-    pxv_info("[PX2-DEBUG] skip saving device handle: have_instance=%d is_file=%d is_input=%d",
-             _state->device_agent().have_instance(),
-             _state->device_agent().is_file(),
-             _state->device_agent().is_input_module());
   }
 }
 
@@ -646,27 +637,18 @@ bool SigSession::restore_previous_device()
 {
   // 采集/保存进行中不能切换设备（set_device 的断言前提）。
   if (_state->is_working() || _state->is_saving()) {
-    pxv_info("[PX2-DEBUG] restore_previous_device: busy (working=%d saving=%d), skip",
-             _state->is_working(), _state->is_saving());
     return false;
   }
   ds_device_handle h = _saved_device_handle;
   _saved_device_handle = NULL_HANDLE;  // 一次性使用，用后清除
   if (h == NULL_HANDLE) {
-    pxv_info("[PX2-DEBUG] restore_previous_device: no saved handle, falling back to default");
     return set_default_device();
   }
   // 确保 handle 对应的 sdi 仍然存在（未断开）
   struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
   if (!sdi) {
-    pxv_warn("[PX2-DEBUG] restore_previous_device: sdi for handle %llu not found, falling back",
-             (unsigned long long)h);
     return set_default_device();
   }
-  pxv_info("[PX2-DEBUG] restoring device handle %llu (driver=%s name=%s)",
-           (unsigned long long)h,
-           _state->device_agent().driver_name().toUtf8().data(),
-           _state->device_agent().name().toUtf8().data());
   return set_device(h);
 }
 

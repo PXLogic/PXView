@@ -315,25 +315,6 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
         vp->pixmap().size() != pixmapSize ||
         !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
 
-    // [PX3-DEBUG] render diagnostics: pixmap rebuild gate + enabled traces
-    {
-      int enabled_cnt = 0, with_data = 0;
-      for (auto t : traces) {
-        if (t->enabled()) {
-          enabled_cnt++;
-          if (auto *ls = t->as_logic())
-            if (ls->data())
-              with_data++;
-        }
-      }
-      pxv_info("[PX3-DEBUG] SignalPixmapPass: rebuild=%d (params=%d need_update=%d pixmap_chg=%d) "
-               "scale=%g off=%lld vOffset=%d sh=%g | traces=%d enabled=%d logic_with_data=%d",
-               (view_params_changed || vp->need_update() || pixmap_changed) ? 1 : 0,
-               view_params_changed ? 1 : 0, vp->need_update() ? 1 : 0, pixmap_changed ? 1 : 0,
-               view->scale(), (long long)view->offset(), view->get_vOffset(),
-               view->get_signalHeight(), (int)traces.size(), enabled_cnt, with_data);
-    }
-
     if (view_params_changed || vp->need_update() || pixmap_changed) {
       vp->curScale() = view->scale();
       vp->curOffset() = view->offset();

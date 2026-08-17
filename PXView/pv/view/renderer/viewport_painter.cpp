@@ -80,20 +80,6 @@ void ViewportPainter::paintEvent(QPaintEvent *event) {
 void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   using pv::view::Signal;
 
-  // [PX3-DEBUG] paint entry diagnostics: is the demo tab's viewport being
-  // repainted at all after switching back? Log session status branch.
-  {
-    auto &sess = _viewport->view().session();
-    pxv_info("[PX3-DEBUG] doPaint: vp=%p logic=%d status_init=%d stopped=%d rt_refresh=%d running=%d instant=%d",
-             (void *)_viewport,
-             _viewport->view().is_logic_rendering_mode() ? 1 : 0,
-             sess.is_init_status() ? 1 : 0,
-             sess.is_stopped_status() ? 1 : 0,
-             sess.is_realtime_refresh() ? 1 : 0,
-             sess.is_running_status() ? 1 : 0,
-             sess.is_instant() ? 1 : 0);
-  }
-
   QStyleOption o;
   o.initFrom(_viewport);
   QPainter p(_viewport);
