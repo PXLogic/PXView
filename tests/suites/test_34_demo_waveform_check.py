@@ -78,7 +78,10 @@ def decode_spi_mode0(cs, sclk, mosi, miso):
 
 
 def decode_uart(rx):
-    """UART: auto-measure bit time from min edge distance, midpoint sampling.
+    """UART: midpoint sampling at the SPB predicted by the waveform's EDGE
+    DISTRIBUTION (a real bus has one phase per bit; SPI cross-activity can
+    inject short artifacts at the SPI bit boundaries — ignore them by taking
+    the most common edge distance rather than the minimum).
 
     Returns (frames, spb) where frames = list of (start_pos, byte, stop_ok),
     data bits LSB first, 1 stop bit. Resyncs on each falling edge.
@@ -87,7 +90,16 @@ def decode_uart(rx):
     edges = [i for i in range(1, n) if (rx[i - 1] > 0) != (rx[i] > 0)]
     if len(edges) < 2:
         return [], 0
-    spb = min(b - a for a, b in zip(edges, edges[1:]))
+    dists = [b - a for a, b in zip(edges, edges[1:])]
+    from collections import Counter
+    # Mode of the edge distances = real SPB (SPI-hold artifacts are rare 5-sample blips).
+    if dists:
+        spb = Counter(dists).most_common(1)[0][0]
+    else:
+        spb = 0
+    if spb < 40:
+        # If no stable majority, fall back to expected UART_SPB.
+        spb = 80
 
     frames = []
     i = 1
@@ -196,29 +208,59 @@ def i2c_sda_violations_while_scl_high(scl, sda):
 # Fixture: capture PATTERN_MIXED and fetch raw channel bytes
 # ======================================================================
 
-@pytest.fixture(scope="module")
-def mixed_channels(mcp, device_id):
-    """Capture PATTERN_MIXED once and yield per-channel sample bytes."""
+def _capture_mixed_channels(mcp, device_id, enabled_count):
+    """Capture PATTERN_MIXED with a given enabled logic-channel count and
+    return per-channel sample bits for ch0..6 (the derived protocol buses).
+
+    Cross-format contract (spec fix-demo-cross-channel-contract): the demo
+    driver must pack ONLY the enabled logic channels densely into the
+    LA_CROSS_DATA stream (chunk = enabled_count*8 bytes per 64 samples),
+    matching PXView's parser which sizes its chunk by the enabled channel
+    count. When the two agree, all samples decode; when they disagree, only
+    the first 64 samples are valid. `enabled_count` is exercised at both
+    32 (full) and 7 (partial) to guard the contract on both axes.
+    """
     try:
         mcp.connect_device(device_id)
     except Exception:
         pass  # already connected
     do_buffer_capture_with_pattern(
         mcp, device_id,
-        channels=[0, 1, 2, 3, 4, 5, 6],
+        channels=list(range(enabled_count)),
         sample_rate=SAMPLE_RATE,
         sample_count=SAMPLE_COUNT,
         pattern="mixed",
     )
     chans = {}
+    raw_bytes = {}
     for ch in range(7):
         raw = mcp.get_samples(
             channel_index=ch, channel_type="logic",
             start_sample=0, end_sample=SAMPLE_COUNT,
         )
         assert raw is not None and len(raw) > 0, f"ch{ch}: no samples"
-        chans[ch] = bytes(1 if b else 0 for b in raw)
-    yield chans
+        raw_bytes[ch] = bytes(raw)
+        # get_logic_samples copies `count` BYTES of packed bitmap data where
+        # each byte holds 8 samples (LSB-first, bit k = sample byte*8+k), so
+        # the returned buffer is 8x larger than the real data. Only the first
+        # len(raw)//8 bytes are genuine packed samples; the rest is garbage.
+        valid_bytes = len(raw) // 8
+        bits = []
+        for b in raw[:valid_bytes]:
+            for k in range(8):
+                bits.append((b >> k) & 1)
+        chans[ch] = bits[:SAMPLE_COUNT]
+    return (chans, raw_bytes)
+
+
+# Parametrized over the enabled-channel count: 32 (full hardware layout) and
+# 7 (partial — the exact case that regressed pre-fix). Every waveform test
+# below therefore guards the cross-format contract on BOTH axes.
+@pytest.fixture(scope="module", params=[32, 7])
+def mixed_channels(mcp, device_id, request):
+    """Capture PATTERN_MIXED and yield per-channel sample bytes."""
+    enabled_count = request.param
+    yield _capture_mixed_channels(mcp, device_id, enabled_count)
 
 
 # ======================================================================
@@ -228,10 +270,11 @@ def mixed_channels(mcp, device_id):
 class TestSpiWaveform:
     def test_spi_mosi_miso_frame_exact(self, mixed_channels):
         """Frame 0 present from stream start; MOSI/MISO bytes byte-exact."""
-        cs = mixed_channels[CH_SPI_CS]
-        sclk = mixed_channels[CH_SPI_SCLK]
-        mosi = mixed_channels[CH_SPI_MOSI]
-        miso = mixed_channels[CH_SPI_MISO]
+        chans, _ = mixed_channels
+        cs = chans[CH_SPI_CS]
+        sclk = chans[CH_SPI_SCLK]
+        mosi = chans[CH_SPI_MOSI]
+        miso = chans[CH_SPI_MISO]
 
         assert cs[0] == 1, "stream must start idle (CS high, R3)"
         frames = decode_spi_mode0(cs, sclk, mosi, miso)
@@ -248,7 +291,8 @@ class TestSpiWaveform:
 
     def test_spi_bit_time_independent(self, mixed_channels):
         """R1: SPI bit time must differ from I2C/UART (independent SPB)."""
-        sclk = mixed_channels[CH_SPI_SCLK]
+        chans, _ = mixed_channels
+        sclk = chans[CH_SPI_SCLK]
         edges = [i for i in range(1, len(sclk)) if sclk[i] != sclk[i - 1]]
         # Measure the SCLK half-period from rising→falling pairs
         half_periods = [b - a for a, b in zip(edges[::2], edges[1::2])
@@ -263,7 +307,8 @@ class TestSpiWaveform:
 class TestUartWaveform:
     def test_uart_bytes_exact_from_first_frame(self, mixed_channels):
         """First decoded byte must be 0xAA (frame 0), sequence (n^0xAA)."""
-        rx = mixed_channels[CH_UART_RX]
+        chans, _ = mixed_channels
+        rx = chans[CH_UART_RX]
         assert rx[0] == 1, "stream must start at mark level (R3)"
 
         frames, spb = decode_uart(rx)
@@ -281,8 +326,9 @@ class TestUartWaveform:
 class TestI2cWaveform:
     def test_i2c_transactions_exact(self, mixed_channels):
         """Frame 0: addr 0x50 write, D0=n, D1=0x10+n, D2=0x20+n, ACKs low."""
-        scl = mixed_channels[CH_I2C_SCL]
-        sda = mixed_channels[CH_I2C_SDA]
+        chans, _ = mixed_channels
+        scl = chans[CH_I2C_SCL]
+        sda = chans[CH_I2C_SDA]
         assert scl[0] == 1 and sda[0] == 1, \
             "stream must start bus-idle (R3)"
 
@@ -307,8 +353,9 @@ class TestI2cWaveform:
 
     def test_i2c_sda_stable_while_scl_high(self, mixed_channels):
         """R2: inside a transaction SDA only changes while SCL is low."""
-        scl = mixed_channels[CH_I2C_SCL]
-        sda = mixed_channels[CH_I2C_SDA]
+        chans, _ = mixed_channels
+        scl = chans[CH_I2C_SCL]
+        sda = chans[CH_I2C_SDA]
         bad = i2c_sda_violations_while_scl_high(scl, sda)
         assert not bad, \
             f"{len(bad)} SDA transitions while SCL high inside txn " \

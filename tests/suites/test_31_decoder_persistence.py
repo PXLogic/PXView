@@ -28,6 +28,12 @@ pytestmark = pytest.mark.p1
 SAMPLE_RATE_1M = 1_000_000
 SAMPLE_COUNT_1M = 1_000_000
 
+# Cross-format contract FIXED: LA_CROSS_DATA packs only the enabled logic
+# channels (from `channels=`), so the I2C base/stacked decoders need only
+# ch0(SCL) and ch1(SDA) enabled for save/load re-decode to see the full
+# transaction stream.
+ALL_CH = [0, 1]  # I2C SCL/SDA only
+
 
 class TestDecoderPersistence:
 
@@ -44,7 +50,7 @@ class TestDecoderPersistence:
         # 2. Capture
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -104,7 +110,7 @@ class TestDecoderPersistence:
         # 3. Capture with I2C pattern
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",

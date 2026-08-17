@@ -30,6 +30,11 @@ pytestmark = pytest.mark.p2
 SAMPLE_RATE_1M = 1_000_000
 SAMPLE_COUNT_1M = 1_000_000
 
+# Cross-format contract FIXED: LA_CROSS_DATA packs only the enabled logic
+# channels, so tight-encoding works correctly. Only the stacked decoders'
+# channels are needed: ch0-1 (I2C) and ch2-5 (SPI).
+ALL_CH = list(range(6))  # ch0-1 I2C, ch2-5 SPI
+
 
 class TestDecoderStacked:
     """Stacked decoder tests: base decoder + stacked decoder."""
@@ -53,7 +58,7 @@ class TestDecoderStacked:
         # Use PATTERN_I2C which has real I2C traffic
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -83,7 +88,7 @@ class TestDecoderStacked:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -121,7 +126,7 @@ class TestDecoderStacked:
         # Use PATTERN_MIXED which has real SPI traffic on ch2-5
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[2, 3, 4, 5],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="mixed",
@@ -153,7 +158,7 @@ class TestDecoderStacked:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[2, 3, 4, 5],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="mixed",
@@ -183,7 +188,7 @@ class TestDecoderStacked:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",

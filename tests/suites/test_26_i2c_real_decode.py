@@ -35,6 +35,11 @@ pytestmark = pytest.mark.p0
 SAMPLE_RATE_1M = 1_000_000
 SAMPLE_COUNT_1M = 1_000_000
 
+# Cross-format contract FIXED: LA_CROSS_DATA now packs only the enabled
+# logic channels (from `channels=`), matching PXView's parser. Only the
+# I2C decoder channels are needed, so we enable just ch0(SCL) and ch1(SDA).
+ALL_CH = [0, 1]  # tight-encoded: I2C SCL/SDA only
+
 # I2C annotation class IDs as returned by get_analyzer_results (MCP).
 # NOTE: the MCP API reports ann_class as a globally re-indexed value: it is
 # the decoder's internal annotation-class id PLUS a +7 row/offset (verified
@@ -61,7 +66,7 @@ class TestI2CRealDecode:
 
         status = do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -85,7 +90,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -107,7 +112,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -135,7 +140,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -164,7 +169,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -183,16 +188,22 @@ class TestI2CRealDecode:
         assert len(addr_texts) > 0, \
             f"No ADDRESS annotations in {len(results)} results"
 
-        # The demo generator intends a fixed 0x50 device address, and the C
-        # decoder reliably emits ADDRESS annotations. However the demo's
-        # synthetic waveform has a bit-level offset (verified: addresses come
-        # back as 0x24/0x28/0x2C rather than 0xA0), so we only assert that
-        # address annotations exist and carry a hex value — the decoder-side
-        # requirement (it DID decode an address byte) is what this test guards.
-        found_hex = any(re.search(r"(?:0x)?[0-9A-Fa-f]{2}", t)
-                        for t in addr_texts)
-        assert found_hex, \
-            f"No hex address value in addresses: {addr_texts[:10]}"
+        # Spec R5 (restored exact assertion): the demo generator uses a fixed
+        # 0x50 EEPROM address. With the tight-encoded I2C capture (see ALL_CH),
+        # the C decoder reliably decodes the address byte as 0x50 in every
+        # transaction (verified: 'Address write: 50'). Assert 0x50 appears.
+        decoded_addrs = []
+        for t in addr_texts:
+            m = re.search(r'Address write:\s*(?:0x)?([0-9A-Fa-f]{2})', t)
+            if m:
+                try:
+                    decoded_addrs.append(int(m.group(1), 16))
+                except ValueError:
+                    pass
+        assert decoded_addrs, \
+            f"No parseable address value in: {addr_texts[:10]}"
+        assert 0x50 in decoded_addrs, \
+            f"Address 0x50 not found; decoded: {decoded_addrs[:20]}"
 
     def test_i2c_has_data_annotations(self, mcp, device_id,
                                         cleanup_after_test):
@@ -205,7 +216,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -233,7 +244,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -261,7 +272,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
@@ -269,9 +280,11 @@ class TestI2CRealDecode:
 
         results = get_decoder_results_with_retry(mcp, analyzer_id, max_wait=30.0)
 
-        # Each transaction = START + ADDR + ACK + 3*(DATA+ACK) + STOP = 10 anns
-        # At 1M samples, 10 samples/bit, 38 bits/transaction → ~2631 transactions
-        # But decoder may cap at maxCount (10000)
+        # Each transaction = START + ADDR + ACK + 3*(DATA+ACK) + STOP ≈ 17 anns.
+        # I2C frame = 42 bit-times @ I2C_SPB=50 → 42*50 = 2100 samples/transaction.
+        # At 1M samples → ~476 transactions → ~8100 annotations (decoder may cap
+        # at maxCount=10000). SPB grew from 10 → 50 (5x) vs the old 38-bit/10spb
+        # waveform, so only floor existence is asserted.
         assert len(results) >= 20, \
             f"Only {len(results)} annotations, expected at least 20"
 
@@ -287,7 +300,7 @@ class TestI2CRealDecode:
 
         do_buffer_capture_with_pattern(
             mcp, device_id,
-            channels=[0, 1],
+            channels=ALL_CH,
             sample_rate=SAMPLE_RATE_1M,
             sample_count=SAMPLE_COUNT_1M,
             pattern="i2c",
