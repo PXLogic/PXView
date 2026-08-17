@@ -672,7 +672,16 @@ bool CaptureManager::get_capture_status(bool &triggered, int &progress) {
   // always return true and let the out-params convey the state.
   triggered = _state->is_triged();
 
-  const uint64_t sample_limits = _coord->cur_samplelimits();
+  // Progress denominator. In repeat mode each frame is a single discrete
+  // acquisition with its own target sample count (get_sample_limit(), e.g.
+  // demo 1M samples per frame), NOT the ring-buffer capacity. cur_samplelimits()
+  // in stream+repeat is set to get_ring_sample_count() (the mmap/memory ring,
+  // e.g. 250M) to serve the ruler time axis — using it here would show
+  // progress stuck at ~0.4% (1M/250M) every frame. So for repeat mode we
+  // divide by the per-frame target so the bar actually reaches 100% each frame.
+  const uint64_t sample_limits =
+      is_repeat_mode() ? _state->device_agent().get_sample_limit()
+                       : _coord->cur_samplelimits();
   if (sample_limits == 0) {
     progress = 0;
     return true;

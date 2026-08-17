@@ -138,6 +138,40 @@ elseif(NOT APPLE)
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
 endif()
 
+# ==== DecodeTaskManager 离线状态机/查询单测 (Spec harden-review T8) ====
+# 与 test_capture_manager 同一套"链接桩外壳": 复用 pre-编译的 pxview-core +
+# pxview-data + Hermes对象 (mock), 不重新枚举 core/data 源码。
+#   * pxview-core 静态库 (decodetaskmanager/eventbus/documentregistry/log +
+#     pxview-data/config 传递提供) —— 复用预编译对象。
+#   * AUTOMOC 为被间接包含的 QObject 头 (dstimer/decoderstack) 生成 moc, 补上静态库
+#     不携带的 vtable/meta 符号。
+#   * libsigrokdecode + common/*.c 直接编入目标, 提供 decoderstack 的 srd_* 与
+#     xlog_* (pxv_log 由 pxview-core 的 log.cpp 提供)。
+#   * libsigrok 以 --whole-archive 链接 (对齐主 exe / test_capture_manager)。
+pv_add_qtest(test_decode_task_manager
+    core/test_decode_task_manager.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+)
+target_include_directories(test_decode_task_manager PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+target_sources(test_decode_task_manager PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
+)
+target_link_libraries(test_decode_task_manager PRIVATE pxview-core Qt6::Gui)
+target_link_options(test_decode_task_manager PRIVATE -Wl,--no-as-needed)
+if(WIN32)
+    target_link_libraries(test_decode_task_manager PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_decode_task_manager PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
+
 # ==== Data layer tests ====
 pv_add_qtest(test_trigger_config
     data/test_trigger_config.cpp

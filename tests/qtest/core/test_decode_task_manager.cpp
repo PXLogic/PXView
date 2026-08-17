@@ -35,6 +35,8 @@
 
 #include <QtTest>
 
+#include <QCoreApplication>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -54,15 +56,23 @@
 #include "pv/core/thread_pool.h"
 
 #include "pv/data/isession_host.h"
+#include "pv/data/decode/decoder.h"
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/data/stack/decoderstack.h"
 
-// Global log writer used by pxv_info/pxv_warn (via eventbus.cpp and the
-// decode sources). Left null so the underlying xlog writers no-op. Must be
-// defined here if log.cpp is not linked; delete this definition (and keep
-// XLOG from the common/log target) if the qtest target already provides it,
-// to avoid a duplicate-symbol error — identical pattern to test_eventbus.cpp.
-xlog_writer *pxv_log = nullptr;
+// pxv_log is provided by pxview-core's log.cpp (which this test links via the
+// pxview-core static lib), so it is NOT re-defined here — a duplicate symbol
+// would otherwise arise against pxview-core. Identical pattern to
+// test_capture_manager.cpp.
+
+// ---- Link shims for QColor::fromString / QColor::lightness ----
+// Identical to test_capture_manager: pxview-config's AppConfig theme helpers
+// reference these Qt6Gui imports via __imp__ indirection, but pxview-config.a
+// is scanned AFTER the Qt6Gui import library in the link order, so the __imp__
+// slots stay undefined under MinGW. These null slots are never dereferenced
+// by the offline paths under test.
+void *__imp__ZN6QColor10fromStringE14QAnyStringView = nullptr;
+void *__imp__ZNK6QColor10lightnessFEv = nullptr;
 
 namespace {
 
@@ -324,7 +334,21 @@ private slots:
 };
 
 void TestDecodeTaskManager::initTestCase() {
-    srd_init(nullptr); // nullptr path = use libsigrokdecode's default search dirs
+    g_dec = nullptr;
+    // The test executable lives in build.dir, right beside the deployed
+    // `decoders/` (Python PDs) + `decoders/c_decoders/` (C DLLs) trees. This
+    // fork of libsigrokdecode requires an explicit srd_init(<search-path>) +
+    // srd_decoder_load(<id>) (matching decoder_test.c of libsigrokdecode); the
+    // upstream-style srd_init(nullptr) alone never registers any decoder, so
+    // g_dec would stay null and every DecoderStack test would QSKIP.
+    const QString decodersDir =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/decoders");
+    if (srd_init(qPrintable(decodersDir)) != SRD_OK) {
+        qWarning() << "libsigrokdecode srd_init failed for" << decodersDir
+                   << "; DecoderStack-based tests will be skipped.";
+        return;
+    }
+    srd_decoder_load("i2c");
     g_dec = srd_decoder_get_by_id("i2c");
     if (!g_dec)
         qWarning() << "libsigrokdecode 'i2c' decoder unavailable; "
