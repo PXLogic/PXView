@@ -37,6 +37,14 @@
 
 find_package(Qt6 REQUIRED COMPONENTS Test Core Gui Widgets)
 
+# ==== Memory/UB sanitizer gate (harden-review-findings T13 / R5) ====
+# Enable with: cmake .. -DPXVIEW_ENABLE_SANITIZERS=ON
+# Applies -fsanitize=address,undefined to every pv_add_qtest target. Default
+# OFF so normal builds are unaffected. Sources compiled directly into a test
+# executable (e.g. logicsnapshot.cpp) get instrumented, exposing leaks/UAF/UB.
+option(PXVIEW_ENABLE_SANITIZERS
+    "Build PXView qtest targets with AddressSanitizer + UBSan" OFF)
+
 set(PXVIEW_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/PXView")
 
 # ---- Helper: add a QTest executable with optional extra source files ----
@@ -63,6 +71,13 @@ function(pv_add_qtest target_name)
     target_compile_features(${target_name} PRIVATE cxx_std_23)
     # Force console subsystem on MinGW (otherwise linker looks for WinMain)
     target_link_options(${target_name} PRIVATE -mconsole)
+    # Memory/UB sanitizer gate (see option above).
+    if(PXVIEW_ENABLE_SANITIZERS)
+        target_compile_options(${target_name} PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(${target_name} PRIVATE
+            -fsanitize=address,undefined)
+    endif()
     # Register with CTest
     add_test(NAME ${target_name} COMMAND ${target_name})
     # Offscreen platform for headless CI
@@ -76,6 +91,52 @@ pv_add_qtest(test_cursor_registry
     core/test_cursor_registry.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/core/cursorregistry.cpp
 )
+
+# ==== CaptureManager 离线状态机/查询单测 (Spec harden-review T7) ====
+# MockSessionState 实现完整 ISessionState (pv::) + ISessionCoordination。链接方式:
+#   * pxview-core 静态库 (capturemanager/eventbus/log/deviceagent + pxview-data/
+#     config 传递提供) —— 复用预编译对象, 不重新枚举 core/data 源码。
+#   * AUTOMOC 为 test.cpp 直接/间接包含的 QObject 头 (dstimer/decoderstack/
+#     signalmodel/spectrumstack/mathstack/lissajousmodel 等) 生成 moc, 补上静态库
+#     不携带的 QObject vtable/meta 符号 (静态库只带方法体, moc 在 exe 侧编译)。
+#   * libsigrokdecode + common/*.c 直接编入目标, 提供 decoderstack 的 srd_* 与
+#     deviceagent/驱动 的 unz_*/xlog_*。
+#   * libsigrok 以 --whole-archive 链接 (对齐主 exe, deviceagent 的 sr_* 依赖)。
+# GUI 的 LangResource/MsgBox 在测试内打桩 (离线路径不触达)。
+# pxv_log 由 pxview-core 的 log.cpp 提供, 测试不再自行定义。
+set(_CM_TEST_COMMON_SOURCES
+    ${common_SOURCES}
+    ${libsigrokdecode_SOURCES}
+)
+pv_add_qtest(test_capture_manager
+    core/test_capture_manager.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+)
+target_include_directories(test_capture_manager PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+# 显式把被间接包含的 QObject 头列为源, 让 AUTOMOC 为主被拉取的 core/data 类
+# (DsTimer / DecoderStack) 生成 vtable + metaobject (静态库只带方法体, 不携带 moc)。
+target_sources(test_capture_manager PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+)
+# 顺序: 须把 Qt6::Gui 放在静态库之后, 否则 MinGW 的 --as-needed 会在静态库对象
+# (pxview-config 的 QColor::fromString/lightness) 引用到之前就丢弃 Qt6Gui 导入库。
+target_link_libraries(test_capture_manager PRIVATE pxview-core Qt6::Gui)
+# 一锤定音: CMake 会把 pxview-core 的传递静态库 (config/data) 追加在显式 Qt6Gui
+# 之后, 主 exe 靠自身 GUI 符号保住 Qt6Gui, 本测试自身对象很少引 QtGui → --as-needed
+# 仍可能在 config 需要 QColor 前丢弃 Qt6Gui。显式关闭 --as-needed 确保 Qt6Gui 保留。
+target_link_options(test_capture_manager PRIVATE -Wl,--no-as-needed)
+if(WIN32)
+    target_link_libraries(test_capture_manager PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_capture_manager PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
 
 # ==== Data layer tests ====
 pv_add_qtest(test_trigger_config
@@ -152,6 +213,45 @@ pv_add_qtest(test_logic_snapshot_cross_throughput
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_logic_snapshot_cross_throughput PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== EventBus 并发/析构语义 (harden-review-findings T6 / R2) ====
+# 测试文件内定义 pxv_log 桩; 链接 eventbus + QtAsyncDispatcher + xlog.c 提供 xlog_warn。
+pv_add_qtest(test_eventbus
+    core/test_eventbus.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/core/eventbus.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/core/qt_async_dispatcher.cpp
+    ${CMAKE_SOURCE_DIR}/common/log/xlog.c
+)
+
+# ==== LogicSnapshot cross 分块对齐 (harden-review-findings T5 / R3) ====
+# 依赖链同 test_logic_snapshot_raw。
+pv_add_qtest(test_logic_snapshot_cross_alignment
+    data/test_logic_snapshot_cross_alignment.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_snapshot_cross_alignment PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== Glitch Filter 纯函数单测 (harden-review-findings T9 / R4) ====
+# 依赖链同 test_logic_snapshot_raw; 覆盖 apply_glitch_filter_one_pass 阈值语义。
+pv_add_qtest(test_glitch_filter
+    data/test_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_glitch_filter PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
     ${CMAKE_SOURCE_DIR}/common
 )

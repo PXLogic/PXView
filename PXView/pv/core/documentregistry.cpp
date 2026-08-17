@@ -179,8 +179,25 @@ guard_to_reset.reset();
 
 void DocumentRegistry::acquire_capture_owner(data::SessionDocument *doc) {
   size_t idx = doc ? find_index_for_document(doc) : SIZE_MAX;
-  // Track A6: protect guard creation + assignment under _capture_state_mutex
-  // to prevent concurrent acquire/release races on _capture_owner_guard.
+  // CRITICAL FIX (repeat→next freeze): A CaptureOwnerGuard may already be held
+  // (repeat mode keeps it alive across auto-stopped frames). The straightforward
+  // `_capture_owner_guard = make_unique<...>(new)` would move-assign over the
+  // OLD guard: move-assignment first calls the OLD guard's release(), which
+  // clears `_capture_owner_index` and sets `_is_working=false` AFTER the new
+  // guard's constructor set them to true/idx. The final state is therefore
+  // owner=SIZE_MAX + is_working=false while a capture is genuinely running →
+  // view refresh, realtime gating and stop_capture (guarded by is_working())
+  // all stop → the UI freezes (data still streams underneath, PathDiag advances).
+  // Fix: move the old guard OUT and reset it (releasing is_working) BEFORE
+  // constructing the new one, so the assignment below targets a null member
+  // and never triggers another release.
+  std::unique_ptr<CaptureOwnerGuard> old_guard;
+  {
+    std::lock_guard<std::mutex> lock(_capture_state_mutex);
+    old_guard = std::move(_capture_owner_guard);
+  }
+  old_guard.reset();  // release old (is_working=true→false) — outside the lock
+
   std::unique_ptr<CaptureOwnerGuard> new_guard =
       std::make_unique<CaptureOwnerGuard>(this, idx);
   {

@@ -1152,8 +1152,25 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // defense against use-after-free of decommitted/reclaimed memory.
   while ((_ch_fraction != 0 || _byte_fraction != 0) && len > 0) {
     if (_dest_ptr == nullptr) {
-      pxv_err("append_cross_payload: _dest_ptr nullptr during bit-align");
-      return;
+      // ROOT-CAUSE FIX (stream/trigger live capture): a previous append that
+      // early-returned (out-of-range / alloc-fail) left `_dest_ptr == nullptr`
+      // WITHOUT resetting `_ch_fraction`/`_byte_fraction`. The stale residue
+      // then drives every subsequent payload into this branch, and a plain
+      // `return` here drops the WHOLE payload forever → capture ends with
+      // ~no data (_ring≈0). `_dest_ptr==nullptr` means the carried bit-align
+      // position is invalid/unrecoverable, so the correct behavior is to drop
+      // only the <1-chunk partial alignment and re-anchor to the (still
+      // Scale-aligned) `_ring_sample_count`, then continue the main path.
+      // `_ring_sample_count` is always Scale(64)-aligned here — bit-align only
+      // advances whole chunks and tracks the intra-chunk residue in
+      // `_ch_fraction`/`_byte_fraction` — so the main-path invariants hold.
+      pxv_warn("append_cross_payload: _dest_ptr nullptr during bit-align, "
+               "resetting residue (ch_fraction=%u byte_fraction=%u)",
+               (unsigned)_ch_fraction, (unsigned)_byte_fraction);
+      _dest_ptr = nullptr;
+      _ch_fraction = 0;
+      _byte_fraction = 0;
+      break;
     }
 
     // mmap data write — release _mutex during page faults
@@ -1324,6 +1341,19 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     index1 = idx1;
     offset = blk_off;
     last_chan = 0;  // every channel advanced equally → next payload starts at ch0
+
+    // ---- Incremental mipmap for the current partial leaf block ----
+    // All channels share the same `blk_off` (cross format) and `index0/index1`
+    // here. calc_mipmap processes only complete 64-sample (Scale) chunks via
+    // integer division (samples / Scale), so partial bytes at the tail are not
+    // touched; _last_calc_count is saved (isEnd=false) for continuation on the
+    // next call. Without this, the in-progress leaf block (tog=0, first=0) makes
+    // get_sample_self return level 0 for every sample → stream-mode live
+    // rendering shows all-LOW until capture_ended() finalizes the tail block.
+    if (offset > 0 && offset < LeafBlockSamples) {
+      for (unsigned int c = 0; c < _channel_num; c++)
+        calc_mipmap(c, (uint8_t)index0, (uint8_t)index1, offset, false);
+    }
   } else {
   // ---- Original per-channel strided loop (fallback: non-chunk-aligned
   //      payload, or pending partial u64 from a previous call) ----

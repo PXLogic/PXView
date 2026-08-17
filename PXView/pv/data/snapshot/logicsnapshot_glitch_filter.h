@@ -83,6 +83,21 @@ private:
     static const std::vector<LogicSnapshot::FillRange> _empty_filtered_ranges;
 };
 
+// ----------------------------------------------------------------------------
+// 纯单通道毛刺滤波（决策逻辑）。从 apply_glitch_filter 抽出的可独立单元测试
+// 的纯函数：给定一段单通道 0/1 电平样本与最小脉宽阈值，把"窄于（<=）阈值的
+// 短脉冲毛刺"抹平为周围稳定电平，保留正常宽度沿。既不访问 LogicSnapshot 内部
+// 状态，也不持有锁，因此无需实例即可测试。
+//
+// 说明：每个样本占 1 字节，值非 0 视为逻辑高、0 视为逻辑低；in 与 out 指向的
+// 缓冲不得重叠（out 初始化为 in 的副本，再覆盖被判定为毛刺的区间）。
+// filter_mode 语义与 apply_glitch_filter 相同：Both 滤除所有窄脉冲；
+// High 仅在基准电平为高时滤除其上的窄低凹；Low 仅在基准电平为低时滤除窄高刺。
+// ----------------------------------------------------------------------------
+void apply_glitch_filter_one_pass(const uint8_t *in, uint8_t *out,
+                                  uint64_t sample_count, uint32_t threshold,
+                                  GlitchFilterMode filter_mode);
+
 }  // namespace data
 }  // namespace pv
 

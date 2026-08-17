@@ -12,8 +12,8 @@ std::thread::id EventBus::_main_thread_id;
 
 EventBus::EventBus(std::unique_ptr<IAsyncDispatcher> dispatcher)
     : _alive_shared(std::make_shared<std::atomic<bool>>(true))
-    , _dispatcher(dispatcher ? std::move(dispatcher)
-                             : std::make_unique<QtAsyncDispatcher>()) {
+    , _dispatcher(dispatcher ? std::shared_ptr<IAsyncDispatcher>(std::move(dispatcher))
+                             : std::make_shared<QtAsyncDispatcher>()) {
     _main_thread_id = std::this_thread::get_id();
 }
 
@@ -24,7 +24,15 @@ EventBus::~EventBus() {
 }
 
 void EventBus::dispatch_async(std::function<void()> fn) {
-    _dispatcher->post(std::move(fn));
+    // Shared-ownership convenience: keep the dispatcher alive via a local
+    // copy so the posted functor stays safe even if the EventBus is destroyed.
+    std::shared_ptr<IAsyncDispatcher> d = _dispatcher;
+    d->post(std::move(fn));
+}
+
+void EventBus::dispatch_async(std::shared_ptr<IAsyncDispatcher> disp,
+                              std::function<void()> fn) {
+    disp->post(std::move(fn));
 }
 
 // Static convenience — uses a global default QtAsyncDispatcher singleton.

@@ -2553,6 +2553,17 @@ void SigSession::on_session_stopped_event() {
   // TrigNextCollect to trigger the next collection. In all other modes,
   // release the guard and broadcast EndCollectWork.
   if (is_repeat_mode()) {
+    // Align with PXView-1.5.8 (DS_EV_COLLECT_TASK_END): in repeat mode the
+    // capture session is NOT finished when one frame ends — it keeps _is_working
+    // (and the CaptureOwnerGuard) alive until the user presses Stop. The device
+    // worker (DeviceSessionStopped) cleared _is_working for wait_capture_complete,
+    // so restore it here BEFORE the queued TrigNextCollect handler runs.
+    // `on_trig_next_collect()` gates the next exec_capture() on
+    // `_state->is_working() && is_repeat_mode()` — without this restore, the
+    // re-broadcasted event would find is_working==false and NOT start the next
+    // frame spontaneously (repeat just ends after the first capture).
+    // exec_capture() -> acquire_capture_owner() re-affirms is_working=true.
+    _state->set_is_working(true);
     _capture_manager->data_unlock();
     _repeat_session_stopped = true;
     if (_repeat_wait_decode) {

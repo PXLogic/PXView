@@ -86,8 +86,21 @@ public:
             });
         std::lock_guard<std::shared_mutex> lk(_callbacks_mutex);
         auto &vec = _callbacks[type_id];
-        vec.push_back(erased);
-        size_t idx = vec.size() - 1;
+        // Reuse a previously vacated (unsubscribed) slot when available, so the
+        // vector size tracks the historical peak subscription count rather than
+        // the cumulative number of sub/unsub cycles. Each Subscription captures
+        // its own idx, so we must not swap/pop (which would invalidate indices).
+        size_t idx = vec.size();
+        for (size_t i = 0; i < vec.size(); ++i) {
+            if (!vec[i]) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == vec.size())
+            vec.push_back(erased);
+        else
+            vec[idx] = erased;
         return Subscription([this, type_id, idx]() {
             std::lock_guard<std::shared_mutex> lk2(_callbacks_mutex);
             auto it = _callbacks.find(type_id);
@@ -98,13 +111,24 @@ public:
     }
 
     // ---- Query ----
+    // Returns true iff at least one LIVE (subscribed, not-yet-unsubscribed)
+    // callback exists across all event types. Unsubscribed slots (reset to
+    // null) are not counted.
     bool has_subscribers() const {
         std::shared_lock<std::shared_mutex> lk(_callbacks_mutex);
-        return !_callbacks.empty();
+        for (const auto &kv : _callbacks)
+            for (const auto &cb : kv.second)
+                if (cb)
+                    return true;
+        return false;
     }
 
     // ---- Sync typed event broadcast ----
     template <typename EventType> void broadcast(const EventType &ev) {
+        if (!on_main_thread()) {
+            pxv_warn("EventBus::broadcast invoked off the main thread; "
+                     "broadcast() is main-thread-only by contract.");
+        }
         ++_broadcast_depth;
         if (_broadcast_depth > 1) {
             pxv_warn("Event broadcast re-entrancy detected (depth=%d), "
@@ -136,6 +160,15 @@ public:
     // individually — coalescing would lose per-instance data.
     template <typename EventType> void broadcast_async(const EventType &ev) {
         auto alive = _alive_shared;
+        // Safety check BEFORE touching any members (incl. _pending_async_types):
+        // closes the race window where the EventBus is destroyed concurrently
+        // with this call, so we don't touch a freed member after the destructor.
+        if (!alive->load(std::memory_order_acquire))
+            return; // EventBus already destroyed — drop the event
+        // Shared ownership: keep the dispatcher alive for callbacks already
+        // queued/in-flight even if this EventBus is destroyed meanwhile, so the
+        // posted lambda dispatches via this copy rather than `this->_dispatcher`.
+        std::shared_ptr<IAsyncDispatcher> disp = _dispatcher;
 
         if constexpr (std::is_empty_v<EventType>) {
             // Coalescable: skip if same type is already pending
@@ -146,7 +179,11 @@ public:
                     return; // already pending — coalesce
                 _pending_async_types.insert(ti);
             }
-            dispatch_async([this, alive]() {
+            dispatch_async(disp, [this, alive]() {
+                // Check liveness FIRST so a post replayed after ~EventBus never
+                // touches freed members (incl. _pending_async_mutex/types).
+                if (!alive->load(std::memory_order_acquire))
+                    return;
                 // Clear pending flag BEFORE dispatching so that events posted
                 // during dispatch are not lost.
                 {
@@ -154,14 +191,12 @@ public:
                     _pending_async_types.erase(
                         std::type_index(typeid(EventType)));
                 }
-                if (!alive->load(std::memory_order_acquire))
-                    return;
                 // Empty event — default-construct (no per-instance data)
                 broadcast(EventType{});
             });
         } else {
             // Non-coalescable: always dispatch
-            dispatch_async([this, ev, alive]() {
+            dispatch_async(disp, [this, ev, alive]() {
                 if (!alive->load(std::memory_order_acquire))
                     return;
                 broadcast(ev);
@@ -170,8 +205,14 @@ public:
     }
 
     // ---- Internal: post a functor to the target thread via the injected
-    //      IAsyncDispatcher. Used by broadcast_async<T>().
+    //      IAsyncDispatcher. Used by broadcast_async<T>(). Accepts the
+    //      dispatcher by shared_ptr so queued callbacks keep it alive.
+    // Single-arg overload keeps the dispatcher alive through a local shared
+    // copy even if the EventBus is destroyed; used by external callers
+    // (e.g. SigSession hotplug forwarding).
     void dispatch_async(std::function<void()> fn);
+    void dispatch_async(std::shared_ptr<IAsyncDispatcher> disp,
+                        std::function<void()> fn);
 
     // ---- Static convenience: post a functor to the main thread via a
     //      global default QtAsyncDispatcher.  Used by external callers
@@ -237,7 +278,9 @@ private:
     static std::thread::id _main_thread_id;
 
     // ---- Async dispatch strategy (injected, defaults to QtAsyncDispatcher) ----
-    std::unique_ptr<IAsyncDispatcher> _dispatcher;
+    // Shared ownership: queued/in-flight async callbacks hold a copy so the
+    // dispatcher stays alive even after the EventBus itself is destroyed.
+    std::shared_ptr<IAsyncDispatcher> _dispatcher;
 };
 
 } // namespace core

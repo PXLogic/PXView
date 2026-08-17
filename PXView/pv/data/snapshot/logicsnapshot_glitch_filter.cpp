@@ -452,6 +452,78 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
 }
 
 // ----------------------------------------------------------------------------
+// 纯单通道毛刺滤波（决策逻辑）— 与 apply_glitch_filter 状态机逐分支等价，
+// 但对单通道字节流直接运算、零拷贝输入，抽离成可独立单测的纯函数。
+// ----------------------------------------------------------------------------
+void apply_glitch_filter_one_pass(const uint8_t *in, uint8_t *out,
+                                  uint64_t sample_count, uint32_t threshold,
+                                  GlitchFilterMode filter_mode) {
+  if (in == nullptr || out == nullptr || sample_count == 0 || threshold == 0)
+    return;
+
+  // 先用输入填充输出，未判定为毛刺的样本保持原电平
+  memcpy(out, in, (size_t)sample_count);
+
+  bool accepted_level = in[0] != 0;
+  uint64_t scan_pos = 0;
+  const uint64_t end_pos = sample_count;
+
+  while (scan_pos < end_pos) {
+    const bool current_scan_level = in[scan_pos] != 0;
+
+    // 寻找下一个边缘：第一个电平 != current 的位置
+    uint64_t edge_pos = scan_pos;
+    while (edge_pos < end_pos && (in[edge_pos] != 0) == current_scan_level)
+      ++edge_pos;
+    if (edge_pos >= end_pos)
+      break;  // 无更多边缘
+
+    // 从边缘起量取脉冲段 [pulse_start, pulse_end)，其电平 == !current
+    uint64_t pulse_start = edge_pos;
+    uint64_t pulse_end = pulse_start;
+    while (pulse_end < end_pos && (in[pulse_end] != 0) != current_scan_level)
+      ++pulse_end;
+    const uint64_t pulse_len = pulse_end - pulse_start;
+
+    if (current_scan_level == accepted_level) {
+      if (pulse_len <= threshold) {
+        bool should_filter = false;
+        switch (filter_mode) {
+        case GlitchFilterMode::Both:
+          should_filter = true;
+          break;
+        case GlitchFilterMode::High:
+          // 仅在基准电平为高时滤除其上的窄低凹
+          should_filter = (accepted_level == true);
+          break;
+        case GlitchFilterMode::Low:
+          // 仅在基准电平为低时滤除其上的窄高刺
+          should_filter = (accepted_level == false);
+          break;
+        }
+        if (should_filter) {
+          // 判定为毛刺：用稳定基准电平覆盖该段
+          for (uint64_t p = pulse_start; p < pulse_end; ++p)
+            out[p] = accepted_level ? 1 : 0;
+          scan_pos = pulse_end;
+        } else {
+          // 该模式不滤，作为稳定迁移处理
+          accepted_level = !accepted_level;
+          scan_pos = pulse_start;
+        }
+      } else {
+        // 宽脉冲：确认新的基准电平
+        accepted_level = !accepted_level;
+        scan_pos = pulse_start;
+      }
+    } else {
+      // 防御性分支，正常状态机不会进入
+      scan_pos = pulse_start;
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
 // State / persisted-range accessors
 // ----------------------------------------------------------------------------
 

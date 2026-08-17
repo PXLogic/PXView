@@ -51,10 +51,12 @@ QtAsyncDispatcher::~QtAsyncDispatcher() {
 }
 
 void QtAsyncDispatcher::post(std::function<void()> fn) {
+    if (!qApp) return;
     QCoreApplication::postEvent(qApp, new AsyncEvent(std::move(fn)));
 }
 
 void QtAsyncDispatcher::post_to(QObject* target, std::function<void()> fn) {
+    if (!qApp || !target) return;
     QCoreApplication::postEvent(target, new AsyncEvent(std::move(fn)));
 }
 

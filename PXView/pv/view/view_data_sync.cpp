@@ -236,6 +236,18 @@ pv::data::DataSource *ViewDataSync::document_snapshot_source() {
       !_data_source->is_realtime_refresh())
     return _data_source;
 
+  // Active real-time refresh (loop mode, or stream+single/repeat while capturing):
+  // the live data lives in the session's capture_data/view_data, NOT in the
+  // document (which still holds the PREVIOUS capture's data via shared_ptr).
+  // Returning the document here would freeze the view on stale data while the
+  // loop capture keeps streaming underneath (PathDiag keeps advancing but no
+  // RenderDiag appears). is_realtime_refresh() is only true while is_working();
+  // a buffer-mode single shot keeps it false and falls through to the document,
+  // preserving the blank-screen guard for single shots.
+  if (_data_source && _data_source->is_working() &&
+      _data_source->is_realtime_refresh())
+    return _data_source;
+
   if (_document && _document->has_data()) {
     return _document;
   }
