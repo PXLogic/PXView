@@ -306,8 +306,9 @@ GVariant* DecoderOptions::getter(const char *id)
         return g_variant_ref_sink(g_variant_new_boolean(
             AppConfig::Instance().appOptions.tdmRealtimeDecode));
     }
-    if (GVariant *remembered = remembered_analog_trigger_value(definition, id))
+    if (GVariant *remembered = remembered_analog_trigger_value(definition, id)) {
         return remembered;
+    }
 
 	// Get the value from the hash table if it is already present
 	const map<string, GVariant*>& options = _decoder->options();

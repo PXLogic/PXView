@@ -1036,7 +1036,7 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
     } else {
       snprintf(name_buf, sizeof(name_buf), "device-%d", i);
     }
-    strncpy(entry->name, name_buf, sizeof(entry->name) - 1);
+    snprintf(entry->name, sizeof(entry->name), "%s", name_buf);
     entry->name[sizeof(entry->name) - 1] = '\0';
   }
 
@@ -1067,7 +1067,6 @@ void SigSession::refresh_device_list() {
   std::vector<struct sr_dev_inst *> all_sdi;
   int drv_count = 0;
   int init_fail_count = 0;
-  int scan_found_count = 0;
   for (int i = 0; drivers[i]; i++) {
     struct sr_dev_driver *drv = drivers[i];
     if (!drv)
@@ -1083,7 +1082,6 @@ void SigSession::refresh_device_list() {
     GSList *devs = sr_driver_scan(drv, nullptr);
     int found = g_slist_length(devs);
     if (found > 0) {
-      scan_found_count += found;
       pxv_info("refresh_device_list: driver '%s' found %d device(s)",
                drv->name ? drv->name : "(nullptr)", found);
     }
@@ -1210,9 +1208,6 @@ void SigSession::init_signals() {
   }
 
   std::vector<std::shared_ptr<data::SignalModel>> models;
-  unsigned int logic_probe_count = 0;
-  unsigned int dso_probe_count = 0;
-  unsigned int analog_probe_count = 0;
 
   _state->capture_data()->clear();
   _state->view_data()->clear();
@@ -1226,17 +1221,12 @@ void SigSession::init_signals() {
 
       switch (probe->type) {
       case SR_CHANNEL_LOGIC:
-        if (probe->enabled)
-          logic_probe_count++;
         break;
 
       case SR_CHANNEL_DSO:
-        dso_probe_count++;
         break;
 
       case SR_CHANNEL_ANALOG:
-        if (probe->enabled)
-          analog_probe_count++;
         break;
       }
     }

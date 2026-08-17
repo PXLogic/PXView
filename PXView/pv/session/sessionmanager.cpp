@@ -1,10 +1,11 @@
 #include "pv/session/sessionmanager.h"
 #include "pv/session/tabcontext.h"
-#include "pv/view/view.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/session/sigsession.h"
 
 namespace pv {
+
+namespace view { class View; }
 
 std::unique_ptr<SessionManager> SessionManager::_instance;
 

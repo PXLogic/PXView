@@ -21,6 +21,9 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/mainwindow/file_ops.cpp
     PXView/pv/mainwindow/mainframe.cpp
     PXView/pv/mainwindow/submainframe.cpp
+    # Session orchestration (GUI-only: TabContext/SessionManager drive view::View)
+    PXView/pv/session/sessionmanager.cpp
+    PXView/pv/session/tabcontext.cpp
     # View layer rendering objects
     PXView/pv/view/viewport/viewport.cpp
     PXView/pv/view/renderer/viewport_painter.cpp

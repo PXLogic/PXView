@@ -732,7 +732,16 @@ void Viewport::on_trigger_timer() {
 }
 
 void Viewport::on_progress_timer() {
-  const uint64_t sample_limits = _view.session().cur_samplelimits();
+  // In repeat mode each frame is a discrete acquisition with its own target
+  // sample count (get_sample_limit(), e.g. demo 1M). cur_samplelimits() is set
+  // to the ring-buffer capacity in stream+repeat (to serve the ruler axis), so
+  // using it here would pin the progress bar at ~0.4% (1M/250M) forever even
+  // though the frame is complete. Use the per-frame target for repeat mode so
+  // the bar reaches 100% each frame.
+  const uint64_t sample_limits =
+      _view.session().is_repeat_mode()
+          ? (_view.session().device() ? _view.session().device()->get_sample_limit() : 0)
+          : _view.session().cur_samplelimits();
   if (sample_limits == 0) {
     _progress_displayed = 0.0;
     _progress_timer.stop();

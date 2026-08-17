@@ -68,7 +68,7 @@ private:
 private slots:
     void on_fft_clicked();
     void on_math_clicked();
-    void on_lissajous_enable_changed(int state);
+    void on_lissajous_enable_changed(Qt::CheckState state);
     void on_lissajous_percent_changed(int val);
     void on_lissajous_channel_changed();
 

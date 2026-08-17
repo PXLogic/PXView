@@ -371,13 +371,10 @@ void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 	using pv::data::decode::Decoder;
 	if (!container) return;
 	assert(container);
-
-    int dex = 0;
  
     for(auto &up : _trace->decoder()->stack()) 
     { 
         auto dec = up.get();
-        ++dex;
         QWidget *panel = new QWidget(container);
         QFormLayout *form = new QFormLayout();
         form->setContentsMargins(0,0,0,0);
@@ -1557,12 +1554,61 @@ void DecoderOptionsDlg::create_pwm_fast_options(
     connect(copy,&QPushButton::clicked,this,[ui](){int src=std::clamp(ui->selected_channel,0,3);for(int ch=0;ch<4;++ch){if(ch==src)continue;ui->vzoom[ch]->setValue(ui->vzoom[src]->value());ui->vpos[ch]->setValue(ui->vpos[src]->value());ui->range_mode[ch]->setCurrentIndex(ui->range_mode[src]->currentIndex());ui->eng_min[ch]->setValue(ui->eng_min[src]->value());ui->eng_max[ch]->setValue(ui->eng_max[src]->value());ui->unit[ch]->setText(ui->unit[src]->text());}});
 
     auto fit_selected = [this,ui](bool full){
-        if(!_trace||!_trace->decoder())return; int ch=std::clamp(ui->selected_channel,0,3); std::shared_ptr<pv::data::DecoderAnalogData> data;
-        for(const auto &x:_trace->decoder()->analog_data_copy()) if(x&&x->channel()==ch){data=x;break;} if(!data||data->get_sample_count()==0)return;
-        float mn=0,mx=0; bool found=false;
-        if(full){mn=data->min_value();mx=data->max_value();found=true;}
-        else {auto rv=data->read_samples(); const auto &ss=rv.samples(); if(!ss.empty()&&_trace->get_view()){double sr=_trace->decoder()->samplerate();if(sr<=0)sr=1;double spp=sr*_trace->get_view()->scale();int64_t pix=_trace->get_view()->offset();int w=_trace->get_view()->get_view_width();uint64_t s0=(uint64_t)std::max(0.0,pix*spp),s1=(uint64_t)std::max(0.0,(pix+w)*spp);for(const auto &a:ss){if(a.end_sample<s0)continue;if(a.start_sample>s1)break;if(!found){mn=mx=a.value;found=true;}else{mn=std::min(mn,a.value);mx=std::max(mx,a.value);}}}}
-        if(!found)return; float range=mx-mn; double vz=1.0,vp=1.0;if(range>=0.0001f){vz=std::clamp(2.0/(double)range,0.05,100.0);vp=std::clamp(1.0+0.9*((double)mn+mx)*0.5*vz,-3.0,3.0);}ui->vzoom[ch]->setValue(vz);ui->vpos[ch]->setValue(vp);
+        if (!_trace || !_trace->decoder())
+            return;
+        int ch = std::clamp(ui->selected_channel, 0, 3);
+        std::shared_ptr<pv::data::DecoderAnalogData> data;
+        for (const auto &x : _trace->decoder()->analog_data_copy()) {
+            if (x && x->channel() == ch) {
+                data = x;
+                break;
+            }
+        }
+        if (!data || data->get_sample_count() == 0)
+            return;
+        float mn = 0, mx = 0;
+        bool found = false;
+        if (full) {
+            mn = data->min_value();
+            mx = data->max_value();
+            found = true;
+        } else {
+            auto rv = data->read_samples();
+            const auto &ss = rv.samples();
+            if (!ss.empty() && _trace->get_view()) {
+                double sr = _trace->decoder()->samplerate();
+                if (sr <= 0)
+                    sr = 1;
+                double spp = sr * _trace->get_view()->scale();
+                int64_t pix = _trace->get_view()->offset();
+                int w = _trace->get_view()->get_view_width();
+                uint64_t s0 = (uint64_t)std::max(0.0, pix * spp),
+                         s1 = (uint64_t)std::max(0.0, (pix + w) * spp);
+                for (const auto &a : ss) {
+                    if (a.end_sample < s0)
+                        continue;
+                    if (a.start_sample > s1)
+                        break;
+                    if (!found) {
+                        mn = mx = a.value;
+                        found = true;
+                    } else {
+                        mn = std::min(mn, a.value);
+                        mx = std::max(mx, a.value);
+                    }
+                }
+            }
+        }
+        if (!found)
+            return;
+        float range = mx - mn;
+        double vz = 1.0, vp = 1.0;
+        if (range >= 0.0001f) {
+            vz = std::clamp(2.0 / (double)range, 0.05, 100.0);
+            vp = std::clamp(1.0 + 0.9 * ((double)mn + mx) * 0.5 * vz, -3.0, 3.0);
+        }
+        ui->vzoom[ch]->setValue(vz);
+        ui->vpos[ch]->setValue(vp);
     };
     connect(auto_range,&QPushButton::clicked,this,[fit_selected](){fit_selected(false);});
     connect(full_range,&QPushButton::clicked,this,[fit_selected](){fit_selected(true);});

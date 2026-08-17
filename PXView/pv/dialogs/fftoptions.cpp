@@ -261,7 +261,8 @@ void FftOptions::accept()
                 // #4 FFT 计算 (fftw_execute) 移 worker 线程, 避免阻塞 GUI;
                 // 完成后 SpectrumStack::fft_updated 触发 GUI 线程刷新频谱.
                 auto s = stack;
-                QtConcurrent::run([s]() { s->calc_fft(); });
+                QFuture<void> fut = QtConcurrent::run([s]() { s->calc_fft(); });
+                (void)fut;
             }
             break;
         }

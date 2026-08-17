@@ -445,6 +445,7 @@ void DsoSignal::paint_envelope(QPainter &p,
                                int hw_offset, const double pixels_offset,
                                const double samples_per_pixel,
                                uint64_t num_channels, double trig_hoff) {
+  (void)num_channels;
   using namespace Qt;
   using pv::data::DsoSnapshot;
 

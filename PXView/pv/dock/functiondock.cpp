@@ -145,8 +145,8 @@ FunctionDock::FunctionDock(QWidget *parent, SigSession *session)
         _lisa_percent->setValue(min);
     }
 
-    connect(_lisa_enable, &QCheckBox::stateChanged,
-            this, &FunctionDock::on_lissajous_enable_changed);
+    connect(_lisa_enable, &QCheckBox::checkStateChanged,
+        this, &FunctionDock::on_lissajous_enable_changed);
     connect(_lisa_percent, &QSlider::valueChanged,
             this, &FunctionDock::on_lissajous_percent_changed);
 
@@ -261,7 +261,7 @@ void FunctionDock::on_math_clicked()
         dlg.Apply();
 }
 
-void FunctionDock::on_lissajous_enable_changed(int state)
+void FunctionDock::on_lissajous_enable_changed(Qt::CheckState state)
 {
     bool enable = (state == Qt::Checked);
     _lisa_percent->setEnabled(enable);

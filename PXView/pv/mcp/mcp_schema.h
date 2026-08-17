@@ -154,6 +154,7 @@ public:
     TypedSchemaBuilder& opt(std::string_view name,
                              M S::* member_ptr,
                              std::string_view desc) {
+        (void)member_ptr;
         ParamDesc p;
         p.name        = std::string(name);
         p.json_type   = cpp_type_to_json<M>();
@@ -223,6 +224,7 @@ public:
     TypedSchemaBuilder& opt_arr(std::string_view name,
                                   std::vector<E> S::* member_ptr,
                                   std::string_view desc) {
+        (void)member_ptr;
         ParamDesc p;
         p.name        = std::string(name);
         p.json_type   = "array";

@@ -57,6 +57,7 @@ inline ChangeEventKind compute_change_event_pure(
     const std::set<const void *> &model_ptrs)
 {
     // Empty current + non-empty models → first creation → AllReplaced
+    (void)model_ptrs;
     if (current_indices.empty() && !model_indices.empty())
         return ChangeEventKind::AllReplaced;
 

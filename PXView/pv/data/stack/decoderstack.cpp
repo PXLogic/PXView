@@ -686,7 +686,6 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   const bool adaptive_pwm_fast = logic_di->decoder && logic_di->decoder->id &&
       std::strstr(logic_di->decoder->id, "pwm_waveform_c") != nullptr;
 
-  uint64_t entry_cnt = 0;
   uint64_t i = decode_start;
   bool bError = false;
   bool bEndTime = false;
@@ -869,8 +868,6 @@ return;
       auto self = shared_from_this();
       _host->event_bus_post([self]() { self->new_decode_data(); });
     }
-
-    entry_cnt++;
   }
 
   // P1-B: Clean up iterators after the decode loop.

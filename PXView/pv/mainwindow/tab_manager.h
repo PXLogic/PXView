@@ -30,7 +30,7 @@
 #include <QWidget>
 #include <QPointer>
 
-class Q_WIDGETS_EXPORT QDragEnterEvent;
+class QDragEnterEvent;
 
 namespace pv {
 

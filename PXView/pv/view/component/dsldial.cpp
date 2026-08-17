@@ -84,12 +84,6 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
     p.restore();
     // draw value
 
-    if (_is_math)
-    {
-        int bbb = 0;
-        bbb++;
-    }
-
     auto factor = get_factor();
     auto value = _value[_sel];
     uint64_t displayValue = value  * factor;

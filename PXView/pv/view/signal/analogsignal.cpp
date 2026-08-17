@@ -539,11 +539,9 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   const double samples_per_pixel = samplerate * scale;
   const uint64_t ring_start = _data->get_ring_start();
 
-  int64_t start_pixel;
   uint64_t start_index;
   const double index_offset = pixels_offset * samples_per_pixel;
   start_index = (uint64_t)(ring_start + floor(index_offset)) % cur_sample_count;
-  start_pixel = (floor(index_offset) - index_offset) / samples_per_pixel;
 
   int64_t show_length = min(floor(cur_sample_count - floor(index_offset)),
                             ceil(width * samples_per_pixel + 1));
@@ -664,6 +662,7 @@ void AnalogSignal::paint_per_pixel(
     const int left, const int right, const uint64_t start_index,
     const int64_t sample_count, const double samples_per_pixel, const int order,
     const float top, const float bottom, const int width) {
+  (void)width;
 
   pv::data::AnalogSnapshot *pshot =
       const_cast<pv::data::AnalogSnapshot *>(snapshot);

@@ -473,8 +473,6 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
                 _viewport->cur_aftX() = _viewport->cur_preX();
                 _viewport->cur_aftY() = _viewport->cur_preY();
 
-                static int times = 0;
-                times++;
                 break;
               }
             }

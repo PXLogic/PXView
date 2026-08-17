@@ -41,14 +41,12 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/core/measure_format.cpp     # Extracted pure formatting functions for testability
     PXView/pv/core/cursorregistry.cpp     # Task C2.8: cursor position state (Core layer)
     PXView/pv/session/sigsession.cpp
-    PXView/pv/session/sessionmanager.cpp
     PXView/pv/session/deviceagent.cpp
     PXView/pv/base/dstimer.cpp
     PXView/pv/base/eventobject.cpp
     PXView/pv/base/pxvdef.cpp
     PXView/pv/base/ZipMaker.cpp
     PXView/pv/session/storesession.cpp
-    PXView/pv/session/tabcontext.cpp
     # NOTE: data/*.cpp live in pv/data/CMakeLists.txt (pxview-data STATIC lib)
     # API/remote-control layer (SessionService, transports, RPC dispatcher)
     PXView/pv/api/session_service.cpp
