@@ -3,7 +3,7 @@
  *
  * 验证 raw 版存储 + P5 diff+ctz 毛刺滤波:
  *   - find_first_different_raw (P5 raw 字节扫描) 与 mipmap 树搜索
- *     get_nxt_edge_self 逐位置结果一致性
+ *     get_nxt_edge 逐位置结果一致性
  *   - apply_glitch_filter 滤除窄脉冲 / 保留宽脉冲的正确性
  *
  * 依赖链: logicsnapshot + snapshot + diskcache_writer + glitch_filter
@@ -44,7 +44,7 @@ int xlog_dbg(xlog_writer *w, const char *, ...) { (void)w; return 0; }
 int xlog_detail(xlog_writer *w, const char *, ...) { (void)w; return 0; }
 }
 
-// ── 访问 private 方法: find_first_different_raw / get_nxt_edge_self ──
+// ── 访问 private 方法: find_first_different_raw / get_nxt_edge ──
 // 仅对本测试编译单元生效 (include 后立即 undef), 不污染其它代码。
 #define private public
 #define protected public
@@ -115,7 +115,7 @@ class TestLogicSnapshotRaw : public QObject
     Q_OBJECT
 
 private slots:
-    // P5 一致性: find_first_different_raw == get_nxt_edge_self (逐位置)
+    // P5 一致性: find_first_different_raw == get_nxt_edge (逐位置)
     void test_find_first_different_matches_tree();
     void test_find_first_different_matches_tree_multi_block();
     void test_find_first_different_constant_tail();
@@ -158,7 +158,7 @@ void TestLogicSnapshotRaw::test_find_first_different_matches_tree()
 
         uint64_t idx_tree = start;
         const bool found_tree =
-            snap.get_nxt_edge_self(idx_tree, expected, N - 1, 0, sig);
+            snap.get_nxt_edge(idx_tree, expected, N - 1, 0, sig);
 
         QCOMPARE(found_raw, found_tree);
         if (found_raw) {
@@ -212,7 +212,7 @@ void TestLogicSnapshotRaw::test_find_first_different_matches_tree_multi_block()
             snap.find_first_different_raw(order, start, N - 1, expected, out_raw);
         uint64_t idx_tree = start;
         const bool found_tree =
-            snap.get_nxt_edge_self(idx_tree, expected, N - 1, 0, sig);
+            snap.get_nxt_edge(idx_tree, expected, N - 1, 0, sig);
         QCOMPARE(found_raw, found_tree);
         if (found_raw) {
             QCOMPARE(out_raw, idx_tree);
@@ -253,7 +253,7 @@ void TestLogicSnapshotRaw::test_find_first_different_constant_tail()
         snap.find_first_different_raw(order, start, N - 1, expected, out_raw);
     uint64_t idx_tree = start;
     const bool found_tree =
-        snap.get_nxt_edge_self(idx_tree, expected, N - 1, 0, sig);
+        snap.get_nxt_edge(idx_tree, expected, N - 1, 0, sig);
 
     QVERIFY(!found_raw);
     QVERIFY(!found_tree);
@@ -266,7 +266,7 @@ void TestLogicSnapshotRaw::test_find_first_different_constant_tail()
         snap.find_first_different_raw(order, start2, N - 1, expected2, out_raw2);
     uint64_t idx_tree2 = start2;
     const bool found_tree2 =
-        snap.get_nxt_edge_self(idx_tree2, expected2, N - 1, 0, sig);
+        snap.get_nxt_edge(idx_tree2, expected2, N - 1, 0, sig);
     QCOMPARE(found_raw2, found_tree2);
     if (found_raw2) {
         QCOMPARE(out_raw2, idx_tree2);
@@ -321,7 +321,7 @@ void TestLogicSnapshotRaw::test_find_first_different_uninstantiated_block()
         QCOMPARE(out, LB);
         // 与 mipmap 树搜索一致
         uint64_t idx_tree = 5000;
-        QVERIFY(snap.get_nxt_edge_self(idx_tree, false, N - 1, 0, sig));
+        QVERIFY(snap.get_nxt_edge(idx_tree, false, N - 1, 0, sig));
         QCOMPARE(idx_tree, LB);
     }
 
@@ -332,7 +332,7 @@ void TestLogicSnapshotRaw::test_find_first_different_uninstantiated_block()
         QVERIFY(f);
         QCOMPARE(out, 2 * LB);
         uint64_t idx_tree = LB + 1000;
-        QVERIFY(snap.get_nxt_edge_self(idx_tree, true, N - 1, 0, sig));
+        QVERIFY(snap.get_nxt_edge(idx_tree, true, N - 1, 0, sig));
         QCOMPARE(idx_tree, 2 * LB);
     }
 

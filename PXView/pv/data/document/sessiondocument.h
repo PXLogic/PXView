@@ -123,7 +123,6 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   int get_map_zoom() override;
   double get_logic_data_view_time() override;
   bool is_repeating() override;
-  bool is_running_status() override;
   bool is_instant() override;
   bool have_view_data() override;
   bool is_working() override;

@@ -58,6 +58,17 @@ namespace data {
 // the nested FillRange type.
 class LogicSnapshotGlitchFilter;
 
+// Extracted pattern-search subsystem. Defined in
+// logicsnapshot_pattern_search.h/.cpp. Forward-declared here; LogicSnapshot
+// holds it via unique_ptr and forwards the public pattern_search method.
+class LogicSnapshotPatternSearch;
+
+// Extracted display-edge scan subsystem. Defined in
+// logicsnapshot_edge_scan.h/.cpp. Forward-declared here; LogicSnapshot
+// holds it via unique_ptr and forwards the three public edge-scan methods
+// (get_display_edges / get_nxt_edge / get_pre_edge).
+class LogicSnapshotEdgeScan;
+
 class LogicSnapshot : public Snapshot
 {
 private:
@@ -273,25 +284,6 @@ private:
     bool get_sample_unlock(uint64_t index, int sig_index);
     bool get_sample_self(uint64_t index, int sig_index);
 
-    // C3 (P9-on-raw): shared display-edge scan body, operating on PHYSICAL
-    // sample coordinates. Caller guarantees start/end are physical (loop:
-    // pre-adjusted by +_loop_offset; finite: user coords == physical) and the
-    // required synchronization is in effect (finite: lock-free via
-    // committed_sample_count(); loop: caller holds _mutex and has temporarily
-    // added _loop_offset to _ring_sample_count). `sample_count` is the upper
-    // bound the scan may touch.
-    bool get_display_edges_common(
-        std::vector<std::pair<bool, bool>> &edges,
-        std::vector<std::pair<uint16_t, bool>> &togs,
-        uint64_t start, uint64_t end, uint16_t width, uint16_t max_togs,
-        double pixels_offset, double min_length, uint16_t sig_index,
-        uint64_t sample_count);
-
-    bool get_nxt_edge_unlock(uint64_t &index, bool last_sample, uint64_t end,
-                      double min_length, int sig_index);
-    bool get_nxt_edge_self(uint64_t &index, bool last_sample, uint64_t end,
-                      double min_length, int sig_index);
-
     // P5 diff 扫描 (spec 阶段3): 直接对 raw 块字节做 u64 差分 + ctz
     // (bsf_folded) 定位 [start, end] 内第一个与 expected_level 不同的采样点,
     // 输出到 out_pos 并返回 true. 相比 mipmap 树搜索 (get_nxt_edge_self),
@@ -300,12 +292,6 @@ private:
     // 调用方保证 start 处电平 == expected_level.
     bool find_first_different_raw(int order, uint64_t start, uint64_t end,
                                   bool expected_level, uint64_t &out_pos);
-
-    bool get_pre_edge_self(uint64_t &index, bool last_sample,
-                      double min_length, int sig_index);
-
-    bool pattern_search_self(int64_t start, int64_t end, int64_t& index,
-                        std::map<uint16_t, QString> &pattern, bool isNext);
 
     int get_ch_order(int sig_index);
 
@@ -318,18 +304,6 @@ private:
      *  deinterleave. Called by DiskCacheWriter async worker when
      *  logic.format == LA_CROSS_DATA. */
     void append_cross_payload(const sr_datafeed_logic &logic);
-
-    bool lbp_nxt_edge(uint64_t &index, uint64_t root_index, uint64_t lbp_tog, uint8_t lbp_tog_pos,
-                      bool aft_tog, uint8_t aft_pos, bool last_sample, int sig_index);
-
-    bool block_nxt_edge(uint64_t *lbp, uint64_t &index, uint64_t block_end, bool last_sample,
-                        unsigned int min_level);
-
-    bool lbp_pre_edge(uint64_t &index, uint64_t root_index, uint64_t lbp_tog, uint8_t &lbp_tog_pos,
-                      bool pre_tog, uint8_t pre_pos, bool last_sample, int sig_index);
-
-    bool block_pre_edge(uint64_t *lbp, uint64_t &index, bool last_sample,
-                        unsigned int min_level, int sig_index);
 
     inline uint8_t bsf_folded (uint64_t bb)
     {
@@ -446,6 +420,14 @@ private:
     // non-const methods on the helper.
     mutable std::unique_ptr<LogicSnapshotGlitchFilter> _glitch_filter;
 
+    // Extracted pattern-search subsystem. mutable so const forwarders can call
+    // non-const methods on the helper.
+    mutable std::unique_ptr<LogicSnapshotPatternSearch> _pattern_search;
+
+    // Extracted display-edge scan subsystem. mutable so const forwarders can
+    // call non-const methods on the helper.
+    mutable std::unique_ptr<LogicSnapshotEdgeScan> _edge_scan;
+
     // P1-6 fix: Iterator reference count — prevents free_data/free_head_blocks
     // from freeing memory while get_samples() or other readers are active.
     // Matches PulseView's Segment::iterator_count_ mechanism.
@@ -453,6 +435,8 @@ private:
 
     friend class ::LogicSnapshotDiskCacheWriter;
     friend class LogicSnapshotGlitchFilter;
+    friend class LogicSnapshotPatternSearch;
+    friend class LogicSnapshotEdgeScan;
 };
 
 } // namespace data

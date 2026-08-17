@@ -32,7 +32,6 @@ namespace pv {
 namespace data {
 
 Snapshot::Snapshot(int unit_size, uint64_t total_sample_count, unsigned int channel_num)
-    : QObject(nullptr)
 {
     assert(unit_size > 0);
 
@@ -128,29 +127,11 @@ uint64_t Snapshot::ring_end()
 void Snapshot::capture_ended()
 {
     _last_ended = true;
-    // C-2: Mark segment as complete and emit completed() signal so
-    // that any listener (e.g. SigSession, DecoderStack) is notified
-    // via Qt's signal/slot mechanism instead of polling _last_ended.
-    set_complete();
-}
-
-// C-2: Segment completion — sets flag and emits Qt signal.
-// This replaces polling-based completion detection.
-void Snapshot::set_complete()
-{
-    {
-        // _is_complete is atomic, but we use the mutex to establish
-        // a happens-before relationship with any reader that holds _mutex.
-        std::lock_guard<std::recursive_mutex> lock(_mutex);
-        _is_complete = true;
-    }
+    // The removed C-2 set_complete() set both _is_complete and
+    // _mem_optimization_requested. With the QObject/signal path gone,
+    // only the _mem_optimization_requested flag is preserved so that
+    // free_unused_memory() triggering behavior is unchanged.
     _mem_optimization_requested = true;
-    emit completed();
-}
-
-bool Snapshot::is_complete() const
-{
-    return _is_complete.load(std::memory_order_acquire);
 }
 
 // B-6: Default no-op. Subclasses (e.g. LogicSnapshot) override to free
@@ -169,77 +150,6 @@ void Snapshot::set_samplerate(double samplerate)
         return;
     }
     _samplerate = samplerate;
-}
-
-// ============================================================================
-// B-1: Multi-segment support
-// ============================================================================
-
-uint32_t Snapshot::get_segment_count() const
-{
-    return _segment_count;
-}
-
-uint32_t Snapshot::get_current_segment_id() const
-{
-    return _current_segment_id;
-}
-
-void Snapshot::set_current_segment_id(uint32_t id)
-{
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    _current_segment_id = id;
-}
-
-uint32_t Snapshot::create_new_segment()
-{
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-
-    // Complete the current segment if not already.
-    if (!_is_complete.load(std::memory_order_acquire)) {
-        _is_complete.store(true, std::memory_order_release);
-        emit completed();
-    }
-
-    // Allocate a new segment ID.
-    uint32_t new_id = _segment_count;
-    _segment_count++;
-    _current_segment_id = new_id;
-
-    // Grow the per-segment sample count vector.
-    if (_segment_sample_counts.size() < _segment_count)
-        _segment_sample_counts.resize(_segment_count, 0);
-
-    // Reset completion flag for the new segment.
-    _is_complete.store(false, std::memory_order_release);
-
-    return new_id;
-}
-
-uint64_t Snapshot::get_total_sample_count_across_segments() const
-{
-    // _mutex is mutable, so we can lock directly in const methods.
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    uint64_t total = 0;
-    for (uint32_t i = 0; i < _segment_count; i++) {
-        if (i < _segment_sample_counts.size())
-            total += _segment_sample_counts[i];
-        else
-            total += _sample_count;  // fallback for single-segment
-    }
-    return total;
-}
-
-uint64_t Snapshot::get_segment_sample_count(uint32_t segment_id) const
-{
-    // _mutex is mutable, so we can lock directly in const methods.
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    if (segment_id < _segment_sample_counts.size())
-        return _segment_sample_counts[segment_id];
-    // Single-segment backward compatibility
-    if (segment_id == 0)
-        return _sample_count;
-    return 0;
 }
 
 } // namespace data

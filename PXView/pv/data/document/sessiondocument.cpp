@@ -193,8 +193,6 @@ double SessionDocument::get_logic_data_view_time() { return 0.0; }
 
 bool SessionDocument::is_repeating() { return false; }
 
-bool SessionDocument::is_running_status() { return false; }
-
 bool SessionDocument::is_instant() { return false; }
 
 bool SessionDocument::have_view_data() { return has_data(); }

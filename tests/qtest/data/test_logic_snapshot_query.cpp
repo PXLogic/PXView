@@ -3,8 +3,8 @@
  *
  * 用 get_sample() 的暴力逐位扫描作为 ground truth, 对拍:
  *   - get_samples()     字节展开正确性 (返回字节逐位 == get_sample)
- *   - get_nxt_edge_self 下一跳变位置 (向右)
- *   - get_pre_edge_self 上一跳变位置 (向左)
+ *   - get_nxt_edge 下一跳变位置 (向右)
+ *   - get_pre_edge 上一跳变位置 (向左)
  *   - get_display_edges 渲染边 sanity (width/togs 约束 + toggle 电平翻转)
  *
  * 纯数据层, 无 QWidget 依赖。依赖链同 test_logic_snapshot_raw。
@@ -145,11 +145,11 @@ private slots:
     void test_get_samples_multi_block();
     void test_get_samples_constant_block();
 
-    // get_nxt_edge_self 对拍暴力向右
+    // get_nxt_edge 对拍暴力向右
     void test_nxt_edge_vs_brute();
     void test_nxt_edge_vs_brute_multi_block();
 
-    // get_pre_edge_self 对拍暴力向左
+    // get_pre_edge 对拍暴力向左
     void test_pre_edge_vs_brute();
 
     // get_display_edges sanity
@@ -293,7 +293,7 @@ void TestLogicSnapshotQuery::test_nxt_edge_vs_brute()
         const bool b_exp = brute_nxt(snap, start, N - 1, sig, &brute_pos);
 
         uint64_t idx = start;
-        const bool f = snap.get_nxt_edge_self(idx, snap.get_sample(start, sig),
+        const bool f = snap.get_nxt_edge(idx, snap.get_sample(start, sig),
                                               N - 1, 0, sig);
         QCOMPARE((int)f, (int)b_exp);
         if (b_exp)
@@ -324,7 +324,7 @@ void TestLogicSnapshotQuery::test_nxt_edge_vs_brute_multi_block()
         uint64_t brute_pos = 0;
         const bool b_exp = brute_nxt(snap, start, N - 1, sig, &brute_pos);
         uint64_t idx = start;
-        const bool f = snap.get_nxt_edge_self(idx, snap.get_sample(start, sig),
+        const bool f = snap.get_nxt_edge(idx, snap.get_sample(start, sig),
                                               N - 1, 0, sig);
         QCOMPARE((int)f, (int)b_exp);
         if (b_exp)
@@ -356,7 +356,7 @@ void TestLogicSnapshotQuery::test_pre_edge_vs_brute()
         const bool b_exp = brute_pre(snap, start, sig, &brute_pos);
 
         uint64_t idx = start;
-        const bool f = snap.get_pre_edge_self(idx, snap.get_sample(start, sig),
+        const bool f = snap.get_pre_edge(idx, snap.get_sample(start, sig),
                                               1 /*min_length*/, sig);
         QCOMPARE((int)f, (int)b_exp);
         if (b_exp)

@@ -213,6 +213,8 @@ pv_add_qtest(test_logic_snapshot_raw
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_logic_snapshot_raw PRIVATE
@@ -228,6 +230,8 @@ pv_add_qtest(test_logic_snapshot_query
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_logic_snapshot_query PRIVATE
@@ -244,6 +248,8 @@ pv_add_qtest(test_logic_snapshot_cross_throughput
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_logic_snapshot_cross_throughput PRIVATE
@@ -268,6 +274,8 @@ pv_add_qtest(test_logic_snapshot_cross_alignment
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_logic_snapshot_cross_alignment PRIVATE
@@ -283,9 +291,116 @@ pv_add_qtest(test_glitch_filter
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
 )
 target_include_directories(test_glitch_filter PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== LogicSnapshot pattern 搜索子系统 + 显示边沿转发 (B5 扩展) ====
+# pattern_search() / get_display_edges() / get_nxt_edge() / get_pre_edge()
+# 的子系统实现 + 转发路径测试。依赖链同 test_logic_snapshot_query。
+pv_add_qtest(test_logic_snapshot_pattern_search
+    data/test_logic_snapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_snapshot_pattern_search PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== AnalogSnapshot 数据层 (first_payload/append_payload/envelope/范围) ====
+# 依赖: analogsnapshot + snapshot + libsigrok 头 + common (xlog.h)。内部 stub xlog。
+pv_add_qtest(test_analog_snapshot
+    data/test_analog_snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/analogsnapshot.cpp
+)
+target_include_directories(test_analog_snapshot PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== DsoSnapshot 数据层 (first_payload/append_payload/envelope/instant) ====
+# 依赖: dsosnapshot + snapshot + libsigrok 头 + common (xlog.h)。内部 stub xlog。
+pv_add_qtest(test_dso_snapshot
+    data/test_dso_snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/dsosnapshot.cpp
+)
+target_include_directories(test_dso_snapshot PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== SignalModel / SignalConfigStore 数据层 ====
+# signalmodel.cpp / signalconfigstore.cpp 使用 g_free/g_strdup (glib), 显式链接
+# -lglib-2.0 (link_directories 已在 deps.cmake 全局设置)。snapshot.cpp 编译进目标
+# 仅为提供 Snapshot 抽象基类的符号 (测试定义了 TestSnapshot 子类)。
+pv_add_qtest(test_signal_model
+    data/test_signal_model.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalconfigstore.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+)
+target_include_directories(test_signal_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_signal_model PRIVATE -lglib-2.0)
+
+# ==== SessionData/SessionDocument/SessionSnapshot (data 层 document trio) ====
+# 走 Route B: 链接 pxview-core 静态库 (复用预编译 core/data/config 对象), 与
+# test_capture_manager / test_decode_task_manager 同一套链接桩外壳:
+#   * pxv_log 由 pxview-core 的 log.cpp 提供; xlog_* 由 common/log/xlog.c 提供
+#     (测试文件内不再自行定义, 否则重复符号 —— 已从 test_session_document.cpp 移除)。
+#   * libsigrokdecode + common/*.c 直接编入目标, 提供 decoderstack 的 srd_* 与
+#     xlog_*; libsigrok 以 --whole-archive 链接。
+#   * AUTOMOC 为被间接包含的 QObject 头 (dstimer/decoderstack) 生成 moc, 补上
+#     静态库不携带的 vtable/meta 符号。
+pv_add_qtest(test_session_document
+    data/test_session_document.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+)
+target_include_directories(test_session_document PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+target_sources(test_session_document PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+)
+# 顺序: 须把 Qt6::Gui 放在静态库之后 (见 test_capture_manager 注释)。
+target_link_libraries(test_session_document PRIVATE pxview-core Qt6::Gui)
+target_link_options(test_session_document PRIVATE -Wl,--no-as-needed)
+if(WIN32)
+    target_link_libraries(test_session_document PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_session_document PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
+
+# ==== DiskCache 子系统 (config/mmap/buffer-manager/write-thread/read-cache) ====
+# 5 个 cache 类编译进目标, 内部 stub xlog。纯数据层, 无 QWidget 依赖。
+pv_add_qtest(test_disk_cache
+    data/test_disk_cache.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_buffer_manager.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_read_cache.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_write_thread.cpp
+)
+target_include_directories(test_disk_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
     ${CMAKE_SOURCE_DIR}/common
 )
