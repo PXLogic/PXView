@@ -3683,6 +3683,15 @@ Result<void> SessionService::save_file(const std::string &path) {
     HeadlessSessionDataGetter getter(_session, _device);
     store._sessionDataGetter = &getter;
     store.SetFileName(QString::fromStdString(path));
+    // 应用 save_capture 传入的 startSample/endSample 范围（与 GUI 光标保存一致）。
+    // 之前 _save_start/_save_end 只被 CSV/binary 导出路径消费，.pxl/.pxc 保存
+    // 完全忽略，导致 MCP save_capture(startSample, endSample) 总是保存整个捕获，
+    // 无法实现带范围保存（"范围异常"）。
+    store.SetDataRange(_session->get_save_start(), _session->get_save_end());
+    // 消费后清除保存范围，使后续 save/export 操作默认使用完整捕获。
+    // 否则 range 在 session 中持续残留，导致不设范围的 save 也被截断。
+    _session->set_save_start(0);
+    _session->set_save_end(0);
     // Serialize MCP decoders (they live on the API document in headless,
     // which differs from the active document) so save→load round-trips them.
     if (data::SessionDocument *api_doc = api_document())

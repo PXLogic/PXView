@@ -641,8 +641,54 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         sprintf(meta, "device mode = %d\n", mode); str += meta;
     }
  
+    // 光标范围保存：header 中的 "total samples" 必须与实际写入文件的数据长度一致，
+    // 否则加载时 get_sample_limit() 使用整个捕获长度，而 .pxl 内实际数据只有光标
+    // 范围，导致视图时间轴/光标/触发标记错位（用户反馈的"范围异常/数据异常"）。
+    // 同时 "trigger pos" 要按保存起点偏移，使触发标记在重载后仍对齐到正确采样点。
+    // 此处与 save_logic() 使用相同的 64 采样对齐规则，避免二者口径漂移。
+    uint64_t saved_samples = snapshot->get_sample_count();
+    uint64_t saved_trig_pos = _session->get_trigger_pos();
+    data::LogicSnapshot *logic_snap_for_meta =
+        dynamic_cast<data::LogicSnapshot*>(snapshot);
+    if (logic_snap_for_meta) {
+        uint64_t ring = logic_snap_for_meta->get_ring_sample_count();
+        uint64_t start_index = _start_index;
+        uint64_t end_index = _end_index;
+        if (start_index > ring)
+            start_index = 0;
+        if (end_index > ring)
+            end_index = 0;
+        if (start_index > 0)
+            start_index -= start_index % 64;
+        if (end_index > 0) {
+            if (end_index % 64 != 0)
+                end_index += 64 - end_index % 64;
+            if (end_index > ring)
+                end_index = 0;
+        }
+        if (start_index > 0 && end_index > 0) {
+            saved_samples = end_index - start_index;
+            if (saved_trig_pos >= start_index)
+                saved_trig_pos -= start_index;
+            else
+                saved_trig_pos = 0;
+            if (saved_trig_pos > saved_samples)
+                saved_trig_pos = saved_samples;
+        } else if (start_index > 0) {
+            saved_samples = ring - start_index;
+            if (saved_trig_pos >= start_index)
+                saved_trig_pos -= start_index;
+            else
+                saved_trig_pos = 0;
+        } else if (end_index > 0) {
+            saved_samples = end_index;
+            if (saved_trig_pos > end_index)
+                saved_trig_pos = end_index;
+        }
+    }
+
     sprintf(meta, "capturefile = data\n"); str += meta;
-    sprintf(meta, "total samples = %" PRIu64 "\n", snapshot->get_sample_count()); str += meta;
+    sprintf(meta, "total samples = %" PRIu64 "\n", saved_samples); str += meta;
 
     // MSO 架构修复：按通道类型分别统计 logic/analog 通道数。
     // session_file.c 解析时：total probes → 创建 SR_CHANNEL_LOGIC，
@@ -751,7 +797,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             sprintf(meta, "ref max = %d\n", tmp_u32); str += meta;
         }
     }
-    sprintf(meta, "trigger pos = %" PRIu64 "\n", _session->get_trigger_pos()); str += meta;
+    sprintf(meta, "trigger pos = %" PRIu64 "\n", saved_trig_pos); str += meta;
 
     /* trigger time: written in ALL modes (not just LOGIC) so the frontend
      * can restore the original capture timestamp when reopening a .pxl file.
@@ -1512,8 +1558,11 @@ bool StoreSession::decoders_gen(std::string &str)
     if (!gen_decoders_json(dec_array))
         return false;
     QJsonDocument sessionDoc(dec_array);
-    QString data = QString::fromUtf8(sessionDoc.toJson()); 
-    str = std::string(data.toLocal8Bit().data());
+    // 使用 toJson() 的原始 QByteArray（UTF-8）按长度写入，避免经
+    // QString/const char* 的 C 字符串转换在遇到 NUL 字节时截断 JSON，
+    // 否则 .pxl 的 "decoders" 入口可能被截断，加载时无法恢复解码器设置。
+    QByteArray ba = sessionDoc.toJson();
+    str = std::string(ba.constData(), ba.size());
     return true;
 }
 

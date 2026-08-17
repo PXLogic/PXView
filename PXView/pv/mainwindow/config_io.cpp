@@ -397,8 +397,10 @@ bool MainWindowConfigIO::genSessionData(std::string &str) {
   }
 
   QJsonDocument sessionDoc(sessionVar);
-  QString data = QString::fromUtf8(sessionDoc.toJson());
-  str.append(data.toLocal8Bit().data());
+  // 按长度写入原始 UTF-8 字节，避免 C 字符串转换在 NUL 处截断 JSON，
+  // 否则 "session" 入口内容不完整会导致加载时解码器等配置无法恢复。
+  QByteArray ba = sessionDoc.toJson();
+  str.append(ba.constData(), ba.size());
   return true;
 }
 
@@ -905,9 +907,9 @@ QJsonDocument MainWindowConfigIO::get_config_json_from_data_file(QString file,
   auto *data = rd.GetInnterFileData("session");
 
   if (data != nullptr) {
-    QByteArray raw_bytes = QByteArray::fromRawData(data->data(), data->size());
-    QString jsonStr(raw_bytes.data());
-    QByteArray qbs = jsonStr.toUtf8();
+    // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
+    // 导致 "session" 入口 JSON 解析失败（解码器等配置无法恢复）。
+    QByteArray qbs = QByteArray(data->data(), (int)data->size());
     sessionDoc = QJsonDocument::fromJson(qbs, &error);
 
     if (error.error != QJsonParseError::NoError) {
@@ -941,9 +943,9 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
   auto *data = rd.GetInnterFileData("decoders");
 
   if (data != nullptr) {
-    QByteArray raw_bytes = QByteArray::fromRawData(data->data(), data->size());
-    QString jsonStr(raw_bytes.data());
-    QByteArray qbs = jsonStr.toUtf8();
+    // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
+    // 导致 "decoders" 入口 JSON 解析失败（解码器设置无法恢复）。
+    QByteArray qbs = QByteArray(data->data(), (int)data->size());
     QJsonDocument sessionDoc = QJsonDocument::fromJson(qbs, &error);
 
     if (error.error != QJsonParseError::NoError) {
