@@ -442,38 +442,88 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                 const size_t end_idx = range.second;
 
                 if (start_idx < end_idx) {
+                  const int vis_width = right - left + 1;
+
+                  // When the visible slice contains far more annotations
+                  // than screen pixels (e.g. ~1.5M PWM annotations zoomed
+                  // out to the full capture), aggregating every sub-pixel
+                  // fragment into a per-column colour bucket keeps the draw
+                  // cost at O(screen width) instead of O(N) fillRect calls.
+                  const size_t dense_threshold =
+                      (size_t)std::max(8, vis_width) * 4;
+                  const bool dense = (end_idx - start_idx) > dense_threshold;
+
+                  std::vector<uint8_t> col_valid;
+                  std::vector<uint8_t> col_color;
+                  QColor dense_colors[16];
+                  if (dense) {
+                    col_valid.assign(vis_width, 0);
+                    col_color.assign(vis_width, 0);
+                    for (int c = 0; c < 16; c++)
+                      dense_colors[c] = getAnnColor(c);
+                  }
+
                   double last_x = -1;
                   double last_drawn_start = -1;
-                  for (size_t idx = start_idx; idx < end_idx; idx++) {
-                    const Annotation *a = row_data->annotation_at(idx);
-                    if (!a)
-                      break;
 
-                    const uint64_t span_samples =
-                        a->end_sample() > a->start_sample()
-                            ? a->end_sample() - a->start_sample()
-                            : 0;
-                    const double ann_width =
-                        span_samples / samples_per_pixel;
-                    if (ann_width < 2.0) {
-                      // Tiny individual fragment: cheap color block fallback
-                      const double x = a->start_sample() / samples_per_pixel -
-                                       pixels_offset;
-                      if (x < left - DrawPadding || x > right + DrawPadding)
+                  // Iterate the visible range under a single shared lock
+                  // (one lock per row instead of one per annotation).
+                  row_data->for_each_index(
+                      start_idx, end_idx, [&](const Annotation &a) {
+                        const uint64_t span_samples =
+                            a.end_sample() > a.start_sample()
+                                ? a.end_sample() - a.start_sample()
+                                : 0;
+                        const double ann_width =
+                            span_samples / samples_per_pixel;
+                        if (ann_width < 2.0) {
+                          // Tiny individual fragment: cheap colour block
+                          const double x = a.start_sample() / samples_per_pixel -
+                                           pixels_offset;
+                          if (x < left - DrawPadding ||
+                              x > right + DrawPadding)
+                            return;
+                          if (dense) {
+                            // Bucket by pixel column; last writer wins,
+                            // matching the previous per-annotation
+                            // overpaint behaviour.
+                            const int col = (int)x;
+                            if (col >= left && col < left + vis_width) {
+                              col_valid[col - left] = 1;
+                              col_color[col - left] =
+                                  (uint8_t)((a.type() % MaxAnnType) % 16);
+                            }
+                          } else {
+                            const size_t colour =
+                                (a.type() % MaxAnnType) % 16;
+                            const QColor fill = getAnnColor(colour);
+                            p.fillRect(QRectF(x, y - annotation_height * 0.5,
+                                              std::max(1.0, ann_width),
+                                              annotation_height),
+                                       fill);
+                          }
+                          last_drawn_start = x;
+                          last_x = std::max(
+                              last_x, x + std::max(1.0, ann_width));
+                        } else {
+                          draw_annotation(a, p, get_text_colour(),
+                                          annotation_height, left, right,
+                                          samples_per_pixel, pixels_offset, y,
+                                          0, ann_width, fore, back, last_x,
+                                          last_drawn_start);
+                        }
+                      });
+
+                  // Flush dense per-column buckets: one fillRect per pixel
+                  // column instead of per annotation.
+                  if (dense) {
+                    for (int i = 0; i < vis_width; i++) {
+                      if (!col_valid[i])
                         continue;
-                      const size_t colour = (a->type() % MaxAnnType) % 16;
-                      const QColor fill = getAnnColor(colour);
-                      p.fillRect(QRectF(x, y - annotation_height * 0.5,
-                                        std::max(1.0, ann_width),
+                      p.fillRect(QRectF((double)(left + i),
+                                        y - annotation_height * 0.5, 1.0,
                                         annotation_height),
-                                 fill);
-                      last_drawn_start = x;
-                      last_x = std::max(last_x, x + std::max(1.0, ann_width));
-                    } else {
-                      draw_annotation(*a, p, get_text_colour(), annotation_height,
-                                      left, right, samples_per_pixel,
-                                      pixels_offset, y, 0, ann_width, fore,
-                                      back, last_x, last_drawn_start);
+                                 dense_colors[col_color[i]]);
                     }
                   }
                 }

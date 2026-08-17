@@ -86,8 +86,21 @@ public:
   std::pair<size_t, size_t> get_visible_range(uint64_t start_sample,
                                               uint64_t end_sample);
   size_t find_index_after_sample(uint64_t sample);
-  const Annotation *annotation_at(size_t index);
   const Annotation *get_first_annotation_ending_after(uint64_t sample);
+
+  // Iterate annotations in [start_idx, end_idx) under a single shared lock.
+  // The previous render path called annotation_at() per element, acquiring
+  // and releasing the shared_mutex N times per repaint for dense rows
+  // (~1.5M annotations -> ~1.5M lock/unlock cycles on the GUI thread).
+  // Indices stay stable across appends because std::deque never reallocates,
+  // so the decode thread can keep appending while the caller iterates.
+  template <typename Fn>
+  void for_each_index(size_t start_idx, size_t end_idx, Fn &&fn) {
+    std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
+    const size_t n = _annotations.size();
+    for (size_t i = start_idx; i < end_idx && i < n; i++)
+      fn(_annotations[i]);
+  }
 
 private:
   uint64_t _max_annotation;

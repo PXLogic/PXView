@@ -162,11 +162,17 @@ std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
 
   size_t start_idx = std::distance(_annotations.begin(), it);
 
-  size_t end_idx = start_idx;
-  for (; end_idx < _annotations.size(); ++end_idx) {
-    if (_annotations[end_idx].start_sample() > end_sample)
-      break;
-  }
+  // End boundary: first annotation whose start_sample > end_sample.
+  // The deque is ordered by start_sample (decode append order), so the end
+  // boundary is a binary search instead of the previous O(N) linear scan.
+  // A row with ~1.5M annotations previously scanned all of them on every
+  // repaint (worst case when zoomed out to the full capture), which stalled
+  // the GUI thread.
+  auto it_end = std::upper_bound(
+      _annotations.begin(), _annotations.end(), end_sample,
+      [](uint64_t val, const Annotation &a) { return val < a.start_sample(); });
+
+  size_t end_idx = std::distance(_annotations.begin(), it_end);
 
   return {start_idx, end_idx};
 }
@@ -179,14 +185,6 @@ size_t RowData::find_index_after_sample(uint64_t sample) {
       [](uint64_t val, const Annotation &a) { return val < a.start_sample(); });
 
   return std::distance(_annotations.begin(), it);
-}
-
-const Annotation *RowData::annotation_at(size_t index) {
-  std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
-
-  if (index < _annotations.size())
-    return &_annotations[index];
-  return nullptr;
 }
 
 const Annotation *RowData::get_first_annotation_ending_after(uint64_t sample) {
