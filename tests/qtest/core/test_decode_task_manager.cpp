@@ -1,7 +1,7 @@
 /*
  * test_decode_task_manager.cpp — QTest unit tests for DecodeTaskManager
  *
- * Spec harden-review-findings, T8.
+ * Spec harden-review-findings, T8; rst_decoder-fix regression, T7.
  *
  * Focus: the decode thread-pool harness owned by DecodeTaskManager —
  *   * de-dup on add_decode_task (a stack already registered in _running_tasks
@@ -9,7 +9,11 @@
  *   * the add -> worker executes decode_single_task -> dequeue lifecycle
  *     (running set returns to empty, completion fired exactly once),
  *   * stop() is idempotent and clears the running set,
- *   * clear_all_decode_task() empties the running set and resets the index.
+ *   * clear_all_decode_task() empties the running set and resets the index,
+ *   * (T7) rst_decoder() normal path: remove -> wait(true) -> clear ->
+ *     re-add drains cleanly and leaves the stack re-enqueueable,
+ *   * (T7) wait_for_task_finished() returns true for a never-enqueued stack,
+ *     for a drained stack, and for a null stack (early exit).
  *
  * Reasons you cannot merely substitute a "fake" stack here:
  *   DecodeTaskManager operates on the CONCRETE type
@@ -265,7 +269,14 @@ public:
     std::vector<std::shared_ptr<DecoderStack>> &get_decoder_stacks(pv::data::SessionDocument * = nullptr) override {
         return trace_stack;
     }
-    std::shared_ptr<DecoderStack> get_decoder_trace(int, pv::data::SessionDocument * = nullptr) override {
+    std::shared_ptr<DecoderStack> get_decoder_trace(int index, pv::data::SessionDocument * = nullptr) override {
+        // T7: rst_decoder() resolves its target stack through this accessor.
+        // In-range indexes resolve against trace_stack so the normal path
+        // (remove -> wait -> clear -> re-add) is exercisable; out-of-range
+        // keeps returning nullptr (the previous behavior — no existing test
+        // ever calls this, so the shell change is inert for them).
+        if (index >= 0 && index < static_cast<int>(trace_stack.size()))
+            return trace_stack[index];
         return nullptr;
     }
     int get_trace_index_by_key_handel(void *handel, pv::data::SessionDocument * = nullptr) override {
@@ -330,6 +341,8 @@ private slots:
     void DeduplicatedAddWhileRegistered();
     void StopClearsRunningSetAndIsIdempotent();
     void ClearAllDecodeTaskEmptiesAndResetsIndex();
+    void test_rst_decoder_normal_path();
+    void test_wait_for_task_finished_returns_true_when_not_running();
     void cleanupTestCase();
 };
 
@@ -530,6 +543,108 @@ void TestDecodeTaskManager::ClearAllDecodeTaskEmptiesAndResetsIndex() {
     // clear_all_decode_task2() forwards to the 1-arg form without crashing.
     mgr.clear_all_decode_task2();
     QVERIFY(!mgr.has_running_tasks());
+}
+
+// T7: rst_decoder() normal-path regression. The fixed sequence is
+// remove_decode_task (async stop) -> wait_for_task_finished (must return
+// true once the worker has left _running_tasks) -> stack->clear() ->
+// add_decode_task (re-enqueue). With no snapshot data and
+// _options_changed == false the re-submitted worker takes do_decode_work()'s
+// quick-return path, so the whole reset must drain smoothly: no crash, state
+// observables reset, and a subsequent manual add_decode_task must NOT be
+// rejected by the running-set de-dup guard.
+void TestDecodeTaskManager::test_rst_decoder_normal_path() {
+    if (!g_dec)
+        QSKIP("libsigrokdecode decoder unavailable");
+
+    StubHost host;
+    auto stack = make_stack(host);
+    QVERIFY(stack);
+
+    auto disp = std::make_unique<FakeDispatcher>();
+    EventBus bus(std::move(disp));
+    StubSession state;
+    DocumentRegistry reg(&bus, &state, &state);
+    state.set_doc_reg(&reg);
+    DecodeTaskManager mgr(&bus, &state, &state);
+
+    // Register the stack so the (T7-enhanced) StubSession::get_decoder_trace
+    // resolves index 0 — rst_decoder looks its target up by index through
+    // the state shell. The empty DocumentRegistry makes the implicit
+    // active-document lookup return nullptr, which the stub ignores.
+    state.trace_stack.push_back(stack);
+
+    // Prime one full lifecycle first: add -> worker quick-return -> dequeue,
+    // so the reset operates on a stack that has already been through a run.
+    mgr.add_decode_task(stack);
+    QVERIFY(wait_idle(mgr));
+    QVERIFY(!mgr.is_task_running(stack));
+    const int completes_before = state.decode_complete_count;
+    QVERIFY(completes_before >= 1);
+
+    // The reset under test. Must not crash; the re-added task must drain.
+    mgr.rst_decoder(0);
+
+    QVERIFY(wait_idle(mgr));
+    QVERIFY(!mgr.has_running_tasks());
+    QVERIFY(!mgr.is_task_running(stack));
+    // Stack state was reset by the clear() leg and the worker has since
+    // returned (running-set erase happens after begin_decode_work returns).
+    QVERIFY(!stack->IsRunning());
+    QVERIFY(stack->error_message().isEmpty());
+    // The rst_decoder re-add produced exactly one extra completion.
+    QCOMPARE(state.decode_complete_count, completes_before + 1);
+
+    // Post-reset re-enqueue: the de-dup guard keys on _running_tasks, which
+    // is empty again, so a fresh add_decode_task must run (not be mistaken
+    // for a duplicate of the finished task).
+    mgr.add_decode_task(stack);
+    QVERIFY(wait_idle(mgr));
+    QVERIFY(!mgr.is_task_running(stack));
+    QCOMPARE(state.decode_complete_count, completes_before + 2);
+}
+
+// T7: wait_for_task_finished() semantics on the non-blocking legs.
+void TestDecodeTaskManager::test_wait_for_task_finished_returns_true_when_not_running() {
+    if (!g_dec)
+        QSKIP("libsigrokdecode decoder unavailable");
+
+    StubHost host;
+    auto stack = make_stack(host);
+    QVERIFY(stack);
+
+    auto disp = std::make_unique<FakeDispatcher>();
+    EventBus bus(std::move(disp));
+    StubSession state;
+    DocumentRegistry reg(&bus, &state, &state);
+    state.set_doc_reg(&reg);
+    DecodeTaskManager mgr(&bus, &state, &state);
+
+    // (a) A stack that was NEVER enqueued is absent from _running_tasks, so
+    // the bounded poll loop body never executes and the call returns true
+    // immediately ("worker not running" == finished).
+    QVERIFY(!mgr.is_task_running(stack));
+    QVERIFY(mgr.wait_for_task_finished(stack));
+
+    // (b) Same contract after a real completed run — this is exactly the
+    // state rst_decoder's normal path relies on.
+    mgr.add_decode_task(stack);
+    QVERIFY(wait_idle(mgr));
+    QVERIFY(mgr.wait_for_task_finished(stack));
+
+    // (c) Null stack: the implementation early-returns true before polling
+    // (the shared_ptr parameter binds an empty pointer).
+    QVERIFY(mgr.wait_for_task_finished(nullptr));
+
+    // NOTE (timeout branch): the false-returning leg of
+    // wait_for_task_finished (worker still parked in _running_tasks after
+    // the 10 s window) cannot be constructed safely in a unit test — it
+    // would require parking a real decode worker for >10 s. That branch and
+    // its consumer are guaranteed by code walk-through: on false,
+    // DecodeTaskManager::rst_decoder logs pxv_err and returns DIRECTLY
+    // (decodetaskmanager.cpp, the `if (!wait_for_task_finished(stack))`
+    // block) — no stack->clear(), no add_decode_task — so an in-flight
+    // worker can never race a reset (null) snapshot.
 }
 
 QTEST_MAIN(TestDecodeTaskManager)

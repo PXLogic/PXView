@@ -106,17 +106,21 @@ struct CaptureStateChanged {
 };
 
 // CaptureOwnerChanged — the SessionDocument owning the live capture changed.
+// R3: carries document SLOT INDEX (SIZE_MAX = none) instead of raw pointers.
+// The event is dispatched asynchronously and does not extend the document's
+// lifetime; consumers resolve the index via DocumentRegistry (may get nullptr
+// if the slot was released in the meantime).
 struct CaptureOwnerChanged {
-    data::SessionDocument *old_owner;
-    data::SessionDocument *new_owner;
+    size_t old_owner_index;
+    size_t new_owner_index;
 };
 
 // TriggerConfigChanged — advanced/serial trigger config was rewritten.
-// config points at SigSession::_trigger_config and is only valid for the
-// duration of the dispatch (do not store).
-struct TriggerConfigChanged {
-    const data::TriggerConfig *config;
-};
+// R3: no payload. The previous `const data::TriggerConfig*` only pointed at
+// SigSession::_trigger_config and was valid solely for the duration of the
+// synchronous dispatch; consumers re-query the current config instead of
+// storing the pointer.
+struct TriggerConfigChanged {};
 
 // SampleCountUpdated — sample-depth / sample-count metadata changed.
 struct SampleCountUpdated {
@@ -141,15 +145,16 @@ struct DsoViewOptionChanged {
 };
 
 // ActiveDocumentChanged — the active SessionDocument switched.
+// R3: slot indices (SIZE_MAX = none); see CaptureOwnerChanged.
 struct ActiveDocumentChanged {
-    data::SessionDocument *old_doc;
-    data::SessionDocument *new_doc;
+    size_t old_index;
+    size_t new_index;
 };
 
 // CopyToDocDone — background copy of capture data into a document finished;
-// decoders can now be started.
+// decoders can now be started. R3: slot index (SIZE_MAX = none).
 struct CopyToDocDone {
-    data::SessionDocument *doc;
+    size_t doc_index;
 };
 
 // Decode task finished.

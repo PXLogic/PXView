@@ -256,6 +256,8 @@ void SessionEventDispatcher::on_device_list_updated(const pv::interface::DeviceL
 }
 void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &) {
   PV_WIN_GUARD();
+  pxv_info("[PX3-DEBUG] CurrentDeviceChanged handler ENTER, signals_with_data=%d",
+           safe_current_view() ? safe_current_view()->data_sync_delegate()->count_signals_with_data() : -1);
   _window->reset_all_view();
   _window->load_device_config();
   _window->update_title_bar_text();

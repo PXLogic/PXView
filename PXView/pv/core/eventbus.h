@@ -125,9 +125,14 @@ public:
 
     // ---- Sync typed event broadcast ----
     template <typename EventType> void broadcast(const EventType &ev) {
+        // R4: broadcast() and _deferred_broadcasts are main-thread-only.
+        // Redirect off-main-thread misuse to the async path instead of
+        // racing on the non-thread-safe _deferred_broadcasts queue.
         if (!on_main_thread()) {
-            pxv_warn("EventBus::broadcast invoked off the main thread; "
-                     "broadcast() is main-thread-only by contract.");
+            pxv_err("EventBus::broadcast invoked off the main thread; "
+                    "redirecting to async dispatch (broadcast_async).");
+            broadcast_async(ev);
+            return;
         }
         ++_broadcast_depth;
         if (_broadcast_depth > 1) {
@@ -232,12 +237,23 @@ public:
 private:
     template <typename EventType>
     void dispatch_to_callbacks(const EventType &ev) {
-        std::shared_lock<std::shared_mutex> lk(_callbacks_mutex);
-        auto it = _callbacks.find(std::type_index(typeid(EventType)));
-        if (it != _callbacks.end()) {
-            for (auto &cb : it->second) {
-                if (cb) (*cb)(static_cast<const void *>(&ev));
-            }
+        // R2: copy the callback list under the read lock, then invoke the
+        // copies OUTSIDE the lock. Invoking callbacks while holding the read
+        // lock would make a same-thread unsubscribe (Subscription dtor takes
+        // the write lock) an illegal reader->writer lock upgrade — UB or
+        // deadlock. Documented semantics: a callback that is unsubscribed
+        // after the copy but before its invocation may run at most once
+        // more; after that the slot is gone.
+        std::vector<std::shared_ptr<std::function<void(const void *)>>> cbs;
+        {
+            std::shared_lock<std::shared_mutex> lk(_callbacks_mutex);
+            auto it = _callbacks.find(std::type_index(typeid(EventType)));
+            if (it == _callbacks.end())
+                return;
+            cbs = it->second;
+        }
+        for (auto &cb : cbs) {
+            if (cb) (*cb)(static_cast<const void *>(&ev));
         }
     }
 

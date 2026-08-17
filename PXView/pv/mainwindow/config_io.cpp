@@ -681,7 +681,13 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
     }
   }
 
-  _wnd->session()->reload();
+  // 问题3修复：文件设备（pxl 回放）的 signal models 已由 set_file → start_capture
+  // 的回放填充，reload() 会销毁携带数据的旧 models 并创建空 models，导致数据丢失
+  // 和后续点击"开始采集"时捕获线程崩溃（first_payload 无数据可挂载）。
+  // 硬件设备切换时才需要 reload() 重建 models。
+  if (!_wnd->device_agent()->is_file()) {
+    _wnd->session()->reload();
+  }
 
   // Glitch filter config restore
   if (sessionObj.contains("glitch_filter")) {

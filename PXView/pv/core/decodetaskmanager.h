@@ -74,7 +74,9 @@ public:
   /// actually finished (i.e. has been removed from _running_tasks). Used by
   /// rst_decoder() before clear()/init() so the worker thread can no longer
   /// be inside decode_data() touching _snapshot when it is released.
-  void wait_for_task_finished(std::shared_ptr<data::DecoderStack> stack);
+  /// Returns true if the worker finished within the timeout window;
+  /// false on timeout (the stack must NOT be cleared in that case).
+  bool wait_for_task_finished(std::shared_ptr<data::DecoderStack> stack);
 
   /// Stop all decode threads. Called from SigSession::Close().
   void stop();
@@ -95,6 +97,12 @@ private:
   // The old _decode_threads vector + manual join is now handled by
   // ThreadPool's destructor (shutdown + join).
   std::vector<std::shared_ptr<data::DecoderStack>> _running_tasks;
+  // INVARIANT: tasks submitted via add_decode_task() capture the raw 'this'
+  // pointer. This is safe only because ~DecodeTaskManager runs stop()
+  // first — ThreadPool::shutdown() joins every worker BEFORE any member
+  // (including _state/_event_bus) is destroyed. Any refactor that reorders
+  // member destruction or bypasses stop() MUST preserve this
+  // join-before-destroy ordering. (Also documented at the submit site.)
   ThreadPool _decode_pool;
 };
 

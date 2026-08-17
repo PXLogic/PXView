@@ -23,7 +23,7 @@ DocumentRegistry::CaptureOwnerGuard::CaptureOwnerGuard(DocumentRegistry *reg,
   _registry->_capture_owner_index = _doc_index;
   _registry->_coord->set_is_working(true);
   _registry->_event_bus->broadcast_async<interface::CaptureOwnerChanged>(
-      {nullptr, _registry->get_capture_owner_document()});
+      {SIZE_MAX, _doc_index});
 }
 
 DocumentRegistry::CaptureOwnerGuard::~CaptureOwnerGuard() {
@@ -62,9 +62,10 @@ _registry->_capture_owner_index = SIZE_MAX;
     _registry->_coord->set_is_working(false);
   }
   // Broadcast outside the lock to minimize critical section and avoid
-  // listener callbacks re-entering the mutex.
+  // listener callbacks re-entering the mutex. The owner index was already
+  // reset to SIZE_MAX above, so the previous owner is reported via _doc_index.
   _registry->_event_bus->broadcast_async<interface::CaptureOwnerChanged>(
-      {nullptr, _registry->get_capture_owner_document()});
+      {_doc_index, SIZE_MAX});
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ void DocumentRegistry::set_active_document(data::SessionDocument *doc) {
   _active_document_index = new_index;
   // R1: notify listeners that the active document changed.
   _event_bus->broadcast_async<interface::ActiveDocumentChanged>(
-      {nullptr, get_active_document()});
+      {SIZE_MAX, new_index});
 }
 
 std::vector<data::SessionDocument *>
@@ -153,6 +154,22 @@ void DocumentRegistry::clear_all_documents_decoders() {
         // manages the lifetime when the stacks vector is cleared below.
         stack->stop_decode_work();
       }
+    }
+    stacks.clear();
+  }
+}
+
+void DocumentRegistry::clear_active_document_decoders() {
+  // 问题2修复：设备切换（set_device）时只清活动文档的解码器栈，避免非活动
+  // 文档（如 pxl 标签页的文档）的解码器被误清。所有运行中的解码任务仍会
+  // 停止（解码线程可能持有指向被释放数据的指针），但只有活动文档的栈被清空。
+  for (auto &ptr : _owned_documents) {
+    if (!ptr || ptr.get() != get_active_document())
+      continue;
+    auto &stacks = ptr->get_decoder_stacks();
+    for (auto stack : stacks) {
+      if (stack->IsRunning())
+        stack->stop_decode_work();
     }
     stacks.clear();
   }

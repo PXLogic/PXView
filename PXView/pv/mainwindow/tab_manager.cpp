@@ -227,6 +227,8 @@ void TabManager::remove_tab(int index) {
   SigSession *_session = _wnd->session();
 
   pv::TabContext *ctx = _tab_contexts[index];
+  // 方案A（问题2）：记录被关闭的 tab 是否为文件（pxl）tab。
+  bool was_file_tab = !ctx->file_path().isEmpty();
   if (ctx->is_live() && _session->is_working()) {
     _session->stop_capture();
   }
@@ -263,6 +265,12 @@ void TabManager::remove_tab(int index) {
     _current_tab_index = _tab_contexts.size() - 1;
   } else if (index < _current_tab_index) {
     _current_tab_index--;
+  }
+
+  // 方案A（问题2）：关闭 pxl 文件 tab 后恢复之前保存的硬件/demo 设备，
+  // 避免"导入 pxl 导致全局设备变化"在 tab 关闭后仍然残留影响其他 tab。
+  if (was_file_tab) {
+    _session->restore_previous_device();
   }
 
   _tab_contexts[_current_tab_index]->activate();
@@ -307,6 +315,21 @@ void TabManager::on_tab_changed(int index) {
   }
 
   _current_tab_index = index;
+
+  // 方案A（问题2）：从文件（pxl）tab 切回非文件 tab 时，若当前全局设备仍是
+  // 文件设备，恢复之前保存的硬件/demo 设备，避免全局设备被 pxl 占用导致
+  // 该 tab 无法正常采集/显示实体设备数据。
+  {
+    pv::TabContext *target = _tab_contexts[index];
+    SigSession *_session = _wnd->session();
+    if (target && target->file_path().isEmpty() &&
+        _session->get_device()->is_file()) {
+      pxv_info("TabManager::on_tab_changed: switching back to non-file tab, "
+               "restoring hardware/demo device");
+      _session->restore_previous_device();
+    }
+  }
+
   _tab_contexts[index]->activate();
   update_tab_style(index);
 

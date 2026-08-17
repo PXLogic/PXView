@@ -674,6 +674,10 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
 
 void ViewSignalSync::rebuild_signals_from_config(
     const pv::data::SignalConfig &config) {
+  pxv_info("[PX3-DEBUG] rebuild_signals_from_config ENTER: doc=%p doc_has_data=%d signals_before=%d",
+           (void *)_view->data_sync_delegate()->document_ptr(),
+           _view->data_sync_delegate()->document_ptr() ? (_view->data_sync_delegate()->document_ptr()->has_data() ? 1 : 0) : 0,
+           (int)_own_signals.size());
   // Re-entrancy guard: if a nested broadcast (e.g. DeviceOptionsUpdated
   // from within this function) triggers on_event → rebuild_signals() →
   // rebuild_signals_from_config() again, abort immediately to prevent
@@ -845,6 +849,11 @@ if (auto *s = sig->as_logic()) {
 }
 
 void ViewSignalSync::rebuild_signals() {
+  pxv_info("[PX3-DEBUG] rebuild_signals ENTER: data_source=%p doc=%p doc_has_data=%d signals_before=%d",
+           (void *)_view->data_source(),
+           (void *)_view->data_sync_delegate()->document_ptr(),
+           _view->data_sync_delegate()->document_ptr() ? (_view->data_sync_delegate()->document_ptr()->has_data() ? 1 : 0) : 0,
+           (int)_own_signals.size());
   _view->mark_derived_traces_dirty();
 
   if (_view->data_source() == _view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr() &&
@@ -935,6 +944,8 @@ if (sig && sig->model()) {
   if (_view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr()->has_data()) {
     _view->set_data_document(_view->data_sync_delegate()->document_ptr());
   }
+  pxv_info("[PX3-DEBUG] rebuild_signals EXIT: signals=%d with_data=%d",
+           (int)_own_signals.size(), _view->data_sync_delegate()->count_signals_with_data());
 
   signals_changed(nullptr);
 }
@@ -995,6 +1006,13 @@ void ViewSignalSync::on_signals_changed() {
 
   auto event = SignalFactory::compute_change_event(_own_signals, models);
 
+  pxv_info("[PX3-DEBUG] on_signals_changed: event=%d doc=%p doc_has_data=%d is_working=%d signals_before=%d",
+           (int)event,
+           (void *)_view->data_sync_delegate()->document_ptr(),
+           _view->data_sync_delegate()->document_ptr() ? (_view->data_sync_delegate()->document_ptr()->has_data() ? 1 : 0) : 0,
+           _view->session_ptr() ? (_view->session_ptr()->is_working() ? 1 : 0) : 0,
+           (int)_own_signals.size());
+
   // If derived traces changed, upgrade Modified → full layout.
   // Added/Removed/AllReplaced already call signals_changed(nullptr)
   // via their layout helpers, so only Modified needs upgrading.
@@ -1020,6 +1038,23 @@ void ViewSignalSync::on_signals_changed() {
   case SignalFactory::AllReplaced:
     // Full rebuild, need full layout
     signals_changed(nullptr);
+    // 修复（问题：打开文件/设备切换后原 tab 波形被清空）：
+    // AllReplaced 会重建所有 view::Signal，其 _data_source 被重置为
+    // SigSession（指向可能已被 set_device 清空的 view_data）。
+    // 若当前 tab 的文档仍持有历史数据（zero-copy shared_ptr 共享），
+    // 且当前不在实时采集，则重新绑定文档快照，避免波形消失。
+    {
+      bool can_rebind = _view->session_ptr() && !_view->session_ptr()->is_working() &&
+          _view->data_sync_delegate()->document_ptr() &&
+          _view->data_sync_delegate()->document_ptr()->has_data();
+      pxv_info("[PX3-DEBUG] AllReplaced: can_rebind_doc=%d, before_rebind_signals_with_data=%d",
+               can_rebind ? 1 : 0, _view->data_sync_delegate()->count_signals_with_data());
+      if (can_rebind) {
+        _view->set_data_document(_view->data_sync_delegate()->document_ptr());
+      }
+      pxv_info("[PX3-DEBUG] AllReplaced: after, signals_with_data=%d",
+               _view->data_sync_delegate()->count_signals_with_data());
+    }
     break;
   }
 

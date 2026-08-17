@@ -58,6 +58,9 @@ void ViewLayout::set_scale_offset(double scale, int64_t offset) {
   _preScale = _scale;
   _preOffset = _offset;
 
+  pxv_info("[PX3-DEBUG] set_scale_offset: req_scale=%g req_offset=%lld maxscale=%g minscale=%g",
+           scale, (long long)offset, _maxscale, _minscale);
+
   _scale = max(min(scale, _maxscale), _minscale);
   _offset = floor(max(min(offset, _view->get_max_offset()),
                               _view->get_min_offset()));

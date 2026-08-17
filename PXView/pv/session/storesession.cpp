@@ -292,12 +292,15 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
     }
 
     if (start_index > 0){
-        start_index -= start_index % 64;         
+        // 问题1修复：对齐从 64 改为 8（位图 1bit/样本、8 样本/字节的最小字节对齐）。
+        // 64 对齐会在保存范围前多写入最多 63 个前置样本，重载后光标特征整体右移
+        // （如 200us 区间变成 256us），用户反馈"导出后再打开光标偏移 240us+"。
+        start_index -= start_index % 8;         
         start_block = LogicSnapshot::get_block_with_sample(start_index, &start_offset);
     }
     if (end_index > 0){
-        if (end_index % 64 != 0){
-            end_index += (64 - end_index % 64);
+        if (end_index % 8 != 0){
+            end_index += (8 - end_index % 8);
         }        
 
         if (end_index > logic_snapshot->get_ring_sample_count()){
@@ -659,10 +662,11 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         if (end_index > ring)
             end_index = 0;
         if (start_index > 0)
-            start_index -= start_index % 64;
+            // 问题1修复：对齐从 64 改为 8，与 save_logic 保持一致（见上）。
+            start_index -= start_index % 8;
         if (end_index > 0) {
-            if (end_index % 64 != 0)
-                end_index += 64 - end_index % 64;
+            if (end_index % 8 != 0)
+                end_index += 8 - end_index % 8;
             if (end_index > ring)
                 end_index = 0;
         }

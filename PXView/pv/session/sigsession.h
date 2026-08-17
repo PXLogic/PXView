@@ -153,6 +153,12 @@ public:
   bool set_default_device(); bool set_device(ds_device_handle dev_handle);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
   bool import_file(QString name);
+  // 方案A（问题2修复）：加载 pxl/导入前保存当前非文件设备 handle，
+  // 关闭 pxl tab 或切回非文件 tab 时调用 restore_previous_device() 恢复，
+  // 避免"导入 pxl 导致全局设备变化"破坏其他 tab 的设备上下文。
+  void save_current_device_handle();
+  bool restore_previous_device();
+  ds_device_handle saved_device_handle() const { return _saved_device_handle; }
   bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override { return _capture_manager->start_capture(instant, owner); }
   bool stop_capture() override { return _capture_manager->stop_capture(); }
   /// Emergency fallback: force-release the capture state when the
@@ -248,6 +254,11 @@ std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;
   bool is_init_status() { return _state->device_status() == ST_INIT; }
   bool is_running_status() override { return _state->device_status() == ST_RUNNING; }
   bool is_stopped_status() override { return _state->device_status() == ST_STOPPED; }
+  // 切回历史数据 tab（文档有数据但未重新采集）时，设备 status 停留在
+  // ST_INIT（set_device 时设置），viewport_painter::doPaint 会走 paintCursors
+  // 分支而从不调用 paintSignals，导致波形不渲染。此 setter 允许把 status
+  // 恢复为 ST_STOPPED，让视图按"已停止"状态绘制已绑定的文档快照。
+  void set_stopped_status() { _state->set_device_status(ST_STOPPED); }
   void set_collect_mode(DEVICE_COLLECT_MODE m) { _capture_manager->set_collect_mode(m); }
   int get_collect_mode() { return _capture_manager->get_collect_mode(); }
   bool is_repeat_mode() override { return _capture_manager->is_repeat_mode(); }
@@ -471,6 +482,11 @@ std::vector<core::Subscription> _event_subscriptions;
   // open_by_handle, destroyed in release) since the session lifecycle is
   // tied to the active device.
   struct sr_context *_sr_ctx = nullptr;
+
+  // 方案A：加载文件设备前保存的硬件/demo 设备 handle。扫描设备（demo/实体）
+  // 的 sdi 常驻 _scanned_sdi，handle 跨 release 有效；文件设备 sdi 会被
+  // release() 释放，故此处只保存非文件设备，restore 时通过 set_device 切回。
+  ds_device_handle _saved_device_handle = NULL_HANDLE;
 
   // --- USB hotplug (libsigrok sr_listen_hotplug) ---
   // Hotplug callback runs on a libsigrok internal GThread; the static

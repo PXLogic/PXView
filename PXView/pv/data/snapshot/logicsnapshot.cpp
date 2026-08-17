@@ -371,6 +371,23 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 
   std::unique_lock<std::recursive_mutex> lock(_mutex);
 
+  // 问题3防御：total_sample_count 来自 device.get_sample_limit()。对文件设备
+  // （pxl 回放），若 header "total samples" 缺失/损坏，该值可能回退为巨大的
+  // 垃圾值（如 UINT64_MAX 溢出解析），导致下方 root_vector 分配 bad_alloc 而
+  // 在捕获线程抛出未捕获异常崩溃。这里做上限保护：任何超过 2^48 个样本
+  // （约 281 万亿）的声明都视为垃圾值，回退到 1M（与 default_sample_limit 一致）。
+  // 正常采集（含 250MHz×数小时）远低于此上限，不受影响。
+  // 注意：本文件被 qtest 直接编译（不链接 pxview-config），不能依赖
+  // AppConfig::Instance()，故使用本地常量兜底。
+  constexpr uint64_t kSanityMaxSamples = (1ULL << 48);
+  constexpr uint64_t kFallbackSampleLimit = 1000000ULL;
+  if (total_sample_count > kSanityMaxSamples) {
+    pxv_err("first_payload: suspicious total_sample_count=%llu, clamping "
+            "to fallback sample limit",
+            (unsigned long long)total_sample_count);
+    total_sample_count = kFallbackSampleLimit;
+  }
+
   if (total_sample_count != _total_sample_count ||
       channel_num != _channel_num || channel_changed || _is_loop) {
 

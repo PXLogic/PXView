@@ -46,6 +46,10 @@ struct EvEmpty {};
 struct EvEmpty2 {};
 // Non-empty: broadcast_async never coalesces (per-instance data preserved).
 struct EvValue { int value; };
+// Two more non-empty types for the unsubscribe-during-dispatch case
+// (R2): EvA's callback destroys EvB's Subscription mid-dispatch.
+struct EvA { int v; };
+struct EvB { int v; };
 
 // ---- injectable fake dispatcher ----
 // post() records functors instead of running them, so the test drives exactly
@@ -91,6 +95,8 @@ private slots:
     void AsyncCoalescingIsPerType();
     void AsyncPostAfterDestroyDroppedSafely();
     void MainThreadDetection();
+    void test_unsubscribe_during_dispatch();
+    void test_broadcast_off_main_thread_redirected();
 };
 
 void TestEventBus::SubscribeAndBroadcastFires() {
@@ -251,10 +257,70 @@ void TestEventBus::MainThreadDetection() {
     QVERIFY(!on_other_thread);
 }
 
-// Note: EventBus::broadcast()'s off-main-thread warning is exercised via the
-// re-entrancy path above (pxv_log is left null so xlog_warn safely no-ops).
-// We deliberately do NOT call broadcast() from a worker thread here, since
-// doing so relies on the static _main_thread_id set by the ctor.
+// Note: EventBus::broadcast()'s off-main-thread pxv_err is safe here because
+// pxv_log is left null (xlog_err no-ops on a null writer). The redirect case
+// below constructs the bus on the main thread so the static _main_thread_id
+// (set by the ctor) marks worker-thread calls as off-main-thread.
+
+void TestEventBus::test_unsubscribe_during_dispatch() {
+    // R2: dispatch_to_callbacks copies the callback list under the read lock
+    // and invokes the copies AFTER releasing it. A callback that destroys
+    // another Subscription (whose dtor takes the write lock) on the same
+    // thread must neither deadlock nor let the destroyed callback fire in a
+    // later broadcast. Under the old implementation (invoking while holding
+    // the read lock) this same-thread reader->writer upgrade deadlocked.
+    //
+    // NOTE: subB is held via unique_ptr because `subB = Subscription{}`
+    // (move-assign) merely drops the old _unsub shared_ptr WITHOUT running
+    // ~Subscription() — the unsubscribe side effect lives in the destructor,
+    // and move-assignment never runs it. unique_ptr::reset() does.
+    EventBus bus(std::make_unique<FakeDispatcher>());
+    int bCount = 0;
+    auto subB = std::make_unique<Subscription>(
+        bus.subscribe<EvB>([&](const EvB &) { ++bCount; }));
+    auto subA = bus.subscribe<EvA>([&](const EvA &) {
+        // Destroy B's Subscription mid-dispatch: its dtor unsubscribes
+        // (write lock) while we are inside a dispatch callback.
+        subB.reset();
+    });
+
+    // A's callback unsubscribes B mid-dispatch — must complete without
+    // deadlock. If it deadlocked, this test would hang (CI timeout).
+    bus.broadcast(EvA{1});
+    QCOMPARE(bCount, 0); // B never fired before being unsubscribed
+
+    // B is gone: the slot is null, so nothing fires.
+    bus.broadcast(EvB{2});
+    QCOMPARE(bCount, 0);
+}
+
+void TestEventBus::test_broadcast_off_main_thread_redirected() {
+    // R4: broadcast() invoked from a non-main thread must pxv_err (null-writer
+    // no-op here), redirect to broadcast_async() — a single post onto the
+    // dispatcher — and return without touching _broadcast_depth or
+    // _deferred_broadcasts. The FakeDispatcher queues instead of running, so
+    // the redirect is observable as exactly one pending post and zero
+    // synchronous deliveries.
+    auto disp = std::make_unique<FakeDispatcher>();
+    FakeDispatcher *raw = disp.get();
+    EventBus bus(std::move(disp)); // constructed on the main thread
+    int got = 0, value = 0;
+    auto sub = bus.subscribe<EvValue>([&](const EvValue &ev) { ++got; value = ev.value; });
+
+    std::thread t([&]() { bus.broadcast(EvValue{42}); });
+    t.join();
+
+    // Redirected, not dispatched: one queued post, subscriber not yet hit.
+    QCOMPARE(raw->post_count, 1);
+    QCOMPARE(raw->pending_count(), 1);
+    QCOMPARE(got, 0);
+
+    // Delivering the queued functor on the main thread dispatches the event
+    // synchronously (the posted lambda re-enters broadcast() on-main-thread).
+    QCOMPARE(raw->run_pending(), 1);
+    QCOMPARE(got, 1);
+    QCOMPARE(value, 42);
+}
 
 QTEST_MAIN(TestEventBus)
 #include "test_eventbus.moc"

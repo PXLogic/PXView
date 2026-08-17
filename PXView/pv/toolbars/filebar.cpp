@@ -153,12 +153,10 @@ void FileBar::on_actionOpen_triggered()
     //open data file
     AppConfig &app = AppConfig::Instance(); 
 
-    if (_session->have_hardware_data() && _session->is_first_store_confirm()){
-        if (MsgBox::Confirm(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_CAPDATE), "Save captured data?"))){
-            sig_save();
-            return;
-        }
-    }
+    // 多 tab 架构：打开文件创建新 tab，旧 tab 数据保留在文档中。
+    // 旧版单 tab 设计会提示是否保存（打开文件后数据被替换），
+    // 当前多 tab 下此提示是误导性的（用户以为数据会丢，实际不会）。
+    // 因此移除保存提示，直接弹出文件选择对话框。
 
     // Show the dialog
     const QString file_name = QFileDialog::getOpenFileName(
@@ -184,12 +182,8 @@ void FileBar::on_actionImport_triggered()
     //aligned with PulseView's import data functionality
     AppConfig &app = AppConfig::Instance();
 
-    if (_session->have_hardware_data() && _session->is_first_store_confirm()){
-        if (MsgBox::Confirm(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_CAPDATE), "Save captured data?"))){
-            sig_save();
-            return;
-        }
-    }
+    // 多 tab 架构：导入文件创建新 tab，旧 tab 数据保留在文档中，
+    // 因此移除旧版单 tab 的"是否保存数据"提示（见 on_actionOpen_triggered）。
 
     // Build file filter from libsigrok input modules
     QStringList filters;

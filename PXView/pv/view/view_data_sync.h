@@ -112,6 +112,11 @@ public:
   void set_back_ready(bool v) { _back_ready = v; }
   QElapsedTimer &data_updated_timer() { return _data_updated_timer; }
 
+  // [PX3-DEBUG] 诊断：统计当前 view 信号中持有非空 snapshot 的数量，
+  // 用于定位"切回旧 tab 后波形数据被清空"具体由哪次操作引起。
+  int count_signals_with_data() const;
+  void log_data_state(const char *tag) const;
+
 private:
   View *_view;
 

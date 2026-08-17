@@ -491,6 +491,8 @@ void MainWindow::on_signals_changed() {
   // refresh layout. This ensures LogicSignals pick up new SignalModel pointers
   // and Qt signal/slot connections are re-established after
   // init_signals()/reload() recreates models.
+  pxv_info("[PX3-DEBUG] MainWindow::on_signals_changed() fired (throttled timer), signals_with_data=%d",
+           current_view() ? current_view()->data_sync_delegate()->count_signals_with_data() : -1);
   current_view()->on_signals_changed();
 }
 
@@ -659,7 +661,8 @@ void MainWindow::update_toolbar_view_status() {
 // qApp's thread (main thread) — no GUI-thread marshal is needed.
 //
 // Empty-body overrides:
-//   * CaptureOwnerChanged — uses ev.new_owner directly (no int param race).
+//   * CaptureOwnerChanged — R3: carries document slot indices; MainWindow
+//     re-queries DocumentRegistry when needed (no int param race).
 //   * CopyToDocDone / DecodeDone / SignalsChanged / DataUpdated /
 //     DeviceConfigUpdated — these events have no GUI work to do in
 //     MainWindow.

@@ -112,6 +112,8 @@ public:
   // iteration. Returned by value because ownership is internal to the registry.
   std::vector<data::SessionDocument *> get_all_documents() const;
   void clear_all_documents_decoders();
+  // 问题2修复：设备切换时只清活动文档的解码器，非活动文档的解码器保留。
+  void clear_active_document_decoders();
 
   // --- Capture owner / copy thread ---
   inline data::SessionDocument *get_capture_owner_document() const {

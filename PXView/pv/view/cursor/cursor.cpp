@@ -184,10 +184,18 @@ void Cursor::paint_fix_label(QPainter &p, const QRect &rect,
     p.setPen(Qt::white);
     if (has_hoff) {
         auto *src = _view.document_snapshot_source();
-        if (src)
+        if (src) {
+            // [PX1-DEBUG] 问题1排查：光标显示时间 = index/samplerate，用于核对
+            // 200us→240us 偏移（index 是否漂移 / samplerate 是否变化）。
+            pxv_info("[PX1-DEBUG] Cursor::paint: index=%llu samplerate=%llu time=%s",
+                     (unsigned long long)_index,
+                     (unsigned long long)src->cur_snap_samplerate(),
+                     Ruler::format_real_time(_index,
+                         src->cur_snap_samplerate()).toUtf8().data());
             p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
                 Ruler::format_real_time(_index,
                 src->cur_snap_samplerate()));
+        }
     }
 
     const QRect arrowRect = QRect(r.bottomLeft().x(), r.bottomLeft().y(), r.width(), ArrowSize);

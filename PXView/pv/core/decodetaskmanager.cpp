@@ -110,6 +110,12 @@ void DecodeTaskManager::add_decode_task(
 
   // Submit to thread pool — task runs on a pool worker thread.
   // Capture stack by value (shared_ptr copy) to keep it alive.
+  // INVARIANT: the lambda below captures the raw 'this' pointer. This is
+  // safe ONLY because ~DecodeTaskManager runs stop() first —
+  // ThreadPool::shutdown() sets the stop flag and joins every worker before
+  // any member (including _state/_event_bus/_decode_pool) is destroyed.
+  // Any refactor that reorders member destruction or bypasses stop() MUST
+  // preserve this join-before-destroy ordering.
   auto self = this;
   _decode_pool.submit([self, stack]() {
     self->decode_single_task(stack);
@@ -131,10 +137,10 @@ bool DecodeTaskManager::is_task_running(
   return false;
 }
 
-void DecodeTaskManager::wait_for_task_finished(
+bool DecodeTaskManager::wait_for_task_finished(
     std::shared_ptr<data::DecoderStack> stack) {
   if (!stack)
-    return;
+    return true;
   // The worker thread removes itself from _running_tasks in
   // decode_single_task() once begin_decode_work() returns. stop_decode_work()
   // (called before this) sets _bStop and wakes the worker via _data_cond, so
@@ -146,13 +152,15 @@ void DecodeTaskManager::wait_for_task_finished(
   while (is_task_running(stack)) {
     if (waited >= kMaxWaitMs) {
       pxv_warn("DecodeTaskManager::wait_for_task_finished: stack %p still "
-               "running after %d ms; proceeding anyway",
+               "running after %d ms; reporting timeout (caller must NOT "
+               "clear the stack)",
                stack.get(), kMaxWaitMs);
-      break;
+      return false;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(kPollMs));
     waited += kPollMs;
   }
+  return true;
 }
 
 void DecodeTaskManager::clear_all_decode_task(int &runningDex) {
@@ -319,7 +327,17 @@ void DecodeTaskManager::rst_decoder(int index, data::SessionDocument *doc) {
     // _snapshot->end_sample_iteration() on a reset (null) snapshot and crash
     // (SIGSEGV, this=0x0) — reproducing the test_23 stacked-decoder race.
     remove_decode_task(stack); // remove old task (async stop)
-    wait_for_task_finished(stack);
+    // R1: MUST NOT clear()/re-add while the old worker may still be inside
+    // decode_data() touching _snapshot — that reproduces the stacked-decoder
+    // SIGSEGV (_snapshot->end_sample_iteration on a reset snapshot). On
+    // timeout, abort this reset; the user can retry once the stuck worker
+    // is stopped (stop()/clear_all_decode_task joins it).
+    if (!wait_for_task_finished(stack)) {
+      pxv_err("DecodeTaskManager::rst_decoder: stack %p decode worker did "
+              "not finish within the wait window; aborting this reset",
+              stack.get());
+      return;
+    }
     stack->clear();
     // SignalModels may have been recreated by reload() (e.g. during
     // TabContext::activate()) with nullptr snapshot pointers. The

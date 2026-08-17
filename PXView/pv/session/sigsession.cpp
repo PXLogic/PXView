@@ -586,15 +586,22 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   if (_state->device_agent().is_file()) {
     std::string dev_name = pv::path::ToUnicodePath(_state->device_agent().name());
     pxv_info("Switch to file \"%s\" done.", dev_name.c_str());
+    // [PX1-DEBUG] 问题1排查：pxl 加载后设备实际采样率/总样本数，用于核对光标时间轴。
+    pxv_info("[PX1-DEBUG] file device loaded: samplerate=%llu limit_samples=%llu",
+             (unsigned long long)_state->device_agent().get_sample_rate(),
+             (unsigned long long)_state->device_agent().get_sample_limit());
   } else
     pxv_info("Switch to device \"%s\" done.",
              _state->device_agent().name().toUtf8().data());
 
-  clear_all_documents_decoders();
+  // 问题2修复：设备切换只清活动文档的解码器，非活动文档（如 pxl 标签页
+  // 的文档）的解码器保留，避免切换设备后历史文档被清空。
+  _document_registry->clear_active_document_decoders();
 
   _state->view_data()->clear();
   _state->capture_data()->clear();
   _state->set_capture_data(_state->view_data());
+  pxv_info("[PX3-DEBUG] set_device: view_data CLEARED, then init_signals()");
 
   // 架构修复：从 AppConfig 恢复 auto_apply 默认值。
   // 这样即使没有打开 .pxl 文件（如新建采集），auto_apply 勾选状态
@@ -615,9 +622,60 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   return true;
 }
 
+// 方案A（问题2修复）：保存当前非文件设备 handle，供 restore_previous_device 恢复。
+void SigSession::save_current_device_handle()
+{
+  if (_state->device_agent().have_instance() &&
+      !_state->device_agent().is_file() &&
+      !_state->device_agent().is_input_module()) {
+    _saved_device_handle = _state->device_agent().handle();
+    pxv_info("[PX2-DEBUG] saved device handle %llu (driver=%s) before file switch",
+             (unsigned long long)_saved_device_handle,
+             _state->device_agent().driver_name().toUtf8().data());
+  } else {
+    pxv_info("[PX2-DEBUG] skip saving device handle: have_instance=%d is_file=%d is_input=%d",
+             _state->device_agent().have_instance(),
+             _state->device_agent().is_file(),
+             _state->device_agent().is_input_module());
+  }
+}
+
+// 方案A（问题2修复）：关闭 pxl tab 后切回之前保存的非文件设备。
+bool SigSession::restore_previous_device()
+{
+  // 采集/保存进行中不能切换设备（set_device 的断言前提）。
+  if (_state->is_working() || _state->is_saving()) {
+    pxv_info("[PX2-DEBUG] restore_previous_device: busy (working=%d saving=%d), skip",
+             _state->is_working(), _state->is_saving());
+    return false;
+  }
+  ds_device_handle h = _saved_device_handle;
+  _saved_device_handle = NULL_HANDLE;  // 一次性使用，用后清除
+  if (h == NULL_HANDLE) {
+    pxv_info("[PX2-DEBUG] restore_previous_device: no saved handle, falling back to default");
+    return set_default_device();
+  }
+  // 确保 handle 对应的 sdi 仍然存在（未断开）
+  struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
+  if (!sdi) {
+    pxv_warn("[PX2-DEBUG] restore_previous_device: sdi for handle %llu not found, falling back",
+             (unsigned long long)h);
+    return set_default_device();
+  }
+  pxv_info("[PX2-DEBUG] restoring device handle %llu (driver=%s name=%s)",
+           (unsigned long long)h,
+           _state->device_agent().driver_name().toUtf8().data(),
+           _state->device_agent().name().toUtf8().data());
+  return set_device(h);
+}
+
 bool SigSession::set_file(QString name) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
+
+  // 方案A（问题2）：加载文件设备前保存当前硬件/demo 设备 handle，
+  // 供关闭 pxl tab / 切回非文件 tab 时恢复，避免全局设备被 pxl 占用。
+  save_current_device_handle();
 
   std::string file_name = pv::path::ToUnicodePath(name);
   pxv_info("Load file: \"%s\"", file_name.c_str());
@@ -682,6 +740,9 @@ bool SigSession::set_file(QString name) {
 bool SigSession::import_file(QString name) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
+
+  // 方案A（问题2）：导入文件前保存当前硬件/demo 设备 handle，供后续恢复。
+  save_current_device_handle();
 
   std::string file_name = pv::path::ToUnicodePath(name);
   pxv_info("Import file: \"%s\"", file_name.c_str());
@@ -1143,6 +1204,11 @@ void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
     pxv_err("set_cur_snap_samplerate: samplerate=0, ignoring");
     return;
   }
+
+  // [PX1-DEBUG] 问题1排查：记录采样率设置来源与值，用于核对 200us→240us 光标偏移。
+  pxv_info("[PX1-DEBUG] set_cur_snap_samplerate: %llu (device=%s)",
+           (unsigned long long)samplerate,
+           _state->device_agent().name().toUtf8().data());
 
   _state->capture_data()->_cur_snap_samplerate = samplerate;
   _state->capture_data()->get_logic()->set_samplerate(samplerate);
@@ -2406,7 +2472,7 @@ void SigSession::on_rev_end_packet() {
               ? _document_registry->get_capture_owner_document()
               : _document_registry->get_active_document();
       copy_data_to_document(doc);
-      _event_bus->broadcast_async<interface::CopyToDocDone>({nullptr});
+      _event_bus->broadcast_async<interface::CopyToDocDone>({SIZE_MAX});
     } else {
       // No active document (typical in headless mode) OR stream mode (no
       // copy thread needed). Skip the deep copy to a SessionDocument and
@@ -3152,8 +3218,7 @@ data::SessionDocument *SigSession::get_active_document() {
 
 void SigSession::set_trigger_config(const data::TriggerConfig &cfg) {
   _state->set_trigger_config(cfg);
-  _event_bus->broadcast_async<interface::TriggerConfigChanged>(
-      {&_state->trigger_config()});
+  _event_bus->broadcast_async<interface::TriggerConfigChanged>({});
 }
 
 void SigSession::sync_trigger_to_libsigrok(bool disable_trigger) {
@@ -3169,7 +3234,17 @@ void SigSession::copy_data_to_document(data::SessionDocument *doc) {
     return;
 
   doc->set_samplerate(_state->view_data()->_cur_snap_samplerate);
-  doc->set_samplelimits(_state->view_data()->_cur_samplelimits);
+  // 修复（切回旧 tab 波形被缩放消失）：流模式下 _cur_samplelimits 是 ring
+  // 容量（如 2.5e9），而非实际采集样本数。若直接写入文档，切回该 tab 时
+  // auto_set_max_scale 会按 ring 容量计算 maxscale，把实际 1s 的波形缩放到
+  // 几乎不可见。改为使用逻辑快照的实际样本数。
+  uint64_t actual_limits = _state->view_data()->_cur_samplelimits;
+  if (auto *logic = _state->view_data()->get_logic()) {
+    uint64_t cnt = logic->get_sample_count();
+    if (cnt > 0)
+      actual_limits = cnt;
+  }
+  doc->set_samplelimits(actual_limits);
   doc->set_trigger_pos(_state->view_data()->_trig_pos);
 
   // Zero-copy: share the shared_ptr (increment ref count) instead of

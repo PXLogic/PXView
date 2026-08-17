@@ -123,6 +123,14 @@ void TabContext::activate()
                 s->model()->set_enabled(s->enabled());
             }
         }
+        // 修复（切回旧 tab 波形消失）：文档有历史数据且未在采集时，设备 status
+        // 仍停留在 set_device 设置的 ST_INIT，doPaint 会走 paintCursors 分支而
+        // 不调用 paintSignals，波形不渲染。显式恢复 ST_STOPPED，让视图绘制
+        // 已绑定的文档快照。
+        if (!_session->is_working()) {
+            _session->set_stopped_status();
+            pxv_info("TabContext::activate() restored STOPPED status for data doc");
+        }
     } else if (_session->have_view_data() &&
                (_session->is_working() || _session->is_copy_in_progress() ||
                 _session->is_stopped_status()) &&
@@ -156,7 +164,8 @@ void TabContext::activate()
     }
     _view->update_scale_offset();
     _view->signals_changed(nullptr);
-    pxv_info("TabContext::activate() completed");
+    pxv_info("TabContext::activate() completed, signals_with_data=%d",
+        _view->data_sync_delegate()->count_signals_with_data());
 }
 
 void TabContext::deactivate()
