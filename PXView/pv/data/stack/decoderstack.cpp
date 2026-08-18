@@ -1043,19 +1043,21 @@ return;
       last_cnt = i;
       // Scheme A: atomically publish the current frozen snapshot before
       // notifying the GUI, so the render path sees the latest decoded data
-      // with zero lock contention. Throttle to ~60 Hz so the full-deque
-      // copy cost stays bounded on the decode thread.
+      // with zero lock contention. Publish + notify are throttled together
+      // to at most 5 FPS (200ms): the GUI repaint rate for the decode track
+      // is capped by the user requirement, and this also bounds the decode
+      // thread's publish cost and the main-thread event queue volume.
       const auto now = std::chrono::steady_clock::now();
       if (now - _last_publish_time >=
-          std::chrono::milliseconds(16)) {
+          std::chrono::milliseconds(200)) {
         publish_snapshot();
         _last_publish_time = now;
+        // P2-10 fix: Capture shared_ptr instead of raw 'this' to prevent
+        // use-after-free if the DecoderStack is destroyed before the
+        // lambda executes on the main thread.
+        auto self = shared_from_this();
+        _host->event_bus_post([self]() { self->new_decode_data(); });
       }
-      // P2-10 fix: Capture shared_ptr instead of raw 'this' to prevent
-      // use-after-free if the DecoderStack is destroyed before the
-      // lambda executes on the main thread.
-      auto self = shared_from_this();
-      _host->event_bus_post([self]() { self->new_decode_data(); });
     }
   }
 
