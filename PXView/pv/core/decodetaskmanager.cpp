@@ -295,11 +295,12 @@ void DecodeTaskManager::start_all_decode_tasks() {
       add_stack(stack);
   }
   if (!traces.empty()) {
-    // NOTE: capping the pool below traces.size() was measured and REVERTED —
-    // with fewer workers each stack accumulates more annotations before the
-    // 200ms publish gate, so the frozen_snapshot delta (and the heap/rows lock
-    // hold) grows and the main-thread block became WORSE (1-1.4s → a single
-    // ~17s EVENT_LAG block). Keep one worker per decoder so deltas stay small.
+    // Pool cap measured and REVERTED (2nd time): with fewer workers each stack
+    // accumulates bigger annotation bursts before the 200ms publish gate, and
+    // the decode engine's per-annotation process-heap allocations during a
+    // burst block the main thread far longer (delta 5.9K -> 37.7K; EVENT_LAG
+    // 1.4s -> 18.2s), even with the annotation deque on dedicated heaps.
+    // One worker per decoder keeps bursts small — the best trade-off found.
     _decode_pool.grow(traces.size());
   }
 

@@ -262,7 +262,10 @@ void RowDataSnapshot::get_annotation_subset(
                  });
 }
 
-RowData::RowData() : _max_annotation(0), _min_annotation(0) { _item_count = 0; }
+RowData::RowData(AnnotationHeapPtr heap)
+    : _max_annotation(0), _min_annotation(0), _item_count(0),
+      _heap_ref(std::move(heap)), _heap(_heap_ref ? _heap_ref.get() : nullptr),
+      _annotations(HeapAllocator<Annotation>(_heap)) {}
 
 std::shared_ptr<const RowDataSnapshot> RowData::frozen_snapshot() {
   // Safe to touch the deque because the caller (publish_snapshot) holds
@@ -305,7 +308,9 @@ std::shared_ptr<const RowDataSnapshot> RowData::frozen_snapshot() {
 #endif
     while (start < total) {
       const size_t end = std::min(total, start + kMaxSegAnnotations);
-      auto seg = std::make_shared<AnnotationSegment>();
+      // Plan A: allocate the frozen segment from this row's dedicated heap
+      // (same heap as the deque), keeping it alive via heap_ref.
+      auto seg = std::make_shared<AnnotationSegment>(_heap, _heap_ref);
       seg->anns.assign(_annotations.begin() + start,
                        _annotations.begin() + end);
       seg->first_start = seg->anns.front().start_sample();

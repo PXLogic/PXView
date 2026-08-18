@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "pv/data/decode/annotation.h"
+#include "pv/data/decode/annotation_heap.h"
 
 struct srd_proto_data;
 class DecoderStatus;
@@ -54,7 +55,12 @@ namespace decode {
 // instead of re-copying the whole deque on every 16ms tick.
 struct AnnotationSegment {
   // Frozen batch of annotations (append order == start_sample order).
-  std::deque<Annotation> anns;
+  // Plan A: allocated from the DecoderStack's dedicated heap (HeapAllocator)
+  // so decode-thread annotation storage doesn't contend with the GUI thread's
+  // process-heap allocations (the ~1s heap-lock convoy). heap_ref keeps the
+  // dedicated heap alive as long as any snapshot segment referencing it exists.
+  std::deque<Annotation, HeapAllocator<Annotation>> anns;
+  std::shared_ptr<void> heap_ref;
   // Fast bounds for cross-segment binary search (valid when !anns.empty()).
   uint64_t first_start = 0;  // first annotation's start_sample
   uint64_t last_end = 0;     // last annotation's end_sample (for get_max_sample)
@@ -65,6 +71,9 @@ struct AnnotationSegment {
   // tail is narrow but whose head has a wide straddling annotation would be
   // wrongly skipped and its annotations would disappear when zooming.
   uint64_t max_end = 0;
+
+  explicit AnnotationSegment(void *h = nullptr, std::shared_ptr<void> ref = {})
+      : anns(HeapAllocator<Annotation>(h)), heap_ref(std::move(ref)) {}
 };
 
 // Immutable snapshot of a row's annotation data, published by the decode
@@ -151,7 +160,10 @@ private:
 
 class RowData {
 public:
-  RowData();
+  // Plan A: a RowData belongs to one DecoderStack; pass its dedicated heap
+  // (AnnotationHeapPtr) so the annotation deque allocates off the shared
+  // process heap. Default = process heap (safe fallback).
+  explicit RowData(AnnotationHeapPtr heap = {});
   ~RowData();
 
 public:
@@ -220,10 +232,15 @@ private:
   uint64_t _max_annotation;
   uint64_t _min_annotation;
   uint64_t _item_count;
+  // Plan A: dedicated-heap reference + raw HANDLE. Declared before
+  // _annotations so the deque ctor can use _heap for its allocator.
+  AnnotationHeapPtr _heap_ref;
+  void *_heap = nullptr;
   // P2-7 fix: deque<Annotation> value storage — no pointer ownership,
   // no manual delete. deque keeps element pointers stable across
-  // push_back (unlike vector which may reallocate).
-  std::deque<Annotation> _annotations;
+  // push_back (unlike vector which may reallocate). Allocated from the
+  // DecoderStack's dedicated heap to avoid process-heap lock contention.
+  std::deque<Annotation, HeapAllocator<Annotation>> _annotations;
   // Incremental publish state: the last published snapshot (segments reused
   // by the next publish) and how many annotations are already frozen into it.
   std::shared_ptr<const RowDataSnapshot> _last_snapshot;

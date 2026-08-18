@@ -231,8 +231,19 @@ static HANDLE g_main_thread_handle = nullptr;
     while (g_main_thread_handle) {
       const DWORD rc = SuspendThread(g_main_thread_handle);
       if (rc != (DWORD)-1) {
-        if (GetThreadContext(g_main_thread_handle, &ctx))
+        uintptr_t caller = 0;
+        if (GetThreadContext(g_main_thread_handle, &ctx)) {
           pv::base::perf::record_main_sample((uintptr_t)ctx.Rip);
+          // P3-D7c: also record the return address at [rsp] (the caller of the
+          // sampled instruction) so the hot ntdll heap function can be traced
+          // to the app/library function driving it.
+          if (ctx.Rsp) {
+            if (ReadProcessMemory(GetCurrentProcess(), (LPCVOID)ctx.Rsp,
+                                  &caller, sizeof(caller), nullptr))
+              pv::base::perf::record_main_sample_call((uintptr_t)ctx.Rip,
+                                                      caller);
+          }
+        }
         ResumeThread(g_main_thread_handle);
         // P3-D7b: record which module the main thread was sampled in, so the
         // hot SAMPLES addresses (e.g. a DLL wait) can be attributed without

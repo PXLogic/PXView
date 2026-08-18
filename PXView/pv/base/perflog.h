@@ -101,9 +101,18 @@ inline void record_cpu_util(double util) {
 inline std::mutex g_sample_mutex;
 inline std::map<uintptr_t, size_t> g_main_samples;
 inline std::map<std::string, size_t> g_main_sample_modules;
+// P3-D7c: (rip, caller) pairs — the caller (return address at [rsp]) of the
+// hot ntdll function reveals which app/library function drives the main
+// thread's heap activity during the ~1.5s block.
+inline std::map<std::pair<uintptr_t, uintptr_t>, size_t> g_main_sample_calls;
 inline void record_main_sample(uintptr_t rip) {
   std::lock_guard<std::mutex> lk(g_sample_mutex);
   g_main_samples[rip]++;
+}
+inline void record_main_sample_call(uintptr_t rip, uintptr_t caller) {
+  std::lock_guard<std::mutex> lk(g_sample_mutex);
+  g_main_samples[rip]++;
+  g_main_sample_calls[{rip, caller}]++;
 }
 inline void record_main_sample_module(const std::string &mod) {
   std::lock_guard<std::mutex> lk(g_sample_mutex);
@@ -119,6 +128,13 @@ inline std::map<std::string, size_t> take_main_sample_modules() {
   std::lock_guard<std::mutex> lk(g_sample_mutex);
   std::map<std::string, size_t> out;
   out.swap(g_main_sample_modules);
+  return out;
+}
+inline std::map<std::pair<uintptr_t, uintptr_t>, size_t>
+take_main_sample_calls() {
+  std::lock_guard<std::mutex> lk(g_sample_mutex);
+  std::map<std::pair<uintptr_t, uintptr_t>, size_t> out;
+  out.swap(g_main_sample_calls);
   return out;
 }
 // P3-F2: largest single publish delta (annotations copied in one
@@ -334,6 +350,22 @@ inline void flush() {
       const size_t top_s = std::min<size_t>(12, sv.size());
       for (size_t i = 0; i < top_s; i++)
         fprintf(lf, " 0x%p(x%zu)", (void *)sv[i].first, sv[i].second);
+      fprintf(lf, "\n");
+    }
+    auto calls = take_main_sample_calls();
+    if (!calls.empty()) {
+      std::vector<std::pair<std::pair<uintptr_t, uintptr_t>, size_t>> cv(
+          calls.begin(), calls.end());
+      std::sort(cv.begin(), cv.end(),
+                [](const std::pair<std::pair<uintptr_t, uintptr_t>, size_t> &a,
+                   const std::pair<std::pair<uintptr_t, uintptr_t>, size_t> &b) {
+                  return a.second > b.second;
+                });
+      fprintf(lf, "SAMPLE_CALLERS:");
+      const size_t top_c = std::min<size_t>(10, cv.size());
+      for (size_t i = 0; i < top_c; i++)
+        fprintf(lf, " 0x%p<-0x%p(x%zu)", (void *)cv[i].first.first,
+                (void *)cv[i].first.second, cv[i].second);
       fprintf(lf, "\n");
     }
     auto mods = take_main_sample_modules();

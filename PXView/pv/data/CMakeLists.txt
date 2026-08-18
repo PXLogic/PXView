@@ -42,6 +42,7 @@ add_library(pxview-data STATIC
     decode/row.cpp
     decode/decoder.cpp
     decode/annotation.cpp
+    decode/annotation_heap.cpp
     decode/annotationrestable.cpp
     decode/decoderstatus.cpp
 )

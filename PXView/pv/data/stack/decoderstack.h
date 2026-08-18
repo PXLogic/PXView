@@ -299,6 +299,10 @@ private:
 	std::list<std::unique_ptr<decode::Decoder>> _stack;
     std::shared_ptr<pv::data::LogicSnapshot> _snapshot;
   
+    // Plan A: dedicated heap for this stack's annotation storage. Created in
+    // the ctor, destroyed after _rows in the dtor. Reference-counted so a
+    // published snapshot held by the GUI keeps it alive past the stack.
+    decode::AnnotationHeapPtr _annotation_heap;
     // TS-3 fix: _rows owns RowData via unique_ptr — no manual delete needed.
     std::map<const decode::Row, std::unique_ptr<decode::RowData>>   _rows;
     std::map<const decode::Row, bool>       _rows_gshow;

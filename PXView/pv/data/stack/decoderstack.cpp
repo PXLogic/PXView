@@ -107,6 +107,11 @@ DecoderStack::DecoderStack(pv::data::ISessionHost *host,
 
   _stack.push_back(std::make_unique<decode::Decoder>(dec));
 
+  // Plan A: one dedicated heap per stack for annotation storage (deque +
+  // frozen snapshot segments), so decode threads don't contend with the GUI
+  // thread on the shared process heap (the ~1s heap-lock convoy).
+  _annotation_heap = decode::make_annotation_heap();
+
   build_row();
   // Publish the initial (empty) snapshot so the render path and main-thread
   // readers never see a null _published before the first decode cycle.
@@ -227,7 +232,8 @@ void DecoderStack::build_row() {
 
     if (!decc->annotation_rows) {
       const Row row(decc);
-      _rows[row] = std::make_unique<decode::RowData>();
+      _rows[row] =
+          std::make_unique<decode::RowData>(_annotation_heap);
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
@@ -253,7 +259,8 @@ void DecoderStack::build_row() {
 
       const Row row(decc, ann_row, order);
 
-      _rows[row] = std::make_unique<decode::RowData>();
+      _rows[row] =
+          std::make_unique<decode::RowData>(_annotation_heap);
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
