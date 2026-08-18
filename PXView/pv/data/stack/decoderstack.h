@@ -165,6 +165,7 @@ public:
     // decode thread.
     struct SnapshotRow {
       bool gshow = true;
+      bool lshow = true;
       std::shared_ptr<const decode::RowDataSnapshot> data;
     };
     using SnapshotRows =

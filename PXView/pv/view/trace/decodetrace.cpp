@@ -386,6 +386,11 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   // snapshot, so the render path never contends with the decode thread on
   // _rows_mutex / _visitor_mutex.
   const auto snap = _decoder_stack->published_snapshot();
+  // Live-decode LOD state (atomic, lock-free). While decoding is in progress
+  // and the viewport rides the decode frontier, rows are rendered as dense
+  // colour blocks instead of per-annotation text; once decoding stops, the
+  // detailed per-annotation text rendering is restored.
+  const bool decoding = _decoder_stack->IsRunning();
 
   for (auto &up : _decoder_stack->stack()) {
     auto dec = up.get();
@@ -408,9 +413,23 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           const uint64_t max_annotation = srow.data->get_max_annotation();
           const double max_ann_width = max_annotation / samples_per_pixel;
 
+          // Frontier LOD: if the decode thread is still running and the
+          // viewport overlaps the newest decoded samples of this row, fall
+          // back to the dense block path even at high zoom. That region is
+          // repainted at every publish (~60Hz), and per-annotation drawText
+          // there is what saturated the GUI thread; colour blocks keep the
+          // per-frame cost bounded until decoding completes.
+          const uint64_t row_frontier = srow.data->get_max_sample();
+          const uint64_t screen_samples = (uint64_t)std::max(
+              1.0, (double)(right - left) * samples_per_pixel);
+          const bool near_frontier =
+              decoding && (row_frontier >= start_sample) &&
+              (row_frontier <= end_sample + screen_samples);
+          const bool use_dense = (max_ann_width < 2.0) || near_frontier;
+
           const RowDataSnapshot *const row_data = srow.data.get();
           {
-            if (max_ann_width < 2.0) {
+            if (use_dense) {
                 // Entire visible row is sub-pixel/dense: keep the old bounded
                 // block walk so zoomed-out long captures remain fast.
                 uint64_t current_sample = start_sample;

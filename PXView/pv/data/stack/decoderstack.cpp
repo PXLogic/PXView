@@ -107,6 +107,9 @@ DecoderStack::DecoderStack(pv::data::ISessionHost *host,
   _stack.push_back(std::make_unique<decode::Decoder>(dec));
 
   build_row();
+  // Publish the initial (empty) snapshot so the render path and main-thread
+  // readers never see a null _published before the first decode cycle.
+  publish_snapshot();
 }
 
 DecoderStack::~DecoderStack() {
@@ -286,7 +289,11 @@ int64_t DecoderStack::samples_decoded() {
 void DecoderStack::get_annotation_subset(
     std::vector<const pv::data::decode::Annotation *> &dest, const Row &row,
     uint64_t start_sample, uint64_t end_sample) {
-  // P1-4 fix: use shared_lock on _rows_mutex for concurrent read access
+  // NOTE: this API returns pointers into the row's deque, so it must read the
+  // live RowData (whose lifetime is owned by _rows) rather than a published
+  // snapshot, whose lifetime ends when this function returns. It is used only
+  // on explicit user actions (waveform copy / protocol export), not on the
+  // per-frame render path, so the shared lock here is acceptable.
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -304,6 +311,13 @@ decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
 
 uint64_t DecoderStack::get_annotation_index(const Row &row,
                                             uint64_t start_sample) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    auto it = snap->find(row);
+    if (it != snap->end() && it->second.data)
+      return it->second.data->get_annotation_index(start_sample);
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t index = 0;
   auto iter = _rows.find(row);
@@ -315,6 +329,13 @@ uint64_t DecoderStack::get_annotation_index(const Row &row,
 
 std::pair<size_t, size_t> DecoderStack::get_visible_range(
     const Row &row, uint64_t start_sample, uint64_t end_sample) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    auto it = snap->find(row);
+    if (it != snap->end() && it->second.data)
+      return it->second.data->get_visible_range(start_sample, end_sample);
+    return {0, 0};
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::pair<size_t, size_t> range{0, 0};
   auto iter = _rows.find(row);
@@ -325,6 +346,13 @@ std::pair<size_t, size_t> DecoderStack::get_visible_range(
 }
 
 uint64_t DecoderStack::get_max_annotation(const Row &row) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    auto it = snap->find(row);
+    if (it != snap->end() && it->second.data)
+      return it->second.data->get_max_annotation();
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -334,6 +362,13 @@ uint64_t DecoderStack::get_max_annotation(const Row &row) {
 }
 
 uint64_t DecoderStack::get_min_annotation(const Row &row) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    auto it = snap->find(row);
+    if (it != snap->end() && it->second.data)
+      return it->second.data->get_min_annotation();
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -343,6 +378,13 @@ uint64_t DecoderStack::get_min_annotation(const Row &row) {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
+  const auto snap = published_snapshot();
+  if (snap) {
+    std::map<const decode::Row, bool> rows_gshow;
+    for (const auto &kv : *snap)
+      rows_gshow[kv.first] = kv.second.gshow;
+    return rows_gshow;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool> rows_gshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
@@ -354,6 +396,13 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_gshow() {
 }
 
 std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
+  const auto snap = published_snapshot();
+  if (snap) {
+    std::map<const decode::Row, bool> rows_lshow;
+    for (const auto &kv : *snap)
+      rows_lshow[kv.first] = kv.second.lshow;
+    return rows_lshow;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   std::map<const decode::Row, bool> rows_lshow;
   for (std::map<const decode::Row, bool>::const_iterator i =
@@ -381,15 +430,28 @@ void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
 }
 
 void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
-  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
-  std::map<const decode::Row, bool>::const_iterator iter =
-      _rows_lshow.find(row);
-  if (iter != _rows_lshow.end()) {
-    _rows_lshow[row] = show;
+  {
+    std::unique_lock<std::shared_mutex> lock(_rows_mutex);
+    std::map<const decode::Row, bool>::const_iterator iter =
+        _rows_lshow.find(row);
+    if (iter != _rows_lshow.end()) {
+      _rows_lshow[row] = show;
+    }
   }
+  // Scheme A: lshow is captured into the published snapshot and used by
+  // main-thread readers (list_annotation / list_row_title / ...), so any
+  // change must be republished.
+  publish_snapshot();
 }
 
 bool DecoderStack::has_annotations(const Row &row) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    auto it = snap->find(row);
+    if (it != snap->end() && it->second.data)
+      return !it->second.data->empty();
+    return false;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   auto iter = _rows.find(row);
   if (iter != _rows.end())
@@ -413,9 +475,14 @@ void DecoderStack::publish_snapshot() {
   for (auto &kv : _rows) {
     const decode::Row &row = kv.first;
     auto gshow_it = _rows_gshow.find(row);
+    auto lshow_it = _rows_lshow.find(row);
     SnapshotRow sr;
     sr.gshow = (gshow_it != _rows_gshow.end()) ? gshow_it->second : true;
-    sr.data = kv.second->frozen_snapshot();  // copy deque under _visitor_mutex
+    sr.lshow = (lshow_it != _rows_lshow.end()) ? lshow_it->second : true;
+    // Incremental publish: only the annotations appended since the last
+    // publish are copied into a new frozen segment; earlier segments are
+    // reused via shared_ptr inside RowData::frozen_snapshot().
+    sr.data = kv.second->frozen_snapshot();
     (*snap)[row] = std::move(sr);
   }
 
@@ -433,6 +500,16 @@ DecoderStack::published_snapshot() const {
 }
 
 uint64_t DecoderStack::list_annotation_size() {
+  const auto snap = published_snapshot();
+  if (snap) {
+    uint64_t max_annotation_size = 0;
+    for (const auto &kv : *snap) {
+      if (kv.second.lshow && kv.second.data)
+        max_annotation_size =
+            max(max_annotation_size, kv.second.data->get_annotation_size());
+    }
+    return max_annotation_size;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t max_annotation_size = 0;
 
@@ -448,6 +525,15 @@ uint64_t DecoderStack::list_annotation_size() {
 }
 
 uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    for (const auto &kv : *snap) {
+      if (kv.second.lshow && kv.second.data)
+        if (row_index-- == 0)
+          return kv.second.data->get_annotation_size();
+    }
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
@@ -461,6 +547,16 @@ uint64_t DecoderStack::list_annotation_size(uint16_t row_index) {
 
 bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
                                    uint16_t row_index, uint64_t col_index) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    for (const auto &kv : *snap) {
+      if (kv.second.lshow && kv.second.data) {
+        if (row_index-- == 0)
+          return kv.second.data->get_annotation(ann, col_index);
+      }
+    }
+    return false;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
@@ -475,6 +571,18 @@ bool DecoderStack::list_annotation(pv::data::decode::Annotation *ann,
 }
 
 bool DecoderStack::list_row_title(int row, QString &title) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    for (const auto &kv : *snap) {
+      if (kv.second.lshow) {
+        if (row-- == 0) {
+          title = kv.first.title();
+          return 1;
+        }
+      }
+    }
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
@@ -489,6 +597,18 @@ bool DecoderStack::list_row_title(int row, QString &title) {
 }
 
 bool DecoderStack::list_row_description(int row, QString &desc) {
+  const auto snap = published_snapshot();
+  if (snap) {
+    for (const auto &kv : *snap) {
+      if (kv.second.lshow) {
+        if (row-- == 0) {
+          desc = kv.first.description();
+          return 1;
+        }
+      }
+    }
+    return 0;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   for (auto i = _rows.begin(); i != _rows.end(); i++) {
     auto iter = _rows_lshow.find((*i).first);
@@ -683,6 +803,16 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
 }
 
 uint64_t DecoderStack::get_max_sample_count() {
+  const auto snap = published_snapshot();
+  if (snap) {
+    uint64_t max_sample_count = 0;
+    for (const auto &kv : *snap) {
+      if (kv.second.data)
+        max_sample_count =
+            max(max_sample_count, kv.second.data->get_max_sample());
+    }
+    return max_sample_count;
+  }
   std::shared_lock<std::shared_mutex> lock(_rows_mutex);
   uint64_t max_sample_count = 0;
 

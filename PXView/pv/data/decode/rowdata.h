@@ -23,6 +23,7 @@
 #ifndef PXVIEW_PV_DATA_DECODE_ROWDATA_H
 #define PXVIEW_PV_DATA_DECODE_ROWDATA_H
 
+#include <algorithm>
 #include <deque>
 #include <memory>
 #include <shared_mutex>
@@ -45,12 +46,26 @@ namespace decode {
 //   - Memory leak risks from missed delete paths
 //   - const-correctness violations (API now returns const Annotation*)
 
+// Immutable segment of a row's annotation data. Produced by RowData::frozen_
+// snapshot() when new annotations accumulate between two publishes; once a
+// segment is handed to a RowDataSnapshot it is never modified again, so the
+// GUI render path can read it lock-free. This makes publishing *incremental*:
+// a new snapshot only copies the annotations added since the previous publish
+// instead of re-copying the whole deque on every 16ms tick.
+struct AnnotationSegment {
+  // Frozen batch of annotations (append order == start_sample order).
+  std::deque<Annotation> anns;
+  // Fast bounds for cross-segment binary search (valid when !anns.empty()).
+  uint64_t first_start = 0;
+  uint64_t last_end = 0;
+};
+
 // Immutable snapshot of a row's annotation data, published by the decode
 // thread (via RowData::frozen_snapshot) and read lock-free by the GUI
-// render path (paint_mid / paint_back). Once built, the deque and scalar
-// fields are never modified, so all read methods are safe without holding
-// any mutex. This removes the shared_mutex contention between the decode
-// thread (emplace_annotation) and the render thread.
+// render path (paint_mid / paint_back). The snapshot is a list of frozen
+// segments; a new publish reuses the previous segments (shared_ptr) and only
+// appends a segment with the newly arrived annotations, so publish cost is
+// O(annotations since last publish + segment count), not O(total annotations).
 class RowDataSnapshot {
 public:
   RowDataSnapshot();
@@ -60,7 +75,7 @@ public:
   inline bool empty() const { return _item_count == 0; }
   inline uint64_t get_annotation_size() const { return _item_count; }
   inline uint64_t get_max_sample() const {
-    return _annotations.empty() ? 0 : _annotations.back().end_sample();
+    return _segments.empty() ? 0 : _segments.back()->last_end;
   }
   inline uint64_t get_max_annotation() const { return _max_annotation; }
   inline uint64_t get_min_annotation() const {
@@ -68,20 +83,37 @@ public:
   }
 
   // Lock-free analogues of the corresponding RowData methods, operating
-  // on the immutable deque.
+  // on the immutable segment list.
   std::pair<size_t, size_t> get_visible_range(uint64_t start_sample,
                                               uint64_t end_sample) const;
   const Annotation *get_first_annotation_ending_after(uint64_t sample) const;
+  // Index of the first annotation whose start_sample >= sample (global index).
+  uint64_t get_annotation_index(uint64_t start_sample) const;
+  bool get_annotation(Annotation *ann, uint64_t index) const;
+  void get_annotation_subset(std::vector<const Annotation *> &dest,
+                             uint64_t start_sample,
+                             uint64_t end_sample) const;
 
   template <typename Fn>
   void for_each_index(size_t start_idx, size_t end_idx, Fn &&fn) const {
-    const size_t n = _annotations.size();
-    for (size_t i = start_idx; i < end_idx && i < n; i++)
-      fn(_annotations[i]);
+    size_t offset = 0;
+    for (const auto &seg : _segments) {
+      const size_t n = seg->anns.size();
+      if (end_idx <= offset)
+        break;
+      if (start_idx < offset + n) {
+        const size_t lo = (start_idx > offset) ? (start_idx - offset) : 0;
+        const size_t hi = std::min(n, end_idx - offset);
+        for (size_t i = lo; i < hi; ++i)
+          fn(seg->anns[i]);
+      }
+      offset += n;
+    }
   }
 
-  // Built by RowData::frozen_snapshot() under _visitor_mutex.
-  std::deque<Annotation> _annotations;
+  // Frozen segments in time order. Only appended to by the decode thread
+  // under _visitor_mutex when publishing; never modified afterwards.
+  std::vector<std::shared_ptr<const AnnotationSegment>> _segments;
   uint64_t _max_annotation = 0;
   uint64_t _min_annotation = 0;
   uint64_t _item_count = 0;
@@ -106,11 +138,12 @@ public:
   // the caller to new the Annotation.
   bool emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status);
 
-  // Builds an immutable snapshot of this row's annotation data for the
-  // render path. Acquires _visitor_mutex to safely copy the deque. The
-  // decode thread calls it from publish_snapshot() (which holds
-  // _rows_mutex exclusively, so the deque is quiescent). Returns a
-  // shared_ptr to a const snapshot readable lock-free by the GUI thread.
+  // Builds (incrementally) an immutable snapshot of this row's annotation
+  // data for the render path. Acquires _visitor_mutex to safely copy the
+  // annotations that arrived since the previous publish into a new frozen
+  // segment; earlier segments are reused through shared_ptr, so this is
+  // O(new annotations), not O(total). Returns a shared_ptr to a const
+  // snapshot readable lock-free by the GUI thread.
   std::shared_ptr<const RowDataSnapshot> frozen_snapshot();
 
   inline uint64_t get_annotation_size() {
@@ -161,6 +194,10 @@ private:
   // no manual delete. deque keeps element pointers stable across
   // push_back (unlike vector which may reallocate).
   std::deque<Annotation> _annotations;
+  // Incremental publish state: the last published snapshot (segments reused
+  // by the next publish) and how many annotations are already frozen into it.
+  std::shared_ptr<const RowDataSnapshot> _last_snapshot;
+  uint64_t _published_count = 0;
   std::shared_mutex _visitor_mutex;
 };
 
