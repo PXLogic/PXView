@@ -42,6 +42,7 @@
 #include "pv/view/view.h"
 #include "pv/widgets/decodergroupbox.h"
 #include "pv/widgets/decodermenu.h"
+#include "pv/base/perflog.h"
 #include <QAction>
 #include <QApplication>
 #include <QDialog>
@@ -63,7 +64,9 @@ namespace pv {
 namespace view {
 #include "pv/config/appconfig.h"
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <map>
 #include <limits>
 #include <vector>
 
@@ -104,6 +107,16 @@ static void pxv_decode_log(const char *fmt, ...) {
   (void)fmt;
 #endif
 }
+
+// ----------------------------------------------------------------------------
+// Decode / viewport render performance instrumentation.
+// Implemented in pv/base/perflog.h (included at global scope above). OFF
+// unless the build defines PXVIEW_DECODE_PERF (CMake option
+// ENABLE_DECODE_PERF). The local macros below keep call sites readable.
+// ----------------------------------------------------------------------------
+#define PXV_PERF_FRAME_START()  PXV_PERF_PAINTMID_START()
+#define PXV_PERF_FRAME_END()    PXV_PERF_PAINTMID_END()
+
 
 QColor DecodeTrace::getChannelColor(int channelIndex) {
   QColor c = AppConfig::Instance().GetThemeColor(
@@ -363,9 +376,13 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                             QColor back, const PaintContext &ctx) {
   using namespace pv::data::decode;
 
+  PXV_PERF_FRAME_START();
+
   // Skip paint if not yet laid out (see paint_back for rationale).
-  if (get_v_offset() == INT_MAX)
+  if (get_v_offset() == INT_MAX) {
+    PXV_PERF_FRAME_END();
     return;
+  }
 
   (void)back;
 
@@ -443,6 +460,13 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           if (!srow.gshow)
             continue;
 
+          // Per-track-row timing breakdown (perf build only).
+          const QString _perf_row_name = row.title();
+          const auto _perf_row_t0 = std::chrono::steady_clock::now();
+          double _perf_vr_ms = 0;
+          size_t _perf_ann = 0;
+          bool _perf_is_dense = false;
+
           // Use the maximum annotation width to decide whether the whole row
           // is truly dense; inside the normal path, tiny individual fragments
           // still fall back to a cheap color block.
@@ -462,59 +486,70 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
               decoding && (row_frontier >= start_sample) &&
               (row_frontier <= end_sample + screen_samples);
           const bool use_dense = (max_ann_width < 2.0) || near_frontier;
+          _perf_is_dense = use_dense;
 
           const RowDataSnapshot *const row_data = srow.data.get();
           int dbg_blocks = 0;
           {
             if (use_dense) {
-                // Entire visible row is sub-pixel/dense: keep the old bounded
-                // block walk so zoomed-out long captures remain fast.
-                uint64_t current_sample = start_sample;
-                const size_t base_colour = 0;
-
-                while (current_sample <= end_sample) {
-                  const Annotation *ann =
-                      row_data->get_first_annotation_ending_after(
-                          current_sample);
-                  if (!ann || ann->start_sample() > end_sample)
-                    break;
-
-                  uint64_t block_start =
-                      std::max(current_sample, ann->start_sample());
-                  // Draw the block wide enough to be visible (>= 1 px) even
-                  // when the annotation itself is sub-pixel, but only the
-                  // annotation's TRUE end is used to advance the scan. If we
-                  // advanced by the inflated block_end we would skip every
-                  // sparse annotation whose end falls inside that inflated
-                  // gap — making them disappear when zoomed all the way out.
-                  uint64_t block_end = std::max(
-                      ann->end_sample(),
-                      block_start + (uint64_t)std::max(1.0, samples_per_pixel));
-
-                  double x = (block_start / samples_per_pixel) - pixels_offset;
-                  double width = (block_end - block_start) / samples_per_pixel;
-
-                  const size_t colour =
-                      ((base_colour + ann->type()) % MaxAnnType) % 16;
-                  const QColor fill = getAnnColor(colour);
-
-                  p.fillRect(QRectF(x, y - annotation_height * 0.5,
-                                    std::max(1.0, width), annotation_height),
-                             fill);
-                  dbg_blocks++;
-
-                  // Advance by the annotation's real end so sparse annotations
-                  // after a gap are still discovered by the next find.
-                  current_sample = ann->end_sample();
-                }
-                if (pxv_decode_debug() && dbg_blocks == 0) {
-                  // RED full-width bar: dense walk produced ZERO blocks.
-                  p.fillRect(QRectF(left, y - 2, right - left, 4),
-                             QColor(255, 0, 0, 200));
-                }
-              } else {
+                // Pixel-bucket pass (O(screen width) draw, single O(N) linear
+                // scan over visible annotations). The old block-walk called
+                // get_first_annotation_ending_after() once PER visible bit
+                // annotation; at small zoom a bit row (e.g. CAN Bits) holds
+                // millions of sub-pixel annotations, so that walk was
+                // O(N·log N) and could cost >200ms/frame. Bucketing aggregates
+                // every sub-pixel annotation into one colour block per screen
+                // column (last-writer-wins, identical to the MID dense path),
+                // bounding cost by viewport width regardless of annotation
+                // count. Behaviour/visuals unchanged for real dense rows.
+                const auto _perf_vr_t0 = std::chrono::steady_clock::now();
                 auto range =
                     row_data->get_visible_range(start_sample, end_sample);
+                _perf_vr_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - _perf_vr_t0).count();
+                _perf_ann = range.second - range.first;
+                const size_t start_idx = range.first;
+                const size_t end_idx = range.second;
+
+                if (start_idx < end_idx) {
+                  const int vis_width = right - left + 1;
+                  std::vector<uint8_t> col_valid(vis_width, 0);
+                  std::vector<uint8_t> col_color(vis_width, 0);
+                  QColor dense_colors[16];
+                  for (int c = 0; c < 16; c++)
+                    dense_colors[c] = getAnnColor(c);
+
+                  row_data->for_each_index(
+                      start_idx, end_idx, [&](const Annotation &a, size_t) {
+                        const double x = a.start_sample() / samples_per_pixel -
+                                         pixels_offset;
+                        if (x < left - DrawPadding || x > right + DrawPadding)
+                          return;
+                        const int col = (int)x;
+                        if (col >= left && col < left + vis_width) {
+                          col_valid[col - left] = 1;
+                          col_color[col - left] =
+                              (uint8_t)((a.type() % MaxAnnType) % 16);
+                        }
+                      });
+
+                  for (int i = 0; i < vis_width; i++) {
+                    if (!col_valid[i])
+                      continue;
+                    p.fillRect(QRectF((double)(left + i),
+                                      y - annotation_height * 0.5, 1.0,
+                                      annotation_height),
+                               dense_colors[col_color[i]]);
+                    dbg_blocks++;
+                  }
+                }
+              } else {
+                const auto _perf_vr_t0 = std::chrono::steady_clock::now();
+                auto range =
+                    row_data->get_visible_range(start_sample, end_sample);
+                _perf_vr_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - _perf_vr_t0).count();
+                _perf_ann = range.second - range.first;
                 const size_t start_idx = range.first;
                 const size_t end_idx = range.second;
 
@@ -731,6 +766,14 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
             }
           }
 
+          const double _perf_row_ms = std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - _perf_row_t0).count();
+          pv::base::perf::record_track(_perf_row_name, _perf_row_ms,
+                                       _perf_vr_ms, _perf_row_ms - _perf_vr_ms,
+                                       _perf_ann);
+          pv::base::perf::frame_add_rows(_perf_is_dense ? 1 : 0,
+                                         _perf_is_dense ? 0 : 1, _perf_ann);
+
           y += annotation_height;
           _cur_row_headings.push_back(row.title());
         }
@@ -907,6 +950,8 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
     }
     p.restore();
   }
+
+  PXV_PERF_FRAME_END();
 }
 
 void DecodeTrace::paint_fore(QPainter &p, int left, int right, QColor fore,
@@ -1235,52 +1280,59 @@ void DecodeTrace::on_new_decode_data() {
   if (!_decode_elapsed_timer.isValid())
     _decode_elapsed_timer.start();
 
-  // Adaptive throttle: the decode track refresh rate is capped at 5 FPS
-  // (200ms minimum interval); longer decode sessions drop further to 1 FPS
-  // to avoid O(N) repaint overhead.
-  const qint64 decode_duration_ms = _decode_elapsed_timer.elapsed();
-  qint64 throttle_ms;
-  if (decode_duration_ms < 2000)
-    throttle_ms = 200; // at most 5 FPS for the first 2s
-  else
-    throttle_ms = 1000; // 1 FPS for all longer decodes
+  // Throttle ONLY the (relatively expensive) layout/progress rebuild, NOT the
+  // viewport repaint. Repaint is decoupled and coalesced to <=60 FPS by
+  // View::_delayed_view_update_timer, which is cheap because per-row drawing
+  // is now O(screen width) (pixel bucket). The old code gated the WHOLE update
+  // — including the repaint request — behind a 1 FPS (1000ms) discard throttle
+  // for >=3 decoders; that made decode growth appear as uneven "stair-steps"
+  // (a big jump every ~1-2s) and dropped in-flight updates. With repaint
+  // decoupled no frame is lost and growth is smooth.
+  //
+  // Layout/progress refresh cadence: 100ms is plenty now that a single repaint
+  // costs <5ms even with millions of annotations.
+  const qint64 throttle_ms = 100;
 
   qint64 elapsed = _update_timer.isValid() ? _update_timer.elapsed() : 999999;
-  if (is_running && elapsed < throttle_ms) {
-    return;
-  }
-  _update_timer.start();
+  if (!(is_running && elapsed < throttle_ms)) {
+    _update_timer.start();
 
-  // 1. Update progress
-  decoded_progress(_decoder_stack->get_progress());
+    // 1. Update progress
+    decoded_progress(_decoder_stack->get_progress());
 
-  // 2. Trigger geometry layout updates if height changed
-  const int expectedHeight = rows_size() * _view->get_signalHeight();
-  if (_totalHeight != expectedHeight) {
-    _view->signals_changed(nullptr);
-  }
+    // 2. Trigger geometry layout updates if height changed
+    const int expectedHeight = rows_size() * _view->get_signalHeight();
+    if (_totalHeight != expectedHeight) {
+      _view->signals_changed(nullptr);
+    }
 
-  // 3. Request lightweight viewport repaint only
-  // Do NOT call data_updated() which rebuilds headers, margins, scrollbars,
-  // and marks the entire pixmap cache dirty. Decode data changes only affect
-  // the decode trace rendering, not view layout or logic signal cache.
-  // P1-A: Use request_delayed_update() instead of viewport_update() to
-  // coalesce bursts of new_decode_data signals into a single repaint.
-  if (_view && _data_source->is_stopped_status()) {
-    _view->request_delayed_update();
+    // 3. Lightweight, coalesced viewport repaint (never dropped). Throttled
+    //    together with the layout/progress pass to ~10 FPS during decode
+    //    growth. Firing this on every new_decode_data (effectively up to 60
+    //    FPS after the merge change) multiplied the per-frame viewport cost
+    //    (SignalPixmapPass rebuild + get_visible_range work) by ~6x and made
+    //    decode growth stutter badly. 10 FPS is smooth enough for a
+    //    progress-driven view while leaving the main thread free for decoding.
+    //    Do NOT call data_updated() — it rebuilds headers/margins/scrollbars
+    //    and marks the whole pixmap cache dirty; decode changes only affect
+    //    the decode trace rendering.
+    if (_view && _data_source->is_stopped_status()) {
+      _view->request_delayed_update();
+    }
   }
 }
 
 int DecodeTrace::get_progress() { return _decoder_stack->get_progress(); }
 
 void DecodeTrace::on_decode_done() {
-  // Reset decode duration timer so next decode session starts fresh at 30 FPS
+  // Reset decode duration timer so next decode session starts fresh.
   _decode_elapsed_timer.invalidate();
 
-  // Always emit the final progress (100%) and update the viewport,
-  // bypassing the throttle in on_new_decode_data() which can swallow
-  // the final progress update when is_running is still true and
-  // elapsed < 20ms, leaving the progress bar stuck at 99%.
+  // Emit the final progress (100%). The viewport repaint below goes through
+  // the coalesced delayed-update timer (not a direct viewport_update), so the
+  // final frame flushes within <=16ms — progress is never left stuck, and
+  // bursts of simultaneous decoder completions no longer flood the main
+  // thread with back-to-back repaints.
   decoded_progress(_decoder_stack->get_progress());
 
   // Recalculate the full signal layout only when the decoder trace height
@@ -1293,8 +1345,9 @@ void DecodeTrace::on_decode_done() {
       _view->signals_changed(nullptr);
   }
 
+  // Coalesced final repaint (<=60 FPS): avoids completion-burst stutter.
   if (_view && _data_source->is_stopped_status()) {
-    _view->viewport_update();
+    _view->request_delayed_update();
   }
 
   _data_source->decode_done();

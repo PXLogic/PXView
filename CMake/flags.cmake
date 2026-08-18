@@ -57,6 +57,21 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 add_compile_definitions($<$<CONFIG:Debug>:_GLIBCXX_ASSERTIONS>)
 
 #===============================================================================
+#= Decode render performance instrumentation
+#-------------------------------------------------------------------------------
+# When ON, defines PXVIEW_DECODE_PERF which turns on per-frame and per-track-row
+# timing inside DecodeTrace::paint_mid(). Aggregates are flushed periodically
+# (every ~2s or 120 frames) to %TEMP%/pxv_decode_perf.log, sorted by total
+# track time so the jank hotspot is easy to spot. Default OFF — zero runtime
+# cost in normal builds.
+#-------------------------------------------------------------------------------
+option(ENABLE_DECODE_PERF "Enable decode-render timing instrumentation" OFF)
+if(ENABLE_DECODE_PERF)
+    add_compile_definitions(PXVIEW_DECODE_PERF)
+    message(STATUS "Decode render perf instrumentation: ENABLED")
+endif()
+
+#===============================================================================
 #= Sanitizers + Clang-Tidy (Debug mode static analysis & runtime checks)
 #-------------------------------------------------------------------------------
 # See options.cmake for usage. Key constraints:

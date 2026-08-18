@@ -28,6 +28,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/isession_host.h"
 #include "pv/ui/langresource.h"
@@ -491,6 +492,7 @@ void DecoderStack::publish_snapshot() {
   // GUI thread after it observes the pointer.
   _published.store(std::move(snap), std::memory_order_release);
   _snapshot_generation.fetch_add(1, std::memory_order_relaxed);
+  pv::base::perf::record_publish();
 }
 
 std::shared_ptr<const DecoderStack::SnapshotRows>

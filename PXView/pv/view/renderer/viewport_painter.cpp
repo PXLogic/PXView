@@ -38,6 +38,7 @@
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/langresource.h"
 
@@ -54,6 +55,7 @@ ViewportPainter::ViewportPainter(Viewport *viewport) : _viewport(viewport) {}
 ViewportPainter::~ViewportPainter() {}
 
 void ViewportPainter::paintEvent(QPaintEvent *event) {
+  PXV_PERF_SCOPE_VIEWPORT();
   if (_viewport->drag_active() && !_viewport->drag_snapshot().isNull()) {
     QPainter p(_viewport);
     p.drawPixmap(0, 0, _viewport->drag_snapshot());
@@ -197,7 +199,14 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (_viewport->view().session().is_init_status()) {
       paintCursors(p);
     } else if (_viewport->view().session().is_stopped_status()) {
-      paintSignals(p, fore, back);
+      {
+        const auto _ps_t0 = std::chrono::steady_clock::now();
+        paintSignals(p, fore, back);
+        const auto _ps_t1 = std::chrono::steady_clock::now();
+        pv::base::perf::record_track(
+            "V_PAINTSIGNALS", 0.0, 0.0,
+            std::chrono::duration<double, std::milli>(_ps_t1 - _ps_t0).count(), 0);
+      }
     } else if (_viewport->view().session().is_realtime_refresh()) {
       _viewport->view().session().have_new_realtime_refresh(false);
 

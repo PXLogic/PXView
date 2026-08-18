@@ -21,11 +21,13 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cassert>
 #include <cmath>
 #include <mutex>
 
 #include "pv/data/decode/rowdata.h"
+#include "pv/base/perflog.h"
 
 using std::max;
 using std::min;
@@ -136,8 +138,16 @@ const Annotation *RowDataSnapshot::_annotation_at(size_t index) const {
 
 std::pair<size_t, size_t> RowDataSnapshot::get_visible_range(
     uint64_t start_sample, uint64_t end_sample) const {
-  if (_segments.empty())
+  const auto _t0 = std::chrono::steady_clock::now();
+  auto _perf_done = [&]() {
+    pv::base::perf::record_vrange_snap(
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - _t0).count());
+  };
+  if (_segments.empty()) {
+    _perf_done();
     return {0, 0};
+  }
 
   const size_t begin = _first_end_after(start_sample);
 
@@ -195,8 +205,11 @@ std::pair<size_t, size_t> RowDataSnapshot::get_visible_range(
     }
   }
 
-  if (end < begin)
+  if (end < begin) {
+    _perf_done();
     return {begin, begin};
+  }
+  _perf_done();
   return {begin, end};
 }
 
@@ -423,10 +436,18 @@ bool RowData::get_annotation(Annotation *ann, uint64_t index) {
 
 std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
                                                      uint64_t end_sample) {
+  const auto _t0 = std::chrono::steady_clock::now();
+  auto _perf_done = [&]() {
+    pv::base::perf::record_vrange_live(
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - _t0).count());
+  };
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
 
-  if (_annotations.empty())
+  if (_annotations.empty()) {
+    _perf_done();
     return {0, 0};
+  }
 
   // ---- Lower bound: SMALLEST index whose end_sample > start_sample ----
   // end_sample is NOT monotonic (a wide annotation can be followed by narrow
@@ -486,6 +507,7 @@ std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
   if (end_idx < start_idx)
     end_idx = start_idx;
 
+  _perf_done();
   return {start_idx, end_idx};
 }
 
