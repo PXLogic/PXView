@@ -1274,8 +1274,6 @@ void DecodeTrace::draw_unshown_row(QPainter &p, int y, int h, int left,
 }
 
 void DecodeTrace::on_new_decode_data() {
-  bool is_running = _decoder_stack->IsRunning();
-
   // Start tracking decode duration on first call
   if (!_decode_elapsed_timer.isValid())
     _decode_elapsed_timer.start();
@@ -1294,7 +1292,14 @@ void DecodeTrace::on_new_decode_data() {
   const qint64 throttle_ms = 100;
 
   qint64 elapsed = _update_timer.isValid() ? _update_timer.elapsed() : 999999;
-  if (!(is_running && elapsed < throttle_ms)) {
+  // P0 throttle fix: gate on elapsed time ONLY, not on is_running. The old
+  // `!(is_running && elapsed < throttle_ms)` short-circuited to true once
+  // the stack stopped (is_running==false), so after decode finished the
+  // 100ms throttle was bypassed entirely and every lingering notification
+  // (incl. from the final publish window) forced a full repaint — the W12
+  // window showed ~494 fps with PUBLISH=0/s. Stopped-state notifications
+  // are now throttled to the same 100ms cadence as running ones.
+  if (elapsed >= throttle_ms) {
     _update_timer.start();
 
     // 1. Update progress
@@ -1317,7 +1322,10 @@ void DecodeTrace::on_new_decode_data() {
     //    and marks the whole pixmap cache dirty; decode changes only affect
     //    the decode trace rendering.
     if (_view && _data_source->is_stopped_status()) {
-      _view->request_delayed_update();
+      // P2: decode-only repaint — skips the signal-pixmap rebuild (signals
+      // are unchanged during decode growth; the decode layer is drawn by
+      // DecodeTracePass outside the cached pixmap).
+      _view->request_decode_only_update();
     }
   }
 }

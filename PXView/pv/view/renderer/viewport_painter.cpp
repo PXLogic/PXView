@@ -283,6 +283,12 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
   pctx.show_glitch_overlay = _viewport->view().session().show_glitch_filter_overlay();
   pctx.hover_point = _viewport->view().hover_point();
 
+  // P2: consume the viewport's decode-only paint flag (self-clearing). When
+  // set, SignalPixmapPass skips the signal-pixmap rebuild and only blits the
+  // existing cache — decode growth only affects the decode trace layer, which
+  // DecodeTracePass redraws below.
+  const bool decode_only = _viewport->take_decode_only_paint();
+
   // Phase 5: Signal pixmap rebuild + blit via SignalPixmapPass.
   {
     RenderContext sctx;
@@ -294,6 +300,7 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     sctx.back = back;
     sctx.traces = &traces;
     sctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+    sctx.decode_only = decode_only;
     sctx.viewWidth = _viewport->view().get_view_width();
     sctx.pctx = pctx;
 

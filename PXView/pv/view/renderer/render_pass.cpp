@@ -315,7 +315,19 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
         vp->pixmap().size() != pixmapSize ||
         !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
 
-    if (view_params_changed || vp->need_update() || pixmap_changed) {
+    // P2 decode-only: when a decode-only repaint was requested and no other
+    // dirty source exists (view params unchanged, pixmap size/DPR valid, no
+    // forced _need_update), skip the expensive signal-pixmap rebuild and just
+    // blit the existing cache — signal waveforms are unchanged during decode
+    // growth; the decode trace layer is redrawn by DecodeTracePass. Any dirty
+    // source present (zoom/scroll/resize/first paint) forces the full rebuild
+    // (safety fallback).
+    const bool decode_only_skip =
+        ctx.decode_only && !view_params_changed && !pixmap_changed &&
+        !vp->need_update();
+
+    if (!decode_only_skip &&
+        (view_params_changed || vp->need_update() || pixmap_changed)) {
       vp->curScale() = view->scale();
       vp->curOffset() = view->offset();
       vp->curSignalHeight() = view->get_signalHeight();

@@ -62,6 +62,12 @@ struct RenderContext {
   const std::vector<SignalGroup> *groups = nullptr;
   int viewWidth = 0;
   bool is_logic_mode = false;
+  // P2: decode-only paint. When true, SignalPixmapPass skips the signal-pixmap
+  // rebuild (signals are unchanged during decode growth) and just blits the
+  // existing valid cache; DecodeTracePass still redraws the new annotations.
+  // Any real dirty source (view params / pixmap size / forced _need_update)
+  // still forces the full rebuild as a safety fallback.
+  bool decode_only = false;
 
   // PaintContext snapshot for Trace::paint_mid / paint_back / paint_fore.
   // Populated by ViewportPainter before calling RenderPass::render.

@@ -301,6 +301,12 @@ template <typename EventType> void broadcast_async(const EventType &ev) { _event
   // emitting the signal on the main thread avoids QThreadData creation on
   // the worker thread (which crashes on thread exit, see eventbus.h:100-111).
   void event_bus_post(std::function<void()> fn) override { _event_bus->dispatch_async(std::move(fn)); }
+  // P1 global decode-notify batching (ISessionHost). Decode threads enqueue
+  // their DecoderStack here (weak_ptr); the main-thread batch timer drains
+  // the queue at a steady ~100ms cadence and posts new_decode_data() for each
+  // stack, replacing the per-stack 200ms-gated event_bus_post burst (24
+  // phase-aligned stacks -> publish spike on start, then a trickle).
+  void request_decode_notify(std::weak_ptr<DecoderStack> self) override;
   bool have_new_realtime_refresh(bool keep) { return _capture_manager->have_new_realtime_refresh(keep); }
   std::shared_ptr<data::DecoderStack> get_decoder_trace(int index, data::SessionDocument *doc = nullptr);
   std::shared_ptr<data::SignalModel> get_signal_by_index(int index);
@@ -411,6 +417,16 @@ private:
   void clear_all_decode_task(int &runningDex); void clear_all_decode_task2();
   void add_decode_task(std::shared_ptr<data::DecoderStack> stack);
   void DeviceConfigChanged() override;
+  // P1 decode-notify batch timer internals (see request_decode_notify).
+  // Single-shot 100ms, main-thread bound (created in the ctor; SigSession is
+  // not a QObject, so lifetime is managed by unique_ptr — stopped+reset in
+  // ~SigSession). _notify_batch_timer_armed gates the cross-thread arm posts.
+  std::unique_ptr<QTimer> _notify_batch_timer;
+  std::atomic<bool> _notify_batch_timer_armed{false};
+  std::mutex _notify_mutex;   // protects _pending_notify
+  std::vector<std::shared_ptr<DecoderStack>> _pending_notify;
+  void on_notify_batch_timeout();   // main thread: drain + post new_decode_data
+  void ensure_notify_batch_armed_(); // any thread: arm timer on the main thread
   // IDeviceAgentCallback — called from DeviceAgent's worker thread AFTER
   // sr_session_run() returns (libsigrok session fully stopped). Re-broadcasts
   // as the typed SessionStopped event via broadcast_async so listeners run on

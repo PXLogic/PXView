@@ -30,6 +30,7 @@ namespace pv {
 namespace data {
 
 class SignalModel;
+class DecoderStack;
 
 /**
  * ISessionHost — 解码栈所需的会话宿主能力（依赖倒置）。
@@ -58,6 +59,15 @@ public:
     virtual bool is_closed() = 0;
     /// Ring-buffer sample limit for repeating captures.
     virtual int64_t get_ring_sample_count() = 0;
+
+    /// P1 global decode-notify batching. Called by the decode thread (each
+    /// DecoderStack, inside its own 200ms publish gate) to request a GUI
+    /// new_decode_data() notification. Instead of every stack posting its own
+    /// event (phase-aligned across 24 stacks -> publish burst on start), the
+    /// host coalesces all requests into a steady ~100ms main-thread batch.
+    /// `self` is a weak_ptr so a stack destroyed before the batch drains is
+    /// dropped safely. Implemented by SigSession (main-thread QTimer).
+    virtual void request_decode_notify(std::weak_ptr<DecoderStack> self) = 0;
 };
 
 } // namespace data

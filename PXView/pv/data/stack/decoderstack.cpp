@@ -1054,11 +1054,14 @@ return;
           std::chrono::milliseconds(200)) {
         publish_snapshot();
         _last_publish_time = now;
-        // P2-10 fix: Capture shared_ptr instead of raw 'this' to prevent
-        // use-after-free if the DecoderStack is destroyed before the
-        // lambda executes on the main thread.
-        auto self = shared_from_this();
-        _host->event_bus_post([self]() { self->new_decode_data(); });
+        // P1: do NOT post a per-stack new_decode_data event here. The 24
+        // stacks all align on the same 200ms gate, so posting individually
+        // bursts 24 events onto the main thread at once, then dies to a
+        // trickle — "忽快忽慢" growth. Instead, hand the stack over to the
+        // host, which coalesces all requests into a steady ~100ms main-thread
+        // batch. weak_ptr is dropped safely if the stack is destroyed before
+        // the batch drains.
+        _host->request_decode_notify(weak_from_this());
       }
     }
   }

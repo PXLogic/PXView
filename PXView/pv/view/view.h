@@ -395,6 +395,14 @@ public:
   // succession.
   void request_delayed_update();
 
+  // P2: Decode-only repaint request. Same 16ms coalescing as
+  // request_delayed_update(), but the resulting viewport update runs the
+  // decode-only path (viewport_update_decode_only): it skips set_decode_dirty()
+  // so the signal pixmap is NOT rebuilt every frame during decode growth —
+  // signal waveforms are unchanged, only the decode trace layer (drawn by
+  // DecodeTracePass outside the cached pixmap) needs a repaint.
+  void request_decode_only_update();
+
   void show_captured_progress(bool triggered, int progress);
 
   bool get_dso_trig_moved();
@@ -824,6 +832,15 @@ private:
   QTimer *_delayed_view_update_timer = nullptr;
   bool _delayed_view_update_pending = false;
   static constexpr int MaxViewAutoUpdateRateMs = 16; // ~60 FPS
+
+  // P2: decode-only repaint pending flag. When set, the coalescing timer
+  // drains via viewport_update_decode_only() (skips set_decode_dirty) instead
+  // of the full viewport_update(). A full update request supersedes it.
+  bool _decode_only_repaint_pending = false;
+  // P2: decode-only viewport update — repaint the decode trace layer only,
+  // without marking the signal pixmap dirty (signals unchanged during decode
+  // growth). Marks _time_viewport for a decode-only paint then updates.
+  void viewport_update_decode_only();
 
   // (trigger position fix _trig_hoff is declared above in the layout section)
 

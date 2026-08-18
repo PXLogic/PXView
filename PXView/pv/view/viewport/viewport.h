@@ -163,6 +163,18 @@ public:
   void clear_dso_xm();
   void set_need_update(bool update);
   void set_decode_dirty();
+  // P2 decode-only paint. Marks this viewport so the next paint runs the
+  // decode-only path (SignalPixmapPass skips the signal-pixmap rebuild and
+  // just blits the existing cache; DecodeTracePass still redraws). The flag
+  // is consumed (self-cleared) by ViewportPainter::paintSignals via
+  // take_decode_only_paint(). Note: set_decode_dirty() is NOT called on this
+  // path — signal waveforms are unchanged during decode growth.
+  void set_decode_only_paint() { _decode_only_paint = true; }
+  bool take_decode_only_paint() {
+    const bool v = _decode_only_paint;
+    _decode_only_paint = false;
+    return v;
+  }
   int get_fps();
   bool get_dso_trig_moved();
 
@@ -375,6 +387,9 @@ private:
   View &_view;
   View_type _type;
   bool _need_update;
+  // P2: decode-only paint flag (see set_decode_only_paint). Consumed by
+  // ViewportPainter::paintSignals.
+  bool _decode_only_paint = false;
   QPixmap _pixmap;
   QMenu *_cmenu;
 

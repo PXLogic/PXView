@@ -130,6 +130,7 @@ public:
     bool is_realtime_refresh() override { return false; }
     bool is_closed() override { return false; }
     int64_t get_ring_sample_count() override { return 0; }
+    void request_decode_notify(std::weak_ptr<DecoderStack>) override {}
 };
 
 namespace {

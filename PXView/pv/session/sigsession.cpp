@@ -73,6 +73,7 @@
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
 #include "pv/ui/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/utility/path.h"
@@ -191,6 +192,22 @@ SigSession::SigSession() {
   _state->device_agent().set_datafeed_callback(
       &core::DataFeedParser::data_feed_callback_ex,
       _data_feed_parser.get());
+
+  // P1: decode-notify batch timer. Created here (main thread) so the QTimer
+  // has main-thread affinity even though request_decode_notify() is called
+  // from decode worker threads. Single-shot 100ms: on timeout the pending
+  // DecoderStacks are drained and each gets its new_decode_data() posted.
+  // SigSession is NOT a QObject, so the QTimer is parentless and owned by
+  // unique_ptr (same pattern as reconnect_timer_); it is stopped+reset in
+  // ~SigSession before _event_bus is torn down.
+  _notify_batch_timer = std::make_unique<QTimer>();
+  _notify_batch_timer->setSingleShot(true);
+  _notify_batch_timer->setInterval(100);
+  // QObject::connect (qualified: sigsession.cpp pulls in winsock.h via
+  // libusb.h, which shadows the unqualified Qt `connect` with ::connect()).
+  QObject::connect(_notify_batch_timer.get(), &QTimer::timeout,
+                   _notify_batch_timer.get(),
+                   [this]() { on_notify_batch_timeout(); });
 }
 
 SigSession::SigSession(SigSession &o) { (void)o; }
@@ -213,6 +230,21 @@ SigSession::~SigSession() {
   if (reconnect_timer_) {
     reconnect_timer_->stop();
     reconnect_timer_.reset();
+  }
+
+  // P1: stop + release the decode-notify batch timer. The armed gate is set
+  // so no further cross-thread arm posts (capturing `this`) can be queued
+  // after teardown; the pending queue is cleared (stacks' shared_ptrs dropped
+  // — the stacks themselves are owned by documents/DecodeTaskManager, so this
+  // never frees a stack, just releases our batch reference).
+  _notify_batch_timer_armed.store(true, std::memory_order_release);
+  if (_notify_batch_timer) {
+    _notify_batch_timer->stop();
+    _notify_batch_timer.reset();
+  }
+  {
+    std::lock_guard<std::mutex> lock(_notify_mutex);
+    _pending_notify.clear();
   }
 
   // Subscriptions auto-unsubscribe via RAII (vector<Subscription> destructor).
@@ -2291,6 +2323,91 @@ void SigSession::clear_all_decode_task2() {
 
 void SigSession::add_decode_task(std::shared_ptr<data::DecoderStack> stack) {
   _decode_task_manager->add_decode_task(stack);
+}
+
+// ----------------------------------------------------------------------------
+// P1: global decode-notify batching.
+//
+// Before: each DecoderStack posted its own new_decode_data() event (inside a
+// per-stack 200ms gate). With 24 phase-aligned stacks, the first gate cycle
+// burst 24 events onto the main thread at once (PUBLISH=462/s in W2), then
+// they drifted apart and collapsed to ~20/s — growth appeared "忽快忽慢".
+//
+// Now: the decode thread keeps its 200ms publish gate (bounds publish_snapshot
+// copy cost), but the GUI notification goes through this host, which coalesces
+// all stacks into a steady ~100ms main-thread batch. _notify_batch_timer is
+// created in the ctor (main-thread affinity); arming is posted to the main
+// thread because QTimer must be started from its owning thread.
+// ----------------------------------------------------------------------------
+
+void SigSession::request_decode_notify(std::weak_ptr<DecoderStack> self) {
+  // Lock the weak_ptr -> shared_ptr: if the stack was destroyed, drop it.
+  std::shared_ptr<DecoderStack> sp = self.lock();
+  if (!sp)
+    return;
+
+  bool arm = false;
+  {
+    std::lock_guard<std::mutex> lock(_notify_mutex);
+    // Dedup: a stack already queued for the current batch is skipped.
+    for (const auto &p : _pending_notify) {
+      if (p == sp)
+        return;
+    }
+    _pending_notify.push_back(std::move(sp));
+    if (!_notify_batch_timer_armed.load(std::memory_order_acquire))
+      arm = true;
+  }
+
+  if (arm)
+    ensure_notify_batch_armed_();
+}
+
+void SigSession::ensure_notify_batch_armed_() {
+  // Any thread. Gate the post so many decode notifications within one batch
+  // window only produce a single start request.
+  if (_notify_batch_timer_armed.exchange(true, std::memory_order_acq_rel))
+    return;
+  // Start on the main thread (QTimer affinity). Captures `this` by raw
+  // pointer — same pattern as hotplug_cb_/reconnect watchdog; SigSession is
+  // an app-lifetime singleton and the timer is stopped+reset in ~SigSession
+  // before _event_bus is torn down.
+  _event_bus->dispatch_async([this]() {
+    if (_notify_batch_timer)
+      _notify_batch_timer->start();
+  });
+}
+
+void SigSession::on_notify_batch_timeout() {
+  // Main thread (QTimer timeout). Reset the armed gate so new notifications
+  // can re-arm for the next batch.
+  _notify_batch_timer_armed.store(false, std::memory_order_release);
+
+  std::vector<std::shared_ptr<DecoderStack>> batch;
+  {
+    std::lock_guard<std::mutex> lock(_notify_mutex);
+    batch.swap(_pending_notify);
+  }
+
+  if (!batch.empty()) {
+    // Deliver every stack via the existing event_bus_post pattern — shared_ptr
+    // capture prevents UAF if the stack is destroyed before the lambda runs.
+    for (const auto &sp : batch)
+      _event_bus->dispatch_async([sp]() { sp->new_decode_data(); });
+
+#ifdef PXVIEW_DECODE_PERF
+    pv::base::perf::record_track("NOTIFY_BATCH", 0.0, 0.0, 0.0, batch.size());
+#endif
+  }
+
+  // If entries arrived while (or after) we drained, re-arm for the next batch.
+  bool rearm = false;
+  {
+    std::lock_guard<std::mutex> lock(_notify_mutex);
+    rearm = !_pending_notify.empty();
+  }
+  if (rearm)
+    ensure_notify_batch_armed_();
 }
 
 std::shared_ptr<data::DecoderStack>

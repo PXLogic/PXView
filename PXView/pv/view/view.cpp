@@ -137,8 +137,18 @@ _delayed_view_update_timer = new QTimer(this);
 _delayed_view_update_timer->setSingleShot(true);
 _delayed_view_update_timer->setInterval(MaxViewAutoUpdateRateMs);
 connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
-  _delayed_view_update_pending = false;
-  viewport_update();
+  if (_delayed_view_update_pending) {
+    // A full update was requested (e.g. zoom/scroll/resize/decode-done) —
+    // it supersedes any pending decode-only repaint.
+    _delayed_view_update_pending = false;
+    _decode_only_repaint_pending = false;
+    viewport_update();
+  } else if (_decode_only_repaint_pending) {
+    // P2: decode-growth repaint — decode trace layer only, no signal-pixmap
+    // rebuild (skips set_decode_dirty()).
+    _decode_only_repaint_pending = false;
+    viewport_update_decode_only();
+  }
 });
 
 setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
@@ -644,6 +654,37 @@ void View::request_delayed_update() {
     _delayed_view_update_pending = true;
     _delayed_view_update_timer->start();
   }
+}
+
+void View::request_decode_only_update() {
+  // P2: coalesced decode-only repaint. Sets the decode-only pending flag so
+  // the coalescing timer drains via viewport_update_decode_only() (no signal-
+  // pixmap rebuild). A full request_delayed_update() in the same 16ms window
+  // supersedes this (checked first in the timer lambda).
+  _decode_only_repaint_pending = true;
+  if (!_delayed_view_update_timer->isActive())
+    _delayed_view_update_timer->start();
+}
+
+void View::viewport_update_decode_only() {
+  // P2: suppress during decoder-analog-trigger display-hold, same as the
+  // full viewport_update().
+  if (_decoder_analog_trigger_hold)
+    return;
+
+  // Deliberately do NOT call _time_viewport->set_decode_dirty(): decode
+  // growth does not change signal waveforms (only the decode trace layer,
+  // which DecodeTracePass paints outside the cached signal pixmap). Marking
+  // the time viewport for a decode-only paint lets SignalPixmapPass keep
+  // blitting the existing (valid) pixmap while DecodeTracePass redraws the
+  // new annotations. Any real dirty source (zoom/scroll/resize -> forced
+  // _need_update) still falls back to the full rebuild inside that pass.
+  if (_time_viewport)
+    _time_viewport->set_decode_only_paint();
+
+  _viewcenter->update();
+  for (QWidget *viewport : _viewport_list)
+    viewport->update();
 }
 
 void View::splitterMoved(int pos, int index) {
