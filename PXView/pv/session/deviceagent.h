@@ -340,6 +340,11 @@ private:
     QString     _dev_name;
     QString     _driver_name;
     QString     _path;
+    // Real on-disk path of a loaded file device (.pxl/.sr). _path is reset to
+    // "" during release()/open_by_handle(), so the path is captured separately
+    // here in set_file_device() and copied into _path by update() (which runs
+    // after the device is opened). path() relies on this for file devices.
+    QString     _file_path;
     bool        _is_new_device = false;
     struct sr_dev_inst  *_di = nullptr;
     struct sr_session   *_sr_session = nullptr;

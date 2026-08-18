@@ -72,7 +72,10 @@ ds_device_handle DeviceAgent::set_file_device(struct sr_dev_inst *sdi, const QSt
     if (!sdi)
         return NULL_HANDLE;
     _file_sdi.push_back(sdi);
-    (void)name;  // name is derived from sdi in update()
+    // Capture the real on-disk path. It cannot be re-derived from the sdi
+    // (SR_CONF_SESSIONFILE is SET-only in the virtual-session driver), so we
+    // store it here and publish it via _path in update().
+    _file_path = name;
 
     // Assign a STABLE file handle from a monotonic counter. The handle must
     // NOT depend on _file_sdi array position: set_device()->release() erases
@@ -574,6 +577,12 @@ void DeviceAgent::update()
     }
 
     // dev_type is set in open_by_handle; keep it here for consistency.
+
+    // For file devices, publish the captured on-disk path via _path so that
+    // path() returns the real .pxl/.sr location. This is what config_io uses
+    // to read the "session"/"decoders" entries (decoder track restore on open).
+    if (_dev_type == DEV_TYPE_FILELOG)
+        _path = _file_path;
 }
 
 void DeviceAgent::set_datafeed_callback(sr_datafeed_callback cb, void *user_data)
