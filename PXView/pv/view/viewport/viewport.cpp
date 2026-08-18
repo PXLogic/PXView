@@ -21,6 +21,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+// P3-D3: module identification for direct Viewport::update() callers that come
+// from a DLL (e.g. a queued-slot invocation). WIN32_LEAN_AND_MEAN avoids
+// winsock (so the Qt `connect` stays unshadowed) and NOMINMAX avoids the
+// min/max macros; viewport.cpp uses scoped std::max and bare Qt connect.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+
 #include "pv/view/viewport/viewport.h"
 #include "pv/view/viewport/viewport_drag.h"
 #include "pv/view/viewport/viewport_interaction.h"
@@ -75,6 +88,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/langresource.h"
@@ -501,13 +515,16 @@ void Viewport::set_receive_len(quint64 length) {
     _view.scroll_to_logic_last_data_time();
   }
 
-  // Received new data, and refresh the view.
-  // For LOGIC mode in realtime refresh, we must set _need_update so that
-  // paintSignals() rebuilds the pixmap even when scale/offset are unchanged
-  // (e.g. full-scale view where auto-scroll doesn't change the offset).
-  if (_view.is_logic_rendering_mode() && _view.session().is_realtime_refresh()) {
-    _need_update = true;
-  }
+  // P3-F2: the previous code set _need_update=true here on EVERY data packet
+  // (logic + realtime refresh). That was redundant — the actual signal-data
+  // refresh and pixmap rebuild are driven by the DataUpdated event
+  // (ViewDataSync::data_updated → set_update(time_view, true), including its
+  // 16ms dedup path). The redundant flag here made every subsequent paint
+  // (e.g. Qt-driven Viewport::update) rebuild the whole signal pixmap
+  // (~3-5ms) even during decode growth where the signal data is unchanged —
+  // the dominant remaining per-frame cost after the F2 decode cache. Signals
+  // are rebuilt only when data_updated (real new data) or a decode-only/full
+  // update actually needs them.
 
   // In DSO mode, the async DataUpdated event (broadcast_async from
   // feed_in_dso) already drives ViewDataSync::data_updated() which calls
@@ -518,10 +535,52 @@ void Viewport::set_receive_len(quint64 length) {
     return;
   }
 
-  update(UpdateEventType::UPDATE_EV_GENERIC);
+  // P3-F1: do NOT force a full repaint on every feed packet. This function is
+  // called once per data-feed packet (measured ~66/s at decode start), and the
+  // unconditional update() here fed the direct-update repaint storm
+  // (update_direct=65.9/s in the decode-start window), each paint triggering a
+  // signal-pixmap rebuild through the interleaved viewport_update() dirty
+  // flag. The 16ms progress timer (when active) already drives the repaints
+  // that show incoming data, and DataUpdated → viewport_update() refreshes the
+  // waveforms. So a direct repaint here is only justified for the settling
+  // edge case (session still working but the animation is momentarily idle);
+  // when the session is not working (e.g. decoding a static file), the
+  // progress bar has nothing to animate and the per-packet update() is pure
+  // waste, so it is skipped entirely.
+  if (!_progress_timer.isActive() && _view.session().is_working())
+    update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
 void Viewport::update(int event) {
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D: counts EVERY direct viewport update() call (from view_data_sync,
+  // view_glitch_filter, viewport.cpp internals, interaction, update_view_port,
+  // check_measure...). Records the caller return address for UPDATE_CALLERS.
+  void *ra = __builtin_return_address(0);
+  pv::base::perf::record_repaint_update_direct_caller(ra);
+  // P3-D3: one-time identification of any caller that is NOT inside the main
+  // executable (i.e. a DLL, e.g. Qt6Core when Viewport::update is invoked as a
+  // queued slot). Logs the module name once per distinct non-exe return
+  // address so the direct-update source is known without a per-call cost.
+  static void *s_last_non_exe_ra = nullptr;
+  if (s_last_non_exe_ra != ra) {
+    HMODULE exe = GetModuleHandleW(nullptr);
+    const bool in_exe =
+        exe && ra >= (void *)exe &&
+        ra < (void *)((BYTE *)exe + 0x2000000);
+    if (!in_exe) {
+      s_last_non_exe_ra = ra;
+      wchar_t name[MAX_PATH] = L"?";
+      HMODULE m = nullptr;
+      if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             (LPCWSTR)ra, &m))
+        GetModuleBaseNameW(GetCurrentProcess(), m, name, MAX_PATH);
+      pxv_info("Viewport::update called from NON-EXE module '%ls' ra=0x%p",
+               name, ra);
+    }
+  }
+#endif
   QWidget::update();
   (void)event;
 }
@@ -751,6 +810,24 @@ void Viewport::on_progress_timer() {
   const double target =
       static_cast<double>(_sample_received) / static_cast<double>(sample_limits);
   const double diff = target - _progress_displayed;
+
+  // P3-F1: when the session is no longer working (capture ended / stopped /
+  // idle), the progress animation has nothing left to animate toward. Snap to
+  // the final target and stop immediately instead of lerping at 60 FPS for
+  // ~250ms (every tick is a full viewport repaint at ~9ms) or ticking forever
+  // if set_receive_len keeps being fed in a stale path. This strictly removes
+  // repaints, never adds them, and only affects the progress-bar settle timing.
+  if (!_view.session().is_working()) {
+    _progress_displayed = target;
+    _progress_timer.stop();
+    update(UpdateEventType::UPDATE_EV_GENERIC);
+    return;
+  }
+
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D: every remaining tick issues a repaint (snap or lerp branch below).
+  pv::base::perf::record_repaint_progress();
+#endif
 
   if (qAbs(diff) < 0.0005) {
     // Close enough — snap to target and stop the timer. It will be

@@ -842,6 +842,11 @@ private:
   // growth). Marks _time_viewport for a decode-only paint then updates.
   void viewport_update_decode_only();
 
+  // P3-D4: main-thread event-loop lag detector. 100ms periodic tick that
+  // records the max tick overshoot into the perf log, to prove whether the
+  // GUI thread is actually blocked (freeze) and for how long.
+  QTimer *_event_lag_timer = nullptr;
+
   // (trigger position fix _trig_hoff is declared above in the layout section)
 
   // ---- Cursors ----

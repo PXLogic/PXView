@@ -52,6 +52,7 @@
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"
+#include "pv/base/perflog.h"
 #include "pv/session/sigsession.h"
 #include "pv/toolbars/samplingbar.h"
 
@@ -300,6 +301,12 @@ void ViewDataSync::receive_trigger(quint64 trig_pos1) {
 }
 
 void ViewDataSync::data_updated() {
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D: DataUpdated-event-driven repaint entry. Its 16ms dedup below caps
+  // the repaint rate at ~60/s; if the tail-window burst comes from here the
+  // log will show data_updated ≈ 60/s while the decode counters are ~0.
+  pv::base::perf::record_repaint_data_updated();
+#endif
   // Detect DSO continuous (running) mode for the fast-path below.
   const bool is_dso_running =
       (_view->get_work_mode() == DSO && _data_source &&

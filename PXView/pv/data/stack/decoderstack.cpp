@@ -130,8 +130,16 @@ DecoderStack::~DecoderStack() {
 // MUST go through this helper so that the error_message_changed signal is
 // reliably emitted (via event_bus_post for thread safety).
 void DecoderStack::set_error_message(const QString &msg) {
+  // P3-F1: dedup — only emit error_message_changed when the message actually
+  // changed. Decode-start failures (e.g. "required channels not enabled") can
+  // fire this helper repeatedly per chunk/task; without dedup each identical
+  // error spawned an event_bus_post + a full viewport_update() + a pxv_err
+  // log write on the main thread (measured ~267/s during the decode-start
+  // burst, 96 of 126 viewport_update calls came from that path).
   {
     std::lock_guard<std::mutex> lk(_state_mutex);
+    if (_error_message == msg)
+      return;
     _error_message = msg;
   }
   auto self = shared_from_this();
@@ -1049,6 +1057,12 @@ return;
       // to at most 5 FPS (200ms): the GUI repaint rate for the decode track
       // is capped by the user requirement, and this also bounds the decode
       // thread's publish cost and the main-thread event queue volume.
+      //
+      // Plan C (experiment): 200ms -> 50ms was measured and REVERTED. MAX_
+      // PUBLISH_DELTA stayed ~5.9K regardless (decoders emit annotation BURSTS
+      // faster than any gate interval, so the delta is burst-size not gate-
+      // time), and EVENT_LAG_MAX only improved inconsistently (384ms vs 1026ms
+      // in different windows) while publish rate doubled (33->59/s). Keep 200ms.
       const auto now = std::chrono::steady_clock::now();
       if (now - _last_publish_time >=
           std::chrono::milliseconds(200)) {
@@ -1269,8 +1283,17 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   }
 
   if (row_iter == d->_rows.end()) {
-    pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
-            ann_format);
+    // P3-F1: throttle the per-annotation error log. A decoder emitting an
+    // annotation class whose row is not registered (e.g. format=11 from a
+    // decoder whose build_row() did not create that row) floods pxv_err with
+    // one log-file write PER ANNOTATION on the decode thread — tens of
+    // thousands of writes/second serialize on the global log lock and saturate
+    // disk, freezing the whole app during decode ("开始解码会卡一段时间").
+    // Only the first few are logged; the rest are counted silently via
+    // _ann_dropped_row (already an atomic diagnostic counter).
+    if (d->_ann_dropped_row.load(std::memory_order_relaxed) < 10)
+      pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
+              ann_format);
     d->_ann_dropped_row++;
     return;
   }

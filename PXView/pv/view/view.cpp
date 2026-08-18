@@ -68,6 +68,23 @@
 #include "pv/dialogs/lissajousoptions.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
+#include <string>
+#include <thread>
+
+#ifdef _WIN32
+// P3-D6: process-CPU sampling (GetProcessTimes) for the event-lag timer, to
+// tell "main thread starved by decode threads saturating all cores" apart from
+// "main thread busy in an uninstrumented function". WIN32_LEAN_AND_MEAN avoids
+// winsock shadowing Qt's connect; NOMINMAX avoids the min/max macros.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include "pv/session/sigsession.h"
 #include "pv/widgets/hoversplitter.h"
 
@@ -142,14 +159,106 @@ connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
     // it supersedes any pending decode-only repaint.
     _delayed_view_update_pending = false;
     _decode_only_repaint_pending = false;
+#ifdef PXVIEW_DECODE_PERF
+    pv::base::perf::record_repaint_delayed(/*full=*/true);
+#endif
     viewport_update();
   } else if (_decode_only_repaint_pending) {
     // P2: decode-growth repaint — decode trace layer only, no signal-pixmap
     // rebuild (skips set_decode_dirty()).
     _decode_only_repaint_pending = false;
+#ifdef PXVIEW_DECODE_PERF
+    pv::base::perf::record_repaint_delayed(/*full=*/false);
+#endif
     viewport_update_decode_only();
   }
 });
+
+#ifdef PXVIEW_DECODE_PERF
+// P3-D4: main-thread event-loop lag detector. A 100ms periodic tick; if the
+// GUI thread is blocked (freeze) the tick fires late and the overshoot is
+// recorded in the perf log (EVENT_LAG_MAX). This distinguishes "main thread
+// blocked" from "decode threads busy" as the cause of perceived freezing.
+// P3-D6: also samples the whole-process CPU utilisation per tick (CPU_UTIL_MAX
+// in cores) — high util alongside a large EVENT_LAG_MAX means the decode
+// threads saturate the machine and starve the GUI thread.
+_event_lag_timer = new QTimer(this);
+_event_lag_timer->setInterval(100);
+connect(_event_lag_timer, &QTimer::timeout, this, []() {
+  pv::base::perf::record_event_lag();
+#ifdef _WIN32
+  static ULARGE_INTEGER _last_kt{}, _last_ut{};
+  static std::chrono::steady_clock::time_point _last_cpu_t{};
+  FILETIME _ct, _et, _kt, _ut;
+  if (GetProcessTimes(GetCurrentProcess(), &_ct, &_et, &_kt, &_ut)) {
+    ULARGE_INTEGER k, u;
+    k.LowPart = _kt.dwLowDateTime; k.HighPart = _kt.dwHighDateTime;
+    u.LowPart = _ut.dwLowDateTime; u.HighPart = _ut.dwHighDateTime;
+    const auto now = std::chrono::steady_clock::now();
+    if (_last_cpu_t.time_since_epoch().count() != 0) {
+      const double sec =
+          std::chrono::duration<double>(now - _last_cpu_t).count();
+      // 100ns FILETIME units -> ms, delta user+kernel since last tick.
+      const double cpu_ms =
+          (double)((k.QuadPart - _last_kt.QuadPart) +
+                   (u.QuadPart - _last_ut.QuadPart)) /
+          10000.0;
+      const double util = sec > 0 ? cpu_ms / (sec * 1000.0) : 0.0;
+      pv::base::perf::record_cpu_util(util);
+    }
+    _last_kt = k; _last_ut = u; _last_cpu_t = now;
+  }
+#endif
+});
+_event_lag_timer->start();
+
+// P3-D7: main-thread sampling profiler. A watcher thread suspends the main
+// thread every ~3ms and records its RIP into the perf histogram (SAMPLES).
+// The 1-1.4s EVENT_LAG_MAX blocks that are NOT in any instrumented function
+// (signals_changed / on_new_decode_data / on_decode_done all tiny) will show
+// up here as a dense cluster of samples pinpointing the exact blocking
+// function. Diagnostic-only (PXVIEW_DECODE_PERF).
+static std::thread g_main_sampler;
+static HANDLE g_main_thread_handle = nullptr;
+{
+  g_main_thread_handle =
+      OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME |
+                     THREAD_QUERY_INFORMATION,
+                 FALSE, GetCurrentThreadId());
+  g_main_sampler = std::thread([]() {
+    CONTEXT ctx;
+    ctx.ContextFlags = CONTEXT_CONTROL;
+    while (g_main_thread_handle) {
+      const DWORD rc = SuspendThread(g_main_thread_handle);
+      if (rc != (DWORD)-1) {
+        if (GetThreadContext(g_main_thread_handle, &ctx))
+          pv::base::perf::record_main_sample((uintptr_t)ctx.Rip);
+        ResumeThread(g_main_thread_handle);
+        // P3-D7b: record which module the main thread was sampled in, so the
+        // hot SAMPLES addresses (e.g. a DLL wait) can be attributed without
+        // resolving addresses per-run.
+        {
+          HMODULE m = nullptr;
+          wchar_t mod_path[MAX_PATH] = L"?";
+          if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                     GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 (LPCWSTR)(uintptr_t)ctx.Rip, &m) &&
+              GetModuleFileNameW(m, mod_path, MAX_PATH) > 0) {
+            // Basename after the last separator (kernel32, no psapi dep).
+            wchar_t *slash = wcsrchr(mod_path, L'\\');
+            std::wstring ws = slash ? std::wstring(slash + 1)
+                                    : std::wstring(mod_path);
+            pv::base::perf::record_main_sample_module(
+                std::string(ws.begin(), ws.end()));
+          }
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+  });
+  g_main_sampler.detach();
+}
+#endif
 
 setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   setStyleSheet(
@@ -447,7 +556,18 @@ void View::normalize_layout() { _signal_sync->normalize_layout(); }
 void View::mode_changed() { _data_sync->mode_changed(); }
 
 void View::signals_changed(const Trace *eventTrace) {
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D5: timing candidate for the EVENT_LAG_MAX block — full signal
+  // relayout (normalize + group + layout_time_signals).
+  const auto _op_t0 = std::chrono::steady_clock::now();
+#endif
   _signal_sync->signals_changed(eventTrace);
+#ifdef PXVIEW_DECODE_PERF
+  pv::base::perf::record_op_max(
+      "signals_changed",
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - _op_t0).count());
+#endif
 }
 
 bool View::eventFilter(QObject *object, QEvent *event) {
@@ -635,6 +755,11 @@ void View::viewport_update() {
 if (_decoder_analog_trigger_hold)
 return;
 
+#ifdef PXVIEW_DECODE_PERF
+// P3-D: full viewport_update() entry (any caller).
+pv::base::perf::record_repaint_viewport_caller(__builtin_return_address(0));
+#endif
+
 // Mark decode pixmap dirty so it will be rebuilt on next paint.
 // This is needed because decode data can change independently of
 // view parameters (e.g. new decode data arriving).
@@ -671,6 +796,11 @@ void View::viewport_update_decode_only() {
   // full viewport_update().
   if (_decoder_analog_trigger_hold)
     return;
+
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D: decode-only update entry (decode growth path).
+  pv::base::perf::record_repaint_decode_only();
+#endif
 
   // Deliberately do NOT call _time_viewport->set_decode_dirty(): decode
   // growth does not change signal waveforms (only the decode trace layer,

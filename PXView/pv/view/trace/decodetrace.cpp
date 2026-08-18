@@ -428,6 +428,15 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   const int annotation_height =
       (row_count > 0) ? (_totalHeight / row_count) : ctx.signal_height;
 
+  // P3-F2: theme-color signature for the dense render cache. A theme switch
+  // changes annotation colours, so the cache key must invalidate on it.
+  // 16 theme lookups per frame is negligible vs the O(N) row scans it saves.
+  uint32_t _color_sig = 0;
+  for (int c = 0; c < 16; c++) {
+    const QColor _col = getAnnColor(c);
+    _color_sig = _color_sig * 33u + (uint32_t)_col.rgba();
+  }
+
   // Iterate through the rows
   assert(_view);
   int y = get_y() - (_totalHeight - annotation_height) * 0.5;
@@ -513,34 +522,73 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
                 if (start_idx < end_idx) {
                   const int vis_width = right - left + 1;
-                  std::vector<uint8_t> col_valid(vis_width, 0);
-                  std::vector<uint8_t> col_color(vis_width, 0);
                   QColor dense_colors[16];
                   for (int c = 0; c < 16; c++)
                     dense_colors[c] = getAnnColor(c);
 
-                  row_data->for_each_index(
-                      start_idx, end_idx, [&](const Annotation &a, size_t) {
-                        const double x = a.start_sample() / samples_per_pixel -
-                                         pixels_offset;
-                        if (x < left - DrawPadding || x > right + DrawPadding)
-                          return;
-                        const int col = (int)x;
-                        if (col >= left && col < left + vis_width) {
-                          col_valid[col - left] = 1;
-                          col_color[col - left] =
-                              (uint8_t)((a.type() % MaxAnnType) % 16);
-                        }
-                      });
+                  // P3-F2: dense render cache. Between decode publishes the row
+                  // data pointer is unchanged, so repaints that arrive through
+                  // Qt/viewport paths (not new_decode_data) can replay the
+                  // cached per-column buckets instead of re-scanning the whole
+                  // row — the fix for the decode-start GUI freeze when the
+                  // growing annotation set is on screen. Any key change (new
+                  // publish -> new data ptr, zoom/scroll -> scale/offset/clip,
+                  // theme switch -> color_sig) misses and re-renders fully.
+                  DenseRowCache &cache = _dense_row_cache[row];
+                  const bool cache_hit =
+                      cache.data_ptr == row_data &&
+                      cache.spp == samples_per_pixel &&
+                      cache.offset == pixels_offset &&
+                      cache.left == left && cache.right == right &&
+                      cache.height == annotation_height &&
+                      cache.color_sig == _color_sig &&
+                      (int)cache.col_valid.size() == vis_width;
+                  if (cache_hit) {
+                    for (int i = 0; i < vis_width; i++) {
+                      if (!cache.col_valid[i])
+                        continue;
+                      p.fillRect(QRectF((double)(left + i),
+                                        y - annotation_height * 0.5, 1.0,
+                                        annotation_height),
+                                 dense_colors[cache.col_color[i]]);
+                      dbg_blocks++;
+                    }
+                  } else {
+                    std::vector<uint8_t> col_valid(vis_width, 0);
+                    std::vector<uint8_t> col_color(vis_width, 0);
+                    row_data->for_each_index(
+                        start_idx, end_idx, [&](const Annotation &a, size_t) {
+                          const double x = a.start_sample() / samples_per_pixel -
+                                           pixels_offset;
+                          if (x < left - DrawPadding || x > right + DrawPadding)
+                            return;
+                          const int col = (int)x;
+                          if (col >= left && col < left + vis_width) {
+                            col_valid[col - left] = 1;
+                            col_color[col - left] =
+                                (uint8_t)((a.type() % MaxAnnType) % 16);
+                          }
+                        });
 
-                  for (int i = 0; i < vis_width; i++) {
-                    if (!col_valid[i])
-                      continue;
-                    p.fillRect(QRectF((double)(left + i),
-                                      y - annotation_height * 0.5, 1.0,
-                                      annotation_height),
-                               dense_colors[col_color[i]]);
-                    dbg_blocks++;
+                    for (int i = 0; i < vis_width; i++) {
+                      if (!col_valid[i])
+                        continue;
+                      p.fillRect(QRectF((double)(left + i),
+                                        y - annotation_height * 0.5, 1.0,
+                                        annotation_height),
+                                 dense_colors[col_color[i]]);
+                      dbg_blocks++;
+                    }
+
+                    cache.data_ptr = row_data;
+                    cache.spp = samples_per_pixel;
+                    cache.offset = pixels_offset;
+                    cache.left = left;
+                    cache.right = right;
+                    cache.height = annotation_height;
+                    cache.color_sig = _color_sig;
+                    cache.col_valid = std::move(col_valid);
+                    cache.col_color = std::move(col_color);
                   }
                 }
               } else {
@@ -1274,6 +1322,11 @@ void DecodeTrace::draw_unshown_row(QPainter &p, int y, int h, int left,
 }
 
 void DecodeTrace::on_new_decode_data() {
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D5: timing candidate for the EVENT_LAG_MAX block — decode notification
+  // handling (progress, possible signals_changed relayout, decode-only update).
+  const auto _op_t0 = std::chrono::steady_clock::now();
+#endif
   // Start tracking decode duration on first call
   if (!_decode_elapsed_timer.isValid())
     _decode_elapsed_timer.start();
@@ -1328,11 +1381,22 @@ void DecodeTrace::on_new_decode_data() {
       _view->request_decode_only_update();
     }
   }
+#ifdef PXVIEW_DECODE_PERF
+  pv::base::perf::record_op_max(
+      "on_new_decode_data",
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - _op_t0).count());
+#endif
 }
 
 int DecodeTrace::get_progress() { return _decoder_stack->get_progress(); }
 
 void DecodeTrace::on_decode_done() {
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D5: timing candidate for the EVENT_LAG_MAX block — decode completion
+  // (final progress, possible signals_changed relayout, coalesced repaint).
+  const auto _op_t0 = std::chrono::steady_clock::now();
+#endif
   // Reset decode duration timer so next decode session starts fresh.
   _decode_elapsed_timer.invalidate();
 
@@ -1359,14 +1423,24 @@ void DecodeTrace::on_decode_done() {
   }
 
   _data_source->decode_done();
+#ifdef PXVIEW_DECODE_PERF
+  pv::base::perf::record_op_max(
+      "on_decode_done",
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - _op_t0).count());
+#endif
 }
 
 void DecodeTrace::on_error_message_changed(const QString &msg) {
-  // P0-A: When the decoder stack reports an error, trigger a viewport repaint
-  // so that draw_error() is called to display the error message on the trace.
-  // Empty messages clear any previously shown error.
+  // P3-F1: use the coalesced delayed update instead of a direct
+  // viewport_update(). Decode-start failures can fire this at hundreds of
+  // times per second (each identical error now deduped at the source in
+  // DecoderStack::set_error_message); a direct full repaint per event caused
+  // 96 of 126 viewport_update() calls in the decode-start burst window.
+  // Coalescing to the 16ms timer still repaints promptly (error text is drawn
+  // by DecodeTracePass) without flooding the main thread.
   if (_view && _data_source->is_stopped_status()) {
-    _view->viewport_update();
+    _view->request_delayed_update();
   }
   if (!msg.isEmpty()) {
     pxv_err("DecodeTrace: decoder error: %s", msg.toStdString().c_str());

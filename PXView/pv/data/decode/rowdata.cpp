@@ -288,20 +288,39 @@ std::shared_ptr<const RowDataSnapshot> RowData::frozen_snapshot() {
     snap->_segments = _last_snapshot->_segments; // reuse frozen segments
 
   if (_published_count < _annotations.size()) {
-    auto seg = std::make_shared<AnnotationSegment>();
-    seg->anns.assign(_annotations.begin() + _published_count,
-                     _annotations.end());
-    seg->first_start = seg->anns.front().start_sample();
-    seg->last_end = seg->anns.back().end_sample();
-    // max_end: true maximum end over the whole segment. Because end_sample is
-    // not monotonic, the last element's end is NOT the maximum; computing the
-    // max here keeps the segment-skip test in _first_end_after correct.
-    uint64_t max_end = 0;
-    for (const auto &a : seg->anns)
-      max_end = std::max(max_end, a.end_sample());
-    seg->max_end = max_end;
-    snap->_segments.push_back(std::move(seg));
-    _published_count = _annotations.size();
+    // P3-F2: split the pending delta into BOUNDED segments. A publish that
+    // copied a huge delta (millions of annotations -> one giant vector::assign
+    // -> a single hundreds-of-MB allocation) could hold the shared process-heap
+    // lock long enough to stall the main thread ~1s (the sampler found the GUI
+    // thread stuck in ntdll's heap-lock region while a decode thread
+    // published). Bounding each segment keeps every allocation small so no
+    // single malloc/VirtualAlloc blocks the heap for the whole copy; the
+    // multi-segment index (get_visible_range / _annotation_at) already handles
+    // arbitrary segment counts. O(new annotations) total cost is unchanged.
+    constexpr size_t kMaxSegAnnotations = 500000;
+    size_t start = _published_count;
+    const size_t total = _annotations.size();
+#ifdef PXVIEW_DECODE_PERF
+    pv::base::perf::record_publish_delta(total - _published_count);
+#endif
+    while (start < total) {
+      const size_t end = std::min(total, start + kMaxSegAnnotations);
+      auto seg = std::make_shared<AnnotationSegment>();
+      seg->anns.assign(_annotations.begin() + start,
+                       _annotations.begin() + end);
+      seg->first_start = seg->anns.front().start_sample();
+      seg->last_end = seg->anns.back().end_sample();
+      // max_end: true maximum end over the whole segment. Because end_sample is
+      // not monotonic, the last element's end is NOT the maximum; computing the
+      // max here keeps the segment-skip test in _first_end_after correct.
+      uint64_t max_end = 0;
+      for (const auto &a : seg->anns)
+        max_end = std::max(max_end, a.end_sample());
+      seg->max_end = max_end;
+      snap->_segments.push_back(std::move(seg));
+      start = end;
+    }
+    _published_count = total;
   }
 
   snap->_max_annotation = _max_annotation;

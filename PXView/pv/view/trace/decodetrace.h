@@ -28,11 +28,14 @@
 #include <QRectF>
 #include <QString>
 #include <QWidget>
+#include <cstdint>
 #include <list>
 #include <map>
 #include <memory>
+#include <vector>
 
 #include "pv/data/decoderanalogdata.h"
+#include "pv/data/decode/row.h"  // complete decode::Row (std::map key in _dense_row_cache)
 #include "pv/dialogs/pxdialog.h"
 #include "pv/prop/binding/decoderoptions.h"
 #include "pv/view/trace/trace.h"
@@ -228,6 +231,29 @@ private:
 
   QElapsedTimer _update_timer;
   QElapsedTimer _decode_elapsed_timer; // tracks total decode duration
+
+  // P3-F2: per-row dense render cache. Between decode publishes the annotation
+  // data is unchanged, yet viewport repaints that arrive through Qt/widget
+  // paths (Viewport::update — ~50/s during decode growth, seen from
+  // Qt6Widgets.dll) re-rendered the FULL growing annotation set every frame:
+  // an O(N) per-row scan + fillRect at full scale, which froze the GUI for the
+  // whole decode duration when the annotation growth was on screen. Caching
+  // the dense pixel buckets keyed on (row data pointer, scale, offset, clip,
+  // annotation height, theme color signature) turns those between-publish
+  // repaints into a cheap bucket replay. Any key change (new publish -> new
+  // data pointer, zoom/scroll, theme switch) misses and falls back to the full
+  // re-render, so rendering semantics are unchanged.
+  struct DenseRowCache {
+    const void *data_ptr = nullptr;  // srow.data.get(); changes each publish
+    double spp = 0;                  // samples_per_pixel
+    int64_t offset = 0;              // pixels_offset
+    int left = 0, right = 0;         // pixel clip range
+    int height = 0;                  // annotation_height
+    uint32_t color_sig = 0;          // theme color signature (invalidates on theme change)
+    std::vector<uint8_t> col_valid;  // cached per-column buckets
+    std::vector<uint8_t> col_color;
+  };
+  std::map<const pv::data::decode::Row, DenseRowCache> _dense_row_cache;
 };
 
 } // namespace view
