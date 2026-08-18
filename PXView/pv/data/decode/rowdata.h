@@ -56,8 +56,15 @@ struct AnnotationSegment {
   // Frozen batch of annotations (append order == start_sample order).
   std::deque<Annotation> anns;
   // Fast bounds for cross-segment binary search (valid when !anns.empty()).
-  uint64_t first_start = 0;
-  uint64_t last_end = 0;
+  uint64_t first_start = 0;  // first annotation's start_sample
+  uint64_t last_end = 0;     // last annotation's end_sample (for get_max_sample)
+  // MAXIMUM end_sample over the whole segment. The deque is ordered by
+  // start_sample only; end_sample is NOT monotonic (a wide annotation can be
+  // followed by narrow ones), so a segment-skip test must compare against the
+  // true maximum end, not the last element's end — otherwise a segment whose
+  // tail is narrow but whose head has a wide straddling annotation would be
+  // wrongly skipped and its annotations would disappear when zooming.
+  uint64_t max_end = 0;
 };
 
 // Immutable snapshot of a row's annotation data, published by the decode
@@ -87,6 +94,12 @@ public:
   std::pair<size_t, size_t> get_visible_range(uint64_t start_sample,
                                               uint64_t end_sample) const;
   const Annotation *get_first_annotation_ending_after(uint64_t sample) const;
+  // Like get_first_annotation_ending_after but uses >= (end >= sample)
+  // instead of > (end > sample). This finds instant annotations (end == start)
+  // that would be missed by the strict > variant. Used by the dense render
+  // path as a fallback when the strict variant returns nullptr.
+  const Annotation *get_first_annotation_ending_at_or_after(
+      uint64_t sample) const;
   // Index of the first annotation whose start_sample >= sample (global index).
   uint64_t get_annotation_index(uint64_t start_sample) const;
   bool get_annotation(Annotation *ann, uint64_t index) const;
@@ -105,7 +118,7 @@ public:
         const size_t lo = (start_idx > offset) ? (start_idx - offset) : 0;
         const size_t hi = std::min(n, end_idx - offset);
         for (size_t i = lo; i < hi; ++i)
-          fn(seg->anns[i]);
+          fn(seg->anns[i], offset + i);
       }
       offset += n;
     }
@@ -117,6 +130,23 @@ public:
   uint64_t _max_annotation = 0;
   uint64_t _min_annotation = 0;
   uint64_t _item_count = 0;
+
+private:
+  // Global index of the first annotation whose start_sample > sample
+  // (start_sample IS monotonic across the deque, so this binary search is
+  // always correct). Returns _item_count when none exists.
+  size_t _first_start_after(uint64_t sample) const;
+  // Global index of the first annotation whose end_sample > sample. Because
+  // end_sample is not monotonic, this locates the start-ordered insertion
+  // point and then scans a bounded window backwards for a straddling
+  // annotation. Returns _item_count when none exists.
+  size_t _first_end_after(uint64_t sample) const;
+  // Global index of the first annotation whose end_sample >= sample. Same
+  // segment-skip + bounded backward-scan strategy as _first_end_after but
+  // with the >= boundary so instant annotations (end == start) are found.
+  // Returns _item_count when none exists.
+  size_t _first_end_at_or_after(uint64_t sample) const;
+  const Annotation *_annotation_at(size_t index) const;
 };
 
 class RowData {
@@ -183,7 +213,7 @@ public:
     std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
     const size_t n = _annotations.size();
     for (size_t i = start_idx; i < end_idx && i < n; i++)
-      fn(_annotations[i]);
+      fn(_annotations[i], i);
   }
 
 private:

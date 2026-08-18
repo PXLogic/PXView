@@ -53,6 +53,9 @@
 #include <QScrollArea>
 #include <climits>
 #include <libsigrokdecode.h>
+#include <QDir>
+#include <cstdio>
+#include <cstdarg>
 
 using namespace std;
 
@@ -68,6 +71,39 @@ const int DecodeTrace::ArrowSize = 4;
 const double DecodeTrace::EndCapWidth = 5;
 const int DecodeTrace::DrawPadding = 100;
 const int DecodeTrace::ControlRectWidth;
+
+// Debug instrumentation: OFF by default. Enable temporarily while diagnosing
+// annotation-visibility bugs by compiling with -DPXVIEW_DECODE_DEBUG (or by
+// flipping the #if below). When ON it overlays diagnostic drawing on the
+// decoder tracks AND writes a per-row numeric summary to
+// %TEMP%/pxv_decode_dbg.log. The overlay brute-forces every annotation in
+// the row every frame (O(total annotations)), so it must stay OFF in normal
+// builds.
+static bool pxv_decode_debug() {
+#if defined(PXVIEW_DECODE_DEBUG)
+  return true;
+#else
+  return false;
+#endif
+}
+static void pxv_decode_log(const char *fmt, ...) {
+#if defined(PXVIEW_DECODE_DEBUG)
+  static long fcount = 0;
+  fcount++;
+  const char *mode = (fcount == 1) ? "w" : "a";
+  QString path = QDir::temp().filePath("pxv_decode_dbg.log");
+  FILE *lf = fopen(path.toUtf8().constData(), mode);
+  if (!lf)
+    return;
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(lf, fmt, ap);
+  va_end(ap);
+  fclose(lf);
+#else
+  (void)fmt;
+#endif
+}
 
 QColor DecodeTrace::getChannelColor(int channelIndex) {
   QColor c = AppConfig::Instance().GetThemeColor(
@@ -428,6 +464,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           const bool use_dense = (max_ann_width < 2.0) || near_frontier;
 
           const RowDataSnapshot *const row_data = srow.data.get();
+          int dbg_blocks = 0;
           {
             if (use_dense) {
                 // Entire visible row is sub-pixel/dense: keep the old bounded
@@ -444,6 +481,12 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
                   uint64_t block_start =
                       std::max(current_sample, ann->start_sample());
+                  // Draw the block wide enough to be visible (>= 1 px) even
+                  // when the annotation itself is sub-pixel, but only the
+                  // annotation's TRUE end is used to advance the scan. If we
+                  // advanced by the inflated block_end we would skip every
+                  // sparse annotation whose end falls inside that inflated
+                  // gap — making them disappear when zoomed all the way out.
                   uint64_t block_end = std::max(
                       ann->end_sample(),
                       block_start + (uint64_t)std::max(1.0, samples_per_pixel));
@@ -458,8 +501,16 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                   p.fillRect(QRectF(x, y - annotation_height * 0.5,
                                     std::max(1.0, width), annotation_height),
                              fill);
+                  dbg_blocks++;
 
-                  current_sample = block_end;
+                  // Advance by the annotation's real end so sparse annotations
+                  // after a gap are still discovered by the next find.
+                  current_sample = ann->end_sample();
+                }
+                if (pxv_decode_debug() && dbg_blocks == 0) {
+                  // RED full-width bar: dense walk produced ZERO blocks.
+                  p.fillRect(QRectF(left, y - 2, right - left, 4),
+                             QColor(255, 0, 0, 200));
                 }
               } else {
                 auto range =
@@ -489,13 +540,10 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                       dense_colors[c] = getAnnColor(c);
                   }
 
-                  double last_x = -1;
-                  double last_drawn_start = -1;
-
                   // Iterate the visible range under a single shared lock
                   // (one lock per row instead of one per annotation).
                   row_data->for_each_index(
-                      start_idx, end_idx, [&](const Annotation &a) {
+                      start_idx, end_idx, [&](const Annotation &a, size_t) {
                         const uint64_t span_samples =
                             a.end_sample() > a.start_sample()
                                 ? a.end_sample() - a.start_sample()
@@ -528,15 +576,11 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                                               annotation_height),
                                        fill);
                           }
-                          last_drawn_start = x;
-                          last_x = std::max(
-                              last_x, x + std::max(1.0, ann_width));
                         } else {
                           draw_annotation(a, p, get_text_colour(),
                                           annotation_height, left, right,
                                           samples_per_pixel, pixels_offset, y,
-                                          0, ann_width, fore, back, last_x,
-                                          last_drawn_start);
+                                          0, ann_width, fore, back);
                         }
                       });
 
@@ -555,6 +599,137 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                 }
               }
             }
+
+          if (pxv_decode_debug()) {
+            // ---- Debug overlay: mark HIDDEN annotations and WHY ----
+            // Brute-force every annotation that actually overlaps the visible
+            // window [start_sample, end_sample]. For each we recover its GLOBAL
+            // index via get_annotation_index(start_sample) and test membership
+            // in the lookup range [drange). Then classify:
+            //   - baseline : cyan (straddles an edge) / green (fully inside) ->
+            //                this one WAS looked up (may still be clipped).
+            //   - RED  : overlaps window but global idx is OUTSIDE [drange) ->
+            //            "NOT IN LOOKUP RANGE" (get_visible_range /
+            //            _first_end_after missed it -> the row disappears).
+            //   - ORANGE: inside [drange) BUT its clamped pixel span is fully
+            //            outside the viewport padding -> "CLIPPED OUT" by
+            //            draw_annotation's edge test.
+            // This directly answers "which line segments are hidden and why".
+            auto drange = row_data->get_visible_range(start_sample, end_sample);
+            int hidden_before_begin = 0;
+            int hidden_after_end = 0;
+            int hidden_clipped = 0;
+            int total_overlap = 0;
+
+            row_data->for_each_index(0, row_data->get_annotation_size(),
+                [&](const Annotation &a, size_t idx) {
+                  if (a.start_sample() > end_sample ||
+                      a.end_sample() < start_sample)
+                    return;  // does not overlap the window at all
+                  total_overlap++;
+                  const double as =
+                      a.start_sample() / samples_per_pixel - pixels_offset;
+                  const double ae =
+                      a.end_sample() / samples_per_pixel - pixels_offset;
+                  const bool straddle = (a.start_sample() < start_sample) ||
+                                        (a.end_sample() > end_sample);
+
+                  const bool in_lookup =
+                      (idx >= drange.first && idx < drange.second);
+                  const bool clipped =
+                      (as > right + DrawPadding) || (ae < left - DrawPadding);
+
+                  bool is_hidden = false;
+                  QColor hc;
+                  if (!in_lookup) {
+                    is_hidden = true;
+                    if (idx < drange.first) {
+                      // Global index BEFORE the lookup begin: get_visible_range
+                      // / _first_end_after skipped this overlapping annotation.
+                      hc = QColor(255, 0, 0, 210);  // RED = before lookup begin
+                      hidden_before_begin++;
+                    } else {
+                      // Global index AT/AFTER the lookup end: lookup upper bound
+                      // excluded an overlapping annotation that should be shown.
+                      hc = QColor(180, 0, 80, 210);  // DARK-RED = after lookup end
+                      hidden_after_end++;
+                    }
+                  } else if (clipped) {
+                    is_hidden = true;
+                    hc = QColor(255, 140, 0, 210);  // ORANGE = clipped out
+                    hidden_clipped++;
+                  }
+
+                  if (is_hidden) {
+                    p.fillRect(QRectF(as, y - annotation_height * 0.45,
+                                      std::max(1.0, ae - as),
+                                      annotation_height * 0.9), hc);
+                  } else {
+                    QColor c = straddle ? QColor(0, 200, 255, 90)
+                                        : QColor(0, 220, 0, 90);
+                    p.fillRect(QRectF(as, y - annotation_height * 0.45,
+                                      std::max(1.0, ae - as),
+                                      annotation_height * 0.9), c);
+                  }
+                });
+
+            const QString dbg = QString(
+                "[%1] rng=%2..%3 n=%4 spp=%5 maxw=%6 B/A/O=%7/%8/%9 aH=%10")
+                .arg(use_dense ? "DENSE" : "MID")
+                .arg(drange.first)
+                .arg(drange.second)
+                .arg(row_data->get_annotation_size())
+                .arg(samples_per_pixel, 0, 'f', 1)
+                .arg(max_ann_width, 0, 'f', 1)
+                .arg(hidden_before_begin)
+                .arg(hidden_after_end)
+                .arg(hidden_clipped)
+                .arg(annotation_height);
+            p.setPen(QColor(255, 255, 0));
+            p.drawText(QRectF(left, y - annotation_height * 0.5,
+                              right - left, annotation_height),
+                       Qt::AlignRight | Qt::AlignVCenter, dbg);
+
+            // File log with the hidden breakdown.
+            {
+              static long fcount = 0;
+              fcount++;
+              const uint64_t winL =
+                  (uint64_t)max((left + pixels_offset) * samples_per_pixel, 0.0);
+              const uint64_t winR =
+                  (uint64_t)max((right + pixels_offset) * samples_per_pixel, 0.0);
+              int true_hits = 0;
+              row_data->for_each_index(0, row_data->get_annotation_size(),
+                  [&](const Annotation &a, size_t) {
+                    if (a.start_sample() <= end_sample &&
+                        a.end_sample() >= start_sample)
+                      true_hits++;
+                  });
+              const bool empty_range = (drange.first >= drange.second);
+              const bool anomaly =
+                  (empty_range && true_hits > 0) ||
+                  (use_dense && dbg_blocks == 0 && true_hits > 0) ||
+                  (hidden_before_begin + hidden_after_end + hidden_clipped) > 0;
+              if (fcount % 4 == 0 || anomaly) {
+                pxv_decode_log(
+                    "ROW=%-16s PATH=%-5s spp=%11.4f maxw=%9.2f "
+                    "winL/R=[%llu,%llu] view=[%llu,%llu] left/right=[%d,%d] "
+                    "range=[%llu,%llu] n=%llu blocks=%d overlap=%d "
+                    "BEFORE_BEGIN=%d AFTER_END=%d CLIPPED=%d%s\n",
+                    qPrintable(row.title()), use_dense ? "DENSE" : "MID",
+                    samples_per_pixel, max_ann_width,
+                    (unsigned long long)winL, (unsigned long long)winR,
+                    (unsigned long long)start_sample,
+                    (unsigned long long)end_sample, left, right,
+                    (unsigned long long)drange.first,
+                    (unsigned long long)drange.second,
+                    (unsigned long long)row_data->get_annotation_size(),
+                    dbg_blocks, total_overlap,
+                    hidden_before_begin, hidden_after_end, hidden_clipped,
+                    anomaly ? "  <<< HIDDEN ANNOTATIONS PRESENT" : "");
+              }
+            }
+          }
 
           y += annotation_height;
           _cur_row_headings.push_back(row.title());
@@ -751,8 +926,7 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                                   int left, int right, double samples_per_pixel,
                                   double pixels_offset, int y,
                                   size_t base_colour, double min_annWidth,
-                                  QColor fore, QColor back, double &last_x,
-                                  double &last_drawn_start) {
+                                  QColor fore, QColor back) {
   const double start =
       max(a.start_sample() / samples_per_pixel - pixels_offset, (double)left);
   const double end =
@@ -763,32 +937,22 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
   const QColor outline = getAnnOutlineColor(colour);
 
   if (start > right + DrawPadding || end < left - DrawPadding) {
+    if (pxv_decode_debug()) {
+      // RED: annotation was skipped because it lies outside the clip region.
+      p.fillRect(QRectF(left, y - 2, right - left, 4), QColor(255, 0, 0, 150));
+    }
     return;
   }
 
-  // 完美无缝隙 LOD 防御：
-  // 1. 若当前标注完全被之前绘制的区域覆盖，则不可见，跳过。
-  //    同时检查 start 与 last_drawn_start：只有 [start, end] 都落在已绘制
-  //    区间内才跳过，避免对同一字节输出多个时间重叠/逆序标注的解码器
-  //    （如 I2C 地址字节的 R/W 标注 + 地址值标注）造成误杀。
-  if (end <= last_x && start >= last_drawn_start) {
-    return;
-  }
-
-  // 2. 针对极高密度的微小标注（它们最终只会画成一根竖线）
-  // 如果这根竖线落在我们刚刚画过的区域内（在同一个物理像素列），直接跳过！
-  // 这样不仅能把百万次 drawLine
-  // 削减到屏幕像素宽度（~1920次），还绝对不会产生视觉断层和缝隙！
-  if (start + 2.0 > end && (int)start <= (int)last_x) {
-    return;
-  }
-
-  last_drawn_start = start;
-  if (start + 2.0 > end) {
-    last_x = start;
-  } else {
-    last_x = end;
-  }
+  // NOTE: The previous two LOD "already-drawn" / sub-pixel-collinear skip
+  // guards have been removed. They suppressed valid annotations that merely
+  // overlapped a wider one (e.g. an I2C byte's R/W flag under the address
+  // bubble), and — because start/end are clamped to the viewport — a wide
+  // annotation straddling the window edge expanded the "covered" span across
+  // the whole row, silently dropping every annotation inside the viewport
+  // ("一串注解有元素在窗口外也会导致这个元素不会绘制"). Drawing all in-range
+  // annotations matches upstream PulseView behaviour and guarantees no data is
+  // hidden. (Out-of-clip culling above is retained.)
 
   if (_decoder_stack->get_mark_index() ==
       (int64_t)(a.start_sample() + a.end_sample()) / 2) {
@@ -1071,15 +1235,13 @@ void DecodeTrace::on_new_decode_data() {
   if (!_decode_elapsed_timer.isValid())
     _decode_elapsed_timer.start();
 
-  // Adaptive throttle: longer decode sessions get lower refresh rates.
-  // Short decodes (< 2s) stay responsive at 30 FPS.
-  // Long decodes progressively reduce to avoid O(N) repaint overhead.
+  // Adaptive throttle: the decode track refresh rate is capped at 5 FPS
+  // (200ms minimum interval); longer decode sessions drop further to 1 FPS
+  // to avoid O(N) repaint overhead.
   const qint64 decode_duration_ms = _decode_elapsed_timer.elapsed();
   qint64 throttle_ms;
-  if (decode_duration_ms < 500)
-    throttle_ms = 33; // ~30 FPS for first 500ms
-  else if (decode_duration_ms < 2000)
-    throttle_ms = 200; // 5 FPS for 500ms-2s
+  if (decode_duration_ms < 2000)
+    throttle_ms = 200; // at most 5 FPS for the first 2s
   else
     throttle_ms = 1000; // 1 FPS for all longer decodes
 
