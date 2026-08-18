@@ -35,7 +35,52 @@ namespace pv {
 namespace data {
 namespace decode {
 
+RowDataSnapshot::RowDataSnapshot() = default;
+
+std::pair<size_t, size_t> RowDataSnapshot::get_visible_range(
+    uint64_t start_sample, uint64_t end_sample) const {
+  if (_annotations.empty())
+    return {0, 0};
+
+  auto it = std::lower_bound(
+      _annotations.begin(), _annotations.end(), start_sample,
+      [](const Annotation &a, uint64_t val) { return a.end_sample() <= val; });
+  size_t start_idx = std::distance(_annotations.begin(), it);
+
+  auto it_end = std::upper_bound(
+      _annotations.begin(), _annotations.end(), end_sample,
+      [](uint64_t val, const Annotation &a) { return val < a.start_sample(); });
+  size_t end_idx = std::distance(_annotations.begin(), it_end);
+
+  return {start_idx, end_idx};
+}
+
+const Annotation *RowDataSnapshot::get_first_annotation_ending_after(
+    uint64_t sample) const {
+  if (_annotations.empty())
+    return nullptr;
+  auto it = std::lower_bound(
+      _annotations.begin(), _annotations.end(), sample,
+      [](const Annotation &a, uint64_t val) { return a.end_sample() <= val; });
+  return (it != _annotations.end()) ? &(*it) : nullptr;
+}
+
 RowData::RowData() : _max_annotation(0), _min_annotation(0) { _item_count = 0; }
+
+std::shared_ptr<const RowDataSnapshot> RowData::frozen_snapshot() {
+  // Safe to copy the deque because the caller (publish_snapshot) holds
+  // _rows_mutex exclusively, and every write to this deque is gated by
+  // _rows_mutex too. We still take _visitor_mutex for defense-in-depth
+  // and to keep lock ordering (_rows_mutex -> _visitor_mutex) consistent
+  // with the write path.
+  std::unique_lock<std::shared_mutex> lock(_visitor_mutex);
+  auto snap = std::make_shared<RowDataSnapshot>();
+  snap->_annotations = _annotations;  // copy-on-publish of the deque
+  snap->_max_annotation = _max_annotation;
+  snap->_min_annotation = _min_annotation;
+  snap->_item_count = _item_count;
+  return snap;
+}
 
 RowData::~RowData() {
   // P2-7 fix: deque automatically destroys all Annotation objects.

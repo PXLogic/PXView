@@ -26,6 +26,7 @@
 #include <libsigrokdecode.h>
 #include <list>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <QObject>
@@ -34,7 +35,8 @@
 #include <shared_mutex>
 #include <condition_variable>
 
-#include "pv/data/decode/row.h" 
+#include "pv/data/decode/row.h"
+#include "pv/data/decode/rowdata.h"
 #include "pv/data/model/signaldata.h"
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/data/decoderanalogdata.h"
@@ -154,6 +156,27 @@ public:
     void set_rows_gshow(const decode::Row row, bool show);
     void set_rows_lshow(const decode::Row row, bool show);
     bool has_annotations(const decode::Row &row);
+
+    // ---- Publish/subscribe snapshot API (Scheme A) ---------------------
+    // The decode thread writes into _rows and periodically publishes an
+    // immutable snapshot (a const RowDataSnapshot per row plus gshow flags)
+    // via publish_snapshot(). The GUI render path reads published_snapshot()
+    // which is a plain atomic load — zero locks, no contention with the
+    // decode thread.
+    struct SnapshotRow {
+      bool gshow = true;
+      std::shared_ptr<const decode::RowDataSnapshot> data;
+    };
+    using SnapshotRows =
+        std::map<const decode::Row, SnapshotRow>;
+
+    // Called by the decode thread (throttled) to (re)build and atomically
+    // publish the current frozen view of _rows/_rows_gshow.
+    void publish_snapshot();
+
+    // Returns the most recently published immutable snapshot. Lock-free.
+    std::shared_ptr<const SnapshotRows> published_snapshot() const;
+
     uint64_t list_annotation_size();
     uint64_t list_annotation_size(uint16_t row_index);
 
@@ -280,6 +303,20 @@ private:
     std::map<const decode::Row, bool>       _rows_gshow;
     std::map<const decode::Row, bool>       _rows_lshow;
     std::map<std::pair<const srd_decoder*, int>, decode::Row> _class_rows;
+
+    // Scheme A: immutable published snapshot. The decode thread atomically
+    // replaces _published via publish_snapshot(); the GUI render path only
+    // reads it (atomic load, zero lock). Protected by _rows_mutex on the
+    // write side (publish), read side is lock-free.
+    // std::atomic<std::shared_ptr> gives lock-free (or spinlock-backed)
+    // publish/read of the immutable snapshot without the deprecated free
+    // atomic_load_explicit / atomic_store_explicit functions.
+    std::atomic<std::shared_ptr<const SnapshotRows>> _published{nullptr};
+    std::atomic<uint64_t> _snapshot_generation{0};
+    // Wall-clock throttle: publish_snapshot() rebuilds a full immutable copy
+    // of every row's deque, so we cap the publish rate (default ~16ms) to
+    // bound the decode thread's copy cost while keeping the GUI near-realtime.
+    std::chrono::steady_clock::time_point _last_publish_time{};
   
     pv::data::ISessionHost *_host;
     data::SessionDocument *_owner_document;

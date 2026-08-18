@@ -144,6 +144,9 @@ void DecoderStack::add_sub_decoder(std::unique_ptr<decode::Decoder> decoder) {
   _stack.push_back(std::move(decoder));
   build_row();
   _options_changed = true;
+  // Scheme A: rows may have changed; republish so the render path sees the
+  // new row set even outside a decode run.
+  publish_snapshot();
 }
 
 void DecoderStack::remove_sub_decoder(Decoder *decoder) {
@@ -158,6 +161,8 @@ void DecoderStack::remove_sub_decoder(Decoder *decoder) {
 
   build_row();
   _options_changed = true;
+  // Scheme A: republish so the render path sees the reduced row set.
+  publish_snapshot();
 }
 
 void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
@@ -360,12 +365,19 @@ std::map<const decode::Row, bool> DecoderStack::get_rows_lshow() {
 }
 
 void DecoderStack::set_rows_gshow(const decode::Row row, bool show) {
-  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
-  std::map<const decode::Row, bool>::const_iterator iter =
-      _rows_gshow.find(row);
-  if (iter != _rows_gshow.end()) {
-    _rows_gshow[row] = show;
+  {
+    std::unique_lock<std::shared_mutex> lock(_rows_mutex);
+    std::map<const decode::Row, bool>::const_iterator iter =
+        _rows_gshow.find(row);
+    if (iter != _rows_gshow.end()) {
+      _rows_gshow[row] = show;
+    }
   }
+  // Scheme A: reflect the gshow toggle in the published snapshot so the
+  // render path sees it even after decoding has stopped (no more publishes
+  // from the decode thread). publish_snapshot takes _rows_mutex itself, so
+  // release our lock first to avoid self-deadlock.
+  publish_snapshot();
 }
 
 void DecoderStack::set_rows_lshow(const decode::Row row, bool show) {
@@ -387,6 +399,37 @@ bool DecoderStack::has_annotations(const Row &row) {
       return true;
   else
     return false;
+}
+
+void DecoderStack::publish_snapshot() {
+  // Build a new immutable snapshot from the current _rows/_rows_gshow.
+  // Called by the decode thread at throttled notification points. Taking
+  // the exclusive _rows_mutex here briefly blocks the decode thread's
+  // emplace_annotation (which already holds it per-annotation), but it does
+  // NOT block the GUI render path, which reads _published lock-free.
+  std::unique_lock<std::shared_mutex> lock(_rows_mutex);
+
+  auto snap = std::make_shared<SnapshotRows>();
+  for (auto &kv : _rows) {
+    const decode::Row &row = kv.first;
+    auto gshow_it = _rows_gshow.find(row);
+    SnapshotRow sr;
+    sr.gshow = (gshow_it != _rows_gshow.end()) ? gshow_it->second : true;
+    sr.data = kv.second->frozen_snapshot();  // copy deque under _visitor_mutex
+    (*snap)[row] = std::move(sr);
+  }
+
+  // Atomic publish: the reader grabs this shared_ptr with a plain load.
+  // We use release semantics so the snapshot contents are visible to the
+  // GUI thread after it observes the pointer.
+  _published.store(std::move(snap), std::memory_order_release);
+  _snapshot_generation.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::shared_ptr<const DecoderStack::SnapshotRows>
+DecoderStack::published_snapshot() const {
+  // Lock-free: atomic load of the immutable snapshot pointer.
+  return _published.load(std::memory_order_acquire);
 }
 
 uint64_t DecoderStack::list_annotation_size() {
@@ -494,10 +537,16 @@ _no_memory = false;
   _ann_dropped_mem.store(0);
   _ann_dropped_row.store(0);
 
-  std::shared_lock<std::shared_mutex> lk(_rows_mutex);
-  for (auto i = _rows.begin(); i != _rows.end(); i++) {
-    (*i).second->clear();
+  {
+    std::shared_lock<std::shared_mutex> lk(_rows_mutex);
+    for (auto i = _rows.begin(); i != _rows.end(); i++) {
+      (*i).second->clear();
+    }
   }
+
+  // Scheme A: publish an empty snapshot so the render path reads a
+  // consistent (cleared) state after stop/restart of decoding.
+  publish_snapshot();
 
   set_mark_index(-1);
 }
@@ -862,6 +911,16 @@ return;
 
     if ((i - last_cnt) > notify_cnt) {
       last_cnt = i;
+      // Scheme A: atomically publish the current frozen snapshot before
+      // notifying the GUI, so the render path sees the latest decoded data
+      // with zero lock contention. Throttle to ~60 Hz so the full-deque
+      // copy cost stays bounded on the decode thread.
+      const auto now = std::chrono::steady_clock::now();
+      if (now - _last_publish_time >=
+          std::chrono::milliseconds(16)) {
+        publish_snapshot();
+        _last_publish_time = now;
+      }
       // P2-10 fix: Capture shared_ptr instead of raw 'this' to prevent
       // use-after-free if the DecoderStack is destroyed before the
       // lambda executes on the main thread.
@@ -894,6 +953,9 @@ return;
   }
 
   // Publish final-data notification AFTER srd_session_end().
+  // Scheme A: publish the final frozen snapshot so the last decoded data is
+  // visible to the render path.
+  publish_snapshot();
   if (adaptive_tdm_fast || !bError)
     _host->event_bus_post([self]() { self->new_decode_data(); });
 

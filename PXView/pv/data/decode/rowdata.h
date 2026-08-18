@@ -24,6 +24,7 @@
 #define PXVIEW_PV_DATA_DECODE_ROWDATA_H
 
 #include <deque>
+#include <memory>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
@@ -43,6 +44,49 @@ namespace decode {
 //   - The AnnotationPool global singleton memory pool
 //   - Memory leak risks from missed delete paths
 //   - const-correctness violations (API now returns const Annotation*)
+
+// Immutable snapshot of a row's annotation data, published by the decode
+// thread (via RowData::frozen_snapshot) and read lock-free by the GUI
+// render path (paint_mid / paint_back). Once built, the deque and scalar
+// fields are never modified, so all read methods are safe without holding
+// any mutex. This removes the shared_mutex contention between the decode
+// thread (emplace_annotation) and the render thread.
+class RowDataSnapshot {
+public:
+  RowDataSnapshot();
+  RowDataSnapshot(const RowDataSnapshot &) = delete;
+  RowDataSnapshot &operator=(const RowDataSnapshot &) = delete;
+
+  inline bool empty() const { return _item_count == 0; }
+  inline uint64_t get_annotation_size() const { return _item_count; }
+  inline uint64_t get_max_sample() const {
+    return _annotations.empty() ? 0 : _annotations.back().end_sample();
+  }
+  inline uint64_t get_max_annotation() const { return _max_annotation; }
+  inline uint64_t get_min_annotation() const {
+    return (_min_annotation == 0) ? 10 : _min_annotation;
+  }
+
+  // Lock-free analogues of the corresponding RowData methods, operating
+  // on the immutable deque.
+  std::pair<size_t, size_t> get_visible_range(uint64_t start_sample,
+                                              uint64_t end_sample) const;
+  const Annotation *get_first_annotation_ending_after(uint64_t sample) const;
+
+  template <typename Fn>
+  void for_each_index(size_t start_idx, size_t end_idx, Fn &&fn) const {
+    const size_t n = _annotations.size();
+    for (size_t i = start_idx; i < end_idx && i < n; i++)
+      fn(_annotations[i]);
+  }
+
+  // Built by RowData::frozen_snapshot() under _visitor_mutex.
+  std::deque<Annotation> _annotations;
+  uint64_t _max_annotation = 0;
+  uint64_t _min_annotation = 0;
+  uint64_t _item_count = 0;
+};
+
 class RowData {
 public:
   RowData();
@@ -61,6 +105,13 @@ public:
   // Replaces the old push_annotation(Annotation*) which required
   // the caller to new the Annotation.
   bool emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status);
+
+  // Builds an immutable snapshot of this row's annotation data for the
+  // render path. Acquires _visitor_mutex to safely copy the deque. The
+  // decode thread calls it from publish_snapshot() (which holds
+  // _rows_mutex exclusively, so the deque is quiescent). Returns a
+  // shared_ptr to a const snapshot readable lock-free by the GUI thread.
+  std::shared_ptr<const RowDataSnapshot> frozen_snapshot();
 
   inline uint64_t get_annotation_size() {
     std::shared_lock<std::shared_mutex> lock(_visitor_mutex);

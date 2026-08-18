@@ -381,29 +381,36 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
   assert(_decoder_stack);
 
+  // Scheme A: grab the immutable published snapshot once per frame. All
+  // row data (annotation deque, gshow, max/min) is read lock-free from this
+  // snapshot, so the render path never contends with the decode thread on
+  // _rows_mutex / _visitor_mutex.
+  const auto snap = _decoder_stack->published_snapshot();
+
   for (auto &up : _decoder_stack->stack()) {
     auto dec = up.get();
     if (dec->shown()) {
-      const std::map<const pv::data::decode::Row, bool> rows =
-          _decoder_stack->get_rows_gshow();
-      for (std::map<const pv::data::decode::Row, bool>::const_iterator i =
-               rows.begin();
-           i != rows.end(); i++) {
-        if ((*i).first.decoder() == dec->decoder() &&
-            _decoder_stack->has_annotations((*i).first)) {
-          if ((*i).second) {
-            const Row &row = (*i).first;
+      // Iterate only the snapshot rows belonging to this decoder.
+      if (snap) {
+        for (const auto &i : *snap) {
+          const Row &row = i.first;
+          if (row.decoder() != dec->decoder())
+            continue;
+          const pv::data::DecoderStack::SnapshotRow &srow = i.second;
+          if (!srow.data || srow.data->empty())
+            continue;  // was: has_annotations() == false
+          if (!srow.gshow)
+            continue;
 
-            // Use the maximum annotation width to decide whether the whole row
-            // is truly dense; inside the normal path, tiny individual fragments
-            // still fall back to a cheap color block.
-            const uint64_t max_annotation =
-                _decoder_stack->get_max_annotation(row);
-            const double max_ann_width = max_annotation / samples_per_pixel;
+          // Use the maximum annotation width to decide whether the whole row
+          // is truly dense; inside the normal path, tiny individual fragments
+          // still fall back to a cheap color block.
+          const uint64_t max_annotation = srow.data->get_max_annotation();
+          const double max_ann_width = max_annotation / samples_per_pixel;
 
-            RowData *row_data = _decoder_stack->get_row_data(row);
-            if (row_data) {
-              if (max_ann_width < 2.0) {
+          const RowDataSnapshot *const row_data = srow.data.get();
+          {
+            if (max_ann_width < 2.0) {
                 // Entire visible row is sub-pixel/dense: keep the old bounded
                 // block walk so zoomed-out long captures remain fast.
                 uint64_t current_sample = start_sample;
@@ -530,9 +537,8 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
               }
             }
 
-            y += annotation_height;
-            _cur_row_headings.push_back(row.title());
-          }
+          y += annotation_height;
+          _cur_row_headings.push_back(row.title());
         }
       }
     } else {
@@ -1346,16 +1352,19 @@ int DecodeTrace::rows_size() {
 using pv::data::decode::Decoder;
 int size = 0;
 
+// Scheme A: count rows from the immutable published snapshot (lock-free).
+const auto snap = _decoder_stack->published_snapshot();
 for (auto &up : _decoder_stack->stack()) {
 auto dec = up.get();
 if (dec->shown()) {
-auto rows = _decoder_stack->get_rows_gshow();
-
-for (auto i = rows.begin(); i != rows.end(); i++) {
-pv::data::decode::Row _row = (*i).first;
-if (_row.decoder() == dec->decoder() &&
-_decoder_stack->has_annotations((*i).first) && (*i).second)
+if (snap) {
+for (const auto &i : *snap) {
+const pv::data::decode::Row &_row = i.first;
+const auto &srow = i.second;
+if (_row.decoder() == dec->decoder() && srow.gshow &&
+srow.data && !srow.data->empty())
 size++;
+}
 }
 } else {
 size++;
