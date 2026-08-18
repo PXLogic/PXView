@@ -81,7 +81,10 @@ protected:
     Signal(const Signal &s, std::shared_ptr<data::SignalModel> model, data::DataSource *data_source);
 
 public:
-    virtual ~Signal() {}
+    // 析构时通知持有本对象裸指针的组件（如 XCursor::_dsoSig）清空指针，
+    // 避免信号重建（AllReplaced）后遗留悬垂指针。基类析构体执行时对象
+    // 仍完整有效，连接的槽（仅置空指针成员）会同步执行，不会回调正在析构的对象。
+    virtual ~Signal() { emit sig_released(this); }
 
     /**
      * Clone this Signal for a new view.

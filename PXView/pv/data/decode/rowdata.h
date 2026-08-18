@@ -33,6 +33,7 @@
 #include "pv/data/decode/annotation.h"
 #include "pv/data/decode/annotation_heap.h"
 
+struct srd_ann_item;
 struct srd_proto_data;
 class DecoderStatus;
 
@@ -180,6 +181,12 @@ public:
   // the caller to new the Annotation.
   bool emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status);
 
+  // 方案 E: 批量落库。items 为同一行的注解；内部一次获取 _visitor_mutex，
+  // 遍历 items 在栈上构造 srd_proto_data 视图（pdo 置 NULL）后逐个落库，
+  // 与 emplace_annotation 产生完全一致的最终数据。bad_alloc 返回 false。
+  bool emplace_annotations(const std::vector<const srd_ann_item *> &items,
+                           DecoderStatus *status);
+
   // Builds (incrementally) an immutable snapshot of this row's annotation
   // data for the render path. Acquires _visitor_mutex to safely copy the
   // annotations that arrived since the previous publish into a new frozen
@@ -229,6 +236,20 @@ public:
   }
 
 private:
+  // 方案 E: 单个注解落库后的统计更新，emplace_annotation / emplace_annotations
+  // 共用，保证两条路径的 _item_count/_max_annotation/_min_annotation 一致。
+  inline void apply_annotation_stats(const Annotation &a) {
+    _item_count = _annotations.size();
+    _max_annotation = std::max(_max_annotation, a.end_sample() - a.start_sample());
+    if (a.end_sample() != a.start_sample()) {
+      if (_min_annotation == 0) {
+        _min_annotation = a.end_sample() - a.start_sample();
+      } else {
+        _min_annotation = std::min(_min_annotation, a.end_sample() - a.start_sample());
+      }
+    }
+  }
+
   uint64_t _max_annotation;
   uint64_t _min_annotation;
   uint64_t _item_count;

@@ -514,6 +514,24 @@ void View::signals_changed(const Trace *eventTrace) {
   // relayout (normalize + group + layout_time_signals).
   const auto _op_t0 = std::chrono::steady_clock::now();
 #endif
+
+  // 防御性清理:模式切换/加载文件/采集结束等路径会重建 _own_signals,
+  // 旧 Signal/Trace 对象被销毁后, Header/Viewport 缓存的拖拽/悬停/右键
+  // 上下文裸指针会悬垂,打开的毛刺滤波浮窗也可能引用旧 LogicSignal。
+  // 注意:高度拖拽期间 mouseMove/applyDragFrame 也会调用本函数做增量重排,
+  // 此时必须保留活动拖拽状态,故用 mouse_is_down()/RESIZE_SIGNAL 守卫。
+  if (_header && !_header->mouse_is_down()) {
+    _header->clear_interaction_state();
+    if (auto *gfp = _glitch_filter->glitch_filter_popup()) {
+      if (gfp->is_open())
+        gfp->close();
+    }
+  }
+  if (_time_viewport && _time_viewport->action_type() != RESIZE_SIGNAL)
+    _time_viewport->clear_interaction_state();
+  if (_fft_viewport && _fft_viewport->action_type() != RESIZE_SIGNAL)
+    _fft_viewport->clear_interaction_state();
+
   _signal_sync->signals_changed(eventTrace);
 #ifdef PXVIEW_DECODE_PERF
   pv::base::perf::record_op_max(

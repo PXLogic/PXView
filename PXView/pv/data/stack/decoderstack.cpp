@@ -1189,9 +1189,12 @@ srd_session_destroy(session);
     status_for_callback = _stask_stauts;
   }
 
-  srd_pd_output_callback_add(session, SRD_OUTPUT_ANN,
-                             DecoderStack::annotation_callback,
-                             status_for_callback.get());
+  // 方案 E (Task 5): 改用批量回调。引擎按会话把 SRD_OUTPUT_ANN 注解收集进批缓冲
+  // （满 1024 或实例 decode 结束时触发一次），批回调内完成拷贝/intern。
+  // annotation_callback 保留作非批回退参考，不再注册。
+  srd_pd_output_callback_add_batch(session, SRD_OUTPUT_ANN,
+                                   DecoderStack::annotation_callback_batch,
+                                   status_for_callback.get());
 
   srd_pd_output_callback_add(session, SRD_OUTPUT_ANALOG,
                              DecoderStack::analog_callback,
@@ -1320,6 +1323,127 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   // inside the deque — no new/delete, no memory pool needed.
   if (!(*row_iter).second->emplace_annotation(pdata, d->_decoder_status.get()))
     d->_no_memory = true;
+}
+
+// 方案 E (Task 5): 批量注解消费回调。引擎按会话把 SRD_OUTPUT_ANN 注解收集进
+// 批缓冲（满 SRD_ANN_BATCH_MAX 或实例 decode 结束时触发一次），批内字符串由
+// arena 拷贝、仅在回调期间有效，因此必须在回调内完成全部拷贝/intern
+// （RowData 的 AnnotationResTable 已做文本 intern，会拷贝字符串）。
+void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
+  if (!batch) {
+    pxv_warn("%s", "DecoderStack::annotation_callback_batch: batch is nullptr");
+    return;
+  }
+  if (!self) {
+    pxv_warn("%s", "DecoderStack::annotation_callback_batch: self is nullptr");
+    return;
+  }
+  assert(batch);
+  assert(self);
+
+  struct decode_task_status *st = (decode_task_status *)self;
+
+  // P0-2 fix: _decoder is now a shared_ptr, keeping the DecoderStack alive.
+  auto d = st->_decoder;
+  if (!d) {
+    pxv_warn("%s", "DecoderStack::annotation_callback_batch: d is nullptr");
+    return;
+  }
+  assert(d);
+
+  // 批级检查一次即可（逐注解路径每注解检查一次）。
+  if (st->_bStop) {
+    d->_ann_dropped_stop += batch->n;
+    return;
+  }
+  if (!d->_decoder_status) {
+    pxv_err("decode task was deleted.");
+    return;
+  }
+  if (d->_no_memory) {
+    d->_ann_dropped_mem += batch->n;
+    return;
+  }
+  if (batch->n == 0 || !batch->items)
+    return;
+
+  d->_result_count += batch->n;
+
+#ifdef PXVIEW_DECODE_PERF
+  // P3-E: batch-annotation pipeline stats (see perflog.h BATCH_STATS).
+  pv::base::perf::record_batch_stats(batch->n);
+  // P3-D8: sample, once per process, which heap a g_malloc'd block lands on
+  // from a decode thread (reported as HEAP_TOPOLOGY decode_thread_glib). If it
+  // equals the main-thread CRT heap, all decode threads + GUI share one lock.
+  static bool s_heap_topology_recorded = false;
+  if (!s_heap_topology_recorded) {
+    s_heap_topology_recorded = true;
+    pv::base::perf::record_decode_thread_heap();
+  }
+#endif
+
+  // 只获取一次 _rows_mutex，把整批按行分组（组键用 row_iter 指针 = RowData*，
+  // 避免复制 Row）。行查找按批内缓存：每个 ann_format 只解析一次 decc 与行
+  // （"批内缓存行查找"），1024 条注解只需数次 map 查找而非逐条两次查找。
+  std::unique_lock<std::shared_mutex> lk(d->_rows_mutex);
+
+  // ann_format -> RowData*（nullptr 表示该 format 没有已注册的行）。
+  std::map<int, decode::RowData *> row_cache;
+  // RowData* -> 该行的注解指针列表（指针只在回调期间有效，用完即弃）。
+  std::map<decode::RowData *, std::vector<const srd_ann_item *>> groups;
+  bool dropped_logged = false;
+
+  for (size_t i = 0; i < batch->n; i++) {
+    const srd_ann_item *it = &batch->items[i];
+    const int ann_format = it->ann_class;
+
+    decode::RowData *rd = nullptr;
+    const auto cit = row_cache.find(ann_format);
+    if (cit != row_cache.end()) {
+      rd = cit->second;
+    } else {
+      // decc 整批相同可用缓存；按 it->decoder 精确解析行（与逐注解路径
+      // pdata->pdo->di->decoder 语义一致），stacked 解码器因此能命中各自的行。
+      const srd_decoder *const decc = it->decoder;
+      if (decc) {
+        const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
+            d->_class_rows.find(make_pair(decc, ann_format));
+        if (r != d->_class_rows.end()) {
+          const auto row_iter = d->_rows.find((*r).second);
+          if (row_iter != d->_rows.end())
+            rd = row_iter->second.get();
+        } else {
+          const auto row_iter = d->_rows.find(Row(decc));
+          if (row_iter != d->_rows.end())
+            rd = row_iter->second.get();
+        }
+      }
+      row_cache[ann_format] = rd;
+    }
+
+    if (!rd) {
+      // P3-F1: 频控日志，整批最多打一次；其余静默计数。
+      if (!dropped_logged &&
+          d->_ann_dropped_row.load(std::memory_order_relaxed) < 10) {
+        pxv_err("Unexpected annotation (batch): format = %d", ann_format);
+        dropped_logged = true;
+      }
+      d->_ann_dropped_row++;
+      continue;
+    }
+    groups[rd].push_back(it);
+  }
+
+  lk.unlock();
+
+  // 释放 _rows_mutex 后再落库（RowData 内部有自己的 _visitor_mutex），
+  // 与逐注解路径的锁序（先 _rows_mutex 后 _visitor_mutex）一致。
+  for (auto &g : groups) {
+    if (!g.first->emplace_annotations(g.second, d->_decoder_status.get())) {
+      d->_no_memory = true;
+      break;  // 停止剩余行的落库
+    }
+  }
 }
 
 void DecoderStack::analog_callback(srd_proto_data *pdata, void *self) {

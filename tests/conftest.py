@@ -96,10 +96,15 @@ def _pxview_process() -> Iterator[Optional[PXViewProcess]]:
         candidates = []
         if win:
             candidates = [
-                repo_root / "build" / "PXView.exe",        # Windows build dir
-                repo_root / "build.dir" / "PXView.exe",    # Windows MSYS2 build out
-                repo_root / "package" / "PXView.exe",      # Windows package dir
+                # Prefer the installed build: running from build/build.dir
+                # cannot resolve the decoder layout (C decoder path falls back
+                # to the source tree and Python decoders are only installed),
+                # which crashes at startup. install.dir is the documented
+                # run location (see CLAUDE.md).
                 repo_root / "install.dir" / "bin" / "PXView.exe",  # Windows install
+                repo_root / "package" / "PXView.exe",              # Windows package dir
+                repo_root / "build" / "PXView.exe",                # Windows build dir
+                repo_root / "build.dir" / "PXView.exe",            # Windows MSYS2 build out
                 repo_root / "PXView" / "build" / "PXView.exe",
             ]
         else:

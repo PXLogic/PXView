@@ -115,6 +115,7 @@ if(BUILD_DECODER_TEST)
 		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode        # for internal headers via sigrokdecode_static
 		${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/tests  # for "cJSON.h"
 		${GLIB_INCLUDE_DIRS}
+		${Python3_INCLUDE_DIRS}                            # for libsigrokdecode-internal.h (Python.h)
 	)
 
 	# CJSON_IMPLEMENTATION is needed by the cJSON single-header library.

@@ -161,6 +161,11 @@ public:
 
   void clear_measure();
   void clear_dso_xm();
+
+  // 信号重建后旧 Signal/Trace 会被销毁,清空缓存的拖拽/悬停裸指针,
+  // 避免悬垂。由 View::signals_changed() 在非 RESIZE_SIGNAL 活动拖拽时
+  // 防御性调用(高度拖拽期间 applyDragFrame 也会调用 signals_changed)。
+  void clear_interaction_state();
   void set_need_update(bool update);
   void set_decode_dirty();
   // P2 decode-only paint. Marks this viewport so the next paint runs the

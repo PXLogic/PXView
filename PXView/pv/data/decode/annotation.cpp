@@ -151,39 +151,15 @@ const std::vector<QString>& Annotation::annotations() const
 
 		 if (resItem.src_lines.size() > 0)
 		 { 
-			 int 	text_format_buf_len = 0;
-			 char  *text_format_buf = nullptr;
-
 			 //have custom string
 			 for (QString &rd_src : resItem.src_lines)
-			 {			
-				 QString src = rd_src.replace("{$}", "%s");
-
-				 const char *num_str = _status->m_resTable.format_numberic(resItem.str_number_hex, resItem.cur_display_format);
-				 QByteArray byteArray = src.toUtf8();
-				 const char *src_str = byteArray.data();
-				
-				 int textlen = strlen(src_str) + strlen(num_str);
-				 assert(textlen > 0);
-
-				 if (textlen >= text_format_buf_len)
-					{
-						if (text_format_buf)
-							free(text_format_buf);
-						text_format_buf = (char*)malloc(textlen + 8);
-						text_format_buf_len = textlen + 8;
-
-						if (!text_format_buf)
-							break;
-						assert(text_format_buf);
-					}
-				 
-				 sprintf(text_format_buf, src_str, num_str);
-				 resItem.cvt_lines.push_back(QString(text_format_buf));
+			 {
+				 const char *num_str = _status->m_resTable.format_numberic(
+					 resItem.str_number_hex, resItem.cur_display_format);
+				 QString out = rd_src;
+				 out.replace(QStringLiteral("{$}"), QString::fromUtf8(num_str));
+				 resItem.cvt_lines.push_back(out);
 			 }
-
-			 if (text_format_buf)
-				free(text_format_buf);
 		 }
 		 else{
 			 //have only numberic value

@@ -31,6 +31,7 @@
 #include <QWidget>
 #include <QThread>
 #include <string>
+#include <cstdio>
 #include <cassert>
 #include "pv/session/sigsession.h"
 #include "pv/base/pxvdef.h"
@@ -303,7 +304,7 @@ bool AppControl::Init()
     //the python script path of decoder
     char path[256] = {0};
     QString dir = GetDecodeScriptDir();   
-    strcpy(path, dir.toUtf8().data());
+    snprintf(path, sizeof(path), "%s", dir.toUtf8().constData());
 
     // Initialise libsigrokdecode
     pxv_info("DBG: before srd_init, path=%s", path);
@@ -319,9 +320,20 @@ bool AppControl::Init()
         QString cDecDir = GetAppDataDir();
         QDir cDecPath(cDecDir);
         if (cDecPath.cd("c_decoders") || cDecPath.cd("../libsigrokdecode/c_decoders")) {
-            std::string cs = pv::path::ConvertPath(cDecPath.absolutePath());
-            srd_c_decoder_path_add(cs.c_str());
-            pxv_info("C decoder path: \"%s\"", cs.c_str());
+            // Only add the directory if it actually contains decoder DLLs/SOs.
+            // When launched from build.dir, GetAppDataDir() falls back to the
+            // exe dir and "../libsigrokdecode/c_decoders" resolves to the SOURCE
+            // tree (no DLLs) — adding it would poison the C decoder search path.
+#ifdef _WIN32
+            const QStringList filter = QStringList() << "*.dll";
+#else
+            const QStringList filter = QStringList() << "*.so";
+#endif
+            if (!cDecPath.entryList(filter).isEmpty()) {
+                std::string cs = pv::path::ConvertPath(cDecPath.absolutePath());
+                srd_c_decoder_path_add(cs.c_str());
+                pxv_info("C decoder path: \"%s\"", cs.c_str());
+            }
         }
     }
 

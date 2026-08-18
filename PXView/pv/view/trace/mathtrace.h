@@ -85,6 +85,18 @@ public:
     int src2();
 
     /**
+     * Re-binds the DSO source signals after a View signal rebuild.
+     *
+     * Signal rebuilds (mode switch / file load / capture end) destroy the old
+     * DsoSignal objects; their sig_released() nulls _dsoSig1/_dsoSig2. The
+     * MathStack itself is a Core object that survives rebuilds, so the
+     * MathTrace is kept — this re-points the source members at the current
+     * DsoSignal instances matching the MathStack's ch1/ch2 indices and
+     * (re-)connects their sig_released() to guard against future dangling.
+     */
+    void rebind_sources(view::DsoSignal *dsoSig1, view::DsoSignal *dsoSig2);
+
+    /**
       *
       */
     bool measure(const QPointF &p);
@@ -154,8 +166,8 @@ private:
 
 private:
     std::shared_ptr<pv::data::MathStack> _math_stack;
-    view::DsoSignal *_dsoSig1;
-    view::DsoSignal *_dsoSig2;
+    view::DsoSignal *_dsoSig1 = nullptr;
+    view::DsoSignal *_dsoSig2 = nullptr;
     bool _enable;
     bool _show;
 

@@ -567,6 +567,15 @@ void Viewport::clear_measure() {
   update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
+void Viewport::clear_interaction_state() {
+  // 信号重建后旧 Signal/Trace 已销毁,清空拖拽/悬停缓存的裸指针,
+  // 避免后续 mouseMove/Release/applyDragFrame 解引用悬垂对象。
+  _drag_sig = nullptr;
+  _resize_trace_upper = nullptr;
+  _resize_trace_lower = nullptr;
+  _hover_logic_signal = nullptr;
+}
+
 void Viewport::clear_dso_xm() {
   _dso_xm_valid = false;
   _mm_width = View::Unknown_Str;

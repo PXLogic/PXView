@@ -281,6 +281,8 @@ private:
 	void decode_data(const uint64_t decode_start, const uint64_t decode_end, srd_session *const session);
 	void execute_decode_stack();
 	static void annotation_callback(srd_proto_data *pdata, void *self);
+    // 方案 E (Task 5): 批量注解消费回调，注册进 srd_pd_output_callback_add_batch。
+    static void annotation_callback_batch(srd_ann_batch *batch, void *self);
     static void analog_callback(srd_proto_data *pdata, void *self);
     void do_decode_work();
 

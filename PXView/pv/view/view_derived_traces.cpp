@@ -381,26 +381,27 @@ void ViewDerivedTraces::sync_derived_traces() {
   // ---- Sync MathTrace from MathStack ----
   auto math_stack = source->get_math_stack();
   if (math_stack) {
+    // 解析 MathStack 的 ch1/ch2 对应的当前 DsoSignal 指针。
+    DsoSignal *dso1 = nullptr;
+    DsoSignal *dso2 = nullptr;
+    const int idx1 = math_stack->ch1_index();
+    const int idx2 = math_stack->ch2_index();
+    for (auto &sig : _view->get_own_signals()) {
+      if (!sig)
+        continue;
+      if (sig->get_index() == idx1)
+        dso1 = sig->as_dso();
+      if (sig->get_index() == idx2)
+        dso2 = sig->as_dso();
+      if (dso1 && dso2)
+        break;
+    }
+
     if (!_own_math_trace ||
         _own_math_trace->get_math_stack().get() != math_stack.get()) {
       if (_own_math_trace) {
         _own_math_trace.reset();
         changed = true;
-      }
-
-      DsoSignal *dso1 = nullptr;
-      DsoSignal *dso2 = nullptr;
-      const int idx1 = math_stack->ch1_index();
-      const int idx2 = math_stack->ch2_index();
-      for (auto &sig : _view->get_own_signals()) {
-        if (!sig)
-          continue;
-        if (sig->get_index() == idx1)
-          dso1 = sig->as_dso();
-        if (sig->get_index() == idx2)
-          dso2 = sig->as_dso();
-        if (dso1 && dso2)
-          break;
       }
 
       if (dso1 && dso2) {
@@ -411,6 +412,11 @@ void ViewDerivedTraces::sync_derived_traces() {
                  "math src1=%d or src2=%d — MathTrace creation skipped.",
                  idx1, idx2);
       }
+    } else if (_own_math_trace) {
+      // MathStack 未变时 MathTrace 保留,但信号重建已销毁旧的源 DsoSignal
+      // (其 sig_released 已把 _dsoSig1/_dsoSig2 置空)。按当前信号集重新
+      // 绑定源指针,避免 MathTrace 长期持有失效的 DsoSignal 指针。
+      _own_math_trace->rebind_sources(dso1, dso2);
     }
   } else {
     if (_own_math_trace) {

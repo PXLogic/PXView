@@ -24,7 +24,10 @@
 #include <chrono>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <mutex>
+
+#include <libsigrokdecode.h>
 
 #include "pv/data/decode/rowdata.h"
 #include "pv/base/perflog.h"
@@ -422,20 +425,48 @@ bool RowData::emplace_annotation(const srd_proto_data *pdata, DecoderStatus *sta
 
   try {
     _annotations.emplace_back(pdata, status);
-    _item_count = _annotations.size();
+    apply_annotation_stats(_annotations.back());
+    return true;
 
-    const Annotation &a = _annotations.back();
-    _max_annotation = max(_max_annotation, a.end_sample() - a.start_sample());
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
+}
 
-    if (a.end_sample() != a.start_sample()) {
-      if (_min_annotation == 0) {
-        _min_annotation = a.end_sample() - a.start_sample();
-      } else {
-        _min_annotation =
-            min(_min_annotation, a.end_sample() - a.start_sample());
-      }
+// 方案 E: 批量落库。items 属于同一行（调用方已按行分组），内部只获取一次
+// _visitor_mutex，为每个 item 在栈上构造 srd_proto_data 视图（pdo 置 NULL）
+// 后逐个 emplace，最终 _annotations 序列与逐注解路径完全一致。
+bool RowData::emplace_annotations(
+    const std::vector<const srd_ann_item *> &items, DecoderStatus *status) {
+  if (items.empty())
+    return true;
+  if (!status)
+    return false;
+  assert(status);
+
+  std::unique_lock<std::shared_mutex> lock(_visitor_mutex);
+
+  try {
+    for (const srd_ann_item *it : items) {
+      if (!it)
+        continue;
+
+      srd_proto_data pdata{};
+      srd_proto_data_annotation pda{};
+      pdata.start_sample = it->start_sample;
+      pdata.end_sample = it->end_sample;
+      pdata.pdo = nullptr;  // Annotation 不使用 pdata->pdo
+      pdata.data = &pda;
+      pda.ann_class = it->ann_class;
+      pda.ann_type = it->ann_type;
+      pda.ann_text = (char **)it->ann_text;
+      pda.numberic_value = it->numberic_value;
+      memcpy(pda.str_number_hex, it->str_number_hex,
+             sizeof(pda.str_number_hex));
+
+      _annotations.emplace_back(&pdata, status);
+      apply_annotation_stats(_annotations.back());
     }
-
     return true;
 
   } catch (const std::bad_alloc &) {

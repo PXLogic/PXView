@@ -1,4 +1,4 @@
-﻿## This file is part of the PXView project.
+## This file is part of the PXView project.
 ##
 ## Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
 ## Copyright (C) 2012-2013 Alexandru Gagniuc <mr.nuke.me@gmail.com>
@@ -206,6 +206,7 @@ set(libsigrokdecode_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/instance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/type_decoder.c
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/session.c
+	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/ann_batch.c
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/module_sigrokdecode.c
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/srd.c
 	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode/log.c

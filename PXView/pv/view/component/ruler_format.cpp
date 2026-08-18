@@ -7,6 +7,7 @@
 
 #include "ruler_format.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -30,12 +31,11 @@ QString format_freq(double period, unsigned int precision)
     const int prefix = ceil((order - kFirstSIPrefixPower) / 3.0f);
     const double multiplier = pow(10.0, std::max(-prefix * 3.0 - (double)kFirstSIPrefixPower, 0.0));
 
+    const int p = (int)std::min(precision, 12u);
     char buffer[50] = {0};
-    char format[15] = {0};
     QString units = FreqPrefixes[prefix] + "Hz";
-    sprintf(format, "%%.%df", (int)precision);
-    sprintf(buffer, format, 1 / (period * multiplier));
-    strcat(buffer, units.toUtf8().data());
+    snprintf(buffer, sizeof(buffer), "%.*f%s", p, 1 / (period * multiplier),
+             units.toUtf8().constData());
     return QString(buffer);
 }
 
@@ -43,14 +43,12 @@ QString format_time(double t, int prefix, unsigned int precision)
 {
     const double multiplier = pow(10.0, -prefix * 3 - kFirstSIPrefixPower + 6.0);
 
+    const int p = (int)std::min(precision, 12u);
     char buffer[50];
-    char format[15];
     QString units = SIPrefixes[prefix] + "s";
     double v = (t * multiplier) / 1000000.0;
-    buffer[0] = v >= 0 ? '+' : '-';
-    sprintf(format, "%%.%df", (int)precision);
-    sprintf(buffer + 1, format, v);
-    strcat(buffer + 1, units.toUtf8().data());
+    snprintf(buffer, sizeof(buffer), "%c%.*f%s", v >= 0 ? '+' : '-', p, v,
+             units.toUtf8().constData());
     return QString(buffer);
 }
 

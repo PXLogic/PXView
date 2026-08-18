@@ -358,6 +358,25 @@ target_include_directories(test_signal_model PRIVATE
 )
 target_link_libraries(test_signal_model PRIVATE -lglib-2.0)
 
+# ==== RowData 批量/逐注解落库等价性（方案 E）====
+# 直接编译 decode 数据层源文件（不链接 pxview-data），内部 stub xlog。
+# 依赖: rowdata / annotation / annotationrestable / decoderstatus / annotation_heap
+#       + libsigrokdecode 头 + common (xlog.h)。PXVIEW_DECODE_PERF 下 rowdata.cpp
+#       经 perflog.h 引入 glib.h（全局 include/link dirs 已就绪，-lglib-2.0 显式链接）。
+pv_add_qtest(test_rowdata_batch
+    data/test_rowdata_batch.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/decode/rowdata.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/decode/annotation.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/decode/annotationrestable.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/decode/decoderstatus.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/decode/annotation_heap.cpp
+)
+target_include_directories(test_rowdata_batch PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_rowdata_batch PRIVATE -lglib-2.0)
+
 # ==== SessionData/SessionDocument/SessionSnapshot (data 层 document trio) ====
 # 走 Route B: 链接 pxview-core 静态库 (复用预编译 core/data/config 对象), 与
 # test_capture_manager / test_decode_task_manager 同一套链接桩外壳:

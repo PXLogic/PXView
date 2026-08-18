@@ -115,6 +115,18 @@ inline void record_publish_delta(size_t n) {
   if (n > g_max_publish_delta)
     g_max_publish_delta = n;
 }
+// P3-E: batch-annotation stats. In batch mode each flush delivers up to
+// SRD_ANN_BATCH_MAX annotations with a single host callback; per-annotation
+// engine-side g_malloc/g_free is eliminated, so approx_malloc_avoided ~=
+// total annotations (each would have cost >= 1 heap alloc before).
+inline size_t  g_batch_flushes  = 0;
+inline uint64_t g_batch_ann_sum  = 0;
+inline size_t  g_batch_max      = 0;
+inline void record_batch_stats(size_t n) {
+  g_batch_flushes++;
+  g_batch_ann_sum += n;
+  if (n > g_batch_max) g_batch_max = n;
+}
 
 // ---- P3-D8: heap topology probe ----
 // Confirms the convoy premise: main-thread CRT malloc, Qt qMalloc and glib
@@ -311,6 +323,20 @@ inline void flush() {
   // P3-F2: largest single publish delta this window (annotations).
   fprintf(lf, "MAX_PUBLISH_DELTA %zu ann\n", g_max_publish_delta);
   g_max_publish_delta = 0;
+
+  // P3-E: batch-annotation pipeline stats. batches = engine->host flushes,
+  // total_ann = annotations delivered in this window, avg/max = per-batch
+  // size, approx_malloc_avoided ~= total annotations (each would have cost
+  // >= 1 heap alloc with the per-annotation callback before).
+  fprintf(lf,
+          "BATCH_STATS   batches=%zu total_ann=%llu avg=%.1f max=%zu"
+          " approx_malloc_avoided=%llu\n",
+          g_batch_flushes, (unsigned long long)g_batch_ann_sum,
+          g_batch_flushes ? (double)g_batch_ann_sum / g_batch_flushes : 0.0,
+          g_batch_max, (unsigned long long)g_batch_ann_sum);
+  g_batch_flushes = 0;
+  g_batch_ann_sum = 0;
+  g_batch_max = 0;
 
   // P3-D6: max process CPU util per 100ms tick this window (1.0 = one core).
   // High util (~n cores) alongside a large EVENT_LAG_MAX ⇒ decode threads

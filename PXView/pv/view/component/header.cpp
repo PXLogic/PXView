@@ -91,6 +91,20 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
 
 Header::~Header() { REMOVE_UI(this); }
 
+void Header::clear_interaction_state() {
+  // 信号重建后旧 Signal/Trace 已销毁,清空缓存的裸指针与拖拽/按下状态,
+  // 避免后续 mouseMove/Release 或上下文菜单解引用悬垂指针。
+  _drag_traces.clear();
+  _context_trace = nullptr;
+  _resize_trace_upper = nullptr;
+  _resize_trace_lower = nullptr;
+  _mouse_is_down = false;
+  _moveFlag = false;
+  _colorFlag = false;
+  _nameFlag = false;
+  _mouse_point = QPoint(-1, -1);
+}
+
 void Header::retranslateUi() { update(); }
 
 int Header::get_nameEditWidth() {

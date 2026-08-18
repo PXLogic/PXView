@@ -88,6 +88,11 @@ public:
         return _mouse_is_down;
     }
 
+    // 信号重建(模式切换/加载文件/采集结束)后旧 Signal/Trace 会被销毁,
+    // 清空所有指向它们的缓存指针(拖拽/悬停/右键上下文),避免悬垂。
+    // 由 View::signals_changed() 在非活动拖拽时防御性调用。
+    void clear_interaction_state();
+
 private slots:
 	void on_action_set_name_triggered();
     void on_reset_row_height();

@@ -30,6 +30,7 @@
 #include "pv/view/view.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/signal/dsosignal.h"
+#include "pv/view/signal/signal.h"
 #include "pv/base/pxvdef.h"
 #include "pv/view/viewport/viewport.h"
   
@@ -43,8 +44,6 @@ MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
                      view::DsoSignal *dsoSig2):
     Trace("M", dsoSig1->get_index(), SR_CHANNEL_MATH),
     _math_stack(math_stack),
-    _dsoSig1(dsoSig1),
-    _dsoSig2(dsoSig2),
     _enable(enable),
     _show(true),
     _scale(0),
@@ -65,6 +64,11 @@ MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
     _colour = View::Red;
     _ref_min = dsoSig1->get_ref_min();
     _ref_max = dsoSig1->get_ref_max();
+
+    // 连接源信号的 sig_released,源 DsoSignal 被信号重建销毁时自动置空
+    // _dsoSig1/_dsoSig2,避免 MathTrace 持有悬垂裸指针(Release 下
+    // assert 是空操作,src1()/src2() 必须真正判空)。
+    rebind_sources(dsoSig1, dsoSig2);
 }
 
 MathTrace::~MathTrace()
@@ -83,14 +87,31 @@ void MathTrace::set_enable(bool enable)
 
 int MathTrace::src1()
 {
-    assert(_dsoSig1);
-    return _dsoSig1->get_index();
+    return _dsoSig1 ? _dsoSig1->get_index() : -1;
 }
 
 int MathTrace::src2()
 {   
-    assert(_dsoSig2);
-    return _dsoSig2->get_index();
+    return _dsoSig2 ? _dsoSig2->get_index() : -1;
+}
+
+void MathTrace::rebind_sources(view::DsoSignal *dsoSig1, view::DsoSignal *dsoSig2)
+{
+    // 仅在指针实际变化时重连,避免重复 connect 堆积。
+    if (dsoSig1 != _dsoSig1) {
+        _dsoSig1 = dsoSig1;
+        if (_dsoSig1)
+            connect(_dsoSig1, &Signal::sig_released, this, [this](void *o) {
+                if (o == _dsoSig1) _dsoSig1 = nullptr;
+            });
+    }
+    if (dsoSig2 != _dsoSig2) {
+        _dsoSig2 = dsoSig2;
+        if (_dsoSig2)
+            connect(_dsoSig2, &Signal::sig_released, this, [this](void *o) {
+                if (o == _dsoSig2) _dsoSig2 = nullptr;
+            });
+    }
 }
 
 float MathTrace::get_scale()
