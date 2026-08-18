@@ -555,31 +555,8 @@ void Viewport::update(int event) {
 #ifdef PXVIEW_DECODE_PERF
   // P3-D: counts EVERY direct viewport update() call (from view_data_sync,
   // view_glitch_filter, viewport.cpp internals, interaction, update_view_port,
-  // check_measure...). Records the caller return address for UPDATE_CALLERS.
-  void *ra = __builtin_return_address(0);
-  pv::base::perf::record_repaint_update_direct_caller(ra);
-  // P3-D3: one-time identification of any caller that is NOT inside the main
-  // executable (i.e. a DLL, e.g. Qt6Core when Viewport::update is invoked as a
-  // queued slot). Logs the module name once per distinct non-exe return
-  // address so the direct-update source is known without a per-call cost.
-  static void *s_last_non_exe_ra = nullptr;
-  if (s_last_non_exe_ra != ra) {
-    HMODULE exe = GetModuleHandleW(nullptr);
-    const bool in_exe =
-        exe && ra >= (void *)exe &&
-        ra < (void *)((BYTE *)exe + 0x2000000);
-    if (!in_exe) {
-      s_last_non_exe_ra = ra;
-      wchar_t name[MAX_PATH] = L"?";
-      HMODULE m = nullptr;
-      if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             (LPCWSTR)ra, &m))
-        GetModuleBaseNameW(GetCurrentProcess(), m, name, MAX_PATH);
-      pxv_info("Viewport::update called from NON-EXE module '%ls' ra=0x%p",
-               name, ra);
-    }
-  }
+  // check_measure...).
+  pv::base::perf::record_repaint_update_direct();
 #endif
   QWidget::update();
   (void)event;

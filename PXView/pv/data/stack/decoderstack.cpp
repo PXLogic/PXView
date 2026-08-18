@@ -1281,6 +1281,17 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
       (const srd_proto_data_annotation *)pdata->data;
   int ann_format = pda->ann_class;
 
+#ifdef PXVIEW_DECODE_PERF
+  // P3-D8: sample, once per process, which heap a g_malloc'd block lands on
+  // from a decode thread (reported as HEAP_TOPOLOGY decode_thread_glib). If it
+  // equals the main-thread CRT heap, all decode threads + GUI share one lock.
+  static bool s_heap_topology_recorded = false;
+  if (!s_heap_topology_recorded) {
+    s_heap_topology_recorded = true;
+    pv::base::perf::record_decode_thread_heap();
+  }
+#endif
+
   const map<pair<const srd_decoder *, int>, Row>::const_iterator r =
       d->_class_rows.find(make_pair(decc, ann_format));
   if (r != d->_class_rows.end())

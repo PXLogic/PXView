@@ -211,64 +211,6 @@ connect(_event_lag_timer, &QTimer::timeout, this, []() {
 #endif
 });
 _event_lag_timer->start();
-
-// P3-D7: main-thread sampling profiler. A watcher thread suspends the main
-// thread every ~3ms and records its RIP into the perf histogram (SAMPLES).
-// The 1-1.4s EVENT_LAG_MAX blocks that are NOT in any instrumented function
-// (signals_changed / on_new_decode_data / on_decode_done all tiny) will show
-// up here as a dense cluster of samples pinpointing the exact blocking
-// function. Diagnostic-only (PXVIEW_DECODE_PERF).
-static std::thread g_main_sampler;
-static HANDLE g_main_thread_handle = nullptr;
-{
-  g_main_thread_handle =
-      OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME |
-                     THREAD_QUERY_INFORMATION,
-                 FALSE, GetCurrentThreadId());
-  g_main_sampler = std::thread([]() {
-    CONTEXT ctx;
-    ctx.ContextFlags = CONTEXT_CONTROL;
-    while (g_main_thread_handle) {
-      const DWORD rc = SuspendThread(g_main_thread_handle);
-      if (rc != (DWORD)-1) {
-        uintptr_t caller = 0;
-        if (GetThreadContext(g_main_thread_handle, &ctx)) {
-          pv::base::perf::record_main_sample((uintptr_t)ctx.Rip);
-          // P3-D7c: also record the return address at [rsp] (the caller of the
-          // sampled instruction) so the hot ntdll heap function can be traced
-          // to the app/library function driving it.
-          if (ctx.Rsp) {
-            if (ReadProcessMemory(GetCurrentProcess(), (LPCVOID)ctx.Rsp,
-                                  &caller, sizeof(caller), nullptr))
-              pv::base::perf::record_main_sample_call((uintptr_t)ctx.Rip,
-                                                      caller);
-          }
-        }
-        ResumeThread(g_main_thread_handle);
-        // P3-D7b: record which module the main thread was sampled in, so the
-        // hot SAMPLES addresses (e.g. a DLL wait) can be attributed without
-        // resolving addresses per-run.
-        {
-          HMODULE m = nullptr;
-          wchar_t mod_path[MAX_PATH] = L"?";
-          if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                     GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                 (LPCWSTR)(uintptr_t)ctx.Rip, &m) &&
-              GetModuleFileNameW(m, mod_path, MAX_PATH) > 0) {
-            // Basename after the last separator (kernel32, no psapi dep).
-            wchar_t *slash = wcsrchr(mod_path, L'\\');
-            std::wstring ws = slash ? std::wstring(slash + 1)
-                                    : std::wstring(mod_path);
-            pv::base::perf::record_main_sample_module(
-                std::string(ws.begin(), ws.end()));
-          }
-        }
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(3));
-    }
-  });
-  g_main_sampler.detach();
-}
 #endif
 
 setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
@@ -768,7 +710,7 @@ return;
 
 #ifdef PXVIEW_DECODE_PERF
 // P3-D: full viewport_update() entry (any caller).
-pv::base::perf::record_repaint_viewport_caller(__builtin_return_address(0));
+pv::base::perf::record_repaint_viewport();
 #endif
 
 // Mark decode pixmap dirty so it will be rebuilt on next paint.

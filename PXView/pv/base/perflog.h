@@ -32,6 +32,20 @@
 
 #ifdef PXVIEW_DECODE_PERF
 
+// P3-D8: heap topology probe needs Win32 heap APIs, glib (to sample g_malloc
+// placement) and the Plan-A dedicated heap. All scoped to the perf macro so
+// normal builds are untouched.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <glib.h>
+#include <cstdlib>
+#include "pv/data/decode/annotation_heap.h"
+
 namespace pv {
 namespace base {
 namespace perf {
@@ -92,51 +106,6 @@ inline void record_cpu_util(double util) {
   if (util > g_cpu_util_max)
     g_cpu_util_max = util;
 }
-// P3-D7: main-thread sampling profiler histogram. A background watcher thread
-// suspends the main thread every ~3ms and records its RIP; a long EVENT_LAG_MAX
-// block that is not in any instrumented function shows up here as a dense
-// cluster of samples. Printed as SAMPLES (resolve with addr2line), cleared
-// each flush. Mutex-guarded; the sampler only takes the lock AFTER resuming
-// the main thread, so it can never deadlock against a suspended main thread.
-inline std::mutex g_sample_mutex;
-inline std::map<uintptr_t, size_t> g_main_samples;
-inline std::map<std::string, size_t> g_main_sample_modules;
-// P3-D7c: (rip, caller) pairs — the caller (return address at [rsp]) of the
-// hot ntdll function reveals which app/library function drives the main
-// thread's heap activity during the ~1.5s block.
-inline std::map<std::pair<uintptr_t, uintptr_t>, size_t> g_main_sample_calls;
-inline void record_main_sample(uintptr_t rip) {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  g_main_samples[rip]++;
-}
-inline void record_main_sample_call(uintptr_t rip, uintptr_t caller) {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  g_main_samples[rip]++;
-  g_main_sample_calls[{rip, caller}]++;
-}
-inline void record_main_sample_module(const std::string &mod) {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  g_main_sample_modules[mod]++;
-}
-inline std::map<uintptr_t, size_t> take_main_samples() {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  std::map<uintptr_t, size_t> out;
-  out.swap(g_main_samples);
-  return out;
-}
-inline std::map<std::string, size_t> take_main_sample_modules() {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  std::map<std::string, size_t> out;
-  out.swap(g_main_sample_modules);
-  return out;
-}
-inline std::map<std::pair<uintptr_t, uintptr_t>, size_t>
-take_main_sample_calls() {
-  std::lock_guard<std::mutex> lk(g_sample_mutex);
-  std::map<std::pair<uintptr_t, uintptr_t>, size_t> out;
-  out.swap(g_main_sample_calls);
-  return out;
-}
 // P3-F2: largest single publish delta (annotations copied in one
 // publish_snapshot call) this window. Confirms the heap-block hypothesis:
 // million-annotation deltas were the source; after chunking the copy the
@@ -145,6 +114,39 @@ inline size_t g_max_publish_delta = 0;
 inline void record_publish_delta(size_t n) {
   if (n > g_max_publish_delta)
     g_max_publish_delta = n;
+}
+
+// ---- P3-D8: heap topology probe ----
+// Confirms the convoy premise: main-thread CRT malloc, Qt qMalloc and glib
+// g_malloc all land on the SAME heap (one lock), while Plan A's per-stack
+// HeapCreate heaps are genuinely separate. Uses HeapValidate(heap, 0, ptr) to
+// find which heap owns a given pointer.
+inline HANDLE probe_heap_of_pointer(const void *p) {
+  if (!p)
+    return nullptr;
+  DWORD n = GetProcessHeaps(0, nullptr);
+  if (!n || n > 64)
+    return nullptr;
+  HANDLE heaps[64];
+  n = GetProcessHeaps(n, heaps);
+  for (DWORD i = 0; i < n; i++)
+    if (HeapValidate(heaps[i], 0, p))
+      return heaps[i];
+  return nullptr;
+}
+// Recorded from a decode thread: which heap a g_malloc'd block lands on there.
+// If this equals the main-thread CRT heap, the 16 decode threads and the GUI
+// thread share one heap lock (the convoy source). Relaxed write; diagnostic
+// only.
+inline HANDLE g_decode_thread_heap = nullptr;
+inline void record_decode_thread_heap() {
+  void *p = g_malloc(64);
+  if (p) {
+    HANDLE h = probe_heap_of_pointer(p);
+    if (h)
+      g_decode_thread_heap = h;
+    g_free(p);
+  }
 }
 
 inline size_t    g_window_paint_calls   = 0;  // paint_mid calls this window
@@ -174,24 +176,6 @@ inline void record_repaint_update_direct(){ g_repaint_update_direct++; }
 inline void record_repaint_delayed(bool full) {
   g_repaint_delayed++;
   if (full) g_repaint_delayed_full++; else g_repaint_delayed_do++;
-}
-// P3-D2: caller-address histogram for View::viewport_update(). Each call
-// records __builtin_return_address(0); flush() prints the top callers so they
-// can be mapped with addr2line against install.dir/bin/PXView.exe. Cleared per
-// window. Guarded by PXVIEW_DECODE_PERF so there is zero cost otherwise.
-inline std::map<void*, size_t> g_vp_callers;
-inline void record_repaint_viewport_caller(void *caller) {
-  g_repaint_viewport++;
-  if (caller)
-    g_vp_callers[caller]++;
-}
-// P3-D3: caller-address histogram for Viewport::update(int) — every direct
-// viewport update() call. Printed as UPDATE_CALLERS; resolve with addr2line.
-inline std::map<void*, size_t> g_ud_callers;
-inline void record_repaint_update_direct_caller(void *caller) {
-  g_repaint_update_direct++;
-  if (caller)
-    g_ud_callers[caller]++;
 }
 // g_frame_viewport.calls is CUMULATIVE across windows; remember the value at
 // the previous flush so REPAINT_SOURCE can report the per-window delta.
@@ -334,54 +318,39 @@ inline void flush() {
   fprintf(lf, "CPU_UTIL_MAX    %.1f cores\n", g_cpu_util_max);
   g_cpu_util_max = 0;
 
-  // P3-D7: top main-thread sampled RIPs (sampling profiler). Dense clusters =
-  // where the main thread spent its time (e.g. the EVENT_LAG_MAX block).
+  // P3-D8: heap topology — where each allocation source actually lands.
+  // Equal heap handles (crt/qt/glib) = one shared lock = convoy confirmed;
+  // planA != crt = Plan-A heaps genuinely separate; decode_thread_glib == crt
+  // = decode threads allocate on the SAME heap as the GUI thread.
   {
-    auto samples = take_main_samples();
-    if (!samples.empty()) {
-      std::vector<std::pair<uintptr_t, size_t>> sv(samples.begin(),
-                                                   samples.end());
-      std::sort(sv.begin(), sv.end(),
-                [](const std::pair<uintptr_t, size_t> &a,
-                   const std::pair<uintptr_t, size_t> &b) {
-                  return a.second > b.second;
-                });
-      fprintf(lf, "SAMPLES:");
-      const size_t top_s = std::min<size_t>(12, sv.size());
-      for (size_t i = 0; i < top_s; i++)
-        fprintf(lf, " 0x%p(x%zu)", (void *)sv[i].first, sv[i].second);
-      fprintf(lf, "\n");
+    // P3-D8b: probe C++ operator new (std::vector during paint/annotation copy)
+    // instead of Qt — Qt 6.11 only exposes qMallocAligned (aligned pointer sits
+    // past the block base, so HeapValidate returns 0 — an artifact, not a
+    // different heap; Qt on MinGW allocates through the same CRT malloc).
+    void *p_crt = ::malloc(64);
+    void *p_cxx = ::operator new(64);
+    void *p_glib = g_malloc(64);
+    const HANDLE h_crt = probe_heap_of_pointer(p_crt);
+    const HANDLE h_cxx = probe_heap_of_pointer(p_cxx);
+    const HANDLE h_glib = probe_heap_of_pointer(p_glib);
+    HANDLE h_planA = nullptr;
+    void *heapA = pv::data::decode::create_annotation_heap();
+    if (heapA) {
+      void *pa = pv::data::decode::annotation_heap_alloc(heapA, 64);
+      if (pa)
+        h_planA = probe_heap_of_pointer(pa);
+      pv::data::decode::annotation_heap_free(heapA, pa);
+      pv::data::decode::destroy_annotation_heap(heapA);
     }
-    auto calls = take_main_sample_calls();
-    if (!calls.empty()) {
-      std::vector<std::pair<std::pair<uintptr_t, uintptr_t>, size_t>> cv(
-          calls.begin(), calls.end());
-      std::sort(cv.begin(), cv.end(),
-                [](const std::pair<std::pair<uintptr_t, uintptr_t>, size_t> &a,
-                   const std::pair<std::pair<uintptr_t, uintptr_t>, size_t> &b) {
-                  return a.second > b.second;
-                });
-      fprintf(lf, "SAMPLE_CALLERS:");
-      const size_t top_c = std::min<size_t>(10, cv.size());
-      for (size_t i = 0; i < top_c; i++)
-        fprintf(lf, " 0x%p<-0x%p(x%zu)", (void *)cv[i].first.first,
-                (void *)cv[i].first.second, cv[i].second);
-      fprintf(lf, "\n");
-    }
-    auto mods = take_main_sample_modules();
-    if (!mods.empty()) {
-      std::vector<std::pair<std::string, size_t>> mv(mods.begin(),
-                                                      mods.end());
-      std::sort(mv.begin(), mv.end(),
-                [](const std::pair<std::string, size_t> &a,
-                   const std::pair<std::string, size_t> &b) {
-                  return a.second > b.second;
-                });
-      fprintf(lf, "SAMPLE_MODULES:");
-      for (const auto &kv : mv)
-        fprintf(lf, " %s=%zu", kv.first.c_str(), kv.second);
-      fprintf(lf, "\n");
-    }
+    ::free(p_crt);
+    ::operator delete(p_cxx);
+    g_free(p_glib);
+    fprintf(lf,
+            "HEAP_TOPOLOGY process=0x%p crt_malloc=0x%p"
+            " cxx_new=0x%p glib=0x%p"
+            " planA=0x%p decode_thread_glib=0x%p\n",
+            GetProcessHeap(), h_crt, h_cxx, h_glib, h_planA,
+            g_decode_thread_heap);
   }
 
   // P3-D5: max duration of the instrumented main-thread operations, to pin
@@ -392,41 +361,6 @@ inline void flush() {
       fprintf(lf, " %s=%.1fms", kv.first.toUtf8().constData(), kv.second);
     fprintf(lf, "\n");
     g_op_max.clear();
-  }
-
-  // P3-D2: top viewport_update() callers (return addresses, resolve with
-  // addr2line -f -C <install.dir>/bin/PXView.exe <addr>).
-  if (!g_vp_callers.empty()) {
-    std::vector<std::pair<void*, size_t>> vp_sorted(g_vp_callers.begin(),
-                                                    g_vp_callers.end());
-    std::sort(vp_sorted.begin(), vp_sorted.end(),
-              [](const std::pair<void*, size_t> &a,
-                 const std::pair<void*, size_t> &b) {
-                return a.second > b.second;
-              });
-    fprintf(lf, "VIEWPORT_CALLERS:");
-    const size_t top_n = std::min<size_t>(8, vp_sorted.size());
-    for (size_t i = 0; i < top_n; i++)
-      fprintf(lf, " 0x%p(x%zu)", vp_sorted[i].first, vp_sorted[i].second);
-    fprintf(lf, "\n");
-    g_vp_callers.clear();
-  }
-
-  // P3-D3: top Viewport::update(int) callers (direct viewport update()).
-  if (!g_ud_callers.empty()) {
-    std::vector<std::pair<void*, size_t>> ud_sorted(g_ud_callers.begin(),
-                                                    g_ud_callers.end());
-    std::sort(ud_sorted.begin(), ud_sorted.end(),
-              [](const std::pair<void*, size_t> &a,
-                 const std::pair<void*, size_t> &b) {
-                return a.second > b.second;
-              });
-    fprintf(lf, "UPDATE_CALLERS:");
-    const size_t top_u = std::min<size_t>(8, ud_sorted.size());
-    for (size_t i = 0; i < top_u; i++)
-      fprintf(lf, " 0x%p(x%zu)", ud_sorted[i].first, ud_sorted[i].second);
-    fprintf(lf, "\n");
-    g_ud_callers.clear();
   }
 
   // Per-track-row breakdown, hottest first.
