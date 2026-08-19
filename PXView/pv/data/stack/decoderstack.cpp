@@ -507,7 +507,9 @@ void DecoderStack::publish_snapshot() {
   // GUI thread after it observes the pointer.
   _published.store(std::move(snap), std::memory_order_release);
   _snapshot_generation.fetch_add(1, std::memory_order_relaxed);
+#ifdef PXVIEW_DECODE_PERF
   pv::base::perf::record_publish();
+#endif
 }
 
 std::shared_ptr<const DecoderStack::SnapshotRows>
