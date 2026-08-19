@@ -814,6 +814,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
             }
           }
 
+#ifdef PXVIEW_DECODE_PERF
           const double _perf_row_ms = std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - _perf_row_t0).count();
           pv::base::perf::record_track(_perf_row_name, _perf_row_ms,
@@ -821,6 +822,13 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                                        _perf_ann);
           pv::base::perf::frame_add_rows(_perf_is_dense ? 1 : 0,
                                          _perf_is_dense ? 0 : 1, _perf_ann);
+#else
+          (void)_perf_row_name;
+          (void)_perf_row_t0;
+          (void)_perf_vr_ms;
+          (void)_perf_ann;
+          (void)_perf_is_dense;
+#endif
 
           y += annotation_height;
           _cur_row_headings.push_back(row.title());

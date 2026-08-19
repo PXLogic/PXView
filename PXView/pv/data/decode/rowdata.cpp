@@ -141,12 +141,16 @@ const Annotation *RowDataSnapshot::_annotation_at(size_t index) const {
 
 std::pair<size_t, size_t> RowDataSnapshot::get_visible_range(
     uint64_t start_sample, uint64_t end_sample) const {
+#ifdef PXVIEW_DECODE_PERF
   const auto _t0 = std::chrono::steady_clock::now();
   auto _perf_done = [&]() {
     pv::base::perf::record_vrange_snap(
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - _t0).count());
   };
+#else
+  auto _perf_done = []() {};
+#endif
   if (_segments.empty()) {
     _perf_done();
     return {0, 0};
@@ -491,12 +495,16 @@ bool RowData::get_annotation(Annotation *ann, uint64_t index) {
 
 std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
                                                      uint64_t end_sample) {
+#ifdef PXVIEW_DECODE_PERF
   const auto _t0 = std::chrono::steady_clock::now();
   auto _perf_done = [&]() {
     pv::base::perf::record_vrange_live(
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - _t0).count());
   };
+#else
+  auto _perf_done = []() {};
+#endif
   std::shared_lock<std::shared_mutex> lock(_visitor_mutex);
 
   if (_annotations.empty()) {

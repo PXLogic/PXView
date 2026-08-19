@@ -29,6 +29,7 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <version>
 #include <QObject>
 #include <QString>
 #include <mutex>
@@ -65,6 +66,59 @@ class RowData;
 }
 
 class DecoderStack;
+
+// ---------------------------------------------------------------------------
+// atomic_shared_ptr<T>: portable stand-in for std::atomic<std::shared_ptr<T>>
+// (C++20 P0718R2). libstdc++ (GCC 12+) implements that specialization, but
+// libc++ (Apple clang 15/16 on the macOS CI runners) does NOT: the primary
+// template is selected instead and hard-errors with "_Atomic cannot be applied
+// to a type which is not trivially copyable". The fallback below keeps the same
+// load()/store()/exchange() API — mutex-backed, which is also how libstdc++
+// implements it internally for non-lock-free platforms — so call sites are
+// identical on every toolchain.
+// ---------------------------------------------------------------------------
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+template <typename T>
+using atomic_shared_ptr = std::atomic<std::shared_ptr<T>>;
+#else
+template <typename T>
+class atomic_shared_ptr
+{
+public:
+    atomic_shared_ptr() = default;
+    atomic_shared_ptr(std::shared_ptr<T> p) : _p(std::move(p)) {}
+
+    atomic_shared_ptr(const atomic_shared_ptr&) = delete;
+    atomic_shared_ptr& operator=(const atomic_shared_ptr&) = delete;
+
+    std::shared_ptr<T> load(
+        std::memory_order = std::memory_order_seq_cst) const
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _p;
+    }
+
+    void store(std::shared_ptr<T> p,
+               std::memory_order = std::memory_order_seq_cst)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _p = std::move(p);
+    }
+
+    std::shared_ptr<T> exchange(
+        std::shared_ptr<T> p,
+        std::memory_order = std::memory_order_seq_cst)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _p.swap(p);
+        return p;
+    }
+
+private:
+    mutable std::mutex  _mutex;
+    std::shared_ptr<T>  _p;
+};
+#endif
 
 struct decode_task_status
 {
@@ -315,10 +369,11 @@ private:
     // replaces _published via publish_snapshot(); the GUI render path only
     // reads it (atomic load, zero lock). Protected by _rows_mutex on the
     // write side (publish), read side is lock-free.
-    // std::atomic<std::shared_ptr> gives lock-free (or spinlock-backed)
-    // publish/read of the immutable snapshot without the deprecated free
-    // atomic_load_explicit / atomic_store_explicit functions.
-    std::atomic<std::shared_ptr<const SnapshotRows>> _published{nullptr};
+    // atomic_shared_ptr gives lock-free (or spinlock-backed) publish/read of
+    // the immutable snapshot without the deprecated free
+    // atomic_load_explicit / atomic_store_explicit functions. See the
+    // atomic_shared_ptr definition above for the libc++ fallback.
+    atomic_shared_ptr<const SnapshotRows> _published{nullptr};
     std::atomic<uint64_t> _snapshot_generation{0};
     // Wall-clock throttle: publish_snapshot() rebuilds a full immutable copy
     // of every row's deque, so we cap the publish rate (default ~16ms) to

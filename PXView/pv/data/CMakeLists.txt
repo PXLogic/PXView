@@ -48,6 +48,11 @@ add_library(pxview-data STATIC
 )
 
 target_link_libraries(pxview-data PUBLIC Qt6::Core)
+# data/ sources include pv/interface/*.h (typed events / event_notification),
+# which in turn include <nlohmann/json.hpp>. Link the interface target so the
+# nlohmann include path propagates here as well — required when nlohmann comes
+# from FetchContent (MSYS2/Windows CI) instead of a system package.
+target_link_libraries(pxview-data PUBLIC pxview-interface)
 # pxview-data uses FFTW directly (spectrumstack.cpp). Declare it here so CMake
 # places ${FFTW_LIBRARIES} AFTER libpxview-data.a in the final link line —
 # required for static-lib symbol resolution (the linker processes left-to-right

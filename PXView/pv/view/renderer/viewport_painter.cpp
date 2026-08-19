@@ -199,6 +199,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (_viewport->view().session().is_init_status()) {
       paintCursors(p);
     } else if (_viewport->view().session().is_stopped_status()) {
+#ifdef PXVIEW_DECODE_PERF
       {
         const auto _ps_t0 = std::chrono::steady_clock::now();
         paintSignals(p, fore, back);
@@ -207,6 +208,9 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
             "V_PAINTSIGNALS", 0.0, 0.0,
             std::chrono::duration<double, std::milli>(_ps_t1 - _ps_t0).count(), 0);
       }
+#else
+      paintSignals(p, fore, back);
+#endif
     } else if (_viewport->view().session().is_realtime_refresh()) {
       _viewport->view().session().have_new_realtime_refresh(false);
 
