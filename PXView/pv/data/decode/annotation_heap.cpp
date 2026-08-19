@@ -8,6 +8,8 @@
 
 #include "pv/data/decode/annotation_heap.h"
 
+#include <cstdlib>
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -46,9 +48,12 @@ void *annotation_heap_alloc(void *heap, std::size_t n) {
 #ifdef _WIN32
   return HeapAlloc(heap ? static_cast<HANDLE>(heap) : GetProcessHeap(), 0, n);
 #else
+  // On non-Windows platforms there is no Win32 heap API. Fall back to
+  // the standard C allocator so HeapAllocator::allocate() gets a valid
+  // pointer instead of nullptr (which would throw std::bad_alloc and
+  // crash every add_decoder call on Linux/macOS CI).
   (void)heap;
-  (void)n;
-  return nullptr;
+  return std::malloc(n);
 #endif
 }
 
@@ -57,8 +62,9 @@ void annotation_heap_free(void *heap, void *p) {
   if (p)
     HeapFree(heap ? static_cast<HANDLE>(heap) : GetProcessHeap(), 0, p);
 #else
+  // Match the allocation path: free via the standard C allocator.
   (void)heap;
-  (void)p;
+  std::free(p);
 #endif
 }
 

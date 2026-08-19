@@ -40,7 +40,10 @@ inline AnnotationHeapPtr make_annotation_heap() {
 }
 
 // Minimal C++ allocator backed by a HANDLE heap. null heap -> process heap
-// (safe fallback). Copyable; used as the deque allocator for annotation data.
+// (safe fallback on Windows). On non-Windows platforms the heap pointer is
+// always null; annotation_heap_alloc/free fall back to malloc/free so the
+// allocator is fully functional (just not isolated from the process heap).
+// Copyable; used as the deque allocator for annotation data.
 // HeapAlloc/HeapFree are serialized (no HEAP_NO_SERIALIZE), so a snapshot
 // freed on the GUI thread while the decode thread keeps allocating on the same
 // per-stack heap is safe.

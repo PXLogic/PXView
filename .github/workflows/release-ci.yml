@@ -209,6 +209,9 @@ jobs:
             cd tests/suites
             # helpers package lives at tests/helpers; add tests/ to sys.path
             export PYTHONPATH="$PWD/..:$PYTHONPATH"
+            # NOTE: piping through sed means $? is sed's exit code (always 0),
+            # so `|| touch ...` never fires. Use PIPESTATUS[0] to get pytest's
+            # real exit code.
             PXVIEW_NO_AUTO_START=1 \
             PXVIEW_MCP_URL="$url" \
             PXVIEW_STARTUP_TIMEOUT=30 \
@@ -217,8 +220,11 @@ jobs:
               --html="$GITHUB_WORKSPACE/${group_name}_report.html" \
               --junitxml="$GITHUB_WORKSPACE/${group_name}_report.xml" \
               --self-contained-html \
-              2>&1 | sed "s/^/[$group_name] /" \
-              || touch /tmp/e2e_group_failed_${group_name}
+              2>&1 | sed "s/^/[$group_name] /"
+            local pytest_rc=${PIPESTATUS[0]}
+            if [ "$pytest_rc" -ne 0 ]; then
+              touch /tmp/e2e_group_failed_${group_name}
+            fi
             cd ..
 
             # Fallback XML
