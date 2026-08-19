@@ -21,19 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-// P3-D3: module identification for direct Viewport::update() callers that come
-// from a DLL (e.g. a queued-slot invocation). WIN32_LEAN_AND_MEAN avoids
-// winsock (so the Qt `connect` stays unshadowed) and NOMINMAX avoids the
-// min/max macros; viewport.cpp uses scoped std::max and bare Qt connect.
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <psapi.h>
-
 #include "pv/view/viewport/viewport.h"
 #include "pv/view/viewport/viewport_drag.h"
 #include "pv/view/viewport/viewport_interaction.h"
