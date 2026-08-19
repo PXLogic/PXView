@@ -481,6 +481,11 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           // still fall back to a cheap color block.
           const uint64_t max_annotation = srow.data->get_max_annotation();
           const double max_ann_width = max_annotation / samples_per_pixel;
+          // min_annWidth mirrors upstream DSView: the row's minimum annotation
+          // span converted to pixels. This controls the instant-bubble width
+          // so it scales with zoom (up to h) just like the original.
+          const uint64_t min_annotation = srow.data->get_min_annotation();
+          const double min_annWidth = min_annotation / samples_per_pixel;
 
           // Frontier LOD: if the decode thread is still running and the
           // viewport overlaps the newest decoded samples of this row, fall
@@ -494,7 +499,14 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           const bool near_frontier =
               decoding && (row_frontier >= start_sample) &&
               (row_frontier <= end_sample + screen_samples);
-          const bool use_dense = (max_ann_width < 2.0) || near_frontier;
+          // Dense path is entered when ALL annotations are sub-pixel wide.
+          // max_ann_width covers range annotations; min_annWidth covers instant
+          // annotations (whose visual width = min(min_annWidth, h)). If either
+          // is >= 2px, some annotations are wide enough for normal rendering.
+          // Exception: near_frontier forces dense during active decoding to
+          // keep the ~60Hz repaint cost bounded (drawText would stall GUI).
+          const bool use_dense =
+              (max_ann_width < 2.0 && min_annWidth < 2.0) || near_frontier;
           _perf_is_dense = use_dense;
 
           const RowDataSnapshot *const row_data = srow.data.get();
@@ -557,7 +569,16 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                     std::vector<uint8_t> col_valid(vis_width, 0);
                     std::vector<uint8_t> col_color(vis_width, 0);
                     row_data->for_each_index(
-                        start_idx, end_idx, [&](const Annotation &a, size_t) {
+                        start_idx, end_idx,
+                        [&](const Annotation &a, size_t) {
+                          // In dense mode, ALL annotations (both instant and
+                          // range) are sub-pixel wide, so they are all bucketed
+                          // into 1px colour blocks. Instant annotations get the
+                          // same treatment as range annotations: their colour
+                          // overwrites the column (last-writer-wins). This
+                          // avoids the distorted, flickering shapes that
+                          // draw_instant would produce when min_annWidth < 2px
+                          // (rounded-rect narrower than its corner radius).
                           const double x = a.start_sample() / samples_per_pixel -
                                            pixels_offset;
                           if (x < left - DrawPadding || x > right + DrawPadding)
@@ -627,6 +648,20 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                   // (one lock per row instead of one per annotation).
                   row_data->for_each_index(
                       start_idx, end_idx, [&](const Annotation &a, size_t) {
+                        // Instant annotations (start_sample == end_sample)
+                        // must always go through draw_annotation so they are
+                        // rendered as rounded-rect bubbles (circles) matching
+                        // upstream DSView, not vertical lines. The fast-path
+                        // fillRect below is only for narrow *range* annotations.
+                        // min_annWidth scales with zoom so bubble width matches
+                        // upstream behaviour (widens when zoomed in, capped at h).
+                        if (a.start_sample() == a.end_sample()) {
+                          draw_annotation(a, p, get_text_colour(),
+                                          annotation_height, left, right,
+                                          samples_per_pixel, pixels_offset, y,
+                                          0, min_annWidth, fore, back);
+                          return;
+                        }
                         const uint64_t span_samples =
                             a.end_sample() > a.start_sample()
                                 ? a.end_sample() - a.start_sample()
