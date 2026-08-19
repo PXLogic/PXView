@@ -182,6 +182,13 @@ pv_add_qtest(test_trigger_config
 pv_add_qtest(test_result_types
     api/test_result_types.cpp
 )
+# test_result_types.cpp includes pv/api/types.h, which transitively pulls in
+# pv/interface/event_notification.h -> <nlohmann/json.hpp>. On MSYS2/Windows
+# nlohmann_json is fetched via FetchContent; its include path is only exposed
+# through the nlohmann_json::nlohmann_json imported target (linked INTERFACE by
+# pxview-interface). Without this link the MinGW CI build fails with
+# "fatal error: nlohmann/json.hpp: No such file or directory".
+target_link_libraries(test_result_types PRIVATE pxview-interface)
 
 pv_add_qtest(test_binary_codec
     api/test_binary_codec.cpp
