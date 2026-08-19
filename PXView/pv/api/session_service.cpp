@@ -5084,14 +5084,21 @@ Result<std::vector<DecoderClassInfo>> SessionService::get_decoder_class_names(
 
     std::vector<DecoderClassInfo> result;
 
-    // dec->annotations is a GSList of char* (nullptr-terminated descriptions).
-    // The index in the list is the annotation class id, which matches the
-    // ann_class field of DecoderAnnotation returned by get_decoder_annotations.
+    // dec->annotations is a GSList of char** (each node is a pair array:
+    // pair[0] = short label, pair[1] = long description). The index in the
+    // list is the annotation class id, which matches the ann_class field of
+    // DecoderAnnotation returned by get_decoder_annotations.
     int class_id = 0;
     for (const GSList *l = dec->annotations; l; l = l->next, class_id++) {
         DecoderClassInfo info;
         info.class_id = class_id;
-        const char *desc = static_cast<const char *>(l->data);
+        char **pair = static_cast<char **>(l->data);
+        // pair[1] is the long description (ann_labels[i][2]); fall back to
+        // pair[0] (short label) if the long description is null.
+        const char *desc = nullptr;
+        if (pair) {
+            desc = pair[1] ? pair[1] : (pair[0] ? pair[0] : nullptr);
+        }
         info.class_name = ensure_utf8(desc);
         result.push_back(info);
     }
