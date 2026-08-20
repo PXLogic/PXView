@@ -181,9 +181,10 @@ jobs:
           echo "等待崩溃: ${WAIT_SECONDS}s (超过后 SIGTERM 收尾)"
 
           # lldb 批量模式: 运行应用,若崩溃则自动执行 bt all
+          # 注意: 用 `run <args>` 直接透传 argv,不要用 settings set target.run-args
+          # (空格参数会被 lldb 当作自身选项,报 "unknown or ambiguous option")。
           lldb --batch \
-            -o "settings set target.run-args --headless -l 4" \
-            -o "run" \
+            -o "run --headless -l 4" \
             -o "bt all" \
             -o "bt" \
             -o "quit" \
