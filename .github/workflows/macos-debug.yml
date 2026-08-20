@@ -73,13 +73,18 @@ jobs:
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
 
       - name: Configure CMake
+        env:
+          # push 触发时 github.event.inputs 为空,必须给默认值,否则
+          # CMAKE_BUILD_TYPE 为空 → 无 -g 调试信息 → lldb 全是 unnamed_symbol
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'RelWithDebInfo' }}
         run: |
           rm -rf build && mkdir -p build && cd build
           export LDFLAGS="-L$(brew --prefix gettext)/lib"
           export CPPFLAGS="-I$(brew --prefix gettext)/include"
           export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "BUILD_TYPE=$BUILD_TYPE"
           cmake .. -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type }} \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_INSTALL_PREFIX=../install.dir
@@ -165,6 +170,9 @@ jobs:
           ls "$APP/Contents/Frameworks/" | head -20
 
       - name: Run headless under lldb and capture crash backtrace
+        env:
+          # push 触发时 github.event.inputs 为空,给默认值
+          WAIT_SECONDS: ${{ github.event.inputs.wait_seconds || 30 }}
         run: |
           set +e
           APP_BIN="/private/tmp/PXView-dbg.app/Contents/MacOS/PXView"
@@ -173,26 +181,26 @@ jobs:
           xattr -cr /private/tmp/PXView-dbg.app 2>/dev/null || true
           file "$APP_BIN"
 
-          WAIT_SECONDS="${{ github.event.inputs.wait_seconds }}"
           echo "=== lldb (batch) headless 启动 + 崩溃堆栈采集 ==="
           echo "等待崩溃: ${WAIT_SECONDS}s (超过后 SIGTERM 收尾)"
 
-          # lldb 批量模式: 运行应用,若崩溃则自动执行 bt all
-          # 注意: 用 `run <args>` 直接透传 argv,不要用 settings set target.run-args
-          # (空格参数会被 lldb 当作自身选项,报 "unknown or ambiguous option")。
+          # lldb batch 关键点:
+          #  1. 用 `run <args>` 透传 argv (settings set target.run-args 对空格参数报错)
+          #  2. 崩溃(signal stop)后,lldb batch 不会继续执行 -o 命令 —— 必须用
+          #     -k (on-crash) 命令,它们只在进程崩溃时执行。
+          #  3. bt 用 -s 走 DWARF 调试信息符号化,配合 -g 构建即可显示真实函数名。
           lldb --batch \
             -o "run --headless -l 4" \
-            -o "bt all -s" \
-            -o "bt -s" \
-            -o "image lookup --address \$pc" \
-            -o "register read pc x8 x9 x10 x11 lr" \
-            -o "frame variable" \
+            -k "bt all -s" \
+            -k "image lookup --address \$pc" \
+            -k "register read pc x8 x9 x10 x11 lr" \
+            -k "frame variable" \
             -o "quit" \
             "$APP_BIN" > /tmp/lldb-headless.log 2>&1 &
           LLDB_PID=$!
           KILLER_PID=""
 
-          # 若应用不崩溃,到点后给 PXView 发 SIGTERM,让 lldb 的 run 返回并打印当前线程栈
+          # 若应用不崩溃,到点后给 PXView 发 SIGTERM,让 lldb 的 run 返回
           if [ "${WAIT_SECONDS:-30}" -gt 0 ] 2>/dev/null; then
             (
               sleep "$WAIT_SECONDS"
