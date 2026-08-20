@@ -1174,15 +1174,32 @@ srd_session_destroy(session);
     }
   }
 
-  srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
+  int meta_ret = srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64((uint64_t)_samplerate.load(std::memory_order_acquire)));
 
   // Let batch decoders choose an efficient path.
   uint64_t decode_sample_count = _sample_count.load(std::memory_order_acquire);
   if (decode_end != UINT64_MAX && decode_end >= decode_start)
     decode_sample_count = decode_end - decode_start + 1;
-  srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
-                           g_variant_new_uint64(decode_sample_count));
+  if (meta_ret == SRD_OK)
+    meta_ret = srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
+                             g_variant_new_uint64(decode_sample_count));
+
+  if (meta_ret != SRD_OK) {
+    // metadata() raised an exception (e.g. SamplerateError in adat).
+    // Set the error message and skip decode — srd_session_destroy will
+    // clean up the session. Without this, srd_session_start / srd_session_send
+    // would run with a dangling Python exception, causing intermittent
+    // crashes in batch add/remove tests.
+    const char *err_msg = srd_get_last_error();
+    if (err_msg && *err_msg) {
+      set_error_message(QString::fromLocal8Bit(err_msg));
+      pxv_err("srd_session_metadata_set failed: %s", err_msg);
+    }
+    srd_clear_last_error();
+    srd_session_destroy(session);
+    return;
+  }
 
   // P3-11 fix: obtain status shared_ptr under _status_mutex for the callback
   std::shared_ptr<decode_task_status> status_for_callback;

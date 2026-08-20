@@ -66,6 +66,7 @@ function(pv_add_qtest target_name)
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        mimalloc
     )
     # C++23 for std::expected (used by api/types.h Result<T>)
     target_compile_features(${target_name} PRIVATE cxx_std_23)

@@ -103,6 +103,7 @@ if(BUILD_DECODER_TEST)
 	target_link_libraries(sigrokdecode_static
 		-lglib-2.0
 		${PY_LIB}
+		mimalloc
 	)
 
 	# decoder_test executable

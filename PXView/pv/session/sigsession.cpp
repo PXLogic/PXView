@@ -2120,14 +2120,17 @@ void SigSession::remove_decoder(int index, data::SessionDocument *doc) {
   // thread finishes), the object is automatically destroyed.
   remove_decode_task(stack);
 
-  // Check if the decode thread is still using this stack.
-  bool thread_holds_stack = _decode_task_manager->is_task_running(stack);
+  // P0-fix: Wait for the decode thread to finish before returning.
+  // Without this, the thread may still be running and accessing the
+  // stack's annotation heap when the next add_decoder creates a new
+  // stack and starts decoding. If the old stack's shared_ptr refcount
+  // drops to zero while the decode thread is still using HeapAlloc on
+  // its annotation heap, HeapDestroy runs concurrently with HeapAlloc,
+  // causing a heap-use-after-free crash (intermittent segfaults in
+  // batch add/remove tests, e.g. adat_c, mvb_c, scs_c).
+  _decode_task_manager->wait_for_task_finished(stack);
 
-  if (!thread_holds_stack) {
-    signals_changed();
-  }
-  // If thread still holds the stack, it will finish and the shared_ptr
-  // reference in _running_tasks will be released, triggering signals_changed()
+  signals_changed();
 }
 
 void SigSession::remove_decoder_by_key_handel(void *handel,
