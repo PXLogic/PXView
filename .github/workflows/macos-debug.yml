@@ -188,12 +188,16 @@ jobs:
           #  1. 用 `run <args>` 透传 argv (settings set target.run-args 对空格参数报错)
           #  2. 崩溃(signal stop)后,lldb batch 不会继续执行 -o 命令 —— 必须用
           #     -k (on-crash) 命令,它们只在进程崩溃时执行。
-          #  3. bt 用 -s 走 DWARF 调试信息符号化,配合 -g 构建即可显示真实函数名。
+          #  3. -k 命令出错会中断后续命令(stop-on-error),所以每条必须合法:
+          #     - 本 lldb 版本不支持 `bt all -s`,只能用 `bt all`
+          #  4. frame #0 是 static 函数时符号表无名,必须用 image lookup --address
+          #     (走 DWARF)解析真实函数名; $pc/$lr 分别给出崩溃函数与调用者。
           lldb --batch \
             -o "run --headless -l 4" \
-            -k "bt all -s" \
             -k "image lookup --address \$pc" \
-            -k "register read pc x8 x9 x10 x11 lr" \
+            -k "image lookup --address \$lr" \
+            -k "bt all" \
+            -k "register read pc lr x8 x9 x10 x11" \
             -k "frame variable" \
             -o "quit" \
             "$APP_BIN" > /tmp/lldb-headless.log 2>&1 &
