@@ -37,6 +37,7 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/core/datafeedparser.cpp
     PXView/pv/core/documentregistry.cpp
     PXView/pv/core/capturemanager.cpp
+    PXView/pv/core/scheduler_thread.cpp # P6: capture-cadence timers on a dedicated thread
     PXView/pv/core/measurecalculator.cpp  # Task C1.9: DSO measurement computation (Core layer)
     PXView/pv/core/measure_format.cpp     # Extracted pure formatting functions for testability
     PXView/pv/core/cursorregistry.cpp     # Task C2.8: cursor position state (Core layer)

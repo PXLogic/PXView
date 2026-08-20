@@ -22,6 +22,8 @@
  */
 
 #include "pv/view/renderer/render_pass.h"
+#include "pv/view/renderer/rasterize.h"
+#include "pv/view/renderer/render_worker.h"
 #include "pv/view/viewport/viewport.h"
 #include "pv/view/view.h"
 #include "pv/view/trace/trace.h"
@@ -39,6 +41,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <list>
 #include <vector>
@@ -310,81 +313,163 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
 
     const qreal dpr = vp->devicePixelRatioF();
     const QSize pixmapSize = (QSizeF(vp->size()) * dpr).toSize();
-    const bool pixmap_changed =
-        vp->pixmap().isNull() ||
-        vp->pixmap().size() != pixmapSize ||
-        !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
+    // P1: "pixmap changed" = no published worker frame of the current size yet
+    // (cold start / resize). Frames are matched by size+DPR only: during a
+    // zoom/scroll (same size) the newest published frame is blitted even
+    // though its view params are one frame stale, so the GUI thread never
+    // blocks on waveform rasterization (the async frame catches up ~1 frame
+    // later via on_frame_published). The RenderWorker triple buffer replaces
+    // the old cached QPixmap for the logic layer.
+    const bool pixmap_changed = !vp->render_worker().has_frame(pixmapSize, dpr);
 
-    // P2 decode-only: when a decode-only repaint was requested and no other
-    // dirty source exists (view params unchanged, pixmap size/DPR valid, no
-    // forced _need_update), skip the expensive signal-pixmap rebuild and just
-    // blit the existing cache — signal waveforms are unchanged during decode
-    // growth; the decode trace layer is redrawn by DecodeTracePass. Any dirty
-    // source present (zoom/scroll/resize/first paint) forces the full rebuild
-    // (safety fallback).
+    // P2: fixed-FPS gate for data-driven rebuilds. Interaction dirty sources
+    // (view params / pixmap size changed -> zoom/scroll/resize/first paint)
+    // always rebuild immediately. A purely data-driven need_update rebuilds at
+    // most once per Viewport::PixmapRebuildIntervalMs, so streaming frames are
+    // merged into a fixed cadence (~30 FPS, matching the RefreshRtTimer) instead
+    // of rebuilding at up to 60 FPS. When the rate gate skips a data-driven
+    // rebuild, need_update stays set so a later paint (interval elapsed, or any
+    // interaction) completes it — the final capture frame is never lost.
+    const bool interaction_dirty = view_params_changed || pixmap_changed;
     const bool decode_only_skip =
-        ctx.decode_only && !view_params_changed && !pixmap_changed &&
-        !vp->need_update();
+        ctx.decode_only && !interaction_dirty && !vp->need_update();
+    const auto now = std::chrono::steady_clock::now();
+    const bool rate_ok =
+        (now - vp->last_pixmap_rebuild() >=
+         std::chrono::milliseconds(Viewport::PixmapRebuildIntervalMs));
+    const bool rebuild = !decode_only_skip &&
+                         (interaction_dirty || (vp->need_update() && rate_ok));
 
-    if (!decode_only_skip &&
-        (view_params_changed || vp->need_update() || pixmap_changed)) {
+    // P1: background rasterization of the static layer. The expensive waveform
+    // rebuild is submitted to the RenderWorker (value-captured ops calling the
+    // same rasterize_logic_channel pure function), published into the triple
+    // buffer, and blitted here. A cold start (first paint / resize with no
+    // completed frame yet) runs the same ops synchronously so the screen is
+    // never blank; the worker publishes the async baseline right after.
+    std::vector<std::function<void(QPainter &)>> built_ops;
+    if (rebuild) {
       vp->curScale() = view->scale();
       vp->curOffset() = view->offset();
       vp->curSignalHeight() = view->get_signalHeight();
       vp->curVOffset() = view->get_vOffset();
+      vp->last_pixmap_rebuild() = now;
 
-      // Reuse the existing QPixmap when size & DPR match (avoids heap
-      // alloc/dealloc on every frame in realtime refresh mode).
-      if (pixmap_changed) {
-        vp->pixmap() = QPixmap(pixmapSize);
-        vp->pixmap().setDevicePixelRatio(dpr);
-      }
-      vp->pixmap().fill(Qt::transparent);
+      RenderWorker::Job job;
+      job.size = pixmapSize;
+      job.dpr = dpr;
+      job.vOffset = view->get_vOffset();
 
-      QPainter dbp(&vp->pixmap());
-      dbp.translate(0, -view->get_vOffset());
-
+      const PaintContext pctx = ctx.pctx;
+      const double scale = pctx.scale;
+      const int64_t offset = pctx.offset;
       bool bFirst = true;
       uint64_t end_align_sample = 0;
 
-      // modernize-thread-model Task 2: waveform rendering is the SINGLE pure
-      // rasterizer path. paint_mid_align_sample / paint_mid are thin GUI-thread
-      // adapters that delegate 100% to rasterize_logic_channel() /
-      // rasterize_dso_channel() / rasterize_analog_channel() (rasterize.h).
-      // The adapters stay here because they compute GUI-thread state the pure
-      // functions cannot read (y from get_y()+totalHeight/2, glitch live-preview
-      // ranges from View::get_preview_ranges, theme colour, float_scale, ...).
-      // Keeping the pass on the adapters avoids duplicating that prep and
-      // preserves pixel parity; there is no second waveform implementation.
       for (auto t : traces) {
-        if (t->enabled()) {
+        if (!t->enabled())
+          continue;
+        if (auto *logic_signal = t->as_logic()) {
+          if (bFirst && logic_signal->data())
+            end_align_sample = logic_signal->data()->get_ring_sample_count();
+
           std::list<int> _index_list = t->get_index_list();
           int idx = *_index_list.begin() % 8;
           QString token = QString("@logic-channel-%1").arg(idx);
-          QColor color = AppConfig::Instance().GetThemeColor(token);
-          if (!color.isValid()) {
-            color = Viewport::PROBE_COLORS[idx];
+          QColor theme_color = AppConfig::Instance().GetThemeColor(token);
+          if (!theme_color.isValid())
+            theme_color = Viewport::PROBE_COLORS[idx];
+          // Same FINAL pen colour the adapter computes:
+          // _colour.isValid() ? _colour : fore.
+          const QColor colour = logic_signal->get_colour().isValid()
+                                    ? logic_signal->get_colour()
+                                    : theme_color;
+
+          auto snap = logic_signal->data_ref();
+          const int channel_index =
+              logic_signal->model() ? logic_signal->model()->index() : 0;
+          const int right = t->get_view_rect().right();
+          const int y = logic_signal->get_y() +
+                        (int)(logic_signal->get_totalHeight() * 0.5);
+          const int total_height = logic_signal->get_totalHeight();
+
+          std::vector<GlitchRange> preview;
+          if (const auto *pv_ranges = view->get_preview_ranges(logic_signal);
+              pv_ranges && !pv_ranges->empty()) {
+            preview.reserve(pv_ranges->size());
+            for (const auto &pulse : *pv_ranges)
+              preview.push_back({pulse.start, pulse.end});
           }
-          if (auto *logic_signal = t->as_logic()) {
-            if (bFirst && logic_signal->data())
-              end_align_sample =
-                  logic_signal->data()->get_ring_sample_count();
-            logic_signal->paint_mid_align_sample(
-                dbp, 0, t->get_view_rect().right(), color, ctx.back,
-                end_align_sample, ctx.pctx);
-            bFirst = false;
-          } else if (!t->as_decode()) {
-            // Non-logic, non-decoder traces go into the cached pixmap
-            t->paint_mid(dbp, 0, t->get_view_rect().right(), ctx.fore,
-                         ctx.back, ctx.pctx);
-          }
+
+          job.ops.push_back(
+              [snap, channel_index, right, y, total_height, colour, scale,
+               offset, end_align_sample, pctx, preview](QPainter &qp) {
+                if (!snap)
+                  return;
+                const std::vector<GlitchRange> *pp =
+                    preview.empty() ? nullptr : &preview;
+                rasterize_logic_channel(qp, snap.get(), channel_index, 0,
+                                        right, y, total_height, colour, scale,
+                                        offset, end_align_sample, pctx, pp);
+              });
+          bFirst = false;
         }
       }
-      vp->need_update() = false;
+
+      // Keep a copy of the ops ONLY for the cold-start sync fallback (no
+      // published frame of this size yet). During zoom/scroll a stale frame is
+      // blitted instead, so the copy is skipped (avoids per-frame vector copy).
+      if (pixmap_changed)
+        built_ops = job.ops;
+      vp->render_pending() = true;
+      vp->render_pending_seq() = vp->data_seq();
+      vp->render_worker().submit(std::move(job));
     }
 
-    // 1. Blit the cached logic signal pixmap (cheap: just a memcpy)
-    p.drawPixmap(0, 0, vp->pixmap());
+    // Blit the newest completed worker frame of this size (cheap: drawImage).
+    // During interaction (zoom/scroll) the blitted frame may be one view-step
+    // stale; the worker's async frame with the current params arrives ~1 frame
+    // later and repaints. try_acquire returns false only when no frame of this
+    // size is published yet (cold start / resize), in which case the rebuild
+    // above is rendered synchronously so the screen is never blank.
+    const QImage *img = nullptr;
+    if (vp->render_worker().try_acquire(pixmapSize, dpr, &img)) {
+      p.drawImage(0, 0, *img);
+      vp->render_worker().release();
+    } else if (rebuild) {
+      // Cold start: render the SAME ops synchronously so the first frame of
+      // this size is never blank.
+      QImage local(pixmapSize, QImage::Format_ARGB32_Premultiplied);
+      local.setDevicePixelRatio(dpr);
+      local.fill(Qt::transparent);
+      QPainter qp(&local);
+      qp.translate(0, -view->get_vOffset());
+      for (auto &op : built_ops)
+        op(qp);
+      p.drawImage(0, 0, local);
+    }
+
+    // Non-logic, non-decoder traces (analog/dso/math in MSO mode) paint
+    // synchronously on top of the blit, in the same translated space they
+    // occupied inside the old cached pixmap. Z-order is unchanged (different
+    // signal rows never overlap).
+    {
+      bool has_non_logic = false;
+      for (auto t : traces)
+        if (t->enabled() && !t->as_logic() && !t->as_decode()) {
+          has_non_logic = true;
+          break;
+        }
+      if (has_non_logic) {
+        p.save();
+        p.translate(0, -view->get_vOffset());
+        for (auto t : traces) {
+          if (t->enabled() && !t->as_logic() && !t->as_decode())
+            t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore,
+                         ctx.back, ctx.pctx);
+        }
+        p.restore();
+      }
+    }
   } else {
     // Non-logic mode (DSO/analog)
     const qreal dpr = vp->devicePixelRatioF();
@@ -394,11 +479,24 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
         vp->pixmap().size() != pixmapSize ||
         !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
 
-    if (view->scale() != vp->curScale() ||
-        view->offset() != vp->curOffset() ||
-        view->get_signalHeight() != vp->curSignalHeight() ||
-        view->get_vOffset() != vp->curVOffset() ||
-        vp->need_update() || pixmap_changed) {
+    // P2: same fixed-FPS gate as the logic branch — interaction (view params /
+    // pixmap size) rebuilds immediately; data-driven need_update rebuilds at
+    // most once per Viewport::PixmapRebuildIntervalMs (DSO continuous mode is
+    // additionally pre-throttled to 33ms upstream in ViewDataSync::data_updated).
+    const bool interaction_dirty =
+        (view->scale() != vp->curScale() ||
+         view->offset() != vp->curOffset() ||
+         view->get_signalHeight() != vp->curSignalHeight() ||
+         view->get_vOffset() != vp->curVOffset() ||
+         pixmap_changed);
+    const auto now = std::chrono::steady_clock::now();
+    const bool rate_ok =
+        (now - vp->last_pixmap_rebuild() >=
+         std::chrono::milliseconds(Viewport::PixmapRebuildIntervalMs));
+    const bool rebuild =
+        interaction_dirty || (vp->need_update() && rate_ok);
+
+    if (rebuild) {
 
       vp->curScale() = view->scale();
       vp->curOffset() = view->offset();
@@ -436,6 +534,7 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
         }
       }
       vp->need_update() = false;
+      vp->last_pixmap_rebuild() = now;
     }
     p.drawPixmap(0, 0, vp->pixmap());
   }

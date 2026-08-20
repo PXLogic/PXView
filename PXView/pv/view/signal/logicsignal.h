@@ -91,6 +91,11 @@ public:
         return _data;
     }
 
+    // P1: shared_ptr to the logic snapshot (keeps it alive during async render).
+    inline std::shared_ptr<data::LogicSnapshot> data_ref() const {
+        return _data_ref;
+    }
+
     void set_data(data::LogicSnapshot* data);
 
     /// Signal override: extracts LogicSnapshot from DataSource

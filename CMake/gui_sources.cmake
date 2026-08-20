@@ -40,6 +40,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/view/view_context.cpp
     PXView/pv/view/renderer/render_pass.cpp
     PXView/pv/view/renderer/rasterize.cpp
+    PXView/pv/view/renderer/render_worker.cpp # P1: background rasterization worker + triple buffer
     PXView/pv/view/cursor/timemarker.cpp
     PXView/pv/view/signal/signal.cpp
     PXView/pv/view/signal/signalfactory.cpp

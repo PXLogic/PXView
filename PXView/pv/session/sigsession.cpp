@@ -3180,6 +3180,13 @@ data::AnalogSnapshot *SigSession::get_analog_snapshot() {
   return vd ? vd->get_analog() : nullptr;
 }
 
+std::shared_ptr<data::AnalogSnapshot> SigSession::get_analog_snapshot_shared() {
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->analog_shared();
+  return _state->view_data()->analog_shared();
+}
+
 data::DsoSnapshot *SigSession::get_dso_snapshot() {
   if (_capture_manager->is_realtime_refresh() &&
       _state->capture_data() != _state->view_data()) {
@@ -3188,6 +3195,13 @@ data::DsoSnapshot *SigSession::get_dso_snapshot() {
   }
   auto *vd = _state->view_data();
   return vd ? vd->get_dso() : nullptr;
+}
+
+std::shared_ptr<data::DsoSnapshot> SigSession::get_dso_snapshot_shared() {
+  if (_capture_manager->is_realtime_refresh() &&
+      _state->capture_data() != _state->view_data())
+    return _state->capture_data()->dso_shared();
+  return _state->view_data()->dso_shared();
 }
 
 // Task C1.5: DSO measurement computation via core::MeasureCalculator.

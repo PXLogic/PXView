@@ -306,10 +306,23 @@ this, &Viewport::configure_analog_measurement);
   _interaction = std::make_unique<ViewportInteraction>(this);
   _drag = std::make_unique<ViewportDrag>(this);
 
+  // P1: background rasterization of the static layer (signal waveforms).
+  _render_worker.start();
+  _render_worker.set_published_callback([this]() {
+    // Runs on the render worker thread; marshal frame consumption to the
+    // GUI thread (queued on this QWidget). Pending calls to a destroyed
+    // viewport are dropped by Qt's event system.
+    QMetaObject::invokeMethod(this, [this]() { on_frame_published(); },
+                              Qt::QueuedConnection);
+  });
+
   ADD_UI(this);
 }
 
-Viewport::~Viewport() { REMOVE_UI(this); }
+Viewport::~Viewport() {
+  _render_worker.stop(); // join the worker before members are destroyed
+  REMOVE_UI(this);
+}
 
 int Viewport::get_total_height() {
   int h = 0;
@@ -819,9 +832,29 @@ void Viewport::on_progress_timer() {
   update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 
-void Viewport::set_need_update(bool update) { _need_update = update; }
+void Viewport::set_need_update(bool update) {
+  _need_update = update;
+  if (update)
+    ++_data_seq; // P1: sequence-tag data/view changes for the render worker
+}
 
-void Viewport::set_decode_dirty() { _need_update = true; }
+void Viewport::set_decode_dirty() {
+  _need_update = true;
+  ++_data_seq;
+}
+
+void Viewport::on_frame_published() {
+  // GUI thread. The render worker published a frame that reflects the state
+  // at submit time (_render_pending_seq). If no newer data/view change
+  // arrived during the render (_data_seq unchanged), the published frame is
+  // current — clear need_update. Otherwise keep it set so the next paint
+  // (rate gate permitting) re-submits. Either way, clear the in-flight flag
+  // and repaint to blit the freshly published frame.
+  _render_pending = false;
+  if (_render_pending_seq == _data_seq)
+    _need_update = false;
+  QWidget::update();
+}
 
 void Viewport::show_wait_trigger() {
   _waiting_trig %= (WaitLoopTime / SigSession::FeedInterval) * 4;

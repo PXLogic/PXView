@@ -1239,11 +1239,15 @@ QString DecodeTrace::best_annotation_text(
     return QString();
 
   // Try to find an annotation that will fit; pick the longest one that fits.
+  // Use horizontalAdvance (not QFontMetrics::boundingRect(QRect(),...)) —
+  // the latter runs Qt's full text-layout engine per call, which is the
+  // documented 20-30ms/frame cost at 60fps × N rows; advance is the cheap
+  // width metric and is the correct "does it fit" measure.
   QString best_annotation;
   int best_width = 0;
 
   for (auto &txt : ann_list) {
-    const int w = fm.boundingRect(QRect(), 0, txt).width();
+    const int w = fm.horizontalAdvance(txt);
     if (w <= rect_width && w > best_width) {
       best_annotation = txt;
       best_width = w;

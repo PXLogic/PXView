@@ -41,18 +41,22 @@ static QString get_default_disk_cache_path() {
 CaptureManager::CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord)
     : _event_bus(bus), _state(state), _coord(coord),
       _clt_mode(COLLECT_SINGLE) {
-  _feed_timer.SetCallback(std::bind(&CaptureManager::feed_timeout, this));
-  _repeat_timer.SetCallback(
-      std::bind(&CaptureManager::repeat_capture_wait_timeout, this));
-  _repeat_wait_prog_timer.SetCallback(
-      std::bind(&CaptureManager::repeat_wait_prog_timeout, this));
-  _refresh_rt_timer.SetCallback(
-      std::bind(&CaptureManager::realtime_refresh_timeout, this));
-  _trig_check_timer.SetCallback(
-      std::bind(&CaptureManager::trig_check_timeout, this));
+  // P6: capture-cadence timers now live on SchedulerThread's worker thread;
+  // the callbacks below run on the main thread (queued back from the timer).
+  _scheduler.set_callback(SchedulerThread::FeedTimer,
+                          [this]() { feed_timeout(); });
+  _scheduler.set_callback(SchedulerThread::RepeatTimer,
+                          [this]() { repeat_capture_wait_timeout(); });
+  _scheduler.set_callback(SchedulerThread::RepeatWaitProgTimer,
+                          [this]() { repeat_wait_prog_timeout(); });
+  _scheduler.set_callback(SchedulerThread::RefreshRtTimer,
+                          [this]() { realtime_refresh_timeout(); });
+  _scheduler.set_callback(SchedulerThread::TrigCheckTimer,
+                          [this]() { trig_check_timeout(); });
+  _scheduler.start();
 }
 
-CaptureManager::~CaptureManager() = default;
+CaptureManager::~CaptureManager() { _scheduler.stop(); }
 
 void CaptureManager::capture_init() {
   // SR_CONF_INSTANT fork key deleted from pxlogic.c — the driver no longer
@@ -126,11 +130,12 @@ void CaptureManager::capture_init() {
   // Hardware offset is already updated via View's own signal events when user
   // changes it.
 
-  // Start timer
+  // Start timer (P6: cadence lives on SchedulerThread's worker thread)
   if (mode == DSO || mode == ANALOG)
-    _feed_timer.Start(CaptureManager::FeedInterval);
+    _scheduler.start_timer(SchedulerThread::FeedTimer,
+                           CaptureManager::FeedInterval);
   else
-    _feed_timer.Stop();
+    _scheduler.stop_timer(SchedulerThread::FeedTimer);
 }
 
 bool CaptureManager::start_capture(bool instant, data::SessionDocument *owner) {
@@ -339,7 +344,7 @@ bool CaptureManager::action_start_capture(bool instant,
 
     // Start a timer, for able to refresh the view per (1000 / 30)ms.
     if (is_realtime_refresh()) {
-      _refresh_rt_timer.Start(1000 / 30);
+      _scheduler.start_timer(SchedulerThread::RefreshRtTimer, 1000 / 30);
     }
 
     return true;
@@ -425,7 +430,7 @@ bool CaptureManager::exec_capture() {
 
   if (mode == LOGIC && _state->device_agent().is_hardware() &&
       _state->device_agent().get_hardware_operation_mode() == LO_OP_BUFFER) {
-    _trig_check_timer.Start(200);
+    _scheduler.start_timer(SchedulerThread::TrigCheckTimer, 200);
   }
 
   if (bAddDecoder) {
@@ -554,9 +559,9 @@ bool CaptureManager::action_stop_capture() {
 
   if (_coord->bClose()) {
     _coord->set_is_working(false);
-    _repeat_timer.Stop();
-    _repeat_wait_prog_timer.Stop();
-    _refresh_rt_timer.Stop();
+    _scheduler.stop_timer(SchedulerThread::RepeatTimer);
+    _scheduler.stop_timer(SchedulerThread::RepeatWaitProgTimer);
+    _scheduler.stop_timer(SchedulerThread::RefreshRtTimer);
     exit_capture();
     // Task 4: RAII cleanup — join copy thread + clear owner + broadcast.
     _state->document_registry()->release_capture_owner();
@@ -571,9 +576,9 @@ bool CaptureManager::action_stop_capture() {
 
   if (!wait_upload) {
     _coord->set_is_working(false);
-    _repeat_timer.Stop();
-    _repeat_wait_prog_timer.Stop();
-    _refresh_rt_timer.Stop();
+    _scheduler.stop_timer(SchedulerThread::RepeatTimer);
+    _scheduler.stop_timer(SchedulerThread::RepeatWaitProgTimer);
+    _scheduler.stop_timer(SchedulerThread::RefreshRtTimer);
 
     if (_repeat_hold_prg.load() != 0 && is_repeat_mode()) {
       _repeat_hold_prg.store(0);
@@ -653,7 +658,7 @@ bool CaptureManager::action_stop_capture() {
 void CaptureManager::exit_capture() {
   _is_instant.store(false);
 
-  _feed_timer.Stop();
+  _scheduler.stop_timer(SchedulerThread::FeedTimer);
 
   if (_state->device_agent().is_collecting())
     _state->device_agent().stop();
@@ -794,8 +799,8 @@ void CaptureManager::set_collect_mode(DEVICE_COLLECT_MODE m) {
 }
 
 void CaptureManager::repeat_capture_wait_timeout() {
-  _repeat_timer.Stop();
-  _repeat_wait_prog_timer.Stop();
+  _scheduler.stop_timer(SchedulerThread::RepeatTimer);
+  _scheduler.stop_timer(SchedulerThread::RepeatWaitProgTimer);
 
   _repeat_hold_prg.store(0);
 
@@ -822,7 +827,7 @@ void CaptureManager::repeat_capture_wait_timeout() {
       pxv_warn("Repeat restart deferred: attempt %d/%d; retrying in %d ms.",
                failures, RepeatRestartMaxRetries, RepeatRestartRetryMs);
     }
-    _repeat_timer.Start(RepeatRestartRetryMs);
+    _scheduler.start_timer(SchedulerThread::RepeatTimer, RepeatRestartRetryMs);
     return;
   }
 
@@ -878,14 +883,14 @@ void CaptureManager::trig_check_timeout() {
   int pro;
 
   if (_state->is_triged()) {
-    _trig_check_timer.Stop();
+    _scheduler.stop_timer(SchedulerThread::TrigCheckTimer);
     return;
   }
 
   if (get_capture_status(triged, pro) && triged) {
     _coord->set_trig_time(QDateTime::currentDateTime());
     _coord->set_is_triged(true);
-    _trig_check_timer.Stop();
+    _scheduler.stop_timer(SchedulerThread::TrigCheckTimer);
   }
 }
 
@@ -909,8 +914,7 @@ void CaptureManager::refresh(int holdtime) {
 
   _state->view_data()->get_analog()->init();
 
-  _out_timer.TimeOut(holdtime,
-                     std::bind(&CaptureManager::feed_timeout, this));
+  _scheduler.single_shot(holdtime, [this]() { feed_timeout(); });
   _data_updated.store(true);
 }
 

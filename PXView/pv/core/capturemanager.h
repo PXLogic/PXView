@@ -10,7 +10,7 @@
 
 #include "pv/data/cache/disk_cache_config.h"
 #include "pv/data/document/sessiondata.h"
-#include "pv/base/dstimer.h"
+#include "pv/core/scheduler_thread.h"
 #include "pv/base/pxvdef.h" // DEVICE_COLLECT_MODE / DEVICE_STATUS_TYPE
 #include "pv/core/isession_coordination.h"
 #include "pv/core/isession_state.h"
@@ -29,7 +29,8 @@ class SessionStateContext;
 
 /**
  * CaptureManager — owns the capture lifecycle (start/stop/exec/exit),
- * the DsTimer instances that drive data-feed/refresh/repeat cadence, and
+ * the capture cadence timers (P6: driven by SchedulerThread on a dedicated
+ * thread so GUI/paint stalls never skew feed/refresh/repeat cadence), and
  * the related flags/counters (_is_instant, _is_stream_mode, _is_action,
  * _clt_mode, _noData_cnt, _data_lock, _data_updated, _data_auto_lock,
  * _repeat_intvl, _repeat_hold_prg, _repeat_wait_prog_step, _work_time_id,
@@ -104,13 +105,16 @@ public:
   inline void set_repeat_hold_prg(int v) { _repeat_hold_prg.store(v); }
   inline void set_repeat_wait_prog_step(int v) { _repeat_wait_prog_step.store(v); }
   inline int capture_times() const { return _capture_times.load(); }
-  // DsTimer Start/Stop are non-const, so expose typed wrapper methods
-  // instead of leaking mutable refs to the timer sub-objects.
-  inline void start_repeat_timer(int ms) { _repeat_timer.Start(ms); }
-  inline void start_repeat_wait_prog_timer(int ms) {
-    _repeat_wait_prog_timer.Start(ms);
+  // P6: typed wrappers over the SchedulerThread capture-cadence timers.
+  inline void start_repeat_timer(int ms) {
+    _scheduler.start_timer(SchedulerThread::RepeatTimer, ms);
   }
-  inline void stop_trig_check_timer() { _trig_check_timer.Stop(); }
+  inline void start_repeat_wait_prog_timer(int ms) {
+    _scheduler.start_timer(SchedulerThread::RepeatWaitProgTimer, ms);
+  }
+  inline void stop_trig_check_timer() {
+    _scheduler.stop_timer(SchedulerThread::TrigCheckTimer);
+  }
 
   inline void clear_store_confirm_flag() {
     _confirm_store_time_id.store(_work_time_id.load());
@@ -131,7 +135,7 @@ public:
   // --- Decode result clearing (tightly coupled with capture start) ---
   void clear_decode_result();
 
-  // --- DsTimer callback targets ---
+  // --- SchedulerThread (P6) callback targets ---
   void feed_timeout();
   void nodata_timeout();
   void repeat_capture_wait_timeout();
@@ -139,7 +143,7 @@ public:
   void realtime_refresh_timeout();
   void trig_check_timeout();
 
-  // --- DsTimer-driven data update check ---
+  // --- SchedulerThread-driven data update check ---
   void check_update();
 
   // --- Re-initialize data buffers ---
@@ -157,12 +161,8 @@ private:
 
   data::DiskCacheConfig _disk_cache_config;
 
-  DsTimer _feed_timer;
-  DsTimer _out_timer;
-  DsTimer _repeat_timer;
-  DsTimer _repeat_wait_prog_timer;
-  DsTimer _refresh_rt_timer;
-  DsTimer _trig_check_timer;
+  // P6: capture-cadence timers on a dedicated thread (SchedulerThread).
+  SchedulerThread _scheduler;
 
   std::atomic<int> _noData_cnt;
   std::atomic<bool> _data_lock;
