@@ -15,6 +15,7 @@
 
 #include "pv/core/iasync_dispatcher.h"
 #include "pv/base/log.h"
+#include "pv/utility/atomic_shared_ptr.h"
 
 namespace pv {
 namespace core {
@@ -62,11 +63,11 @@ private:
  *   The subscription table is copy-on-write. subscribe<T>() / the
  *   Subscription destructor (the only writers) mutate the authoritative
  *   `_callbacks` map under `_callbacks_mutex`, then publish a fresh immutable
- *   snapshot (`_snapshot`) via an atomic shared_ptr. Readers
- *   (dispatch_to_callbacks / has_subscribers) load the snapshot lock-free —
- *   no lock, no per-event vector copy. A snapshot is only rebuilt when a
+ *   snapshot (`_snapshot`, pv::atomic_shared_ptr). Readers
+ *   (dispatch_to_callbacks / has_subscribers) load the snapshot and iterate
+ *   it — no per-event vector copy. A snapshot is only rebuilt when a
  *   subscription actually changes, so the broadcast hot path (e.g. DataUpdated)
- *   does a single atomic load + iterate instead of a shared_mutex read lock
+ *   does a single snapshot load + iterate instead of a shared_mutex read lock
  *   + vector copy + allocation on every event.
  *
  *   Snapshot shared_ptrs keep every callback's std::function storage alive
@@ -124,7 +125,8 @@ public:
     // ---- Query ----
     // Returns true iff at least one LIVE (subscribed, not-yet-unsubscribed)
     // callback exists across all event types. Unsubscribed slots (reset to
-    // null) are not counted. Lock-free: reads the current COW snapshot.
+    // null) are not counted. Reads the current COW snapshot without touching
+    // `_callbacks`.
     bool has_subscribers() const {
         auto snap = _snapshot.load(std::memory_order_acquire);
         if (!snap)
@@ -256,7 +258,7 @@ private:
     template <typename EventType>
     void dispatch_to_callbacks(const EventType &ev) {
         // modernize-thread-model Task 4: read the current COW snapshot
-        // lock-free (atomic shared_ptr load) and iterate it directly — no
+        // (pv::atomic_shared_ptr load) and iterate it directly — no
         // shared_mutex, no per-event vector copy, no allocation. The snapshot
         // is immutable: concurrent subscribe/unsubscribe swap in a NEW
         // snapshot and never mutate this one, so iterating here is safe.
@@ -282,12 +284,14 @@ private:
     // destructor under _callbacks_mutex; readers never touch it.
     CallbackMap _callbacks;
     std::mutex _callbacks_mutex;
-    // Immutable COW snapshot published atomically. Readers load it lock-free;
-    // writers rebuild it (deep structural copy — callback bodies are shared
-    // via shared_ptr, not duplicated) only when a subscription actually
-    // changes. `std::atomic<std::shared_ptr<const CallbackMap>>` (C++20):
-    // load()/store() are internally synchronized and cheap when uncontended.
-    std::atomic<std::shared_ptr<const CallbackMap>> _snapshot{};
+    // Immutable COW snapshot. Writers rebuild it (deep structural copy —
+    // callback bodies are shared via shared_ptr, not duplicated) and publish
+    // it only when a subscription actually changes; readers load it and
+    // iterate the copy. pv::atomic_shared_ptr (pv/utility/atomic_shared_ptr.h)
+    // is the real std::atomic<std::shared_ptr> on libstdc++/MSVC and
+    // mutex-backed on libc++, which never implemented the C++20
+    // specialization (P0718R2).
+    atomic_shared_ptr<const CallbackMap> _snapshot{};
     // Monotonic counter incremented on every snapshot publish ("版本化").
     std::atomic<uint64_t> _version{0};
 
