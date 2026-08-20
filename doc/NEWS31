@@ -7,6 +7,124 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
   
+    PXView V1.5.8修改
+    时间：2026年8月20日
+    变更如下：
+
+    【新功能】
+    *新增 Tauri 桌面端打包支持：新增 web/src-tauri（Tauri v2）项目结构，Rust 后端提供 pxview_status/pxview_restart 无头进程管理命令，前端新增 tauri-bridge 桥接层与窗口控制按钮（最小化/最大化/关闭），关闭原生窗口装饰
+    *新增 TDM/PWM 模拟解码触发与音频播放功能：新增 DecoderAnalogData 模拟数据管线（TDM/PWM 解码器模拟输出样本、二分查找、整周期测量、抽取渲染、工程量映射）、解码后模拟显示触发（Repeat 模式，原子翻页显示锁定）、基于 Qt Multimedia 的解码音频播放器（DecoderAudioPlayer，多通道混音矩阵、输出设备选择）、模拟波形点测/区间测量（Shift+拖拽，含周期频率/占空比/过冲统计）、TDM/PWM 解码器专用选项对话框、模拟音频 WAV 导出（8/16/24/32bit PCM）
+    *新增自定义 API 端口配置能力：--port（MCP，默认 10110）与 --ws-port（WebSocket，默认 10430）命令行参数，运行时动态调整 MCP 与 WebSocket 端口
+    *完整 MCP SDK 实现（mcp_server.h/cpp）：initialize/ping/tools/list/tools/call 协议处理、参数与 schema 构建、异常驱动分发；新增 mcp_tool_registry 用 Builder/Struct API 注册 49 个整合工具，替代手工 tool_schemas.inc
+    *MCP 工具新增注解（annotations）支持：read_only()/destructive()/idempotent()/open_world() 链式声明
+    *解码器自动生成标签（auto_label）与自定义标签功能：DecoderStack::auto_label() 无自定义标签时按首通道名自动生成，协议列表/导出文件/MCP API 统一显示；新增 list_row_description/Row::description 原生行描述
+    *无头（headless/MCP）模式解码器持久化：.pxl/.pxc 文件加载时解析 decoders 条目并重建解码栈（restore_decoders），保存时序列化解码器配置
+    *get_analyzer_results/get_decoder_annotations 新增按注解类过滤（ann_class 参数），避免早期大行注解饿死后续行
+    *导出接口尊重 set_export_config 保存区间（get_save_start/get_save_end）
+    *后台光栅化渲染：新增 RenderWorker 后台渲染线程（三重缓冲）与 SchedulerThread 专用捕获时序线程；DSO/模拟/逻辑信号波形光栅化提取为纯函数 rasterize_logic/dso/analog_channel，交互驱动同步渲染、数据驱动异步渲染
+    *每个 DecoderStack 创建专属注解堆（annotation_heap + HeapAllocator），缓解多解码线程进程堆锁竞争
+    *libsigrokdecode 批量注解解码路径（srd_pd_output_callback_add_batch + ann_batch.c）
+    *可选解码性能检测：perflog.h 性能日志系统（PXVIEW_DECODE_PERF 宏 + ENABLE_DECODE_PERF 编译开关，pxv_decode_perf.log 落盘）
+    *xlog 新增 xlog_get_level API，运行时获取当前日志级别
+    *LogDock 新增 init_log_receiver 提前注册日志接收器，启动日志（设备扫描等）不丢失
+    *Snapshot 基类继承 QObject 并新增 completed() 信号，支持多段采样（get_segment_count/create_new_segment/get_segment_sample_count 等 API）
+    *新增崩溃信号处理器 signalhandler（Win32 CaptureStackBackTrace+dbghelp / Unix backtrace）
+    *解码器菜单按自然顺序排序（strnatcmp/strnatcasecmp）
+    *新增内存/磁盘缓冲指示（get_logic_memory_bytes/get_logic_disk_bytes/get_mmap_total_bytes），状态栏磁盘占用显示精确化
+    *FFT 计算移入 worker 线程并新增 fft_updated 信号
+    *新增采集诊断 PathDiagWindow 与渲染诊断 RenderDiagRec（>100ms 告警）
+    *新增 parallel.h 并行线程池
+    *新增 clear_cursors RPC/MCP 工具与游标操作封装（get_cursors/add_cursor/remove_cursor/clear_cursors）
+    *pxview-automation 新增 dump-schema 命令、types.py 类型安全 API（CaptureState/ChannelType/ExportFormat 等枚举与数据类）、Windows 作业对象子进程自动清理（异常退出自动终止 PXView 子进程）
+
+    【性能优化】
+    *解码渲染性能系列优化：无锁渲染快照（RowDataSnapshot 不可变快照 + atomic<shared_ptr> 发布，消除渲染路径对 _rows_mutex 竞争）、增量式快照发布（分段 AnnotationSegment 复用，发布开销 O(新增)）、解码前沿 LOD 色块渲染、按屏幕像素列聚合绘制（O(N)→O(屏宽)）、发布节流（约 16ms/200ms 门控）
+    *解码通知批量化：request_decode_notify + 100ms 批量定时器合并多栈 new_decode_data 通知，新增解码专用重绘路径跳过信号缓存重建
+    *RowData::get_visible_range 结束边界二分查找（upper_bound），新增 for_each_index 单次共享锁批量遍历
+    *解码时 GUI 卡顿系列优化：错误消息去重、异常注释日志频控、密集行渲染缓存（_dense_row_cache）、frozen_snapshot 大段拆分（kMaxSegAnnotations=500000）
+    *append_cross_payload 分块转置主路径（chunk-aligned 单次顺序遍历），ingest 吞吐从约 1620MB/s 提升到接近 memcpy 带宽
+    *有限（非 loop）采集无锁快路径：committed_sample_count() 原子读取，get_samples/get_display_edges 等读取函数免锁分支
+    *FFT 计算移入 worker 线程；DSO 测量缓存（按 data 指针/channel/ring count/视图高度缓存，消除主线程重复计算）
+    *毛刺滤波主循环改用 find_first_different_raw 原始字节扫描（u64 差分 + ctz）替代 mipmap 树搜索
+    *文档复制改为零拷贝（移除后台 copy_thread 与 join）；SSE wait_capture 进度推送改用独立线程+原子标志
+    *网络传输重构：WsTransport/McpTransport 移入专用 IO 线程，JSON-RPC 业务处理卸载到 2 线程 worker pool，socket 写入统一 post_to_self 避免跨线程
+    *文件导入异步化：import_file 主线程不阻塞，后台线程执行读取与 sr_input_send 循环，导入中渐进刷新波形
+    *ProtocolDock 图层增量更新（按指针 identity 比对，O(N²)→O(N)）；SignalsChanged 事件 50ms 节流合并；broadcast_async 空类型事件 coalescing
+    *DecoderStack 解码改用迭代器协议（SegmentDataIterator 增量推进，begin/continue_sample_iteration 跨 chunk 复用）
+    *TDM/PWM 解码内存优化：DecoderAnalogData 几何扩容 + 增量 min/max 缓存；按采样量自适应分块（>1000 万样本或 >10s → 64K，否则 32K）
+    *MmapAllocator 页面回收逻辑修正：SEC_RESERVE 下保持 written 标志复用后显式 memset，Linux madvise 返回 true 跳过 memset
+    *DeviceAgent 常驻会话线程替代每帧 std::thread，避免 Windows 频繁线程退出造成的 GLib/CRT 状态撕裂
+
+    【问题修复】
+    *修复采样率异常时解码崩溃：DecoderStack 捕获 srd_session_metadata_set 返回值，失败销毁 session 提前返回（修复堆损坏 0xC0000374）
+    *修复多标签页切换后的多个核心问题：文件设备跳过 reload 避免数据丢失、切回旧 tab 恢复 ST_STOPPED 使波形重新渲染、设备切换只清活动文档解码器、导出样本对齐基准 64→8、全局设备句柄保存/恢复（save_current_device_handle）、流模式 samplelimits 用实际样本数、事件结构由裸指针改槽索引（size_t/SIZE_MAX）、EventBus 非主线程广播重定向
+    *修复范围保存 .pxl 文件异常：save_file 应用 SetDataRange、meta_gen 按 64 对齐计算 saved_samples/saved_trig_pos、config JSON 按字节长度读写避免 NUL 截断
+    *修复重复采集进度显示：repeat 模式用单帧目标采样数（get_sample_limit）计算，进度条每帧达 100%
+    *修复解码器存储/加载：按 base/stacked 区分解码器，恢复每个解码器的 probe 映射与 options（避免栈内解码器覆盖同一字段）
+    *修复导出块范围过滤与光标偏移：先按 start_block/end_block 过滤再计 written_bytes，位索引对齐 actual_start/actual_end 语义
+    *修复 stream 模式视图时间轴限制在 0-1s 与内存持续增长：改用 get_ring_sample_count 而非 get_sample_limit（demo 设备 loop 模式不再清 limit_samples）
+    *修复捕获状态卡死导致无限等待：新增 force_release_capture_state 应急接口、EventBus 重入事件延迟入队（_deferred_broadcasts）、wait_capture_complete 超时兜底强制释放
+    *修复重复采集手动停止误触发 CollectEnd（按 is_repeat_mode 抑制）；Repeat 重启失败导致 UI 冻结（50ms 重试 40 次后干净停止）
+    *修复解码线程堆释放后仍被访问的崩溃：remove_decoder 先 wait_for_task_finished 等待解码线程结束
+    *修复 rst_decoder 竞态：wait_for_task_finished 轮询带 10s 上限，超时中止本次 reset，避免 worker 访问已释放 snapshot 导致 SIGSEGV
+    *修复 find_first_different_raw 未实例化常量块 out_pos 错误回跳（返回真实块起点）
+    *修复解码器类别信息解析：get_decoder_class_names 的 annotations 按 char** 配对数组解析（长描述回退短标签）
+    *修复非 Windows 平台注解堆分配器失效：annotation_heap_alloc/free 改用 malloc/free 回退（原返回 nullptr 抛 bad_alloc 崩溃）
+    *修复信号重建后的悬垂指针：Signal 新增 sig_released 信号、Header/Viewport 清缓存指针、MathTrace 源信号失效处理
+    *修复解码轨迹注释渲染丢失与密集模式判定（get_min_annotation/min_annWidth，密集模式统一矩形色块）
+    *修复文件设备路径无法获取：DeviceAgent 新增 _file_path 保存真实磁盘路径（release/open_by_handle 不再丢失）
+    *修复事件总线/网络传输 use-after-free：EventBus _alive_shared 共享原子标志、WsTransport QPointer 守卫、mcp_transport disconnected 立即移除 socket、SSE 客户端清理
+    *修复 StoreSession 忙标志竞态（调用线程设置）、快照析构泄漏（显式 free_data + drain_and_join）、MmapAllocator prefault try/catch 防崩溃
+    *修复探针因子 vfactor=0 导致断言崩溃（钳制为 1，按通道类型而非工作模式决定 DSO/模拟字段保存）
+    *修复下拉框无限闪烁（_bReady 延迟就绪 + 重入守卫）；Windows urllib 代理导致 127.0.0.1 连不上（空 ProxyHandler）
+    *修复多线程并发访问：DecoderStack 错误消息/行数据加锁、StoreSession 计数器改 atomic、SignalModel 快照改 shared_ptr、EventBus 先拷贝回调列表再锁外调用
+    *将大量 assert 替换为带 pxv_warn/pxv_err 日志的安全处理（越界 clamp/返回默认值），避免 Release 下断言失效直接崩溃
+    *修复 get_capture_status state 字段统一为字符串（MCP/RPC 共享 capture_state_to_str 映射）
+    *修复 SR_CONF_INSTANT 仅对 demo/DSLogic/DSCope 下发，避免 PXLogic 刷日志/失败
+    *修复 MSYS2/MinGW 编译缺 nlohmann_json 头、viewport.cpp 死代码 windows/psapi include 破坏 Linux/macOS 构建
+    *修复 demo 设备采集视图时间轴与内存占用、wait_capture 超时未被 timeoutSeconds 尊重
+
+    【重构】
+    *完成 Plan B 架构重构：引入 ThreadPool 统一线程管理、SharedState 同步原语（cv.wait_for 取代 QEventLoop 轮询，消除事件队列死锁）、EventBus 改为 subscribe<T>+RAII Subscription（移除 IEventListener 45 个 on_event 虚函数）
+    *移除旧 EventObject 基类及其约 17 条死连接，EventBus 支持注入式 IAsyncDispatcher（QtAsyncDispatcher/SyncAsyncDispatcher）
+    *完成 MCP 工具集整合：create_mcp_server 拆分为 4 个分层注册函数，工具合并（get_measurement_results 合并 math/spectrum/lissajous、configure_cursors 整合游标四件套、export_raw_data 合并 csv/binary、get_samples 合并 logic/analog/dso、configure_trigger/probe/glitch_filter 等），新增 outputSchema 支持，add_decoder 拆分为 prepare_decoder/apply_prepared 两阶段
+    *重组 PXView/pv 目录结构为层级布局（162 文件迁移到 base/session/data/view/mainwindow/platform 等子目录，统一 include 为 pv/ 绝对路径，顶层无直接 .cpp/.h）
+    *用 std::unique_ptr 替换大量裸指针（LogicSnapshot 迭代器、StoreProgress、SubMainFrame、SessionManager、LangResource 等），移除手动 delete
+    *依赖倒置接口解耦：IDeviceConfigPort/ISessionHost/ISignalModelSource 抽象接口，SessionDocument/DecoderStack/MathStack/SpectrumStack 不再依赖具体 SigSession
+    *抽离纯格式化函数：measure_format（电压/时间/频率）、ruler_format、ViewContext 坐标映射；多处坐标换算统一从 document_snapshot_source 取采样率，viewport cur_preX/aftX 改 double
+    *新增 change_event.h 纯变化判定函数（ChangeEventKind + compute_change_event_pure）
+    *逻辑快照模块拆分：LogicSnapshotPatternSearch/LogicSnapshotEdgeScan 独立子系统；Snapshot 基类简化（移除 QObject 外的多段 API 与手动 moc，改 AUTOMOC）
+    *提取 atomic_shared_ptr 到独立头文件（pv/utility/atomic_shared_ptr.h），解决 macOS libc++ 不支持 C++20 atomic_shared_ptr 编译
+    *AppConfig 全部配置键重构为 keys::* 常量并新增设置变更监听（SettingChangeListener）；Binding 新增 ConfigChangedCallback 聚合回调
+    *MCP 系统提示词单一数据源（mcp_instructions.txt 编译期嵌入 mcp_instructions_gen.h）
+    *通道 view_index 归一化重构为唯一赋值入口 normalize_view_indices（按类型优先级+channel index 排序）
+    *libsigrokdecode 上游借用（upstream borrow）+ vtable 分发适配（srd_get_last_error/srd_session_inst_list_get 等新 API）
+    *解码器选项 prop::Bool 支持眼睛按钮与 int64 存储模式；DecodeTrace 模拟波形渲染与命中测试（hit_test_analog_channel/auto_fit_visible_analog）
+    *EventBus 重构为 Copy-on-Write 订阅表（_snapshot + rebuild_snapshot + version()）
+
+    【构建与工程】
+    *MSYS2 工具链切换到 UCRT64 替代 MinGW64（CI/构建脚本/打包脚本/deps 全量适配）
+    *完善 mimalloc 依赖：find_package CONFIG/pkg-config/Homebrew/bare 多级查找，统一 ${MIMALLOC_LIB} 变量，替换硬编码链接，为 sigrokdecode_static/主程序/qtest 添加依赖
+    *Windows 构建自动查找并安装 libffi-8.dll（Python _ctypes 需要），未找到给出提示
+    *改进 MSYS2 UCRT64 Python 检测逻辑：探测 /ucrt64/bin、C:/msys64/ucrt64/bin、MSYSTEM_PREFIX 等多路径，优先标准 GIL Python 规避 python3.14t ABI 问题；新增 PEP 703 自由线程 Python 检测（SRD_FREE_THREADED_PYTHON=1）
+    *libsigrok/libsigrokdecode 子模块多次升级/回退到兼容锚点（355f4d41 非 RLE 时代；a7aa591d 等）
+    *新增 Tauri 桌面打包目标（ENABLE_TAURI + tauri-desktop，依赖 Rust cargo+npm）与 Qt Multimedia 组件
+    *clang-tidy 配置全面启用（clang-analyzer/cert/cppcoreguidelines/concurrency 等），新增 .clang-tidy-ci 与 NOLINT 抑制、run_tidy.ps1/clang-tidy-check.bat 脚本
+    *Debug 构建启用 _GLIBCXX_ASSERTIONS；mmap 分配器 ASan 中毒检测（ASAN_POISON_MEMORY_REGION）；关闭 UBSan alignment 检查（minilzo 兼容）
+    *Windows 便携包打包优化（zip -r -9 最高压缩并列出内容校验）；移除 Python embeddable 下载（依赖 UCRT64 mingw-w64-python 的 stdlib+.pyd）
+    *ENABLE_TESTS 改为 CACHE BOOL 修复 CMP0077 冲突；source 文件清单（core/gui/data）全量适配新目录布局；PCH 路径更新
+
+    【测试与 CI】
+    *测试系统迁移到 QTest+CTest 架构（tests/qtest 分 core/data/api/view 四层，QT_QPA_PLATFORM=offscreen 无头运行），移除旧自定义框架与 Google Test
+    *新增 qtest 单元测试：test_decode_task_manager、test_rasterize（光栅化纯函数）、test_rowdata_batch（批量/逐注解等价性）、test_logic_snapshot_raw/query/pattern_search/edge_scan、test_analog_snapshot、test_dso_snapshot、test_signal_model、test_disk_cache、test_session_document、test_eventbus（COW/退订中广播/非主线程重定向）、test_change_event、test_binary_codec、test_result_types、test_trigger_config 等
+    *新增 E2E 测试套件：test_24_real_decode（PWM/GrayCode）、test_25_pwm_mixed_stress（多解码器并发压力）、test_26_i2c_real_decode、test_27_cursor_export（游标区间导出往返）、test_28_real_decode_spi_uart、test_29_work_mode、test_30_pxl_format（含范围保存回归）、test_31_decoder_persistence、test_34_demo_waveform_check、毛刺滤波定量/触发 E2E 等
+    *新增 release-ci.yml：4 并行 job（Release 冒烟/ASan+UBSan 核心子集/TSan 两阶段/Clang-Tidy 快速），Release 构建跑全量 E2E，替代 e2e-linux.yml
+    *CI 测试 3 路并行：3 个 PXView 实例（MCP 10110/10111/10112、WS 10430/10431/10432）分 19 个测试文件并行执行并合并报告
+    *E2E 崩溃诊断演进：catchsegv→gdb→libSegFault LD_PRELOAD→curl 探测 MCP 端口判断就绪（修复 stale PID 误报）
+    *CI 构建修复：Ubuntu24.04 C 扩展复制（_struct 定位+fallback）、UBSan alignment、绝对路径测试报告、setup-python 移到打包前、Python 3.14（deadsnakes PPA）、qtmultimedia/nlohmann-json 依赖
+    *新增 republish-release.yml 重发布资产工作流；test-gates.yml 分层门禁工作流（后移除）；release-ci 测试分组扩容（test_29~36 共 8 个新用例）
+    *新增三份压力测试脚本：c4_three_load_stress（稠密/稀疏×长时采集+渲染+解码并发压测）
+
     PXView V1.5.7修改
     时间：2026年8月9日
     变更如下：
