@@ -269,6 +269,25 @@ return _vDial.get();
 	 **/
     void paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
+    // P1: params for the render worker, computed on the GUI thread at submit
+    // time so the worker only calls the rasterize_dso_channel pure function
+    // (never paint_mid, which mutates _colour and reads GUI-thread state).
+    // Mirrors the param computation in DsoSignal::paint_mid (dsosignal_paint.cpp).
+    struct DsoRasterPrepare {
+        int zeroY = 0;
+        int left = 0, right = 0;
+        int64_t start_sample = 0, end_sample = 0;
+        int hw_offset = 0;
+        double samples_per_pixel = 0;
+        int channel_index = 0;
+        float top = 0, bottom = 0;
+        float scale = 0;
+        QColor colour;
+    };
+    // Returns false if the channel should not be drawn for this frame.
+    bool prepare_raster(const PaintContext &ctx, int left, int right,
+                        DsoRasterPrepare &out);
+
     /**
      * Paints the signal with a QPainter
      * @param p the QPainter to paint into.

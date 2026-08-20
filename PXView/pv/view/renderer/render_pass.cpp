@@ -200,6 +200,46 @@ static void drawFloatingPanel(QPainter &p, const QPointF &cursorPos,
 }
 
 // ---------------------------------------------------------------------------
+// P1: append a DSO/Analog channel rasterization op to a render-worker job.
+// The params are prepared on the GUI thread (prepare_raster, which mirrors
+// the signal's paint_mid computation); the worker op only calls the pure
+// function with the captured params + snapshot shared_ptr.
+// ---------------------------------------------------------------------------
+
+static void add_dso_op(RenderWorker::Job &job, DsoSignal *dso,
+                       const PaintContext &pctx, int left, int right) {
+  DsoSignal::DsoRasterPrepare prep;
+  if (!dso->prepare_raster(pctx, left, right, prep))
+    return;
+  auto snap = dso->data_ref();
+  job.ops.push_back([snap, prep](QPainter &qp) {
+    if (!snap)
+      return;
+    rasterize_dso_channel(qp, snap.get(), prep.zeroY, prep.left, prep.right,
+                          prep.start_sample, prep.end_sample, prep.hw_offset,
+                          prep.samples_per_pixel, prep.channel_index,
+                          prep.top, prep.bottom, prep.scale, prep.colour);
+  });
+}
+
+static void add_analog_op(RenderWorker::Job &job, AnalogSignal *asig,
+                          const PaintContext &pctx, int left, int right) {
+  AnalogSignal::AnalogRasterPrepare prep;
+  if (!asig->prepare_raster(pctx, left, right, prep))
+    return;
+  auto snap = asig->data_ref();
+  job.ops.push_back([snap, prep](QPainter &qp) {
+    if (!snap)
+      return;
+    rasterize_analog_channel(qp, snap.get(), prep.zeroY, prep.left,
+                             prep.right, prep.start_index, prep.show_length,
+                             prep.samples_per_pixel, prep.order, prep.top,
+                             prep.bottom, prep.hw_offset, prep.scale,
+                             prep.float_scale, prep.colour);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // GroupCardBackgroundPass
 // ---------------------------------------------------------------------------
 
@@ -343,9 +383,20 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
     // P1: background rasterization of the static layer. The expensive waveform
     // rebuild is submitted to the RenderWorker (value-captured ops calling the
     // same rasterize_logic_channel pure function), published into the triple
-    // buffer, and blitted here. A cold start (first paint / resize with no
-    // completed frame yet) runs the same ops synchronously so the screen is
-    // never blank; the worker publishes the async baseline right after.
+    // buffer, and blitted here.
+    //
+    // Interaction vs data-driven split (fixes "缩放不跟手"):
+    //   - interaction_dirty (zoom/scroll/resize): the waveform must track the
+    //     mouse IMMEDIATELY. Async blit of a one-frame-stale frame is visibly
+    //     laggy at ~60Hz wheel zoom, so the freshly-built ops are ALSO
+    //     rendered synchronously here. The job is still submitted to the
+    //     worker so its triple buffer stays at the current zoom for later
+    //     data-driven blits (otherwise a decode-only paint would blit the old
+    //     zoom frame).
+    //   - data-driven (need_update / decode growth): submit async + blit the
+    //     newest published frame — the GUI never blocks on capture cadence.
+    //     Cold start (no frame of this size yet) falls back to a synchronous
+    //     render so the screen is never blank.
     std::vector<std::function<void(QPainter &)>> built_ops;
     if (rebuild) {
       vp->curScale() = view->scale();
@@ -412,32 +463,29 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
                                         offset, end_align_sample, pctx, pp);
               });
           bFirst = false;
+        } else if (auto *dso_signal = t->as_dso()) {
+          // P1: DSO channels rasterize on the worker too (same job frame).
+          add_dso_op(job, dso_signal, pctx, 0, t->get_view_rect().right());
+        } else if (auto *analog_signal = t->as_analog()) {
+          // P1: analog channels rasterize on the worker too (same job frame).
+          add_analog_op(job, analog_signal, pctx, 0, t->get_view_rect().right());
         }
       }
 
-      // Keep a copy of the ops ONLY for the cold-start sync fallback (no
-      // published frame of this size yet). During zoom/scroll a stale frame is
-      // blitted instead, so the copy is skipped (avoids per-frame vector copy).
-      if (pixmap_changed)
+      // Keep a copy of the ops whenever a synchronous render may run: cold
+      // start (no published frame of this size yet) or an interaction rebuild
+      // (must track the mouse immediately).
+      if (interaction_dirty || pixmap_changed)
         built_ops = job.ops;
       vp->render_pending() = true;
       vp->render_pending_seq() = vp->data_seq();
       vp->render_worker().submit(std::move(job));
     }
 
-    // Blit the newest completed worker frame of this size (cheap: drawImage).
-    // During interaction (zoom/scroll) the blitted frame may be one view-step
-    // stale; the worker's async frame with the current params arrives ~1 frame
-    // later and repaints. try_acquire returns false only when no frame of this
-    // size is published yet (cold start / resize), in which case the rebuild
-    // above is rendered synchronously so the screen is never blank.
-    const QImage *img = nullptr;
-    if (vp->render_worker().try_acquire(pixmapSize, dpr, &img)) {
-      p.drawImage(0, 0, *img);
-      vp->render_worker().release();
-    } else if (rebuild) {
-      // Cold start: render the SAME ops synchronously so the first frame of
-      // this size is never blank.
+    const bool do_sync = rebuild && interaction_dirty;
+    if (do_sync) {
+      // Interaction (zoom/scroll): draw the freshly-built ops synchronously so
+      // the waveform tracks the mouse immediately (no async lag).
       QImage local(pixmapSize, QImage::Format_ARGB32_Premultiplied);
       local.setDevicePixelRatio(dpr);
       local.fill(Qt::transparent);
@@ -446,24 +494,42 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
       for (auto &op : built_ops)
         op(qp);
       p.drawImage(0, 0, local);
+    } else {
+      // Data-driven / decode-only: blit the newest completed worker frame
+      // (cheap: drawImage). Cold start (no frame of this size yet) falls back
+      // to a synchronous render so the screen is never blank.
+      const QImage *img = nullptr;
+      if (vp->render_worker().try_acquire(pixmapSize, dpr, &img)) {
+        p.drawImage(0, 0, *img);
+        vp->render_worker().release();
+      } else if (rebuild) {
+        QImage local(pixmapSize, QImage::Format_ARGB32_Premultiplied);
+        local.setDevicePixelRatio(dpr);
+        local.fill(Qt::transparent);
+        QPainter qp(&local);
+        qp.translate(0, -view->get_vOffset());
+        for (auto &op : built_ops)
+          op(qp);
+        p.drawImage(0, 0, local);
+      }
     }
 
-    // Non-logic, non-decoder traces (analog/dso/math in MSO mode) paint
-    // synchronously on top of the blit, in the same translated space they
-    // occupied inside the old cached pixmap. Z-order is unchanged (different
-    // signal rows never overlap).
+    // Math traces (no pure rasterizer) paint synchronously on top of the
+    // blit, in the same translated space. Logic/DSO/Analog now rasterize in
+    // the worker job; decode traces are handled by DecodeTracePass. Z-order
+    // is unchanged (different signal rows never overlap).
     {
-      bool has_non_logic = false;
+      bool has_math = false;
       for (auto t : traces)
-        if (t->enabled() && !t->as_logic() && !t->as_decode()) {
-          has_non_logic = true;
+        if (t->enabled() && t->as_math()) {
+          has_math = true;
           break;
         }
-      if (has_non_logic) {
+      if (has_math) {
         p.save();
         p.translate(0, -view->get_vOffset());
         for (auto t : traces) {
-          if (t->enabled() && !t->as_logic() && !t->as_decode())
+          if (t->enabled() && t->as_math())
             t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore,
                          ctx.back, ctx.pctx);
         }
@@ -471,13 +537,12 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
       }
     }
   } else {
-    // Non-logic mode (DSO/analog)
+    // Non-logic mode (DSO/analog). Same RenderWorker async path as the logic
+    // branch: DSO/Analog channels rasterize on the worker into the triple
+    // buffer; math traces (no pure rasterizer) stay synchronous on top.
     const qreal dpr = vp->devicePixelRatioF();
     const QSize pixmapSize = (QSizeF(vp->size()) * dpr).toSize();
-    const bool pixmap_changed =
-        vp->pixmap().isNull() ||
-        vp->pixmap().size() != pixmapSize ||
-        !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
+    const bool pixmap_changed = !vp->render_worker().has_frame(pixmapSize, dpr);
 
     // P2: same fixed-FPS gate as the logic branch — interaction (view params /
     // pixmap size) rebuilds immediately; data-driven need_update rebuilds at
@@ -496,47 +561,102 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
     const bool rebuild =
         interaction_dirty || (vp->need_update() && rate_ok);
 
+    std::vector<std::function<void(QPainter &)>> built_ops;
     if (rebuild) {
-
       vp->curScale() = view->scale();
       vp->curOffset() = view->offset();
       vp->curSignalHeight() = view->get_signalHeight();
       vp->curVOffset() = view->get_vOffset();
+      vp->last_pixmap_rebuild() = now;
 
-      // Reuse the existing QPixmap when size & DPR match (avoids heap
-      // alloc/dealloc on every frame in DSO continuous mode).
-      if (pixmap_changed) {
-        vp->pixmap() = QPixmap(pixmapSize);
-        vp->pixmap().setDevicePixelRatio(dpr);
-      }
-      vp->pixmap().fill(Qt::transparent);
-
-      QPainter dbp(&vp->pixmap());
-      dbp.translate(0, -view->get_vOffset());
+      const PaintContext pctx = ctx.pctx;
+      RenderWorker::Job job;
+      job.size = pixmapSize;
+      job.dpr = dpr;
+      job.vOffset = view->get_vOffset();
 
       bool isLissa = false;
-
       if (view->get_work_mode() == DSO) {
         auto lis_trace = view->get_own_lissajous_trace();
-        if (lis_trace && lis_trace->enabled()) {
+        if (lis_trace && lis_trace->enabled())
           isLissa = true;
-        }
       }
 
       for (auto t : traces) {
-        if (t->enabled()) {
-          if (isLissa && t->signal_type() == SR_CHANNEL_DSO)
-            continue;
-          if (isLissa && t->signal_type() == SR_CHANNEL_MATH)
-            continue;
-          t->paint_mid(dbp, 0, t->get_view_rect().right(), ctx.fore,
-                       ctx.back, ctx.pctx);
-        }
+        if (!t->enabled())
+          continue;
+        if (isLissa && t->signal_type() == SR_CHANNEL_DSO)
+          continue;
+        if (isLissa && t->signal_type() == SR_CHANNEL_MATH)
+          continue;
+        if (auto *dso_signal = t->as_dso())
+          add_dso_op(job, dso_signal, pctx, 0, t->get_view_rect().right());
+        else if (auto *analog_signal = t->as_analog())
+          add_analog_op(job, analog_signal, pctx, 0, t->get_view_rect().right());
       }
-      vp->need_update() = false;
-      vp->last_pixmap_rebuild() = now;
+
+      // Keep a copy of the ops whenever a synchronous render may run: cold
+      // start (no published frame of this size yet) or an interaction rebuild
+      // (must track the mouse immediately).
+      if (interaction_dirty || pixmap_changed)
+        built_ops = job.ops;
+      vp->render_pending() = true;
+      vp->render_pending_seq() = vp->data_seq();
+      vp->render_worker().submit(std::move(job));
     }
-    p.drawPixmap(0, 0, vp->pixmap());
+
+    // Interaction vs data-driven split (same as the logic branch): zoom/scroll
+    // renders synchronously to track the mouse; data-driven streaming blits
+    // the newest published worker frame so the GUI never blocks on capture.
+    const bool do_sync = rebuild && interaction_dirty;
+    if (do_sync) {
+      QImage local(pixmapSize, QImage::Format_ARGB32_Premultiplied);
+      local.setDevicePixelRatio(dpr);
+      local.fill(Qt::transparent);
+      QPainter qp(&local);
+      qp.translate(0, -view->get_vOffset());
+      for (auto &op : built_ops)
+        op(qp);
+      p.drawImage(0, 0, local);
+    } else {
+      const QImage *img = nullptr;
+      if (vp->render_worker().try_acquire(pixmapSize, dpr, &img)) {
+        p.drawImage(0, 0, *img);
+        vp->render_worker().release();
+      } else if (rebuild) {
+        // Cold start: render synchronously so the first frame of this size is
+        // never blank.
+        QImage local(pixmapSize, QImage::Format_ARGB32_Premultiplied);
+        local.setDevicePixelRatio(dpr);
+        local.fill(Qt::transparent);
+        QPainter qp(&local);
+        qp.translate(0, -view->get_vOffset());
+        for (auto &op : built_ops)
+          op(qp);
+        p.drawImage(0, 0, local);
+      }
+    }
+
+    // Math traces (no pure rasterizer) paint synchronously on top of the
+    // blit, in the same translated space.
+    {
+      bool has_math = false;
+      for (auto t : traces)
+        if (t->enabled() && t->as_math()) {
+          has_math = true;
+          break;
+        }
+      if (has_math) {
+        p.save();
+        p.translate(0, -view->get_vOffset());
+        for (auto t : traces) {
+          if (t->enabled() && t->as_math())
+            t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore,
+                         ctx.back, ctx.pctx);
+        }
+        p.restore();
+      }
+    }
   }
 }
 

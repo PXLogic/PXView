@@ -268,6 +268,55 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   }
 }
 
+// P1: computed on the GUI thread so the render worker can rasterize this DSO
+// channel off-thread. Mirrors the param computation in paint_mid above; keep
+// the two in sync. Non-const because it reads GUI-thread state (zero pos /
+// hw offset / samplerate).
+bool DsoSignal::prepare_raster(const PaintContext &ctx, int left, int right,
+                               DsoRasterPrepare &out) {
+  if (!_show || right <= left || !_data || !enabled())
+    return false;
+
+  const int index = get_index();
+  const int width = right - left;
+  out.zeroY = get_zero_vpos();
+
+  const double scale = ctx.scale;
+  if (scale <= 0)
+    return false;
+  const int64_t offset = ctx.offset;
+
+  if (!_data->empty() || !_data->has_data(index))
+    return false;
+
+  // Use document_snapshot_source samplerate for coordinate consistency
+  const double samplerate = _data_source->cur_snap_samplerate();
+  if (samplerate <= 0)
+    return false;
+
+  const int64_t last_sample =
+      max((int64_t)(_data->get_sample_count() - 1), (int64_t)0);
+  const double samples_per_pixel = samplerate * scale;
+  const double start = offset * samples_per_pixel - ctx.trig_hoff;
+  const double end = start + samples_per_pixel * width;
+
+  out.left = left;
+  out.right = right;
+  out.start_sample =
+      min(max((int64_t)floor(start), (int64_t)0), last_sample);
+  out.end_sample =
+      min(max((int64_t)ceil(end) + 1, (int64_t)0), last_sample);
+  out.hw_offset = get_hw_offset();
+  out.samples_per_pixel = samples_per_pixel;
+  out.channel_index = index;
+  const QRect vrect = get_view_rect();
+  out.top = vrect.top();
+  out.bottom = vrect.bottom();
+  out.scale = _scale;
+  out.colour = getSignalColor(_model ? _model->index() : 0);
+  return true;
+}
+
 void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
                            QColor back, const PaintContext &ctx) {
   if (!_show)
