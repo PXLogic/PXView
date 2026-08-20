@@ -40,10 +40,10 @@ inline AnnotationHeapPtr make_annotation_heap() {
 }
 
 // Minimal C++ allocator backed by a per-stack mimalloc heap (mi_heap_t).
-// null heap -> process heap (safe fallback). The heap pointer is non-null on
-// every platform (cross-platform, same allocator as libsigrokdecode's
-// ann_batch.c), so annotation_heap_alloc/free only fall back to malloc/free
-// when a caller passes a null handle explicitly.
+// null heap -> process heap (safe fallback). On macOS the heap is disabled
+// (NULL) because mimalloc's global malloc-zone override crashes embedded
+// Python 3.14 during decoder import; annotation_heap_alloc/free then fall back
+// to malloc/free. On all other platforms the heap pointer is non-null.
 // Copyable; used as the deque allocator for annotation data.
 // mi_free routes each freed block back to its owning heap, so a snapshot freed
 // on the GUI thread while the decode thread keeps allocating on the same

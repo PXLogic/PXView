@@ -246,7 +246,16 @@ find_package(Threads)
 #===============================================================================
 #= mimalloc (performance allocator)
 #= Used by libsigrokdecode/ann_batch.c for per-session annotation heaps.
-#= Discovery order:
+#=
+#= macOS: mimalloc is NOT linked at all. Its global malloc-zone override
+#= (installed automatically when linked, because Homebrew builds with
+#= MI_OVERRIDE=ON) crashes the embedded Python 3.14 during decoder import —
+#= libsystem malloc dispatches into the mimalloc zone and the allocation
+#= faults. ann_batch.c and annotation_heap.cpp fall back to plain GLib/malloc
+#= on macOS (see the __APPLE__ guards), so no mi_* symbols are referenced and
+#= no mimalloc headers are needed.
+#=
+#= Discovery order (non-macOS):
 #=   1. find_package(mimalloc CONFIG) — CMake config files (Homebrew, vcpkg, MSYS2)
 #=      NOTE: target names differ across distributors:
 #=        - MSYS2 mingw: "mimalloc" / "mimalloc-static" (no namespace)
@@ -257,6 +266,11 @@ find_package(Threads)
 #=   4. Bare "mimalloc" — Linux/MSYS2 last resort (standard search paths)
 #-------------------------------------------------------------------------------
 set(MIMALLOC_LIB "")
+
+if(APPLE)
+	message(STATUS "----- mimalloc:")
+	message(STATUS "	 library: (disabled on macOS — malloc-zone override crashes embedded Python 3.14)")
+else()
 find_package(mimalloc CONFIG QUIET)
 if(mimalloc_FOUND)
 	# Detect the actual imported target name (varies by distributor)
@@ -282,31 +296,14 @@ if(NOT MIMALLOC_LIB)
 		link_directories(${MIMALLOC_LIBDIR})
 		include_directories(${MIMALLOC_INCLUDE_DIRS})
 	else()
-		# Fallback: resolve via Homebrew prefix on macOS
-		if(APPLE)
-			execute_process(
-				COMMAND brew --prefix mimalloc
-				OUTPUT_VARIABLE _mimalloc_brew_prefix
-				OUTPUT_STRIP_TRAILING_WHITESPACE
-				ERROR_QUIET
-				RESULT_VARIABLE _mimalloc_brew_result
-			)
-			if(_mimalloc_brew_result EQUAL 0 AND EXISTS "${_mimalloc_brew_prefix}/lib/libmimalloc.dylib")
-				set(MIMALLOC_LIB "${_mimalloc_brew_prefix}/lib/libmimalloc.dylib")
-				include_directories("${_mimalloc_brew_prefix}/include")
-			else()
-				message(FATAL_ERROR "mimalloc not found via find_package, pkg-config, or Homebrew. "
-					"Install it with: brew install mimalloc (macOS) or apt install libmimalloc-dev (Linux)")
-			endif()
-		else()
-			# Linux / MSYS2: bare library name works with standard search paths
-			set(MIMALLOC_LIB mimalloc)
-		endif()
+		# Linux / MSYS2: bare library name works with standard search paths
+		set(MIMALLOC_LIB mimalloc)
 	endif()
 endif()
 
 message("----- mimalloc:")
 message(STATUS "	 library: ${MIMALLOC_LIB}")
+endif()
 
 #===============================================================================
 #= Aggregated link libraries for pxview-core / PXView executable
