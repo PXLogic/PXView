@@ -1150,8 +1150,11 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
     gvar = _session->get_device()->get_config(SR_CONF_REF_MIN);
     if (gvar != nullptr) {
+        // new_config() stores the variant WITHOUT ref'ing it; free_config()
+        // below is the single owner that unrefs it. Do NOT unref here —
+        // that would double-free (g_atomic_ref_count_dec underflow,
+        // "GLib-CRITICAL" during export).
         src = _session->get_device()->new_config(SR_CONF_REF_MIN, gvar);
-        g_variant_unref(gvar);
     }
     else {
         src = _session->get_device()->new_config(SR_CONF_REF_MIN, g_variant_new_uint32(1));
@@ -1161,8 +1164,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
     gvar = _session->get_device()->get_config(SR_CONF_REF_MAX);
     if (gvar != nullptr) {
+        // Same ownership note as REF_MIN above — no unref here.
         src = _session->get_device()->new_config(SR_CONF_REF_MAX, gvar);
-        g_variant_unref(gvar);
     }
     else {
         src = _session->get_device()->new_config(SR_CONF_REF_MAX, g_variant_new_uint32((1 << bits) - 1));

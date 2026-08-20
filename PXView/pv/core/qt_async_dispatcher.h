@@ -5,6 +5,7 @@
 
 #include <QEvent>
 #include <QObject>
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -37,6 +38,15 @@ public:
         static QEvent::Type eventType();
 
         std::function<void()> fn;
+
+        // Release/acquire handshake flag. The producer sets it to true as
+        // the LAST step of construction (memory_order_release); the consumer
+        // load-acquires it before touching fn. Qt's posted-event queue is
+        // protected by QBasicMutex, which TSan cannot intercept, so without
+        // this explicit atomic edge TSan reports data races between the
+        // posting (worker) thread and the delivering (main) thread — false
+        // positives, since Qt's lock does provide the real happens-before.
+        std::atomic<bool> ready{false};
 
         explicit AsyncEvent(std::function<void()> f);
     };

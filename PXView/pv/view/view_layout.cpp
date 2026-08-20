@@ -296,7 +296,9 @@ void ViewLayout::update_scroll() {
   int64_t length = 0;
   int64_t offset = 0;
   get_scroll_layout(length, offset);
-  length = max(length - areaSize.width(), (int64_t)0);
+  // Overflow-free equivalent of max(length - areaSize.width(), 0):
+  // length may be INT64_MIN, and INT64_MIN - width overflows (UBSan).
+  length = std::max(length, (int64_t)areaSize.width()) - areaSize.width();
 
   _view->horizontalScrollBar()->setPageStep(areaSize.width());
 

@@ -439,7 +439,6 @@ void MainFrame::changeEvent(QEvent *event)
 bool MainFrame::eventFilter(QObject *object, QEvent *event)
 { 
     const QEvent::Type type = event->type();
-    const QMouseEvent *const mouse_event = (QMouseEvent*)event;
 
 #ifdef _WIN32 
     if (_parentNativeWidget != nullptr){
@@ -453,6 +452,11 @@ bool MainFrame::eventFilter(QObject *object, QEvent *event)
         && type != QEvent::Leave){
         return QMainWindow::eventFilter(object, event);
     }
+
+    // Only reachable for mouse events — cast here (not before the type
+    // guard) so non-mouse events never get downcast to QMouseEvent*
+    // (UBSan vptr error, mainframe.cpp:442).
+    const QMouseEvent *const mouse_event = static_cast<const QMouseEvent*>(event);
 
     //when window is maximized, or is moving, call return 
     if (IsMaxsized() || IsMoving()){

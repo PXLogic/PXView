@@ -14,7 +14,13 @@ QEvent::Type QtAsyncDispatcher::AsyncEvent::eventType() {
 }
 
 QtAsyncDispatcher::AsyncEvent::AsyncEvent(std::function<void()> f)
-    : QEvent(eventType()), fn(std::move(f)) {}
+    : QEvent(eventType()) {
+    // Write the payload BEFORE publishing the ready flag so the consumer's
+    // acquire-load (eventFilter / customEvent) synchronizes with this
+    // release-store and sees a fully-constructed event.
+    fn = std::move(f);
+    ready.store(true, std::memory_order_release);
+}
 
 // --- QtAsyncDispatcher::EventFilter ---
 
@@ -23,6 +29,11 @@ public:
     bool eventFilter(QObject *obj, QEvent *event) override {
         if (event->type() == AsyncEvent::eventType()) {
             auto *e = static_cast<AsyncEvent *>(event);
+            // Acquire-load pairs with the release-store in the AsyncEvent
+            // constructor: makes fn (and the QEvent payload) visible before
+            // we read them. Silences the TSan false positives on the
+            // worker-thread -> main-thread handoff (see AsyncEvent::ready).
+            e->ready.load(std::memory_order_acquire);
             if (e->fn) {
                 e->fn();
             }

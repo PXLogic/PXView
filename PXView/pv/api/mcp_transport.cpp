@@ -74,6 +74,10 @@ void McpTransport::customEvent(QEvent* event)
 {
     if (event->type() == pv::core::QtAsyncDispatcher::AsyncEvent::eventType()) {
         auto* e = static_cast<pv::core::QtAsyncDispatcher::AsyncEvent*>(event);
+        // Acquire-load pairs with the release-store in the AsyncEvent
+        // constructor (see AsyncEvent::ready) — silences the TSan false
+        // positive on the worker -> IO thread handoff.
+        e->ready.load(std::memory_order_acquire);
         if (e->fn)
             e->fn();
         return;
@@ -226,6 +230,19 @@ void McpTransport::on_new_connection()
                 this, &McpTransport::on_ready_read);
         connect(socket, &QTcpSocket::disconnected,
                 socket, &QTcpSocket::deleteLater);
+        // UAF fix: drop the socket from both bookkeeping sets the moment it
+        // disconnects. Previously a disconnected socket stayed in
+        // _sse_clients/_pending_sockets until a lazy prune or stop() ran, and
+        // the socket object could already be freed by deleteLater before that
+        // -> heap-use-after-free / SEGV in socket->state() (mcp_transport.cpp:204,
+        // confirmed by ASan & TSan) and in stop()'s pending-socket cleanup.
+        connect(socket, &QTcpSocket::disconnected, this, [this, socket]() {
+            std::lock_guard<std::mutex> lock(_sse_clients_mutex);
+            _sse_clients.remove(socket);
+            // _pending_sockets is only touched on the IO thread; safe to
+            // mutate here (the socket lives on the same thread).
+            _pending_sockets.remove(socket);
+        });
     }
 }
 

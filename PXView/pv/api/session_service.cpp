@@ -211,8 +211,13 @@ inline Result<std::string> run_string_on_main_thread(
         {
             std::lock_guard<std::mutex> lock(result_mutex);
             done = true;
+            // Notify while still holding the mutex: guarantees the waiter
+            // cannot see done==true, exit and destroy the stack cv before
+            // this notify_one() has completed. Fixes the TSan data race at
+            // session_service.cpp:243 (pthread_cond_signal vs the waiter's
+            // pthread_cond_destroy at function exit).
+            result_cv.notify_one();
         }
-        result_cv.notify_one();
     });
 
     {
@@ -239,8 +244,13 @@ inline Result<void> run_void_on_main_thread(
         {
             std::lock_guard<std::mutex> lock(result_mutex);
             done = true;
+            // Notify while still holding the mutex: guarantees the waiter
+            // cannot see done==true, exit and destroy the stack cv before
+            // this notify_one() has completed. Fixes the TSan data race at
+            // session_service.cpp:243 (pthread_cond_signal vs the waiter's
+            // pthread_cond_destroy at function exit).
+            result_cv.notify_one();
         }
-        result_cv.notify_one();
     });
 
     {
@@ -280,8 +290,11 @@ inline void invoke_or_call(QObject *ctx, F &&fn) {
         {
             std::lock_guard<std::mutex> lock(m);
             done = true;
+            // Notify under the lock so the waiter cannot destroy the stack cv
+            // before this notify_one() finishes (same fix as the
+            // run_*_on_main_thread helpers).
+            cv.notify_one();
         }
-        cv.notify_one();
     });
     std::unique_lock<std::mutex> lock(m);
     cv.wait(lock, [&done]() { return done; });
@@ -311,8 +324,13 @@ inline T run_value_on_main_thread(const std::function<T()>& fn) {
         {
             std::lock_guard<std::mutex> lock(result_mutex);
             done = true;
+            // Notify while still holding the mutex: guarantees the waiter
+            // cannot see done==true, exit and destroy the stack cv before
+            // this notify_one() has completed. Fixes the TSan data race at
+            // session_service.cpp:243 (pthread_cond_signal vs the waiter's
+            // pthread_cond_destroy at function exit).
+            result_cv.notify_one();
         }
-        result_cv.notify_one();
     });
 
     {
@@ -350,8 +368,13 @@ inline Result<T> run_result_on_main_thread(
         {
             std::lock_guard<std::mutex> lock(result_mutex);
             done = true;
+            // Notify while still holding the mutex: guarantees the waiter
+            // cannot see done==true, exit and destroy the stack cv before
+            // this notify_one() has completed. Fixes the TSan data race at
+            // session_service.cpp:243 (pthread_cond_signal vs the waiter's
+            // pthread_cond_destroy at function exit).
+            result_cv.notify_one();
         }
-        result_cv.notify_one();
     });
 
     {

@@ -31,6 +31,10 @@ void WsTransport::customEvent(QEvent* event)
 {
     if (event->type() == pv::core::QtAsyncDispatcher::AsyncEvent::eventType()) {
         auto* e = static_cast<pv::core::QtAsyncDispatcher::AsyncEvent*>(event);
+        // Acquire-load pairs with the release-store in the AsyncEvent
+        // constructor (see AsyncEvent::ready) — silences the TSan false
+        // positive on the worker -> IO thread handoff.
+        e->ready.load(std::memory_order_acquire);
         if (e->fn)
             e->fn();
         return;

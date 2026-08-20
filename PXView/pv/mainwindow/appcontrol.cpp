@@ -376,10 +376,14 @@ bool AppControl::Start()
 
     // Start on IO thread — post_to queues the start() call on the IO
     // thread's event loop. The IO thread processes it when it pumps events.
+    // Capture the transport pointer by value so the lambda does not re-read
+    // the AppControl member on the IO thread (TSan race + use-after-free
+    // hardening); the pointer value is published via the AsyncEvent
+    // release/acquire handshake.
     pv::core::QtAsyncDispatcher::post_to(_ws_transport,
-        [this]() { _ws_transport->start(); });
+        [ws = _ws_transport]() { ws->start(); });
     pv::core::QtAsyncDispatcher::post_to(_mcp_transport,
-        [this]() { _mcp_transport->start(); });
+        [mcp = _mcp_transport]() { mcp->start(); });
 
     auto* active_session = _app_service->get_active_session();
     if (active_session) {
@@ -405,10 +409,10 @@ bool AppControl::Start()
     // stop() first, then exits the event loop.
     if (_ws_transport)
         pv::core::QtAsyncDispatcher::post_to(_ws_transport,
-            [this]() { _ws_transport->stop(); });
+            [ws = _ws_transport]() { ws->stop(); });
     if (_mcp_transport)
         pv::core::QtAsyncDispatcher::post_to(_mcp_transport,
-            [this]() { _mcp_transport->stop(); });
+            [mcp = _mcp_transport]() { mcp->stop(); });
 
     // Quit IO thread event loop and wait for it to finish.
     // The quit event is queued after the stop() events, so stop() runs
