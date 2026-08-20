@@ -21,6 +21,8 @@
 #include <memory>
 #include <queue>
 #include <thread>
+#include <atomic>
+#include <vector>
 
 using pv::core::EventBus;
 using pv::core::IAsyncDispatcher;
@@ -97,6 +99,8 @@ private slots:
     void MainThreadDetection();
     void test_unsubscribe_during_dispatch();
     void test_broadcast_off_main_thread_redirected();
+    void SnapshotVersionIncrementsOnChange();
+    void CowChurnNoDeadlock();
 };
 
 void TestEventBus::SubscribeAndBroadcastFires() {
@@ -320,6 +324,82 @@ void TestEventBus::test_broadcast_off_main_thread_redirected() {
     QCOMPARE(raw->run_pending(), 1);
     QCOMPARE(got, 1);
     QCOMPARE(value, 42);
+}
+
+void TestEventBus::SnapshotVersionIncrementsOnChange() {
+    // modernize-thread-model Task 4.1: the COW table publishes a new snapshot
+    // (version++) ONLY on an actual subscription change — never on broadcast.
+    EventBus bus(std::make_unique<FakeDispatcher>());
+    const uint64_t v0 = bus.version();
+    int a = 0, b = 0;
+    {
+        auto sa = bus.subscribe<EvEmpty>([&](const EvEmpty &) { ++a; });
+        const uint64_t v1 = bus.version();
+        QVERIFY(v1 > v0); // subscribe published a fresh snapshot
+
+        auto sb = bus.subscribe<EvValue>([&](const EvValue &ev) { b += ev.value; });
+        const uint64_t v2 = bus.version();
+        QVERIFY(v2 > v1); // second subscribe published again
+
+        const uint64_t vBeforeBroadcast = bus.version();
+        bus.broadcast(EvEmpty{});
+        bus.broadcast(EvValue{5});
+        QCOMPARE(a, 1);
+        QCOMPARE(b, 5);
+        QCOMPARE(bus.version(), vBeforeBroadcast); // broadcast must NOT republish
+    } // sa, sb destroyed here → two RAII unsub publishes
+
+    QVERIFY(bus.version() >= v0 + 4); // sub, sub, unsub, unsub = 4 publishes
+
+    bus.broadcast(EvEmpty{});
+    QCOMPARE(a, 1); // nothing fires after both unsubscribed
+
+    // Re-subscribe after full teardown: slot reuse + fresh snapshot still works.
+    auto sc = bus.subscribe<EvEmpty>([&](const EvEmpty &) { ++a; });
+    bus.broadcast(EvEmpty{});
+    QCOMPARE(a, 2);
+}
+
+void TestEventBus::CowChurnNoDeadlock() {
+    // modernize-thread-model Task 4.3 (C4-style pressure): worker threads churn
+    // subscribe/unsubscribe (writers serialize on _callbacks_mutex and publish
+    // new COW snapshots) while the main thread broadcasts a hot event
+    // (readers load the snapshot lock-free). Must neither deadlock nor lose an
+    // event for a steady subscriber registered before the churn started.
+    EventBus bus(std::make_unique<FakeDispatcher>());
+    std::atomic<int> steady_hits{0};
+    std::atomic<bool> start{false};
+
+    // Registered BEFORE churn → every subsequently published snapshot includes
+    // it → every broadcast must fire it exactly once.
+    auto steady = bus.subscribe<EvValue>(
+        [&](const EvValue &) { steady_hits.fetch_add(1, std::memory_order_relaxed); });
+
+    constexpr int kWriters = 4;
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&bus, &start]() {
+            while (!start.load(std::memory_order_acquire)) {}
+            std::vector<Subscription> pool;
+            pool.reserve(8);
+            for (int i = 0; i < 300; ++i) {
+                pool.emplace_back(
+                    bus.subscribe<EvValue>([](const EvValue &) {}));
+                if (pool.size() >= 8)
+                    pool.erase(pool.begin()); // RAII unsubscribe on a worker thread
+            }
+            // Remaining pool Subscriptions unsubscribed during join/teardown.
+        });
+    }
+
+    start.store(true, std::memory_order_release);
+    constexpr int kBroadcasts = 2000;
+    for (int i = 0; i < kBroadcasts; ++i)
+        bus.broadcast(EvValue{i});
+    for (auto &t : writers)
+        t.join();
+
+    QCOMPARE(steady_hits.load(), kBroadcasts);
 }
 
 QTEST_MAIN(TestEventBus)

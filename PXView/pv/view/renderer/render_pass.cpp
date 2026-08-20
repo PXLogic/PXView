@@ -347,6 +347,15 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
       bool bFirst = true;
       uint64_t end_align_sample = 0;
 
+      // modernize-thread-model Task 2: waveform rendering is the SINGLE pure
+      // rasterizer path. paint_mid_align_sample / paint_mid are thin GUI-thread
+      // adapters that delegate 100% to rasterize_logic_channel() /
+      // rasterize_dso_channel() / rasterize_analog_channel() (rasterize.h).
+      // The adapters stay here because they compute GUI-thread state the pure
+      // functions cannot read (y from get_y()+totalHeight/2, glitch live-preview
+      // ranges from View::get_preview_ranges, theme colour, float_scale, ...).
+      // Keeping the pass on the adapters avoids duplicating that prep and
+      // preserves pixel parity; there is no second waveform implementation.
       for (auto t : traces) {
         if (t->enabled()) {
           std::list<int> _index_list = t->get_index_list();

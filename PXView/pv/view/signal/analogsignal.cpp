@@ -30,6 +30,7 @@
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/view.h"
+#include "pv/view/renderer/rasterize.h"
 #include <cmath>
 #include <algorithm>
 
@@ -60,32 +61,18 @@ QColor AnalogSignal::getSignalColor(int index) {
 //   低密度 (_cur_edges.size() < max_togs) → 连接线 (连续外观)
 //   高密度 (>= max_togs)                  → 每像素条 (条重叠成连续外观)
 //
-// 模拟信号的对偶:
-//   spp < EnvelopeThreshold  → paint_trace (逐样本折线, 平滑曲线)
-//   spp >= EnvelopeThreshold → paint_envelope (竖直矩形带, min/max 范围)
-//
-// 性能悬崖: paint_trace 是 O(spp*width), paint_envelope 是 O(width/16),
-// 在阈值处相差 16 倍。阈值越高, 悬崖处 paint_trace 的绝对工作量越大
-// (16*width @ spp=16), 配合滚轮节流导致 "卡在分界线" 现象。
-//
-// 取 4.0 而非 16.0:
-//   1. paint_envelope 矩形已加宽 (rect_w = max(1, 16/spp)), spp<16 也连续,
-//      不再需要靠阈值=16 保证相切 → 可安全降低阈值。
-//   2. 阈值=4 使 paint_trace 最坏工作量 = 4*width (4 倍降低), 悬崖帧 ~1ms。
-//   3. spp>=4 时每像素 >=4 样本, envelope 的 16 样本 min/max 矩形视觉可接受;
-//      spp<4 时用户放大看曲线细节, paint_trace 折线更平滑。
-// Always use paint_per_pixel (drawRects) instead of paint_trace (drawPolyline).
-// drawPolyline with alpha on a transparent QPixmap is extremely slow on
-// Windows raster engine (same issue as DsoSignal). paint_per_pixel uses
-// drawRects which is ~20x faster. Dual-mode: interpolation for spp<1.0
-// (smooth lines when zoomed in), min/max for spp>=1.0 (envelope when zoomed out).
-const float AnalogSignal::EnvelopeThreshold = 0.0f;
-
+// modernize-thread-model Task 2: the analog waveform rasterization lives in
+// the pure function rasterize_analog_channel() (pv/view/renderer/rasterize.h).
+// Its dual-mode body (interpolation for spp<1.0, min/max for spp>=1.0) is the
+// single rendering path; the former paint_trace / paint_envelope / paint_per_pixel
+// members are removed. Note: drawPolyline with alpha on a transparent QPixmap
+// is extremely slow on the Windows raster engine, so the rasterizer draws
+// opaque polylines when zoomed in and opaque min/max rects when zoomed out.
 AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
     : Signal(model, data_source), _data(data),
-      _points_cap(0), _cached_hw_offset(model ? model->hw_offset() : 128), _hover_en(false),
+      _cached_hw_offset(model ? model->hw_offset() : 128), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(1.0f) {
   _typeWidth = 5;
@@ -139,7 +126,7 @@ AnalogSignal::AnalogSignal(view::AnalogSignal *s,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
     : Signal(*s, model, data_source), _data(data),
-      _points_cap(0), _cached_hw_offset(s->_cached_hw_offset), _hover_en(false),
+      _cached_hw_offset(s->_cached_hw_offset), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(s->_float_scale) {
   _typeWidth = 5;
@@ -160,9 +147,6 @@ AnalogSignal *AnalogSignal::clone() const {
 }
 
 AnalogSignal::~AnalogSignal() {
-  _rects.reset();
-  _points.reset();
-  _points_cap = 0;
 }
 
 int AnalogSignal::get_hw_offset() {
@@ -421,15 +405,6 @@ double AnalogSignal::get_zero_ratio() {
 }
 
 /**
- * Event
- **/
-void AnalogSignal::resize() {
-  _rects.reset();
-  _points.reset();
-  _points_cap = 0;
-}
-
-/**
  * Paint
  **/
 void AnalogSignal::paint_back(QPainter &p, int left, int right, QColor fore,
@@ -549,10 +524,14 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     return;
   }
 
-  // Always use paint_per_pixel (drawRects — fast) regardless of spp.
-  // Dual-mode internally: interpolation for spp<1.0, min/max for spp>=1.0.
-  paint_per_pixel(p, _data, zeroY, left, right, start_index, show_length,
-                  samples_per_pixel, order, top, bottom, width);
+  // modernize-thread-model Task 2: the analog waveform logic was extracted to
+  // the pure function rasterize_analog_channel() (see pv/view/renderer/rasterize.h).
+  // paint_mid stays on the GUI thread and passes the prepare results
+  // (zeroY / hw_offset / _scale / _float_scale / top / bottom / _colour) as
+  // value parameters; the function reads only the snapshot + those values.
+  rasterize_analog_channel(p, _data, zeroY, left, right, start_index,
+                           show_length, samples_per_pixel, order, top, bottom,
+                           get_hw_offset(), _scale, _float_scale, _colour);
 }
 
 void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
@@ -572,335 +551,6 @@ void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
     if (ctx.is_stopped_status)
       paint_hover_measure(p, fore, back);
   }
-}
-
-void AnalogSignal::paint_trace(
-    QPainter &p, const pv::data::AnalogSnapshot *snapshot, int zeroY,
-    const int start_pixel, const uint64_t start_index,
-    const int64_t sample_count, const double samples_per_pixel, const int order,
-    const float top, const float bottom, const int width) {
-  (void)width;
-
-  pv::data::AnalogSnapshot *pshot =
-      const_cast<pv::data::AnalogSnapshot *>(snapshot);
-
-  int64_t channel_num = (int64_t)pshot->get_channel_num();
-  if (sample_count > 0) {
-    const uint8_t unit_bytes = pshot->get_unit_bytes();
-    const uint8_t *const samples = pshot->get_samples(0);
-    assert(samples);
-
-    p.setPen(_colour);
-    // p.setPen(QPen(_colour, 2, Qt::SolidLine));
-
-    // 性能修复: 复用成员缓冲 _points，避免每帧 new/delete。
-    // 仅当现有容量不足时才重新分配 (类比 paint_envelope 对 _rects 的处理)。
-    if (!_points || _points_cap < sample_count) {
-      _points_cap = sample_count;
-      _points.reset(new QPointF[_points_cap]);
-    }
-    QPointF *points = _points.get();
-    QPointF *point = points;
-    uint64_t yindex = start_index;
-
-    const int hw_offset = get_hw_offset();
-    float x = start_pixel;
-    double pixels_per_sample = 1.0 / samples_per_pixel;
-
-    // CRITICAL FIX: 上游 libsigrok analog 数据可能是 float 格式
-    // (encoding->is_float=true, unitsize=4)。旧代码按 uint8 逐字节拼接，
-    // 对 float 数据完全错误。检查 _data->is_float() 决定读取方式。
-    const bool is_float = pshot->is_float();
-
-    // 性能修复: get_sample_count/get_ring_end 是非 inline 方法 (snapshot.h)，
-    // 旧代码每次迭代调用 3 次 → spp*width 次函数调用。提出到循环外。
-    const uint64_t sample_cnt = pshot->get_sample_count();
-    const uint64_t ring_end = pshot->get_ring_end();
-    const uint64_t data_size = sample_cnt * channel_num * unit_bytes;
-
-    for (int64_t sample = 0; sample < sample_count; sample++) {
-      uint64_t index = (yindex * channel_num + order) * unit_bytes;
-      // 边界安全检查：防止读取越界导致 SIGSEGV
-      if (index + unit_bytes > data_size) {
-        break;
-      }
-      float yvalue;
-      if (is_float && unit_bytes == sizeof(float)) {
-        // float 数据：直接 reinterpret_cast
-        yvalue = *reinterpret_cast<const float*>(samples + index);
-        // 参考 PulseView: y - sample_value * scale_。
-        // float 电压值直接缩放，不减 hw_offset（hw_offset 是 ADC 整数路径的概念）。
-        yvalue = zeroY - yvalue * _float_scale;
-      } else {
-        // 整数数据：按 unit_bytes 逐字节拼接（原逻辑）
-        yvalue = samples[index];
-        for (uint8_t i = 1; i < unit_bytes; i++) {
-          yvalue += (samples[++index] << i * 8);
-        }
-        // ADC 整数路径：减 hw_offset 后按 _scale 缩放（原逻辑）
-        yvalue = zeroY + (yvalue - hw_offset) * _scale;
-      }
-
-      yvalue = min(max(yvalue, top), bottom);
-      *point++ = QPointF(x, yvalue);
-
-      if (yindex == ring_end)
-        break;
-
-      yindex++;
-      yindex %= sample_cnt;
-      x += pixels_per_sample;
-    }
-
-    p.drawPolyline(points, point - points);
-    // 不释放 points: 复用成员缓冲 _points，由析构/resize 统一释放。
-  }
-}
-
-void AnalogSignal::paint_per_pixel(
-    QPainter &p, const pv::data::AnalogSnapshot *snapshot, int zeroY,
-    const int left, const int right, const uint64_t start_index,
-    const int64_t sample_count, const double samples_per_pixel, const int order,
-    const float top, const float bottom, const int width) {
-  (void)width;
-
-  pv::data::AnalogSnapshot *pshot =
-      const_cast<pv::data::AnalogSnapshot *>(snapshot);
-
-  const int64_t channel_num = (int64_t)pshot->get_channel_num();
-  const uint8_t unit_bytes = pshot->get_unit_bytes();
-  const uint8_t *const samples = pshot->get_samples(0);
-  if (!samples || sample_count <= 0)
-    return;
-
-  const bool is_float = pshot->is_float();
-  const uint64_t sample_cnt = pshot->get_sample_count();
-  const uint64_t ring_end = pshot->get_ring_end();
-  const uint64_t data_size = sample_cnt * channel_num * unit_bytes;
-  const int hw_offset = get_hw_offset();
-  const double spp = samples_per_pixel;
-  const int pixel_width = right - left;
-
-  if (pixel_width <= 0)
-    return;
-
-  QColor trace_colour = _colour;
-  trace_colour.setAlpha(View::ForeAlpha);
-  p.setPen(QPen(Qt::NoPen));
-  p.setBrush(trace_colour);
-
-  // Reuse member rect buffer.
-  if (!_rects || _points_cap < pixel_width) {
-    _points_cap = pixel_width + 10;
-    _rects.reset(new QRectF[_points_cap]);
-  }
-  QRectF *r = _rects.get();
-
-  // Helper: read a single sample value at ring index and map to screen Y.
-  auto read_sample_y = [&](uint64_t ring_idx) -> float {
-    uint64_t idx = (ring_idx * channel_num + order) * unit_bytes;
-    if (idx + unit_bytes > data_size)
-      return zeroY;
-    float yvalue;
-    if (is_float && unit_bytes == sizeof(float)) {
-      yvalue = *reinterpret_cast<const float*>(samples + idx);
-      yvalue = zeroY - yvalue * _float_scale;
-    } else {
-      yvalue = samples[idx];
-      for (uint8_t i = 1; i < unit_bytes; i++)
-        yvalue += (samples[idx + i] << (i * 8));
-      yvalue = zeroY + (yvalue - hw_offset) * _scale;
-    }
-    return min(max(yvalue, top), bottom);
-  };
-
-  if (spp < 1.0) {
-    // ---- Polyline mode (zoomed in: spp < 1.0) ----
-    // Use drawPolyline for smooth Bresenham diagonals on steep edges.
-    // Draw with OPAQUE color (alpha=255) to avoid per-pixel alpha blending
-    // on transparent QPixmap (same performance fix as DsoSignal).
-    static thread_local QVector<QPointF> pts;
-    if (pts.size() < pixel_width) pts.resize(pixel_width);
-
-    // Opaque pen — bypasses alpha blending entirely.
-    p.setPen(QPen(_colour));
-    p.setBrush(Qt::NoBrush);
-
-    int pt_count = 0;
-    for (int x = 0; x < pixel_width; x++) {
-      double sample_pos = (double)x * spp;
-      uint64_t s0_offset = (uint64_t)floor(sample_pos);
-      double frac = sample_pos - s0_offset;
-
-      if (s0_offset >= (uint64_t)sample_count) {
-        if (pt_count > 0) break;
-        continue;
-      }
-
-      uint64_t s0 = (start_index + s0_offset) % sample_cnt;
-      uint64_t s1 = (s0 + 1) % sample_cnt;
-      float y0 = read_sample_y(s0);
-      float y1 = read_sample_y(s1);
-      float v = y0 + (float)(y1 - y0) * frac;
-      pts[pt_count++] = QPointF((float)(left + x), v);
-
-      if (s0 == ring_end)
-        break;
-    }
-    p.drawPolyline(pts.data(), pt_count);
-  } else {
-    // ---- Min/max mode (zoomed out: spp >= 1.0) ----
-    // Multiple samples per pixel. Compute min/max over the pixel's sample
-    // range, then draw with vertical overlap to eliminate diagonal gaps.
-    static thread_local QVector<float> min_buf, max_buf;
-    if (min_buf.size() < pixel_width) { min_buf.resize(pixel_width); max_buf.resize(pixel_width); }
-
-    // Pass 1: compute min/max Y for each pixel column.
-    for (int x = 0; x < pixel_width; x++) {
-      uint64_t s_start_off = (uint64_t)floor((double)x * spp);
-      uint64_t s_end_off = (uint64_t)floor((double)(x + 1) * spp);
-      if (s_end_off <= s_start_off) s_end_off = s_start_off + 1;
-      if (s_end_off > (uint64_t)sample_count) s_end_off = (uint64_t)sample_count;
-      if (s_start_off >= (uint64_t)sample_count) {
-        if (x > 0) { min_buf[x] = min_buf[x-1]; max_buf[x] = max_buf[x-1]; }
-        else { min_buf[x] = zeroY; max_buf[x] = zeroY; }
-        continue;
-      }
-
-      uint64_t s0 = (start_index + s_start_off) % sample_cnt;
-      float y_min = read_sample_y(s0);
-      float y_max = y_min;
-
-      for (uint64_t i = 1; i < s_end_off - s_start_off; i++) {
-        uint64_t si = (start_index + s_start_off + i) % sample_cnt;
-        if (si == ring_end) break;
-        float yv = read_sample_y(si);
-        if (yv < y_min) y_min = yv;
-        if (yv > y_max) y_max = yv;
-      }
-      min_buf[x] = y_min;
-      max_buf[x] = y_max;
-    }
-
-    // Pass 2: draw rectangles with vertical overlap to adjacent pixels.
-    for (int x = 0; x < pixel_width; x++) {
-      float draw_max = max_buf[x];
-      float draw_min = min_buf[x];
-      if (x + 1 < pixel_width) {
-        draw_max = max(draw_max, min_buf[x + 1]);
-        draw_min = min(draw_min, max_buf[x + 1]);
-      }
-
-      float h = draw_max - draw_min;
-      if (h >= 0.0f && h < 1.0f)
-        h = 1.0f;
-      else if (h <= 0.0f && h > -1.0f)
-        h = -1.0f;
-
-      r[x] = QRectF((float)(left + x), draw_min, 1.0f, h);
-    }
-    p.drawRects(r, pixel_width);
-  }
-}
-
-void AnalogSignal::paint_envelope(
-    QPainter &p, const pv::data::AnalogSnapshot *snapshot, int zeroY,
-    const int start_pixel, const uint64_t start_index,
-    const int64_t sample_count, const double samples_per_pixel, const int order,
-    const float top, const float bottom, const int width) {
-  using namespace Qt;
-  using pv::data::AnalogSnapshot;
-  pv::data::AnalogSnapshot *pshot =
-      const_cast<pv::data::AnalogSnapshot *>(snapshot);
-
-  AnalogSnapshot::EnvelopeSection e;
-  pshot->get_envelope_section(e, start_index, sample_count, samples_per_pixel,
-                              order);
-  if (e.samples_num == 0)
-    return;
-
-  p.setPen(QPen(NoPen));
-  p.setBrush(_colour);
-
-  if (!_rects)
-    _rects.reset(new QRectF[width + 10]);
-
-  QRectF *rect = _rects.get();
-  int px = -1, pre_px;
-  float y_min = zeroY, y_max = zeroY, pre_y_min = zeroY, pre_y_max = zeroY;
-  int pcnt = 0;
-  const double scale_pixels_per_samples = e.scale / samples_per_pixel;
-  // 矩形横向宽度: spp < e.scale(16) 时每个 envelope 样本跨越 >1px，
-  // 旧代码固定 1.0f 宽 → 矩形间留白 → 离散线条。
-  // 改为 max(1, step) 使低密度时矩形横向铺满到下一个样本位置 → 连续。
-  // 高密度 (spp>16) 时 step<1, max(1,step)=1, 行为与旧代码一致。
-  // 这使 envelope 在 spp<16 也能连续绘制，从而可安全降低 EnvelopeThreshold。
-  const float rect_w = max(1.0f, (float)scale_pixels_per_samples);
-  int64_t end_v = pshot->get_ring_end();
-  const uint64_t ring_end = max((int64_t)0, end_v / e.scale - 1);
-  const int hw_offset = get_hw_offset();
-
-  float x = start_pixel;
-  for (uint64_t sample = 0; sample < e.length; sample++) {
-    const uint64_t ring_index =
-        (e.start + sample) % (_data_source->cur_samplelimits() / e.scale);
-    if (sample != 0 && ring_index == ring_end)
-      break;
-
-    const AnalogSnapshot::EnvelopeSample *const ev =
-        e.samples + ((e.start + sample) % e.samples_num);
-
-    // float 数据用 _float_scale 直接缩放（参考 PulseView y - value * scale_）；
-    // 整数数据用原 ADC 路径（hw_offset + _scale）。
-    // EnvelopeSample 现在是 float 类型（见 analogsnapshot.h），直接使用。
-    //
-    // 坐标方向约定（屏幕 Y 向下递增）：
-    //   整数路径: ev->max(高ADC) → 更大 Y(底部), ev->min(低ADC) → 更小 Y(顶部)
-    //            所以 b=底部(大Y), t=顶部(小Y), y_max=b, y_min=t, y_max>y_min ✓
-    //   Float 路径: ev->max(高电压) → 更小 Y(顶部), ev->min(低电压) → 更大 Y(底部)
-    //             若直接 b=顶部, t=底部 → y_max<y_min, 矩形高度为负 ✗
-    //   修复: Float 路径交换 b/t 赋值，使 b=底部(大Y), t=顶部(小Y)，与整数路径一致。
-    float b, t;
-    if (pshot->is_float()) {
-      t = min(max((float)(zeroY - ev->max * _float_scale), top), bottom);
-      b = min(max((float)(zeroY - ev->min * _float_scale), top), bottom);
-    } else {
-      b = min(max((float)(zeroY + (ev->max - hw_offset) * _scale + 0.5), top),
-              bottom);
-      t = min(max((float)(zeroY + (ev->min - hw_offset) * _scale + 0.5), top),
-              bottom);
-    }
-
-    pre_px = px;
-    if (px != floor(x)) {
-      if (pre_px != -1) {
-        // We overlap this sample with the previous so that vertical
-        // gaps do not appear during steep rising or falling edges
-        if (pre_y_min > y_max)
-          *rect++ = QRectF(pre_px, y_min, rect_w, pre_y_min - y_min + 1);
-        else if (pre_y_max < y_min)
-          *rect++ = QRectF(pre_px, pre_y_max, rect_w, y_max - pre_y_max + 1);
-        else
-          *rect++ = QRectF(pre_px, y_min, rect_w, y_max - y_min + 1);
-        pre_y_min = y_min;
-        pre_y_max = y_max;
-        pcnt++;
-      } else {
-        pre_y_max = min(max(b, top), bottom);
-        pre_y_min = min(max(t, top), bottom);
-      }
-      px = x;
-      y_max = min(max(b, top), bottom);
-      y_min = min(max(t, top), bottom);
-    }
-    if (px == pre_px) {
-      y_max = max(b, y_max);
-      y_min = min(t, y_min);
-    }
-    x += scale_pixels_per_samples;
-  }
-
-  p.drawRects(_rects.get(), pcnt);
 }
 
 void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {

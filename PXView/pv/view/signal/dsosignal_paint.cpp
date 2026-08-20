@@ -45,6 +45,7 @@
 #include "pv/ui/langresource.h"
 #include "pv/view/view.h"
 #include "pv/view/viewport/viewport.h"
+#include "pv/view/renderer/rasterize.h"
 
 using namespace std;
 
@@ -223,8 +224,6 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
       return;
     }
 
-    const uint16_t enabled_channels = _data->get_channel_num();
-    const double pixels_offset = offset;
     // Use document_snapshot_source samplerate for coordinate consistency
     const double samplerate = _data_source->cur_snap_samplerate();
 
@@ -249,14 +248,17 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const int hw_offset = get_hw_offset();
     s_dso_timing.hw_offset_ms = dso_ft.elapsed();
 
-    // Always use paint_per_pixel (drawRects — fast) regardless of spp.
-    // paint_trace (drawPolyline) is ~20x slower with alpha on transparent
-    // QPixmap on Windows raster engine.
+    // modernize-thread-model Task 2: the DSO waveform logic was extracted to
+    // the pure function rasterize_dso_channel() (see pv/view/renderer/rasterize.h).
+    // paint_mid stays on the GUI thread and passes the prepare results
+    // (zeroY / hw_offset / view-rect top-bottom / _scale / _colour) as value
+    // parameters; the function reads only the snapshot + those values.
     qint64 dso_paint_start = dso_ft.elapsed();
-    s_dso_timing.get_samples_ms = 0; // reset before paint; accumulated inside
-    paint_per_pixel(p, _data, zeroY, left, right, start_sample, end_sample,
-                    hw_offset, pixels_offset, samples_per_pixel,
-                    enabled_channels, ctx.trig_hoff);
+    const QRect vrect = get_view_rect();
+    rasterize_dso_channel(p, _data, zeroY, left, right, start_sample,
+                          end_sample, hw_offset, samples_per_pixel,
+                          get_index(), vrect.top(), vrect.bottom(), _scale,
+                          _colour);
     s_dso_timing.paint_draw_ms = dso_ft.elapsed() - dso_paint_start;
     s_dso_timing.active = true;
     s_dso_timing.sample_count = end_sample - start_sample + 1;
@@ -371,265 +373,6 @@ QRectF DsoSignal::get_trig_rect(int left, int right) {
   return QRectF(right + SquareWidth / 2,
                 ratio2pos(get_trig_vrate()) - SquareWidth / 2, SquareWidth,
                 SquareWidth);
-}
-
-void DsoSignal::paint_trace(QPainter &p, const pv::data::DsoSnapshot *snapshot,
-                            int zeroY, int left, const int64_t start,
-                            const int64_t end, int hw_offset,
-                            const double pixels_offset,
-                            const double samples_per_pixel,
-                            uint64_t num_channels, double trig_hoff) {
-  (void)num_channels;
-
-  const int64_t sample_count = end - start + 1;
-
-  if (sample_count > 0) {
-    pv::data::DsoSnapshot *pshot =
-        const_cast<pv::data::DsoSnapshot *>(snapshot);
-    QElapsedTimer gs_timer;
-    gs_timer.start();
-    const uint8_t *const samples_buffer =
-        pshot->get_samples(start, end, get_index());
-    s_dso_timing.get_samples_ms += gs_timer.elapsed();
-
-    if (!samples_buffer) {
-      pxv_warn("[DSO] paint_trace: samples_buffer is nullptr, skipping draw");
-      return;
-    }
-
-    QColor trace_colour = _colour;
-    trace_colour.setAlpha(View::ForeAlpha);
-    p.setPen(trace_colour);
-
-    // Reuse a thread-local buffer to avoid heap alloc/dealloc on every paint.
-    // Painting is GUI-thread-only, so thread_local is safe and the buffer
-    // grows once then stays stable across paints.
-    static thread_local QVector<QPointF> points;
-    if (points.size() < (int)sample_count)
-      points.resize(sample_count);
-    QPointF *pts = points.data();
-    QPointF *point = pts;
-
-    float top = get_view_rect().top();
-    float bottom = get_view_rect().bottom();
-    float right = (float)get_view_rect().right();
-    double pixels_per_sample = 1.0 / samples_per_pixel;
-
-    uint8_t value;
-    float x = (start / samples_per_pixel - pixels_offset) + left +
-              trig_hoff * pixels_per_sample;
-    float y;
-
-    for (int64_t sample = 0; sample < sample_count; sample++) {
-      value = samples_buffer[sample];
-      y = min(max(top, zeroY + (value - hw_offset) * _scale), bottom);
-      if (x > right) {
-        point--;
-        const float lastY = point->y() + (y - point->y()) / (x - point->x()) *
-                                             (right - point->x());
-        point++;
-        *point++ = QPointF(right, lastY);
-        break;
-      }
-      *point++ = QPointF(x, y);
-      x += pixels_per_sample;
-    }
-
-    p.drawPolyline(pts, point - pts);
-  }
-}
-
-void DsoSignal::paint_envelope(QPainter &p,
-                               const pv::data::DsoSnapshot *snapshot, int zeroY,
-                               int left, const int64_t start, const int64_t end,
-                               int hw_offset, const double pixels_offset,
-                               const double samples_per_pixel,
-                               uint64_t num_channels, double trig_hoff) {
-  (void)num_channels;
-  using namespace Qt;
-  using pv::data::DsoSnapshot;
-
-  data::DsoSnapshot *pshot = const_cast<data::DsoSnapshot *>(snapshot);
-
-  DsoSnapshot::EnvelopeSection e;
-  const uint16_t index = get_index();
-  pshot->get_envelope_section(e, start, end, samples_per_pixel, index);
-
-  if (e.length < 2)
-    return;
-
-  p.setPen(QPen(NoPen));
-  QColor envelope_colour = _colour;
-  envelope_colour.setAlpha(View::ForeAlpha);
-  p.setBrush(envelope_colour);
-
-  // Reuse a thread-local buffer to avoid heap alloc/dealloc on every paint.
-  static thread_local QVector<QRectF> rects;
-  if (rects.size() < (int)e.length)
-    rects.resize(e.length);
-  QRectF *r = rects.data();
-  QRectF *rect = r;
-  float top = get_view_rect().top();
-  float bottom = get_view_rect().bottom();
-
-  const float scale_pixels_per_samples = e.scale / samples_per_pixel;
-  const float rect_w = max(1.0f, scale_pixels_per_samples);
-
-  for (uint64_t sample = 0; sample < e.length - 1; sample++) {
-    const float x =
-        ((e.scale * sample + e.start) / samples_per_pixel - pixels_offset) +
-        left + trig_hoff / samples_per_pixel;
-    const DsoSnapshot::EnvelopeSample *const s = e.samples + sample;
-
-    const float b = min(
-        max(top, ((max(s->max, (s + 1)->min) - hw_offset) * _scale + zeroY)),
-        bottom);
-    const float t = min(
-        max(top, ((min(s->min, (s + 1)->max) - hw_offset) * _scale + zeroY)),
-        bottom);
-
-    float h = b - t;
-    if (h >= 0.0f && h <= 1.0f)
-      h = 1.0f;
-    if (h <= 0.0f && h >= -1.0f)
-      h = -1.0f;
-
-    *rect++ = QRectF(x, t, rect_w, h);
-  }
-
-  p.drawRects(r, e.length);
-}
-
-void DsoSignal::paint_per_pixel(QPainter &p,
-                                const pv::data::DsoSnapshot *snapshot,
-                                int zeroY, int left, int right,
-                                const int64_t start, const int64_t end,
-                                int hw_offset, const double pixels_offset,
-                                const double samples_per_pixel,
-                                uint64_t num_channels,
-                                double trig_hoff) {
-  (void)num_channels;
-  (void)pixels_offset; // base_sample derived from `start` directly.
-  (void)trig_hoff;   // start_sample already accounts for trig_hoff offset.
-
-  const int width = right - left;
-  if (width <= 0 || end <= start)
-    return;
-
-  pv::data::DsoSnapshot *pshot = const_cast<pv::data::DsoSnapshot *>(snapshot);
-  QElapsedTimer gs_timer;
-  gs_timer.start();
-  const uint8_t *const samples_buffer =
-      pshot->get_samples(start, end, get_index());
-  s_dso_timing.get_samples_ms += gs_timer.elapsed();
-  if (!samples_buffer)
-    return;
-
-  QColor trace_colour = _colour;
-  trace_colour.setAlpha(View::ForeAlpha);
-  p.setPen(QPen(Qt::NoPen));
-  p.setBrush(trace_colour);
-
-  static thread_local QVector<QRectF> rects;
-  if (rects.size() < width)
-    rects.resize(width);
-  QRectF *r = rects.data();
-
-  const float top = get_view_rect().top();
-  const float bottom = get_view_rect().bottom();
-  const double spp = samples_per_pixel;
-
-  const double base_sample = start;
-
-  if (spp < 1.0) {
-    // ---- Polyline mode (zoomed in: spp < 1.0) ----
-    static thread_local QVector<QPointF> pts;
-    if (pts.size() < width) pts.resize(width);
-
-    p.setPen(QPen(_colour));
-    p.setBrush(Qt::NoBrush);
-
-    int pt_count = 0;
-    for (int x = 0; x < width; x++) {
-      double sample_pos = base_sample + x * spp;
-      int64_t s0 = (int64_t)floor(sample_pos);
-      double frac = sample_pos - s0;
-
-      if (s0 < start) { s0 = start; frac = 0; }
-      if (s0 >= end) {
-        if (pt_count > 0) break;
-        continue;
-      }
-
-      int64_t s1 = s0 + 1;
-      if (s1 > end) s1 = end;
-      uint8_t v0 = samples_buffer[s0 - start];
-      uint8_t v1 = (s1 <= end && s1 > start) ? samples_buffer[s1 - start] : v0;
-      float v = v0 + (float)(v1 - v0) * frac;
-      float y = min(max(top, zeroY + (v - hw_offset) * _scale), bottom);
-      pts[pt_count++] = QPointF((float)(left + x), y);
-    }
-    p.drawPolyline(pts.data(), pt_count);
-  } else {
-    // ---- Min/max mode (zoomed out: spp >= 1.0) ----
-    static thread_local QVector<uint8_t> min_buf, max_buf;
-    if (min_buf.size() < width) { min_buf.resize(width); max_buf.resize(width); }
-
-    for (int x = 0; x < width; x++) {
-      int64_t s_start = (int64_t)floor(base_sample + x * spp);
-      int64_t s_end = (int64_t)floor(base_sample + (x + 1) * spp);
-
-      if (s_start < start) s_start = start;
-      if (s_end > end) s_end = end;
-      if (s_end <= s_start)
-        s_end = s_start + 1;
-      if (s_end > end)
-        s_end = end;
-      if (s_start >= s_end) {
-        if (x > 0) {
-          min_buf[x] = min_buf[x - 1];
-          max_buf[x] = max_buf[x - 1];
-        } else {
-          min_buf[x] = 128;
-          max_buf[x] = 128;
-        }
-        continue;
-      }
-
-      const uint8_t *psrc = samples_buffer + (s_start - start);
-      const int64_t span = s_end - s_start;
-      uint8_t min_v = *psrc;
-      uint8_t max_v = *psrc;
-      for (int64_t i = 1; i < span; i++) {
-        const uint8_t v = psrc[i];
-        if (v < min_v) min_v = v;
-        if (v > max_v) max_v = v;
-      }
-      min_buf[x] = min_v;
-      max_buf[x] = max_v;
-    }
-
-    for (int x = 0; x < width; x++) {
-      uint8_t draw_max = max_buf[x];
-      uint8_t draw_min = min_buf[x];
-      if (x + 1 < width) {
-        draw_max = max(draw_max, min_buf[x + 1]);
-        draw_min = min(draw_min, max_buf[x + 1]);
-      }
-
-      float y_top = min(max(top, zeroY + (draw_min - hw_offset) * _scale), bottom);
-      float y_bot = min(max(top, zeroY + (draw_max - hw_offset) * _scale), bottom);
-
-      float h = y_bot - y_top;
-      if (h >= 0.0f && h < 1.0f)
-        h = 1.0f;
-      else if (h <= 0.0f && h > -1.0f)
-        h = -1.0f;
-
-      r[x] = QRectF((float)(left + x), y_top, 1.0f, h);
-    }
-    p.drawRects(r, width);
-  }
 }
 
 void DsoSignal::paint_type_options(QPainter &p, int right, const QPoint pt,

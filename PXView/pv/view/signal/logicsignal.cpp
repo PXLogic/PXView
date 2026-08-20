@@ -24,11 +24,13 @@
 #include "pv/view/signal/logicsignal.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/datasource.h"
+#include "pv/data/pulse_analyzer.h"
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/view.h"
+#include "pv/view/renderer/rasterize.h"
 #include <libsigrokdecode.h>
 #include <cmath>
 
@@ -150,144 +152,41 @@ void LogicSignal::paint_mid_align_sample(QPainter &p, int left, int right,
 void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
                                   QColor back, uint64_t end_align_sample,
                                   const PaintContext &ctx) {
-  using pv::view::View;
-
   (void)back;
 
   if (!_data)
     return;
   assert(_view);
-  assert(right >= left);
 
+  // modernize-thread-model Task 2: the waveform + glitch-filter overlay logic
+  // was extracted to the pure function rasterize_logic_channel() (see
+  // pv/view/renderer/rasterize.h). It reads only the snapshot + value params
+  // (all local buffers, no member mutation), so it is thread-safe and
+  // directly unit-testable without a View. Pixel output is identical.
+  //
+  // The glitch LIVE preview (orange overlay) is GUI state read via
+  // View::get_preview_ranges and passed in as GlitchRange values; the
+  // already-filtered (red) overlay is read from the snapshot inside the
+  // rasterizer.
   const int y = get_y() + _totalHeight * 0.5;
-  const double scale = ctx.scale;
-  if (scale <= 0)
-    return;
   const int64_t offset = ctx.offset;
 
-  const int high_offset = y - _totalHeight; // removed +0.5f: y and _totalHeight are both int, so 0.5f was silently truncated
-  const int low_offset = y;
-
-  double samplerate = _data ? _data->samplerate() : 0;
-  if (!_data || _data->empty() || samplerate == 0) {
-    pxv_warn("LogicSignal::paint_mid_align: no data or samplerate==0, skipping paint");
-    return;
-  }
-
-  if (!_data->has_data(_model ? _model->index() : 0)) {
-    pxv_warn("LogicSignal::paint_mid_align: has_data false for index=%d, skipping paint",
-             _model ? _model->index() : 0);
-    return;
-  }
-
-  uint64_t ring_cnt = _data->get_ring_sample_count();
-  if (ring_cnt == 0) {
-    pxv_warn("LogicSignal::paint_mid_align: ring_sample_count==0, skipping paint");
-    return;
-  }
-  if (end_align_sample >= ring_cnt)
-    end_align_sample = ring_cnt - 1;
-
-  const int64_t last_sample = end_align_sample;
-  const double samples_per_pixel = samplerate * scale;
-
-  uint16_t width = right - left;
-  const double start = offset * samples_per_pixel;
-  const double end = (offset + width + 1) * samples_per_pixel;
-  const uint64_t end_index =
-      min(max((int64_t)floor(end), (int64_t)0), last_sample);
-  const uint64_t start_index = max((uint64_t)floor(start), (uint64_t)0);
-
-  if (start_index > end_index)
-    return;
-
-  width =
-      min(width, (uint16_t)ceil((end_index + 1) / samples_per_pixel - offset));
-  const uint16_t max_togs = width / TogMaxScale;
-
-  const bool first_sample = _data->get_display_edges(
-      _cur_pulses, _cur_edges, start_index, end_index, width, max_togs, offset,
-      samples_per_pixel, _model ? _model->index() : 0);
-  assert(_cur_pulses.size() >= width);
-
-  int preX = 0;
-  int preY = first_sample ? high_offset : low_offset;
-  int x = preX;
-  std::vector<QLine> wave_lines;
-
-  if (_cur_edges.size() < max_togs) {
-    std::vector<std::pair<uint16_t, bool>>::const_iterator i;
-    for (i = _cur_edges.begin() + 1; i != _cur_edges.end() - 1; i++) {
-      x = (*i).first;
-      wave_lines.push_back(QLine(preX, preY, x, preY));
-      wave_lines.push_back(QLine(x, high_offset, x, low_offset));
-      preX = x;
-      preY = (*i).second ? high_offset : low_offset;
-    }
-    x = (*i).first;
-    wave_lines.push_back(QLine(preX, preY, x, preY));
-  } else if (_cur_pulses.size() > 0) {
-    std::vector<std::pair<bool, bool>>::const_iterator i = _cur_pulses.begin();
-    while (i != _cur_pulses.end() - 1) {
-      if ((*i).first) {
-        wave_lines.push_back(QLine(preX, preY, x, preY));
-        wave_lines.push_back(QLine(x, high_offset, x, low_offset));
-        preX = x;
-        preY = (*i).second ? high_offset : low_offset;
-      }
-      x++;
-      i++;
-    }
-    wave_lines.push_back(QLine(preX, preY, x, preY));
-  }
-
-  p.setPen(_colour.isValid() ? _colour : fore);
-  p.drawLines(wave_lines.data(), wave_lines.size());
-
-  // === Glitch filter overlay (Task 8) ===
-  // Coordinate mapping: pixel x = sample_index / samples_per_pixel - offset
-  // (offset is the pixel offset of the left edge; matches the edge/pulse
-  // pixel coordinates produced by get_display_edges above).
-  const int sig_idx = _model ? _model->index() : 0;
-
-  // (1) Already-filtered ranges (red overlay). Drawn when the snapshot has
-  //     been glitch-filtered AND the user has enabled the overlay in the
-  //     glitch filter panel; takes precedence over the live preview.
-  if (_data && _data->is_glitch_filtered() &&
-      ctx.show_glitch_overlay) {
-    const auto &ranges = _data->get_filtered_ranges(sig_idx);
-    if (!ranges.empty()) {
-      p.setBrush(QColor(255, 82, 82, 90));
-      p.setPen(Qt::NoPen);
-      for (const auto &r : ranges) {
-        if (r.end < start_index || r.start > end_index)
-          continue;  // off-screen cull
-        int x1 = (int)(r.start / samples_per_pixel - offset);
-        int x2 = (int)(r.end / samples_per_pixel - offset);
-        if (x2 <= x1)
-          x2 = x1 + 1;
-        p.drawRect(x1, high_offset, x2 - x1, low_offset - high_offset);
-      }
+  std::vector<GlitchRange> preview;
+  const std::vector<GlitchRange> *preview_ptr = nullptr;
+  if (_view) {
+    if (const auto *pv_ranges = _view->get_preview_ranges(this);
+        pv_ranges && !pv_ranges->empty()) {
+      preview.reserve(pv_ranges->size());
+      for (const auto &pulse : *pv_ranges)
+        preview.push_back({pulse.start, pulse.end});
+      preview_ptr = &preview;
     }
   }
-  // (2) Live preview ranges (orange overlay). Only shown while the popup is
-  //     open and the snapshot is not yet actually filtered.
-  else if (_view) {
-    auto *preview = _view->get_preview_ranges(this);
-    if (preview && !preview->empty()) {
-      p.setBrush(QColor(255, 183, 77, 70));
-      p.setPen(Qt::NoPen);
-      for (const auto &pulse : *preview) {
-        if (pulse.end < start_index || pulse.start > end_index)
-          continue;
-        int x1 = (int)(pulse.start / samples_per_pixel - offset);
-        int x2 = (int)(pulse.end / samples_per_pixel - offset);
-        if (x2 <= x1)
-          x2 = x1 + 1;
-        p.drawRect(x1, high_offset, x2 - x1, low_offset - high_offset);
-      }
-    }
-  }
+
+  rasterize_logic_channel(p, _data, _model ? _model->index() : 0, left, right,
+                          y, _totalHeight, _colour.isValid() ? _colour : fore,
+                          ctx.scale, offset, end_align_sample, ctx,
+                          preview_ptr);
 }
 
 void LogicSignal::paint_caps(QPainter &p, QLineF *const lines,

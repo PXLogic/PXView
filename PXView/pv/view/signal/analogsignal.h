@@ -48,7 +48,6 @@ class AnalogSignal : public Signal
 
 private:
 	static const QColor SignalColours[4];
-	static const float EnvelopeThreshold;
     static const int NumSpanY = 5;
     static const int NumMiniSpanY = 5;
     static const int NumSpanX = 10;
@@ -142,11 +141,6 @@ public:
     double pos2ratio(int pos);
 
     /**
-     * Event
-     **/
-    void resize();
-
-    /**
      * Paints the background layer of the trace with a QPainter
      * @param p the QPainter to paint into.
      * @param left the x-coordinate of the left edge of the signal
@@ -171,39 +165,17 @@ public:
     void paint_fore(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx) override;
 
 private:
-    void paint_trace(QPainter &p,
-                     const pv::data::AnalogSnapshot *snapshot,
-                     int zeroY, const int start_pixel,
-                     const uint64_t start_index, const int64_t sample_count,
-                     const double samples_per_pixel, const int order,
-                     const float top, const float bottom, const int width);
-
-    void paint_per_pixel(QPainter &p,
-                         const pv::data::AnalogSnapshot *snapshot,
-                         int zeroY, const int left, const int right,
-                         const uint64_t start_index,
-                         const int64_t sample_count,
-                         const double samples_per_pixel, const int order,
-                         const float top, const float bottom, const int width);
-
-    void paint_envelope(QPainter &p,
-                        const pv::data::AnalogSnapshot *snapshot,
-                        int zeroY, const int start_pixel,
-                        const uint64_t start_index, const int64_t sample_count,
-                        const double samples_per_pixel, const int order,
-                        const float top, const float bottom, const int width);
+    // modernize-thread-model Task 2: analog waveform rasterization was extracted
+    // to the pure function rasterize_analog_channel() (pv/view/renderer/rasterize.h).
+    // paint_mid calls it directly with prepare results as value parameters;
+    // the former paint_trace / paint_per_pixel / paint_envelope members are
+    // removed (single code path).
 
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
 
 private:
 	pv::data::AnalogSnapshot *_data;
 std::shared_ptr<pv::data::AnalogSnapshot> _data_ref; // keeps snapshot alive (prevents use-after-free)
-
-    std::unique_ptr<QRectF[]> _rects;
-    // 性能修复: paint_trace 复用成员缓冲，避免每帧 new/delete QPointF[]。
-    // 与 _rects 同生命周期管理 (构造 nullptr / 析构+resize 释放 / 按需扩容)。
-    std::unique_ptr<QPointF[]> _points;
-    int64_t _points_cap;
 
 	float _scale;
     // float 电压数据的缩放（参考 PulseView scale_ = div_height / resolution）。

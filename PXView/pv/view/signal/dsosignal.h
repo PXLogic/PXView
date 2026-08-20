@@ -292,30 +292,11 @@ protected:
     void paint_type_options(QPainter &p, int right, const QPoint pt, QColor fore);
 
 private:
-    void paint_trace(QPainter &p,
-        const pv::data::DsoSnapshot* snapshot,
-        int zeroY, int left, const int64_t start, const int64_t end, int hw_offset,
-        const double pixels_offset, const double samples_per_pixel,
-        uint64_t num_channels, double trig_hoff);
-
-    void paint_envelope(QPainter &p,
-        const pv::data::DsoSnapshot *snapshot,
-        int zeroY, int left, const int64_t start, const int64_t end, int hw_offset,
-        const double pixels_offset, const double samples_per_pixel,
-        uint64_t num_channels, double trig_hoff);
-
-    // New LDO path: per-pixel min/max. For each screen pixel, computes the
-    // min and max of all samples falling into that pixel's sample-range,
-    // then draws a 1px-wide rectangle. Time-accurate (each pixel independent)
-    // and seamless (1px rects tile perfectly). Used for spp >= TraceThreshold.
-    // Replaces the old mipmap paint_envelope path which was time-inaccurate
-    // for spp in [4, 255] (mipmap scale=256 caused 64px-wide rects at spp=4).
-    void paint_per_pixel(QPainter &p,
-        const pv::data::DsoSnapshot *snapshot,
-        int zeroY, int left, int right, const int64_t start, const int64_t end,
-        int hw_offset, const double pixels_offset,
-        const double samples_per_pixel, uint64_t num_channels,
-        double trig_hoff);
+    // modernize-thread-model Task 2: DSO waveform rasterization was extracted
+    // to the pure function rasterize_dso_channel() (pv/view/renderer/rasterize.h).
+    // paint_mid calls it directly with prepare results as value parameters;
+    // the former paint_trace / paint_envelope / paint_per_pixel members are
+    // removed (single code path).
 
     void paint_hover_measure(QPainter &p, QColor fore, QColor back);
     void auto_set();

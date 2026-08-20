@@ -211,6 +211,29 @@ pv_add_qtest(test_trace_visitor
     view/test_trace_visitor.cpp
 )
 
+# ==== 波形光栅化纯函数直测 (modernize-thread-model Task 2.6) ====
+# 直接编译 rasterize.cpp + 三个快照数据层源文件, 内部 stub xlog。
+# 无 View/QWidget 依赖: 直接构造 snapshot + 值参数, 用 QImage 承载 QPainter
+# 调 rasterize_logic_channel / rasterize_dso_channel / rasterize_analog_channel
+# 并断言像素 (logic 波形/glitch live-preview overlay/DSO+Analog 双模式)。
+pv_add_qtest(test_rasterize
+    view/test_rasterize.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/view/renderer/rasterize.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/dsosnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/analogsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_rasterize PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
 # ==== LogicSnapshot raw 存储路径 (P5 diff+ctz 毛刺滤波) ====
 # 直接编译 raw 数据层源文件 (不链接 pxview-data), 内部 stub xlog.
 # 依赖: snapshot / logicsnapshot / diskcache_writer / glitch_filter / mmap_allocator

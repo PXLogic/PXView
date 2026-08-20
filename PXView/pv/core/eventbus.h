@@ -7,7 +7,6 @@
 #include <mutex>
 #include <queue>
 #include <set>
-#include <shared_mutex>
 #include <thread>
 #include <type_traits>
 #include <typeindex>
@@ -59,11 +58,21 @@ private:
  * IEventListener has been removed. All event consumers use subscribe<T>()
  * with RAII Subscription management.
  *
- * Thread safety:
- *   - subscribe<T>() acquires a write lock on _callbacks_mutex.
- *   - broadcast<T>() acquires a read lock on _callbacks_mutex.
- *   - Subscription destructor acquires a write lock to remove the callback.
- *   - broadcast_async<T>() posts via IAsyncDispatcher (thread-safe).
+ * Thread safety (modernize-thread-model Task 4 — COW subscription table):
+ *   The subscription table is copy-on-write. subscribe<T>() / the
+ *   Subscription destructor (the only writers) mutate the authoritative
+ *   `_callbacks` map under `_callbacks_mutex`, then publish a fresh immutable
+ *   snapshot (`_snapshot`) via an atomic shared_ptr. Readers
+ *   (dispatch_to_callbacks / has_subscribers) load the snapshot lock-free —
+ *   no lock, no per-event vector copy. A snapshot is only rebuilt when a
+ *   subscription actually changes, so the broadcast hot path (e.g. DataUpdated)
+ *   does a single atomic load + iterate instead of a shared_mutex read lock
+ *   + vector copy + allocation on every event.
+ *
+ *   Snapshot shared_ptrs keep every callback's std::function storage alive
+ *   while any reader still holds the snapshot, so an unsubscribed callback
+ *   that was already published in an in-flight snapshot can run at most once
+ *   more but never touches freed storage (callback context keep-alive).
  */
 class EventBus {
 public:
@@ -84,7 +93,7 @@ public:
             [cb_ptr](const void *ptr) {
                 (*cb_ptr)(*static_cast<const EventType *>(ptr));
             });
-        std::lock_guard<std::shared_mutex> lk(_callbacks_mutex);
+        std::lock_guard<std::mutex> lk(_callbacks_mutex);
         auto &vec = _callbacks[type_id];
         // Reuse a previously vacated (unsubscribed) slot when available, so the
         // vector size tracks the historical peak subscription count rather than
@@ -101,11 +110,13 @@ public:
             vec.push_back(erased);
         else
             vec[idx] = erased;
+        rebuild_snapshot(); // publish a fresh COW snapshot (version++)
         return Subscription([this, type_id, idx]() {
-            std::lock_guard<std::shared_mutex> lk2(_callbacks_mutex);
+            std::lock_guard<std::mutex> lk2(_callbacks_mutex);
             auto it = _callbacks.find(type_id);
             if (it != _callbacks.end() && idx < it->second.size()) {
                 it->second[idx].reset();
+                rebuild_snapshot(); // unsubscribed → publish a fresh snapshot
             }
         });
     }
@@ -113,15 +124,22 @@ public:
     // ---- Query ----
     // Returns true iff at least one LIVE (subscribed, not-yet-unsubscribed)
     // callback exists across all event types. Unsubscribed slots (reset to
-    // null) are not counted.
+    // null) are not counted. Lock-free: reads the current COW snapshot.
     bool has_subscribers() const {
-        std::shared_lock<std::shared_mutex> lk(_callbacks_mutex);
-        for (const auto &kv : _callbacks)
+        auto snap = _snapshot.load(std::memory_order_acquire);
+        if (!snap)
+            return false;
+        for (const auto &kv : *snap)
             for (const auto &cb : kv.second)
                 if (cb)
                     return true;
         return false;
     }
+
+    // Monotonic snapshot version — incremented on every COW publish
+    // (i.e. every actual subscription-table change). Lock-free read; used by
+    // tests/debugging to assert "only rebuild on change" semantics.
+    uint64_t version() const { return _version.load(std::memory_order_relaxed); }
 
     // ---- Sync typed event broadcast ----
     template <typename EventType> void broadcast(const EventType &ev) {
@@ -237,31 +255,54 @@ public:
 private:
     template <typename EventType>
     void dispatch_to_callbacks(const EventType &ev) {
-        // R2: copy the callback list under the read lock, then invoke the
-        // copies OUTSIDE the lock. Invoking callbacks while holding the read
-        // lock would make a same-thread unsubscribe (Subscription dtor takes
-        // the write lock) an illegal reader->writer lock upgrade — UB or
-        // deadlock. Documented semantics: a callback that is unsubscribed
-        // after the copy but before its invocation may run at most once
-        // more; after that the slot is gone.
-        std::vector<std::shared_ptr<std::function<void(const void *)>>> cbs;
-        {
-            std::shared_lock<std::shared_mutex> lk(_callbacks_mutex);
-            auto it = _callbacks.find(std::type_index(typeid(EventType)));
-            if (it == _callbacks.end())
-                return;
-            cbs = it->second;
-        }
-        for (auto &cb : cbs) {
+        // modernize-thread-model Task 4: read the current COW snapshot
+        // lock-free (atomic shared_ptr load) and iterate it directly — no
+        // shared_mutex, no per-event vector copy, no allocation. The snapshot
+        // is immutable: concurrent subscribe/unsubscribe swap in a NEW
+        // snapshot and never mutate this one, so iterating here is safe.
+        // A callback that is unsubscribed after this snapshot was published
+        // but before its invocation may run at most once more (the snapshot
+        // shared_ptr keeps its storage alive — no dangling callback).
+        auto snap = _snapshot.load(std::memory_order_acquire);
+        if (!snap)
+            return;
+        auto it = snap->find(std::type_index(typeid(EventType)));
+        if (it == snap->end())
+            return;
+        for (const auto &cb : it->second) {
             if (cb) (*cb)(static_cast<const void *>(&ev));
         }
     }
 
-    // ---- Type-erased callback storage ----
-    std::unordered_map<std::type_index,
-                       std::vector<std::shared_ptr<std::function<void(const void *)>>>>
-        _callbacks;
-    mutable std::shared_mutex _callbacks_mutex;
+    // ---- Type-erased callback storage (writer-only, COW) ----
+    using CallbackMap = std::unordered_map<
+        std::type_index,
+        std::vector<std::shared_ptr<std::function<void(const void *)>>>>;
+    // Authoritative table. Mutated only by subscribe<T>() / the Subscription
+    // destructor under _callbacks_mutex; readers never touch it.
+    CallbackMap _callbacks;
+    std::mutex _callbacks_mutex;
+    // Immutable COW snapshot published atomically. Readers load it lock-free;
+    // writers rebuild it (deep structural copy — callback bodies are shared
+    // via shared_ptr, not duplicated) only when a subscription actually
+    // changes. `std::atomic<std::shared_ptr<const CallbackMap>>` (C++20):
+    // load()/store() are internally synchronized and cheap when uncontended.
+    std::atomic<std::shared_ptr<const CallbackMap>> _snapshot{};
+    // Monotonic counter incremented on every snapshot publish ("版本化").
+    std::atomic<uint64_t> _version{0};
+
+    // Caller MUST hold _callbacks_mutex. Deep-copies _callbacks into a fresh
+    // immutable snapshot and publishes it atomically.
+    void rebuild_snapshot() {
+        if (_callbacks.empty()) {
+            _snapshot.store(nullptr, std::memory_order_release);
+            _version.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        _snapshot.store(std::make_shared<const CallbackMap>(_callbacks),
+                        std::memory_order_release);
+        _version.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // ---- Re-entrancy guard ----
     // CRITICAL: broadcast() and the _deferred_broadcasts queue are NOT

@@ -69,22 +69,16 @@ QColor DsoSignal::getSignalColor(int index) {
   return c.isValid() ? c : SignalColours[index % 4];
 }
 
-// LDO dual-path threshold:
-//   spp < threshold → paint_trace (per-sample polyline, continuous)
-//   spp >= threshold → paint_per_pixel (per-pixel min/max, 1px rects)
-// Set to 4.0: paint_trace uses drawPolyline which is inherently continuous
-// (connects points), while paint_per_pixel uses drawRects (independent
-// rectangles, no connection). At spp ≈ 1, paint_per_pixel draws 1px rects
-// with no connection → appears as scattered dots / broken lines.
-// At spp < 4, paint_trace draws < 4000 points (DSO frame = 20K samples,
-// visible = width * spp < 4000), which is < 2ms — smooth and continuous.
-// At spp >= 4, paint_per_pixel draws 1000 dense rects — no visual gaps.
-// Always use paint_per_pixel (drawRects) instead of paint_trace (drawPolyline).
-// drawPolyline with alpha=200 on a transparent QPixmap is extremely slow on
-// Windows raster engine: 502 points takes ~44ms per DSO channel, vs ~2ms
-// for paint_per_pixel with drawRects. The visual difference (stepped vs
-// smooth) is negligible for DSO waveforms. Setting threshold to 0 ensures
-// paint_per_pixel is always used regardless of zoom level.
+// DSO waveform rasterization (modernize-thread-model Task 2) lives in the
+// pure function rasterize_dso_channel() (pv/view/renderer/rasterize.h). Its
+// dual-mode body (interpolation for spp<1.0, min/max for spp>=1.0) is the
+// single rendering path; the former paint_trace / paint_envelope /
+// paint_per_pixel members are removed. Note: drawPolyline with alpha on a
+// transparent QPixmap is extremely slow on the Windows raster engine, so the
+// rasterizer draws opaque polylines when zoomed in and opaque min/max rects
+// when zoomed out.
+//
+// EnvelopeThreshold is retained only because MathTrace references it.
 const float DsoSignal::EnvelopeThreshold = 0.0f;
 
 DsoSignal::DsoSignal(data::DsoSnapshot *data,
@@ -676,9 +670,10 @@ void DsoSignal::auto_start() { _measure->auto_start(); }
 
 //============================== Paint methods ==============================
 // Phase 5: Paint methods (get_view_rect, paint_prepare, paint_back,
-// paint_mid, paint_fore, get_trig_rect, paint_trace, paint_envelope,
-// paint_per_pixel, paint_type_options, paint_hover_measure) have been
-// extracted to dsosignal_paint.cpp for better file modularity.
+// paint_mid, paint_fore, get_trig_rect, paint_type_options,
+// paint_hover_measure) have been extracted to dsosignal_paint.cpp for better
+// file modularity. Waveform rasterization itself lives in the pure function
+// rasterize_dso_channel() (modernize-thread-model Task 2; see rasterize.h).
 //============================== Interaction ==============================
 
 bool DsoSignal::mouse_press(int right, const QPoint pt) {
