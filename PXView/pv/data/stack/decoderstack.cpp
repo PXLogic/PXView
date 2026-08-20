@@ -37,6 +37,7 @@
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/rowdata.h"
 #include "pv/data/stack/decoderstack.h"
+
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"
@@ -1174,15 +1175,34 @@ srd_session_destroy(session);
     }
   }
 
-  srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
+  int meta_ret = srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64((uint64_t)_samplerate.load(std::memory_order_acquire)));
 
   // Let batch decoders choose an efficient path.
   uint64_t decode_sample_count = _sample_count.load(std::memory_order_acquire);
   if (decode_end != UINT64_MAX && decode_end >= decode_start)
     decode_sample_count = decode_end - decode_start + 1;
-  srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
+  if (meta_ret == SRD_OK)
+    meta_ret = srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
                            g_variant_new_uint64(decode_sample_count));
+
+  // metadata() raised an exception (e.g. adat's SamplerateError when the
+  // samplerate is too low). Skip srd_session_start / decode_data entirely —
+  // otherwise the decode thread runs with a broken decoder state and the
+  // process crashes with heap corruption (0xC0000374). The session is
+  // destroyed below, isolating the failure to this decode run.
+  if (meta_ret != SRD_OK) {
+    // metadata() raised an exception (e.g. adat's SamplerateError when the
+    // samplerate is too low). The message was already logged by
+    // py_call_metadata via srd_err, and it is NOT stored in the thread-local
+    // last_error (srd_inst_send_meta frees it directly), so there is nothing
+    // to fetch here. Skip srd_session_start / decode_data entirely —
+    // otherwise the decode thread runs with a broken decoder state and the
+    // process crashes with heap corruption (0xC0000374). Destroy the session
+    // to isolate the failure to this decode run.
+    srd_session_destroy(session);
+    return;
+  }
 
   // P3-11 fix: obtain status shared_ptr under _status_mutex for the callback
   std::shared_ptr<decode_task_status> status_for_callback;
