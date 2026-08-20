@@ -1,26 +1,23 @@
 #===============================================================================
 #= macOS 崩溃调试工作流 (lldb backtrace)
 #-------------------------------------------------------------------------------
-# 目的: 手动触发 macOS (arm64) 构建,然后用 lldb 运行 headless 启动测试,
-#       在崩溃点自动抓取完整调用堆栈 (bt all)。
+# 目的: 在 macOS (arm64) 上构建,然后用 lldb 运行 headless 启动测试,
+#       在崩溃点自动抓取完整调用堆栈 (bt all + 崩溃帧符号化)。
 #
 # 为什么用 lldb 而不是 gdb:
 #   - macOS 上 gdb 需要额外 codesign,且非 Apple 分发,基本不可用;
 #   - lldb 是 Apple 官方 (clang/LLVM) 调试器,macos-14 runner 自带。
 #
-# 用法:
-#   1. Actions → 选择本工作流 → Run workflow
-#   2. 可选输入:
-#      - ref:        要构建的分支/tag/commit (留空 = 默认分支)
-#      - build_type: RelWithDebInfo(默认,带符号且接近 Release 优化) / Release / Debug
-#      - wait_seconds: 等待崩溃的秒数;超过后给 PXView 发 SIGTERM 以便 lldb 收尾
-#                     (0 = 永不超时,若应用不崩溃则会一直等)
-#   3. 运行结束后下载 "lldb-backtrace" 产物,内含崩溃堆栈。
+# 触发方式:
+#   - 推荐: push 到 main 分支即自动构建并抓取崩溃堆栈(无需手动操作)
+#   - 也支持手动: Actions → 选本工作流 → Run workflow,可指定 ref/build_type
 #===============================================================================
 
 name: macOS Debug (lldb backtrace)
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       ref:
@@ -187,6 +184,9 @@ jobs:
             -o "run --headless -l 4" \
             -o "bt all" \
             -o "bt" \
+            -o "image lookup --address \$pc" \
+            -o "register read pc x8 x9 x10 x11 lr" \
+            -o "frame variable" \
             -o "quit" \
             "$APP_BIN" > /tmp/lldb-headless.log 2>&1 &
           LLDB_PID=$!
