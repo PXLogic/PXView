@@ -244,6 +244,71 @@ include_directories(${Boost_INCLUDE_DIRS})
 find_package(Threads)
 
 #===============================================================================
+#= mimalloc (performance allocator)
+#= Used by libsigrokdecode/ann_batch.c for per-session annotation heaps.
+#= Discovery order:
+#=   1. find_package(mimalloc CONFIG) — CMake config files (Homebrew, vcpkg, MSYS2)
+#=      NOTE: target names differ across distributors:
+#=        - MSYS2 mingw: "mimalloc" / "mimalloc-static" (no namespace)
+#=        - Homebrew/vcpkg: "mimalloc::mimalloc" (namespaced)
+#=      We detect whichever target actually exists after find_package.
+#=   2. pkg_search_module — Linux apt libmimalloc-dev, MSYS2 fallback
+#=   3. Homebrew prefix — macOS fallback when no cmake config installed
+#=   4. Bare "mimalloc" — Linux/MSYS2 last resort (standard search paths)
+#-------------------------------------------------------------------------------
+set(MIMALLOC_LIB "")
+find_package(mimalloc CONFIG QUIET)
+if(mimalloc_FOUND)
+	# Detect the actual imported target name (varies by distributor)
+	if(TARGET mimalloc::mimalloc)
+		set(MIMALLOC_LIB mimalloc::mimalloc)
+	elseif(TARGET mimalloc-static)
+		# MSYS2: static import lib (links libmimalloc.a + system libs)
+		set(MIMALLOC_LIB mimalloc-static)
+	elseif(TARGET mimalloc)
+		# MSYS2: shared import lib (links libmimalloc.dll.a)
+		set(MIMALLOC_LIB mimalloc)
+	else()
+		# find_package set mimalloc_FOUND but no known target — fall through
+		set(mimalloc_FOUND FALSE)
+	endif()
+endif()
+
+if(NOT MIMALLOC_LIB)
+	# Try pkg-config (works on Linux apt libmimalloc-dev and MSYS2 mingw package)
+	pkg_search_module(MIMALLOC QUIET mimalloc)
+	if(MIMALLOC_FOUND)
+		set(MIMALLOC_LIB ${MIMALLOC_LIBRARIES})
+		link_directories(${MIMALLOC_LIBDIR})
+		include_directories(${MIMALLOC_INCLUDE_DIRS})
+	else()
+		# Fallback: resolve via Homebrew prefix on macOS
+		if(APPLE)
+			execute_process(
+				COMMAND brew --prefix mimalloc
+				OUTPUT_VARIABLE _mimalloc_brew_prefix
+				OUTPUT_STRIP_TRAILING_WHITESPACE
+				ERROR_QUIET
+				RESULT_VARIABLE _mimalloc_brew_result
+			)
+			if(_mimalloc_brew_result EQUAL 0 AND EXISTS "${_mimalloc_brew_prefix}/lib/libmimalloc.dylib")
+				set(MIMALLOC_LIB "${_mimalloc_brew_prefix}/lib/libmimalloc.dylib")
+				include_directories("${_mimalloc_brew_prefix}/include")
+			else()
+				message(FATAL_ERROR "mimalloc not found via find_package, pkg-config, or Homebrew. "
+					"Install it with: brew install mimalloc (macOS) or apt install libmimalloc-dev (Linux)")
+			endif()
+		else()
+			# Linux / MSYS2: bare library name works with standard search paths
+			set(MIMALLOC_LIB mimalloc)
+		endif()
+	endif()
+endif()
+
+message("----- mimalloc:")
+message(STATUS "	 library: ${MIMALLOC_LIB}")
+
+#===============================================================================
 #= Aggregated link libraries for pxview-core / PXView executable
 # This was lost when the original monolithic CMakeLists.txt was split into
 # cmake/*.cmake modules. Restored here so pxview-core (CMakeLists.txt:107)

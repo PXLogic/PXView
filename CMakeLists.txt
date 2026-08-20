@@ -247,7 +247,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME}
 	pxview-core
 	${QT_GUI_LIBS}
-	mimalloc
+	${MIMALLOC_LIB}
 )
 if(WIN32)
 	target_link_libraries(${PROJECT_NAME}
