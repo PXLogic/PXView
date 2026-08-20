@@ -1,71 +1,75 @@
 /*
- * PXView — Plan A: dedicated heap implementation (Windows).
+ * PXView — Plan A: dedicated heaps for decode-thread annotation storage.
  *
- * One growable, serialized heap per DecoderStack for decode-thread annotation
- * storage. See annotation_heap.h for the rationale. This translation unit is
- * the only one that needs <windows.h> for the heap APIs.
+ * Root cause (see devdoc/解码器性能排查报告.md): 16 decode threads all
+ * allocating annotations on the shared process heap caused the main thread to
+ * stall ~1s inside ntdll's heap critical section (heap lock convoy; the GUI
+ * thread was sampled stuck in RtlLockHeap/RtlEnterCriticalSection). Each
+ * DecoderStack now gets its own mimalloc heap and the per-row deque + frozen
+ * snapshot segments allocate from it, so the decode threads no longer contend
+ * with the GUI thread's process-heap allocations.
+ *
+ * Instead of the former Win32-only HeapCreate/HeapValidate (which left
+ * Linux/macOS as a plain malloc fallback with no isolation), we use a per-stack
+ * mi_heap_t from mimalloc — cross-platform, and the same allocator that
+ * libsigrokdecode/ann_batch.c already uses for its per-session annotation
+ * arena. mi_free routes each block back to its owning heap, so the GUI thread
+ * can safely free a published snapshot even though a decode thread allocated
+ * it (producer/consumer across threads).
+ *
+ * mi_heap_malloc returns >= MI_MAX_ALIGN_SIZE (16) aligned memory, satisfying
+ * std::deque<Annotation, HeapAllocator<Annotation>> element alignment.
+ *
+ * The handle is exposed as void* so the header needs no mimalloc.h; the
+ * implementation lives here.
  */
 
 #include "pv/data/decode/annotation_heap.h"
 
 #include <cstdlib>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include <mimalloc.h>
 
 namespace pv {
 namespace data {
 namespace decode {
 
 void *create_annotation_heap() {
-#ifdef _WIN32
-  // Flags 0 = serialized (thread-safe) + growable; initial 0, max 0 = grow
-  // on demand. Each DecoderStack owns one, so the 16 decode threads no longer
-  // share the process heap for annotation data.
-  return HeapCreate(0, 0, 0);
-#else
-  return nullptr;
-#endif
+  // Dedicated, thread-safe heap that never recycles to the OS until destroyed.
+  // Each DecoderStack owns one, so the 16 decode threads no longer share the
+  // process heap for annotation data.
+  return mi_heap_new();
 }
 
 void destroy_annotation_heap(void *heap) {
-#ifdef _WIN32
+  // mi_heap_destroy bulk-frees whatever remains. The AnnotationHeapPtr
+  // refcount guarantees all RowData / AnnotationSegment / published snapshot
+  // users are gone before this runs (same contract as the old HeapDestroy), so
+  // no thread is touching the heap here.
   if (heap)
-    HeapDestroy(static_cast<HANDLE>(heap));
-#else
-  (void)heap;
-#endif
+    mi_heap_destroy(static_cast<mi_heap_t *>(heap));
 }
 
 void *annotation_heap_alloc(void *heap, std::size_t n) {
-#ifdef _WIN32
-  return HeapAlloc(heap ? static_cast<HANDLE>(heap) : GetProcessHeap(), 0, n);
-#else
-  // On non-Windows platforms there is no Win32 heap API. Fall back to
-  // the standard C allocator so HeapAllocator::allocate() gets a valid
-  // pointer instead of nullptr (which would throw std::bad_alloc and
-  // crash every add_decoder call on Linux/macOS CI).
-  (void)heap;
+  if (heap)
+    return mi_heap_malloc(static_cast<mi_heap_t *>(heap), n);
+  // null heap -> standard C allocator (safe fallback for callers that pass a
+  // null handle explicitly, e.g. perflog.h probes).
   return std::malloc(n);
-#endif
 }
 
 void annotation_heap_free(void *heap, void *p) {
-#ifdef _WIN32
-  if (p)
-    HeapFree(heap ? static_cast<HANDLE>(heap) : GetProcessHeap(), 0, p);
-#else
-  // Match the allocation path: free via the standard C allocator.
-  (void)heap;
-  std::free(p);
-#endif
+  if (!p)
+    return;
+  if (heap) {
+    // Route by the block's owning heap header (mimalloc reads it on the
+    // pointer), thread-safe by design — handles the common case where the GUI
+    // thread frees a block that a decode thread allocated on this heap.
+    mi_free(p);
+  } else {
+    // Match the null-heap allocation path above.
+    std::free(p);
+  }
 }
 
 } // namespace decode

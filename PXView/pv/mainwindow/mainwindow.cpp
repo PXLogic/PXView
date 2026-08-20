@@ -460,6 +460,14 @@ void MainWindow::switchTheme(QString style) {
 
 
 void MainWindow::on_data_updated() {
+  // Phase 0 (thread-model modernization): consume the capture data-updated
+  // flag here instead of inside ViewportPainter::doPaint, so data-refresh
+  // decisions leave the paint path (a slow paint can no longer stall the
+  // capture cadence). check_update() uses try_lock + flag self-reset, is
+  // idempotent, and for ANALOG mode re-broadcasts DataUpdated (async) to
+  // keep the view refresh cadence — matching the old paint-time behaviour.
+  if (_session)
+    _session->check_update();
   _dock_manager->measure_widget()->reCalc();
   current_view()->data_updated();
 }

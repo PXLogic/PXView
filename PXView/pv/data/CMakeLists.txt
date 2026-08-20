@@ -70,6 +70,7 @@ target_link_libraries(pxview-data PUBLIC ${FFTW_LIBRARIES})
 target_link_libraries(pxview-data PRIVATE
     ${FFTW_LIBRARIES}
     -lglib-2.0
+    ${MIMALLOC_LIB}
 )
 
 # Expose PXView/ as include path so data .cpp files can resolve

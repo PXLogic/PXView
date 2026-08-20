@@ -90,8 +90,11 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   QFont font = theme_font_cursor();
   p.setFont(font);
 
-  _viewport->view().session().check_update();
-
+  // Phase 0 (thread-model modernization): the paint path is now read-only
+  // w.r.t. session state. check_update() (data-refresh flag consumption +
+  // ANALOG-mode repaint kick) was moved to the DataUpdated event path
+  // (MainWindow::on_data_updated) so a slow paint can no longer stall the
+  // capture cadence, and the painter no longer touches session state.
   QColor fore(_viewport->palette().color(_viewport->foregroundRole()));
   QColor back(_viewport->palette().color(_viewport->backgroundRole()));
   fore.setAlpha(View::ForeAlpha);

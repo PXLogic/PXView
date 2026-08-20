@@ -9,7 +9,7 @@
  * snapshot segments allocate from it, so the decode threads no longer contend
  * with the GUI thread's process-heap allocations.
  *
- * The handle is exposed as void* so this header needs no <windows.h>; the
+ * The handle is exposed as void* so this header needs no <mimalloc.h>; the
  * implementation lives in annotation_heap.cpp.
  */
 
@@ -39,13 +39,14 @@ inline AnnotationHeapPtr make_annotation_heap() {
                            [](void *h) { destroy_annotation_heap(h); });
 }
 
-// Minimal C++ allocator backed by a HANDLE heap. null heap -> process heap
-// (safe fallback on Windows). On non-Windows platforms the heap pointer is
-// always null; annotation_heap_alloc/free fall back to malloc/free so the
-// allocator is fully functional (just not isolated from the process heap).
+// Minimal C++ allocator backed by a per-stack mimalloc heap (mi_heap_t).
+// null heap -> process heap (safe fallback). The heap pointer is non-null on
+// every platform (cross-platform, same allocator as libsigrokdecode's
+// ann_batch.c), so annotation_heap_alloc/free only fall back to malloc/free
+// when a caller passes a null handle explicitly.
 // Copyable; used as the deque allocator for annotation data.
-// HeapAlloc/HeapFree are serialized (no HEAP_NO_SERIALIZE), so a snapshot
-// freed on the GUI thread while the decode thread keeps allocating on the same
+// mi_free routes each freed block back to its owning heap, so a snapshot freed
+// on the GUI thread while the decode thread keeps allocating on the same
 // per-stack heap is safe.
 template <typename T>
 class HeapAllocator {
