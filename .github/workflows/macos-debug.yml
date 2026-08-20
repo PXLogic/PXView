@@ -1,0 +1,231 @@
+#===============================================================================
+#= macOS 崩溃调试工作流 (lldb backtrace)
+#-------------------------------------------------------------------------------
+# 目的: 手动触发 macOS (arm64) 构建,然后用 lldb 运行 headless 启动测试,
+#       在崩溃点自动抓取完整调用堆栈 (bt all)。
+#
+# 为什么用 lldb 而不是 gdb:
+#   - macOS 上 gdb 需要额外 codesign,且非 Apple 分发,基本不可用;
+#   - lldb 是 Apple 官方 (clang/LLVM) 调试器,macos-14 runner 自带。
+#
+# 用法:
+#   1. Actions → 选择本工作流 → Run workflow
+#   2. 可选输入:
+#      - ref:        要构建的分支/tag/commit (留空 = 默认分支)
+#      - build_type: RelWithDebInfo(默认,带符号且接近 Release 优化) / Release / Debug
+#      - wait_seconds: 等待崩溃的秒数;超过后给 PXView 发 SIGTERM 以便 lldb 收尾
+#                     (0 = 永不超时,若应用不崩溃则会一直等)
+#   3. 运行结束后下载 "lldb-backtrace" 产物,内含崩溃堆栈。
+#===============================================================================
+
+name: macOS Debug (lldb backtrace)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch/tag/commit SHA to build (empty = default branch)'
+        required: false
+        type: string
+        default: ''
+      build_type:
+        description: 'CMake build type (symbols matter for a useful backtrace)'
+        required: false
+        type: choice
+        default: 'RelWithDebInfo'
+        options:
+          - RelWithDebInfo
+          - Release
+          - Debug
+      wait_seconds:
+        description: 'Seconds to wait for the crash before SIGTERM (0 = wait forever)'
+        required: false
+        type: number
+        default: 30
+
+jobs:
+  macos-debug:
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - name: Resolve ref
+        id: ref
+        run: |
+          INPUT_REF="${{ github.event.inputs.ref }}"
+          if [ -n "$INPUT_REF" ]; then
+            echo "value=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved ref: $(cat "$GITHUB_OUTPUT" | grep value | cut -d= -f2)"
+
+      - name: Checkout PXView repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.value }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install dependencies via Homebrew
+        run: |
+          brew update
+          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
+
+      - name: Build fx2lafw firmware
+        run: |
+          bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
+
+      - name: Configure CMake
+        run: |
+          rm -rf build && mkdir -p build && cd build
+          export LDFLAGS="-L$(brew --prefix gettext)/lib"
+          export CPPFLAGS="-I$(brew --prefix gettext)/include"
+          export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
+            -DCMAKE_INSTALL_PREFIX=../install.dir
+
+      - name: Build and Install
+        run: |
+          cd build
+          ninja -j 4
+          ninja install
+
+      - name: Package .app bundle (macdeployqt + Python stdlib)
+        # 与 build.yml 的 macOS 打包保持一致,保证崩溃场景可复现。
+        run: |
+          set -e
+          MACDEPLOYQT="$(brew --prefix qt)/bin/macdeployqt"
+          APP="install.dir/PXView.app"
+
+          # Python framework 路径修正
+          PY_PREFIX="$(brew --prefix python3 2>/dev/null \
+                       || brew --prefix python@3.14 2>/dev/null \
+                       || brew --prefix python@3.13 2>/dev/null \
+                       || brew --prefix python@3.12 2>/dev/null)"
+          if [ -n "$PY_PREFIX" ]; then
+            mkdir -p "$PY_PREFIX/lib"
+            if [ ! -e "$PY_PREFIX/lib/Python.framework" ] && [ -e "$PY_PREFIX/Frameworks/Python.framework" ]; then
+              ln -s "$PY_PREFIX/Frameworks/Python.framework" "$PY_PREFIX/lib/Python.framework"
+            fi
+          fi
+
+          # macdeployqt 依赖收集 (把 Qt/Python dylib 打进 Frameworks)
+          $MACDEPLOYQT "$APP" -always-overwrite -verbose=1 || true
+
+          # 复制 Python 标准库到 bundled Python.framework
+          BUNDLED_FW="$APP/Contents/Frameworks/Python.framework"
+          if [ -d "$BUNDLED_FW" ]; then
+            for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
+              [ -d "$ver_dir" ] || continue
+              py_ver=$(basename "$ver_dir")
+              STDLIB_SRC=""
+              for fw_base in \
+                "$PY_PREFIX/Frameworks/Python.framework" \
+                "$PY_PREFIX/lib/Python.framework" \
+                "$(brew --prefix)/Frameworks/Python.framework"; do
+                if [ -d "$fw_base/Versions/$py_ver/lib/python$py_ver/encodings" ]; then
+                  STDLIB_SRC="$fw_base/Versions/$py_ver/lib/python$py_ver"
+                  break
+                fi
+              done
+              if [ -z "$STDLIB_SRC" ]; then
+                for candidate in "$(brew --prefix)/lib/python$py_ver" "$PY_PREFIX/lib/python$py_ver"; do
+                  if [ -d "$candidate/encodings" ]; then
+                    STDLIB_SRC="$candidate"
+                    break
+                  fi
+                done
+              fi
+              if [ -n "$STDLIB_SRC" ]; then
+                mkdir -p "$ver_dir/lib"
+                cp -R "$STDLIB_SRC" "$ver_dir/lib/"
+                echo "Copied Python stdlib (python$py_ver) to bundled framework"
+              else
+                echo "WARNING: Python stdlib not found for $py_ver"
+              fi
+            done
+            find "$BUNDLED_FW" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+            if [ ! -e "$BUNDLED_FW/Versions/Current" ]; then
+              latest_ver=$(ls -d "$BUNDLED_FW"/Versions/3.* 2>/dev/null | sort -V | tail -1)
+              if [ -n "$latest_ver" ]; then
+                ln -s "$(basename "$latest_ver")" "$BUNDLED_FW/Versions/Current"
+                echo "Created Current symlink -> $(basename "$latest_ver")"
+              fi
+            fi
+          else
+            echo "WARNING: Python.framework not found in bundle"
+          fi
+
+          # 清除隔离标记 + 临时 ad-hoc 签名 (runner 本地运行用)
+          xattr -cr "$APP" 2>/dev/null || true
+          codesign --force --sign - "$APP/Contents/MacOS/PXView" 2>/dev/null || true
+          codesign --force --sign - "$APP" 2>/dev/null || true
+          echo "=== .app 结构 ==="
+          ls "$APP/Contents/MacOS/"
+          ls "$APP/Contents/Frameworks/" | head -20
+
+      - name: Run headless under lldb and capture crash backtrace
+        run: |
+          set +e
+          APP_BIN="/private/tmp/PXView-dbg.app/Contents/MacOS/PXView"
+          rm -rf /private/tmp/PXView-dbg.app
+          cp -R install.dir/PXView.app /private/tmp/PXView-dbg.app
+          xattr -cr /private/tmp/PXView-dbg.app 2>/dev/null || true
+          file "$APP_BIN"
+
+          WAIT_SECONDS="${{ github.event.inputs.wait_seconds }}"
+          echo "=== lldb (batch) headless 启动 + 崩溃堆栈采集 ==="
+          echo "等待崩溃: ${WAIT_SECONDS}s (超过后 SIGTERM 收尾)"
+
+          # lldb 批量模式: 运行应用,若崩溃则自动执行 bt all
+          lldb --batch \
+            -o "settings set target.run-args --headless -l 4" \
+            -o "run" \
+            -o "bt all" \
+            -o "bt" \
+            -o "quit" \
+            "$APP_BIN" > /tmp/lldb-headless.log 2>&1 &
+          LLDB_PID=$!
+          KILLER_PID=""
+
+          # 若应用不崩溃,到点后给 PXView 发 SIGTERM,让 lldb 的 run 返回并打印当前线程栈
+          if [ "${WAIT_SECONDS:-30}" -gt 0 ] 2>/dev/null; then
+            (
+              sleep "$WAIT_SECONDS"
+              pkill -TERM -x PXView 2>/dev/null || true
+            ) &
+            KILLER_PID=$!
+          fi
+
+          wait "$LLDB_PID"
+          LLDB_RC=$?
+          if [ -n "$KILLER_PID" ]; then
+            kill "$KILLER_PID" 2>/dev/null || true
+          fi
+
+          echo "lldb exit code: $LLDB_RC"
+          echo ""
+          echo "=== lldb 输出 (含崩溃堆栈) ==="
+          cat /tmp/lldb-headless.log
+          echo ""
+          echo "=== 崩溃报告 .ips (若有) ==="
+          ls -lt ~/Library/Logs/DiagnosticReports/PXView-*.ips 2>/dev/null | head -3 || echo "无 .ips 崩溃报告"
+
+          # 收集诊断产物
+          mkdir -p /tmp/diag
+          cp /tmp/lldb-headless.log /tmp/diag/lldb-headless.log 2>/dev/null || true
+          cp ~/Library/Logs/DiagnosticReports/PXView-*.ips /tmp/diag/ 2>/dev/null || true
+          ls -la /tmp/diag/
+
+      - name: Upload lldb backtrace artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lldb-backtrace
+          path: |
+            /tmp/diag/*.log
+            /tmp/diag/*.ips
+          if-no-files-found: warn
