@@ -19,3 +19,6 @@
 	path = libusb
 	url = https://github.com/haikumuse/libusb.git
 	branch = event-abstraction-v4
+[submodule "mimalloc"]
+	path = mimalloc
+	url = https://github.com/microsoft/mimalloc.git

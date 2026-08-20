@@ -28,28 +28,17 @@
 
 #include <cstdlib>
 
-#if !defined(__APPLE__)
 #include <mimalloc.h>
-#endif
 
 namespace pv {
 namespace data {
 namespace decode {
 
 void *create_annotation_heap() {
-#if defined(__APPLE__)
-  // macOS: mimalloc is deliberately NOT linked into the executable — its
-  // global malloc-zone override crashes the embedded Python 3.14 during
-  // decoder import (libsystem malloc dispatches into the mimalloc zone and
-  // the allocation faults). Return NULL so annotation_heap_alloc/free use
-  // the plain std::malloc/std::free fallback below.
-  return nullptr;
-#else
   // Dedicated, thread-safe heap that never recycles to the OS until destroyed.
   // Each DecoderStack owns one, so the 16 decode threads no longer share the
   // process heap for annotation data.
   return mi_heap_new();
-#endif
 }
 
 void destroy_annotation_heap(void *heap) {
@@ -57,38 +46,30 @@ void destroy_annotation_heap(void *heap) {
   // refcount guarantees all RowData / AnnotationSegment / published snapshot
   // users are gone before this runs (same contract as the old HeapDestroy), so
   // no thread is touching the heap here.
-  if (heap) {
-#if !defined(__APPLE__)
+  if (heap)
     mi_heap_destroy(static_cast<mi_heap_t *>(heap));
-#endif
-  }
 }
 
 void *annotation_heap_alloc(void *heap, std::size_t n) {
-#if !defined(__APPLE__)
   if (heap)
     return mi_heap_malloc(static_cast<mi_heap_t *>(heap), n);
-#endif
   // null heap -> standard C allocator (safe fallback for callers that pass a
-  // null handle explicitly, e.g. perflog.h probes, or on macOS where the heap
-  // is intentionally disabled).
+  // null handle explicitly, e.g. perflog.h probes).
   return std::malloc(n);
 }
 
 void annotation_heap_free(void *heap, void *p) {
   if (!p)
     return;
-#if !defined(__APPLE__)
   if (heap) {
     // Route by the block's owning heap header (mimalloc reads it on the
     // pointer), thread-safe by design — handles the common case where the GUI
     // thread frees a block that a decode thread allocated on this heap.
     mi_free(p);
-    return;
+  } else {
+    // Match the null-heap allocation path above.
+    std::free(p);
   }
-#endif
-  // Match the null-heap allocation path above.
-  std::free(p);
 }
 
 } // namespace decode

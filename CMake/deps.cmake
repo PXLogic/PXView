@@ -244,66 +244,35 @@ include_directories(${Boost_INCLUDE_DIRS})
 find_package(Threads)
 
 #===============================================================================
-#= mimalloc (performance allocator)
-#= Used by libsigrokdecode/ann_batch.c for per-session annotation heaps.
+#= mimalloc (performance allocator) — built from source (vendored submodule)
+#= Used by libsigrokdecode/ann_batch.c and
+#= PXView/pv/data/decode/annotation_heap.cpp for per-session annotation heaps.
 #=
-#= macOS: mimalloc is NOT linked at all. Its global malloc-zone override
-#= (installed automatically when linked, because Homebrew builds with
-#= MI_OVERRIDE=ON) crashes the embedded Python 3.14 during decoder import —
-#= libsystem malloc dispatches into the mimalloc zone and the allocation
-#= faults. ann_batch.c and annotation_heap.cpp fall back to plain GLib/malloc
-#= on macOS (see the __APPLE__ guards), so no mi_* symbols are referenced and
-#= no mimalloc headers are needed.
+#= Built from the vendored submodule (mimalloc/, pinned to v3.5.0) with the
+#= global malloc override DISABLED (MI_OVERRIDE=OFF and, on macOS,
+#= MI_OSX_ZONE/MI_OSX_INTERPOSE=OFF).
 #=
-#= Discovery order (non-macOS):
-#=   1. find_package(mimalloc CONFIG) — CMake config files (Homebrew, vcpkg, MSYS2)
-#=      NOTE: target names differ across distributors:
-#=        - MSYS2 mingw: "mimalloc" / "mimalloc-static" (no namespace)
-#=        - Homebrew/vcpkg: "mimalloc::mimalloc" (namespaced)
-#=      We detect whichever target actually exists after find_package.
-#=   2. pkg_search_module — Linux apt libmimalloc-dev, MSYS2 fallback
-#=   3. Homebrew prefix — macOS fallback when no cmake config installed
-#=   4. Bare "mimalloc" — Linux/MSYS2 last resort (standard search paths)
+#= Why: Homebrew's prebuilt mimalloc is compiled with MI_OVERRIDE=ON, which on
+#= macOS installs a global malloc-zone override. The embedded Python 3.14 then
+#= dispatches its malloc (from ctypes struct init during decoder import)
+#= through libsystem_malloc into the mimalloc zone, where the allocation
+#= faults (EXC_BAD_ACCESS), crashing startup at srd_decoder_load_all.
+#=
+#= Building with the override off keeps the explicit mi_heap_* API (used by
+#= the annotation heaps) but registers no malloc override — one code path on
+#= all platforms, no per-platform #ifdefs.
 #-------------------------------------------------------------------------------
-set(MIMALLOC_LIB "")
-
-if(APPLE)
-	message(STATUS "----- mimalloc:")
-	message(STATUS "	 library: (disabled on macOS — malloc-zone override crashes embedded Python 3.14)")
-else()
-find_package(mimalloc CONFIG QUIET)
-if(mimalloc_FOUND)
-	# Detect the actual imported target name (varies by distributor)
-	if(TARGET mimalloc::mimalloc)
-		set(MIMALLOC_LIB mimalloc::mimalloc)
-	elseif(TARGET mimalloc-static)
-		# MSYS2: static import lib (links libmimalloc.a + system libs)
-		set(MIMALLOC_LIB mimalloc-static)
-	elseif(TARGET mimalloc)
-		# MSYS2: shared import lib (links libmimalloc.dll.a)
-		set(MIMALLOC_LIB mimalloc)
-	else()
-		# find_package set mimalloc_FOUND but no known target — fall through
-		set(mimalloc_FOUND FALSE)
-	endif()
-endif()
-
-if(NOT MIMALLOC_LIB)
-	# Try pkg-config (works on Linux apt libmimalloc-dev and MSYS2 mingw package)
-	pkg_search_module(MIMALLOC QUIET mimalloc)
-	if(MIMALLOC_FOUND)
-		set(MIMALLOC_LIB ${MIMALLOC_LIBRARIES})
-		link_directories(${MIMALLOC_LIBDIR})
-		include_directories(${MIMALLOC_INCLUDE_DIRS})
-	else()
-		# Linux / MSYS2: bare library name works with standard search paths
-		set(MIMALLOC_LIB mimalloc)
-	endif()
-endif()
+set(MI_OVERRIDE      OFF CACHE BOOL "Override standard malloc interface (disabled)" FORCE)
+set(MI_OSX_ZONE      OFF CACHE BOOL "macOS malloc-zone override (disabled)" FORCE)
+set(MI_OSX_INTERPOSE OFF CACHE BOOL "macOS interpose override (disabled)" FORCE)
+set(MI_BUILD_SHARED  OFF CACHE BOOL "Build shared library (not needed)" FORCE)
+set(MI_BUILD_OBJECT  OFF CACHE BOOL "Build object library (not needed)" FORCE)
+set(MI_BUILD_TESTS   OFF CACHE BOOL "Build test executables (not needed)" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/mimalloc EXCLUDE_FROM_ALL)
+set(MIMALLOC_LIB mimalloc-static)
 
 message("----- mimalloc:")
-message(STATUS "	 library: ${MIMALLOC_LIB}")
-endif()
+message(STATUS "	 library: ${MIMALLOC_LIB} (vendored submodule, MI_OVERRIDE=OFF)")
 
 #===============================================================================
 #= Aggregated link libraries for pxview-core / PXView executable
