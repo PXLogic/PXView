@@ -182,8 +182,8 @@ jobs:
           # (空格参数会被 lldb 当作自身选项,报 "unknown or ambiguous option")。
           lldb --batch \
             -o "run --headless -l 4" \
-            -o "bt all" \
-            -o "bt" \
+            -o "bt all -s" \
+            -o "bt -s" \
             -o "image lookup --address \$pc" \
             -o "register read pc x8 x9 x10 x11 lr" \
             -o "frame variable" \
@@ -211,6 +211,9 @@ jobs:
           echo ""
           echo "=== lldb 输出 (含崩溃堆栈) ==="
           cat /tmp/lldb-headless.log
+          echo ""
+          echo "=== 关键摘要 (帧/符号化/寄存器) ==="
+          grep -nE "frame #[0-9]|Summary:|Name:|stop reason|register read|General Purpose" /tmp/lldb-headless.log | head -120
           echo ""
           echo "=== 崩溃报告 .ips (若有) ==="
           ls -lt ~/Library/Logs/DiagnosticReports/PXView-*.ips 2>/dev/null | head -3 || echo "无 .ips 崩溃报告"
