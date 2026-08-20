@@ -83,6 +83,7 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
+            libmimalloc-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -411,6 +412,7 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
+            libmimalloc-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -626,6 +628,7 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
+            libmimalloc-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -898,6 +901,7 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
+            libmimalloc-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \

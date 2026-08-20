@@ -1,4 +1,4 @@
-﻿name: PXView Build
+name: PXView Build
 
 on:
   workflow_dispatch:
@@ -123,6 +123,7 @@ jobs:
             git gcc g++ make cmake ninja-build pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
+            libmimalloc-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libvulkan-dev \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-render0 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
@@ -414,7 +415,7 @@ jobs:
           else
             BREW_OVERWRITE=""
           fi
-          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
+          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v4
@@ -767,6 +768,7 @@ jobs:
             mingw-w64-ucrt-x86_64-qt6-websockets
             mingw-w64-ucrt-x86_64-qt6-multimedia
             mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-mimalloc
             mingw-w64-ucrt-x86_64-boost
             mingw-w64-ucrt-x86_64-fftw
             mingw-w64-ucrt-x86_64-zlib
