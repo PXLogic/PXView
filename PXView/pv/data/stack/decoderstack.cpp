@@ -130,6 +130,7 @@ DecoderStack::~DecoderStack() {
   _rows_gshow.clear();
   _rows_lshow.clear();
   _class_rows.clear();
+  _annotation_heap.reset();
 }
 
 // P0-A: Centralised error-message setter.  All _error_message assignments
@@ -748,7 +749,7 @@ void DecoderStack::do_decode_work() {
 
   _snapshot.reset();
 
-  pxv_info("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
+  pxv_detail("DecoderStack::do_decode_work: _stack size=%zu, checking required probes", _stack.size());
 
 if (!check_required_probes()) {
 set_error_message(QString::fromStdString(s_kRequiredChannelsMissing));
@@ -768,28 +769,28 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
     models_snapshot = _host->get_signal_models();
   }
 
-  pxv_info("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
+  pxv_detail("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
            models_snapshot.size());
 
   for (auto &up : _stack) {
     auto dec = up.get();
     if (dec->have_probes()) {
       int probe_idx = dec->first_probe_index();
-      pxv_info("DecoderStack::do_decode_work: decoder %p has probes, first_probe_index=%d, checking %zu signal_models",
-               dec, probe_idx, models_snapshot.size());
+      pxv_detail("DecoderStack::do_decode_work: decoder %p has probes, first_probe_index=%d, checking %zu signal_models",
+           dec, probe_idx, models_snapshot.size());
 
       for (auto m : models_snapshot) {
         bool index_match = (m->index() == probe_idx);
         bool type_match = (m->type() == SR_CHANNEL_LOGIC);
         bool snapshot_ok = (m->snapshot() != nullptr);
 
-        pxv_info("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
+        pxv_detail("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
                  m->index(), (int)m->type(), (int)SR_CHANNEL_LOGIC,
                  m->snapshot().get(), index_match, type_match, snapshot_ok);
 
         if (index_match && type_match) {
           _snapshot = std::static_pointer_cast<pv::data::LogicSnapshot>(m->snapshot());
-          pxv_info("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot.get());
+          pxv_detail("DecoderStack::do_decode_work: found matching model! _snapshot=%p", _snapshot.get());
           if (_snapshot != nullptr)
             break;
         }
@@ -797,7 +798,7 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
       if (_snapshot != nullptr)
         break;
     } else {
-      pxv_info("DecoderStack::do_decode_work: decoder %p has no probes, skipping", up.get());
+      pxv_detail("DecoderStack::do_decode_work: decoder %p has no probes, skipping", up.get());
     }
   }
 
@@ -890,7 +891,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   bool bEndTime = false;
 
   if (i >= decode_end) {
-    pxv_info("decode data index have been to end");
+    pxv_detail("decode data index have been to end");
   }
 
   std::vector<const uint8_t *> chunk;
@@ -919,12 +920,12 @@ void DecoderStack::decode_data(const uint64_t decode_start,
         bCheckEnd = true;
 
         uint64_t align_sample_count = _snapshot->get_sample_count();
-        pxv_info("DecoderStack debug: bCheckEnd triggered. get_sample_count() = %llu, end_index = %llu",
+        pxv_detail("DecoderStack debug: bCheckEnd triggered. get_sample_count() = %llu, end_index = %llu",
                  (unsigned long long)align_sample_count, (unsigned long long)end_index);
 
         if (end_index >= align_sample_count) {
           end_index = align_sample_count > 0 ? align_sample_count - 1 : 0;
-          pxv_info("Reset the decode end sample, new:%llu, old:%llu",
+          pxv_detail("Reset the decode end sample, new:%llu, old:%llu",
                    (u64_t)end_index, (u64_t)decode_end);
         }
 
@@ -1263,8 +1264,8 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
 
   struct decode_task_status *st = (decode_task_status *)self;
 
-  // P0-2 fix: _decoder is now a shared_ptr, keeping the DecoderStack alive
-  auto d = st->_decoder;  // copies the shared_ptr, ensuring lifetime
+  // lifecycle fix: weak_ptr -> lock() keeps the stack alive for this callback.
+  auto d = st->_decoder.lock();  // strong ref only for the duration of cb
   if (!d) {
     pxv_warn("%s", "DecoderStack::annotation_callback: d is nullptr");
     return;
@@ -1365,8 +1366,8 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
 
   struct decode_task_status *st = (decode_task_status *)self;
 
-  // P0-2 fix: _decoder is now a shared_ptr, keeping the DecoderStack alive.
-  auto d = st->_decoder;
+  // lifecycle fix: weak_ptr -> lock() keeps the stack alive for this callback.
+  auto d = st->_decoder.lock();
   if (!d) {
     pxv_warn("%s", "DecoderStack::annotation_callback_batch: d is nullptr");
     return;
@@ -1472,7 +1473,7 @@ void DecoderStack::analog_callback(srd_proto_data *pdata, void *self) {
   if (!pdata || !self)
     return;
   auto *st = static_cast<decode_task_status *>(self);
-  auto d = st->_decoder;
+  auto d = st->_decoder.lock();
   if (!d || st->_bStop.load(std::memory_order_relaxed))
     return;
   if (!pdata->pdo || pdata->pdo->output_type != SRD_OUTPUT_ANALOG)

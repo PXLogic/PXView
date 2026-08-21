@@ -71,9 +71,17 @@ class DecoderStack;
 struct decode_task_status
 {
     std::atomic<bool> _bStop{false};
-    // P0-2 fix: use shared_ptr instead of raw pointer so the callback
-    // safely keeps the DecoderStack alive for the duration of its execution.
-    std::shared_ptr<DecoderStack> _decoder;
+    // DECODERSTACK LIFECYCLE FIX: weak_ptr, not shared_ptr.
+    // A shared_ptr here creates a reference cycle:
+    //   DecoderStack -> _stask_stauts (member) -> _decoder -> DecoderStack
+    // The last decode_task_status stays in _stask_stauts forever, so the cycle
+    // keeps the DecoderStack alive indefinitely -> ~DecoderStack never runs ->
+    // _annotation_heap (mi_heap) leaks every add/remove cycle (~80MB each).
+    // Callers that need the stack during a callback must .lock() it; the decode
+    // thread already holds a strong shared_ptr (via DecodeTaskManager's task /
+    // _running_tasks) for the whole decode duration, so lock() is non-null
+    // during execution and there is no use-after-free.
+    std::weak_ptr<DecoderStack> _decoder;
 };
 
  //a torotocol have a DecoderStack, destroy by DecodeTrace
