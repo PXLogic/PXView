@@ -39,7 +39,6 @@
 #include "pv/data/decoderanalogdata.h"
 #include "pv/interface/icallbacks.h"
 #include "pv/ui/uimanager.h"
-#include "pv/view/renderer/render_worker.h"
 #include "pv/view/view.h"
 #include "pv/view/component/edge_nav_button.h"
 #include "pv/view/trace/trace.h"
@@ -148,9 +147,6 @@ public:
 
   // Public static constant (needed by ViewportInteraction)
   static constexpr int DragFrameInterval = 16;
-  // P2: minimum interval between data-driven signal-pixmap rebuilds (matches
-  // the RefreshRtTimer realtime-refresh cadence, 1000/30 ms = ~30 FPS).
-  static constexpr int PixmapRebuildIntervalMs = 33;
 
   QColor panelBgColor() const { return _panelBgColor; }
   void setPanelBgColor(QColor c) { _panelBgColor = c; }
@@ -235,12 +231,6 @@ private:
   void keyPressEvent(QKeyEvent *event) override;
   bool gestureEvent(QNativeGestureEvent *event);
 
-  // P1: called on the GUI thread (queued from the render worker) when a frame
-  // is published. Clears the pending-rebuild state (and need_update if the
-  // published frame still reflects the current data) and schedules a repaint.
-  void on_frame_published();
-
-
 private slots:
   void on_trigger_timer();
   void on_drag_timer();
@@ -273,20 +263,6 @@ public:
   int64_t& curOffset() { return _curOffset; }
   int& curSignalHeight() { return _curSignalHeight; }
   int& curVOffset() { return _curVOffset; }
-  // P2: fixed-FPS gate for data-driven signal-pixmap rebuilds. Timestamp of
-  // the last rebuild; SignalPixmapPass rebuilds a data-driven (need_update)
-  // pixmap at most once per PixmapRebuildIntervalMs, while interaction
-  // (view-param change / resize / first paint) always rebuilds immediately.
-  std::chrono::steady_clock::time_point& last_pixmap_rebuild() {
-    return _last_pixmap_rebuild;
-  }
-  // P1: background rasterization worker (static-layer waveform rendering).
-  RenderWorker& render_worker() { return _render_worker; }
-  // P1: sequence-tag the data/view state so the async renderer can tell
-  // whether the frame it published still reflects the current state.
-  uint64_t& data_seq() { return _data_seq; }
-  uint64_t& render_pending_seq() { return _render_pending_seq; }
-  bool& render_pending() { return _render_pending; }
 
   // B. Interaction state (ViewportInteraction)
   QPoint& mouse_point() { return _mouse_point; }
@@ -430,14 +406,6 @@ private:
   double _curScale;
   int64_t _curOffset;
   int _curSignalHeight;
-  // P2: last signal-pixmap rebuild timestamp (fixed-FPS gate; see
-  // last_pixmap_rebuild()). Steady clock, zeroed -> first rebuild immediate.
-  std::chrono::steady_clock::time_point _last_pixmap_rebuild{};
-  // P1: background rasterization worker + sequence-tag state.
-  RenderWorker _render_worker;
-  uint64_t _data_seq = 0;           // bumped by set_need_update(true)
-  uint64_t _render_pending_seq = 0; // data_seq at last submit
-  bool _render_pending = false;     // a rebuild is in flight in the worker
   bool _measure_en;
   ActionType _action_type;
   MeasureType _measure_type;
