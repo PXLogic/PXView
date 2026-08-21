@@ -42,7 +42,9 @@ jobs:
   release-build-and-tests:
     name: Release Build + Full E2E Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Raised 30 -> 60: the 3-way parallel E2E was being cancelled at the 30min
+    # job timeout before the full suite finished (masking real results).
+    timeout-minutes: 60
     permissions:
       contents: read
       checks: write
