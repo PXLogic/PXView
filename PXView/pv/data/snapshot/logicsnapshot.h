@@ -219,6 +219,14 @@ public:
         return _iterator_count.load(std::memory_order_acquire) > 0;
     }
 
+    /// Capture-boundary drain: block (bounded) until no active sample
+    /// iterators remain. Returns true if drained within the window.
+    /// A decode thread from the PREVIOUS capture may still hold a get_samples()
+    /// iterator, which makes free_data() defer freeing and accumulate old
+    /// capture buffers across a long session (group3 OOM / std::bad_alloc).
+    /// Call before free_data() at a capture boundary so the free actually runs.
+    bool wait_active_iterators_zero(int max_wait_ms = 3000);
+
     // RAII guard for iterator counting
     struct IteratorGuard {
         LogicSnapshot *_snap;

@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -147,6 +148,23 @@ LogicSnapshot::~LogicSnapshot() {
   _disk_cache_writer->drain_and_join();
   free_data();
 }
+bool LogicSnapshot::wait_active_iterators_zero(int max_wait_ms) {
+  const int kPollMs = 2;
+  int waited = 0;
+  while (has_active_iterators()) {
+    if (waited >= max_wait_ms) {
+      pxv_warn("LogicSnapshot::wait_active_iterators_zero: %d active "
+               "iterators still present after %d ms; proceeding (free will "
+               "be deferred/retried on the next boundary)",
+               _iterator_count.load(), max_wait_ms);
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kPollMs));
+    waited += kPollMs;
+  }
+  return true;
+}
+
 void LogicSnapshot::free_data() {
   // P1-6 fix: Skip memory optimization if there are active iterators
   // (e.g. the decode thread calling get_samples). This prevents
@@ -367,6 +385,12 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
       (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_drain_t1 - _drain_t0).count());
 
     auto _free_t0 = std::chrono::steady_clock::now();
+    // [OOM fix / capture boundary] The previous capture's decode thread may
+    // still hold a get_samples() iterator; free_data() would then defer and
+    // retain this snapshot's mmap buffers, accumulating working-set across a
+    // long session (group3 std::bad_alloc). Drain active iterators (bounded)
+    // so the free actually runs here.
+    wait_active_iterators_zero();
     free_data();
     auto _free_t1 = std::chrono::steady_clock::now();
     pxv_info("first_payload TIMING: free_data=%lldms",
@@ -1966,6 +1990,12 @@ LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
   if (!_is_loop) {
     auto it = std::make_unique<SegmentDataIterator>();
     begin_iteration();  // increment _iterator_count
+    // [TSan fix / B1] Acquire-load the published sample count so this read is
+    // ordered after the feed thread's release-store of `_ring_published` in
+    // append_payload_impl(). Establishes happens-before so the leaf-data bytes
+    // written by the capture thread are visible here, fixing the
+    // get_samples-vs-feed data race (TSan memmove report) for completed reads.
+    _ring_published.load(std::memory_order_acquire);
     it->current_sample = start;
     it->ch_order = get_ch_order(sig_index);
     if (it->ch_order < 0 || (unsigned int)it->ch_order >= _ch_data.size()) {
