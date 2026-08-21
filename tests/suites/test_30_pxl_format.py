@@ -132,11 +132,16 @@ class TestPxlFormat:
         """
         import zipfile as _zipfile
 
+        # The saved range is byte-aligned at 8 samples/byte (correct behavior:
+        # the implementation writes minimal, byte-aligned data with no
+        # extraneous leading samples). Align by 8 to match the actual saved
+        # length; aligning by 64 adds up to 63 spurious leading samples and
+        # shifts cursor features on reload.
         def align_down(x: int) -> int:
-            return x - (x % 64)
+            return x - (x % 8)
 
         def align_up(x: int) -> int:
-            return x + ((64 - x % 64) % 64)
+            return x + ((8 - x % 8) % 8)
 
         status = do_buffer_capture_with_pattern(
             mcp, device_id, channels=[0, 1],
