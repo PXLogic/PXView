@@ -28,6 +28,7 @@
 #include <libsigrok/libsigrok.h>
 #include <QString>
 #include <QVector>
+#include <atomic>
 #include <map>
 #include <thread>
 #include <mutex>
@@ -412,7 +413,11 @@ private:
     // support. DSL/PXLogic devices still use SR_CONF_DEVICE_MODE via the
     // driver, but this cache is always updated so get_work_mode() is
     // consistent.
-    int     _app_work_mode = LOGIC;
+    // Atomic: get_work_mode() writes the cached value (DSL/demo path) from
+    // both the device session thread (DataFeedParser::data_feed_in) and the
+    // GUI main thread (ViewStatus::paintEvent -> View::get_work_mode), and
+    // set_work_mode() writes it from the main thread.
+    std::atomic<int> _app_work_mode{LOGIC};
 
     // Cached mode list built by get_device_mode_list() based on the device's
     // channel capabilities (logic/analog/DSO). Owned by DeviceAgent — freed

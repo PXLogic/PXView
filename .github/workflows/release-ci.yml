@@ -82,7 +82,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git gcc g++ make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build pkg-config gdb \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libmimalloc-dev \
@@ -411,7 +411,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git gcc g++ make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build pkg-config gdb \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libmimalloc-dev \
@@ -529,6 +529,45 @@ jobs:
           done
 
           if [ "$READY" -eq 1 ]; then
+            # ---- Hang watchdog: probe the MCP endpoint; if PXView stops
+            #      responding for WATCHDOG_STALL_SECONDS (GUI-mode main thread
+            #      freeze), dump all thread stacks via gdb, then SIGABRT so the
+            #      frozen main-thread stack is captured in the CI log instead
+            #      of burning the whole job timeout. ----
+            WATCHDOG_STALL_SECONDS=120
+            WATCHDOG_PROBE_INTERVAL=5
+            # Allow gdb attach (ubuntu runners default to yama ptrace_scope=1)
+            sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+            (
+              set +e
+              last_ok=$(date +%s)
+              while kill -0 "$PXV_PID" 2>/dev/null; do
+                sleep "$WATCHDOG_PROBE_INTERVAL"
+                RESP=$(curl -s -X POST "$MCP_URL" \
+                  -H "Content-Type: application/json" \
+                  -d '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' \
+                  --max-time 3 2>/dev/null || true)
+                now=$(date +%s)
+                if echo "$RESP" | grep -q '"result"'; then
+                  last_ok=$now
+                  continue
+                fi
+                if [ $((now - last_ok)) -ge "$WATCHDOG_STALL_SECONDS" ]; then
+                  echo "===== WATCHDOG: MCP unresponsive for ${WATCHDOG_STALL_SECONDS}s — PXView main thread may be frozen ====="
+                  if command -v gdb >/dev/null 2>&1; then
+                    gdb -p "$PXV_PID" -batch \
+                      -ex "set pagination off" \
+                      -ex "set confirm off" \
+                      -ex "thread apply all bt" 2>&1 | head -400 || true
+                  else
+                    echo "WATCHDOG: gdb not installed, cannot dump stacks"
+                  fi
+                  echo "===== WATCHDOG: sending SIGABRT to PXView ($PXV_PID) ====="
+                  kill -ABRT "$PXV_PID" 2>/dev/null || true
+                  break
+                fi
+              done
+            ) &
             echo "=== Running ASan core E2E test subset ==="
             echo "test_01: MCP protocol (9 tests)"
             echo "test_03: capture basic (13 tests)"
@@ -627,7 +666,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git gcc g++ make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build pkg-config gdb \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libmimalloc-dev \
@@ -806,6 +845,45 @@ jobs:
           done
 
           if [ "$READY" -eq 1 ]; then
+            # ---- Hang watchdog: probe the MCP endpoint; if PXView stops
+            #      responding for WATCHDOG_STALL_SECONDS (GUI-mode main thread
+            #      freeze), dump all thread stacks via gdb, then SIGABRT so the
+            #      frozen main-thread stack is captured in the CI log instead
+            #      of burning the whole job timeout. ----
+            WATCHDOG_STALL_SECONDS=120
+            WATCHDOG_PROBE_INTERVAL=5
+            # Allow gdb attach (ubuntu runners default to yama ptrace_scope=1)
+            sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+            (
+              set +e
+              last_ok=$(date +%s)
+              while kill -0 "$PXV_PID" 2>/dev/null; do
+                sleep "$WATCHDOG_PROBE_INTERVAL"
+                RESP=$(curl -s -X POST "$PXVIEW_MCP_URL" \
+                  -H "Content-Type: application/json" \
+                  -d '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' \
+                  --max-time 3 2>/dev/null || true)
+                now=$(date +%s)
+                if echo "$RESP" | grep -q '"result"'; then
+                  last_ok=$now
+                  continue
+                fi
+                if [ $((now - last_ok)) -ge "$WATCHDOG_STALL_SECONDS" ]; then
+                  echo "===== WATCHDOG: MCP unresponsive for ${WATCHDOG_STALL_SECONDS}s — PXView main thread may be frozen ====="
+                  if command -v gdb >/dev/null 2>&1; then
+                    gdb -p "$PXV_PID" -batch \
+                      -ex "set pagination off" \
+                      -ex "set confirm off" \
+                      -ex "thread apply all bt" 2>&1 | head -400 || true
+                  else
+                    echo "WATCHDOG: gdb not installed, cannot dump stacks"
+                  fi
+                  echo "===== WATCHDOG: sending SIGABRT to PXView ($PXV_PID) ====="
+                  kill -ABRT "$PXV_PID" 2>/dev/null || true
+                  break
+                fi
+              done
+            ) &
             echo "=== Running MCP + capture tests under TSan (GUI mode) ==="
             cd tests
             export PYTHONPATH="$PWD:$PYTHONPATH"
@@ -900,7 +978,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git gcc g++ make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build pkg-config gdb \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libmimalloc-dev \
