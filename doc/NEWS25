@@ -88,6 +88,12 @@ FPGA/IC吹水群：377248676
     *修复长跑采集后内存耗尽（std::bad_alloc）：采集边界排空上一采集解码线程仍持有的活动迭代器后再执行 free_data（wait_active_iterators_zero），使旧采集 mmap/leaf 块真正被回收，避免多采集累积；修复 begin_sample_iteration 首个分块读取缺少 _ring_published acquire，消除解码线程 get_samples 与采集线程数据写入的 TSan 数据竞态
     *修复添加/移除解码器的内存泄漏：打破 DecoderStack 引用环（decode_task_status::_decoder 由 shared_ptr 改为 weak_ptr，回调经 lock() 取强引用），根除每轮 add/remove 约 80MB 泄漏与 MCP 超时
     *修复 macOS 无头启动崩溃：禁用 mimalloc 全局 malloc override，mimalloc 改为 vendored 子模块源码构建（libsigrokdecode 注解堆继续使用 mi_heap）
+    *修复 load_capture 设备切换并发清除解码器栈导致的堆损坏崩溃（Windows 全页堆 verifier stop/SIGSEGV）：GUI 主线程与 MCP worker 并发清空销毁同一 SessionDocument::_decoder_stacks，std::vector 双线程 clear+析构数据竞争导致悬垂/双释放。修复：_decoder_stacks 增加 _stacks_mutex 并统一走加锁且幂等的 clear_decoder_stacks()；set_device 销毁解码栈前先 clear_all_decode_task2() 等待解码 worker 真正结束；修复 main.cpp 消息处理器临时 QByteArray::constData() 悬垂指针 UAF
+    *修复解码终快照尾段缺注解（SWD/I2S/MIPI 尾段无解码）：libsigrokdecode 批量收集器仅内部数组达 SRD_ANN_BATCH_MAX(1024) 时自动 flush，尾部分批仅在 srd_session_destroy 时补投递，晚于 publish_snapshot()，导致低注解量解码器发布快照只含整批倍数而尾批丢失（swd_c=1024 等）。修复：srd_session_end 之后、publish_snapshot() 之前显式调用 srd_ann_batch_flush(session)；同步修复 i2c_c 无条件发射 start=end=UINT64_MAX 的无效 ATK 着色注解
+    *修复 FilterProcessor::wait_idle 的轮询空窗：改为委托线程池 wait_for_idle 真正 join 等待 glitch/invert 任务完成（覆盖 submit→执行空窗），使 init_signals 重建前的滤波任务可靠结束
+    *修复卸载残留文件：卸载时 taskkill /F 强制结束 PXView/PXView-Agent 进程并 Sleep 等待句柄释放，所有 RMDir /r 增加 /REBOOTOK，解决旧主程序未退出导致的文件锁定与卸载后目录残留
+    *修复多线程竞争读写的潜在问题，为_work_mode变量添加atomic修饰符
+
 
     【重构】
     *完成 Plan B 架构重构：引入 ThreadPool 统一线程管理、SharedState 同步原语（cv.wait_for 取代 QEventLoop 轮询，消除事件队列死锁）、EventBus 改为 subscribe<T>+RAII Subscription（移除 IEventListener 45 个 on_event 虚函数）
@@ -106,6 +112,7 @@ FPGA/IC吹水群：377248676
     *libsigrokdecode 上游借用（upstream borrow）+ vtable 分发适配（srd_get_last_error/srd_session_inst_list_get 等新 API）
     *解码器选项 prop::Bool 支持眼睛按钮与 int64 存储模式；DecodeTrace 模拟波形渲染与命中测试（hit_test_analog_channel/auto_fit_visible_analog）
     *EventBus 重构为 Copy-on-Write 订阅表（_snapshot + rebuild_snapshot + version()）
+    *移除无用的调试日志和冗余警告日志，降低日志噪音
 
     【构建与工程】
     *MSYS2 工具链切换到 UCRT64 替代 MinGW64（CI/构建脚本/打包脚本/deps 全量适配）
@@ -118,6 +125,7 @@ FPGA/IC吹水群：377248676
     *Debug 构建启用 _GLIBCXX_ASSERTIONS；mmap 分配器 ASan 中毒检测（ASAN_POISON_MEMORY_REGION）；关闭 UBSan alignment 检查（minilzo 兼容）
     *Windows 便携包打包优化（zip -r -9 最高压缩并列出内容校验）；移除 Python embeddable 下载（依赖 UCRT64 mingw-w64-python 的 stdlib+.pyd）
     *ENABLE_TESTS 改为 CACHE BOOL 修复 CMP0077 冲突；source 文件清单（core/gui/data）全量适配新目录布局；PCH 路径更新
+    *NSIS 打包脚本适配 PXView-Agent：根据是否构建 Agent 通过编译期条件动态生成桌面快捷方式，/DPXVIEW_AGENT 参数由脚本随版本同源一致传入，修复重复定义问题
 
     【测试与 CI】
     *测试系统迁移到 QTest+CTest 架构（tests/qtest 分 core/data/api/view 四层，QT_QPA_PLATFORM=offscreen 无头运行），移除旧自定义框架与 Google Test
@@ -133,6 +141,7 @@ FPGA/IC吹水群：377248676
     *修正 pxl 保存范围断言按 8 采样对齐（对齐 64→8），匹配当前正确实现
     *CI：release E2E 超时 30→60 分钟；macOS 构建触发逻辑与说明更新
     *macOS 调试工作流（macos-debug.yml）：新增手动 lldb 崩溃回溯工作流、修复 lldb on-crash 命令导致堆栈未打印、headless 采集改用 'run --headless -l 4'、优化日志输出与 debug info 收集、更新工作流配置
+    *CI 作业新增主线程卡死监控与崩溃转储：Ubuntu 构建作业安装 gdb，看门狗脚本检测 PXView 主线程无响应超过 120 秒时通过 gdb 导出所有线程栈并触发 SIGABRT 保留崩溃现场
 
     PXView V1.5.7修改
     时间：2026年8月9日
