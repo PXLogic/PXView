@@ -913,17 +913,16 @@ jobs:
         shell: pwsh
         run: |
           $installer = "PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe"
-          # Enable the "PXView Agent" desktop/start-menu shortcut only when the
-          # Tauri wrapper was actually built into package\. window_nisi.nsi ALSO
-          # auto-detects this at compile time — this flag is an explicit knob.
-          $nsisOpts = @("/DPRODUCT_VERSION=${{ steps.version.outputs.value }}")
+          # Enabling the "PXView Agent" shortcut is handled INSIDE window_nisi.nsi
+          # by compile-time auto-detection (it only defines PXVIEW_AGENT when
+          # package\PXView-Agent.exe exists). Do NOT pass /DPXVIEW_AGENT here:
+          # defining the same symbol twice is a fatal NSIS error.
           if (Test-Path "package/PXView-Agent.exe") {
-            Write-Host "PXView-Agent.exe present -> enabling PXView Agent shortcut"
-            $nsisOpts += "/DPXVIEW_AGENT"
+            Write-Host "PXView-Agent.exe present -> PXView Agent shortcut will be created (auto-detect)"
           } else {
-            Write-Host "PXView-Agent.exe not built -> skipping PXView Agent shortcut"
+            Write-Host "PXView-Agent.exe not built -> will skip PXView Agent shortcut (auto-detect)"
           }
-          & makensis @nsisOpts window_nisi.nsi
+          & makensis "/DPRODUCT_VERSION=${{ steps.version.outputs.value }}" window_nisi.nsi
           if (Test-Path $installer) {
             Write-Host "Installer created: $installer"
             Get-Item $installer | Format-List Name, Length, LastWriteTime
