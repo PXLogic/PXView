@@ -9,15 +9,15 @@
 	url = https://github.com/sigrokproject/sigrok-util.git
 [submodule "libsigrok"]
 	path = libsigrok
-	url = https://github.com/haikumuse/libsigrok.git
+	url = https://github.com/PXLogic/libsigrok.git
 	branch = pxview-fork
 [submodule "libsigrokdecode"]
 	path = libsigrokdecode
-	url = https://github.com/haikumuse/libsigrokdecode.git
+	url = https://github.com/PXLogic/libsigrokdecode.git
 	branch = pxview-fork
 [submodule "libusb"]
 	path = libusb
-	url = https://github.com/haikumuse/libusb.git
+	url = https://github.com/PXLogic/libusb.git
 	branch = event-abstraction-v4
 [submodule "mimalloc"]
 	path = mimalloc
