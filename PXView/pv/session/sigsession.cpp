@@ -627,6 +627,15 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
     pxv_info("Switch to device \"%s\" done.",
              _state->device_agent().name().toUtf8().data());
 
+  // 线程生命周期纪律：销毁解码栈前必须先等所有解码 worker 真正结束。
+  // 仅 set stop 标志不够——worker 可能仍在其内部写注解/持有 shared_ptr，
+  // 随即 clear_active_document_decoders() 销毁 DecoderStack 会触发 UAF/
+  // 双重释放（页堆下即 in ~DecoderStack 的 _Sp_counted_base::_M_release
+  // SIGSEGV，load_capture→set_device 必现）。rst_decoder/remove_decoder 已
+  // 走 wait_for_task_finished；批量清理这里统一走 clear_all_decode_task2()
+  // （stop 全部 + _decode_pool.wait_for_idle() + 清 _running_tasks）。
+  _decode_task_manager->clear_all_decode_task2();
+
   // 问题2修复：设备切换只清活动文档的解码器，非活动文档（如 pxl 标签页
   // 的文档）的解码器保留，避免切换设备后历史文档被清空。
   _document_registry->clear_active_document_decoders();
@@ -2303,11 +2312,16 @@ void SigSession::clear_all_decoder(bool bUpdateView) {
   int dex = -1;
   clear_all_decode_task(dex);
 
-  // P0-3 fix: _delete_flag removed — shared_ptr manages lifetime.
-  // The running stack (if any) will be released when its decode thread
-  // finishes and decode_single_task() removes it from _running_tasks.
-
-  decode_traces().clear();
+  // 并发安全修复：清除解码器栈统一走加锁且幂等的
+  // SessionDocument::clear_decoder_stacks()。GUI 主线程的
+  // CurrentDeviceChangePrev→del_all_protocol（异步）与 MCP worker 线程的
+  // set_device→clear_active_document_decoders 会同时清同一份文档栈，若各自
+  // .clear() 会数据竞争/双释放 → Windows 堆损坏/SIGSEGV。这里与 Core 侧
+  // 用同一把 _stacks_mutex 串行化（后到的看到空向量即无操作）。
+  if (auto *doc = _document_registry->get_active_document())
+    doc->clear_decoder_stacks();
+  else
+    decode_traces().clear();  // 无活动文档兜底（极少：headless 单文档场景）
 
   // decode_traces() returns _active_document->get_decoder_stacks() (or
   // _empty_decoder_stacks), so the clear above already removed them from

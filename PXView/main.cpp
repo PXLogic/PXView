@@ -55,7 +55,12 @@
 
 void myMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
-    const char *msg_str = msg.toUtf8().constData();
+    // Keep the QByteArray alive across the fprintf/strstr calls: msg.toUtf8()
+    // returns a temporary, and constData() points into it — using it after the
+    // temporary is destroyed is a use-after-free (page heap ASAN turns it into
+    // a startup SIGSEGV). Bind to a named QByteArray first.
+    const QByteArray utf8 = msg.toUtf8();
+    const char *msg_str = utf8.constData();
     fprintf(stderr, "QtMsg: %s (file: %s, line: %d, function: %s)\n", 
             msg_str ? msg_str : "", 
             context.file ? context.file : "", 

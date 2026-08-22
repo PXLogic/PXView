@@ -145,17 +145,8 @@ DocumentRegistry::get_all_documents() const {
 
 void DocumentRegistry::clear_all_documents_decoders() {
   for (auto &ptr : _owned_documents) {
-    if (!ptr)
-      continue;
-    auto &stacks = ptr->get_decoder_stacks();
-    for (auto stack : stacks) {
-      if (stack->IsRunning()) {
-        // P0-3 fix: _delete_flag removed — just stop the work, shared_ptr
-        // manages the lifetime when the stacks vector is cleared below.
-        stack->stop_decode_work();
-      }
-    }
-    stacks.clear();
+    if (ptr)
+      ptr->clear_decoder_stacks();  // 加锁、幂等、并发安全
   }
 }
 
@@ -163,16 +154,15 @@ void DocumentRegistry::clear_active_document_decoders() {
   // 问题2修复：设备切换（set_device）时只清活动文档的解码器栈，避免非活动
   // 文档（如 pxl 标签页的文档）的解码器被误清。所有运行中的解码任务仍会
   // 停止（解码线程可能持有指向被释放数据的指针），但只有活动文档的栈被清空。
-  for (auto &ptr : _owned_documents) {
-    if (!ptr || ptr.get() != get_active_document())
-      continue;
-    auto &stacks = ptr->get_decoder_stacks();
-    for (auto stack : stacks) {
-      if (stack->IsRunning())
-        stack->stop_decode_work();
-    }
-    stacks.clear();
-  }
+  //
+  // 并发安全修复：此函数可能被 MCP worker 线程（load_capture→set_device）
+  // 与 GUI 主线程（CurrentDeviceChangePrev→del_all_protocol→clear_all_decoder）
+  // 同时调用并各自清同一份文档栈 → 双线程 .clear() 数据竞争/双释放。统一走
+  // SessionDocument::clear_decoder_stacks()（内部加锁 + 幂等）：先清空的销毁
+  // 全部栈，后到的看到空向量即无操作。
+  auto *doc = get_active_document();
+  if (doc)
+    doc->clear_decoder_stacks();
 }
 
 void DocumentRegistry::clear_capture_owner_document(data::SessionDocument *doc) {

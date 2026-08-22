@@ -9,6 +9,7 @@
  */
 
 #include "pv/data/document/sessiondocument.h"
+#include "pv/data/stack/decoderstack.h"  // DecoderStack (IsRunning/stop_decode_work complete type)
 #include "pv/base/log.h"
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/data/stack/mathstack.h"
@@ -133,6 +134,24 @@ void SessionDocument::remove_decoder_stack(std::shared_ptr<DecoderStack> stack) 
   auto it = std::find(_decoder_stacks.begin(), _decoder_stacks.end(), stack);
   if (it != _decoder_stacks.end())
     _decoder_stacks.erase(it);
+}
+
+// 幂等 + 并发安全的清空。设备切换时 MCP worker 线程（set_device→
+// clear_active_document_decoders）与 GUI 主线程（CurrentDeviceChangePrev→
+// del_all_protocol→clear_all_decoder）会同时清同一份 _decoder_stacks：直接
+// .clear() 是双线程数据竞争 → 迭代器/对象悬垂 → Windows 堆损坏/SIGSEGV。
+// 统一加锁串行化：先清空的在锁内销毁所有栈，后到的看到空向量即无操作。
+void SessionDocument::clear_decoder_stacks() {
+  std::lock_guard<std::mutex> lock(_stacks_mutex);
+  for (auto &s : _decoder_stacks)
+    if (s && s->IsRunning())
+      s->stop_decode_work();
+  _decoder_stacks.clear();
+}
+
+bool SessionDocument::decoder_stacks_empty() const {
+  std::lock_guard<std::mutex> lock(_stacks_mutex);
+  return _decoder_stacks.empty();
 }
 
 // DataSource pure-virtual overrides. SessionDocument does NOT own live copies

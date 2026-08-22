@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace pv {
@@ -96,6 +97,13 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   get_decoder_stacks(SessionDocument *doc = nullptr) override;
   void add_decoder_stack(std::shared_ptr<DecoderStack> stack);
   void remove_decoder_stack(std::shared_ptr<DecoderStack> stack);
+  // 并发安全地清空解码器栈（含 stop）。load_capture/set_device（MCP worker
+  // 线程）与 CurrentDeviceChangePrev→del_all_protocol（GUI 主线程，异步）会
+  // 并发清同一份 _decoder_stacks，直接 .clear() 双线程并发 = 数据竞争/双释放。
+  // 统一走这里加锁且幂等的清空可消除该竞争（第二次调用看到空向量即无操作，
+  // 由同一把 _stacks_mutex 串行化）。
+  void clear_decoder_stacks();
+  bool decoder_stacks_empty() const;
   // get_signal_models()/get_spectrum_stacks()/get_math_stack()/
   // get_lissajous_model() below are DataSource overrides returning
   // empty/null because SessionDocument never populated these fields (only
@@ -203,6 +211,9 @@ private:
   uint64_t _samplelimits;
   uint64_t _trigger_pos;
   std::vector<std::shared_ptr<DecoderStack>> _decoder_stacks;
+  // 串行化对 _decoder_stacks 的并发清除（设备切换时 MCP worker 线程与 GUI
+  // 主线程会同时 clear；见 clear_decoder_stacks() 注释）。
+  mutable std::mutex _stacks_mutex;
   // Dead storage removed (purify-architecture-concepts Task 1):
   // _decoder_model / _signal_models / _spectrum_stacks / _math_stack /
   // _lissajous_model were never populated (only clear()-ed) and shadowed the
