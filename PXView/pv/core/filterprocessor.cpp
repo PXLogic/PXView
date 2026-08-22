@@ -34,18 +34,14 @@ void FilterProcessor::stop() {
   _filter_pool.shutdown();
 }
 
-void FilterProcessor::wait_idle(int max_wait_ms) {
-  const auto t0 = std::chrono::steady_clock::now();
-  while (_glitch_filter_running.load(std::memory_order_acquire) ||
-         _signal_invert_running.load(std::memory_order_acquire)) {
-    if (std::chrono::steady_clock::now() - t0 >
-        std::chrono::milliseconds(max_wait_ms)) {
-      pxv_warn("FilterProcessor::wait_idle: tasks still running after %dms; "
-               "proceeding anyway (snapshot rebuild may race).", max_wait_ms);
-      return;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
+void FilterProcessor::wait_idle(int) {
+  // [lifetime discipline] Delegate join to the worker pool. wait_for_idle()
+  // blocks until every queued/running glitch/invert task has truly finished,
+  // which is more reliable than polling a running flag: it covers the
+  // submit->execution window and cannot wedge if a task faults before clearing
+  // its flag. This is the Krita-style "join before teardown" guarantee that
+  // closes the group3 test_36 crash (background copier vs snapshot rebuild).
+  _filter_pool.wait_for_idle();
 }
 
 void FilterProcessor::set_glitch_filter(
