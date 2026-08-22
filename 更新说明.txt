@@ -8,7 +8,7 @@ FPGA/IC吹水群：377248676
 --------------------------------------------------------------------------------
   
     PXView V1.5.8修改
-    时间：2026年8月20日
+    时间：2026年8月22日
     变更如下：
 
     【新功能】
@@ -54,6 +54,7 @@ FPGA/IC吹水群：377248676
     *TDM/PWM 解码内存优化：DecoderAnalogData 几何扩容 + 增量 min/max 缓存；按采样量自适应分块（>1000 万样本或 >10s → 64K，否则 32K）
     *MmapAllocator 页面回收逻辑修正：SEC_RESERVE 下保持 written 标志复用后显式 memset，Linux madvise 返回 true 跳过 memset
     *DeviceAgent 常驻会话线程替代每帧 std::thread，避免 Windows 频繁线程退出造成的 GLib/CRT 状态撕裂
+    *移除后台渲染 Worker（RenderWorker/渲染三重缓冲），波形渲染改为 GUI 线程同步渲染，消除交互缩放/平移 1~2 帧延迟
 
     【问题修复】
     *修复采样率异常时解码崩溃：DecoderStack 捕获 srd_session_metadata_set 返回值，失败销毁 session 提前返回（修复堆损坏 0xC0000374）
@@ -83,6 +84,10 @@ FPGA/IC吹水群：377248676
     *修复 SR_CONF_INSTANT 仅对 demo/DSLogic/DSCope 下发，避免 PXLogic 刷日志/失败
     *修复 MSYS2/MinGW 编译缺 nlohmann_json 头、viewport.cpp 死代码 windows/psapi include 破坏 Linux/macOS 构建
     *修复 demo 设备采集视图时间轴与内存占用、wait_capture 超时未被 timeoutSeconds 尊重
+    *修复 Group3 回归测试段错误崩溃（test_36 毛刺滤波 i2c）：毛刺滤波后台任务按原始指针读取当前逻辑快照，与采集/配置边界 init_signals 重建信号模型并发，导致 LogicSnapshot::copy_from 读取已释放的 mmap 块而 SIGSEGV。修复：init_signals 重建前等待滤波任务空闲（FilterProcessor::wait_idle）；新增 _backup_mutex 串行化滤波/反相/清除对 live↔backup 快照的 copy_from；copy_from 执行期间锁定源快照迭代器（_iterator_count），使并发 free_data 延迟释放
+    *修复长跑采集后内存耗尽（std::bad_alloc）：采集边界排空上一采集解码线程仍持有的活动迭代器后再执行 free_data（wait_active_iterators_zero），使旧采集 mmap/leaf 块真正被回收，避免多采集累积；修复 begin_sample_iteration 首个分块读取缺少 _ring_published acquire，消除解码线程 get_samples 与采集线程数据写入的 TSan 数据竞态
+    *修复添加/移除解码器的内存泄漏：打破 DecoderStack 引用环（decode_task_status::_decoder 由 shared_ptr 改为 weak_ptr，回调经 lock() 取强引用），根除每轮 add/remove 约 80MB 泄漏与 MCP 超时
+    *修复 macOS 无头启动崩溃：禁用 mimalloc 全局 malloc override，mimalloc 改为 vendored 子模块源码构建（libsigrokdecode 注解堆继续使用 mi_heap）
 
     【重构】
     *完成 Plan B 架构重构：引入 ThreadPool 统一线程管理、SharedState 同步原语（cv.wait_for 取代 QEventLoop 轮询，消除事件队列死锁）、EventBus 改为 subscribe<T>+RAII Subscription（移除 IEventListener 45 个 on_event 虚函数）
@@ -124,6 +129,10 @@ FPGA/IC吹水群：377248676
     *CI 构建修复：Ubuntu24.04 C 扩展复制（_struct 定位+fallback）、UBSan alignment、绝对路径测试报告、setup-python 移到打包前、Python 3.14（deadsnakes PPA）、qtmultimedia/nlohmann-json 依赖
     *新增 republish-release.yml 重发布资产工作流；test-gates.yml 分层门禁工作流（后移除）；release-ci 测试分组扩容（test_29~36 共 8 个新用例）
     *新增三份压力测试脚本：c4_three_load_stress（稠密/稀疏×长时采集+渲染+解码并发压测）
+    *可选 8 位 sweep 采样率测试导出左游标改为范围级语义校验（断言导出行数 ≤ 区间长度且均为合法逻辑位），去掉依赖随机位的首行精确断言，消除 flaky
+    *修正 pxl 保存范围断言按 8 采样对齐（对齐 64→8），匹配当前正确实现
+    *CI：release E2E 超时 30→60 分钟；macOS 构建触发逻辑与说明更新
+    *macOS 调试工作流（macos-debug.yml）：新增手动 lldb 崩溃回溯工作流、修复 lldb on-crash 命令导致堆栈未打印、headless 采集改用 'run --headless -l 4'、优化日志输出与 debug info 收集、更新工作流配置
 
     PXView V1.5.7修改
     时间：2026年8月9日
