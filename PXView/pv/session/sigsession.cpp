@@ -1290,6 +1290,15 @@ void SigSession::init_signals() {
 
   std::vector<std::shared_ptr<data::SignalModel>> models;
 
+  // [group3 crash fix] init_signals is a capture/config boundary that clears
+  // view_data / rebuilds signal models below, destroying the live logic
+  // snapshot. A running glitch-filter/invert background task reads that
+  // snapshot by raw pointer (copy_from/apply); wait for it to finish first,
+  // else SIGSEGV in LogicSnapshot::copy_from (group3 test_36 crash).
+  if (_filter_processor) {
+    _filter_processor->wait_idle();
+  }
+
   _state->capture_data()->clear();
   _state->view_data()->clear();
   set_cur_snap_samplerate(_state->device_agent().get_sample_rate());

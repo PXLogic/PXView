@@ -1604,6 +1604,27 @@ void LogicSnapshot::capture_ended() {
 void LogicSnapshot::copy_from(const LogicSnapshot &src) {
 std::lock_guard<std::recursive_mutex> lock(_mutex);
 
+// [group3 crash fix] Guard the SOURCE snapshot with a read iterator for the
+// whole copy. Below we memcpy src._ch_data leaf blocks by raw pointer; a
+// concurrent free_data()/clear on src (first_payload / capture boundary,
+// e.g. while a glitch-filter task copies/restores the live snapshot) honors
+// has_active_iterators() + wait_active_iterators_zero(), so raising src's
+// count makes the release DEFER until this copy completes. This closes the
+// use-after-free (SIGSEGV in copy_from -> memmove) that crashed the group3
+// E2E at test_36_glitch_filter_i2c_e2e.py.
+auto &src_mut = const_cast<LogicSnapshot &>(src);
+const bool src_is_self = (this == &src_mut);
+if (!src_is_self) {
+  src_mut.begin_iteration();
+}
+struct SrcIteratorGuard {
+  LogicSnapshot *s;
+  LogicSnapshot *self;
+  ~SrcIteratorGuard() {
+    if (s && self && s != self) s->end_iteration();
+  }
+} src_iter_guard{&src_mut, this};
+
 // H4 fix: drain the async writer before free_data() resets _mmap_alloc.
 // Without this, the async worker could still be accessing the old mmap
 // allocator through _owner->_mmap_alloc while free_data() resets it.

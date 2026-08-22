@@ -6,6 +6,8 @@
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/base/log.h"
 
+#include <chrono>
+#include <thread>
 #include <libsigrok/libsigrok.h>
 
 namespace pv {
@@ -30,6 +32,20 @@ void FilterProcessor::stop() {
     _signal_invert_running = false;
   }
   _filter_pool.shutdown();
+}
+
+void FilterProcessor::wait_idle(int max_wait_ms) {
+  const auto t0 = std::chrono::steady_clock::now();
+  while (_glitch_filter_running.load(std::memory_order_acquire) ||
+         _signal_invert_running.load(std::memory_order_acquire)) {
+    if (std::chrono::steady_clock::now() - t0 >
+        std::chrono::milliseconds(max_wait_ms)) {
+      pxv_warn("FilterProcessor::wait_idle: tasks still running after %dms; "
+               "proceeding anyway (snapshot rebuild may race).", max_wait_ms);
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
 }
 
 void FilterProcessor::set_glitch_filter(
@@ -81,6 +97,11 @@ void FilterProcessor::set_glitch_filter(
 void FilterProcessor::glitch_filter_task(
     const std::map<int, uint32_t> thresholds,
     const std::map<int, GlitchFilterMode> filter_modes) {
+  // [group3 crash fix] Serialize against clear_glitch_filter / signal_invert
+  // (see _backup_mutex). Holds for the whole task so copy_from(live<->backup)
+  // and apply on the live snapshot cannot race a concurrent restore/clear.
+  std::lock_guard<std::mutex> backup_lk(_backup_mutex);
+
   if (!_state->view_data()->_logic_backup) {
     // Track B3: use make_unique instead of raw new
     _state->view_data()->_logic_backup = std::make_unique<data::LogicSnapshot>();
@@ -208,6 +229,10 @@ void FilterProcessor::glitch_filter_task(
 }
 
 void FilterProcessor::clear_glitch_filter() {
+  // [group3 crash fix] Serialize with glitch/invert tasks (copy_from on the
+  // live<->backup pair); see _backup_mutex.
+  std::lock_guard<std::mutex> backup_lk(_backup_mutex);
+
   if (_glitch_filter_running)
     return;
 
@@ -270,6 +295,10 @@ void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
 }
 
 void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
+  // [group3 crash fix] Serialize with glitch/clear (copy_from on the
+  // live<->backup pair); see _backup_mutex.
+  std::lock_guard<std::mutex> backup_lk(_backup_mutex);
+
   if (!_state->view_data()->_logic_backup) {
     // Track B3: use make_unique instead of raw new
     _state->view_data()->_logic_backup = std::make_unique<data::LogicSnapshot>();

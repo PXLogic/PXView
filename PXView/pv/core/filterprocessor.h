@@ -53,6 +53,13 @@ public:
   /// Stop both background tasks. Called from SigSession::Close().
   void stop();
 
+  /// Block (bounded) until no glitch-filter / signal-invert background task
+  /// is running. Called by capture/config boundaries (init_signals / capture
+  /// start) BEFORE they clear or rebuild the live logic snapshot, because a
+  /// running task reads that snapshot by raw pointer (copy_from/apply) and
+  /// would SIGSEGV if it were destroyed underneath it (group3 test_36 crash).
+  void wait_idle(int max_wait_ms = 15000);
+
 private:
   void glitch_filter_task(const std::map<int, uint32_t> thresholds,
                           const std::map<int, GlitchFilterMode> filter_modes);
@@ -79,6 +86,16 @@ private:
   std::atomic<bool> _signal_invert_running;
   // H2 fix: same TOCTOU protection for signal invert launch path
   std::mutex _signal_invert_launch_mutex;
+
+  // [group3 crash fix] Serializes all access to the (live logic snapshot,
+  // _logic_backup) pair. glitch_filter_task / signal_invert_task (worker) and
+  // clear_glitch_filter (main thread) each perform copy_from(live <-> backup);
+  // running two of them concurrently causes a cross copy_from race: one thread
+  // frees/reconstructs the live snapshot's leaf blocks while the other memcpy's
+  // from that same block -> SIGSEGV in LogicSnapshot::copy_from. One mutex
+  // across all three makes the accessible data stable (crashed the group3 E2E
+  // at test_36_glitch_filter_i2c_e2e.py).
+  std::mutex _backup_mutex;
 };
 
 } // namespace core
