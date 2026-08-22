@@ -1114,6 +1114,16 @@ return;
     }
   }
 
+  // Flush the trailing partial annotation batch BEFORE publishing the final
+  // snapshot. libsigrokdecode's batch collector auto-flushes only when the
+  // internal array reaches SRD_ANN_BATCH_MAX; the residual annotations since
+  // the last full flush are otherwise delivered only at srd_session_destroy()
+  // (belt-and-braces), which runs well after this publish. Without this flush,
+  // low-volume decoders (swd/i2s/mipi) lose the tail: only full-batch
+  // multiples (1024/2048/...) reach the snapshot and the last partial batch
+  // (e.g. the trailing ~988 SWD annotations) is dropped -> "尾段无解码".
+  srd_ann_batch_flush(session);
+
   // Publish final-data notification AFTER srd_session_end().
   // Scheme A: publish the final frozen snapshot so the last decoded data is
   // visible to the render path.
