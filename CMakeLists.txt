@@ -1,4 +1,4 @@
-## This file is part of the PXView project.
+﻿## This file is part of the PXView project.
 ##
 ## Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
 ## Copyright (C) 2012-2013 Alexandru Gagniuc <mr.nuke.me@gmail.com>
