@@ -1106,7 +1106,6 @@ void ViewportInteraction::update_edge_nav_buttons() {
       _viewport->mouse_point() - QPoint(0, _viewport->view().get_vOffset());
   LogicSignal *sig = get_hovered_logic_signal(screenPos);
   if (!sig || !sig->data() || sig->data()->empty()) {
-    pxv_warn("ViewportInteraction::update_edge_nav_buttons: no signal or empty data, hiding buttons");
     _viewport->prev_edge_btn()->hide();
     _viewport->next_edge_btn()->hide();
     _viewport->hover_logic_signal() = nullptr;
