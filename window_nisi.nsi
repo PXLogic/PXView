@@ -230,8 +230,12 @@ FunctionEnd
  ******************************/
 
 Section Uninstall
-  ; Kill PXView-Agent if running
+  ; Kill ANY running PXView / PXView-Agent process first. Otherwise locked files
+  ; (PXView.exe, plugins, python stdlib, c_decoders DLLs) cannot be deleted and
+  ; RMDir /r silently skips them, leaving a half-deleted install tree.
   nsExec::Exec 'cmd /c taskkill /F /IM PXView-Agent.exe' 2>/dev/null
+  nsExec::Exec 'cmd /c taskkill /F /IM PXView.exe' 2>/dev/null
+  Sleep 300
   Delete "$INSTDIR\${PRODUCT_NAME}.url"
   Delete "$INSTDIR\uninst.exe"
   Delete "$INSTDIR\PXView.exe"
@@ -246,27 +250,29 @@ Section Uninstall
 
   RMDir "$SMPROGRAMS\PXView"
 
-  ; Remove everything under INSTDIR to ensure no stale files remain
-  RMDir /r "$INSTDIR\styles"
-  RMDir /r "$INSTDIR\sqldrivers"
-  RMDir /r "$INSTDIR\res"
-  RMDir /r "$INSTDIR\printsupport"
-  RMDir /r "$INSTDIR\plugins"
-  RMDir /r "$INSTDIR\platforms"
-  RMDir /r "$INSTDIR\libsigrokdecode"
-  RMDir /r "$INSTDIR\lang"
-  RMDir /r "$INSTDIR\imageformats"
-  RMDir /r "$INSTDIR\iconengines"
-  RMDir /r "$INSTDIR\generic"
-  RMDir /r "$INSTDIR\demo"
-  RMDir /r "$INSTDIR\decoders"
-  RMDir /r "$INSTDIR\bearer"
-  RMDir /r "$INSTDIR\translations"
-  RMDir /r "$INSTDIR\webview2loader"
-  RMDir /r "$INSTDIR\webui"
-  RMDir /r "$INSTDIR\Qt*"
+  ; Remove everything under INSTDIR to ensure no stale files remain.
+  ; /REBOOTOK marks any still-locked file for deletion on reboot instead of
+  ; silently skipping it (a locked PXView.exe etc. would otherwise survive).
+  RMDir /r /REBOOTOK "$INSTDIR\styles"
+  RMDir /r /REBOOTOK "$INSTDIR\sqldrivers"
+  RMDir /r /REBOOTOK "$INSTDIR\res"
+  RMDir /r /REBOOTOK "$INSTDIR\printsupport"
+  RMDir /r /REBOOTOK "$INSTDIR\plugins"
+  RMDir /r /REBOOTOK "$INSTDIR\platforms"
+  RMDir /r /REBOOTOK "$INSTDIR\libsigrokdecode"
+  RMDir /r /REBOOTOK "$INSTDIR\lang"
+  RMDir /r /REBOOTOK "$INSTDIR\imageformats"
+  RMDir /r /REBOOTOK "$INSTDIR\iconengines"
+  RMDir /r /REBOOTOK "$INSTDIR\generic"
+  RMDir /r /REBOOTOK "$INSTDIR\demo"
+  RMDir /r /REBOOTOK "$INSTDIR\decoders"
+  RMDir /r /REBOOTOK "$INSTDIR\bearer"
+  RMDir /r /REBOOTOK "$INSTDIR\translations"
+  RMDir /r /REBOOTOK "$INSTDIR\webview2loader"
+  RMDir /r /REBOOTOK "$INSTDIR\webui"
+  RMDir /r /REBOOTOK "$INSTDIR\Qt*"
   ; Remove any remaining files and subdirectories
-  RMDir /r "$INSTDIR"
+  RMDir /r /REBOOTOK "$INSTDIR"
 
   ; Delete registry keys from the 64-bit view (current SetRegView)
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
