@@ -220,6 +220,7 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     ./linuxdeploy-x86_64.AppImage \
         --appdir install.dir \
         -e install.dir/usr/bin/PXView \
+        -e install.dir/usr/bin/PXView-Agent \
         -d install.dir/usr/share/applications/pxview.desktop \
         --plugin qt \
         --output appimage

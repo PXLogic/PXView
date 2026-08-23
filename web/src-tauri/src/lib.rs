@@ -26,15 +26,20 @@ struct PxViewStatus {
 /// 5. On the system PATH
 fn find_pxview_exe(app: &AppHandle) -> Option<PathBuf> {
     // 1 & 2: Next to the current executable
+    // The executable has a ".exe" suffix on Windows, but no suffix on
+    // Linux/macOS. Use the platform-appropriate name so the Agent can find the
+    // headless PXView sitting next to it in the packaged bundle.
+    let exe_name = if cfg!(windows) { "PXView.exe" } else { "PXView" };
+
     if let Ok(exe_dir) = std::env::current_exe() {
         if let Some(exe_dir) = exe_dir.parent() {
             // Direct neighbour
-            let direct = exe_dir.join("PXView.exe");
+            let direct = exe_dir.join(exe_name);
             if direct.exists() {
                 return Some(direct);
             }
             // In a subfolder
-            let subfolder = exe_dir.join("pxview").join("PXView.exe");
+            let subfolder = exe_dir.join("pxview").join(exe_name);
             if subfolder.exists() {
                 return Some(subfolder);
             }
@@ -45,7 +50,7 @@ fn find_pxview_exe(app: &AppHandle) -> Option<PathBuf> {
                 .join("..")
                 .join("..")
                 .join("build.dir")
-                .join("PXView.exe");
+                .join(exe_name);
             if dev_build.exists() {
                 return Some(dev_build.canonicalize().unwrap_or(dev_build));
             }
@@ -53,14 +58,14 @@ fn find_pxview_exe(app: &AppHandle) -> Option<PathBuf> {
     }
 
     // 3: Relative to CWD (development)
-    let cwd_build = PathBuf::from("../../build.dir/PXView.exe");
+    let cwd_build = PathBuf::from("../../build.dir").join(exe_name);
     if cwd_build.exists() {
         return Some(cwd_build.canonicalize().unwrap_or(cwd_build));
     }
 
     // Also try from the tauri.conf.json directory
     if let Some(resource_path) = app.path().resource_dir().ok() {
-        let res = resource_path.join("PXView.exe");
+        let res = resource_path.join(exe_name);
         if res.exists() {
             return Some(res);
         }

@@ -257,6 +257,7 @@ jobs:
           ./linuxdeploy-x86_64.AppImage \
             --appdir install.dir \
             -e install.dir/usr/bin/PXView \
+            -e install.dir/usr/bin/PXView-Agent \
             -d install.dir/usr/share/applications/pxview.desktop \
             --plugin qt \
             --output appimage
@@ -265,6 +266,62 @@ jobs:
         run: |
           ls -la PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
           chmod +x PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
+
+      - name: Test launcher — PXView and PXView-Agent start independently
+        run: |
+          set -euo pipefail
+          APPI="./PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export NO_AT_BRIDGE=1
+
+          # The Tauri Agent needs a display + webkit/GTK runtime libs. Install
+          # them so the agent test can open its window and spawn headless PXView.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xauth \
+            libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1
+
+          wait_mcp() { # args: pid
+            local pid=$1
+            for _ in $(seq 1 90); do
+              if curl -s -o /dev/null -m 2 "http://127.0.0.1:10110/"; then
+                return 0
+              fi
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "process exited before MCP port 10110 came up"
+                return 1
+              fi
+              sleep 1
+            done
+            return 1
+          }
+          cleanup() { # kill any leftover PXView/Agent so the MCP port frees up
+            pkill -9 -f 'PXView' 2>/dev/null || true
+            sleep 3
+          }
+
+          echo "=== Test 1: classic PXView entry (./AppImage --headless) ==="
+          "$APPI" --headless >pxv_classic.log 2>&1 &
+          pid=$!
+          if wait_mcp "$pid"; then
+            echo "PASS: classic PXView headless reachable on MCP 10110"
+          else
+            cat pxv_classic.log || true
+            exit 1
+          fi
+          cleanup
+
+          echo "=== Test 2: Tauri Agent entry (xvfb-run -a ./AppImage agent) ==="
+          xvfb-run -a "$APPI" agent >pxv_agent.log 2>&1 &
+          pid=$!
+          if wait_mcp "$pid"; then
+            echo "PASS: PXView-Agent started and spawned headless PXView (MCP 10110)"
+          else
+            cat pxv_agent.log || true
+            exit 1
+          fi
+          cleanup
+
+          echo "=== OK: both launcher entries started independently ==="
 
       - name: Package udev rules (separate artifact)
         run: |

@@ -293,6 +293,11 @@ install(FILES PXView/icons/logo.png DESTINATION ${MAC_RES_PREFIX}share/pixmaps R
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 	install(FILES PXView/PXView.desktop DESTINATION ${MAC_RES_PREFIX}share/applications RENAME pxview.desktop)
 
+	# Single entry-point dispatcher: routes between PXView and PXView-Agent.
+	# Both binaries land in the same bin/ dir so the Tauri Agent can find and
+	# spawn the headless PXView next to it.
+	install(PROGRAMS PXView/pxview-launcher DESTINATION ${MAC_RES_PREFIX}bin)
+
 	#add_compile_definitions(_DEFAULT_SOURCE)
 
 	# udev rules: install to system path for system prefixes, local prefix otherwise

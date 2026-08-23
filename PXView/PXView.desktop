@@ -3,8 +3,17 @@ Type=Application
 Encoding=UTF-8
 Name=PXView
 Comment=GUI Program for PXLogic USB-based Instruments
-TryExec=PXView
-Exec=PXView
+TryExec=pxview-launcher
+Exec=pxview-launcher
 Icon=pxview
 Terminal=false
+Actions=Classic;Agent;
 Categories=Development;Electronics;Qt;
+
+[Desktop Action Classic]
+Name=Launch classic PXView GUI
+Exec=pxview-launcher
+
+[Desktop Action Agent]
+Name=Launch PXView Agent (Tauri)
+Exec=pxview-launcher agent

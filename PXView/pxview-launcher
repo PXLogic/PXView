@@ -1,0 +1,54 @@
+#!/bin/sh
+# PXView entry-point dispatcher for the self-contained AppImage / portable bundle.
+#
+# A single AppImage only exposes ONE AppRun entry. This small dispatcher is that
+# single entry and routes to either the classic Qt GUI or the Tauri Agent,
+# depending on the first command-line argument.
+#
+# Usage:
+#   pxview-launcher                     start PXView (classic signal-analysis GUI)
+#   pxview-launcher agent               start PXView-Agent (Tauri desktop wrapper)
+#   pxview-launcher --agent             start PXView-Agent (alias)
+#   pxview-launcher agent ["--headless" ...]   pass trailing args to the Agent
+#   pxview-launcher --help              show this help
+#   pxview-launcher --print-target      print which binary would be launched (CI/test)
+#
+# Both binaries live in this same directory, so the Agent (Tauri) and the
+# headless PXView it spawns can find each other by relative path.
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT="$DIR/PXView-Agent"
+CLASSIC="$DIR/PXView"
+
+usage() {
+    cat <<'EOF'
+PXView launcher
+
+  (no args)          start the classic PXView GUI
+  agent | --agent    start the PXView-Agent (Tauri desktop wrapper)
+  --print-target     print the resolved binary path without running it
+  --help             show this help
+EOF
+}
+
+case "$1" in
+    --help|-h|help)
+        usage
+        exit 0
+        ;;
+    agent|--agent)
+        shift
+        if [ "$1" = "--print-target" ]; then
+            echo "$AGENT"
+            exit 0
+        fi
+        exec "$AGENT" "$@"
+        ;;
+    --print-target)
+        echo "$CLASSIC"
+        exit 0
+        ;;
+    *)
+        exec "$CLASSIC" "$@"
+        ;;
+esac
