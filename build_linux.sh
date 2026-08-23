@@ -192,16 +192,26 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     echo " [7/7] 打包 AppImage..."
 
     # 打包 Python 标准库到 AppDir
-    # 必须打包"编译时链接的同一个小版本"标准库。PXView 把 Python home 设为
-    # <prefix>/usr,内嵌解释器会去 <home>/lib/python<其版本>/encodings 找。
-    # 若用默认 python3 打包了别的版本,会运行时报 "Failed to import encodings"。
-    # 因此从 CMake 缓存读取编译实际使用的解释器,而不是 python3。
+    # 必须打包"与二进制实际链接的 libpython 同小版本"的标准库。PXView 把 Python
+    # home 设为 <prefix>/usr,内嵌解释器去 <home>/lib/python<其版本>/encodings 找。
+    # 权威版本应从 ldd 读(编译真实链接的 libpython),不能用 python3 或 CMake 缓存
+    # ——它们可能与 libsigrokdecode/PXView 实际链接的版本不一致。
     echo "   打包 Python 标准库..."
-    PYEXE=$(grep -E '^Python3_EXECUTABLE:' build/CMakeCache.txt | head -1 | cut -d'=' -f2)
-    [ -n "$PYEXE" ] || PYEXE=$(command -v python3)
-    PY_VERSION=$("$PYEXE" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    PY_VERSION=$(ldd "install.dir/usr/bin/PXView" 2>/dev/null \
+        | awk '/libpython/{print $1}' | head -1 \
+        | sed -E 's/^libpython([0-9]+\.[0-9]+).*/\1/')
+    echo "   PXView 链接的 libpython 版本: $PY_VERSION"
+    if [ -z "$PY_VERSION" ]; then
+        echo "   WARN: 未读到来libpython版本,回退 python3"
+        PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    fi
+    PYEXE=$(ls /usr/bin/python$PY_VERSION /usr/local/bin/python$PY_VERSION 2>/dev/null | head -1)
+    if [ -z "$PYEXE" ] || [ ! -x "$PYEXE" ]; then
+        echo "   ERROR: 找不到 python$PY_VERSION 解释器来打包标准库" >&2
+        exit 1
+    fi
     PYSTDLIB=$("$PYEXE" -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')
-    echo "   Python 版本: $PY_VERSION (exe=$PYEXE, stdlib=$PYSTDLIB)"
+    echo "   打包 Python $PY_VERSION 标准库: $PYSTDLIB"
     mkdir -p "install.dir/usr/lib/python$PY_VERSION"
     cp -a "$PYSTDLIB"/* "install.dir/usr/lib/python$PY_VERSION/" 2>/dev/null || true
     if [ -d "$PYSTDLIB/lib-dynload" ]; then
@@ -212,7 +222,7 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     rm -rf "install.dir/usr/lib/python$PY_VERSION/__pycache__"
     find "install.dir/usr/lib/python$PY_VERSION" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
     if [ ! -d "install.dir/usr/lib/python$PY_VERSION/encodings" ]; then
-        echo "   ERROR: Python $PY_VERSION stdlib 未打包(构建链接的是 $PYEXE)" >&2
+        echo "   ERROR: Python $PY_VERSION 标准库未打包(源 $PYSTDLIB)" >&2
         exit 1
     fi
 
