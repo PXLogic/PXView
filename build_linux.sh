@@ -217,6 +217,12 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     export LD_LIBRARY_PATH="$QT_PREFIX/$QT_VERSION/gcc_64/lib:$LD_LIBRARY_PATH"
     export OUTPUT="PXView-Linux-x86_64-AppImage-$VERSION.AppImage"
 
+    # Install our custom AppRun (single-entry router to PXView / PXView-Agent).
+    # linuxdeploy does NOT overwrite an existing AppRun, so this routing
+    # survives and becomes the AppImage's real launch entry.
+    cp packaging/pxview-AppRun install.dir/AppRun
+    chmod +x install.dir/AppRun
+
     ./linuxdeploy-x86_64.AppImage \
         --appdir install.dir \
         -e install.dir/usr/bin/PXView \
