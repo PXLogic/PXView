@@ -245,6 +245,9 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     # survives and becomes the AppImage's real launch entry.
     cp packaging/pxview-AppRun install.dir/AppRun
     chmod +x install.dir/AppRun
+    # Ensure both binaries and the launcher are executable in the AppImage
+    # (the Tauri agent is installed via file(INSTALL) which defaults to 0644).
+    chmod +x install.dir/usr/bin/PXView install.dir/usr/bin/PXView-Agent install.dir/usr/bin/pxview-launcher
 
     ./linuxdeploy-x86_64.AppImage \
         --appdir install.dir \

@@ -347,7 +347,11 @@ if(ENABLE_TAURI AND NPM_EXECUTABLE AND CARGO_EXECUTABLE AND RUSTC_EXECUTABLE)
         if(EXISTS \"${TAURI_BIN_PATH}\")
             file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin\"
                  TYPE FILE FILES \"${TAURI_BIN_PATH}\"
-                 RENAME \"PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}\")
+                 RENAME \"PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}\"
+                 FILE_PERMISSIONS
+                    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                    GROUP_READ GROUP_EXECUTE
+                    WORLD_READ WORLD_EXECUTE)
             message(STATUS \"Installing Tauri desktop app to: \${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/PXView-Agent${CMAKE_EXECUTABLE_SUFFIX}\")
         else()
             message(STATUS \"Tauri desktop app not built, skipping. Run: ninja tauri-desktop\")
