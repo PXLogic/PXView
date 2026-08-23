@@ -1,3 +1,8 @@
 # NSIS installer script must preserve UTF-8 BOM for correct Chinese character encoding
 # Setting to binary to prevent Git from stripping the BOM during checkout on Windows
 window_nisi.nsi binary
+
+# AppImage single-entry dispatcher scripts MUST stay LF — a CR breaks the
+# shebang and `exec` on Linux (AppRun + pxview-launcher).
+packaging/pxview-AppRun text eol=lf
+PXView/pxview-launcher text eol=lf

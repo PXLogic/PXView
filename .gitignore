@@ -40,6 +40,9 @@
 !/tests
 !/tools
 !/web
+# AppImage 分发器（AppRun 单入口，linuxdeploy 不覆盖已存在的 AppRun）
+!/packaging
+!/packaging/pxview-AppRun
 !/window
 # 项目文件
 !/COPYING

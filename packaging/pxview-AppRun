@@ -1,0 +1,30 @@
+#!/bin/bash
+# PXView AppImage -- custom single entry-point (AppRun).
+#
+# A self-contained AppImage exposes exactly ONE AppRun. linuxdeploy generates one
+# that always execs the main binary, which cannot route to a second app. Here we
+# supply our own AppRun (linuxdeploy does NOT overwrite an existing AppRun), so
+# the single entry can dispatch to either the classic GUI or the Tauri Agent
+# based on the first command-line argument:
+#
+#   ./PXView-....AppImage              -> classic PXView GUI
+#   ./PXView-....AppImage --headless   -> classic PXView headless (MCP on 10110)
+#   ./PXView-....AppImage agent        -> PXView-Agent (Tauri desktop wrapper)
+#
+# The Agent and the headless PXView it spawns are both under usr/bin, so they
+# find each other. This file must be copied to $APPDIR/AppRun (appdir root) and
+# made executable BEFORE running linuxdeploy.
+
+set -e
+
+# Resolve the AppDir root: works both for FUSE mount and APPIMAGE_EXTRACT_AND_RUN.
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="$HERE"
+
+# Bring the bundled runtime libs (Qt, GCC runtime, Python, ...) onto the loader
+# path -- mirrors the env linuxdeploy's default AppRun sets.
+export PATH="$HERE/usr/bin:$PATH"
+export LD_LIBRARY_PATH="$HERE/usr/lib:$HERE/usr/lib/x86_64-linux-gnu:$HERE/lib:$HERE/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+# Delegate argument routing to the launcher (it handles agent / classic / args).
+exec "$HERE/usr/bin/pxview-launcher" "$@"
