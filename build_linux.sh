@@ -192,16 +192,29 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     echo " [7/7] 打包 AppImage..."
 
     # 打包 Python 标准库到 AppDir
+    # 必须打包"编译时链接的同一个小版本"标准库。PXView 把 Python home 设为
+    # <prefix>/usr,内嵌解释器会去 <home>/lib/python<其版本>/encodings 找。
+    # 若用默认 python3 打包了别的版本,会运行时报 "Failed to import encodings"。
+    # 因此从 CMake 缓存读取编译实际使用的解释器,而不是 python3。
     echo "   打包 Python 标准库..."
-    PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    echo "   Python 版本: $PY_VERSION"
+    PYEXE=$(grep -E '^Python3_EXECUTABLE:' build/CMakeCache.txt | head -1 | cut -d'=' -f2)
+    [ -n "$PYEXE" ] || PYEXE=$(command -v python3)
+    PY_VERSION=$("$PYEXE" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    PYSTDLIB=$("$PYEXE" -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')
+    echo "   Python 版本: $PY_VERSION (exe=$PYEXE, stdlib=$PYSTDLIB)"
     mkdir -p "install.dir/usr/lib/python$PY_VERSION"
-    cp -a "/usr/lib/python$PY_VERSION"/* "install.dir/usr/lib/python$PY_VERSION/" 2>/dev/null || true
-    mkdir -p "install.dir/usr/lib/python$PY_VERSION/lib-dynload"
-    cp -a "/usr/lib/python$PY_VERSION/lib-dynload"/* "install.dir/usr/lib/python$PY_VERSION/lib-dynload/" 2>/dev/null || true
+    cp -a "$PYSTDLIB"/* "install.dir/usr/lib/python$PY_VERSION/" 2>/dev/null || true
+    if [ -d "$PYSTDLIB/lib-dynload" ]; then
+        mkdir -p "install.dir/usr/lib/python$PY_VERSION/lib-dynload"
+        cp -a "$PYSTDLIB/lib-dynload"/* "install.dir/usr/lib/python$PY_VERSION/lib-dynload/" 2>/dev/null || true
+    fi
     rm -rf "install.dir/usr/lib/python$PY_VERSION/test"
     rm -rf "install.dir/usr/lib/python$PY_VERSION/__pycache__"
     find "install.dir/usr/lib/python$PY_VERSION" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    if [ ! -d "install.dir/usr/lib/python$PY_VERSION/encodings" ]; then
+        echo "   ERROR: Python $PY_VERSION stdlib 未打包(构建链接的是 $PYEXE)" >&2
+        exit 1
+    fi
 
     # 下载 linuxdeploy
     echo "   下载 linuxdeploy..."

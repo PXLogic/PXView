@@ -201,19 +201,33 @@ jobs:
 
       - name: Bundle Python standard library into AppDir
         run: |
-          PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-          echo "Bundling Python $PY_VERSION standard library"
+          # Must ship <prefix>/lib/pythonX.Y for the EXACT python minor that the
+          # build linked against. PXView sets Python home to <prefix>/usr, and the
+          # embedded interpreter imports <home>/lib/python<itsversion>/encodings.
+          # Bundling a different minor (e.g. the `python3` default) triggers
+          # "Failed to import encodings module" at runtime. Read the interpreter
+          # from the CMake cache (the one used to build libsigrokdecode/PXView),
+          # not from `python3`, and bundle ITS stdlib.
+          PYEXE=$(grep -E '^Python3_EXECUTABLE:' build/CMakeCache.txt | head -1 | cut -d'=' -f2)
+          [ -n "${PYEXE}" ] || PYEXE=$(command -v python3)
+          PY_VERSION=$("$PYEXE" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          PYSTDLIB=$("$PYEXE" -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')
+          echo "Bundling Python $PY_VERSION stdlib from $PYSTDLIB"
           mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a /usr/lib/python$PY_VERSION/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
-          mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
-          cp -a /usr/lib/python$PY_VERSION/lib-dynload/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          cp -a "$PYSTDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
+          if [ -d "$PYSTDLIB/lib-dynload" ]; then
+            mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
+            cp -a "$PYSTDLIB/lib-dynload"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
+          fi
           rm -rf install.dir/usr/lib/python$PY_VERSION/test
           rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
           find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-          if [ -d /usr/lib/python$PY_VERSION/encodings ]; then
-            echo "OK: encodings module found at /usr/lib/python$PY_VERSION/encodings"
+          # Fail the build if stdlib didn't bundle — a silent skip ships a broken AppImage.
+          if [ -d install.dir/usr/lib/python$PY_VERSION/encodings ]; then
+            echo "OK: encodings bundled at install.dir/usr/lib/python$PY_VERSION/encodings"
           else
-            echo "WARN: encodings not found in /usr/lib/python$PY_VERSION, AppImage Python may fail"
+            echo "ERROR: Python $PY_VERSION stdlib not found (build links against $PYEXE)" >&2
+            exit 1
           fi
           echo "Bundled Python stdlib size:"
           du -sh install.dir/usr/lib/python$PY_VERSION
