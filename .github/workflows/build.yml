@@ -488,6 +488,10 @@ jobs:
           echo "HOMEBREW_NO_PATH_SHADOW_CHECK=1" >> $GITHUB_ENV
           echo "HOMEBREW_NO_ENV_HINTS=1" >> $GITHUB_ENV
           echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $GITHUB_ENV
+          # Homebrew 6.0.19+ 将 macOS Intel x86_64 标记为 Tier-3 不支持，
+          # 会在 brew install 成功装完全部依赖后强制返回非零退出码，导致本 job 误判失败。
+          # 启用 developer 模式绕过该弃用诊断（仅作用于交叉编译的 x86_64 环境，不影响依赖安装）。
+          echo "HOMEBREW_DEVELOPER=1" >> $GITHUB_ENV
           echo "/usr/local/bin" >> $GITHUB_PATH
           echo "=== x86_64 Homebrew 验证 ==="
           /usr/local/bin/brew --version
