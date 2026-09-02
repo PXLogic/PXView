@@ -83,6 +83,9 @@ void SessionStateContext::frame_began() {
 }
 
 void SessionStateContext::frame_ended() {
+  // CollectEnd has now been delivered for this capture — disarm the guard so
+  // the auto-stop handler does not synthesize a duplicate one.
+  _frame_end_pending.store(false);
   _event_bus->broadcast_async<interface::CollectEnd>({});
 }
 

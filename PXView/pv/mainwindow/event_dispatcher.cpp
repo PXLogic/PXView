@@ -230,6 +230,14 @@ void SessionEventDispatcher::on_collect_end(const pv::interface::CollectEnd &) {
   _window->on_frame_ended();
 }
 void SessionEventDispatcher::on_end_collect_work(const pv::interface::EndCollectWork &) {
+  // Symmetric with on_start_collect_work(): that handler latches the sidebar
+  // Start/Instant button into its "running" (Stop) state, so this one must
+  // release it. Relying solely on CollectEnd -> MainWindow::on_frame_ended()
+  // left a hole: any capture that ends without SR_DF_END never emits
+  // CollectEnd, and the button stayed stuck on "Stop" forever. Releasing here
+  // as well is idempotent and makes the latch impossible to leak.
+  _window->dock_manager()->side_bar()->setItemRunning(_window->SIDEBAR_RUNSTOP, false);
+  _window->dock_manager()->side_bar()->setItemRunning(_window->SIDEBAR_INSTANT, false);
   _window->update_capture_ui_status();
 
   pv::TabContext *ctx = _window->current_context();

@@ -1723,8 +1723,22 @@ void SigSession::reload() {
       }
     }
   } else if (mode == LOGIC || mode == ANALOG || mode == DSO || mode == MSO) {
-    pxv_info("ERROR: Unable to create any channel in reload(). channels is empty or all skipped.");
-    clear_signals();
+    // The device reported no usable channels. This happens for imported
+    // files whose input module detached/emptied its channel list after the
+    // import finished (see sr_input_release_sdi() in libsigrok — vcd/csv/wav/
+    // stf/protocoldata cleanup moves sdi->channels away). Destroying the
+    // existing models here would blank the whole viewport and drop the
+    // imported waveform, so keep them: reload() is a rebuild request, not a
+    // "device has no channels" signal. Only clear when there is nothing to
+    // preserve (genuine empty device).
+    if (_state->signal_models().empty()) {
+      pxv_info("ERROR: Unable to create any channel in reload(). channels is empty or all skipped.");
+      clear_signals();
+    } else {
+      pxv_warn("reload: device reports no channels, keeping existing %d "
+               "signal models (channel list unavailable)",
+               (int)_state->signal_models().size());
+    }
   }
 
   spectrum_rebuild();
@@ -2784,6 +2798,23 @@ void SigSession::on_session_stopped_event() {
     pxv_info("SigSession::on_event(SessionStopped): releasing CaptureOwnerGuard "
              "(auto-stop path).");
     _capture_manager->data_unlock();
+
+    // CollectEnd delivery guard. CollectEnd is the only event that resets the
+    // View's "running" state (MainWindow::on_frame_ended ->
+    // side_bar()->setItemRunning(false)). It is normally emitted by the
+    // SR_DF_END path, which a capture that produced NO data packets never
+    // reaches — sr_session_run() just returns and this auto-stop branch runs
+    // instead. Without the guard below the flag is still armed, so the UI would
+    // stay latched on "Stop" with no way out (a later manual stop is a no-op
+    // because action_stop_capture() short-circuits on is_working()==false).
+    if (_state->consume_frame_end_pending()) {
+      pxv_warn("SigSession::on_event(SessionStopped): capture ended without "
+               "SR_DF_END (no data packets) — synthesizing CollectEnd and "
+               "ST_STOPPED so the View can reset its running state.");
+      set_stopped_status();
+      _state->frame_ended();
+    }
+
     // Plan B Phase 1: broadcast_sync → broadcast_async.
     _event_bus->broadcast_async<interface::EndCollectWorkPrev>({});
     _document_registry->release_capture_owner();

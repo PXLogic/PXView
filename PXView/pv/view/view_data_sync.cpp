@@ -653,6 +653,15 @@ void ViewDataSync::resizeEvent(QResizeEvent *event) {
 
   if (!widthChanged && _view->get_work_mode() != DSO) {
     _view->set_viewport_margins(_view->headerWidth(), _view->rulerHeight(), 0, 0);
+    // 纯纵向缩放(只改高度、宽度不变)时也必须刷新 overlay 子控件的几何。
+    // Header / Ruler / DevMode 是 View 的普通子窗口,geometry 由
+    // ViewLayout::update_margins() 手工维护,QAbstractScrollArea 只会调整
+    // 自己的 viewport(_viewcenter),不会带动它们。少了这一句,窗口被拉高后
+    // Header 仍停留在旧高度,底部新露出的区域没有任何绘制,直接透出 View
+    // 的背景色;反向缩小则 Header 过高、底边越界。
+    _view->update_margins();
+    // 底部状态条同样是手工定位的,跟随视口高度重新贴底。
+    _view->reposition_status_bar();
     _view->header_widget()->header_resize();
     _view->update_scroll();
     _view->viewport_update();

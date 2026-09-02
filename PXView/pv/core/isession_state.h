@@ -131,6 +131,12 @@ public:
     // --- Misc (kept for interface completeness) ---
     virtual void cur_snap_samplerate_changed() = 0;
     virtual void frame_ended() = 0;
+    // CollectEnd delivery guard. A capture that produces no data packets never
+    // reaches SR_DF_END and therefore never emits CollectEnd — the only event
+    // that resets the View's "running" state. The guard lets the auto-stop
+    // handler detect that and synthesize the missing CollectEnd.
+    virtual void arm_frame_end_pending() = 0;
+    virtual bool consume_frame_end_pending() = 0;
     virtual void repeat_hold(int percent) = 0;
     virtual void show_wait_trigger() = 0;
     virtual void delay_prop_msg(QString strMsg) = 0;

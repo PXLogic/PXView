@@ -770,6 +770,13 @@ public:
   void clear();
   void reconstruct();
 
+  // Re-pin the bottom status overlay (ViewStatus) to the bottom of the time
+  // viewport. It is a plain child widget with manually managed geometry, so
+  // it must be repositioned whenever the viewport height changes (window
+  // resize / work-mode switch). Without this the bar stays at the previous y
+  // and floats in the middle of the waveform area.
+  void reposition_status_bar();
+
 private:
 
   // ---- Private static constants ----

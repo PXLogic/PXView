@@ -217,6 +217,24 @@ public:
   void cur_snap_samplerate_changed();
   void frame_began() override;
   void frame_ended();
+
+  // --- CollectEnd delivery guard ------------------------------------------
+  // CollectEnd is the ONLY event that resets the View's "running" UI state
+  // (MainWindow::on_frame_ended -> side_bar()->setItemRunning(false)).
+  // It is normally emitted from the SR_DF_END path (RevEndPacket for LOGIC,
+  // DataFeedParser's else branch for DSO/ANALOG) or from the manual-stop path.
+  // But a capture that produces NO data packets at all (e.g. an input-module
+  // device whose sr_session_run() returns immediately) never reaches SR_DF_END,
+  // so CollectEnd is never emitted and the UI stays stuck on "Stop" forever.
+  //
+  // arm_frame_end_pending() is called when a capture starts; frame_ended()
+  // clears it. If the auto-stop handler finds it still armed, the capture
+  // ended without SR_DF_END and must synthesize CollectEnd itself.
+  void arm_frame_end_pending() override { _frame_end_pending.store(true); }
+  bool consume_frame_end_pending() override {
+    return _frame_end_pending.exchange(false);
+  }
+
   void update_capture() override;
   void repeat_hold(int percent);
   void receive_trigger(uint64_t trigger_pos) override;
@@ -349,6 +367,8 @@ private:
   std::atomic<bool> _hw_replied{false};
   std::atomic<bool> _bClose{false};
   std::atomic<bool> _is_saving{false};
+  // See the CollectEnd delivery guard comment above frame_ended().
+  std::atomic<bool> _frame_end_pending{false};
 
   uint8_t _trigger_ch = 0;
   SESSION_ERROR_STATUS _error = No_err;

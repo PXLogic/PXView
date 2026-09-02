@@ -125,6 +125,8 @@ public:
     void receive_header() override {}
     void receive_trigger(uint64_t) override {}
     void frame_began() override {}
+    void arm_frame_end_pending() override {}
+    bool consume_frame_end_pending() override { return false; }
     void session_error() override {}
     void set_trigger_flag(bool v) override { _trigger_flag = v; }
     void set_trigger_ch(int v) override { _trigger_ch = v; }

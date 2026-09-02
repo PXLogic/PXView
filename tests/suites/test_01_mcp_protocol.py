@@ -22,9 +22,14 @@ class TestMcpProtocol:
         assert mcp.connected, "Client should be connected"
 
     def test_tools_list_count(self, mcp: McpClient):
-        """tools/list returns the consolidated 46+ tool set."""
+        """tools/list returns exactly the 45 consolidated tools."""
         tools = mcp.tools
-        assert len(tools) >= 40, f"Expected at least 40 tools, got {len(tools)}"
+        assert len(tools) == 45, (
+            f"Expected exactly 45 tools, got {len(tools)}. "
+            f"If a tool was added or removed on purpose, update this count "
+            f"together with mcp_instructions.txt and the tier comments in "
+            f"mcp_tool_registry.cpp."
+        )
 
     def test_tools_list_schema(self, mcp: McpClient):
         """Every tool has name, description, and inputSchema."""
@@ -77,6 +82,7 @@ class TestMcpProtocol:
             "get_active_decoders", "clear_all_decoders",
             "reconfigure_decoder",
             "list_sessions", "create_session", "destroy_session",
+            "set_active_session",
             "get_measurement_results", "configure_error_state",
             # Generic device config (SR_CONF_* keys: PWM, VTH, Filter, etc.)
             "get_config", "set_config",

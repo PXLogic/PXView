@@ -3,11 +3,22 @@
 // This file replaces both tool_schemas.inc (46 KB of hand-written JSON)
 // and the dispatch_mcp_tool() if-chain in rpc_dispatcher.cpp.
 //
-// 49 consolidated tools (down from 65 originals):
+// 45 consolidated tools (down from 65 originals, and from the 49 listed in
+// devdoc/mcp-tool-consolidation-report.md — 4 of those were later merged away):
 //   Tier 0: Mode management (3)     — switch/get_work_mode, get_supported_work_modes
-//   Tier 1: Core workflow (18)      — devices, capture, analyzers, channels, export
+//   Tier 1: Core workflow (17)      — devices, capture, analyzers, channels, export
 //   Tier 2: Configuration (12)      — sample config, channel, trigger, probe, glitch, invert, config
-//   Tier 3: Advanced features (16)  — samples, edges, decoders, sessions, math/spectrum, cursors
+//   Tier 3: Advanced features (13)  — samples, edges, decoders, sessions, measurement, cursors
+//
+// The 4 tools no longer registered are NOT missing — they were intentionally
+// folded into existing tools (see devdoc/mcp-post-migration-fix-plan.md §3):
+//   get_math_results + get_spectrum_results + get_lissajous_results
+//       -> get_measurement_results (dispatch by the 'types' array)
+//   get_sample_config
+//       -> get_session_status with include='config'   (returns "sampleConfig")
+//   get_decoder_class_names
+//       -> get_analyzer_results with includeMetadata=true (returns "metadata.classNames")
+//   set_save_range -> renamed set_export_config (1:1, same capability)
 //
 // Refactored from a single 1645-line function into:
 //   - 4 tier-based register functions (Improvement 1)
@@ -825,7 +836,7 @@ static void register_mode_management_tools(McpServer& server,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Tier 1: Core Workflow (18 tools)
+//  Tier 1: Core Workflow (17 tools)
 // ═══════════════════════════════════════════════════════════════════════
 
 static void register_core_workflow_tools(McpServer& server,
@@ -1104,7 +1115,7 @@ static void register_core_workflow_tools(McpServer& server,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Tier 2: Configuration (10 tools)
+//  Tier 2: Configuration (12 tools)
 // ═══════════════════════════════════════════════════════════════════════
 
 static void register_configuration_tools(McpServer& server,
@@ -1321,7 +1332,7 @@ static void register_configuration_tools(McpServer& server,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Tier 3: Advanced Features (15 tools)
+//  Tier 3: Advanced Features (13 tools)
 // ═══════════════════════════════════════════════════════════════════════
 
 static void register_advanced_feature_tools(McpServer& server,
@@ -1536,9 +1547,9 @@ create_mcp_server(IAppService* app_svc) {
 
     // Register tools by tier (Improvement 1: split for readability)
     register_mode_management_tools(*server, app_svc);     // Tier 0: 3 tools
-    register_core_workflow_tools(*server, app_svc);       // Tier 1: 18 tools
+    register_core_workflow_tools(*server, app_svc);       // Tier 1: 17 tools
     register_configuration_tools(*server, app_svc);       // Tier 2: 12 tools
-    register_advanced_feature_tools(*server, app_svc);    // Tier 3: 15 tools
+    register_advanced_feature_tools(*server, app_svc);    // Tier 3: 13 tools
 
     return server;
 }

@@ -1259,7 +1259,16 @@ bool SessionService::can_start_capture() const {
     auto fn = [this]() -> bool {
         if (!_session)
             return false;
-        return !_session->is_working() && _device && _device->have_instance();
+        if (!_device || !_device->have_instance())
+            return false;
+        // Input-module devices (VCD/CSV/binary imports) have no driver to
+        // acquire from — the file was already loaded into the snapshot during
+        // import. CaptureManager::action_start_capture() rejects the request,
+        // so report the capability as false instead of letting the caller
+        // issue a start that silently does nothing.
+        if (_device->is_input_module())
+            return false;
+        return !_session->is_working();
     };
     return run_value_on_main_thread<bool>(fn);
 }

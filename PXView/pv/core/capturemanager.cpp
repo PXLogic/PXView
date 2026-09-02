@@ -149,6 +149,25 @@ bool CaptureManager::action_start_capture(bool instant,
                                           data::SessionDocument *owner) {
   assert(_event_bus && _event_bus->has_subscribers());
 
+  // Input-module devices (VCD / CSV / binary / Saleae imports) have no
+  // libsigrok driver: their sdi is synthesised by the sr_input module, so
+  // sr_session_run() returns immediately without producing a single datafeed
+  // packet. SigSession::import_file() already fed the whole file into the
+  // snapshot during the import, so a "capture" here can only destroy the
+  // imported data (start_capture clears view_data) and then leave the UI stuck
+  // — no data packets means no SR_DF_END, hence no CollectEnd, hence the
+  // Start/Stop button is never reset. Refuse at the Core boundary so every
+  // entry point (sidebar, sampling bar, MCP, WS API) is covered at once.
+  //
+  // Note: .pxl/.sr session files use the "virtual-session" driver and are NOT
+  // input modules — they keep their replay/capture capability.
+  if (_state->device_agent().is_input_module()) {
+    pxv_warn("Start collect rejected: input-module device has no driver to "
+             "acquire from. The imported file is already loaded into the "
+             "snapshot — no capture is needed.");
+    return false;
+  }
+
   pxv_info("Start collect.");
 
   if (_state->is_working()) {
@@ -325,6 +344,12 @@ bool CaptureManager::action_start_capture(bool instant,
   // (event_dispatcher.cpp:572-581) is a lightweight UI commit (trigger
   // settings + capture_init), which is idempotent and safe to run
   // asynchronously before exec_capture().
+  // Arm the CollectEnd guard BEFORE the device starts: if this capture never
+  // reaches SR_DF_END (no data packets at all), the auto-stop handler will find
+  // the flag still armed and synthesize the missing CollectEnd so the View can
+  // reset its running state instead of hanging on "Stop" forever.
+  _state->arm_frame_end_pending();
+
   _event_bus->broadcast_async<interface::StartCollectWorkPrev>({});
 
   if (exec_capture()) {

@@ -1,5 +1,5 @@
 PXView is a multi-mode signal analyzer with 4 work modes.
-This server provides 49 tools organized in 4 tiers.
+This server provides 45 tools organized in 4 tiers.
 
 ## Work Modes
 
@@ -74,29 +74,39 @@ The error message will tell you which mode to switch to.
                captureMode="stream" and call stop_capture to end.
                In Stream mode, durationSeconds and sampleCount are IGNORED.
 
-## Tool Organization (49 tools)
+## Tool Organization (45 tools)
 
   Tier 0: Mode management (3 tools) — call first
     get_supported_work_modes, get_work_mode, switch_work_mode
 
-  Tier 1: Core workflow (18 tools)
+  Tier 1: Core workflow (17 tools)
     get_devices, start_capture, stop_capture, wait_capture,
     get_capture_status, load_capture, save_capture, close_capture,
     add_analyzer, remove_analyzer, list_analyzers, get_analyzer_options,
     get_analyzer_results, export_raw_data, export_data_table_csv,
-    get_channels, get_sample_config, refresh_device_list
+    get_channels, refresh_device_list
 
   Tier 2: Configuration (12 tools)
     set_sample_config, configure_channel, configure_trigger,
     configure_probe, configure_glitch_filter, configure_signal_invert,
-    get_config, set_config, set_save_range, connect_device,
+    get_config, set_config, set_export_config, connect_device,
     disconnect_device, get_session_status
 
-  Tier 3: Advanced features (16 tools)
+  Tier 3: Advanced features (13 tools)
     get_samples, find_next_edge, find_pattern, get_active_decoders,
     clear_all_decoders, reconfigure_decoder,
     list_sessions, create_session, destroy_session, set_active_session,
     get_measurement_results, configure_error_state, configure_cursors
+
+## Tools That No Longer Exist (use the replacement instead)
+
+  These were removed in an earlier consolidation. Do NOT call them:
+    get_sample_config        -> get_session_status with include="config"
+    get_decoder_class_names  -> get_analyzer_results with includeMetadata=true
+    get_math_results         -> get_measurement_results with types=["math"]
+    get_spectrum_results     -> get_measurement_results with types=["spectrum"]
+    get_lissajous_results    -> get_measurement_results with types=["lissajous"]
+    set_save_range           -> set_export_config (renamed, same parameters)
 
 ## Common Error Patterns
 

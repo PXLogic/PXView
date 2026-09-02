@@ -835,9 +835,15 @@ void View::reconstruct() {
     _viewbottom->setFixedHeight(DsoStatusHeight);
   else
     _viewbottom->setFixedHeight(StatusHeight);
+  reposition_status_bar();
+  _viewbottom->reload();
+}
+
+void View::reposition_status_bar() {
+  if (!_viewbottom || !_time_viewport)
+    return;
   _viewbottom->setGeometry(0, _time_viewport->height() - _viewbottom->height(),
                            _time_viewport->width(), _viewbottom->height());
-  _viewbottom->reload();
 }
 
 void View::repeat_show() { _viewbottom->update(); }
