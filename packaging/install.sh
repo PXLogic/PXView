@@ -269,17 +269,22 @@ fi
 # Uninstall wrapper: lifts to root with a graphical prompt (pkexec) when
 # available, otherwise falls back to sudo. This is what the "卸载 PXView"
 # desktop/menu entry calls.
+#
+# NB: pkexec must NOT run with `exec` in the success path -- if it fails (e.g.
+# no polkit authentication agent is running on the desktop), we must fall back
+# to sudo instead of dying silently. The caller is a `Terminal=false` .desktop
+# entry, so without this a failure looks like "nothing happened" to the user.
 cat > "$BIN_DIR/pxview-uninstall" <<EOF
 #!/bin/sh
 # Uninstall PXView, prompting for privilege elevation when needed.
 if command -v pkexec >/dev/null 2>&1; then
-    exec pkexec "$PREFIX/uninstall.sh"
-elif command -v sudo >/dev/null 2>&1; then
-    exec sudo "$PREFIX/uninstall.sh"
-else
-    echo "请用 root 运行: $PREFIX/uninstall.sh" >&2
-    exit 1
+    pkexec "$PREFIX/uninstall.sh" && exit 0
 fi
+if command -v sudo >/dev/null 2>&1; then
+    exec sudo "$PREFIX/uninstall.sh"
+fi
+echo "无法提权，请手动用 root 运行: $PREFIX/uninstall.sh" >&2
+exit 1
 EOF
 chmod 755 "$BIN_DIR/pxview-uninstall"
 info "$BIN_DIR/pxview-uninstall"
