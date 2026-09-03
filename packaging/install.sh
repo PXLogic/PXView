@@ -98,10 +98,31 @@ fi
 #------------------------------------------------------------------------------
 step "安装到 $PREFIX"
 
-if [ -e "$PREFIX" ]; then
-    backup="$PREFIX.old.$(date +%Y%m%d%H%M%S)"
-    warn "$PREFIX 已存在，备份为 $backup"
-    mv "$PREFIX" "$backup"
+# Upgrade scenario. Because this installer already runs as root (see the sanity
+# check above), the target $PREFIX is writable, so the default is a plain
+# overwrite install: no uninstall step, no `.old.<ts>` backup tree. The wrappers,
+# .desktop entries, udev rules, icons and the uninstaller are all (re)installed
+# right below, overwriting their previous files in place.
+#
+# A *clean* uninstall is still available as an explicit opt-in for users who
+# want to erase every trace of the previous version before installing:
+#   PXVIEW_UNINSTALL_FIRST=yes
+# This runs the previous $PREFIX/uninstall.sh (which already removes $PREFIX,
+# wrappers, .desktop entries, desktop shortcuts, udev rules and the icon cache)
+# and then installs the new tree.
+if [ -e "$PREFIX" ] && [ "${PXVIEW_UNINSTALL_FIRST:-no}" = "yes" ]; then
+    if [ -f "$PREFIX/uninstall.sh" ]; then
+        info "检测到旧版本 $PREFIX，根据 PXVIEW_UNINSTALL_FIRST=yes 先卸载旧版再安装..."
+        if "$PREFIX/uninstall.sh"; then
+            info "旧版本已卸载"
+        else
+            warn "旧版本卸载脚本执行失败，将直接覆盖安装"
+        fi
+    else
+        warn "$PREFIX 已存在但无卸载脚本，将直接覆盖安装"
+    fi
+elif [ -e "$PREFIX" ]; then
+    warn "$PREFIX 已存在，本安装程序以 root 运行，将直接覆盖旧版本（未先卸载；如需先卸载请加 PXVIEW_UNINSTALL_FIRST=yes）"
 fi
 
 mkdir -p "$PREFIX"
@@ -221,6 +242,24 @@ EOF
     info "$BIN_DIR/pxview-agent"
 fi
 
+# Uninstall wrapper: lifts to root with a graphical prompt (pkexec) when
+# available, otherwise falls back to sudo. This is what the "卸载 PXView"
+# desktop/menu entry calls.
+cat > "$BIN_DIR/pxview-uninstall" <<EOF
+#!/bin/sh
+# Uninstall PXView, prompting for privilege elevation when needed.
+if command -v pkexec >/dev/null 2>&1; then
+    exec pkexec "$PREFIX/uninstall.sh"
+elif command -v sudo >/dev/null 2>&1; then
+    exec sudo "$PREFIX/uninstall.sh"
+else
+    echo "请用 root 运行: $PREFIX/uninstall.sh" >&2
+    exit 1
+fi
+EOF
+chmod 755 "$BIN_DIR/pxview-uninstall"
+info "$BIN_DIR/pxview-uninstall"
+
 #------------------------------------------------------------------------------
 # 6. Desktop entries -- two real entries, no more single-AppRun juggling
 #------------------------------------------------------------------------------
@@ -261,6 +300,23 @@ EOF
     info "$APPS_DIR/pxview-agent.desktop"
 fi
 
+# Uninstall entry -- invokes the root-lifting wrapper (pkexec/sudo), so a
+# password dialog appears at click time. Uses an icon every hicolor theme has.
+cat > "$APPS_DIR/pxview-uninstall.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=卸载 PXView
+GenericName=Uninstall PXView
+Comment=从本系统移除 PXView (需要管理员权限)
+Exec=pxview-uninstall
+Icon=edit-delete
+Terminal=false
+Categories=System;Development;Settings;
+Keywords=uninstall;remove;purge;pxview;
+EOF
+info "$APPS_DIR/pxview-uninstall.desktop"
+
 command -v update-desktop-database >/dev/null 2>&1 && \
     update-desktop-database "$APPS_DIR" || true
 
@@ -277,7 +333,9 @@ install_shortcuts() {
     [ -n "$desktop" ] && [ -d "$desktop" ] || desktop="$home/Desktop"
     [ -d "$desktop" ] || return 0
 
-    for name in pxview pxview-agent; do
+    # pxview / pxview-agent are the launchers; pxview-uninstall the removal
+    # entry (both desktop shortcut and menu entry).
+    for name in pxview pxview-agent pxview-uninstall; do
         [ -f "$APPS_DIR/$name.desktop" ] || continue
         cp -f "$APPS_DIR/$name.desktop" "$desktop/"
         chmod 755 "$desktop/$name.desktop"
@@ -307,8 +365,8 @@ set -u
 [ "\$(id -u)" -eq 0 ] || { echo "需要 root 权限，请用 sudo 运行。" >&2; exit 1; }
 
 rm -rf "$PREFIX"
-rm -f "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent"
-rm -f "$APPS_DIR/pxview.desktop" "$APPS_DIR/pxview-agent.desktop"
+rm -f "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent" "$BIN_DIR/pxview-uninstall"
+rm -f "$APPS_DIR/pxview.desktop" "$APPS_DIR/pxview-agent.desktop" "$APPS_DIR/pxview-uninstall.desktop"
 
 # Remove the desktop shortcuts install.sh copied to each real user's Desktop.
 # Walk /etc/passwd so any user (not just the one who installed) gets cleaned
@@ -324,7 +382,7 @@ while IFS=: read -r _ _ uid _ _ homedir _; do
         [ -n "\$d" ] && [ -d "\$d" ] && desktop="\$d"
     fi
     [ -d "\$desktop" ] || continue
-    rm -f "\$desktop/pxview.desktop" "\$desktop/pxview-agent.desktop"
+    rm -f "\$desktop"/pxview*.desktop
 done < /etc/passwd
 
 rm -f "$UDEV_DIR/60-px.rules" "$UDEV_DIR/60-libsigrok.rules" \\
