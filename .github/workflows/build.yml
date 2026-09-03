@@ -504,7 +504,9 @@ jobs:
           else
             BREW_OVERWRITE=""
           fi
-          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
+          # --force-bottle: 在 Rosetta 2 下强制使用预编译 bottle，避免 pcre2/openssl/lz4/node
+          # 等包因无法命中 x86_64 bottle 而回退到源码编译，导致 6 小时 job 超时。
+          brew install $BREW_OVERWRITE --force-bottle cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v4
