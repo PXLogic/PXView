@@ -21,7 +21,7 @@ Exit codes:
 Usage:
   check_window_render.py "<window title substring>" [min-distinct-colours]
 
-Requires x11-utils (xwininfo, xwd) and a reachable $DISPLAY.
+Requires x11-utils (xwininfo) and x11-apps (xwd) plus a reachable $DISPLAY.
 """
 from __future__ import annotations
 
@@ -106,9 +106,13 @@ def sample(width: int, height: int, bytes_per_line: int, raster: bytes,
 
 
 def main() -> int:
+    # xwininfo/xdpyinfo live in x11-utils; xwd moved to x11-apps. Be accurate
+    # in the hint so a missing tool is easy to fix.
+    pkg_of = {"xwininfo": "x11-utils", "xdpyinfo": "x11-utils", "xwd": "x11-apps"}
     for tool in ("xwininfo", "xwd"):
         if shutil.which(tool) is None:
-            print(f"FAIL: {tool} not found (apt install x11-utils)", file=sys.stderr)
+            pkg = pkg_of[tool]
+            print(f"FAIL: {tool} not found (apt install {pkg})", file=sys.stderr)
             return 1
 
     title = sys.argv[1] if len(sys.argv) > 1 else "PXView Agent"
