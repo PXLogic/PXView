@@ -1,4 +1,4 @@
-name: PXView Build
+﻿name: PXView Build
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       version:
         description: 'Version number for package naming (e.g. 1.5.4)'
         required: true
-        default: '1.5.8'
+        default: '1.5.9'
       targets:
         description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
@@ -93,7 +93,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.8" >> $GITHUB_OUTPUT
+            echo "value=1.5.9" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -467,7 +467,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.8" >> $GITHUB_OUTPUT
+            echo "value=1.5.9" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -896,7 +896,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.5.8" >> $GITHUB_OUTPUT
+            echo "value=1.5.9" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
