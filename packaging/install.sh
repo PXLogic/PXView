@@ -325,7 +325,9 @@ EOF
 fi
 
 # Uninstall entry -- invokes the root-lifting wrapper (pkexec/sudo), so a
-# password dialog appears at click time. Uses an icon every hicolor theme has.
+# password dialog appears at click time. Reuses the self-installed pxview
+# icon (already copied into /usr/share/icons/hicolor) so it always resolves,
+# and stays visually consistent with the main PXView menu entries.
 cat > "$APPS_DIR/pxview-uninstall.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -334,7 +336,7 @@ Name=卸载 PXView
 GenericName=Uninstall PXView
 Comment=从本系统移除 PXView (需要管理员权限)
 Exec=pxview-uninstall
-Icon=edit-delete
+Icon=pxview
 Terminal=false
 Categories=System;Development;Settings;
 Keywords=uninstall;remove;purge;pxview;
