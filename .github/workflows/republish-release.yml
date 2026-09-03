@@ -102,16 +102,6 @@ jobs:
           path: dl/mac-arm64
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download macOS x86_64 DMG
-        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'mac' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ github.event.inputs.run_id }}
-          name: PXView-macOS-x86_64-${{ github.event.inputs.version }}
-          path: dl/mac-x86_64
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download Windows NSIS installer
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'windows' }}
         continue-on-error: true
@@ -164,8 +154,8 @@ jobs:
             echo "  SKIP: Linux udev rules (not found in source run)"
           fi
 
-          # macOS DMGs
-          for pair in "dl/mac-arm64:ARM64" "dl/mac-x86_64:x86_64"; do
+          # macOS DMGs (ARM64 only; x86_64 was retired)
+          for pair in "dl/mac-arm64:ARM64"; do
             dir="${pair%%:*}"
             label="${pair##*:}"
             if ls "$dir"/*.dmg 1>/dev/null 2>&1; then

@@ -17,12 +17,6 @@ on:
         default: 'all'
         type: choice
         options: [linux, mac, windows, both, all]
-      mac_arch:
-        description: 'Which macOS architectures to build. "arm64" is fast (default); "all" also builds the slow x86_64 cross-compile. Note: push builds always build both arm64 and x86_64; pull_request builds always use "arm64" regardless of this value.'
-        required: true
-        default: 'arm64'
-        type: choice
-        options: [arm64, all]
       publish_release:
         description: 'Publish build artifacts to a GitHub Release (only applies to manual runs; tag pushes always publish)'
         required: true
@@ -435,10 +429,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Default (manual without "all" / pull_request): build only ARM64 (fast).
-        # push builds always build BOTH arm64 and the slow x86_64 cross-compile,
-        # as does explicit manual opt-in (workflow_dispatch with mac_arch == "all").
-        include: ${{ fromJson((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mac_arch == 'all')) && '[{"arch":"ARM64","cross_compile":false},{"arch":"x86_64","cross_compile":true}]' || '[{"arch":"ARM64","cross_compile":false}]') }}
+        # macOS builds ARM64 only. The x86_64 cross-compile job was removed because
+        # Homebrew 6.0.19+ stopped shipping x86_64 bottles (Intel Tier-3 deprecation)
+        # and GitHub retired the macos-13 Intel runner, making it unbuildable on
+        # GitHub-hosted runners.
+        arch: [ARM64]
     runs-on: macos-14
     steps:
       - name: Resolve ref
@@ -477,34 +472,10 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Setup x86_64 cross-compilation (Rosetta 2)
-        if: matrix.cross_compile
-        run: |
-          softwareupdate --install-rosetta --agree-to-license || true
-          if [ ! -f /usr/local/bin/brew ]; then
-            NONINTERACTIVE=1 arch -x86_64 /bin/bash -c \
-              "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          fi
-          echo "HOMEBREW_NO_PATH_SHADOW_CHECK=1" >> $GITHUB_ENV
-          echo "HOMEBREW_NO_ENV_HINTS=1" >> $GITHUB_ENV
-          echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $GITHUB_ENV
-          # Homebrew 6.0.19+ 将 macOS Intel x86_64 标记为 Tier-3 不支持，
-          # 会在 brew install 成功装完全部依赖后强制返回非零退出码，导致本 job 误判失败。
-          # 启用 developer 模式绕过该弃用诊断（仅作用于交叉编译的 x86_64 环境，不影响依赖安装）。
-          echo "HOMEBREW_DEVELOPER=1" >> $GITHUB_ENV
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          echo "=== x86_64 Homebrew 验证 ==="
-          /usr/local/bin/brew --version
-
       - name: Install dependencies via Homebrew
         run: |
           brew update
-          if [ "${{ matrix.cross_compile }}" = "true" ]; then
-            BREW_OVERWRITE="--overwrite"
-          else
-            BREW_OVERWRITE=""
-          fi
-          brew install $BREW_OVERWRITE cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
+          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v4
@@ -524,11 +495,7 @@ jobs:
           export LDFLAGS="-L$(brew --prefix gettext)/lib"
           export CPPFLAGS="-I$(brew --prefix gettext)/include"
           export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
-          if [ "${{ matrix.cross_compile }}" = "true" ]; then
-            OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=x86_64"
-          else
-            OSX_ARCH_FLAG=""
-          fi
+          OSX_ARCH_FLAG=""
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
             -DENABLE_TAURI=ON \
@@ -771,11 +738,7 @@ jobs:
           echo ""
           echo "启动 PXView --headless,等待 15 秒..."
 
-          if [ "${{ matrix.cross_compile }}" = "true" ]; then
-            arch -x86_64 "$APP_BIN" --headless -l 4 > /tmp/pxv-headless.log 2>&1 &
-          else
-            "$APP_BIN" --headless -l 4 > /tmp/pxv-headless.log 2>&1 &
-          fi
+          "$APP_BIN" --headless -l 4 > /tmp/pxv-headless.log 2>&1 &
           PID=$!
           sleep 15
 
