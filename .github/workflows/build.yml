@@ -439,10 +439,7 @@ jobs:
         # push builds always build BOTH arm64 and the slow x86_64 cross-compile,
         # as does explicit manual opt-in (workflow_dispatch with mac_arch == "all").
         include: ${{ fromJson((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mac_arch == 'all')) && '[{"arch":"ARM64","cross_compile":false},{"arch":"x86_64","cross_compile":true}]' || '[{"arch":"ARM64","cross_compile":false}]') }}
-    # x86_64 交叉编译在原生 Intel runner (macos-13) 上运行，x86_64 Homebrew 原生执行、
-    # bottle 齐全，避免 ARM runner + Rosetta 下 Homebrew 6.0.19+ 对 Intel 的 Tier-3 弃用
-    # 导致 bottle 缺失、回退源码编译而撑满 6 小时超时。ARM64 仍用 macos-14。
-    runs-on: ${{ matrix.cross_compile && 'macos-13' || 'macos-14' }}
+    runs-on: macos-14
     steps:
       - name: Resolve ref
         id: ref
