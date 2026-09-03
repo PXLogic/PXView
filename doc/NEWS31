@@ -7,6 +7,39 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
   
+    PXView V1.5.9修改
+    时间：2026年9月3日
+    变更如下：
+
+    【新功能】
+    *新增 Linux AppImage 统一入口分发器 pxview-launcher：单个 AppImage 只能暴露一个 AppRun，新增的分发脚本按首个参数路由——无参数启动经典 PXView GUI，`agent`/`--agent` 启动 PXView-Agent（Tauri 桌面端），另支持 --print-target（供 CI 校验解析目标）与 --help；配套新增 packaging/pxview-AppRun 作为 AppImage 的 AppRun 入口，负责设置 APPDIR/PATH/LD_LIBRARY_PATH 后把参数转交分发器
+    *Linux 桌面文件 PXView.desktop 新增多模式启动项：TryExec/Exec 改为 pxview-launcher，并新增 Classic / Agent 两个 Desktop Action，可在应用菜单中直接选择启动经典界面或 Tauri Agent
+
+    【问题修复】
+    *修复导入文件（VCD/CSV/WAV/STF 等）后主界面卡在"停止"状态无法恢复：此类采集不产生任何数据包，永远走不到 SR_DF_END，而 CollectEnd 是唯一能复位 View 运行态的事件，导致 Start/Stop 按钮被永久锁死。新增 CollectEnd 投递守卫（SessionStateContext 的原子标志 _frame_end_pending，配 arm_frame_end_pending()/consume_frame_end_pending()）：采集开始时置位、frame_ended() 时清除；on_session_stopped_event() 的自动停止路径发现标志仍置位，即说明本次采集未经 SR_DF_END 就结束，遂合成 CollectEnd 与 ST_STOPPED
+    *EndCollectWork 事件补充侧边栏按钮复位：与 StartCollectWork 把 Start/Instant 按钮锁进"运行"态相对称，on_end_collect_work() 现在同步执行 setItemRunning(false)，使这一闩锁不可能泄漏
+    *拒绝输入模块设备的无效采集请求：CaptureManager::action_start_capture() 在 device_agent().is_input_module() 时直接返回 false 并打印告警——输入模块（VCD/CSV/二进制/Saleae 导入）没有 libsigrok 驱动，sr_session_run() 立即返回且不产生数据包，此时发起采集只会清空 view_data 丢掉已导入波形并让 UI 卡死；SessionService::can_start_capture() 同步对输入模块返回 false。.pxl/.sr 会话文件走虚拟会话驱动，保留其回放/采集能力，不受影响
+    *修复 reload() 在设备报告无通道时误清空已导入数据：输入模块 cleanup 会转移 sdi 通道列表，导致 reload 读到空通道，原先无条件 clear_signals() 会清空整个视口并丢弃导入的波形；改为仅在确实没有任何 signal_models 时才 clear_signals()，否则保留既有模型并打印告警
+    *修复窗口缩放后底部状态条错位：新增 View::reposition_status_bar()，把底部状态浮层（ViewStatus）重新贴到时间视口底边（它是手工维护 geometry 的普通子控件，不随 QAbstractScrollArea 的 viewport 自动调整）
+    *修复纯纵向缩放时表头/标尺不跟随高度变化：ViewDataSync::resizeEvent 在宽度未变（仅高度变化）的分支补充调用 _view->update_margins() 与 reposition_status_bar()。Header/Ruler/DevMode 的 geometry 由 ViewLayout::update_margins() 手工维护，少了这一步，窗口拉高后表头仍停在旧高度、底部新露出区域无任何绘制而直接透出背景色，反向缩小则表头过高、底边越界
+    *修正 MCP 工具数量与文档不一致：实际注册 45 个工具（Tier0 模式管理 3 / Tier1 核心工作流 17 / Tier2 配置 12 / Tier3 高级特性 13），同步更新 mcp_instructions.txt 与 mcp_tool_registry.cpp 的各 Tier 注释；新增"已移除工具及替代方案"章节，明确 get_sample_config→get_session_status(include="config")、get_decoder_class_names→get_analyzer_results(includeMetadata=true)、get_math_results/get_spectrum_results/get_lissajous_results→get_measurement_results(types=[...])、set_save_range→重命名 set_export_config（参数与能力 1:1 不变）
+    *libsigrok 子模块：修复 sr_input_release_sdi() 丢失 sdi 通道列表的问题——vcd/csv/wav/stf/protocoldata 的 cleanup() 都会调用 keep_header_for_reread()，把 sdi->channels 与 sdi->channel_groups 转移到模块私有上下文并置 NULL。对 sr_input_free() 而言这是对的（sdi 与 input 一同销毁），但对 release_sdi() 是错的：sdi 所有权即将交给调用者，丢失通道列表会让调用者持有的 sdi 不可用且无法释放（每个通道都泄漏）。改为在 cleanup 前后保存并恢复这两个列表
+
+    【构建与工程】
+    *AppImage 打包纳入 PXView-Agent：linuxdeploy 增加 -e install.dir/usr/bin/PXView-Agent；install_packaging.cmake 安装 pxview-launcher 到 bin 目录，并为 Tauri Agent 的 file(INSTALL) 显式指定 OWNER/GROUP/WORLD 执行权限（原默认 0644，落地后无执行权限）
+    *自定义 AppRun 作为 AppImage 的真实启动入口：打包前复制 packaging/pxview-AppRun 到 install.dir/AppRun 并 chmod +x，linuxdeploy 不会覆盖已存在的 AppRun，路由逻辑因此得以保留
+    *打包流程显式 chmod +x PXView / PXView-Agent / pxview-launcher，修复 AppImage 内二进制无执行权限
+    *修复 AppImage 运行时 "Failed to import encodings module"：Python 标准库必须打包成与二进制实际链接的 libpython 相同的小版本。改为用 ldd 读取 PXView 真实链接的 libpython 版本（不再依赖默认 python3 或 CMake 缓存，两者都可能与 libsigrokdecode/PXView 实际链接的版本不一致），再定位对应解释器复制其 stdlib；读取失败时回退 python3，找不到解释器或 encodings 未打包则直接报错退出，避免静默产出坏包
+    *.gitattributes 为 packaging/pxview-AppRun 与 PXView/pxview-launcher 强制 LF 行尾（CR 会破坏 shebang 与 exec）；.gitignore 放行 packaging 目录
+    *Tauri 端跨平台适配：find_pxview_exe 按平台选择 PXView.exe / PXView，使 Linux/macOS 打包后 Agent 能找到同目录的无头 PXView
+    *版本号提升到 1.5.9（CMakeLists.txt、README 版本徽章、CI 默认版本、NSIS 安装脚本）
+    *README 修正 PX-Logic 各型号流模式最大采样率，与缓存模式保持一致（PX-Logic 32 与 16 Pro 均 1 GSa/s，16 Plus 500 MSa/s，16 Base 250 MSa/s）
+
+    【测试与 CI】
+    *CI 新增 AppImage 启动器双模式验证：分别以 `--headless` 与 `agent`（xvfb-run + webkit2gtk/GTK 运行库）启动 AppImage，轮询 MCP 端口 10110 确认经典 GUI 与 Tauri Agent（含其拉起的无头 PXView）均能独立正常启动
+    *macOS CI 移除 x86_64 交叉编译：Homebrew 6.0.19+ 已将 Intel x86_64 标记为 Tier-3 并停发 x86_64 bottle，GitHub 也已停用 macos-13 Intel runner，x86_64 构建在托管 runner 上已不可实现（期间尝试过的 HOMEBREW_DEVELOPER=1 绕过 Tier-3 弃用诊断、--force-bottle 强制预编译包、改用 macos-13 原生 Intel runner 等方案均随之撤销）。build.yml 矩阵简化为仅 ARM64，删除 Rosetta 2 交叉编译步骤、CMake OSX_ARCH_FLAG 与 headless 测试的 cross_compile 分支、workflow_dispatch 的 mac_arch 输入；republish-release.yml 删除 macOS x86_64 DMG 的下载与重打包环节
+    *QTest 桩（test_capture_manager / test_decode_task_manager）适配新增的 arm_frame_end_pending()/consume_frame_end_pending() 接口；MCP 协议测试改为精确断言 45 个工具，并把 set_active_session 补入必需工具清单
+
     PXView V1.5.8修改
     时间：2026年8月22日
     变更如下：
