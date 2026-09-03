@@ -56,22 +56,41 @@ printf 'PXView %s 安装程序\n' "$VERSION"
 # deliberately never bundled (see packaging/check-webkit-stack.sh). Since the
 # installer runs as root anyway, try to pull the runtime in rather than leaving
 # the user with an Agent that silently renders a blank window.
-have_webkit() { ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4.1'; }
+have_webkit() {
+    # Prefer the ldconfig cache (fast, and matches the loader's view). When the
+    # cache is stale -- e.g. a library was installed but ldconfig was never
+    # re-run -- fall back to probing the actual .so files so we don't wrongly
+    # report "missing" (and then try to reinstall) system-wide WebKit.
+    ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4.1' && return 0
+    local d
+    for d in /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64 /usr/lib; do
+        [ -d "$d" ] || continue
+        [ -n "$(find "$d" -maxdepth 1 -name 'libwebkit2gtk-4.1.so*' -print -quit 2>/dev/null)" ] && return 0
+    done
+    return 1
+}
 
 install_webkit_runtime() {
+    # Keep a diagnostics log so a silent failure isn't a black box. On success
+    # the temp log is removed; on failure the tail of it is shown to the user.
+    WEBKIT_LOG="${TMPDIR:-/tmp}/pxview-webkit-install.log"
+    rm -f "$WEBKIT_LOG"
     if command -v apt-get >/dev/null 2>&1; then
         local deb="libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1"
-        apt-get install -y -qq --no-install-recommends $deb >/dev/null 2>&1 && return 0
+        if apt-get install -y -qq --no-install-recommends $deb >>"$WEBKIT_LOG" 2>&1; then
+            return 0
+        fi
         # Package index may be stale or absent on a fresh box.
-        apt-get update -qq >/dev/null 2>&1
-        apt-get install -y -qq --no-install-recommends $deb >/dev/null 2>&1
+        apt-get update -qq >>"$WEBKIT_LOG" 2>&1 || true
+        apt-get install -y -qq --no-install-recommends $deb >>"$WEBKIT_LOG" 2>&1
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y -q webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3 >/dev/null 2>&1
+        dnf install -y -q webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3 >>"$WEBKIT_LOG" 2>&1
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -S --noconfirm --needed webkit2gtk-4.1 gtk3 librsvg libappindicator-gtk3 >/dev/null 2>&1
+        pacman -S --noconfirm --needed webkit2gtk-4.1 gtk3 librsvg libappindicator-gtk3 >>"$WEBKIT_LOG" 2>&1
     else
         return 1
     fi
+    # Rebuild the loader cache so system WebKit becomes visible to ldconfig -p.
     command -v ldconfig >/dev/null 2>&1 && ldconfig >/dev/null 2>&1
     return 0
 }
@@ -86,6 +105,11 @@ if [ -f "$PAYLOAD/bin/PXView-Agent" ] && ! have_webkit; then
     if have_webkit; then
         info "WebKitGTK 运行时已就绪"
     else
+        log="${WEBKIT_LOG:-}"
+        if [ -n "$log" ] && [ -s "$log" ]; then
+            warn "安装过程输出（末尾 12 行）:"
+            tail -n 12 "$log" | sed 's/^/    /' >&2
+        fi
         warn "自动安装失败，请手动安装（PXView 主程序不受影响，仅 Agent 无法启动）:"
         warn "  Ubuntu/Debian: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1"
         warn "  Fedora:        sudo dnf install webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3"
