@@ -309,6 +309,39 @@ if(APPLE)
     )
 endif()
 
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    # Installed layout is <prefix>/bin + <prefix>/lib + <prefix>/share. Resolve
+    # the bundled libraries relative to the binary instead of exporting
+    # LD_LIBRARY_PATH from a wrapper script: an exported LD_LIBRARY_PATH is
+    # inherited by every child process, and that is exactly how the AppImage
+    # ended up mixing bundled and system libraries inside WebKitGTK's helper
+    # processes -- the Tauri Agent rendered a blank window while the UI process
+    # and the headless PXView child kept running.
+    #
+    # PXView also resolves the rest of the tree from applicationDirPath():
+    #   <bindir>/../lib/python3.X   Python stdlib (appcontrol.cpp)
+    #   <bindir>/../share/PXView    res/ lang/ demo/ (appconfig.cpp)
+    #   <bindir>/../share/libsigrokdecode
+    # so a relocatable <prefix> such as /opt/PXView works unchanged.
+    #
+    # $ORIGIN expands to the directory holding the *binary*, so:
+    #   bin/PXView     -> $ORIGIN/../lib
+    #   lib/lib*.so    -> $ORIGIN          (siblings)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        INSTALL_RPATH "\$ORIGIN/../lib"
+        BUILD_RPATH "\$ORIGIN/../lib"
+    )
+
+    # RPATH is not transitive: libsigrok's own dependencies are resolved with
+    # libsigrok's RUNPATH, not the executable's.
+    if(TARGET libsigrok)
+        set_target_properties(libsigrok PROPERTIES
+            INSTALL_RPATH "\$ORIGIN"
+            BUILD_RPATH "\$ORIGIN"
+        )
+    endif()
+endif()
+
 if(ENABLE_COTIRE)
 	include(cotire)
 	cotire(${PROJECT_NAME})

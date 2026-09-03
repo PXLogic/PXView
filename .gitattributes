@@ -6,3 +6,7 @@ window_nisi.nsi binary
 # shebang and `exec` on Linux (AppRun + pxview-launcher).
 packaging/pxview-AppRun text eol=lf
 PXView/pxview-launcher text eol=lf
+packaging/check-webkit-stack.sh text eol=lf
+packaging/install.sh text eol=lf
+packaging/make-installer.sh text eol=lf
+tests/ci/check_window_render.py text eol=lf

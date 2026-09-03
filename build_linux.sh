@@ -249,13 +249,34 @@ if [ "$BUILD_APPIMAGE" = true ]; then
     # (the Tauri agent is installed via file(INSTALL) which defaults to 0644).
     chmod +x install.dir/usr/bin/PXView install.dir/usr/bin/PXView-Agent install.dir/usr/bin/pxview-launcher
 
+    # PXView-Agent is deliberately NOT passed with -e.
+    #
+    # linuxdeploy walks the ldd tree of every executable given with -e. For the
+    # Tauri Agent that tree is the entire WebKitGTK stack -- libwebkit2gtk-4.1
+    # (~95 MB), libjavascriptcoregtk-4.1, libsoup-3.0, libgtk-3, libgdk-3,
+    # libgstreamer-1.0 + libgst*, libenchant-2, libmanette -- and bundling it
+    # breaks the Agent. WebKitGTK forks helper processes
+    # (WebKitWebProcess / WebKitNetworkProcess / WebKitGPUProcess +
+    # injected-bundle/) that live in
+    # /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/; they are executables, so
+    # linuxdeploy never copies them. The UI process would then resolve the
+    # *bundled* libraries via AppRun's LD_LIBRARY_PATH while its helpers resolve
+    # the *system* ones, and that ABI mix kills the WebProcess: blank window,
+    # "WebKitWebProcess closed unexpectedly", "GStreamer element appsink not
+    # found". The headless PXView child keeps serving MCP 10110 throughout, so
+    # nothing but the user's eyes notices.
+    #
+    # The Agent is installed at usr/bin/PXView-Agent already, so it ships as a
+    # plain file and resolves webkit2gtk-4.1 from the target system -- which is
+    # what Tauri requires anyway (see CMake/install_packaging.cmake).
     ./linuxdeploy-x86_64.AppImage \
         --appdir install.dir \
         -e install.dir/usr/bin/PXView \
-        -e install.dir/usr/bin/PXView-Agent \
         -d install.dir/usr/share/applications/pxview.desktop \
         --plugin qt \
         --output appimage
+
+    bash packaging/check-webkit-stack.sh install.dir
 
     echo "   [OK] AppImage 生成: $OUTPUT"
     chmod +x "$OUTPUT"

@@ -194,11 +194,152 @@ fn pxview_restart(app: AppHandle, state: tauri::State<'_, PxViewChild>) -> PxVie
     }
 }
 
+/// WebKitGTK 2.4x+ composites through dmabuf + GPU. On stacks without a usable
+/// dmabuf/GL path the WebProcess aborts during startup and the window stays
+/// blank. Setting these forces the software path.
+const SOFTWARE_COMPOSITING_VARS: [&str; 2] = [
+    "WEBKIT_DISABLE_DMABUF_RENDERER",
+    "WEBKIT_DISABLE_COMPOSITING_MODE",
+];
+
+/// Escape hatch: `PXVIEW_WEBKIT_SOFTWARE=0` keeps hardware compositing even on
+/// a detected VM, `PXVIEW_WEBKIT_SOFTWARE=1` forces software everywhere.
+const FORCE_SOFTWARE_VAR: &str = "PXVIEW_WEBKIT_SOFTWARE";
+
+/// Substrings that identify a hypervisor in the DMI vendor/product strings.
+const VM_VENDOR_HINTS: [&str; 10] = [
+    "vmware",
+    "virtualbox",
+    "innotek", // VirtualBox's DMI vendor
+    "qemu",
+    "kvm",
+    "xen",
+    "bochs",
+    "parallels",
+    "microsoft corporation", // Hyper-V
+    "amazon ec2",
+];
+
+fn read_lowercase(path: &str) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|text| text.to_lowercase())
+}
+
+/// True when the DMI tables or the CPU flags say we run on a hypervisor.
+fn is_virtual_machine() -> bool {
+    const DMI_FILES: [&str; 3] = [
+        "/sys/class/dmi/id/sys_vendor",
+        "/sys/class/dmi/id/product_name",
+        "/sys/class/dmi/id/board_vendor",
+    ];
+
+    for path in DMI_FILES {
+        if let Some(text) = read_lowercase(path) {
+            if VM_VENDOR_HINTS.iter().any(|hint| text.contains(hint)) {
+                return true;
+            }
+        }
+    }
+
+    // Linux sets the `hypervisor` CPU flag under KVM / Xen / VMware / Hyper-V.
+    if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+        if cpuinfo
+            .lines()
+            .any(|line| line.split_whitespace().any(|token| token == "hypervisor"))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// True when a DRM render node or an NVIDIA device node is present.
+fn has_gpu_device() -> bool {
+    if let Ok(entries) = std::fs::read_dir("/dev/dri") {
+        if entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("card"))
+        {
+            return true;
+        }
+    }
+    // Proprietary NVIDIA drivers expose /dev/nvidia* instead of /dev/dri when
+    // modeset is disabled, so check those before assuming there is no GPU.
+    std::path::Path::new("/dev/nvidiactl").exists()
+        || std::path::Path::new("/dev/nvidia0").exists()
+}
+
+/// Hardware compositing is kept wherever it can plausibly work; only stacks
+/// that are known to break get the software fallback.
+fn needs_software_compositing() -> bool {
+    if is_virtual_machine() {
+        log::info!("virtual machine detected; WebKit GPU compositing disabled");
+        return true;
+    }
+    if !has_gpu_device() {
+        log::info!("no GPU device node found; WebKit GPU compositing disabled");
+        return true;
+    }
+    false
+}
+
+fn apply_software_compositing() {
+    for key in SOFTWARE_COMPOSITING_VARS {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, "1");
+            log::info!("{key}=1 (WebKitGTK software-compositing fallback)");
+        }
+    }
+}
+
+/// Choose the WebKitGTK compositing mode before GTK/WebKit initialises.
+///
+/// Without the fallback the failure looks like this on affected machines:
+///
+///   (WebKitWebProcess:PID): ERROR **: WebProcess didn't exit as expected
+///                                   after the UI process connection was closed
+///   "Sorry, the program \"WebKitWebProcess\" closed unexpectedly"
+///
+/// What makes it nasty is that everything else stays healthy: the UI process
+/// keeps running, the window has the right title and size, and the headless
+/// PXView child keeps serving MCP port 10110. Only a pixel check sees it.
+fn preset_webkit_env() {
+    // An explicit choice always wins.
+    match std::env::var(FORCE_SOFTWARE_VAR).ok().as_deref() {
+        Some("0") => {
+            log::info!("{FORCE_SOFTWARE_VAR}=0: keeping hardware compositing");
+            return;
+        }
+        Some(value) => {
+            log::info!("{FORCE_SOFTWARE_VAR}={value}: forcing software compositing");
+            apply_software_compositing();
+            return;
+        }
+        None => {}
+    }
+
+    // Respect values already set by the user or a launcher script.
+    if SOFTWARE_COMPOSITING_VARS
+        .iter()
+        .any(|key| std::env::var_os(key).is_some())
+    {
+        return;
+    }
+
+    if needs_software_compositing() {
+        apply_software_compositing();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
+
+    preset_webkit_env();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

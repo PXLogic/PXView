@@ -276,13 +276,35 @@ jobs:
           # Ensure both binaries and the launcher are executable in the AppImage
           # (the Tauri agent is installed via file(INSTALL) which defaults to 0644).
           chmod +x install.dir/usr/bin/PXView install.dir/usr/bin/PXView-Agent install.dir/usr/bin/pxview-launcher
+          # PXView-Agent is deliberately NOT passed with -e.
+          #
+          # linuxdeploy walks the ldd tree of every executable given with -e. For
+          # the Tauri Agent that tree is the entire WebKitGTK stack --
+          # libwebkit2gtk-4.1 (~95 MB), libjavascriptcoregtk-4.1, libsoup-3.0,
+          # libgtk-3, libgdk-3, libgstreamer-1.0 + libgst*, libenchant-2,
+          # libmanette -- and bundling it breaks the Agent. WebKitGTK forks
+          # helper processes (WebKitWebProcess / WebKitNetworkProcess /
+          # WebKitGPUProcess + injected-bundle/) that live in
+          # /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/; they are executables, so
+          # linuxdeploy never copies them. The UI process would then resolve the
+          # *bundled* libraries via AppRun's LD_LIBRARY_PATH while its helpers
+          # resolve the *system* ones, and that ABI mix kills the WebProcess:
+          # blank window, "WebKitWebProcess closed unexpectedly", "GStreamer
+          # element appsink not found". The headless PXView child keeps serving
+          # MCP 10110 throughout, so nothing but the user's eyes notices.
+          #
+          # The Agent is installed at usr/bin/PXView-Agent already, so it ships as
+          # a plain file and resolves webkit2gtk-4.1 from the target system --
+          # which is what Tauri requires anyway (see CMake/install_packaging.cmake).
           ./linuxdeploy-x86_64.AppImage \
             --appdir install.dir \
             -e install.dir/usr/bin/PXView \
-            -e install.dir/usr/bin/PXView-Agent \
             -d install.dir/usr/share/applications/pxview.desktop \
             --plugin qt \
             --output appimage
+
+      - name: Verify WebKitGTK stack is not bundled
+        run: bash packaging/check-webkit-stack.sh install.dir
 
       - name: Verify AppImage
         run: |
@@ -298,8 +320,9 @@ jobs:
 
           # The Tauri Agent needs a display + webkit/GTK runtime libs. Install
           # them so the agent test can open its window and spawn headless PXView.
+          # x11-utils provides xdpyinfo/xwininfo/xwd for the render check below.
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xauth \
+          sudo apt-get install -y -qq xvfb xauth x11-utils \
             libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1
 
           wait_mcp() { # args: pid
@@ -332,18 +355,44 @@ jobs:
           fi
           cleanup
 
-          echo "=== Test 2: Tauri Agent entry (xvfb-run -a ./AppImage agent) ==="
-          xvfb-run -a "$APPI" agent >pxv_agent.log 2>&1 &
+          echo "=== Test 2: Tauri Agent entry (./AppImage agent) ==="
+          # Drive a known display instead of xvfb-run, so the render check below
+          # can point xwininfo/xwd at it.
+          Xvfb :99 -screen 0 1440x900x24 >xvfb.log 2>&1 &
+          xvfb_pid=$!
+          export DISPLAY=:99
+          for _ in $(seq 1 30); do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+          "$APPI" agent >pxv_agent.log 2>&1 &
           pid=$!
           if wait_mcp "$pid"; then
             echo "PASS: PXView-Agent started and spawned headless PXView (MCP 10110)"
           else
             cat pxv_agent.log || true
+            kill "$xvfb_pid" 2>/dev/null || true
+            exit 1
+          fi
+
+          # Reaching MCP 10110 only proves the headless PXView child is up. A
+          # crashed WebProcess leaves a correctly sized but blank window while
+          # the UI process stays alive and 10110 keeps answering, so only a
+          # pixel check catches it. See tests/ci/check_window_render.py.
+          if python3 tests/ci/check_window_render.py "PXView Agent"; then
+            echo "PASS: PXView-Agent window rendered real content"
+          else
+            echo "FAIL: PXView-Agent window is blank or missing" >&2
+            cat pxv_agent.log || true
+            cleanup
+            kill "$xvfb_pid" 2>/dev/null || true
             exit 1
           fi
           cleanup
+          kill "$xvfb_pid" 2>/dev/null || true
 
-          echo "=== OK: both launcher entries started independently ==="
+          echo "=== OK: both launcher entries started and the Agent window renders ==="
 
       - name: Package udev rules (separate artifact)
         run: |
@@ -393,11 +442,94 @@ jobs:
           echo "=== udev rules contents ==="
           unzip -l PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
 
+      - name: Build self-extracting installer
+        run: |
+          chmod +x packaging/make-installer.sh
+          PXVIEW_VERSION="${{ steps.version.outputs.value }}" \
+            PXVIEW_APPDIR="$PWD/install.dir/usr" \
+            PXVIEW_OUTPUT_DIR="$PWD" \
+            bash packaging/make-installer.sh
+
+      - name: Test installer (install into /opt, then uninstall)
+        run: |
+          set -euo pipefail
+          INSTALLER="./PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh"
+          PREFIX=/opt/PXView
+
+          sudo env PXVIEW_PREFIX="$PREFIX" "$INSTALLER"
+
+          test -x "$PREFIX/bin/PXView"
+          test -f "$PREFIX/uninstall.sh"
+
+          # The installed binaries must resolve their bundled libraries through
+          # RUNPATH -- no LD_LIBRARY_PATH wrapper anywhere. An exported
+          # LD_LIBRARY_PATH is what mixed bundled and system libraries inside
+          # WebKitGTK's helper processes and blanked the agent window.
+          if ldd "$PREFIX/bin/PXView" | grep -q "not found"; then
+            echo "FAIL: PXView has unresolved libraries:" >&2
+            ldd "$PREFIX/bin/PXView" | grep "not found" >&2
+            exit 1
+          fi
+          echo "== PXView RUNPATH =="
+          readelf -d "$PREFIX/bin/PXView" | grep -Ei "runpath|rpath" || true
+
+          # udev rules must land in a directory udev actually reads -- this is
+          # what the AppImage could never do (it shipped a separate zip).
+          udev_dir=/etc/udev/rules.d
+          [ -d /usr/lib/udev/rules.d ] && udev_dir=/usr/lib/udev/rules.d
+          if ! ls "$udev_dir" | grep -q "60-px.rules"; then
+            echo "FAIL: udev rules not installed into $udev_dir" >&2
+            exit 1
+          fi
+          echo "PASS: udev rules installed into $udev_dir"
+
+          # Two real desktop entries, no more single-AppRun routing.
+          test -f /usr/local/share/applications/pxview.desktop
+          test -f /usr/local/share/applications/pxview-agent.desktop
+          test -x /usr/local/bin/pxview
+          test -x /usr/local/bin/pxview-agent
+          echo "PASS: desktop entries and CLI wrappers installed"
+
+          # Headless PXView from the installed tree must reach MCP 10110.
+          "$PREFIX/bin/PXView" --headless >installed_headless.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -s -o /dev/null -m 2 "http://127.0.0.1:10110/"; then break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "FAIL: installed PXView exited" >&2
+              cat installed_headless.log >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -s -o /dev/null -m 2 "http://127.0.0.1:10110/" || {
+            echo "FAIL: MCP 10110 unreachable" >&2; cat installed_headless.log >&2; exit 1; }
+          kill "$pid" 2>/dev/null || true
+          pkill -9 -x PXView 2>/dev/null || true
+          sleep 2
+          echo "PASS: installed PXView headless reachable on MCP 10110"
+
+          # Uninstall must undo everything.
+          sudo "$PREFIX/uninstall.sh"
+          test ! -e "$PREFIX"
+          test ! -e /usr/local/bin/pxview
+          test ! -f /usr/local/share/applications/pxview.desktop
+          test ! -f "$udev_dir/60-px.rules"
+          echo "PASS: installer install + uninstall"
+
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}
           path: PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}
+          path: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh
           if-no-files-found: error
           compression-level: 0
 
