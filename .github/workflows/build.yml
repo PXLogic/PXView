@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: false
           persist-credentials: false
@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
@@ -129,7 +129,7 @@ jobs:
           g++ --version
 
       - name: Setup Node.js (for Web UI)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -287,7 +287,7 @@ jobs:
           echo "PASS: installer install + uninstall"
 
       - name: Upload Installer Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}
           path: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.run
@@ -350,19 +350,24 @@ jobs:
           fi
 
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
           persist-credentials: false
 
       - name: Install dependencies via Homebrew
+        env:
+          # GitHub-runner 是临时环境,无需对第三方 tap 做信任校验。
+          # 关闭后可消除 "The following taps are not trusted: aws/tap"
+          # 这类由 Homebrew 新 tap-trust 机制产生的噪音警告。
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
           brew update
           brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
 
       - name: Setup Node.js (for Web UI)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -662,7 +667,7 @@ jobs:
           echo "=== ✅ DMG 验证通过 (${{ matrix.arch }}) ==="
 
       - name: Upload DMG Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PXView-macOS-${{ matrix.arch }}-${{ steps.version.outputs.value }}
           path: install.dir/*.dmg
@@ -747,14 +752,14 @@ jobs:
           fi
 
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
           persist-credentials: false
 
       - name: Setup Node.js (for Web UI)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -868,7 +873,7 @@ jobs:
           }
 
       - name: Upload NSIS Installer Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}
           path: PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe
@@ -876,7 +881,7 @@ jobs:
           compression-level: 0
 
       - name: Upload Portable Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}
           path: package/

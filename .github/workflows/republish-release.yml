@@ -7,7 +7,7 @@
 # after artifacts were already uploaded).
 #
 # Workflow:
-#   1. Download artifacts from the specified run-id (actions/download-artifact@v4)
+#   1. Download artifacts from the specified run-id (actions/download-artifact@v8)
 #      — each artifact zip is auto-extracted to a sub-directory.
 #   2. Collect single-file assets (.sh installer / .dmg / .exe / .zip) as-is.
 #   3. Re-zip the Windows Portable directory with max compression (-9).
@@ -75,7 +75,7 @@ jobs:
       - name: Download Linux Installer
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'linux' }}
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.event.inputs.run_id }}
           name: PXView-Linux-x86_64-Installer-${{ github.event.inputs.version }}
@@ -85,7 +85,7 @@ jobs:
       - name: Download macOS ARM64 DMG
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'mac' }}
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.event.inputs.run_id }}
           name: PXView-macOS-ARM64-${{ github.event.inputs.version }}
@@ -95,7 +95,7 @@ jobs:
       - name: Download Windows NSIS installer
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'windows' }}
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.event.inputs.run_id }}
           name: PXView-Windows-x86_64-Setup-${{ github.event.inputs.version }}
@@ -108,7 +108,7 @@ jobs:
             || github.event.inputs.platforms == 'windows'
             || github.event.inputs.platforms == 'portable' }}
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.event.inputs.run_id }}
           name: PXView-Windows-x86_64-Portable-${{ github.event.inputs.version }}

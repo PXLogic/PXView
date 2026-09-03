@@ -57,7 +57,7 @@ jobs:
 
     steps:
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
@@ -352,7 +352,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-e2e-report
           path: |
@@ -386,7 +386,7 @@ jobs:
 
     steps:
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
@@ -607,7 +607,7 @@ jobs:
 
       - name: Upload ASan test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: asan-core-report
           path: |
@@ -641,7 +641,7 @@ jobs:
 
     steps:
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
@@ -906,7 +906,7 @@ jobs:
 
       - name: Upload TSan headless report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tsan-headless-report
           path: |
@@ -916,7 +916,7 @@ jobs:
 
       - name: Upload TSan GUI report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tsan-gui-report
           path: |
@@ -961,7 +961,7 @@ jobs:
 
     steps:
       - name: Checkout PXView repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
@@ -1060,7 +1060,7 @@ jobs:
 
       - name: Upload Clang-Tidy log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clang-tidy-fast-report
           path: build/clang-tidy.log
