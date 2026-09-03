@@ -4,7 +4,7 @@
 #=
 #= Produces a single file the user can just run:
 #=
-#=   sudo ./PXView-Linux-x86_64-Installer-<version>.sh
+#=   sudo ./PXView-Linux-x86_64-Installer-<version>.run
 #=
 #= Structure of the produced file:
 #=
@@ -53,7 +53,7 @@ VERSION="$(detect_version)"
 [ -f "$APPDIR/bin/PXView" ] || { echo "ERROR: $APPDIR/bin/PXView 不存在。" >&2; exit 1; }
 [ -f "$SCRIPT_DIR/install.sh" ] || { echo "ERROR: 缺少 packaging/install.sh" >&2; exit 1; }
 
-OUTPUT="$OUTPUT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
+OUTPUT="$OUTPUT_DIR/PXView-Linux-x86_64-Installer-$VERSION.run"
 ARCH="$(uname -m)"
 
 echo "================================"
@@ -116,7 +116,7 @@ cat > "$OUTPUT" <<'HEADER'
 #==============================================================================
 #= PXView self-extracting installer for Linux x86_64.
 #=
-#=   sudo ./PXView-Linux-x86_64-Installer-<version>.sh
+#=   sudo ./PXView-Linux-x86_64-Installer-<version>.run
 #=
 #= The payload is appended below the __PXVIEW_ARCHIVE_BELOW__ marker. Everything
 #= after that marker is a tar archive; everything before it is this script.

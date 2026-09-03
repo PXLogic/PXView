@@ -127,7 +127,7 @@ source ~/.bashrc
 
 ### Step 4 (recommended): Packaging as a .sh Installer (Linux)
 
-PXView now ships a self-extracting `.sh` installer built by `packaging/make-installer.sh`. It stages `install.dir/usr` into a portable payload and installs it to `/opt/PXView` with full system integration (udev rules, icons, two desktop entries, CLI wrappers, uninstaller).
+PXView now ships a self-extracting `.run` installer built by `packaging/make-installer.sh`. It stages `install.dir/usr` into a portable payload and installs it to `/opt/PXView` with full system integration (udev rules, icons, two desktop entries, CLI wrappers, uninstaller).
 
 ```bash
 cd build && ninja -j "$(nproc)" && ninja install
@@ -139,8 +139,8 @@ cd ..
 bash packaging/bundle-runtime-libs.sh install.dir
 
 PXVIEW_VERSION=1.5.9 bash packaging/make-installer.sh
-# -> PXView-Linux-x86_64-Installer-1.5.9.sh
-sudo ./PXView-Linux-x86_64-Installer-1.5.9.sh
+# -> PXView-Linux-x86_64-Installer-1.5.9.run
+sudo ./PXView-Linux-x86_64-Installer-1.5.9.run
 ```
 
 The Tauri Agent (`PXView-Agent`) is shipped as a plain file and resolves `libwebkit2gtk-4.1` from the target system at runtime — it is deliberately **not** bundled, because bundling WebKitGTK produces an ABI mismatch (bundled libs vs. the system's `WebKitWebProcess`/`WebKitNetworkProcess`) that blanks the Agent window. `packaging/check-webkit-stack.sh` fails the build if any desktop/WebKit library leaks into the tree.

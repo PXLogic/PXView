@@ -127,7 +127,7 @@ source ~/.bashrc
 
 ### 步骤 4（推荐）：打包为自解压 .sh 安装器（Linux）
 
-PXView 现在改用 `packaging/make-installer.sh` 生成的 `.sh` 自解压安装器。它会把 `install.dir/usr` 暂存为可移植负载，并安装到 `/opt/PXView`，自动完成系统级集成（udev 规则、图标、两个桌面项、CLI 包装、卸载脚本）。
+PXView 现在改用 `packaging/make-installer.sh` 生成的 `.run` 自解压安装器。它会把 `install.dir/usr` 暂存为可移植负载，并安装到 `/opt/PXView`，自动完成系统级集成（udev 规则、图标、两个桌面项、CLI 包装、卸载脚本）。
 
 ```bash
 cd build && ninja -j "$(nproc)" && ninja install
@@ -138,8 +138,8 @@ cd ..
 bash packaging/bundle-runtime-libs.sh install.dir
 
 PXVIEW_VERSION=1.5.9 bash packaging/make-installer.sh
-# -> PXView-Linux-x86_64-Installer-1.5.9.sh
-sudo ./PXView-Linux-x86_64-Installer-1.5.9.sh
+# -> PXView-Linux-x86_64-Installer-1.5.9.run
+sudo ./PXView-Linux-x86_64-Installer-1.5.9.run
 ```
 
 Tauri Agent（`PXView-Agent`）以普通文件分发，运行时从目标系统解析 `libwebkit2gtk-4.1`——**刻意不打包**，因为打包 WebKitGTK 会造成 ABI 混搭（打包库 vs 系统 `WebKitWebProcess`/`WebKitNetworkProcess`），导致 Agent 窗口全白。`packaging/check-webkit-stack.sh` 一旦检测到桌面/WebKit 库泄漏进安装树就会让构建失败。

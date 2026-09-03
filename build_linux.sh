@@ -218,7 +218,7 @@ if [ "$BUILD_PACKAGE" = true ]; then
         bash packaging/make-installer.sh
 
     echo "   [OK] 安装器生成完成"
-    ls -la "PXView-Linux-x86_64-Installer-$VERSION.sh"
+    ls -la "PXView-Linux-x86_64-Installer-$VERSION.run"
 else
     echo " [7/7] 跳过打包 (--no-package)"
 fi
@@ -228,9 +228,9 @@ echo "================================================"
 echo " 构建完成!"
 echo "================================================"
 if [ "$BUILD_PACKAGE" = true ]; then
-    echo " 安装器:    $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
-    echo " 安装:      sudo $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
-    echo " 指定目录:  sudo PXVIEW_PREFIX=/opt/PXView $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
+echo " 安装器:    $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.run"
+echo " 安装:      sudo $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.run"
+echo " 指定目录:  sudo PXVIEW_PREFIX=/opt/PXView $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.run"
 fi
 echo " 安装树:    $SCRIPT_DIR/install.dir/usr/"
 echo " 直接运行:  $SCRIPT_DIR/install.dir/usr/bin/PXView"

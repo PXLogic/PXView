@@ -125,10 +125,10 @@ jobs:
 
           echo "=== Scanning downloaded artifacts ==="
 
-          # Linux installer (.sh self-extracting)
-          if ls dl/linux-installer/*.sh 1>/dev/null 2>&1; then
-            cp dl/linux-installer/*.sh release-assets/
-            chmod +x release-assets/*.sh
+          # Linux installer (.run self-extracting)
+          if ls dl/linux-installer/*.run 1>/dev/null 2>&1; then
+            cp dl/linux-installer/*.run release-assets/
+            chmod +x release-assets/*.run
             FOUND=$((FOUND+1))
             echo "  OK: Linux installer"
           else

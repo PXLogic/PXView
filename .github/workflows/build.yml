@@ -222,7 +222,7 @@ jobs:
       - name: Test installer (install into /opt, then uninstall)
         run: |
           set -euo pipefail
-          INSTALLER="./PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh"
+          INSTALLER="./PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.run"
           PREFIX=/opt/PXView
 
           sudo env PXVIEW_PREFIX="$PREFIX" "$INSTALLER"
@@ -290,7 +290,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}
-          path: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh
+          path: PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.run
           if-no-files-found: error
           compression-level: 0
 
@@ -299,7 +299,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh
+            PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.run
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:
