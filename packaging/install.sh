@@ -152,6 +152,20 @@ if ! getent group plugdev >/dev/null 2>&1; then
     groupadd plugdev && info "已创建 plugdev 组"
 fi
 
+# We already hold root here: add the invoking user to plugdev so they can use
+# the USB device right after a re-login, instead of printing a "please run this
+# yourself" hint. Membership takes effect on the user's next login, so we still
+# tell them to log out/in. SUDO_USER is unset when run via su/root directly.
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    if getent passwd "$SUDO_USER" >/dev/null 2>&1; then
+        if usermod -aG plugdev "$SUDO_USER" 2>/dev/null; then
+            info "已将 $SUDO_USER 加入 plugdev 组 (重新登录后生效)"
+        else
+            warn "无法自动将 $SUDO_USER 加入 plugdev 组，请手动执行: usermod -aG plugdev $SUDO_USER"
+        fi
+    fi
+fi
+
 #------------------------------------------------------------------------------
 # 4. Icons
 #------------------------------------------------------------------------------
@@ -295,6 +309,24 @@ set -u
 rm -rf "$PREFIX"
 rm -f "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent"
 rm -f "$APPS_DIR/pxview.desktop" "$APPS_DIR/pxview-agent.desktop"
+
+# Remove the desktop shortcuts install.sh copied to each real user's Desktop.
+# Walk /etc/passwd so any user (not just the one who installed) gets cleaned
+# up. plugdev membership is deliberately left untouched -- it is a generic
+# system group the account may still need for other devices.
+while IFS=: read -r _ _ uid _ _ homedir _; do
+    # Only real interactive users (uid >= 1000) with an existing home dir.
+    [ "\$uid" -ge 1000 ] 2>/dev/null || continue
+    [ -n "\$homedir" ] && [ -d "\$homedir" ] || continue
+    desktop="\$homedir/Desktop"
+    if command -v xdg-user-dir >/dev/null 2>&1; then
+        d="\$(sudo -u "\$(basename "\$homedir")" xdg-user-dir DESKTOP 2>/dev/null || true)"
+        [ -n "\$d" ] && [ -d "\$d" ] && desktop="\$d"
+    fi
+    [ -d "\$desktop" ] || continue
+    rm -f "\$desktop/pxview.desktop" "\$desktop/pxview-agent.desktop"
+done < /etc/passwd
+
 rm -f "$UDEV_DIR/60-px.rules" "$UDEV_DIR/60-libsigrok.rules" \\
       "$UDEV_DIR/61-libsigrok-plugdev.rules" "$UDEV_DIR/61-libsigrok-uaccess.rules"
 rm -f /usr/share/pixmaps/pxview.png /usr/share/pixmaps/pxview.svg
@@ -321,7 +353,12 @@ info "启动:       pxview          (或在应用菜单中选择 PXView)"
 info "卸载:       sudo $PREFIX/uninstall.sh"
 echo
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-    info "注意: 请把自己加入 plugdev 组并重新登录，否则普通用户无权访问 USB 设备:"
-    info "      sudo usermod -aG plugdev $SUDO_USER"
+    if getent group plugdev >/dev/null 2>&1 && getent passwd "$SUDO_USER" >/dev/null 2>&1 \
+       && id -nG "$SUDO_USER" 2>/dev/null | grep -qw plugdev; then
+        info "已将 $SUDO_USER 加入 plugdev 组。请重新登录使 USB 设备权限生效。"
+    else
+        info "注意: 请手动把自己加入 plugdev 组并重新登录，否则普通用户无权访问 USB 设备:"
+        info "      sudo usermod -aG plugdev $SUDO_USER"
+    fi
 fi
 echo

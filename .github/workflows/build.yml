@@ -211,54 +211,6 @@ jobs:
           export QT_DIR="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
           bash packaging/bundle-runtime-libs.sh install.dir
 
-      - name: Package udev rules (separate artifact)
-        run: |
-          mkdir -p udev-rules
-          cp install.dir/usr/lib/udev/rules.d/60-px.rules udev-rules/
-          cp libsigrok/contrib/60-libsigrok.rules udev-rules/
-          cp libsigrok/contrib/61-libsigrok-plugdev.rules udev-rules/
-          cp libsigrok/contrib/61-libsigrok-uaccess.rules udev-rules/
-          cat > udev-rules/install-udev-rules.sh << 'EOF'
-          #!/bin/bash
-          set -e
-          RULES_FILES="60-px.rules 60-libsigrok.rules 61-libsigrok-plugdev.rules 61-libsigrok-uaccess.rules"
-          if [ "$(id -u)" -ne 0 ]; then
-            echo "Please run with sudo: sudo $0"
-            exit 1
-          fi
-          if [ -d /usr/lib/udev/rules.d ]; then
-            DEST=/usr/lib/udev/rules.d
-          elif [ -d /lib/udev/rules.d ]; then
-            DEST=/lib/udev/rules.d
-          elif [ -d /etc/udev/rules.d ]; then
-            DEST=/etc/udev/rules.d
-          else
-            echo "Error: No udev rules directory found"
-            exit 1
-          fi
-          echo "Installing udev rules to $DEST/"
-          for f in $RULES_FILES; do
-            if [ ! -f "$f" ]; then
-              echo "Warning: $f not found, skipping"
-              continue
-            fi
-            cp "$f" "$DEST/$f"
-            echo "  -> installed $f"
-          done
-          udevadm control --reload-rules
-          udevadm trigger
-          echo ""
-          echo "Done. PXView hardware devices should now be accessible without sudo."
-          echo "Note: For the 'plugdev' group rule to take effect, add yourself to the group:"
-          echo "  sudo usermod -aG plugdev \$USER"
-          echo "Then log out and back in (or run 'newgrp plugdev')."
-          EOF
-          chmod +x udev-rules/install-udev-rules.sh
-          (cd udev-rules && zip -r ../PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip .)
-          ls -la PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
-          echo "=== udev rules contents ==="
-          unzip -l PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
-
       - name: Build self-extracting installer
         run: |
           chmod +x packaging/make-installer.sh
@@ -342,21 +294,12 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Upload udev rules Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PXView-Linux-udev-rules-${{ steps.version.outputs.value }}
-          path: PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
-          if-no-files-found: error
-          compression-level: 0
-
       - name: Create GitHub Release (tag push or manual opt-in)
         if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true') }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
             PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh
-            PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:

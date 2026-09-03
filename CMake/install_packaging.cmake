@@ -315,6 +315,39 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 		install(FILES PXView/px.rules DESTINATION ${MAC_RES_PREFIX}lib/udev/rules.d RENAME 60-px.rules)
 	endif()
 
+	# libsigrok's udev rules are not installed by libsigrok itself when it is
+	# built in-tree here, so ship them alongside 60-px.rules in the local-prefix
+	# tree. packaging/install.sh copies every *.rules out of lib/udev/rules.d,
+	# which makes the self-extracting installer the single place that owns USB
+	# device permissions (no separate udev zip artifact needed anymore).
+	if(CMAKE_INSTALL_PREFIX STREQUAL "/usr" OR CMAKE_INSTALL_PREFIX STREQUAL "/usr/local")
+		if(IS_DIRECTORY /usr/lib/udev/rules.d)
+			install(FILES
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/60-libsigrok.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-plugdev.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-uaccess.rules
+				DESTINATION /usr/lib/udev/rules.d)
+		elseif(IS_DIRECTORY /lib/udev/rules.d)
+			install(FILES
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/60-libsigrok.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-plugdev.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-uaccess.rules
+				DESTINATION /lib/udev/rules.d)
+		elseif(IS_DIRECTORY /etc/udev/rules.d)
+			install(FILES
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/60-libsigrok.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-plugdev.rules
+				${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-uaccess.rules
+				DESTINATION /etc/udev/rules.d)
+		endif()
+	else()
+		install(FILES
+			${CMAKE_SOURCE_DIR}/libsigrok/contrib/60-libsigrok.rules
+			${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-plugdev.rules
+			${CMAKE_SOURCE_DIR}/libsigrok/contrib/61-libsigrok-uaccess.rules
+			DESTINATION ${MAC_RES_PREFIX}lib/udev/rules.d)
+	endif()
+
 endif()
 
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/doc/ DESTINATION ${MAC_RES_PREFIX}share/PXView)

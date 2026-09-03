@@ -82,16 +82,6 @@ jobs:
           path: dl/linux-installer
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download Linux udev rules
-        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'linux' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ github.event.inputs.run_id }}
-          name: PXView-Linux-udev-rules-${{ github.event.inputs.version }}
-          path: dl/linux-udev
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download macOS ARM64 DMG
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'mac' }}
         continue-on-error: true
@@ -143,15 +133,6 @@ jobs:
             echo "  OK: Linux installer"
           else
             echo "  SKIP: Linux installer (not found in source run)"
-          fi
-
-          # Linux udev rules (already a zip)
-          if ls dl/linux-udev/*.zip 1>/dev/null 2>&1; then
-            cp dl/linux-udev/*.zip release-assets/
-            FOUND=$((FOUND+1))
-            echo "  OK: Linux udev rules"
-          else
-            echo "  SKIP: Linux udev rules (not found in source run)"
           fi
 
           # macOS DMGs (ARM64 only; x86_64 was retired)
