@@ -15,9 +15,13 @@
 
 name: macOS Debug (lldb backtrace)
 
+# 默认不自动构建：本工作流需在 macOS runner 上完整编译 PXView 再跑 lldb，
+# 成本高。改为仅 manual dispatch 时构建并上传 backtrace 产物；
+# push 到 main 不再自动触发（避免每次提交都占用 macos-14 runner）。
+# 如需恢复自动构建，把下面注释掉的 push 段恢复即可。
 on:
-  push:
-    branches: [ main ]
+  # push:
+  #   branches: [ main ]
   workflow_dispatch:
     inputs:
       ref:
