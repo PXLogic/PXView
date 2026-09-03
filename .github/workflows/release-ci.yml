@@ -13,11 +13,13 @@ name: PXView Release CI
 # Job 2: asan-core-tests
 #   Debug 编译 (ASan + UBSan) → 核心测试子集
 #   只跑 test_01 (MCP 协议) + test_03 (采集基础) + test_05 (数据完整性)
-#   ASan 2-5x 减速下核心子集约 15 分钟完成
+#   ASan 2-5x 减速下采集测试显著变慢：watchdog 宽限 600s、pytest 单测超时 600s、
+#   job 总超时 60min，避免 sanitizer 进程被误判为冻结而 SIGABRT 引发级联失败
 #
 # Job 3: tsan-races
 #   Debug 编译 (TSan) → headless + GUI 两阶段
 #   直接复用 e2e-linux.yml 的 TSan 逻辑
+#   TSan 比 ASan 更慢：watchdog 宽限 900s、pytest 单测超时 900s、job 总超时 90min
 #
 # Job 4: clang-tidy-fast
 #   Debug 编译 + Clang-Tidy（仅 bug-finding checks）
@@ -373,7 +375,7 @@ jobs:
   asan-core-tests:
     name: ASan Core Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       checks: write
@@ -534,7 +536,7 @@ jobs:
             #      freeze), dump all thread stacks via gdb, then SIGABRT so the
             #      frozen main-thread stack is captured in the CI log instead
             #      of burning the whole job timeout. ----
-            WATCHDOG_STALL_SECONDS=120
+            WATCHDOG_STALL_SECONDS=600
             WATCHDOG_PROBE_INTERVAL=5
             # Allow gdb attach (ubuntu runners default to yama ptrace_scope=1)
             sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
@@ -582,7 +584,7 @@ jobs:
               suites/test_01_mcp_protocol.py \
               suites/test_03_capture_basic.py \
               suites/test_05_data_integrity.py \
-              -v --tb=short --timeout=120 --timeout-method=thread \
+              -v --tb=short --timeout=600 --timeout-method=thread \
               --html="$GITHUB_WORKSPACE/asan_report.html" \
               --junitxml="$GITHUB_WORKSPACE/asan_report.xml" \
               --self-contained-html \
@@ -628,7 +630,7 @@ jobs:
   tsan-races:
     name: TSan Race Detection
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: read
       checks: write
@@ -850,7 +852,7 @@ jobs:
             #      freeze), dump all thread stacks via gdb, then SIGABRT so the
             #      frozen main-thread stack is captured in the CI log instead
             #      of burning the whole job timeout. ----
-            WATCHDOG_STALL_SECONDS=120
+            WATCHDOG_STALL_SECONDS=900
             WATCHDOG_PROBE_INTERVAL=5
             # Allow gdb attach (ubuntu runners default to yama ptrace_scope=1)
             sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
@@ -890,7 +892,7 @@ jobs:
             python -m pytest \
               suites/test_01_mcp_protocol.py \
               suites/test_03_capture_basic.py \
-              -v --tb=short --timeout=300 --timeout-method=thread \
+              -v --tb=short --timeout=900 --timeout-method=thread \
               --html="$GITHUB_WORKSPACE/tsan_gui_report.html" \
               --junitxml="$GITHUB_WORKSPACE/tsan_gui_report.xml" \
               --self-contained-html \
