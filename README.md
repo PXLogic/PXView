@@ -25,10 +25,10 @@ PXView provides native support for PXLogic USB logic analyzers:
 
 | Model | Channels | Max Sample Rate | Interface |
 |-------|----------|-----------------|-----------|
-| PX-Logic 32 | 32 ch | 1 GSa/s (buffer), 50 MSa/s (stream) | USB 3.0 / 2.0 |
-| PX-Logic 16 Pro | 16 ch | 500 MSa/s (buffer), 125 MSa/s (stream) | USB 3.0 / 2.0 |
-| PX-Logic 16 Plus | 16 ch | 500 MSa/s (buffer), 125 MSa/s (stream) | USB 3.0 / 2.0 |
-| PX-Logic 16 Base | 16 ch | 250 MSa/s (buffer), 125 MSa/s (stream) | USB 3.0 / 2.0 |
+| PX-Logic 32 | 32 ch | 1 GSa/s (buffer), 1 GSa/s (stream) | USB 3.0 / 2.0 |
+| PX-Logic 16 Pro | 16 ch | 1 GSa/s (buffer), 1 GSa/s (stream) | USB 3.0 / 2.0 |
+| PX-Logic 16 Plus | 16 ch | 500 MSa/s (buffer), 500 MSa/s (stream) | USB 3.0 / 2.0 |
+| PX-Logic 16 Base | 16 ch | 250 MSa/s (buffer), 250 MSa/s (stream) | USB 3.0 / 2.0 |
 
 ## Device Support
 
