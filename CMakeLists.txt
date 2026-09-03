@@ -313,10 +313,10 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     # Installed layout is <prefix>/bin + <prefix>/lib + <prefix>/share. Resolve
     # the bundled libraries relative to the binary instead of exporting
     # LD_LIBRARY_PATH from a wrapper script: an exported LD_LIBRARY_PATH is
-    # inherited by every child process, and that is exactly how the AppImage
-    # ended up mixing bundled and system libraries inside WebKitGTK's helper
-    # processes -- the Tauri Agent rendered a blank window while the UI process
-    # and the headless PXView child kept running.
+    # inherited by every child process, and that is how an install tree ends up
+    # mixing bundled and system libraries inside WebKitGTK's helper processes --
+    # the Tauri Agent renders a blank window while the UI process and the
+    # headless PXView child keep running. See packaging/check-webkit-stack.sh.
     #
     # PXView also resolves the rest of the tree from applicationDirPath():
     #   <bindir>/../lib/python3.X   Python stdlib (appcontrol.cpp)

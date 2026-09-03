@@ -9,7 +9,7 @@
 # Workflow:
 #   1. Download artifacts from the specified run-id (actions/download-artifact@v4)
 #      — each artifact zip is auto-extracted to a sub-directory.
-#   2. Collect single-file assets (.AppImage / .dmg / .exe / .zip) as-is.
+#   2. Collect single-file assets (.sh installer / .dmg / .exe / .zip) as-is.
 #   3. Re-zip the Windows Portable directory with max compression (-9).
 #   4. Upload everything to a GitHub Release via softprops/action-gh-release@v2.
 #
@@ -72,14 +72,14 @@ jobs:
       # Each download auto-extracts the artifact zip into the path directory.
       # continue-on-error lets us skip platforms that weren't built in that run.
 
-      - name: Download Linux AppImage
+      - name: Download Linux Installer
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'linux' }}
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           run-id: ${{ github.event.inputs.run_id }}
-          name: PXView-Linux-x86_64-AppImage-${{ github.event.inputs.version }}
-          path: dl/linux-appimage
+          name: PXView-Linux-x86_64-Installer-${{ github.event.inputs.version }}
+          path: dl/linux-installer
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Linux udev rules
@@ -135,14 +135,14 @@ jobs:
 
           echo "=== Scanning downloaded artifacts ==="
 
-          # Linux AppImage
-          if ls dl/linux-appimage/*.AppImage 1>/dev/null 2>&1; then
-            cp dl/linux-appimage/*.AppImage release-assets/
-            chmod +x release-assets/*.AppImage
+          # Linux installer (.sh self-extracting)
+          if ls dl/linux-installer/*.sh 1>/dev/null 2>&1; then
+            cp dl/linux-installer/*.sh release-assets/
+            chmod +x release-assets/*.sh
             FOUND=$((FOUND+1))
-            echo "  OK: Linux AppImage"
+            echo "  OK: Linux installer"
           else
-            echo "  SKIP: Linux AppImage (not found in source run)"
+            echo "  SKIP: Linux installer (not found in source run)"
           fi
 
           # Linux udev rules (already a zip)

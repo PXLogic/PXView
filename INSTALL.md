@@ -125,7 +125,29 @@ source ~/.bashrc
 
 `ninja install` will automatically install the MCP web client if it has been built. If the web client has not been built yet, it will be silently skipped.
 
-### Step 4: Packaging as AppImage (Linux)
+### Step 4 (recommended): Packaging as a .sh Installer (Linux)
+
+PXView now ships a self-extracting `.sh` installer built by `packaging/make-installer.sh`. It stages `install.dir/usr` into a portable payload and installs it to `/opt/PXView` with full system integration (udev rules, icons, two desktop entries, CLI wrappers, uninstaller).
+
+```bash
+cd build && ninja -j "$(nproc)" && ninja install
+cd ..
+
+# Bundle runtime libs (Qt, plugins, Python stdlib, whitelisted system deps) and
+# write bin/qt.conf. Does NOT bundle WebKitGTK/GTK/GStreamer. See
+# packaging/bundle-runtime-libs.sh.
+bash packaging/bundle-runtime-libs.sh install.dir
+
+PXVIEW_VERSION=1.5.9 bash packaging/make-installer.sh
+# -> PXView-Linux-x86_64-Installer-1.5.9.sh
+sudo ./PXView-Linux-x86_64-Installer-1.5.9.sh
+```
+
+The Tauri Agent (`PXView-Agent`) is shipped as a plain file and resolves `libwebkit2gtk-4.1` from the target system at runtime — it is deliberately **not** bundled, because bundling WebKitGTK produces an ABI mismatch (bundled libs vs. the system's `WebKitWebProcess`/`WebKitNetworkProcess`) that blanks the Agent window. `packaging/check-webkit-stack.sh` fails the build if any desktop/WebKit library leaks into the tree.
+
+> **Note:** The AppImage section below is retained only as historical reference.
+
+### Step 4 (legacy reference): Packaging as AppImage (Linux)
 
 AppImage bundles the application and its dependencies into a single portable file. Since AppImage is a user-space portable package, **system-level files such as udev rules, desktop entries, and documentation should not be bundled inside** — they must be installed separately.
 

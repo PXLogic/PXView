@@ -17,7 +17,7 @@ PXView is a Qt-based signal analysis software for [PXLogic](https://marrychip.co
 - **USB hotplug** — Cross-platform hotplug support with automatic device detection and reconnection
 - **Glitch filter** — Pulse analysis tool with histogram visualization, threshold adjustment, and undo support
 - **Data export** — Export raw capture data and decoded results to CSV, binary, or session files (`.pxc`)
-- **Cross-platform** — Linux (AppImage), macOS (Universal DMG for ARM64 + x86_64), and Windows
+- **Cross-platform** — Linux (.sh self-extracting installer), macOS (.dmg), and Windows (.exe / .zip)
 
 ## PXLogic Hardware
 

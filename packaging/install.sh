@@ -52,13 +52,45 @@ printf 'PXView %s 安装程序\n' "$VERSION"
 [ -x "$PAYLOAD/bin/PXView" ] || [ -f "$PAYLOAD/bin/PXView" ] \
     || die "$PAYLOAD/bin/PXView 不存在，安装包损坏。"
 
-# The Tauri Agent needs webkit2gtk-4.1 from the system; it is deliberately not
-# bundled (see packaging/check-webkit-stack.sh).
-if [ -f "$PAYLOAD/bin/PXView-Agent" ] && \
-   ! ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4.1'; then
-    warn "未检测到 libwebkit2gtk-4.1，PXView Agent 将无法启动。"
-    warn "Ubuntu/Debian: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1"
-    warn "Fedora:        sudo dnf install webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3"
+# The Tauri Agent needs webkit2gtk-4.1 from the target system; it is
+# deliberately never bundled (see packaging/check-webkit-stack.sh). Since the
+# installer runs as root anyway, try to pull the runtime in rather than leaving
+# the user with an Agent that silently renders a blank window.
+have_webkit() { ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4.1'; }
+
+install_webkit_runtime() {
+    if command -v apt-get >/dev/null 2>&1; then
+        local deb="libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1"
+        apt-get install -y -qq --no-install-recommends $deb >/dev/null 2>&1 && return 0
+        # Package index may be stale or absent on a fresh box.
+        apt-get update -qq >/dev/null 2>&1
+        apt-get install -y -qq --no-install-recommends $deb >/dev/null 2>&1
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3 >/dev/null 2>&1
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed webkit2gtk-4.1 gtk3 librsvg libappindicator-gtk3 >/dev/null 2>&1
+    else
+        return 1
+    fi
+    command -v ldconfig >/dev/null 2>&1 && ldconfig >/dev/null 2>&1
+    return 0
+}
+
+if [ -f "$PAYLOAD/bin/PXView-Agent" ] && ! have_webkit; then
+    warn "未检测到 libwebkit2gtk-4.1，PXView Agent 需要它才能启动。"
+    info "尝试自动安装 WebKitGTK 运行时..."
+    # Failure here is not fatal: PXView itself does not need WebKit.
+    if ! install_webkit_runtime; then
+        :
+    fi
+    if have_webkit; then
+        info "WebKitGTK 运行时已就绪"
+    else
+        warn "自动安装失败，请手动安装（PXView 主程序不受影响，仅 Agent 无法启动）:"
+        warn "  Ubuntu/Debian: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1"
+        warn "  Fedora:        sudo dnf install webkit2gtk4.1 gtk3 librsvg2 libappindicator-gtk3"
+        warn "  Arch:          sudo pacman -S webkit2gtk-4.1 gtk3 librsvg libappindicator-gtk3"
+    fi
 fi
 
 #------------------------------------------------------------------------------
@@ -141,6 +173,21 @@ info "图标已安装"
 #------------------------------------------------------------------------------
 # 5. Launcher wrappers -- no LD_LIBRARY_PATH, the binaries use $ORIGIN RUNPATH
 #------------------------------------------------------------------------------
+#
+# Deliberately no QT_PLUGIN_PATH / LD_LIBRARY_PATH here:
+#
+#   * Libraries  -- PXView carries INSTALL_RPATH $ORIGIN/../lib, so the bundled
+#                   Qt, libsigrok and Python are found without any environment.
+#   * Qt plugins -- RUNPATH never applies to plugins. Qt would otherwise look in
+#                   the aqtinstall paths compiled into it and fail with
+#                   "could not load the Qt platform plugin xcb". bin/qt.conf
+#                   (written at package time) fixes that, and it works even for
+#                   the .desktop entries below, which exec the binary directly
+#                   and would bypass any wrapper we set variables in.
+#   * The Agent  -- Tauri/WebKitGTK must resolve everything from the system.
+#                   Exporting LD_LIBRARY_PATH=$PREFIX/lib here would also be
+#                   inherited by the Agent (it sits in the same bin/), which is
+#                   exactly the ABI mix check-webkit-stack.sh exists to prevent.
 step "创建命令行入口"
 mkdir -p "$BIN_DIR"
 

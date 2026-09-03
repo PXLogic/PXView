@@ -125,7 +125,28 @@ source ~/.bashrc
 
 `ninja install` 会自动安装已构建的 MCP Web 客户端。如果 Web 客户端尚未构建，则会静默跳过。
 
-### 步骤 4：打包为 AppImage（Linux）
+### 步骤 4（推荐）：打包为自解压 .sh 安装器（Linux）
+
+PXView 现在改用 `packaging/make-installer.sh` 生成的 `.sh` 自解压安装器。它会把 `install.dir/usr` 暂存为可移植负载，并安装到 `/opt/PXView`，自动完成系统级集成（udev 规则、图标、两个桌面项、CLI 包装、卸载脚本）。
+
+```bash
+cd build && ninja -j "$(nproc)" && ninja install
+cd ..
+
+# 打包运行时库（Qt、插件、Python 标准库、白名单内的系统依赖）并写入 bin/qt.conf。
+# 不打包 WebKitGTK/GTK/GStreamer。详见 packaging/bundle-runtime-libs.sh。
+bash packaging/bundle-runtime-libs.sh install.dir
+
+PXVIEW_VERSION=1.5.9 bash packaging/make-installer.sh
+# -> PXView-Linux-x86_64-Installer-1.5.9.sh
+sudo ./PXView-Linux-x86_64-Installer-1.5.9.sh
+```
+
+Tauri Agent（`PXView-Agent`）以普通文件分发，运行时从目标系统解析 `libwebkit2gtk-4.1`——**刻意不打包**，因为打包 WebKitGTK 会造成 ABI 混搭（打包库 vs 系统 `WebKitWebProcess`/`WebKitNetworkProcess`），导致 Agent 窗口全白。`packaging/check-webkit-stack.sh` 一旦检测到桌面/WebKit 库泄漏进安装树就会让构建失败。
+
+> **说明**：下面的 AppImage 章节仅作为历史参考保留。
+
+### 步骤 4（历史参考）：打包为 AppImage（Linux）
 
 AppImage 将应用程序及其依赖打包为单个可移植文件。由于 AppImage 是用户态的便携包，**udev rules、desktop 文件、文档等系统级文件不应打包进去**，需要单独安装。
 

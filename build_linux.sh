@@ -4,9 +4,9 @@
 # PXView Linux 本机构建脚本 (x86_64)
 #
 # 用法:
-#   ./build_linux.sh              # 完整构建 (依赖安装 + 编译 + 打包 AppImage)
+#   ./build_linux.sh              # 完整构建 (依赖安装 + 编译 + 打包 .sh 安装器)
 #   ./build_linux.sh --no-deps    # 跳过依赖安装 (已安装好依赖时使用)
-#   ./build_linux.sh --no-appimage # 只编译安装,不打包 AppImage
+#   ./build_linux.sh --no-package # 只编译安装,不生成安装器
 #   ./build_linux.sh --no-firmware # 跳过 fx2lafw 固件编译
 #   ./build_linux.sh --no-webui   # 跳过 Web UI 构建
 #   ./build_linux.sh --system-qt  # 使用系统 Qt 而非 aqtinstall
@@ -19,14 +19,13 @@ cd "$SCRIPT_DIR"
 
 QT_VERSION="6.11.0"
 QT_PREFIX="$SCRIPT_DIR/Qt"
-LINUXDEPLOY_VERSION="continuous"
 VERSION="${PXVIEW_VERSION:-1.5.4}"
 INSTALL_PREFIX="$SCRIPT_DIR/install.dir/usr"
 NPROC=$(nproc)
 
 # 命令行参数解析
 INSTALL_DEPS=true
-BUILD_APPIMAGE=true
+BUILD_PACKAGE=true
 BUILD_FIRMWARE=true
 BUILD_WEBUI=true
 USE_SYSTEM_QT=false
@@ -34,14 +33,15 @@ USE_SYSTEM_QT=false
 for arg in "$@"; do
     case "$arg" in
         --no-deps)       INSTALL_DEPS=false ;;
-        --no-appimage)  BUILD_APPIMAGE=false ;;
-        --no-firmware)  BUILD_FIRMWARE=false ;;
-        --no-webui)     BUILD_WEBUI=false ;;
-        --system-qt)    USE_SYSTEM_QT=true ;;
+        --no-package)    BUILD_PACKAGE=false ;;
+        --no-appimage)   BUILD_PACKAGE=false ;;   # 兼容旧调用: 等价于 --no-package
+        --no-firmware)   BUILD_FIRMWARE=false ;;
+        --no-webui)      BUILD_WEBUI=false ;;
+        --system-qt)     USE_SYSTEM_QT=true ;;
         --help|-h)
             echo "用法: ./build_linux.sh [选项]"
             echo "  --no-deps        跳过依赖安装"
-            echo "  --no-appimage    不打包 AppImage"
+            echo "  --no-package     不生成 .sh 安装器"
             echo "  --no-firmware    跳过 fx2lafw 固件编译"
             echo "  --no-webui       跳过 Web UI 构建"
             echo "  --system-qt      使用系统 Qt (需自行安装 qt6-base-dev)"
@@ -112,7 +112,7 @@ if [ "$USE_SYSTEM_QT" = false ]; then
     if [ -f "$QT_PLUGINS_DIR/libqwayland-qt.so" ] || [ -f "$QT_PLUGINS_DIR/libqwayland-generic.so" ]; then
         echo "   [OK] qtwayland 插件已存在,跳过编译"
     else
-        echo "   构建 qtwayland (让 AppImage 同时支持 xcb 和 wayland)..."
+        echo "   构建 qtwayland (让安装包在 xcb 和 wayland 会话下都能启动)..."
         sudo apt-get install -y wayland-protocols libwayland-dev
         git clone --branch "v$QT_VERSION" --depth 1 https://github.com/qt/qtwayland.git
         cd qtwayland
@@ -187,164 +187,54 @@ cd "$SCRIPT_DIR"
 echo "   [OK] 编译安装完成"
 echo ""
 
-# ── 步骤 7: 打包 AppImage (可选) ──────────────────────────────────────────
-if [ "$BUILD_APPIMAGE" = true ]; then
-    echo " [7/7] 打包 AppImage..."
+# ── 步骤 7: 打包运行时库并生成安装器 (可选) ──────────────────────────────
+#
+# 这里刻意不再使用 linuxdeploy / AppImage。linuxdeploy 会顺着 -d 给的 .desktop
+# 文件找到同目录的 usr/bin/PXView-Agent(Tauri 二进制),把整个 WebKitGTK 栈
+# (libwebkit2gtk-4.1 + libjavascriptcoregtk + libsoup + gtk3 + gstreamer 全家,
+# 约 95 MB)复制进 usr/lib;而 WebKit 派生的 helper(WebKitWebProcess /
+# WebKitNetworkProcess / WebKitGPUProcess + injected-bundle/)是可执行文件,
+# 永远不会被复制。结果就是"打包的库 + 系统的 helper"ABI 混搭,Agent 窗口全白。
+#
+# packaging/bundle-runtime-libs.sh 用白名单取代它:只打包桌面栈不拥有的依赖
+# (Qt、libsigrok、libpython、boost/fftw/usb/zip/nettle...),GLib/GTK/GStreamer/
+# X11/Wayland 一律留给目标系统。
+# ---------------------------------------------------------------------------
+if [ "$BUILD_PACKAGE" = true ]; then
+    echo " [7/7] 打包运行时库并生成安装器..."
 
-    # 打包 Python 标准库到 AppDir
-    # 必须打包"与二进制实际链接的 libpython 同小版本"的标准库。PXView 把 Python
-    # home 设为 <prefix>/usr,内嵌解释器去 <home>/lib/python<其版本>/encodings 找。
-    # 权威版本应从 ldd 读(编译真实链接的 libpython),不能用 python3 或 CMake 缓存
-    # ——它们可能与 libsigrokdecode/PXView 实际链接的版本不一致。
-    echo "   打包 Python 标准库..."
-    PY_VERSION=$(ldd "install.dir/usr/bin/PXView" 2>/dev/null \
-        | awk '/libpython/{print $1}' | head -1 \
-        | sed -E 's/^libpython([0-9]+\.[0-9]+).*/\1/')
-    echo "   PXView 链接的 libpython 版本: $PY_VERSION"
-    if [ -z "$PY_VERSION" ]; then
-        echo "   WARN: 未读到来libpython版本,回退 python3"
-        PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    fi
-    PYEXE=$(ls /usr/bin/python$PY_VERSION /usr/local/bin/python$PY_VERSION 2>/dev/null | head -1)
-    if [ -z "$PYEXE" ] || [ ! -x "$PYEXE" ]; then
-        echo "   ERROR: 找不到 python$PY_VERSION 解释器来打包标准库" >&2
-        exit 1
-    fi
-    PYSTDLIB=$("$PYEXE" -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')
-    echo "   打包 Python $PY_VERSION 标准库: $PYSTDLIB"
-    mkdir -p "install.dir/usr/lib/python$PY_VERSION"
-    cp -a "$PYSTDLIB"/* "install.dir/usr/lib/python$PY_VERSION/" 2>/dev/null || true
-    if [ -d "$PYSTDLIB/lib-dynload" ]; then
-        mkdir -p "install.dir/usr/lib/python$PY_VERSION/lib-dynload"
-        cp -a "$PYSTDLIB/lib-dynload"/* "install.dir/usr/lib/python$PY_VERSION/lib-dynload/" 2>/dev/null || true
-    fi
-    rm -rf "install.dir/usr/lib/python$PY_VERSION/test"
-    rm -rf "install.dir/usr/lib/python$PY_VERSION/__pycache__"
-    find "install.dir/usr/lib/python$PY_VERSION" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-    if [ ! -d "install.dir/usr/lib/python$PY_VERSION/encodings" ]; then
-        echo "   ERROR: Python $PY_VERSION 标准库未打包(源 $PYSTDLIB)" >&2
-        exit 1
+    # 用 aqtinstall 装的 Qt 时必须显式指过去;用系统 Qt 时让脚本自己用 qmake 探测。
+    if [ "$USE_SYSTEM_QT" = false ]; then
+        export QT_DIR="$QT_PREFIX/$QT_VERSION/gcc_64"
     fi
 
-    # 下载 linuxdeploy
-    echo "   下载 linuxdeploy..."
-    if [ ! -f linuxdeploy-x86_64.AppImage ]; then
-        wget -c "https://github.com/linuxdeploy/linuxdeploy/releases/download/$LINUXDEPLOY_VERSION/linuxdeploy-x86_64.AppImage"
-    fi
-    if [ ! -f linuxdeploy-plugin-qt-x86_64.AppImage ]; then
-        wget -c "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/$LINUXDEPLOY_VERSION/linuxdeploy-plugin-qt-x86_64.AppImage"
-    fi
-    chmod +x linuxdeploy*.AppImage
+    # 装填 install.dir/usr:Qt 运行时与插件、GCC 运行时、Python 标准库、
+    # 白名单内的系统依赖,并写入 bin/qt.conf (让可重定位的安装树找到 Qt 插件)。
+    # 脚本末尾会自动跑 packaging/check-webkit-stack.sh 自检。
+    bash packaging/bundle-runtime-libs.sh install.dir
 
-    export QMAKE="$QT_PREFIX/$QT_VERSION/gcc_64/bin/qmake"
-    export LD_LIBRARY_PATH="$QT_PREFIX/$QT_VERSION/gcc_64/lib:$LD_LIBRARY_PATH"
-    export OUTPUT="PXView-Linux-x86_64-AppImage-$VERSION.AppImage"
+    echo "   生成自解压安装器..."
+    PXVIEW_APPDIR="$SCRIPT_DIR/install.dir/usr" PXVIEW_VERSION="$VERSION" \
+        bash packaging/make-installer.sh
 
-    # Install our custom AppRun (single-entry router to PXView / PXView-Agent).
-    # linuxdeploy does NOT overwrite an existing AppRun, so this routing
-    # survives and becomes the AppImage's real launch entry.
-    cp packaging/pxview-AppRun install.dir/AppRun
-    chmod +x install.dir/AppRun
-    # Ensure both binaries and the launcher are executable in the AppImage
-    # (the Tauri agent is installed via file(INSTALL) which defaults to 0644).
-    chmod +x install.dir/usr/bin/PXView install.dir/usr/bin/PXView-Agent install.dir/usr/bin/pxview-launcher
-
-    # PXView-Agent is deliberately NOT passed with -e.
-    #
-    # linuxdeploy walks the ldd tree of every executable given with -e. For the
-    # Tauri Agent that tree is the entire WebKitGTK stack -- libwebkit2gtk-4.1
-    # (~95 MB), libjavascriptcoregtk-4.1, libsoup-3.0, libgtk-3, libgdk-3,
-    # libgstreamer-1.0 + libgst*, libenchant-2, libmanette -- and bundling it
-    # breaks the Agent. WebKitGTK forks helper processes
-    # (WebKitWebProcess / WebKitNetworkProcess / WebKitGPUProcess +
-    # injected-bundle/) that live in
-    # /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/; they are executables, so
-    # linuxdeploy never copies them. The UI process would then resolve the
-    # *bundled* libraries via AppRun's LD_LIBRARY_PATH while its helpers resolve
-    # the *system* ones, and that ABI mix kills the WebProcess: blank window,
-    # "WebKitWebProcess closed unexpectedly", "GStreamer element appsink not
-    # found". The headless PXView child keeps serving MCP 10110 throughout, so
-    # nothing but the user's eyes notices.
-    #
-    # The Agent is installed at usr/bin/PXView-Agent already, so it ships as a
-    # plain file and resolves webkit2gtk-4.1 from the target system -- which is
-    # what Tauri requires anyway (see CMake/install_packaging.cmake).
-    ./linuxdeploy-x86_64.AppImage \
-        --appdir install.dir \
-        -e install.dir/usr/bin/PXView \
-        -d install.dir/usr/share/applications/pxview.desktop \
-        --plugin qt \
-        --output appimage
-
-    bash packaging/check-webkit-stack.sh install.dir
-
-    echo "   [OK] AppImage 生成: $OUTPUT"
-    chmod +x "$OUTPUT"
-    ls -la "$OUTPUT"
-
-    # 打包 udev 规则
-    echo "   打包 udev 规则..."
-    mkdir -p udev-rules
-    cp install.dir/usr/lib/udev/rules.d/60-px.rules udev-rules/ 2>/dev/null || true
-    cp libsigrok/contrib/60-libsigrok.rules udev-rules/ 2>/dev/null || true
-    cp libsigrok/contrib/61-libsigrok-plugdev.rules udev-rules/ 2>/dev/null || true
-    cp libsigrok/contrib/61-libsigrok-uaccess.rules udev-rules/ 2>/dev/null || true
-
-    cat > udev-rules/install-udev-rules.sh << 'UDEVEOF'
-#!/bin/bash
-set -e
-RULES_FILES="60-px.rules 60-libsigrok.rules 61-libsigrok-plugdev.rules 61-libsigrok-uaccess.rules"
-if [ "$(id -u)" -ne 0 ]; then
-    echo "请用 sudo 运行: sudo $0"
-    exit 1
-fi
-if [ -d /usr/lib/udev/rules.d ]; then
-    DEST=/usr/lib/udev/rules.d
-elif [ -d /lib/udev/rules.d ]; then
-    DEST=/lib/udev/rules.d
-elif [ -d /etc/udev/rules.d ]; then
-    DEST=/etc/udev/rules.d
+    echo "   [OK] 安装器生成完成"
+    ls -la "PXView-Linux-x86_64-Installer-$VERSION.sh"
 else
-    echo "错误: 未找到 udev 规则目录"
-    exit 1
-fi
-echo "安装 udev 规则到 $DEST/"
-for f in $RULES_FILES; do
-    [ -f "$f" ] || continue
-    cp "$f" "$DEST/$f"
-    echo "  -> 已安装 $f"
-done
-udevadm control --reload-rules
-udevadm trigger
-echo "完成。PXView 设备现在无需 sudo 即可访问。"
-echo "注意: 要使 'plugdev' 组规则生效,请将自己加入该组:"
-echo "  sudo usermod -aG plugdev \$USER"
-echo "然后重新登录 (或运行 'newgrp plugdev')。"
-UDEVEOF
-    chmod +x udev-rules/install-udev-rules.sh
-    (cd udev-rules && zip -r "../PXView-Linux-udev-rules-$VERSION.zip" .)
-    echo "   [OK] udev 规则打包: PXView-Linux-udev-rules-$VERSION.zip"
-else
-    echo " [7/7] 跳过 AppImage 打包 (--no-appimage)"
+    echo " [7/7] 跳过打包 (--no-package)"
 fi
 
 echo ""
-echo "================================================" 
+echo "================================================"
 echo " 构建完成!"
-echo "================================================" 
-if [ "$BUILD_APPIMAGE" = true ]; then
-    echo " AppImage:  $SCRIPT_DIR/PXView-Linux-x86_64-AppImage-$VERSION.AppImage"
-    echo " udev规则:  $SCRIPT_DIR/PXView-Linux-udev-rules-$VERSION.zip"
-else
-    echo " 安装目录:  $SCRIPT_DIR/install.dir/"
-    echo " 可执行文件: $SCRIPT_DIR/install.dir/usr/bin/PXView"
+echo "================================================"
+if [ "$BUILD_PACKAGE" = true ]; then
+    echo " 安装器:    $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
+    echo " 安装:      sudo $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
+    echo " 指定目录:  sudo PXVIEW_PREFIX=/opt/PXView $SCRIPT_DIR/PXView-Linux-x86_64-Installer-$VERSION.sh"
 fi
+echo " 安装树:    $SCRIPT_DIR/install.dir/usr/"
+echo " 直接运行:  $SCRIPT_DIR/install.dir/usr/bin/PXView"
 echo ""
-echo " 运行:"
-echo "   ./PXView-Linux-x86_64-AppImage-$VERSION.AppImage"
-echo " 或:"
-echo "   ./install.dir/usr/bin/PXView"
-echo ""
-echo " 安装 udev 规则 (USB 设备访问权限):"
-echo "   sudo ./udev-rules/install-udev-rules.sh"
-echo "================================================" 
+echo " udev 规则、图标、桌面项与卸载脚本均由安装器自动处理 (需要 root)。"
+echo " 卸载:      sudo /opt/PXView/uninstall.sh"
+echo "================================================"

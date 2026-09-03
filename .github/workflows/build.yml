@@ -50,7 +50,7 @@ jobs:
         run: python3 tools/audit_config_types.py
 
   linux:
-    name: Linux AppImage (x86_64)
+    name: Linux Installer (x86_64)
     if: ${{ github.event.inputs.targets == 'linux' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -58,7 +58,6 @@ jobs:
     env:
       QT_PREFIX: ${{ github.workspace }}/Qt
       QT_VERSION: "6.11.0"
-      LINUXDEPLOY_VERSION: "continuous"
 
     steps:
       - name: Resolve ref
@@ -193,134 +192,34 @@ jobs:
       - name: Install
         run: cd build && ninja install
 
-      - name: Bundle Python standard library into AppDir
+      - name: Bundle runtime libraries (Qt, plugins, whitelisted system deps)
         run: |
-          # The AppImage must ship <prefix>/lib/pythonX.Y matched to the EXACT
-          # libpython the binary links. PXView sets Python home to <prefix>/usr
-          # and the embedded interpreter imports <home>/lib/python<itsversion>/encodings.
-          # The authoritative version is the library actually linked into PXView
-          # (via ldd) — NOT `python3` and NOT the CMake cache, both of which can
-          # disagree with what libsigrokdecode/PXView truly link.
-          PY_VERSION=$(ldd install.dir/usr/bin/PXView 2>/dev/null \
-            | awk '/libpython/{print $1}' | head -1 \
-            | sed -E 's/^libpython([0-9]+\.[0-9]+).*/\1/')
-          echo "Embedded libpython in PXView: $PY_VERSION"
-          if [ -z "$PY_VERSION" ]; then
-            echo "WARN: could not read linked libpython version; falling back to python3"
-            PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-          fi
-          # Locate an interpreter of that exact version to copy its full stdlib.
-          PYEXE=$(ls /usr/bin/python$PY_VERSION /usr/local/bin/python$PY_VERSION 2>/dev/null | head -1)
-          [ -n "$PYEXE" ] && [ -x "$PYEXE" ] || { echo "ERROR: no python$PY_VERSION interpreter found for stdlib bundling" >&2; exit 1; }
-          PYSTDLIB=$("$PYEXE" -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')
-          echo "Bundling Python $PY_VERSION stdlib from $PYSTDLIB"
-          mkdir -p install.dir/usr/lib/python$PY_VERSION
-          cp -a "$PYSTDLIB"/* install.dir/usr/lib/python$PY_VERSION/ 2>/dev/null || true
-          if [ -d "$PYSTDLIB/lib-dynload" ]; then
-            mkdir -p install.dir/usr/lib/python$PY_VERSION/lib-dynload
-            cp -a "$PYSTDLIB/lib-dynload"/* install.dir/usr/lib/python$PY_VERSION/lib-dynload/ 2>/dev/null || true
-          fi
-          rm -rf install.dir/usr/lib/python$PY_VERSION/test
-          rm -rf install.dir/usr/lib/python$PY_VERSION/__pycache__
-          find install.dir/usr/lib/python$PY_VERSION -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-          if [ -d install.dir/usr/lib/python$PY_VERSION/encodings ]; then
-            echo "OK: encodings bundled at install.dir/usr/lib/python$PY_VERSION/encodings"
-          else
-            echo "ERROR: Python $PY_VERSION stdlib not bundled (source $PYSTDLIB)" >&2
-            exit 1
-          fi
-          echo "Bundled Python stdlib size:"
-          du -sh install.dir/usr/lib/python$PY_VERSION
-
-      - name: Bundle GCC runtime libraries into AppDir
-        run: |
-          # Ubuntu 24.04 自带 GCC 14,但目标用户可能在 Ubuntu 22.04 上运行,
-          # 那里只有 GCC 12。打包 libstdc++.so.6 和 libgcc_s.so.1 确保
-          # GLIBCXX_3.4.33 等符号在旧系统上可用。
-          echo "=== Bundling GCC runtime libraries ==="
-          mkdir -p install.dir/usr/lib
-          STDCPP_SRC=$(gcc -print-file-name=libstdc++.so.6)
-          if [ -f "$STDCPP_SRC" ]; then
-            cp -f "$STDCPP_SRC" install.dir/usr/lib/
-            echo "  libstdc++.so.6: $STDCPP_SRC -> install.dir/usr/lib/"
-          else
-            echo "  WARNING: libstdc++.so.6 not found"
-          fi
-          LIBGCC_SRC=$(gcc -print-file-name=libgcc_s.so.1)
-          if [ -f "$LIBGCC_SRC" ]; then
-            cp -f "$LIBGCC_SRC" install.dir/usr/lib/
-            echo "  libgcc_s.so.1: $LIBGCC_SRC -> install.dir/usr/lib/"
-          else
-            echo "  WARNING: libgcc_s.so.1 not found"
-          fi
-          echo "=== Bundled library versions ==="
-          strings install.dir/usr/lib/libstdc++.so.6 | grep GLIBCXX | tail -5
-          ls -la install.dir/usr/lib/libstdc++.so.6 install.dir/usr/lib/libgcc_s.so.1
-
-      - name: Create AppImage using linuxdeploy
-        run: |
-          # linuxdeploy 的 mksquashfs 需要可写的 TMPDIR (GitHub Actions 默认 /tmp 可能空间不足)
-          export TMPDIR="$HOME/tmp"
-          mkdir -p "$TMPDIR"
-          wget -c "https://github.com/linuxdeploy/linuxdeploy/releases/download/${{ env.LINUXDEPLOY_VERSION }}/linuxdeploy-x86_64.AppImage"
-          wget -c "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${{ env.LINUXDEPLOY_VERSION }}/linuxdeploy-plugin-qt-x86_64.AppImage"
-          chmod +x linuxdeploy*.AppImage
-          export QMAKE="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/bin/qmake"
-          export LD_LIBRARY_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
-          export OUTPUT="PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage"
-          # Install our custom AppRun (single-entry router to PXView / PXView-Agent).
-          # linuxdeploy does NOT overwrite an existing AppRun, so this routing
-          # survives and becomes the AppImage's real launch entry.
-          cp packaging/pxview-AppRun install.dir/AppRun
-          chmod +x install.dir/AppRun
-          # Ensure both binaries and the launcher are executable in the AppImage
-          # (the Tauri agent is installed via file(INSTALL) which defaults to 0644).
-          chmod +x install.dir/usr/bin/PXView install.dir/usr/bin/PXView-Agent install.dir/usr/bin/pxview-launcher
-          # PXView-Agent is deliberately NOT passed with -e.
+          # Replaces linuxdeploy.
           #
-          # linuxdeploy walks the ldd tree of every executable given with -e. For
-          # the Tauri Agent that tree is the entire WebKitGTK stack --
-          # libwebkit2gtk-4.1 (~95 MB), libjavascriptcoregtk-4.1, libsoup-3.0,
-          # libgtk-3, libgdk-3, libgstreamer-1.0 + libgst*, libenchant-2,
-          # libmanette -- and bundling it breaks the Agent. WebKitGTK forks
-          # helper processes (WebKitWebProcess / WebKitNetworkProcess /
-          # WebKitGPUProcess + injected-bundle/) that live in
-          # /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/; they are executables, so
-          # linuxdeploy never copies them. The UI process would then resolve the
-          # *bundled* libraries via AppRun's LD_LIBRARY_PATH while its helpers
-          # resolve the *system* ones, and that ABI mix kills the WebProcess:
-          # blank window, "WebKitWebProcess closed unexpectedly", "GStreamer
-          # element appsink not found". The headless PXView child keeps serving
-          # MCP 10110 throughout, so nothing but the user's eyes notices.
+          # linuxdeploy reached usr/bin/PXView-Agent (the Tauri binary) through
+          # the .desktop file handed to it with -d, then copied the whole
+          # WebKitGTK stack into usr/lib -- exactly what
+          # packaging/check-webkit-stack.sh exists to catch. It also cannot be
+          # told to stop once it starts walking an ldd tree.
           #
-          # The Agent is installed at usr/bin/PXView-Agent already, so it ships as
-          # a plain file and resolves webkit2gtk-4.1 from the target system --
-          # which is what Tauri requires anyway (see CMake/install_packaging.cmake).
-          ./linuxdeploy-x86_64.AppImage \
-            --appdir install.dir \
-            -e install.dir/usr/bin/PXView \
-            -d install.dir/usr/share/applications/pxview.desktop \
-            --plugin qt \
-            --output appimage
+          # bundle-runtime-libs.sh bundles by whitelist instead: Qt runtime +
+          # plugins, GCC runtime, Python stdlib, and only those system
+          # libraries the desktop stack does not own. It writes bin/qt.conf so
+          # the relocatable tree can find its Qt plugins (RUNPATH resolves
+          # libraries, never plugins), and self-checks with
+          # check-webkit-stack.sh at the end.
+          export QT_DIR="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
+          bash packaging/bundle-runtime-libs.sh install.dir
 
-      - name: Verify WebKitGTK stack is not bundled
-        run: bash packaging/check-webkit-stack.sh install.dir
-
-      - name: Verify AppImage
-        run: |
-          ls -la PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
-          chmod +x PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
-
-      - name: Test launcher — PXView and PXView-Agent start independently
+      - name: Smoke test install tree — PXView, PXView-Agent and window render
         run: |
           set -euo pipefail
-          APPI="./PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage"
-          export APPIMAGE_EXTRACT_AND_RUN=1
+          TREE="$PWD/install.dir/usr"
           export NO_AT_BRIDGE=1
 
           # The Tauri Agent needs a display + webkit/GTK runtime libs. Install
           # them so the agent test can open its window and spawn headless PXView.
-          # x11-utils provides xdpyinfo/xwininfo/xwd for the render check below.
+          # x11-utils provides xdpyinfo/xwininfo/xwd for the render checks below.
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb xauth x11-utils \
             libwebkit2gtk-4.1-0 libgtk-3-0 librsvg2-2 libayatana-appindicator3-1
@@ -344,8 +243,8 @@ jobs:
             sleep 3
           }
 
-          echo "=== Test 1: classic PXView entry (./AppImage --headless) ==="
-          "$APPI" --headless >pxv_classic.log 2>&1 &
+          echo "=== Test 1: classic PXView headless (install tree) ==="
+          "$TREE/bin/PXView" --headless >pxv_classic.log 2>&1 &
           pid=$!
           if wait_mcp "$pid"; then
             echo "PASS: classic PXView headless reachable on MCP 10110"
@@ -355,9 +254,8 @@ jobs:
           fi
           cleanup
 
-          echo "=== Test 2: Tauri Agent entry (./AppImage agent) ==="
-          # Drive a known display instead of xvfb-run, so the render check below
-          # can point xwininfo/xwd at it.
+          # Drive a known display instead of xvfb-run, so the render checks
+          # below can point xwininfo/xwd at it.
           Xvfb :99 -screen 0 1440x900x24 >xvfb.log 2>&1 &
           xvfb_pid=$!
           export DISPLAY=:99
@@ -366,7 +264,8 @@ jobs:
             sleep 1
           done
 
-          "$APPI" agent >pxv_agent.log 2>&1 &
+          echo "=== Test 2: Tauri Agent entry (pxview-launcher agent) ==="
+          "$TREE/bin/pxview-launcher" agent >pxv_agent.log 2>&1 &
           pid=$!
           if wait_mcp "$pid"; then
             echo "PASS: PXView-Agent started and spawned headless PXView (MCP 10110)"
@@ -390,9 +289,36 @@ jobs:
             exit 1
           fi
           cleanup
+
+          echo "=== Test 3: classic PXView GUI renders (proves qt.conf works) ==="
+          # This is the check that catches a Qt plugin path failure. RUNPATH
+          # resolves libraries but never plugins, so without bin/qt.conf Qt
+          # looks in the aqtinstall paths compiled into it, finds no xcb
+          # platform plugin and dies with "could not load the Qt platform
+          # plugin xcb" before a window ever exists -- invisible to any MCP
+          # health check.
+          "$TREE/bin/PXView" >pxv_gui.log 2>&1 &
+          gui_pid=$!
+          if python3 tests/ci/check_window_render.py "PXView"; then
+            echo "PASS: PXView GUI window rendered (Qt platform plugin resolved)"
+          else
+            echo "FAIL: PXView GUI window is blank or missing" >&2
+            echo "--- qt.conf ---" >&2
+            cat "$TREE/bin/qt.conf" >&2 || true
+            echo "--- platforms plugins ---" >&2
+            ls "$TREE/plugins/platforms" >&2 || true
+            echo "--- PXView log ---" >&2
+            cat pxv_gui.log >&2 || true
+            kill "$gui_pid" 2>/dev/null || true
+            cleanup
+            kill "$xvfb_pid" 2>/dev/null || true
+            exit 1
+          fi
+          kill "$gui_pid" 2>/dev/null || true
+          cleanup
           kill "$xvfb_pid" 2>/dev/null || true
 
-          echo "=== OK: both launcher entries started and the Agent window renders ==="
+          echo "=== OK: install tree starts PXView, the Agent, and both windows render ==="
 
       - name: Package udev rules (separate artifact)
         run: |
@@ -473,8 +399,8 @@ jobs:
           echo "== PXView RUNPATH =="
           readelf -d "$PREFIX/bin/PXView" | grep -Ei "runpath|rpath" || true
 
-          # udev rules must land in a directory udev actually reads -- this is
-          # what the AppImage could never do (it shipped a separate zip).
+          # udev rules must land in a directory udev actually reads -- the
+          # installer owns this, so nobody has to run a separate script.
           udev_dir=/etc/udev/rules.d
           [ -d /usr/lib/udev/rules.d ] && udev_dir=/usr/lib/udev/rules.d
           if ! ls "$udev_dir" | grep -q "60-px.rules"; then
@@ -483,7 +409,7 @@ jobs:
           fi
           echo "PASS: udev rules installed into $udev_dir"
 
-          # Two real desktop entries, no more single-AppRun routing.
+          # Two real desktop entries, no single-entry routing needed.
           test -f /usr/local/share/applications/pxview.desktop
           test -f /usr/local/share/applications/pxview-agent.desktop
           test -x /usr/local/bin/pxview
@@ -517,14 +443,6 @@ jobs:
           test ! -f "$udev_dir/60-px.rules"
           echo "PASS: installer install + uninstall"
 
-      - name: Upload AppImage Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}
-          path: PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
-          if-no-files-found: error
-          compression-level: 0
-
       - name: Upload Installer Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -546,7 +464,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            PXView-Linux-x86_64-AppImage-${{ steps.version.outputs.value }}.AppImage
+            PXView-Linux-x86_64-Installer-${{ steps.version.outputs.value }}.sh
             PXView-Linux-udev-rules-${{ steps.version.outputs.value }}.zip
           draft: true
           name: PXView ${{ steps.version.outputs.value }}

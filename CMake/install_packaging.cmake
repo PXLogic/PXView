@@ -103,8 +103,10 @@ endif()
 #=   Linux:
 #=     Minimum:  Ubuntu 22.04 (jammy) / Debian 12 (bookworm) / Fedora 36
 #=     Tauri v2 requires webkit2gtk-4.1 (NOT 4.0). Ubuntu 20.04 only has
-#=     webkit2gtk-4.0 and is NOT supported. AppImage bundles libstdc++/libgcc_s
-#=     but webkit2gtk must be installed on the target system.
+#=     webkit2gtk-4.0 and is NOT supported. The installer bundles
+#=     libstdc++/libgcc_s for forward-compat, but webkit2gtk must come from the
+#=     target system (the Agent is shipped as a plain file and resolves it from
+#=     the system, which is what Tauri requires).
 #=     Also requires: libgtk-3, librsvg, libayatana-appindicator3.
 #
 #=   macOS:
