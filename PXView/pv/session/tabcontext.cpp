@@ -185,7 +185,10 @@ void TabContext::apply_device_intent()
         // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
         // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
         // 不丢失)。tab 切换低频，二次重建开销可接受。
-        _session->broadcast_async<interface::DeviceOptionsUpdated>({});
+        // 演进（事件瀑布收敛）：意图应用路径已显式 reload()，skip_model_reload
+        // 置位让 SigSession 跳过其订阅 handler 中的二次全量重建；GUI 消费方
+        // （通道名/布局刷新等）不受影响，照常执行。
+        _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
     } else {
         pxv_info("TabContext::apply_device_intent() session working, "
                  "saving pending config");

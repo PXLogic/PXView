@@ -448,7 +448,7 @@ private:
   void DeviceSessionStopped() override;
   // --- Core-internal state-machine event handlers ---
   // Called via EventBus::subscribe<T>() from the constructor.
-  void on_device_options_updated();
+  void on_device_options_updated(const interface::DeviceOptionsUpdated &ev);
   void on_trig_next_collect();
   void on_rev_end_packet();
   void on_copy_to_doc_done();
@@ -515,6 +515,10 @@ std::vector<core::Subscription> _event_subscriptions;
   // 的 sdi 常驻 _scanned_sdi，handle 跨 release 有效；文件设备 sdi 会被
   // release() 释放，故此处只保存非文件设备，restore 时通过 set_device 切回。
   ds_device_handle _saved_device_handle = NULL_HANDLE;
+  // 演进：最近一次 set_device 的切换原因。switch_work_mode 广播
+  // DeviceModeChanged 时透传，使事件自携带语义（不再依赖 GUI 层转发）。
+  interface::DeviceChangeReason _device_change_reason =
+      interface::DeviceChangeReason::UserSelection;
 
   // --- USB hotplug (libsigrok sr_listen_hotplug) ---
   // Hotplug callback runs on a libsigrok internal GThread; the static

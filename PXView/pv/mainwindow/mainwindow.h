@@ -196,15 +196,11 @@ public:
     void update_disk_cache_status();
     void update_fps();
 
-    // ---- 设备变更裁决状态（架构重构 Phase 1/4）----
-    // last_device_change_reason：最近一次 CurrentDeviceChanged 的原因，
-    // 供 on_device_mode_changed 复用（该事件单一广播点、不携带 reason；
-    // 主线程排队 FIFO 串行处理，时序可靠）。
+    // ---- 设备变更裁决状态（架构演进）----
     // loading_device_profile：设备 profile 加载进行中标志，抑制其内部
-    // set CHANNEL_MODE 连锁触发的 DeviceModeChanged 再次加载 profile
-    // （否则一次设备选择会双重加载 profile + 双份全量刷新）。
-    pv::interface::DeviceChangeReason last_device_change_reason =
-        pv::interface::DeviceChangeReason::FirstInit;
+    // set CHANNEL_MODE 连锁触发的再次加载（否则一次设备选择双重加载 +
+    // 双份全量刷新）。reason 语义已由事件自携带（DeviceChangeReason），
+    // 不再需要 GUI 层 last_device_change_reason 状态转发。
     bool loading_device_profile = false;
 
     pv::view::View* current_view();

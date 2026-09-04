@@ -128,7 +128,13 @@ struct SampleCountUpdated {
 };
 
 // DeviceOptionsUpdated — device options changed; signals need reload.
-struct DeviceOptionsUpdated {};
+// skip_model_reload: set by TabContext::apply_device_intent() — the intent
+// apply path has already run reload() explicitly; SigSession skips its
+// redundant second full model rebuild (event-cascade convergence). All other
+// broadcast sites leave it false (unchanged behavior).
+struct DeviceOptionsUpdated {
+    bool skip_model_reload = false;
+};
 
 // DsoViewOptionChanged — DSO view-layer option changed from header interaction
 // (vDial/factor/acCoupling). Unlike DeviceOptionsUpdated, this does NOT trigger
@@ -175,19 +181,6 @@ struct SignalsChanged {
 // Underlying sample data updated.
 struct DataUpdated {};
 
-// DeviceModeChanged — LOGIC/DSO/ANALOG work mode switched.
-struct DeviceModeChanged {
-    int mode;  // LOGIC/DSO/ANALOG
-};
-
-// CollectModeChanged — single/repeat/loop collect mode switched.
-struct CollectModeChanged {
-    int mode;  // DEVICE_COLLECT_MODE (COLLECT_SINGLE/COLLECT_REPEAT/COLLECT_LOOP)
-};
-
-// DeviceListUpdated — the device list changed.
-struct DeviceListUpdated {};
-
 // DeviceChangeReason — why the current device changed. Lets GUI consumers
 // (device-profile auto-load, view refresh) distinguish a user-initiated
 // device selection from a tab-switch restore, whose per-tab document config
@@ -199,9 +192,31 @@ enum class DeviceChangeReason {
     TabSwitch       // TabContext::activate() restoring this tab's own device
 };
 
+// DeviceModeChanged — LOGIC/DSO/ANALOG work mode switched.
+// reason: the DeviceChangeReason of the most recent device switch, stamped by
+// switch_work_mode() from SigSession's recorded state — events carry their own
+// semantics; no GUI-side state forwarding needed.
+struct DeviceModeChanged {
+    int mode;  // LOGIC/DSO/ANALOG
+    DeviceChangeReason reason = DeviceChangeReason::UserSelection;
+};
+
+// CollectModeChanged — single/repeat/loop collect mode switched.
+struct CollectModeChanged {
+    int mode;  // DEVICE_COLLECT_MODE (COLLECT_SINGLE/COLLECT_REPEAT/COLLECT_LOOP)
+};
+
+// DeviceListUpdated — the device list changed.
+struct DeviceListUpdated {};
+
 // CurrentDeviceChanged — the current device selection changed.
+// handle: the newly-activated device's handle, so consumers don't have to
+// query the global active device (paves the way for per-tab DeviceSlot).
+// unsigned long long == ds_device_handle (uint64_t) on this platform; kept
+// literal to avoid a type dependency in this low-level header.
 struct CurrentDeviceChanged {
     DeviceChangeReason reason = DeviceChangeReason::UserSelection;
+    unsigned long long handle = 0;
 };
 
 // DeviceOpenFailed — set_device() failed to open the new device via sr_dev_open.

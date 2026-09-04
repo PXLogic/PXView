@@ -125,7 +125,7 @@ SigSession::SigSession() {
   // Register event handlers via subscribe<T>() (replaces IEventListener).
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::DeviceOptionsUpdated>(
-          [this](const interface::DeviceOptionsUpdated &) { on_device_options_updated(); }));
+          [this](const interface::DeviceOptionsUpdated &e) { on_device_options_updated(e); }));
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::TrigNextCollect>(
           [this](const interface::TrigNextCollect &) { on_trig_next_collect(); }));
@@ -664,9 +664,11 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   set_cur_samplelimits(_state->device_agent().get_sample_limit());
 
   // The current device changed.
-  // 架构重构 Phase 1：切换原因随事件显式下发，GUI 层裁决依赖语义而非
-  // broadcast_async 的排队时序巧合。
-  _event_bus->broadcast_async<interface::CurrentDeviceChanged>({reason});
+  // 架构重构 Phase 1 + 演进：切换原因与设备 handle 随事件显式下发——
+  // reason 供 GUI 裁决 profile 加载；handle 供消费方免查询全局活动设备
+  // （为 per-tab DeviceSlot 演进铺路）。
+  _device_change_reason = reason;
+  _event_bus->broadcast_async<interface::CurrentDeviceChanged>({reason, dev_handle});
 
   return true;
 }
@@ -2510,8 +2512,13 @@ Snapshot *SigSession::get_signal_snapshot() {
 // safe via qApp queue).
 // ============================================================================
 
-void SigSession::on_device_options_updated() {
-  reload();
+void SigSession::on_device_options_updated(
+    const interface::DeviceOptionsUpdated &ev) {
+  // 演进（事件瀑布收敛）：skip_model_reload=true 由 TabContext::
+  // apply_device_intent() 置位 —— 意图应用路径已显式 reload() 过，模型
+  // 即为最新，跳过此处的二次全量重建。其余广播点默认 false，行为不变。
+  if (!ev.skip_model_reload)
+    reload();
 }
 
 void SigSession::on_trig_next_collect() {
@@ -3083,7 +3090,9 @@ bool SigSession::switch_work_mode(int mode) {
     // Qt::QueuedConnection, so View finishes its signals_changed rebuild
     // before handlers access view::Signal::_model. No separate _deferred
     // variant is needed.
-    _event_bus->broadcast_async<interface::DeviceModeChanged>({});
+    // 演进：透传最近一次设备切换原因，事件自携带语义，GUI 不再状态转发。
+    _event_bus->broadcast_async<interface::DeviceModeChanged>(
+        {mode, _device_change_reason});
 
     return true;
   }

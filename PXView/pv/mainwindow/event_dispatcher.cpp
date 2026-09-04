@@ -274,7 +274,6 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   // 这正是"切回 demo 后通道数和 header 名被还原"的历史根因。
   // 显式 reason 语义取代了曾经的 has_signal_config() 启发式与
   // broadcast_async 事件时序巧合依赖。
-  _window->last_device_change_reason = ev.reason;
   if (ev.reason != pv::interface::DeviceChangeReason::TabSwitch) {
     // Phase 4：profile 加载内部会 set CHANNEL_MODE 等配置，触发排队的
     // DeviceModeChanged → on_device_mode_changed → 再次 load_device_config
@@ -496,19 +495,16 @@ void SessionEventDispatcher::on_sample_rate_changed(const pv::interface::SampleR
 void SessionEventDispatcher::on_sample_count_updated(const pv::interface::SampleCountUpdated &) {
   _window->sampling_bar()->update_sample_count_selector();
 }
-void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceModeChanged &) {
+void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceModeChanged &ev) {
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->mode_changed();
   _window->reset_all_view();
-  // 架构重构 Phase 1/2：与 on_current_device_changed 同一裁决规则。
-  // DeviceModeChanged 单一广播点、不携带 reason，故复用最近一次
-  // CurrentDeviceChanged 的 reason（主线程排队 FIFO，时序可靠）：
-  //  - TabSwitch 期间的模式变化来自 apply_signal_config 恢复标签页配置，
-  //    绝不能再加载 profile 覆盖之；
-  //  - loading_device_profile 期间的模式变化来自 profile 加载自身，
-  //    跳过以免双重加载。
-  if (_window->last_device_change_reason !=
-          pv::interface::DeviceChangeReason::TabSwitch &&
+  // 架构演进：DeviceModeChanged 现自携带 reason（switch_work_mode 广播时
+  // 透传 SigSession 记录的最近一次设备切换原因），不再依赖 MainWindow 的
+  // last_device_change_reason 状态转发。裁决规则与 on_current_device_changed
+  // 一致：TabSwitch 期间的工作模式变化来自标签页意图应用，绝不加载
+  // profile；loading_device_profile 期间跳过以免双重加载。
+  if (ev.reason != pv::interface::DeviceChangeReason::TabSwitch &&
       !_window->loading_device_profile)
     _window->load_device_config();
   _window->update_title_bar_text();
