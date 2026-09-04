@@ -48,6 +48,13 @@
 #==============================================================================
 set -Eeuo pipefail
 
+# Fix the umask: this script runs through sudo, which keeps the invoking
+# user's umask when it is stricter than the default. A hardened shell with
+# umask 077 would otherwise leave every installed file at 600 root:root --
+# unreadable to the desktop user, silently breaking desktop icons, .desktop
+# menu entries and app resources. Explicit chmods below are defense in depth.
+umask 022
+
 VERSION="@PXVIEW_VERSION@"
 PREFIX="${PXVIEW_PREFIX:-/opt/PXView}"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${0}")")" && pwd)"
@@ -310,6 +317,12 @@ step "安装到 $PREFIX"
 mkdir -p "$PREFIX"
 cp -a "$PAYLOAD/." "$PREFIX/"
 
+# Defense in depth against odd payload modes or a hostile umask: everything in
+# the tree must be readable by the desktop user. u+rwX keeps existing exec
+# bits (and sets them on directories), go+rX makes dirs traversable, go-w
+# drops any group/other write that should not be there.
+chmod -R u+rwX,go+rX,go-w "$PREFIX"
+
 chmod 755 "$PREFIX/bin/PXView"
 [ -f "$PREFIX/bin/PXView-Agent" ] && chmod 755 "$PREFIX/bin/PXView-Agent"
 [ -f "$PREFIX/bin/pxview-launcher" ] && chmod 755 "$PREFIX/bin/pxview-launcher"
@@ -333,6 +346,7 @@ if [ -d "$PREFIX/lib/udev/rules.d" ]; then
     for rule in "$PREFIX"/lib/udev/rules.d/*.rules; do
         [ -f "$rule" ] || continue
         cp -f "$rule" "$UDEV_DIR/"
+        chmod 644 "$UDEV_DIR/$(basename "$rule")"
         track_external "$UDEV_DIR/$(basename "$rule")"
         info "$(basename "$rule") -> $UDEV_DIR/"
     done
@@ -344,6 +358,7 @@ fi
 for extra in "$PREFIX"/share/libsigrokdecode/contrib/*.rules; do
     [ -f "$extra" ] || continue
     cp -f "$extra" "$UDEV_DIR/" && {
+        chmod 644 "$UDEV_DIR/$(basename "$extra")"
         track_external "$UDEV_DIR/$(basename "$extra")"
         info "$(basename "$extra") -> $UDEV_DIR/"
     }
@@ -385,6 +400,7 @@ for size in 16x16 32x32 48x48 64x64 128x128 256x256 scalable; do
         [ -f "$f" ] || continue
         dest="$ICON_ROOT/$size/apps/$(basename "$f")"
         cp -f "$f" "$dest" 2>/dev/null || true
+        chmod 644 "$dest" 2>/dev/null || true
         track_external "$dest"
     done
 done
@@ -394,6 +410,7 @@ if [ -d "$PREFIX/share/pixmaps" ]; then
         [ -f "$f" ] || continue
         dest="/usr/share/pixmaps/$(basename "$f")"
         cp -f "$f" "$dest" 2>/dev/null || true
+        chmod 644 "$dest" 2>/dev/null || true
         track_external "$dest"
     done
 fi
@@ -526,6 +543,10 @@ EOF
 track_external "$APPS_DIR/pxview-uninstall.desktop"
 info "$APPS_DIR/pxview-uninstall.desktop"
 
+# Menu entries are read by the desktop user -- never leave them at the
+# installer's umask (cat > writes 600 under umask 077).
+chmod 644 "$APPS_DIR"/pxview*.desktop
+
 command -v update-desktop-database >/dev/null 2>&1 && \
     update-desktop-database "$APPS_DIR" || true
 
@@ -549,8 +570,11 @@ install_shortcuts() {
         cp -f "$APPS_DIR/$name.desktop" "$desktop/"
         chmod 755 "$desktop/$name.desktop"
         # GNOME refuses to run .desktop files that are not marked trusted.
-        sudo -u "$user" gio set "$desktop/$name.desktop" \
-             metadata::trusted true 2>/dev/null || true
+        # gio's metadata lives in the gvfs metadata daemon, reached over the
+        # user's session bus; sudo strips DBUS_SESSION_BUS_ADDRESS, so probe
+        # the standard systemd user bus path explicitly.
+        sudo -u "$user" env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$user")/bus" \
+             gio set "$desktop/$name.desktop" metadata::trusted true 2>/dev/null || true
         chown "$user" "$desktop/$name.desktop" 2>/dev/null || true
         if [ -f "$desktop/$name.desktop" ]; then
             track_shortcut "$desktop/$name.desktop"

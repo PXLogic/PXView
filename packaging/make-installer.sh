@@ -9,8 +9,8 @@
 #= The artifact is generated with makeself (the standard self-extracting
 #= archive used by NVIDIA/CUDA et al.), which provides:
 #=
-#=   * embedded SHA-256 integrity check, verified automatically at runtime
-#=     (also available on demand via: ./PXView-*.run --check)
+#=   * embedded MD5 integrity check (CRC disabled), verified automatically at
+#=     runtime (also available on demand via: ./PXView-*.run --check)
 #=   * standard runtime flags: --target <dir> to extract without running,
 #=     --noexec, --keep, --info, ...
 #=   * a root pre-check BEFORE extracting anything (--needroot)
@@ -110,13 +110,20 @@ MAKSELF_CMD="$(command -v makeself.sh || command -v makeself || true)"
 # time (tar --zstd vs tar -z) -- same tradeoff as the previous hand-rolled
 # header. Switch to --gzip unconditionally if old-distro support reports
 # (CentOS 7 et al. without zstd) ever come in.
+#
+# Checksums: MD5 is embedded by default (there is no --md5 flag; only
+# --nomd5 can turn it off). --nocrc drops the legacy CRC so runtime
+# verification is exactly one MD5 pass over the payload -- the fastest
+# corruption check. Add --sha256 back only if tamper-evidence is ever needed
+# (against accidental corruption MD5 is sufficient; real tamper-evidence
+# requires GPG signing either way).
 echo " [2/2] 生成自解压安装器 (makeself)..."
 COMPR_ARGS=(--gzip)
 if command -v zstd >/dev/null 2>&1; then
     COMPR_ARGS=(--zstd)
 fi
 
-"$MAKSELF_CMD" "${COMPR_ARGS[@]}" --sha256 --needroot \
+"$MAKSELF_CMD" "${COMPR_ARGS[@]}" --nocrc --needroot \
     "$STAGE" "$OUTPUT" "PXView $VERSION Linux x86_64 Installer" ./install.sh
 
 chmod 755 "$OUTPUT"
