@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # republish-release.yml
 #
 # Manually re-publish build artifacts from a past workflow run to a GitHub
@@ -32,7 +32,7 @@ on:
       version:
         description: 'Version number used in the source build (e.g. 1.5.7)'
         required: true
-        default: '1.5.7'
+        default: '1.6.0'
       tag:
         description: 'Target release tag (e.g. v1.5.7). Leave empty to derive from version.'
         required: false
@@ -193,7 +193,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.value }}
           files: release-assets/*
           draft: ${{ github.event.inputs.draft }}
-          name: PXView ${{ github.event.inputs.version }}
+          name: PXView_v${{ github.event.inputs.version }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
