@@ -14,6 +14,28 @@
 #=   * wrappers   -> /usr/local/bin/pxview, /usr/local/bin/pxview-agent
 #=   * $PREFIX/uninstall.sh
 #=
+#= Upgrade model (industrial-installer style; on-disk contract documented in
+#= packaging/INSTALL_MANIFEST_SPEC.md):
+#=
+#=   * Ownership marker + version stamp : $PREFIX/.pxview/install.json
+#=   * File manifest                    : $PREFIX/.pxview/manifest.txt
+#=     ([tree] relative paths, [external]/[shortcuts] absolute paths)
+#=   * Upgrade = staged swap: the old tree is renamed aside (atomic on one
+#=     filesystem), the new tree is installed and self-checked, and only then
+#=     the old tree is deleted. Any failure after the swap rolls back to the
+#=     untouched old tree, so the system is never left without a PXView.
+#=   * Uninstall = manifest-driven: deletes exactly the files the installer
+#=     created, with glob fallbacks for pre-manifest installs.
+#=
+#= Environment switches:
+#=   PXVIEW_PREFIX=/opt/PXView    install location
+#=   PXVIEW_OVERWRITE=yes         plain in-place overwrite, no staging
+#=                                (still prunes our own orphans via the old
+#=                                manifest; keeps foreign extra files)
+#=   PXVIEW_KEEP_OLD=yes          keep the staged old tree as .old.<ts> backup
+#=   PXVIEW_FORCE=yes             take over a directory without our marker
+#=   PXVIEW_KILL_RUNNING=yes      kill running instances instead of refusing
+#=
 #= Layout after install (all paths are resolved from applicationDirPath(), so
 #= the prefix is relocatable -- see CMakeLists.txt INSTALL_RPATH notes):
 #=
@@ -24,7 +46,7 @@
 #=   /opt/PXView/share/libsigrokdecode/
 #=   /opt/PXView/share/sigrok-firmware/
 #==============================================================================
-set -euo pipefail
+set -Eeuo pipefail
 
 VERSION="@PXVIEW_VERSION@"
 PREFIX="${PXVIEW_PREFIX:-/opt/PXView}"
@@ -35,11 +57,79 @@ BIN_DIR=/usr/local/bin
 APPS_DIR=/usr/local/share/applications
 ICON_ROOT=/usr/share/icons/hicolor
 UDEV_DIR=/etc/udev/rules.d
+META_DIR="$PREFIX/.pxview"
 
 step() { printf '\n==> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '    [警告] %s\n' "$*" >&2; }
 die()  { printf '\n错误: %s\n' "$*" >&2; exit 1; }
+
+#------------------------------------------------------------------------------
+# Bookkeeping: every file installed outside $PREFIX is tracked while the
+# installer runs, so the manifest (and therefore the uninstaller) knows
+# exactly what to remove. [tree] is walked from the installed payload.
+#------------------------------------------------------------------------------
+EXTERNALS=()    # absolute paths: udev rules, wrappers, .desktop entries, icons
+SHORTCUTS=()    # absolute paths: per-user Desktop .desktop launchers
+OLD_DIR=""      # staged old tree during a staged-swap upgrade ("" = none)
+OLD_VERSION=""  # version string detected for the previous install ("" = fresh)
+OLD_MANIFEST="" # old manifest path (staged-swap upgrades only)
+
+track_external() { EXTERNALS+=("$1"); }
+track_shortcut() { SHORTCUTS+=("$1"); }
+
+# True when both paths live on the same filesystem, i.e. rename() -- and with
+# it the atomic staged swap -- is possible. Unprobeable (stat missing) counts
+# as "not same" and takes the conservative path.
+same_fs() {
+    local a b
+    a="$(stat -c %d -- "$1" 2>/dev/null)" || return 1
+    b="$(stat -c %d -- "$2" 2>/dev/null)" || return 1
+    [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
+# Version recorded in a .pxview/install.json ("" when absent/unparseable).
+marker_version() {
+    [ -f "$1" ] || return 0
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1
+}
+
+# Glob-based cleanup of integration files from pre-manifest installs.
+# Deliberately does NOT touch per-user Desktop shortcuts: they keep pointing
+# into $PREFIX, which the upgrade refreshes in place; only a real uninstall
+# removes them.
+legacy_cleanup_externals() {
+    local d s
+    rm -f -- "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent" "$BIN_DIR/pxview-uninstall"
+    rm -f -- "$APPS_DIR"/pxview*.desktop
+    d=/usr/lib/udev/rules.d
+    [ -d "$d" ] || { d=/lib/udev/rules.d; [ -d "$d" ] || d=/etc/udev/rules.d; }
+    rm -f -- "$d"/60-px.rules "$d"/pxview*.rules \
+             "$d"/60-libsigrok*.rules "$d"/61-libsigrok*.rules
+    rm -f -- /usr/share/pixmaps/pxview.png /usr/share/pixmaps/pxview.svg
+    for s in 16x16 32x32 48x48 64x64 128x128 256x256 scalable; do
+        rm -f -- "$ICON_ROOT/$s/apps/pxview.png" "$ICON_ROOT/$s/apps/pxview.svg"
+    done
+}
+
+# ERR-trap rollback: armed only once the staged swap has happened. Undoes a
+# half-finished install by dropping the partial new tree and moving the staged
+# old tree back, leaving the system exactly as it was before the upgrade.
+rollback() {
+    local rc=$?
+    trap - ERR
+    set +e
+    if [ -n "$OLD_DIR" ] && [ -d "$OLD_DIR" ]; then
+        warn "安装失败 (exit $rc)，正在回滚到升级前状态..."
+        rm -rf -- "$PREFIX"
+        if mv -- "$OLD_DIR" "$PREFIX"; then
+            warn "已回滚：旧版本保留在 $PREFIX，系统与安装前一致。"
+        else
+            warn "回滚失败！旧版本树仍在 $OLD_DIR，请手动恢复。"
+        fi
+    fi
+    exit "$rc"
+}
 
 printf 'PXView %s 安装程序\n' "$VERSION"
 
@@ -118,36 +208,104 @@ if [ -f "$PAYLOAD/bin/PXView-Agent" ] && ! have_webkit; then
 fi
 
 #------------------------------------------------------------------------------
-# 2. Install the tree
+# 2. Upgrade handling -- detect the previous install, stage it, purge its
+#    integration files. Everything after the staged swap is rollback-protected
+#    by the ERR trap; everything before it is read-only inspection.
+#------------------------------------------------------------------------------
+step "检查已安装版本"
+
+if compgen -G "$PREFIX.old.*" >/dev/null 2>&1; then
+    warn "检测到此前中断升级遗留的暂存目录 ($PREFIX.old.*)，卸载时会一并清除"
+fi
+
+if [ ! -e "$PREFIX" ]; then
+    info "全新安装: $PREFIX"
+else
+    #---- Ownership check: never touch a directory PXView does not manage ----
+    if [ ! -f "$PREFIX/bin/PXView" ] && [ ! -f "$META_DIR/install.json" ]; then
+        if [ "${PXVIEW_FORCE:-no}" != "yes" ] && [ "${PXVIEW_OVERWRITE:-no}" != "yes" ]; then
+            die "$PREFIX 已存在，但找不到 PXView 的所有权标记 (bin/PXView 或 .pxview/install.json)。
+为避免误删无关目录，已中止。若确认可接管该目录，请改用:
+    PXVIEW_FORCE=yes        按升级流程接管 (暂存旧目录, 成功后删除)
+    PXVIEW_OVERWRITE=yes    直接覆盖 (不清理旧系统集成文件)"
+        fi
+    fi
+
+    #---- Previous version (marker JSON, else the legacy uninstall banner) ----
+    OLD_VERSION="$(marker_version "$META_DIR/install.json")"
+    if [ -z "$OLD_VERSION" ] && [ -f "$PREFIX/uninstall.sh" ]; then
+        OLD_VERSION="$(sed -n 's/^# PXView \(.*\) uninstaller.*/\1/p' "$PREFIX/uninstall.sh" | head -1)"
+    fi
+
+    #---- Running instances: replacing files under a live capture loses data --
+    if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -x PXView >/dev/null 2>&1 || pgrep -x PXView-Agent >/dev/null 2>&1; then
+            if [ "${PXVIEW_KILL_RUNNING:-no}" = "yes" ]; then
+                warn "检测到正在运行的 PXView/PXView-Agent，按 PXVIEW_KILL_RUNNING=yes 终止"
+                pkill -x PXView-Agent 2>/dev/null || true
+                pkill -x PXView 2>/dev/null || true
+                sleep 2
+                pkill -9 -x PXView-Agent 2>/dev/null || true
+                pkill -9 -x PXView 2>/dev/null || true
+            else
+                die "检测到 PXView 正在运行。升级会替换其文件并中断正在进行的采集。
+请先关闭 PXView / PXView-Agent 后重试；
+或以 PXVIEW_KILL_RUNNING=yes 运行，由安装器自动结束进程。"
+            fi
+        fi
+    fi
+
+    if [ "${PXVIEW_OVERWRITE:-no}" = "yes" ]; then
+        #---- Plain overwrite: no staging; prune only OUR orphaned tree files --
+        warn "PXVIEW_OVERWRITE=yes: 直接覆盖安装 (不暂存旧版本)"
+        if [ -f "$META_DIR/manifest.txt" ]; then
+            while IFS= read -r rel; do
+                [ -n "$rel" ] || continue
+                if [ ! -e "$PAYLOAD/$rel" ]; then
+                    rm -rf -- "$PREFIX/$rel"
+                fi
+            done < <(awk '/^\[tree\]/{s=1;next} /^\[/{s=0} s' "$META_DIR/manifest.txt")
+            info "已按旧安装清单清理本版本不再包含的文件"
+        fi
+    elif same_fs "$PREFIX" "$(dirname -- "$PREFIX")"; then
+        #---- Staged swap: atomic rename, then rollback-protected install -----
+        OLD_DIR="$PREFIX.old.$(date +%Y%m%d%H%M%S)"
+        [ -e "$OLD_DIR" ] && OLD_DIR="${OLD_DIR}.$$"
+        trap rollback ERR
+        mv -- "$PREFIX" "$OLD_DIR"
+        [ -f "$OLD_DIR/.pxview/manifest.txt" ] && OLD_MANIFEST="$OLD_DIR/.pxview/manifest.txt"
+        info "旧版本已暂存: $OLD_DIR"
+        info "  安装成功后自动删除; 任一步失败将自动回滚到升级前状态"
+    else
+        #---- Cross-device mount point: rename() impossible --------------------
+        warn "$PREFIX 位于独立文件系统，无法原子暂存，回退为先卸载后安装 (此路径无回滚保护)"
+        if [ -f "$PREFIX/uninstall.sh" ]; then
+            "$PREFIX/uninstall.sh" || warn "旧版卸载脚本执行失败，继续覆盖安装"
+        fi
+    fi
+
+    #---- Purge the previous install's external integration files ------------
+    if [ -n "$OLD_DIR" ]; then
+        if [ -n "$OLD_MANIFEST" ] && [ -f "$OLD_MANIFEST" ]; then
+            while IFS= read -r f; do
+                rm -f -- "$f"
+            done < <(grep -E '^/' "$OLD_MANIFEST" || true)
+            info "已按旧安装清单精确清理旧版系统集成文件"
+        else
+            legacy_cleanup_externals
+            info "旧版本无安装清单，已按通配规则清理旧版系统集成文件"
+        fi
+    fi
+
+    if [ -n "$OLD_VERSION" ]; then
+        info "检测到旧版本: $OLD_VERSION -> $VERSION"
+    fi
+fi
+
+#------------------------------------------------------------------------------
+# 3. Install the tree
 #------------------------------------------------------------------------------
 step "安装到 $PREFIX"
-
-# Upgrade scenario. Because this installer already runs as root (see the sanity
-# check above), the target $PREFIX is writable, so the default is a plain
-# overwrite install: no uninstall step, no `.old.<ts>` backup tree. The wrappers,
-# .desktop entries, udev rules, icons and the uninstaller are all (re)installed
-# right below, overwriting their previous files in place.
-#
-# A *clean* uninstall is still available as an explicit opt-in for users who
-# want to erase every trace of the previous version before installing:
-#   PXVIEW_UNINSTALL_FIRST=yes
-# This runs the previous $PREFIX/uninstall.sh (which already removes $PREFIX,
-# wrappers, .desktop entries, desktop shortcuts, udev rules and the icon cache)
-# and then installs the new tree.
-if [ -e "$PREFIX" ] && [ "${PXVIEW_UNINSTALL_FIRST:-no}" = "yes" ]; then
-    if [ -f "$PREFIX/uninstall.sh" ]; then
-        info "检测到旧版本 $PREFIX，根据 PXVIEW_UNINSTALL_FIRST=yes 先卸载旧版再安装..."
-        if "$PREFIX/uninstall.sh"; then
-            info "旧版本已卸载"
-        else
-            warn "旧版本卸载脚本执行失败，将直接覆盖安装"
-        fi
-    else
-        warn "$PREFIX 已存在但无卸载脚本，将直接覆盖安装"
-    fi
-elif [ -e "$PREFIX" ]; then
-    warn "$PREFIX 已存在，本安装程序以 root 运行，将直接覆盖旧版本（未先卸载；如需先卸载请加 PXVIEW_UNINSTALL_FIRST=yes）"
-fi
 
 mkdir -p "$PREFIX"
 cp -a "$PAYLOAD/." "$PREFIX/"
@@ -175,6 +333,7 @@ if [ -d "$PREFIX/lib/udev/rules.d" ]; then
     for rule in "$PREFIX"/lib/udev/rules.d/*.rules; do
         [ -f "$rule" ] || continue
         cp -f "$rule" "$UDEV_DIR/"
+        track_external "$UDEV_DIR/$(basename "$rule")"
         info "$(basename "$rule") -> $UDEV_DIR/"
     done
 else
@@ -184,7 +343,10 @@ fi
 # libsigrok's own rules ship inside the tree as well
 for extra in "$PREFIX"/share/libsigrokdecode/contrib/*.rules; do
     [ -f "$extra" ] || continue
-    cp -f "$extra" "$UDEV_DIR/" && info "$(basename "$extra") -> $UDEV_DIR/"
+    cp -f "$extra" "$UDEV_DIR/" && {
+        track_external "$UDEV_DIR/$(basename "$extra")"
+        info "$(basename "$extra") -> $UDEV_DIR/"
+    }
 done
 
 if command -v udevadm >/dev/null 2>&1; then
@@ -219,11 +381,21 @@ for size in 16x16 32x32 48x48 64x64 128x128 256x256 scalable; do
     src="$PREFIX/share/icons/hicolor/$size/apps"
     [ -d "$src" ] || continue
     mkdir -p "$ICON_ROOT/$size/apps"
-    cp -f "$src"/* "$ICON_ROOT/$size/apps/" 2>/dev/null || true
+    for f in "$src"/*; do
+        [ -f "$f" ] || continue
+        dest="$ICON_ROOT/$size/apps/$(basename "$f")"
+        cp -f "$f" "$dest" 2>/dev/null || true
+        track_external "$dest"
+    done
 done
 if [ -d "$PREFIX/share/pixmaps" ]; then
     mkdir -p /usr/share/pixmaps
-    cp -f "$PREFIX"/share/pixmaps/* /usr/share/pixmaps/ 2>/dev/null || true
+    for f in "$PREFIX"/share/pixmaps/*; do
+        [ -f "$f" ] || continue
+        dest="/usr/share/pixmaps/$(basename "$f")"
+        cp -f "$f" "$dest" 2>/dev/null || true
+        track_external "$dest"
+    done
 fi
 command -v gtk-update-icon-cache >/dev/null 2>&1 && \
     gtk-update-icon-cache -q -t -f "$ICON_ROOT" || true
@@ -255,6 +427,7 @@ cat > "$BIN_DIR/pxview" <<EOF
 exec "$PREFIX/bin/PXView" "\$@"
 EOF
 chmod 755 "$BIN_DIR/pxview"
+track_external "$BIN_DIR/pxview"
 info "$BIN_DIR/pxview"
 
 if [ -f "$PREFIX/bin/PXView-Agent" ]; then
@@ -263,6 +436,7 @@ if [ -f "$PREFIX/bin/PXView-Agent" ]; then
 exec "$PREFIX/bin/PXView-Agent" "\$@"
 EOF
     chmod 755 "$BIN_DIR/pxview-agent"
+    track_external "$BIN_DIR/pxview-agent"
     info "$BIN_DIR/pxview-agent"
 fi
 
@@ -287,6 +461,7 @@ echo "无法提权，请手动用 root 运行: $PREFIX/uninstall.sh" >&2
 exit 1
 EOF
 chmod 755 "$BIN_DIR/pxview-uninstall"
+track_external "$BIN_DIR/pxview-uninstall"
 info "$BIN_DIR/pxview-uninstall"
 
 #------------------------------------------------------------------------------
@@ -309,6 +484,7 @@ Categories=Development;Electronics;Qt;
 Keywords=logic;analyzer;oscilloscope;sigrok;pxlogic;
 StartupWMClass=PXView
 EOF
+track_external "$APPS_DIR/pxview.desktop"
 info "$APPS_DIR/pxview.desktop"
 
 if [ -f "$PREFIX/bin/PXView-Agent" ]; then
@@ -326,6 +502,7 @@ Categories=Development;Electronics;Qt;
 Keywords=logic;analyzer;agent;ai;
 StartupWMClass=PXView Agent
 EOF
+    track_external "$APPS_DIR/pxview-agent.desktop"
     info "$APPS_DIR/pxview-agent.desktop"
 fi
 
@@ -346,6 +523,7 @@ Terminal=false
 Categories=System;Development;Settings;
 Keywords=uninstall;remove;purge;pxview;
 EOF
+track_external "$APPS_DIR/pxview-uninstall.desktop"
 info "$APPS_DIR/pxview-uninstall.desktop"
 
 command -v update-desktop-database >/dev/null 2>&1 && \
@@ -374,6 +552,9 @@ install_shortcuts() {
         sudo -u "$user" gio set "$desktop/$name.desktop" \
              metadata::trusted true 2>/dev/null || true
         chown "$user" "$desktop/$name.desktop" 2>/dev/null || true
+        if [ -f "$desktop/$name.desktop" ]; then
+            track_shortcut "$desktop/$name.desktop"
+        fi
         info "桌面快捷方式: $desktop/$name.desktop"
     done
 }
@@ -386,23 +567,49 @@ else
 fi
 
 #------------------------------------------------------------------------------
-# 8. Uninstaller
+# 9. Uninstaller -- manifest-driven, with glob fallbacks
 #------------------------------------------------------------------------------
 step "生成卸载脚本"
 cat > "$PREFIX/uninstall.sh" <<EOF
 #!/usr/bin/env bash
-# PXView $VERSION uninstaller -- run as root.
+# PXView $VERSION uninstaller -- manifest-driven, run as root.
+# Deletes exactly what the installer created: the $PREFIX tree plus every
+# absolute path recorded in the manifest, with glob fallbacks for
+# pre-manifest installs.
 set -u
 [ "\$(id -u)" -eq 0 ] || { echo "需要 root 权限，请用 sudo 运行。" >&2; exit 1; }
 
-rm -rf "$PREFIX"
-rm -f "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent" "$BIN_DIR/pxview-uninstall"
-rm -f "$APPS_DIR/pxview.desktop" "$APPS_DIR/pxview-agent.desktop" "$APPS_DIR/pxview-uninstall.desktop"
+PREFIX="$PREFIX"
+MANIFEST="$META_DIR/manifest.txt"
+BIN_DIR="$BIN_DIR"
+APPS_DIR="$APPS_DIR"
+ICON_ROOT="$ICON_ROOT"
 
-# Remove the desktop shortcuts install.sh copied to each real user's Desktop.
-# Walk /etc/passwd so any user (not just the one who installed) gets cleaned
-# up. plugdev membership is deliberately left untouched -- it is a generic
-# system group the account may still need for other devices.
+# 1) Manifest-driven removal -- absolute paths only ([external] + [shortcuts]);
+#    the [tree] section is covered by the rm -rf of \$PREFIX below.
+if [ -f "\$MANIFEST" ]; then
+    grep -E '^/' "\$MANIFEST" | while IFS= read -r f; do
+        [ -n "\$f" ] && rm -f -- "\$f"
+    done
+fi
+
+# 2) Glob fallback -- covers pre-manifest installs and any stragglers; the
+#    same patterns the installer itself uses for its legacy upgrade path.
+rm -f -- "\$BIN_DIR/pxview" "\$BIN_DIR/pxview-agent" "\$BIN_DIR/pxview-uninstall"
+rm -f -- "\$APPS_DIR"/pxview*.desktop
+UDEV_DIR=/usr/lib/udev/rules.d
+[ -d "\$UDEV_DIR" ] || { UDEV_DIR=/lib/udev/rules.d; [ -d "\$UDEV_DIR" ] || UDEV_DIR=/etc/udev/rules.d; }
+rm -f -- "\$UDEV_DIR"/60-px.rules "\$UDEV_DIR"/pxview*.rules \\
+         "\$UDEV_DIR"/60-libsigrok*.rules "\$UDEV_DIR"/61-libsigrok*.rules
+rm -f -- /usr/share/pixmaps/pxview.png /usr/share/pixmaps/pxview.svg
+for s in 16x16 32x32 48x48 64x64 128x128 256x256 scalable; do
+    rm -f -- "\$ICON_ROOT/\$s/apps/pxview.png" "\$ICON_ROOT/\$s/apps/pxview.svg"
+done
+
+# 3) Per-user Desktop shortcuts. Walk /etc/passwd so any user (not just the
+#    one who installed) gets cleaned up. plugdev membership is deliberately
+#    left untouched -- it is a generic system group the account may still need
+#    for other devices.
 while IFS=: read -r _ _ uid _ _ homedir _; do
     # Only real interactive users (uid >= 1000) with an existing home dir.
     [ "\$uid" -ge 1000 ] 2>/dev/null || continue
@@ -413,33 +620,101 @@ while IFS=: read -r _ _ uid _ _ homedir _; do
         [ -n "\$d" ] && [ -d "\$d" ] && desktop="\$d"
     fi
     [ -d "\$desktop" ] || continue
-    rm -f "\$desktop"/pxview*.desktop
+    rm -f -- "\$desktop"/pxview*.desktop
 done < /etc/passwd
 
-rm -f "$UDEV_DIR/60-px.rules" "$UDEV_DIR/60-libsigrok.rules" \\
-      "$UDEV_DIR/61-libsigrok-plugdev.rules" "$UDEV_DIR/61-libsigrok-uaccess.rules"
-rm -f /usr/share/pixmaps/pxview.png /usr/share/pixmaps/pxview.svg
-for s in 16x16 32x32 48x48 64x64 128x128 256x256 scalable; do
-    rm -f "$ICON_ROOT/\$s/apps/pxview.png" "$ICON_ROOT/\$s/apps/pxview.svg"
-done
+# 4) The tree itself (marker dir included) plus leftover staging trees from
+#    any interrupted upgrade.
+rm -rf -- "\$PREFIX"
+rm -rf -- "\$PREFIX".old.* 2>/dev/null
+
+# 5) Refresh system caches.
 command -v udevadm >/dev/null 2>&1 && { udevadm control --reload-rules; udevadm trigger; } || true
-command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" || true
-command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f "$ICON_ROOT" || true
-echo "PXView $VERSION 已从 $PREFIX 卸载。"
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "\$APPS_DIR" || true
+command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f "\$ICON_ROOT" || true
+echo "PXView $VERSION 已从 \$PREFIX 卸载。"
 EOF
 chmod 755 "$PREFIX/uninstall.sh"
 info "$PREFIX/uninstall.sh"
 
 #------------------------------------------------------------------------------
-# 9. Summary
+# 10. Install manifest + version stamp -- the on-disk contract consumed by
+#     uninstall.sh and by the next upgrade (see INSTALL_MANIFEST_SPEC.md)
+#------------------------------------------------------------------------------
+step "写入安装清单与版本标记"
+mkdir -p "$META_DIR"
+{
+    echo "# PXView install manifest -- consumed by uninstall.sh and the next upgrade"
+    echo "# version=$VERSION"
+    echo "[tree]"
+    (cd "$PREFIX" && find . -mindepth 1 -not -path './.pxview' -not -path './.pxview/*' \
+        | sed 's|^\./||' | LC_ALL=C sort)
+    echo "[external]"
+    if [ "${#EXTERNALS[@]}" -gt 0 ]; then
+        printf '%s\n' "${EXTERNALS[@]}" | LC_ALL=C sort -u
+    fi
+    echo "[shortcuts]"
+    if [ "${#SHORTCUTS[@]}" -gt 0 ]; then
+        printf '%s\n' "${SHORTCUTS[@]}" | LC_ALL=C sort -u
+    fi
+} > "$META_DIR/manifest.txt"
+
+cat > "$META_DIR/install.json" <<EOF
+{
+  "name": "PXView",
+  "version": "$VERSION",
+  "installed": "$(date +%Y-%m-%dT%H:%M:%S%z)",
+  "installer": "self-extracting",
+  "prefix": "$PREFIX",
+  "manifest": ".pxview/manifest.txt"
+}
+EOF
+info "$META_DIR/manifest.txt"
+info "$META_DIR/install.json"
+
+#------------------------------------------------------------------------------
+# 11. Self check -- the upgrade is only committed once this passes
+#------------------------------------------------------------------------------
+step "安装自检"
+test -x "$PREFIX/bin/PXView"
+if command -v ldd >/dev/null 2>&1; then
+    if ldd "$PREFIX/bin/PXView" 2>/dev/null | grep -q 'not found'; then
+        warn "PXView 存在未解析的库依赖:"
+        ldd "$PREFIX/bin/PXView" 2>/dev/null | grep 'not found' >&2 || true
+        false   # trip the ERR trap -> automatic rollback to the staged old tree
+    fi
+fi
+info "自检通过"
+
+#------------------------------------------------------------------------------
+# 12. Commit -- new tree is complete and verified; failures no longer roll back
+#------------------------------------------------------------------------------
+trap - ERR
+
+if [ -n "$OLD_DIR" ] && [ -d "$OLD_DIR" ]; then
+    if [ "${PXVIEW_KEEP_OLD:-no}" = "yes" ]; then
+        info "PXVIEW_KEEP_OLD=yes: 旧版本备份保留于 $OLD_DIR (确认无误后可手动删除)"
+    else
+        rm -rf -- "$OLD_DIR"
+        info "旧版本已删除: $OLD_DIR"
+    fi
+    OLD_DIR=""
+fi
+
+#------------------------------------------------------------------------------
+# 13. Summary
 #------------------------------------------------------------------------------
 step "安装完成"
 info "版本:       $VERSION"
+if [ -n "$OLD_VERSION" ]; then
+    info "升级自:     $OLD_VERSION"
+fi
 info "安装目录:   $PREFIX"
 info "启动:       pxview          (或在应用菜单中选择 PXView)"
 [ -f "$PREFIX/bin/PXView-Agent" ] && \
     info "            pxview-agent    (或在应用菜单中选择 PXView Agent)"
-info "卸载:       sudo $PREFIX/uninstall.sh"
+info "卸载:       sudo $PREFIX/uninstall.sh   (或应用菜单中的 卸载 PXView)"
+info "安装清单:   $META_DIR/manifest.txt"
 echo
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
     if getent group plugdev >/dev/null 2>&1 && getent passwd "$SUDO_USER" >/dev/null 2>&1 \

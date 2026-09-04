@@ -6,14 +6,22 @@
 #=
 #=   sudo ./PXView-Linux-x86_64-Installer-<version>.run
 #=
-#= Structure of the produced file:
+#= The artifact is generated with makeself (the standard self-extracting
+#= archive used by NVIDIA/CUDA et al.), which provides:
 #=
-#=   [ shell header ]        locates the archive marker, untars to $TMPDIR
-#=   __PXVIEW_ARCHIVE_BELOW__
-#=   [ tar archive ]         pxview-install/install.sh + pxview-install/data/
+#=   * embedded SHA-256 integrity check, verified automatically at runtime
+#=     (also available on demand via: ./PXView-*.run --check)
+#=   * standard runtime flags: --target <dir> to extract without running,
+#=     --noexec, --keep, --info, ...
+#=   * a root pre-check BEFORE extracting anything (--needroot)
+#=   * automatic temp-dir cleanup
 #=
-#= The header then execs install.sh, which does the real work (files, udev
-#= rules, icons, desktop entries, uninstaller). See packaging/install.sh.
+#= Payload layout (what makeself archives):
+#=
+#=   pxview-install/install.sh    the real installer (see packaging/install.sh)
+#=   pxview-install/data/         the install tree (ninja install output)
+#=
+#= Build-time dependency: the makeself CLI (apt install makeself).
 #=
 #= Usage:
 #=   PXVIEW_VERSION=1.5.9 packaging/make-installer.sh
@@ -73,7 +81,7 @@ trap cleanup EXIT
 
 STAGE="$STAGING/pxview-install"
 mkdir -p "$STAGE/data"
-echo " [1/4] 暂存安装数据..."
+echo " [1/2] 暂存安装数据..."
 cp -a "$APPDIR/." "$STAGE/data/"
 echo "   $(du -sh "$STAGE/data" 2>/dev/null | cut -f1)"
 
@@ -89,75 +97,27 @@ if [ ! -d "$STAGE/data/lib/udev/rules.d" ] || \
 fi
 
 #------------------------------------------------------------------------------
-# 2. Compress
+# 2. Generate the self-extracting archive with makeself
 #------------------------------------------------------------------------------
-echo " [2/4] 压缩..."
+MAKSELF_CMD="$(command -v makeself.sh || command -v makeself || true)"
+[ -n "$MAKSELF_CMD" ] || {
+    echo "ERROR: 未找到 makeself。请先安装: apt install makeself (或 pacman -S makeself)" >&2
+    exit 1
+}
+
+# zstd keeps the payload small; gzip is the fallback when the build box lacks
+# it. Either way the TARGET machine needs the matching decompressor at install
+# time (tar --zstd vs tar -z) -- same tradeoff as the previous hand-rolled
+# header. Switch to --gzip unconditionally if old-distro support reports
+# (CentOS 7 et al. without zstd) ever come in.
+echo " [2/2] 生成自解压安装器 (makeself)..."
+COMPR_ARGS=(--gzip)
 if command -v zstd >/dev/null 2>&1; then
-    SUFFIX=zst
-    # Flag is written into the self-extracting header verbatim, so it must be
-    # explicit: `tar -a` (auto-detect) is a GNU-tar-ism and some tar builds
-    # ignore it while extracting, which silently yields an empty payload.
-    TAR_FLAG=--zstd
-    tar -C "$STAGING" --zstd -cf "$STAGING/payload.tar.zst" pxview-install
-else
-    SUFFIX=gz
-    TAR_FLAG=-z
-    tar -C "$STAGING" -czf "$STAGING/payload.tar.gz" pxview-install
-fi
-PAYLOAD="$STAGING/payload.tar.$SUFFIX"
-echo "   $(du -h "$PAYLOAD" | cut -f1)"
-
-#------------------------------------------------------------------------------
-# 3. Emit the self-extracting header
-#------------------------------------------------------------------------------
-echo " [3/4] 生成自解压头..."
-cat > "$OUTPUT" <<'HEADER'
-#!/usr/bin/env bash
-#==============================================================================
-#= PXView self-extracting installer for Linux x86_64.
-#=
-#=   sudo ./PXView-Linux-x86_64-Installer-<version>.run
-#=
-#= The payload is appended below the __PXVIEW_ARCHIVE_BELOW__ marker. Everything
-#= after that marker is a tar archive; everything before it is this script.
-#==============================================================================
-set -euo pipefail
-
-if [ "$(id -u)" -ne 0 ]; then
-    echo "错误: 需要 root 权限，请用 sudo 运行本安装程序。" >&2
-    exit 1
+    COMPR_ARGS=(--zstd)
 fi
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/pxview-extract.XXXXXX")"
-cleanup() { rm -rf "$TMP"; }
-trap cleanup EXIT
-
-MARKER='__PXVIEW_ARCHIVE_BELOW__'
-ARCHIVE_LINE="$(grep -an -m1 "^${MARKER}\$" "$0" | cut -d: -f1 || true)"
-if [ -z "$ARCHIVE_LINE" ]; then
-    echo "错误: 安装包已损坏(找不到归档标记)。" >&2
-    exit 1
-fi
-
-echo "==> 正在解包到 $TMP ..."
-tail -n +"$((ARCHIVE_LINE + 1))" "$0" | tar -C "$TMP" -x -f - @@TAR_FLAG@@
-
-exec bash "$TMP/pxview-install/install.sh" "$@"
-HEADER
-# Inject the explicit tar decompression flag chosen at build time. Using a
-# literal flag (--zstd / -z) instead of `tar -a` keeps the extraction portable
-# across tar implementations; `tar -a` (auto-detect) is a GNU-tar-ism that some
-# tar builds silently ignore while extracting, yielding an empty payload.
-sed -i "s/@@TAR_FLAG@@/$TAR_FLAG/" "$OUTPUT"
-
-#------------------------------------------------------------------------------
-# 4. Append the archive
-#------------------------------------------------------------------------------
-echo " [4/4] 追加归档..."
-{
-    echo "__PXVIEW_ARCHIVE_BELOW__"
-    cat "$PAYLOAD"
-} >> "$OUTPUT"
+"$MAKSELF_CMD" "${COMPR_ARGS[@]}" --sha256 --needroot \
+    "$STAGE" "$OUTPUT" "PXView $VERSION Linux x86_64 Installer" ./install.sh
 
 chmod 755 "$OUTPUT"
 
@@ -169,4 +129,5 @@ ls -la "$OUTPUT"
 echo
 echo " 安装:  sudo $OUTPUT"
 echo " 指定目录: sudo PXVIEW_PREFIX=/opt/PXView $OUTPUT"
+echo " 完整性自检: $OUTPUT --check"
 echo

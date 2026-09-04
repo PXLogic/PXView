@@ -148,6 +148,30 @@ SectionEnd
 
 # -- Per NSIS rules, all Function sections must be placed after Section sections. -- #
 
+; --- Reject shared/system directories as the install target ------------------
+; Section Uninstall does RMDir /r on $INSTDIR, so a mistyped target (drive
+; root, C:\Windows, Program Files itself, ...) must never be accepted.
+; Checked on the directory page (.onVerifyInstDir) and once in .onInit so a
+; bad registry value or a /D= override on silent installs falls back to the
+; default instead of proceeding. NSIS StrCmp (==) is case-insensitive.
+!macro _PXVIEW_CHECK_INSTDIR
+  StrCpy $R9 "0"
+  StrLen $R0 "$INSTDIR"
+  ${If} $R0 <= 3            ; drive root like "C:\" or bare "C:"
+    StrCpy $R9 "1"
+  ${EndIf}
+  ${If} $R9 == "0"
+    ${If} $INSTDIR == "$WINDIR"
+    ${OrIf} $INSTDIR == "$PROGRAMFILES"
+    ${OrIf} $INSTDIR == "$PROGRAMFILES64"
+    ${OrIf} $INSTDIR == "$PROGRAMFILES32"
+    ${OrIf} $INSTDIR == "$COMMONFILES"
+    ${OrIf} $INSTDIR == "$COMMONFILES64"
+      StrCpy $R9 "1"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 Function .onInit
   !insertmacro MUI_LANGDLL_DISPLAY
 
@@ -223,6 +247,20 @@ Function .onInit
     Abort
 
   done:
+  ; A forbidden initial $INSTDIR (registry leftover or silent /D= override) is
+  ; reset to the default rather than aborting the whole setup.
+  !insertmacro _PXVIEW_CHECK_INSTDIR
+  ${If} $R9 == "1"
+    StrCpy $INSTDIR "$PROGRAMFILES\PXView"
+  ${EndIf}
+FunctionEnd
+
+; Directory-page guard: refuse forbidden targets while the user browses.
+Function .onVerifyInstDir
+  !insertmacro _PXVIEW_CHECK_INSTDIR
+  ${If} $R9 == "1"
+    Abort
+  ${EndIf}
 FunctionEnd
 
 /******************************

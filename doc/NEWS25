@@ -34,7 +34,9 @@ FPGA/IC吹水群：377248676
     【构建与工程】
     *用自解压 .sh 安装器取代 AppImage/linuxdeploy 的分发方式：新增 packaging/bundle-runtime-libs.sh 以白名单方式拷贝 Qt 运行时与插件、GCC 运行时、Python 标准库、libsigrok/libpython 等私有依赖，刻意不打包 WebKitGTK/GTK/GStreamer/GLib/X11/Wayland 等桌面栈，避免 ABI 混搭造成窗口白屏；并重写 packaging/check-webkit-stack.sh（安装树黑名单递归扫描去重），删除 AppImage 专用的 packaging/pxview-AppRun
     *新增系统安装器与打包脚本：packaging/install.sh + make-installer.sh 产出自解压安装器，安装到 /opt/PXView，自动处理 udev 规则、图标、.desktop、CLI 封装、桌面快捷方式与 uninstall.sh；CMake install_packaging.cmake 现在一并发装 libsigrok 的 udev 规则，使安装器成为 USB 设备权限的唯一归属，不再单独上传 udev 压缩包；CMakeLists 为 Linux 增加 INSTALL_RPATH，安装树靠 RUNPATH 解析自带库；build_linux.sh 不再捆绑 WebKit 栈
-    *自解压安装器产物后缀由 .sh 改为 .run；升级安装器默认行为为直接覆盖，并补全卸载入口与桌面项（.desktop/快捷方式）清理
+    *自解压安装器产物后缀由 .sh 改为 .run；升级改为工业级暂存切换（staged swap）：旧版本树原子改名暂存→安装新树→自检→提交删除，任一步失败自动回滚到升级前状态；安装前缀之外的所有文件（udev 规则/CLI 封装/.desktop/图标/桌面快捷方式）记入 .pxview/manifest.txt 清单，卸载与升级按清单精确清理并以通配兜底；.pxview/install.json 版本标记防止误接管非 PXView 目录（PXVIEW_FORCE=yes 强制接管）；检测到运行中的 PXView 默认拒绝升级以保护采集中数据（PXVIEW_KILL_RUNNING=yes 自动结束）；PXVIEW_OVERWRITE=yes 纯覆盖、PXVIEW_KEEP_OLD=yes 保留旧版备份；补全卸载入口与桌面项（.desktop/快捷方式）清理
+    *NSIS 安装器补充安装目录保护：拒绝盘根与系统目录（C:\、Windows、Program Files 等）作为安装目标，防止卸载时 RMDir /r 误删
+    *Linux 自解压安装器改用标准 makeself 生成：内置 SHA-256 完整性校验（运行时自动校验，亦可 --check 手动触发）、支持 --target/--noexec/--keep 等标准运行参数、解包前预检 root 权限；产物仍为 .run 单文件，packaging/install.sh 的安装与升级逻辑不变
     *更新应用图标（logo.png / logo.svg），并同步更新 README/INSTALL 文档措辞以反映新的 .sh 安装器分发方式
     *版本号提升到 1.6.0（CMakeLists.txt、README 版本徽章、CI 默认版本、NSIS 安装脚本）
 

@@ -124,7 +124,7 @@ jobs:
             libxcb-xinput0 libxcb-xkb1 libxcb-util1 \
             libwayland-dev libwayland-egl1 libwayland-client0 libwayland-cursor0 \
             libzip-dev nettle-dev libftdi1-dev \
-            sdcc wget zip
+            sdcc wget zip makeself
           gcc --version
           g++ --version
 
@@ -277,6 +277,20 @@ jobs:
           pkill -9 -x PXView 2>/dev/null || true
           sleep 2
           echo "PASS: installed PXView headless reachable on MCP 10110"
+
+          # Upgrade path: re-run the installer over the live tree. The staged
+          # swap must refresh the tree, stamp marker + manifest, and clean up
+          # the .old.<ts> staging directory on success.
+          sudo env PXVIEW_PREFIX="$PREFIX" "$INSTALLER"
+          test -x "$PREFIX/bin/PXView"
+          test -f "$PREFIX/.pxview/install.json"
+          test -f "$PREFIX/.pxview/manifest.txt"
+          if ls -d "$PREFIX".old.* >/dev/null 2>&1; then
+            echo "FAIL: staged old tree not cleaned up:" >&2
+            ls -d "$PREFIX".old.* >&2
+            exit 1
+          fi
+          echo "PASS: staged-swap upgrade (marker + manifest stamped, staging cleaned)"
 
           # Uninstall must undo everything.
           sudo "$PREFIX/uninstall.sh"
