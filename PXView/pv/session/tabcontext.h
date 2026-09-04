@@ -96,6 +96,14 @@ public:
     static int _next_session_id;
 
 private:
+    // ---- 设备意图协议（架构重构 Phase 3）----
+    // 本标签页的设备/通道状态（意图）持久化于 _document 的 SignalConfigStore。
+    //   deactivate() → harvest_device_state()：从 View/SignalModel 收割状态回写意图；
+    //   activate()   → apply_device_intent()：把意图应用回全局设备与 Core 模型。
+    // 全局 DeviceAgent 只持有一个活动设备，标签页切换 = 意图的收割/应用轮转。
+    void apply_device_intent();
+    void harvest_device_state();
+
     view::View              *_view;
     SigSession              *_session;
     data::SessionDocument   *_document;   // weak reference (owned by DocumentRegistry)

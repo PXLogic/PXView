@@ -85,7 +85,8 @@ void TabContext::activate()
         if (_session->get_device()->handle() != _device_handle) {
             pxv_info("TabContext::activate() restoring device handle %llu for this tab",
                      (unsigned long long)_device_handle);
-            if (!_session->set_device(_device_handle)) {
+            if (!_session->set_device(_device_handle,
+                                      interface::DeviceChangeReason::TabSwitch)) {
                 // Device is gone (e.g. closed from the device list). Drop the
                 // stale handle so we stop trying to restore it.
                 pxv_warn("TabContext::activate() failed to restore device handle %llu",
@@ -102,34 +103,8 @@ void TabContext::activate()
         _session->set_active_document(_document);
     }
     _state = LIVE;
-    if (_document && _document->has_signal_config()) {
-        if (!_session->is_working()) {
-            pxv_info("TabContext::activate() applying signal config, work_mode=%d ch_count=%d",
-                _document->get_signal_config().work_mode,
-                (int)_document->get_signal_config().channels.size());
-            _document->apply_signal_config();
-            _session->reload();
-            // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
-            // reload 内部虽从 old_model 保留 trig_type (sigsession.cpp:1141)，
-            // 但 old_model 是上一个 tab 的，需覆盖为当前 tab 的配置。
-            for (const auto &ch : _document->get_channels()) {
-                auto m = _session->get_signal_by_index(ch.index);
-                if (m)
-                    m->set_trig_type(ch.trig_type);
-            }
-            // R3: 通道配置已修改 Core (probe->enabled 等)，广播通知其他 GUI
-            // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
-            // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
-            // 不丢失)。tab 切换低频，二次重建开销可接受。
-            _session->broadcast_async<interface::DeviceOptionsUpdated>({});
-        } else {
-            pxv_info("TabContext::activate() session working, saving pending config");
-            _document->set_pending_config(_document->get_signal_config());
-        }
-        _view->rebuild_signals_from_config(_document->get_signal_config());
-        pxv_info("TabContext::activate() rebuild_signals_from_config done, own_signals=%d",
-            (int)_view->get_own_signals().size());
-    }
+    // 架构重构 Phase 3：设备意图协议 —— 应用阶段（详见 apply_device_intent）。
+    apply_device_intent();
     if (_document && _document->has_data()) {
         _view->set_data_document(_document);
         auto &sigs = _view->get_own_signals();
@@ -182,31 +157,78 @@ void TabContext::activate()
     _view->signals_changed(nullptr);
 }
 
+// 架构重构 Phase 3：设备意图协议 —— 应用阶段。
+// 把本标签页持久化的设备/通道意图（_document 的 SignalConfigStore）应用回
+// 全局设备与 Core 模型：apply_signal_config 写设备（CHANNEL_MODE、通道启用/
+// 命名等）→ reload 重建 SignalModel → 恢复 trig_type → 广播 GUI 刷新。
+// 会话工作中（采集/拷贝）时改为暂存 pending config，待工作结束再应用。
+void TabContext::apply_device_intent()
+{
+    if (!_document || !_document->has_signal_config())
+        return;
+
+    if (!_session->is_working()) {
+        pxv_info("TabContext::apply_device_intent() work_mode=%d ch_count=%d",
+            _document->get_signal_config().work_mode,
+            (int)_document->get_signal_config().channels.size());
+        _document->apply_signal_config();
+        _session->reload();
+        // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
+        // reload 内部虽从 old_model 保留 trig_type (sigsession.cpp:1141)，
+        // 但 old_model 是上一个 tab 的，需覆盖为当前 tab 的配置。
+        for (const auto &ch : _document->get_channels()) {
+            auto m = _session->get_signal_by_index(ch.index);
+            if (m)
+                m->set_trig_type(ch.trig_type);
+        }
+        // R3: 通道配置已修改 Core (probe->enabled 等)，广播通知其他 GUI
+        // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
+        // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
+        // 不丢失)。tab 切换低频，二次重建开销可接受。
+        _session->broadcast_async<interface::DeviceOptionsUpdated>({});
+    } else {
+        pxv_info("TabContext::apply_device_intent() session working, "
+                 "saving pending config");
+        _document->set_pending_config(_document->get_signal_config());
+    }
+    _view->rebuild_signals_from_config(_document->get_signal_config());
+    pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
+        (int)_view->get_own_signals().size());
+}
+
 void TabContext::deactivate()
 {
     pxv_info("TabContext::deactivate() doc=%p", _document);
-    if (_document) {
-        // Collect UI layout state from the View layer so that
-        // save_signal_config can persist view_index/v_offset/own_height as the
-        // single source of truth for channel layout. (Task 7: visible is no
-        // longer a Core-serialized field; it will be owned by View-layer
-        // DockUiState in a later task.)
-        std::map<int, data::ChannelLayoutState> channel_layout;
-        if (_view) {
-            for (auto &sig : _view->get_own_signals()) {
-                data::ChannelLayoutState layout;
-                layout.view_index = sig->get_view_index();
-                layout.v_offset = sig->get_v_offset();
-                layout.own_height = sig->get_own_height();
-                channel_layout[sig->get_index()] = layout;
-            }
-        }
-        // R2: 传入 SignalModel 列表，保存 Logic 通道 trig_type
-        // UI 布局状态经 channel_layout 持久化到 ChannelConfig
-        _document->save_signal_config(_session->get_signal_models_snapshot(),
-                                      channel_layout);
-    }
+    // 架构重构 Phase 3：设备意图协议 —— 收割阶段（详见 harvest_device_state）。
+    harvest_device_state();
     _state = HISTORICAL;
+}
+
+// 架构重构 Phase 3：设备意图协议 —— 收割阶段。
+// 从 View 层收集通道 UI 布局（view_index/v_offset/own_height，标签页布局的
+// 单一真相来源；Task 7: visible 已不再是 Core 序列化字段），连同当前
+// SignalModel 通道状态（enabled/名称/vfactor/trig_type 等）回写本标签页的
+// _document 意图存储。切走后全局设备可被其他标签页自由切换，本标签页状态
+// 完整保存于文档中，activate() 时经 apply_device_intent() 原样恢复。
+void TabContext::harvest_device_state()
+{
+    if (!_document)
+        return;
+
+    std::map<int, data::ChannelLayoutState> channel_layout;
+    if (_view) {
+        for (auto &sig : _view->get_own_signals()) {
+            data::ChannelLayoutState layout;
+            layout.view_index = sig->get_view_index();
+            layout.v_offset = sig->get_v_offset();
+            layout.own_height = sig->get_own_height();
+            channel_layout[sig->get_index()] = layout;
+        }
+    }
+    // R2: 传入 SignalModel 列表，保存 Logic 通道 trig_type
+    // UI 布局状态经 channel_layout 持久化到 ChannelConfig
+    _document->save_signal_config(_session->get_signal_models_snapshot(),
+                                  channel_layout);
 }
 
 } // namespace pv

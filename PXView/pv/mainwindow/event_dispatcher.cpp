@@ -262,21 +262,31 @@ void SessionEventDispatcher::on_trig_next_collect(const pv::interface::TrigNextC
 void SessionEventDispatcher::on_device_list_updated(const pv::interface::DeviceListUpdated &) {
   _window->sampling_bar()->update_device_list();
 }
-void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &) {
+void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &ev) {
   PV_WIN_GUARD();
   _window->reset_all_view();
-  // 阶段4修复：切回一个【已有 signal config】的标签页时，其通道配置（通道数、
-  // 启用状态、header 标签名等）已由 TabContext::activate() 的 apply_signal_config()
-  // 恢复为标签页自身保存的版本。此处的 load_device_config() 会加载设备 profile
-  // （如 demo0.pxc），把标签页的自定义设置覆盖回默认值 —— 这正是"切回 demo 后
-  // 通道数和 header 名被还原"的根因。因此仅当标签页尚无 signal config（首启 /
-  // 新设备首次选择）时才自动加载 profile；已配置标签页保持自身设置。
-  {
-    auto *cur_ctx = _window->current_context();
-    bool has_tab_config = cur_ctx && cur_ctx->document() &&
-                          cur_ctx->document()->has_signal_config();
-    if (!has_tab_config)
-      _window->load_device_config();
+  // 架构重构 Phase 1/2：设备 profile（demo0.pxc / 硬件 per-device profile）
+  // 只在「设备身份变更」的场景作为初始化来源加载 —— FirstInit（首启）与
+  // UserSelection（用户/接口选择了另一设备，标签页旧 config 已过期，加载
+  // profile 后经本 handler 尾部 save_signal_config 写入标签页文档）。
+  // TabSwitch 时标签页 config 已由 TabContext::activate() 的
+  // apply_signal_config() 恢复，是权威来源，绝不能被 profile 覆盖 ——
+  // 这正是"切回 demo 后通道数和 header 名被还原"的历史根因。
+  // 显式 reason 语义取代了曾经的 has_signal_config() 启发式与
+  // broadcast_async 事件时序巧合依赖。
+  _window->last_device_change_reason = ev.reason;
+  if (ev.reason != pv::interface::DeviceChangeReason::TabSwitch) {
+    // Phase 4：profile 加载内部会 set CHANNEL_MODE 等配置，触发排队的
+    // DeviceModeChanged → on_device_mode_changed → 再次 load_device_config
+    // （历史日志中一次设备选择双重加载 + 双份全量刷新）。置位抑制标志，
+    // 经排队调用清除 —— 排队清除必然晚于 profile 加载期间排队的全部
+    // DeviceModeChanged 事件（同一事件队列 FIFO）。
+    _window->loading_device_profile = true;
+    _window->load_device_config();
+    QMetaObject::invokeMethod(
+        _window,
+        [w = _window]() { w->loading_device_profile = false; },
+        Qt::QueuedConnection);
   }
   _window->update_title_bar_text();
   _window->sampling_bar()->update_device_list();
@@ -490,16 +500,17 @@ void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceM
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->mode_changed();
   _window->reset_all_view();
-  // 阶段4修复：与 on_current_device_changed 同理。切回已有 config 的标签页时，
-  // apply_signal_config() 已恢复其 CHANNEL_MODE 等设置，此处不应再用 profile
-  // 覆盖。仅无 config 的标签页（首启/新设备）才自动加载 profile。
-  {
-    auto *cur_ctx = _window->current_context();
-    bool has_tab_config = cur_ctx && cur_ctx->document() &&
-                          cur_ctx->document()->has_signal_config();
-    if (!has_tab_config)
-      _window->load_device_config();
-  }
+  // 架构重构 Phase 1/2：与 on_current_device_changed 同一裁决规则。
+  // DeviceModeChanged 单一广播点、不携带 reason，故复用最近一次
+  // CurrentDeviceChanged 的 reason（主线程排队 FIFO，时序可靠）：
+  //  - TabSwitch 期间的模式变化来自 apply_signal_config 恢复标签页配置，
+  //    绝不能再加载 profile 覆盖之；
+  //  - loading_device_profile 期间的模式变化来自 profile 加载自身，
+  //    跳过以免双重加载。
+  if (_window->last_device_change_reason !=
+          pv::interface::DeviceChangeReason::TabSwitch &&
+      !_window->loading_device_profile)
+    _window->load_device_config();
   _window->update_title_bar_text();
   _window->dock_manager()->device_options_widget()->on_mode_changed();
   _window->update_toolbar_view_status();

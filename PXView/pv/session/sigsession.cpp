@@ -477,7 +477,7 @@ void SigSession::uninit() {
   }
 }
 
-bool SigSession::set_default_device() {
+bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
   assert(!_state->is_saving());
 
   if (_state->is_working()) {
@@ -575,13 +575,14 @@ bool SigSession::set_default_device() {
 
   free(array);
 
-  if (set_device(dev_handle)) {
+  if (set_device(dev_handle, reason)) {
     return true;
   }
   return false;
 }
 
-bool SigSession::set_device(ds_device_handle dev_handle) {
+bool SigSession::set_device(ds_device_handle dev_handle,
+                            interface::DeviceChangeReason reason) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
   assert(_event_bus && _event_bus->has_subscribers());
@@ -663,7 +664,9 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   set_cur_samplelimits(_state->device_agent().get_sample_limit());
 
   // The current device changed.
-  _event_bus->broadcast_async<interface::CurrentDeviceChanged>({});
+  // 架构重构 Phase 1：切换原因随事件显式下发，GUI 层裁决依赖语义而非
+  // broadcast_async 的排队时序巧合。
+  _event_bus->broadcast_async<interface::CurrentDeviceChanged>({reason});
 
   return true;
 }
@@ -687,15 +690,19 @@ bool SigSession::restore_previous_device()
   }
   ds_device_handle h = _saved_device_handle;
   _saved_device_handle = NULL_HANDLE;  // 一次性使用，用后清除
+  // Phase 1：本函数只在标签页关闭流程中被调用（幸存标签页的 activate()
+  // 会立即应用其自身 config），因此设备切换语义是 TabSwitch —— 避免排队
+  // 的 CurrentDeviceChanged(UserSelection) 触发 profile 加载，覆盖幸存
+  // 标签页刚恢复的 config。
   if (h == NULL_HANDLE) {
-    return set_default_device();
+    return set_default_device(interface::DeviceChangeReason::TabSwitch);
   }
   // 确保 handle 对应的 sdi 仍然存在（未断开）
   struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
   if (!sdi) {
     return set_default_device();
   }
-  return set_device(h);
+  return set_device(h, interface::DeviceChangeReason::TabSwitch);
 }
 
 bool SigSession::set_file(QString name) {

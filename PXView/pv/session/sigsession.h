@@ -150,12 +150,22 @@ public:
   DeviceAgent* device() override { return &_state->device_agent(); }
 // Spec v2 Task 7: add_callback/remove_callback/set_callback removed (ISessionCallback abolished)
   bool init(); void uninit(); void Open(); void Close();
-  bool set_default_device(); bool set_device(ds_device_handle dev_handle);
+  // reason 语义（架构重构 Phase 1）：设备切换原因随 CurrentDeviceChanged
+  // 事件下发，GUI 层据此裁决是否自动加载设备 profile（TabSwitch 时标签页
+  // config 为权威来源，跳过 profile 加载）。默认 UserSelection 保持既有
+  // 调用点（采样条选择/API/自动切换）行为不变。
+  bool set_default_device(interface::DeviceChangeReason reason =
+                              interface::DeviceChangeReason::UserSelection);
+  bool set_device(ds_device_handle dev_handle,
+                  interface::DeviceChangeReason reason =
+                      interface::DeviceChangeReason::UserSelection);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
   bool import_file(QString name);
   // 方案A（问题2修复）：加载 pxl/导入前保存当前非文件设备 handle，
-  // 关闭 pxl tab 或切回非文件 tab 时调用 restore_previous_device() 恢复，
-  // 避免"导入 pxl 导致全局设备变化"破坏其他 tab 的设备上下文。
+  // 关闭 pxl tab 时调用 restore_previous_device() 恢复（以 TabSwitch 语义
+  // 切换，不触发 profile 加载），避免"导入 pxl 导致全局设备变化"破坏其他
+  // tab 的设备上下文。标签页间切换不再使用本函数 —— 各标签的 activate()
+  // 经 per-tab handle 直接恢复自己的设备（Phase 5 已删兜底）。
   void save_current_device_handle();
   bool restore_previous_device();
   ds_device_handle saved_device_handle() const { return _saved_device_handle; }

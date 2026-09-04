@@ -285,6 +285,8 @@ void TabManager::remove_tab(int index) {
   //     set_default_device（避免在后续 activate() 之外多切一次设备）。
   // 这样关闭文件 tab 不再泄漏虚拟设备，设备列表里也不会残留已关闭的文件。
   if (was_file_tab) {
+    // Phase 1：restore_previous_device 内部以 TabSwitch 语义切换设备，
+    // 排队的 CurrentDeviceChanged 不会触发 profile 加载覆盖幸存标签页 config。
     _session->restore_previous_device();
     // NOTE: use the cached handle — ctx has already been destroyed by
     // destroy_context() above.
@@ -335,26 +337,12 @@ void TabManager::on_tab_changed(int index) {
 
   _current_tab_index = index;
 
-  // 方案A（问题2）：从文件（pxl）tab 切回非文件 tab 时，若当前全局设备仍是
-  // 文件设备，恢复之前保存的硬件/demo 设备，避免全局设备被 pxl 占用导致
-  // 该 tab 无法正常采集/显示实体设备数据。
-  {
-    pv::TabContext *target = _tab_contexts[index];
-    SigSession *_session = _wnd->session();
-    // 阶段3修复：仅当目标标签没有记录设备 handle（旧标签/未设置路径）时，
-    // 才使用 restore_previous_device() 兜底。已记录 handle 的标签统一由
-    // TabContext::activate() 的 per-tab 恢复处理，避免兜底在 _saved_device_handle
-    // 用尽后退化到 set_default_device()，误选设备列表末尾的 VCD/文件设备
-    // （有通道）而把 demo 标签"两通道化"。
-    if (target && target->file_path().isEmpty() &&
-        _session->get_device()->is_file() &&
-        target->device_handle() == NULL_HANDLE) {
-      pxv_info("TabManager::on_tab_changed: switching back to non-file tab, "
-               "restoring hardware/demo device (fallback)");
-      _session->restore_previous_device();
-    }
-  }
-
+  // 架构重构 Phase 5：移除 restore_previous_device() 兜底。所有标签创建
+  // 路径（file_ops / tab_manager / on_load_device_first）均已记录 per-tab
+  // 设备 handle，TabContext::activate() 的 per-tab 恢复即完备且语义精确
+  // （handle -> 该标签自己的设备，TabSwitch reason）。旧兜底在
+  // _saved_device_handle 用尽后会退化到 set_default_device()，曾误选设备
+  // 列表末尾的 VCD/文件设备（有通道）而把 demo 标签"两通道化"。
   _tab_contexts[index]->activate();
   update_tab_style(index);
 

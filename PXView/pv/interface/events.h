@@ -188,8 +188,21 @@ struct CollectModeChanged {
 // DeviceListUpdated — the device list changed.
 struct DeviceListUpdated {};
 
+// DeviceChangeReason — why the current device changed. Lets GUI consumers
+// (device-profile auto-load, view refresh) distinguish a user-initiated
+// device selection from a tab-switch restore, whose per-tab document config
+// is already the authoritative source and must NOT be clobbered by the
+// device profile (demo0.pxc / per-hardware profile).
+enum class DeviceChangeReason {
+    FirstInit,      // App startup picking the default device
+    UserSelection,  // User/API/auto-switch picked a device (identity change)
+    TabSwitch       // TabContext::activate() restoring this tab's own device
+};
+
 // CurrentDeviceChanged — the current device selection changed.
-struct CurrentDeviceChanged {};
+struct CurrentDeviceChanged {
+    DeviceChangeReason reason = DeviceChangeReason::UserSelection;
+};
 
 // DeviceOpenFailed — set_device() failed to open the new device via sr_dev_open.
 // The old device has already been released (CurrentDeviceChangePrev ran), so
