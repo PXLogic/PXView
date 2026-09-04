@@ -73,7 +73,18 @@ public:
     void set_type(int type);
 
     [[nodiscard]] inline bool enabled() const { return _enabled; }
-    void set_enabled(bool enabled);
+
+    /// Sets the enabled flag and mirrors it into sr_channel.enabled.
+    ///
+    /// @param notify Whether to emit visibility_changed(). Pass false for
+    ///        bulk / structural writes performed while a UI panel is
+    ///        rebuilding itself: visibility_changed() lands in
+    ///        View::signals_changed(), which does a synchronous full relayout
+    ///        (normalize + group + layout_time_signals). Emitting it from
+    ///        inside a widget-construction loop re-enters the View and is both
+    ///        wasteful and unsafe. Those call sites refresh the View once
+    ///        afterwards via broadcast<DeviceOptionsUpdated>.
+    void set_enabled(bool enabled, bool notify = true);
 
     [[nodiscard]] inline const std::string &color() const { return _color; }
     void set_color(const std::string &color);

@@ -366,6 +366,25 @@ void MainWindow::on_load_device_first() {
     tmp_file = "";
   } else {
     _session->set_default_device();
+    // 阶段3修复：必须在 set_default_device() 之后才给 demo 初始标签记录
+    // 设备 handle。init_initial_tab() 在 set_default_device() 之前运行，
+    // 彼时 _device_agent->handle() 尚未就绪（甚至可能是上一次残留的非 demo
+    // 设备 handle），会把错误的 handle（如 VCD 文件设备）记到 demo 标签上，
+    // 导致切回 demo 时 activate() 恢复成错误的设备/通道数。set_default_device
+    // 之后当前设备即 demo，handle 才正确。自动加载文件分支不走这里，demo 标签
+    // 保持 NULL_HANDLE，回退到 restore_previous_device() 兜底（其 _saved 已保存
+    // demo handle），行为同样正确。
+    if (!_tab_manager->contexts().isEmpty()) {
+      pv::TabContext *init_ctx = _tab_manager->contexts()[0];
+      if (init_ctx->device_handle() == NULL_HANDLE) {
+        DeviceAgent *da = _session->get_device();
+        if (da && da->have_instance()) {
+          init_ctx->set_device_handle(da->handle());
+          if (init_ctx->document())
+            init_ctx->document()->set_device_handle(init_ctx->device_handle());
+        }
+      }
+    }
   }
 }
 

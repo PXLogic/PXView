@@ -113,7 +113,20 @@ public:
     bool open_by_handle(ds_device_handle handle, struct sr_context *ctx);
 
     // Releases the active device: destroys session, closes device.
-    void release();
+    //
+    // |destroy_file_device| controls the fate of file-loaded devices
+    // (DEV_TYPE_FILELOG — .pxl sessions and input-module imports):
+    //   true  (default) — the sdi is freed and dropped from _file_handles /
+    //                     _file_sdi. The handle becomes invalid afterwards.
+    //   false           — only sr_dev_close() runs; the sdi and its handle
+    //                     stay registered so the device can be re-selected
+    //                     later (tab switch back) without reloading the file.
+    //
+    // Device-switch paths (set_device) must pass false: a file device belongs
+    // to the tab that opened it, not to "whichever device happens to be
+    // active". Ownership is transferred to SessionDocument (phase 2); until
+    // then the device is released explicitly via SigSession::close_file().
+    void release(bool destroy_file_device = true);
 
     // Refresh device info (name/driver/type) from the active SDI.
     void update();

@@ -29,6 +29,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "pv/base/pxvdef.h"   // ds_device_handle / NULL_HANDLE
+
 namespace pv {
 
 namespace view {
@@ -75,6 +77,18 @@ public:
     inline void set_title(const QString &title) { _title = title; }
     inline void set_file_path(const QString &path) { _file_path = path; }
 
+    // The device this tab's data came from. NULL_HANDLE for tabs that have
+    // never been bound to a device (e.g. a fresh empty tab before any capture).
+    //
+    // File tabs (.pxl / imported VCD/CSV/...) MUST remember their virtual
+    // device: the global DeviceAgent can only hold ONE active device, so
+    // tabbing away switches it. Without this handle the tab can never get its
+    // device back — its sr_channels (channel names / enabled / types) are gone
+    // and the tab silently degrades to whatever device happens to be active
+    // (typically Demo).
+    inline ds_device_handle device_handle() const { return _device_handle; }
+    inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
+
     void make_live();
     void activate();
     void deactivate();
@@ -91,6 +105,7 @@ private:
     QString                 _file_path;
     State                   _state;
     QDateTime               _timestamp;
+    ds_device_handle        _device_handle = NULL_HANDLE;
 };
 
 } // namespace pv

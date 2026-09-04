@@ -170,26 +170,37 @@ void SignalConfigStore::save_signal_config(
   int mode = _signal_config.work_mode;
   for (const GSList *l = agent->get_channels(); l; l = l->next) {
     sr_channel *const probe = (sr_channel *)l->data;
-    ChannelConfig cfg;
-    cfg.index = (int)probe->index;
-    cfg.enabled = probe->enabled;
-    cfg.vdiv = 0;
-    cfg.coupling = 0;
-    cfg.map_default = true;
 
-    // Task 3: 通道元数据（所有模式）。type/name 直接读 sr_channel。
-    cfg.type = probe->type;
-    cfg.name = probe->name ? probe->name : "";
-
-    // 查找当前通道对应的 SignalModel（fork sr_channel 扩展字段已不在
-    // upstream libsigrok 的 sr_channel 中，改从 SignalModel 读取）。
+    // SignalModel is the source of truth for channel identity/metadata. Locate
+    // the model for this channel up front, then read every field through it so a
+    // single code path handles the normal case and the pre-init_signals() window
+    // (no model exists yet) falls back to the sr_channel struct.
     std::shared_ptr<SignalModel> matched_model;
     for (auto m : signal_models) {
-      if (m && m->index() == cfg.index) {
+      if (m && m->index() == (int)probe->index) {
         matched_model = m;
         break;
       }
     }
+
+    ChannelConfig cfg;
+    cfg.index = matched_model ? (int)matched_model->index() : (int)probe->index;
+    // enabled: prefer SignalModel (the user-editable single source of truth);
+    // fall back to sr_channel before a model exists.
+    cfg.enabled = matched_model ? matched_model->enabled()
+                               : (probe->enabled != FALSE);
+    cfg.vdiv = 0;
+    cfg.coupling = 0;
+    cfg.map_default = true;
+
+    // type: prefer SignalModel (kept in sync with sr_channel by
+    // commit_to_device); fall back to sr_channel.
+    cfg.type = matched_model ? matched_model->type() : (int)probe->type;
+    // name: prefer SignalModel (the user-editable source of truth); fall back to
+    // sr_channel->name.
+    cfg.name = (matched_model && !matched_model->name().empty())
+                   ? matched_model->name()
+                   : (probe->name ? probe->name : "");
 
     // ROOT FIX: Use channel TYPE (not work mode) to decide whether to save
     // DSO/ANALOG fields. The device may have DSO channels even in LOGIC mode
@@ -197,8 +208,8 @@ void SignalConfigStore::save_signal_config(
     // checked `mode == ANALOG || mode == DSO`, so in LA mode DSO channels
     // had vfactor=0 (the struct default), which caused assertion failures
     // when the file was loaded later (dslDial::set_factor assert(factor > 0)).
-    if (probe->type == SR_CHANNEL_DSO ||
-        probe->type == SR_CHANNEL_ANALOG) {
+    if (cfg.type == SR_CHANNEL_DSO ||
+        cfg.type == SR_CHANNEL_ANALOG) {
       // SR_CONF_PROBE_VDIV / SR_CONF_PROBE_COUPLING fork DSO keys deleted;
       // cfg.vdiv / cfg.coupling keep their defaults (0). map_default is still
       // queried (key retained in pxvdef.h, migrated in Phase 2).
@@ -355,6 +366,13 @@ void SignalConfigStore::apply_signal_config() {
 
     // Task 3: 通道名（所有模式，原 MainWindow 路径 B 写 probe->name）。
     if (!cfg.name.empty()) {
+      // sr_channel owns its name (g_strdup'ed by libsigrok). Free the old
+      // value before replacing it — the previous code leaked one string per
+      // channel on every apply (i.e. on every tab switch).
+      if (probe->name) {
+        g_free(probe->name);
+        probe->name = nullptr;
+      }
       probe->name = g_strdup(cfg.name.c_str());
     }
 

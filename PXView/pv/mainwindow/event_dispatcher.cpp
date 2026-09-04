@@ -265,7 +265,19 @@ void SessionEventDispatcher::on_device_list_updated(const pv::interface::DeviceL
 void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &) {
   PV_WIN_GUARD();
   _window->reset_all_view();
-  _window->load_device_config();
+  // 阶段4修复：切回一个【已有 signal config】的标签页时，其通道配置（通道数、
+  // 启用状态、header 标签名等）已由 TabContext::activate() 的 apply_signal_config()
+  // 恢复为标签页自身保存的版本。此处的 load_device_config() 会加载设备 profile
+  // （如 demo0.pxc），把标签页的自定义设置覆盖回默认值 —— 这正是"切回 demo 后
+  // 通道数和 header 名被还原"的根因。因此仅当标签页尚无 signal config（首启 /
+  // 新设备首次选择）时才自动加载 profile；已配置标签页保持自身设置。
+  {
+    auto *cur_ctx = _window->current_context();
+    bool has_tab_config = cur_ctx && cur_ctx->document() &&
+                          cur_ctx->document()->has_signal_config();
+    if (!has_tab_config)
+      _window->load_device_config();
+  }
   _window->update_title_bar_text();
   _window->sampling_bar()->update_device_list();
   _window->sampling_bar()->reload();
@@ -478,7 +490,16 @@ void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceM
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->mode_changed();
   _window->reset_all_view();
-  _window->load_device_config();
+  // 阶段4修复：与 on_current_device_changed 同理。切回已有 config 的标签页时，
+  // apply_signal_config() 已恢复其 CHANNEL_MODE 等设置，此处不应再用 profile
+  // 覆盖。仅无 config 的标签页（首启/新设备）才自动加载 profile。
+  {
+    auto *cur_ctx = _window->current_context();
+    bool has_tab_config = cur_ctx && cur_ctx->document() &&
+                          cur_ctx->document()->has_signal_config();
+    if (!has_tab_config)
+      _window->load_device_config();
+  }
   _window->update_title_bar_text();
   _window->dock_manager()->device_options_widget()->on_mode_changed();
   _window->update_toolbar_view_status();

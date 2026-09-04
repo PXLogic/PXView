@@ -131,14 +131,14 @@ void FilterProcessor::glitch_filter_task(
   }
   if (has_invert) {
     int ch_idx = 0;
-    for (const GSList *l = _state->device_agent().get_channels(); l;
-         l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
-      if (probe->type != SR_CHANNEL_LOGIC)
+    // Iterate SignalModels (the source of truth for channel metadata). The
+    // LOGIC sub-sequence order matches get_channels() (both ordered by index),
+    // so the ch_idx → channels_copy index correspondence is preserved.
+    for (auto &m : _state->signal_models()) {
+      if (!m || m->type() != SR_CHANNEL_LOGIC)
         continue;
-      if (ch_idx < (int)channels_copy.size() &&
-          channels_copy[ch_idx]) {
-        _state->view_data()->get_logic()->invert_channel(probe->index);
+      if (ch_idx < (int)channels_copy.size() && channels_copy[ch_idx]) {
+        _state->view_data()->get_logic()->invert_channel(m->index());
       }
       ch_idx++;
     }
@@ -196,14 +196,14 @@ void FilterProcessor::glitch_filter_task(
     // Re-apply signal invert if active
     if (_state->view_data()->_signal_invert_active) {
       int ch_idx = 0;
-      for (const GSList *l = _state->device_agent().get_channels(); l;
-           l = l->next) {
-        sr_channel *const probe = (sr_channel *)l->data;
-        if (probe->type != SR_CHANNEL_LOGIC)
+      // See the matching loop above: iterate SignalModels, LOGIC sub-sequence
+      // order matches get_channels().
+      for (auto &m : _state->signal_models()) {
+        if (!m || m->type() != SR_CHANNEL_LOGIC)
           continue;
         if (ch_idx < (int)_state->view_data()->_signal_invert_channels.size() &&
             _state->view_data()->_signal_invert_channels[ch_idx]) {
-          _state->view_data()->get_logic()->invert_channel(probe->index);
+          _state->view_data()->get_logic()->invert_channel(m->index());
         }
         ch_idx++;
       }
@@ -313,12 +313,13 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
 
   // Apply invert on each enabled channel
   int ch_idx = 0;
-  for (const GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
-    if (probe->type != SR_CHANNEL_LOGIC)
+  // See the matching loop above: iterate SignalModels, LOGIC sub-sequence
+  // order matches get_channels().
+  for (auto &m : _state->signal_models()) {
+    if (!m || m->type() != SR_CHANNEL_LOGIC)
       continue;
     if (ch_idx < (int)channels.size() && channels[ch_idx]) {
-      _state->view_data()->get_logic()->invert_channel(probe->index);
+      _state->view_data()->get_logic()->invert_channel(m->index());
     }
     ch_idx++;
   }

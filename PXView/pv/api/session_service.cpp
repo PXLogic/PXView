@@ -1370,7 +1370,13 @@ std::vector<ChannelInfo> SessionService::get_channels() const {
                 continue;
             ChannelInfo info;
             info.index = static_cast<int32_t>(ch->index);
-            info.name = ch->name ? ch->name : "";
+            // name: SignalModel is the source of truth for the user-editable
+            // label; sr_channel->name holds only the device-provided default.
+            const auto m = _session
+                              ? _session->get_signal_by_index(static_cast<int>(ch->index))
+                              : nullptr;
+            info.name = (m && !m->name().empty()) ? m->name()
+                                                  : (ch->name ? ch->name : "");
             info.type = sr_channel_type_to_api(ch->type);
             info.enabled = ch->enabled;
             info.enabled_default = ch->enabled;

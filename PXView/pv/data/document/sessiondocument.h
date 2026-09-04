@@ -19,6 +19,7 @@
 #include "pv/data/model/signalconfigstore.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/data/triggerconfig.h"
+#include "pv/base/pxvdef.h"   // ds_device_handle / NULL_HANDLE
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
@@ -183,6 +184,16 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
     return _signal_config_store.get();
   }
 
+  // --- Owning device handle (phase 2) ---
+  // The device this document's data came from. For file-loaded tabs (.pxl /
+  // imported VCD/CSV/...) this is the virtual session device handle; for
+  // live-capture tabs it is the hardware/demo handle. The handle is recorded
+  // so the document is self-describing: closing the tab can release exactly
+  // its own device instead of relying on a global "previous device" hack.
+  // NULL_HANDLE means no specific device (e.g. an empty freshly-created tab).
+  inline ds_device_handle device_handle() const { return _device_handle; }
+  inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
+
   inline const data::TriggerConfig &trigger_config() const override {
     return _trigger_config;
   }
@@ -221,6 +232,7 @@ private:
   // empty/null literals. set_decoder_model (zero callers) was deleted.
   std::unique_ptr<SignalConfigStore> _signal_config_store;
   data::TriggerConfig _trigger_config;
+  ds_device_handle _device_handle = NULL_HANDLE;   // phase 2: owning device
 };
 
 } // namespace data

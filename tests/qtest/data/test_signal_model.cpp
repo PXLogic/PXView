@@ -208,7 +208,14 @@ private slots:
     void CommitToDeviceSyncsAll();
     void HeadlessNoDeviceNoCrash();
     void NoDeviceInstanceSkipsWrites();
+    // ---- SignalModel <-> sr_channel two-way sync (P4 safety net) ----
+    void SetEnabledWritesSrChannel();
+    void SetNameWritesSrChannelAndFreesOld();
+    void SetTypeWritesSrChannel();
+    void CommitToDeviceSyncsType();
+    void SettersWithoutSrChannelAreNoOps();
     // ---- SignalConfigStore ----
+    void SavePrefersModelNameOverProbeName();
     void SaveWithModelsSetsValid();
     void JsonHasChannelKeyFields();
     void JsonRoundTripPreservesChannels();
@@ -519,6 +526,122 @@ void TestSignalModel::CommitToDeviceSyncsAll() {
     ch.name = nullptr;
 }
 
+// ===========================================================================
+// SignalModel <-> sr_channel two-way sync (P4–P6 safety net)
+//
+// SignalModel is the source of truth for channel labels, but libsigrok still
+// reads the mirrored struct fields directly:
+//   - session.c:785  — capture start fails outright if no ch->enabled is set
+//   - device.c:154   — sr_dev_channel_enable writes ch->enabled, then calls
+//                      into the driver with SR_CHANNEL_SET_ENABLED
+//   - session_driver.c:137/286/380/842/872/901 — dispatch the LOGIC/ANALOG/DSO
+//                      data feeds by ch->type
+//   - soft-trigger.c:37, device.c:192/217 — filter/compare channels by type
+// These tests pin the write-back contract so the P4–P6 migration (which moves
+// every reader over to SignalModel) cannot silently desynchronise the two
+// sides.
+// ===========================================================================
+void TestSignalModel::SetEnabledWritesSrChannel() {
+    SignalModel m;
+    sr_channel ch{};
+    ch.enabled = FALSE;
+    m.set_sr_channel(&ch);
+
+    m.set_enabled(true);
+    QCOMPARE(ch.enabled, (gboolean)TRUE);
+    QVERIFY(m.enabled());
+
+    m.set_enabled(false);
+    QCOMPARE(ch.enabled, (gboolean)FALSE);
+    QVERIFY(!m.enabled());
+}
+
+void TestSignalModel::SetNameWritesSrChannelAndFreesOld() {
+    SignalModel m;
+    sr_channel ch{};
+    // Owned the way libsigrok owns it: a g_strdup'd buffer, not a literal.
+    ch.name = g_strdup("D0");
+    m.set_sr_channel(&ch);
+
+    // Rename twice. Each call must g_free the previous buffer before
+    // installing the new one — overwriting probe->name without freeing leaks
+    // one g_strdup per rename (the bug fixed in signalconfigstore.cpp /
+    // signalmodel.cpp).
+    m.set_name("SCL");
+    QVERIFY(ch.name != nullptr);
+    QCOMPARE(std::string(ch.name), std::string("SCL"));
+
+    m.set_name("SDA");
+    QVERIFY(ch.name != nullptr);
+    QCOMPARE(std::string(ch.name), std::string("SDA"));
+    QCOMPARE(QString::fromStdString(m.name()), QString("SDA"));
+
+    // Re-setting the same name is a no-op — guarded by `if (_name != name)`,
+    // so the pointer must not be churned (which would break any observer
+    // holding the old buffer).
+    const char *before = ch.name;
+    m.set_name("SDA");
+    QVERIFY(ch.name == before);
+
+    g_free(ch.name);
+    ch.name = nullptr;
+}
+
+void TestSignalModel::SetTypeWritesSrChannel() {
+    SignalModel m;
+    sr_channel ch{};
+    ch.type = SR_CHANNEL_LOGIC;
+    m.set_sr_channel(&ch);
+
+    // Regression: set_type() used to update only the model field, so libsigrok
+    // kept classifying the channel with its old type and routed its data to
+    // the wrong feed.
+    m.set_type(SR_CHANNEL_ANALOG);
+    QCOMPARE(m.type(), (int)SR_CHANNEL_ANALOG);
+    QCOMPARE(ch.type, (int)SR_CHANNEL_ANALOG);
+
+    m.set_type(SR_CHANNEL_DSO);
+    QCOMPARE(m.type(), (int)SR_CHANNEL_DSO);
+    QCOMPARE(ch.type, (int)SR_CHANNEL_DSO);
+}
+
+void TestSignalModel::CommitToDeviceSyncsType() {
+    SignalModel m;
+    sr_channel ch{};
+    ch.type = SR_CHANNEL_LOGIC;
+    m.set_sr_channel(&ch);
+    m.set_type(SR_CHANNEL_ANALOG);
+
+    // Simulate a struct drifting out of sync (e.g. a device switch rebuilt
+    // the channel list, or an older code path wrote it directly).
+    // commit_to_device() is the "push everything back" entry point, so it
+    // must repair type as well as name/enabled — and it does so before the
+    // have_instance() early-out, so this holds without a device port.
+    ch.type = SR_CHANNEL_LOGIC;
+    m.commit_to_device();
+
+    QCOMPARE(ch.type, (int)SR_CHANNEL_ANALOG);
+    QVERIFY(ch.name != nullptr);
+
+    g_free(ch.name);
+    ch.name = nullptr;
+}
+
+void TestSignalModel::SettersWithoutSrChannelAreNoOps() {
+    // Headless: no sr_channel bound. Every mirroring setter and
+    // commit_to_device() must skip the write-back without dereferencing
+    // nullptr.
+    SignalModel m;
+    m.set_name("D0");
+    m.set_enabled(true);
+    m.set_type(SR_CHANNEL_ANALOG);
+    m.commit_to_device();
+
+    QCOMPARE(QString::fromStdString(m.name()), QString("D0"));
+    QVERIFY(m.enabled());
+    QCOMPARE(m.type(), (int)SR_CHANNEL_ANALOG);
+}
+
 void TestSignalModel::HeadlessNoDeviceNoCrash() {
     // No device port, no sr_channel — every setter must be a safe no-op.
     SignalModel m;
@@ -569,6 +692,49 @@ void TestSignalModel::NoDeviceInstanceSkipsWrites() {
 // ===========================================================================
 // SignalConfigStore tests
 // ===========================================================================
+void TestSignalModel::SavePrefersModelNameOverProbeName() {
+    // SignalModel is the source of truth for the user-editable channel label:
+    // a channel renamed in the UI must keep its custom name across a
+    // save/restore cycle even though sr_channel->name still holds the
+    // device-provided default. sr_channel->name is only the fallback.
+    MockDeviceConfigPort mock;
+    std::vector<sr_channel> chs;
+
+    sr_channel c0{};
+    c0.index = 0;
+    c0.type = SR_CHANNEL_LOGIC;
+    c0.enabled = TRUE;
+    c0.name = const_cast<char *>("D0");   // device default
+    chs.push_back(c0);
+
+    sr_channel c1{};
+    c1.index = 1;
+    c1.type = SR_CHANNEL_LOGIC;
+    c1.enabled = TRUE;
+    c1.name = const_cast<char *>("D1");   // no model override -> fallback
+    chs.push_back(c1);
+
+    mock.set_channels(std::move(chs));
+
+    SignalConfigStore store(&mock);
+
+    auto m0 = std::make_shared<SignalModel>();
+    m0->set_index(0);
+    m0->set_name("SCL");       // user rename, must win over probe->name "D0"
+
+    auto m1 = std::make_shared<SignalModel>();
+    m1->set_index(1);
+    m1->set_name("");          // empty -> fall back to probe->name "D1"
+
+    store.save_signal_config({m0, m1}, {}, {});
+    QVERIFY(store.has_signal_config());
+
+    const SignalConfig &cfg = store.get_signal_config();
+    QCOMPARE((int)cfg.channels.size(), 2);
+    QCOMPARE(QString::fromStdString(cfg.channels[0].name), QString("SCL"));
+    QCOMPARE(QString::fromStdString(cfg.channels[1].name), QString("D1"));
+}
+
 void TestSignalModel::SaveWithModelsSetsValid() {
     MockDeviceConfigPort mock;
     std::vector<sr_channel> chs;
@@ -594,6 +760,7 @@ void TestSignalModel::SaveWithModelsSetsValid() {
     m0->set_name("D0");
     m0->set_color("#FF0000");
     m0->set_trig_type(SignalModel::POSTRIG);
+    m0->set_enabled(TRUE);   // init_signals mirrors sr_channel->enabled into the model
     auto m1 = std::make_shared<SignalModel>();
     m1->set_index(1);
     m1->set_name("D1");
@@ -659,6 +826,7 @@ void TestSignalModel::JsonHasChannelKeyFields() {
     m0->set_name("D0");
     m0->set_color("#FF0000");
     m0->set_trig_type(SignalModel::POSTRIG);
+    m0->set_enabled(TRUE);   // init_signals mirrors sr_channel->enabled into the model
 
     std::map<int, std::string> colours;
     colours[0] = "#FF0000";
@@ -813,6 +981,7 @@ void TestSignalModel::ApplySignalConfigWritesDevice() {
     SignalConfigStore store(&mock);
     auto m0 = std::make_shared<SignalModel>();
     m0->set_index(0);
+    m0->set_enabled(TRUE);   // init_signals mirrors sr_channel->enabled into the model
     auto m1 = std::make_shared<SignalModel>();
     m1->set_index(1);
     store.save_signal_config({m0, m1});

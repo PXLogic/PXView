@@ -38,6 +38,7 @@
 #include "pv/interface/icontextaware.h"
 #include "pv/prop/binding/deviceoptions.h"
 #include "pv/prop/binding/probeoptions.h"
+#include "pv/data/model/signalmodel.h"
 #include "pv/session/sigsession.h"
 #include "pv/ui/uimanager.h"
 
@@ -86,6 +87,31 @@ QString dynamic_widget(QLayout *lay);
   void try_resize_scroll();
   void channel_checkbox_clicked(QCheckBox *sc);
   void ChannelChecked(int index, QObject *object);
+
+  // ---- SignalModel-backed channel accessors ----
+  //
+  // SignalModel is the source of truth for the user-visible channel state
+  // (name / enabled / type). These resolve the model for a channel and fall
+  // back to the sr_channel struct when no model exists yet — which happens
+  // before SigSession::init_signals() has run, after a device switch, and in
+  // headless/no-device states.
+  //
+  // Writes go through the model so both sides stay in sync: SignalModel
+  // mirrors every change back into sr_channel, which libsigrok reads directly
+  // (session.c refuses to start a capture with no enabled channel;
+  // session_driver.c dispatches the LOGIC/ANALOG/DSO feeds by ch->type).
+  //
+  // `notify` is forwarded to SignalModel::set_enabled(). Pass false while
+  // this dock is (re)building its own widgets — visibility_changed() ends up
+  // in View::signals_changed(), a synchronous full relayout, and emitting it
+  // from inside the construction loop re-enters the View. Those call sites
+  // refresh the View once afterwards via DeviceOptionsUpdated instead.
+  std::shared_ptr<data::SignalModel> model_for_probe(const sr_channel *probe);
+  bool channel_enabled(const sr_channel *probe);
+  int channel_type(const sr_channel *probe);
+  QString channel_name(const sr_channel *probe);
+  void set_channel_enabled(sr_channel *probe, bool enabled,
+                           bool notify = true);
 
   void UpdateLanguage() override;
   void UpdateTheme() override;

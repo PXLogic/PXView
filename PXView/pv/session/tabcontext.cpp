@@ -71,12 +71,29 @@ bool TabContext::has_data()
 
 void TabContext::activate()
 {
-    fprintf(stderr, "DBG TabContext::activate() doc=%p has_config=%d has_data=%d is_working=%d\n",
-        _document,
-        _document ? _document->has_signal_config() : 0,
-        _document ? _document->has_data() : 0,
-        _session->is_working());
-    fflush(stderr);
+    // Restore this tab's device BEFORE any config/data work below.
+    //
+    // DeviceAgent holds exactly ONE active device, shared by every tab. A tab
+    // that opened a file (.pxl, or an imported VCD/CSV/...) owns a virtual
+    // device; tabbing away switches the global device to the other tab's.
+    // apply_signal_config() / reload() further down both read and write the
+    // CURRENT device's sr_channels, so running them against a foreign device
+    // writes this tab's channel config onto the wrong channels and reads back
+    // the wrong channel count — the "tabbing back shows 2 channels with
+    // default names" bug.
+    if (_device_handle != NULL_HANDLE && !_session->is_working()) {
+        if (_session->get_device()->handle() != _device_handle) {
+            pxv_info("TabContext::activate() restoring device handle %llu for this tab",
+                     (unsigned long long)_device_handle);
+            if (!_session->set_device(_device_handle)) {
+                // Device is gone (e.g. closed from the device list). Drop the
+                // stale handle so we stop trying to restore it.
+                pxv_warn("TabContext::activate() failed to restore device handle %llu",
+                         (unsigned long long)_device_handle);
+                _device_handle = NULL_HANDLE;
+            }
+        }
+    }
 
     // R6: 工作中（采集/copy 进行中）跳过 set_active_document，避免覆盖
     // capture_owner_document 导致数据归属错乱。END_COLLECT_WORK 时由

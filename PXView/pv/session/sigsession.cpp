@@ -598,7 +598,12 @@ bool SigSession::set_device(ds_device_handle dev_handle) {
   // Plan B Phase 1: broadcast_sync → broadcast_async.
   _event_bus->broadcast_async<interface::CurrentDeviceChangePrev>({});
   // Release the old device.
-  _state->device_agent().release();
+  // destroy_file_device=false: a file device (.pxl / input-module import) is
+  // owned by the tab that opened it, not by "whatever is active now". Freeing
+  // it here made the device vanish from the device list on every tab switch
+  // (and destroyed the channel metadata the tab still needed). Cleanup is
+  // SigSession::close_file()'s job.
+  _state->device_agent().release(false);
   _state->set_device_status(ST_INIT);
 
   // Open the new device via DeviceAgent (handles sr_dev_open + channel setup).

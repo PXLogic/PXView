@@ -837,25 +837,38 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
 
         if (mode == LOGIC && !probe->enabled)
             continue;
-        if (probe->name)
-        {
-            if (is_logic) {
-                sprintf(meta, "probe%d = %s\n", probe->index, probe->name);
-            } else {
-                sprintf(meta, "analog%d = %s\n", analogcnt, probe->name);
-            }
-            str += meta;
-        }
 
-        // Find matching SignalModel by probe->index for fork field replacements.
+        // Find the matching SignalModel up front — used both for the channel-label
+        // serialization below and the fork field lookups that follow. Falls back
+        // to sr_channel when no model exists yet.
         std::shared_ptr<data::SignalModel> matched_model;
-        std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
+        std::vector<std::shared_ptr<data::SignalModel>> _sm_models =
+            _session->get_signal_models_snapshot();
+        for (auto m : _sm_models) {
             if (m && m->index() == probe->index) {
                 matched_model = m;
                 break;
             }
         }
 
+        // Channel label: SignalModel is the source of truth for the user-editable
+        // name (a renamed channel must be serialized under its custom name),
+        // falling back to sr_channel->name.
+        {
+            const char *ch_name = (matched_model && !matched_model->name().empty())
+                                      ? matched_model->name().c_str()
+                                      : (probe->name ? probe->name : "");
+            if (ch_name && ch_name[0] != '\0') {
+                if (is_logic) {
+                    sprintf(meta, "probe%d = %s\n", probe->index, ch_name);
+                } else {
+                    sprintf(meta, "analog%d = %s\n", analogcnt, ch_name);
+                }
+                str += meta;
+            }
+        }
+
+        // Find matching SignalModel by probe->index for fork field replacements.
         if (mode == DSO)
         {
             /* DSO/ANALOG per-channel fields use analogcnt (not probecnt)

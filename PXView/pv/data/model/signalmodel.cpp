@@ -82,16 +82,29 @@ void SignalModel::set_type(int type) {
            type == SR_CHANNEL_FFT || type == SR_CHANNEL_LISSAJOUS ||
            type == SR_CHANNEL_MATH || type == SR_CHANNEL_GROUP);
     _type = type;
+    // Mirror to sr_channel.type — set_name()/set_enabled() already do this for
+    // their fields, but type was missed, so a model-side type change never
+    // reached libsigrok. libsigrok dispatches on ch->type in several places:
+    //   - session_driver.c:137/155/173/286/380/842/872/901 — demo driver routes
+    //     LOGIC / ANALOG / DSO feeds and builds the enabled-channel set by type
+    //   - soft-trigger.c:37 — trigger matching filters channels by type
+    //   - device.c:217 — channel comparison
+    // Without the write-back the driver keeps classifying the channel with its
+    // old type, so e.g. a channel switched to ANALOG still delivers logic data.
+    if (_sr_channel) {
+        _sr_channel->type = type;
+    }
 }
 
-void SignalModel::set_enabled(bool enabled) {
+void SignalModel::set_enabled(bool enabled, bool notify) {
     if (_enabled != enabled) {
         _enabled = enabled;
         // Mirror to sr_channel.enabled so libsigrok reflects the new state.
         if (_sr_channel) {
             _sr_channel->enabled = enabled ? TRUE : FALSE;
         }
-        emit visibility_changed();
+        if (notify)
+            emit visibility_changed();
     }
 }
 
@@ -306,6 +319,12 @@ void SignalModel::commit_to_device()
     _sr_channel->name = g_strdup(_name.c_str());
 
     _sr_channel->enabled = _enabled ? TRUE : FALSE;
+
+    // type must be mirrored too: libsigrok dispatches on ch->type when routing
+    // the data feed (session_driver.c) and matching triggers (soft-trigger.c),
+    // so a model-side type change that never reaches the struct leaves the
+    // driver classifying the channel with its old type.
+    _sr_channel->type = _type;
 
     // Fork libsigrok's sr_channel had extra fields (offset, zero_offset,
     // hw_offset, vdiv, vfactor, coupling, trig_value) that upstream

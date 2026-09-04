@@ -178,6 +178,54 @@ void DeviceOptionsDock::ChannelChecked(int index, QObject *object) {
 
 void DeviceOptionsDock::on_property_committed() { emit settings_applied(); }
 
+// ---------------------------------------------------------------------------
+// SignalModel-backed channel accessors
+//
+// The dock used to read and write sr_channel fields directly. SignalModel is
+// the source of truth for those fields, so every access now goes through it,
+// with the struct as fallback for channels that have no model yet.
+// ---------------------------------------------------------------------------
+std::shared_ptr<data::SignalModel>
+DeviceOptionsDock::model_for_probe(const sr_channel *probe) {
+  if (probe == nullptr || _session == nullptr)
+    return nullptr;
+  return _session->get_signal_by_index((int)probe->index);
+}
+
+bool DeviceOptionsDock::channel_enabled(const sr_channel *probe) {
+  if (auto m = model_for_probe(probe))
+    return m->enabled();
+  return probe != nullptr && probe->enabled;
+}
+
+int DeviceOptionsDock::channel_type(const sr_channel *probe) {
+  if (auto m = model_for_probe(probe))
+    return m->type();
+  return probe != nullptr ? probe->type : (int)SR_CHANNEL_LOGIC;
+}
+
+QString DeviceOptionsDock::channel_name(const sr_channel *probe) {
+  if (auto m = model_for_probe(probe)) {
+    if (!m->name().empty())
+      return QString::fromStdString(m->name());
+  }
+  return (probe != nullptr && probe->name != nullptr)
+             ? QString::fromUtf8(probe->name)
+             : QString();
+}
+
+void DeviceOptionsDock::set_channel_enabled(sr_channel *probe,
+                                            bool enabled, bool notify) {
+  if (auto m = model_for_probe(probe)) {
+    m->set_enabled(enabled, notify);
+    return;
+  }
+  // No model yet (e.g. before init_signals()). Keep the struct in sync so the
+  // device still sees the change; the model picks it up when it is created.
+  if (probe != nullptr)
+    probe->enabled = enabled ? TRUE : FALSE;
+}
+
 void DeviceOptionsDock::commit_channels() {
   using namespace Qt;
   bool hasEnabled = false;
@@ -201,20 +249,24 @@ void DeviceOptionsDock::commit_channels() {
       //               with a single index would run past the end of the
       //               list (vector::_M_range_check). Skip channels that
       //               have no checkbox in this mode.
-      if (mode == ANALOG && probe->type != SR_CHANNEL_ANALOG) {
+      if (mode == ANALOG && channel_type(probe) != SR_CHANNEL_ANALOG) {
         continue;
       }
       if (index >= (int)_probes_checkBox_list.size()) {
+        const QString ch_name = channel_name(probe);
         pxv_warn("commit_channels: index %d >= _probes_checkBox_list size %d "
                  "(mode=%d, ch[%d] '%s' type=%d) — list out of sync, skipping",
                  index, (int)_probes_checkBox_list.size(), mode,
-                 probe->index, probe->name ? probe->name : "(nullptr)",
-                 probe->type);
+                 probe->index,
+                 qPrintable(ch_name.isEmpty() ? QString("(nullptr)") : ch_name),
+                 channel_type(probe));
         break;
       }
-      probe->enabled = _probes_checkBox_list.at(index)->isChecked();
+      // notify=true: this is a user-driven checkbox change, so the View needs
+      // the visibility_changed() relayout SignalModel emits.
+      set_channel_enabled(probe, _probes_checkBox_list.at(index)->isChecked());
       index++;
-      if (probe->enabled)
+      if (channel_enabled(probe))
         hasEnabled = true;
     }
   } else {
@@ -498,11 +550,16 @@ int contentHeight = 0;
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
     sr_channel *const probe = (sr_channel *)l->data;
 
-    if (probe->enabled)
+    if (channel_enabled(probe))
       cur_ch_num++;
 
+    // notify=false: we are inside build_dynamic_panel(), which is rebuilding
+    // this dock's own widgets. Letting SignalModel emit visibility_changed()
+    // here would re-enter View::signals_changed() (a synchronous full
+    // relayout) from the construction loop. The View is refreshed once
+    // afterwards by the DeviceOptionsUpdated broadcast.
     if (cur_ch_num > vld_ch_num)
-      probe->enabled = false;
+      set_channel_enabled(probe, false, false);
 
     // DSO channels (oscilloscope) are not part of LOGIC/MSO channel
     // selection — Core (sigsession.cpp init_signals) skips them when
@@ -512,10 +569,11 @@ int contentHeight = 0;
     // add it to any visible grid — otherwise O0/O1 show up in the Analog
     // Channel group (demo device, indices 13/14).
     int cur_mode = _device_agent->get_work_mode();
-    bool is_dso_hidden = (probe->type == SR_CHANNEL_DSO &&
+    const int probe_type = channel_type(probe);
+    bool is_dso_hidden = (probe_type == SR_CHANNEL_DSO &&
                           (cur_mode == LOGIC || cur_mode == MSO));
-    bool is_analog = (probe->type == SR_CHANNEL_ANALOG ||
-                      probe->type == SR_CHANNEL_DSO);
+    bool is_analog = (probe_type == SR_CHANNEL_ANALOG ||
+                      probe_type == SR_CHANNEL_DSO);
     ChannelLabel *ch_item = new ChannelLabel(
         this, nullptr, probe->index,
         is_analog ? ChannelLabel::Analog : ChannelLabel::Logic);
@@ -523,8 +581,8 @@ int contentHeight = 0;
     if (is_dso_hidden) {
       ch_item->setVisible(false);
       _probes_checkBox_list.push_back(ch_item->getCheckBox());
-      ch_item->getCheckBox()->setCheckState(probe->enabled ? Qt::Checked
-                                                           : Qt::Unchecked);
+      ch_item->getCheckBox()->setCheckState(channel_enabled(probe) ? Qt::Checked
+                                                                   : Qt::Unchecked);
       continue;
     }
 
@@ -551,8 +609,8 @@ int contentHeight = 0;
     }
 
     _probes_checkBox_list.push_back(ch_item->getCheckBox());
-    ch_item->getCheckBox()->setCheckState(probe->enabled ? Qt::Checked
-                                                         : Qt::Unchecked);
+    ch_item->getCheckBox()->setCheckState(channel_enabled(probe) ? Qt::Checked
+                                                                 : Qt::Unchecked);
     channel_line_height = ch_item->height();
   }
 
@@ -917,7 +975,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
     assert(probe);
 
     // DSO mode: only show DSO channels
-    if (probe->type != SR_CHANNEL_DSO) {
+    if (channel_type(probe) != SR_CHANNEL_DSO) {
       continue;
     }
 
@@ -927,7 +985,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
     QGridLayout *probe_layout = new QGridLayout(probe_widget);
     probe_widget->setLayout(probe_layout);
 
-    bool ch_enabled = probe->enabled;
+    bool ch_enabled = channel_enabled(probe);
     if (ch_dex < (int)_lst_probe_enabled_status.size()) {
       ch_enabled = _lst_probe_enabled_status[ch_dex];
     }
@@ -991,7 +1049,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
     connect(probe_checkBox, &QCheckBox::released, this,
             &DeviceOptionsDock::on_analog_channel_enable);
 
-    QString tabName = QString::fromUtf8(probe->name);
+    QString tabName = channel_name(probe);
     tabName += " ";
 
     tabWidget->addTab(probe_widget, tabName);
@@ -1038,9 +1096,13 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     // in this mode). Without this filter, ProbeOptions was created for
     // LOGIC channels (D0-D7) whose cg is the "Logic" group — VDIV/COUPLING
     // are not in that group's devopts, so every _getter() returned nullptr.
-    if (probe->type != SR_CHANNEL_ANALOG) {
+    if (channel_type(probe) != SR_CHANNEL_ANALOG) {
       pxv_info("DeviceOptionsDock::analog_probes: skipping non-analog channel "
-               "'%s' (type=%d)", probe->name ? probe->name : "(nullptr)", probe->type);
+               "'%s' (type=%d)",
+               qPrintable(channel_name(probe).isEmpty()
+                              ? QString("(nullptr)")
+                              : channel_name(probe)),
+               channel_type(probe));
       continue;
     }
 
@@ -1050,7 +1112,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     QGridLayout *probe_layout = new QGridLayout(probe_widget);
     probe_widget->setLayout(probe_layout);
 
-    bool ch_enabled = probe->enabled;
+    bool ch_enabled = channel_enabled(probe);
     if (ch_dex < (int)_lst_probe_enabled_status.size()) {
       ch_enabled = _lst_probe_enabled_status[ch_dex];
     }
@@ -1144,7 +1206,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     connect(probe_checkBox, &QCheckBox::released, this,
             &DeviceOptionsDock::on_analog_channel_enable);
 
-    QString tabName = QString::fromUtf8(probe->name);
+    QString tabName = channel_name(probe);
     tabName += " ";
 
     tabWidget->addTab(probe_widget, tabName);
@@ -1690,7 +1752,7 @@ QJsonObject DeviceOptionsDock::get_session() {
     if (idx < (int)_probes_checkBox_list.size()) {
       ch_obj["enabled"] = _probes_checkBox_list[idx]->isChecked();
     } else {
-      ch_obj["enabled"] = probe->enabled;
+      ch_obj["enabled"] = channel_enabled(probe);
     }
 
     if (mode == ANALOG || mode == DSO) {
@@ -1806,9 +1868,13 @@ void DeviceOptionsDock::set_session(QJsonObject &obj) {
       sr_channel *const probe = (sr_channel *)l->data;
       if (idx < ch_array.size()) {
         QJsonObject ch_obj = ch_array[idx].toObject();
-        probe->enabled = ch_obj["enabled"].toBool();
+        const bool restored_enabled = ch_obj["enabled"].toBool();
+        // notify=false: set_session() restores a whole batch of channels while
+        // the dock panels are being rebuilt; the caller refreshes the View
+        // afterwards. One relayout beats N.
+        set_channel_enabled(probe, restored_enabled, false);
         if (idx < (int)_probes_checkBox_list.size()) {
-          _probes_checkBox_list[idx]->setChecked(probe->enabled);
+          _probes_checkBox_list[idx]->setChecked(channel_enabled(probe));
         }
 
         if (mode == ANALOG || mode == DSO) {

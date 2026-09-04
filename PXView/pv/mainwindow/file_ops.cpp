@@ -97,6 +97,13 @@ void MainWindowFileOps::on_load_file(QString file_name) {
       _wnd->session()->set_default_device();
       return;
     }
+    // The virtual device created by set_file() belongs to THIS tab. Record it
+    // so activate() can restore it when the user tabs away and back — the
+    // global DeviceAgent can only hold one active device.
+    ctx->set_device_handle(_wnd->session()->get_device()->handle());
+    // Mirror the handle onto the document so the document is self-describing:
+    // closing the tab releases exactly its own device (see TabManager::remove_tab).
+    new_doc->set_device_handle(ctx->device_handle());
     ctx->make_live();
     ctx->activate();
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));
@@ -142,6 +149,12 @@ void MainWindowFileOps::on_import_file(QString file_name) {
       _wnd->session()->set_default_device();
       return;
     }
+    // Same as on_load_file: the input-module device created by import_file()
+    // belongs to THIS tab and must be restorable across tab switches.
+    ctx->set_device_handle(_wnd->session()->get_device()->handle());
+    // Mirror the handle onto the document so the document is self-describing:
+    // closing the tab releases exactly its own device (see TabManager::remove_tab).
+    new_doc->set_device_handle(ctx->device_handle());
     ctx->make_live();
     ctx->activate();
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));

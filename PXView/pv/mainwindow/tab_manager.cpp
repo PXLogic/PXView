@@ -103,6 +103,13 @@ void TabManager::init_initial_tab() {
       initial_view, _session, initial_doc, initial_doc_idx,
       _session->document_registry());
   initial_ctx->set_title(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE), "File"));
+
+  // 注意：初始 demo 标签的设备 handle 不在此处设置。init_initial_tab() 由
+  // setup_ui() 在 set_default_device() 之前调用，此时 _device_agent->handle()
+  // 尚未就绪（可能是残留值），会错误地把非 demo 设备 handle 记到 demo 标签
+  // 上。handle 的设置移到 on_load_device_first() 的 set_default_device()
+  // 之后（见 mainwindow.cpp），那里当前设备即 demo，handle 才正确。
+
   _tab_contexts.append(initial_ctx);
   qDebug() << "TabManager::init_initial_tab() before addTab, initial_doc="
            << initial_doc
@@ -229,6 +236,9 @@ void TabManager::remove_tab(int index) {
   pv::TabContext *ctx = _tab_contexts[index];
   // 方案A（问题2）：记录被关闭的 tab 是否为文件（pxl）tab。
   bool was_file_tab = !ctx->file_path().isEmpty();
+  // Cache the tab's device handle up-front: ctx is deleted by
+  // destroy_context() below, so it must not be dereferenced afterwards.
+  const ds_device_handle closed_file_handle = ctx->device_handle();
   if (ctx->is_live() && _session->is_working()) {
     _session->stop_capture();
   }
@@ -267,10 +277,19 @@ void TabManager::remove_tab(int index) {
     _current_tab_index--;
   }
 
-  // 方案A（问题2）：关闭 pxl 文件 tab 后恢复之前保存的硬件/demo 设备，
-  // 避免"导入 pxl 导致全局设备变化"在 tab 关闭后仍然残留影响其他 tab。
+  // 方案A（问题2）+ 阶段2：关闭 pxl/导入文件 tab 时：
+  //  1) 先恢复之前的硬件/demo 设备（_saved_device_handle），让当前设备回到
+  //     非文件状态；
+  //  2) 再 close_file() 释放本 tab 的虚拟设备。由于此时该文件设备已不是
+  //     当前设备，close_file 只从 DeviceAgent 注销并 free 其 sdi，不会触发
+  //     set_default_device（避免在后续 activate() 之外多切一次设备）。
+  // 这样关闭文件 tab 不再泄漏虚拟设备，设备列表里也不会残留已关闭的文件。
   if (was_file_tab) {
     _session->restore_previous_device();
+    // NOTE: use the cached handle — ctx has already been destroyed by
+    // destroy_context() above.
+    if (closed_file_handle != NULL_HANDLE)
+      _session->close_file(closed_file_handle);
   }
 
   _tab_contexts[_current_tab_index]->activate();
@@ -322,10 +341,16 @@ void TabManager::on_tab_changed(int index) {
   {
     pv::TabContext *target = _tab_contexts[index];
     SigSession *_session = _wnd->session();
+    // 阶段3修复：仅当目标标签没有记录设备 handle（旧标签/未设置路径）时，
+    // 才使用 restore_previous_device() 兜底。已记录 handle 的标签统一由
+    // TabContext::activate() 的 per-tab 恢复处理，避免兜底在 _saved_device_handle
+    // 用尽后退化到 set_default_device()，误选设备列表末尾的 VCD/文件设备
+    // （有通道）而把 demo 标签"两通道化"。
     if (target && target->file_path().isEmpty() &&
-        _session->get_device()->is_file()) {
+        _session->get_device()->is_file() &&
+        target->device_handle() == NULL_HANDLE) {
       pxv_info("TabManager::on_tab_changed: switching back to non-file tab, "
-               "restoring hardware/demo device");
+               "restoring hardware/demo device (fallback)");
       _session->restore_previous_device();
     }
   }
@@ -445,6 +470,14 @@ void TabManager::on_new_tab_requested() {
   new_ctx->set_title(
       QString::fromUtf8(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1"))
           .arg(_tab_contexts.size() + 1));
+
+  // 阶段3修复：新建空白标签同样记住当前设备 handle（与 demo 默认标签一致），
+  // 使其切回时能由 activate() 正确恢复自己的设备，而非依赖一次性兜底。
+  if (_device_agent && _device_agent->have_instance()) {
+    new_ctx->set_device_handle(_device_agent->handle());
+    new_doc->set_device_handle(new_ctx->device_handle());
+  }
+
   add_tab(new_ctx);
 }
 
@@ -489,6 +522,13 @@ void TabManager::on_tab_attached_extended(QWidget *widget,
                                                        doc, doc_idx,
                                                        _session->document_registry());
         ctx->set_title(title);
+
+        // 阶段3修复：拖出窗口再重新 attach 时新建的标签也记住当前设备 handle。
+        if (_session->get_device() && _session->get_device()->have_instance()) {
+          ctx->set_device_handle(_session->get_device()->handle());
+          doc->set_device_handle(ctx->device_handle());
+        }
+
         _tab_contexts.append(ctx);
       }
     }

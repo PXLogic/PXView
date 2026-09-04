@@ -369,7 +369,7 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
     return true;
 }
 
-void DeviceAgent::release()
+void DeviceAgent::release(bool destroy_file_device)
 {
     if (_sr_session) {
         if (sr_session_is_running(_sr_session)) {
@@ -393,7 +393,13 @@ void DeviceAgent::release()
         // dangling pointers. Removal is by value (not array index) so it does
         // NOT shift other file devices' handles — those remain valid for
         // subsequent set_file() loads.
-        if (_dev_type == DEV_TYPE_FILELOG) {
+        // Only destroy a file device when the caller explicitly asks for it.
+        // Device switches (set_device → release(false)) must keep the sdi
+        // alive: the file device is owned by the tab that opened it, and
+        // tabbing away must not make it disappear from the device list.
+        // Ownership/cleanup goes through SigSession::close_file() →
+        // remove_device(), which frees the sdi.
+        if (_dev_type == DEV_TYPE_FILELOG && destroy_file_device) {
             for (auto it = _file_handles.begin(); it != _file_handles.end();) {
                 if (it->second == _di)
                     it = _file_handles.erase(it);
@@ -405,6 +411,10 @@ void DeviceAgent::release()
                 _file_sdi.erase(vit);
             sr_dev_inst_free(_di);
             pxv_info("release: freed sdi %p for file device", (void *)_di);
+        } else if (_dev_type == DEV_TYPE_FILELOG) {
+            pxv_info("release: keeping sdi %p for file device (handle %llu) "
+                     "— owned by its document/tab",
+                     (void *)_di, (unsigned long long)_dev_handle);
         }
 
         _di = nullptr;

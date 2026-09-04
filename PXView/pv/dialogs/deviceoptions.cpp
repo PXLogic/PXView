@@ -896,7 +896,15 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
     connect(probe_checkBox, &QCheckBox::released, this,
             &DeviceOptions::on_analog_channel_enable);
 
-    QString tabName = QString::fromUtf8(probe->name);
+    // SignalModel is the source of truth for the channel label: a renamed
+    // channel must show its custom name here even though sr_channel->name still
+    // holds the device-provided default.
+    std::shared_ptr<SignalModel> m =
+        _session ? _session->get_signal_by_index((int)probe->index) : nullptr;
+    QString tabName = (m && !m->name().empty())
+                          ? QString::fromStdString(m->name())
+                          : (probe->name ? QString::fromUtf8(probe->name)
+                                         : QString());
     tabName += " ";
 
     tabWidget->addTab(probe_widget, tabName);

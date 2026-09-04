@@ -711,7 +711,12 @@ _own_signals.clear();
     auto model = std::make_shared<data::SignalModel>();
     model->set_index(ch.index);
     model->set_enabled(ch.enabled);
-    model->set_name(std::to_string(ch.index));
+    // Restore the persisted channel name (ChannelConfig::name, written by
+    // SignalConfigStore::save_signal_config from sr_channel->name).
+    // Falling back to the numeric index used to wipe every custom channel
+    // label on tab switch / rebuild, because this is the only path that
+    // recreates Signals from a persisted config.
+    model->set_name(ch.name.empty() ? std::to_string(ch.index) : ch.name);
 
     // CRITICAL FIX: 用 ch.type（来自 ChannelConfig 元数据，由
     // SignalConfigStore::save_signal_config 从 SignalModel::type() 序列化）
@@ -847,26 +852,12 @@ if (auto *s = sig->as_logic()) {
 void ViewSignalSync::rebuild_signals() {
   _view->mark_derived_traces_dirty();
 
-  if (_view->data_source() == _view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr() &&
-      _view->data_sync_delegate()->document_ptr()->has_signal_config()) {
-    const auto &config = _view->data_sync_delegate()->document_ptr()->get_signal_config();
-    int device_ch_count = 0;
-    for (const GSList *l = _view->device_agent()->get_channels(); l;
-         l = l->next) {
-      device_ch_count++;
-    }
-    if (config.channels.size() == (size_t)device_ch_count) {
-      rebuild_signals_from_config(config);
-// update_signals with Modified event only updates properties in-place,
-// so it is safe to pass the unique_ptr container directly.
-SignalFactory::update_signals(_own_signals, _view->data_source(),
-_view->data_source(),
-SignalFactory::Modified);
-      // Only property changes, no layout needed - use incremental refresh
-      signals_modified_refresh();
-      return;
-    }
-  }
+  // Dead-code removal: the original code guarded the inline config-apply path
+  // behind `data_source() == document_ptr()`. That is always false — View
+  // sets data_source() to the SigSession exactly once (View::View), and
+  // set_data_source() has no external callers, so data_source() can never
+  // equal the SessionDocument. Layout restoration for the session-as-source
+  // path now happens inline below (the restore_doc block).
 
   if (!_view->data_source())
     return;
@@ -945,14 +936,16 @@ void ViewSignalSync::on_signals_changed() {
   // avoiding full object recreation for minor changes.
   //
   // IMPORTANT: SignalModels ALWAYS live in SigSession (_data_source), never
-  // in SessionDocument. SessionDocument::_signal_models is never populated
-  // (it only stores data snapshots via _logic/_analog/_dso). Using the
-  // snapshot-source accessor (the former effective_data_source(), now
-  // document_snapshot_source()) here was a bug: when _document->has_data() is
+  // in SessionDocument. SessionDocument does NOT own any SignalModel list — it
+  // only stores data snapshots (_logic/_analog/_dso) plus the persisted
+  // SignalConfig archive. (SessionDocument::get_signal_models() exists purely
+  // as a dead-storage stub that returns an empty vector; the _signal_models
+  // field was removed during the architecture purification work.) Using the
+  // snapshot-source accessor here was a bug: when _document->has_data() is
   // true (after a capture), document_snapshot_source() returns _document, and
-  // create_signals(_document) reads the empty _signal_models vector,
-  // returning an empty list. AllReplaced then deletes all existing view
-  // signals and creates 0 new ones, clearing the waveform tracks
+  // create_signals(_document) would read the empty model list, returning an
+  // empty view-signal list. AllReplaced then deletes all existing view signals
+  // and creates 0 new ones, clearing the waveform tracks
   // (Header::paintEvent shows traces=1).
 
   if (!_view->data_source()) {
