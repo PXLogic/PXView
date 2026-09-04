@@ -7,6 +7,45 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
   
+    PXView V1.6.0修改
+    时间：2026年9月4日
+    变更如下：
+
+    【新功能】
+    *设备意图协议与设备变更裁决重构（Phase 1-5 多阶段重构，从"启发式补丁 + 时序巧合"升级为"显式语义 + 架构保证"）：事件语义化——新增 DeviceChangeReason 枚举（FirstInit/UserSelection/TabSwitch），CurrentDeviceChanged 携带 {reason, handle}、DeviceModeChanged 携带 {mode, reason}，SigSession::set_device/set_default_device 增加 reason 参数（默认 UserSelection，既有调用点零改动）；删除 has_signal_config() 启发式，事件调度改为显式 reason 裁决，正确性不再依赖事件时序巧合（events.h、sigsession.cpp、event_dispatcher.cpp、mainwindow.h）
+    *配置单一真相来源：标签页设备/通道状态通过 TabContext::apply_device_intent()/harvest_device_state() 在各自文档中持久化；设备 profile 自动加载只在"设备身份变更"（FirstInit/UserSelection）时发生，TabSwitch 绝不加载 profile（tabcontext.cpp/.h、event_dispatcher.cpp）
+    *设备意图协议正式化：TabContext::activate/deactivate 收敛为意图协议调用，契约写入头文件注释
+    *时序确定性：新增 loading_device_profile 标志 + 排队清除，抑制 profile 加载内部 CHANNEL_MODE 连锁导致的双重 profile 加载（即历史日志中"一次设备选择双份刷新"的根因）（mainwindow.h、event_dispatcher.cpp）
+    *清理：删除 on_tab_changed 的 restore_previous_device() 兜底（所有建签路径均已记录 per-tab handle），并更新三处过时注释
+    *事件瀑布收敛：为 DeviceOptionsUpdated 事件增加 skip_model_reload 标志，仅由 TabContext::apply_device_intent() 在已显式重建后置为 true，SigSession 据此跳过二次全量 reload；其余广播点行为不变，GUI 的通道名/布局刷新照常执行（sigsession.cpp、tabcontext.cpp）
+
+    【问题修复】
+    *修复多标签页下设备/通道状态错乱：文件设备不再随全局设备切换被释放，改由所属标签页主动释放；每个标签页绑定自己的设备句柄，切换标签时自动恢复对应的设备与配置（deviceagent.cpp/.h、storesession.cpp、file_ops.cpp、tabcontext.cpp）
+    *修复启动时 demo 标签页被错误绑定设备句柄的缺陷：on_load_device_first() 改为先完成默认设备初始化再记录句柄，避免把残留的 VCD 文件设备句柄记到 demo 标签，导致切回 demo 时恢复成错误的设备与通道数（mainwindow.cpp）
+    *修复采集结束后波形轨道被整体清空的渲染缺陷：on_signals_changed() 原先误用快照源读取空的 SignalModel 列表，重建时删光已有信号却生成 0 个，导致波形轨道消失；现改为始终以 SigSession 持有的 SignalModel 为准（view_signal_sync.cpp）
+    *通道名称、启用状态与类型统一以 SignalModel 为唯一可信源：设备选项面板与 .pxc 配置序列化均改为经 SignalModel 读写，重命名后的通道能在设备选项界面和保存的配置中正确显示自定义名称（deviceoptionsdock.cpp/.h、deviceoptions.cpp、storesession.cpp、signalmodel.cpp/.h）
+    *修复信号过滤（毛刺滤波）的通道遍历顺序错误：glitch_filter_task 改用 SignalModel 列表（按 index 排序）遍历，确保通道索引与反相映射对应正确（filterprocessor.cpp）
+    *修复切回已配置标签页时自定义设置被 profile 覆盖：此前每次 CurrentDeviceChanged（异步 queued）都会触发 load_device_config() 重新加载 demo0.pxc 等默认 profile，把标签页已保存的通道数/header 名覆盖回默认值（"切回 demo 后通道数和 header 名被还原"的真正根因）；现以 ev.reason != TabSwitch 守卫 on_current_device_changed 与 on_device_mode_changed 两处 load_device_config() 调用，TabSwitch 跳过自动 profile 加载、保留标签页自定义配置，首启/新设备首次选择因尚无 config 仍正常加载 profile（event_dispatcher.cpp）
+    *修复 Linux 已安装 WebKit 仍误报未检测到的问题
+    *修复 Linux 卸载脚本（pkexec）提权失败：执行失败时回退 sudo 而非直接退出，避免从桌面快捷方式调用时无提示失败
+    *卸载桌面项的图标由通用的 edit-delete 改为 PXView 自带图标，确保正常显示并与主菜单风格一致
+    *修复 Linux 在虚拟机 / 无 GPU 环境下 WebKit 初始化白屏：GTK/WebKit 初始化前按运行环境自动选择合成模式，虚拟机或无 GPU 时退回软件合成，其余默认硬件加速（web/src-tauri/src/lib.rs）
+
+    【构建与工程】
+    *用自解压 .sh 安装器取代 AppImage/linuxdeploy 的分发方式：新增 packaging/bundle-runtime-libs.sh 以白名单方式拷贝 Qt 运行时与插件、GCC 运行时、Python 标准库、libsigrok/libpython 等私有依赖，刻意不打包 WebKitGTK/GTK/GStreamer/GLib/X11/Wayland 等桌面栈，避免 ABI 混搭造成窗口白屏；并重写 packaging/check-webkit-stack.sh（安装树黑名单递归扫描去重），删除 AppImage 专用的 packaging/pxview-AppRun
+    *新增系统安装器与打包脚本：packaging/install.sh + make-installer.sh 产出自解压安装器，安装到 /opt/PXView，自动处理 udev 规则、图标、.desktop、CLI 封装、桌面快捷方式与 uninstall.sh；CMake install_packaging.cmake 现在一并发装 libsigrok 的 udev 规则，使安装器成为 USB 设备权限的唯一归属，不再单独上传 udev 压缩包；CMakeLists 为 Linux 增加 INSTALL_RPATH，安装树靠 RUNPATH 解析自带库；build_linux.sh 不再捆绑 WebKit 栈
+    *自解压安装器产物后缀由 .sh 改为 .run；升级安装器默认行为为直接覆盖，并补全卸载入口与桌面项（.desktop/快捷方式）清理
+    *更新应用图标（logo.png / logo.svg），并同步更新 README/INSTALL 文档措辞以反映新的 .sh 安装器分发方式
+    *版本号提升到 1.6.0（CMakeLists.txt、README 版本徽章、CI 默认版本、NSIS 安装脚本）
+
+    【测试与 CI】
+    *更新 GitHub Actions 依赖版本：actions/checkout v4→v7、actions/upload-artifact→v8、actions/setup-node v4→v6；为 Homebrew 配置 HOMEBREW_NO_REQUIRE_TAP_TRUST，消除 tap 信任警告
+    *放宽 ASan/TSan 看门狗与单测超时（方案 A）：ASan 看门狗 120→600、pytest 超时 120→600、任务超时 30→60 分钟；TSan 看门狗 120→900、pytest 超时 300→900、任务超时 30→90 分钟，保留完整 capture 端到端覆盖，避免慢速 sanitizer 进程被误杀
+    *macOS-debug 默认不再自动构建：push 到 main 时不再在 macos-14 上完整编译并跑 lldb，以节省 macOS runner；需要抓取崩溃 backtrace 时仍可通过手动 workflow_dispatch 构建并上传产物
+    *修复 CI 渲染检查的依赖包安装与提示：修正 xwd 实际属于 x11-apps 而非 x11-utils，更新 apt 包列表与错误提示；新增 tests/ci/check_window_render.py 做像素级窗口渲染校验
+    *CI 新增 Linux 安装/卸载冒烟测试与安装器制品上传；随后又移除了 build.yml 中 PXView/PXView-Agent/窗口渲染的安装树冒烟测试步骤以简化 CI 流程
+    *新增单元测试覆盖 SignalModel 与 libsigrok 结构体的双向同步（tests/qtest/data/test_signal_model.cpp）
+
     PXView V1.5.9修改
     时间：2026年9月3日
     变更如下：
