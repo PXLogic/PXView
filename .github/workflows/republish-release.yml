@@ -17,7 +17,7 @@
 #   GitHub repo → Actions → "Republish Release Assets" → Run workflow
 #     run_id  : numeric ID from the source run URL (e.g. 12345678901)
 #     version : must match the version used in the source build (e.g. 1.5.7)
-#     tag     : target release tag (e.g. v1.5.7; leave empty → v<version>)
+#     tag     : target release tag (e.g. PXView_v1.5.7; leave empty → PXView_v<version>)
 #     platforms: which platform artifacts to include
 # =============================================================================
 
@@ -63,7 +63,7 @@ jobs:
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
           else
-            TAG="v${{ github.event.inputs.version }}"
+            TAG="PXView_v${{ github.event.inputs.version }}"
           fi
           echo "value=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Target release tag: ${TAG}"
