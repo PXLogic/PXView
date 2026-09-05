@@ -107,6 +107,7 @@ Section "MainSection" SEC01
   ; Force overwrite to ensure all files are updated (not just ifnewer)
   SetOverwrite on
   File "package\PXView.exe"
+  File "package\pxviewd.exe"
   CreateDirectory "$SMPROGRAMS\PXView"
   CreateShortCut "$SMPROGRAMS\PXView\PXView.lnk" "$INSTDIR\PXView.exe"
   CreateShortCut "$DESKTOP\PXView.lnk" "$INSTDIR\PXView.exe"
@@ -277,6 +278,7 @@ Section Uninstall
   Delete "$INSTDIR\${PRODUCT_NAME}.url"
   Delete "$INSTDIR\uninst.exe"
   Delete "$INSTDIR\PXView.exe"
+  Delete "$INSTDIR\pxviewd.exe"
   Delete "$INSTDIR\PXView-Agent.exe"
 
   Delete "$SMPROGRAMS\PXView\Uninstall.lnk"

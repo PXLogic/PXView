@@ -26,6 +26,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileDialog>
 #include <QStyle>
 #include <QGuiApplication>
 #include <QAccessible>
@@ -36,12 +37,15 @@
 #include "pv/mainwindow/mainwindow.h"
 #include "pv/config/appconfig.h"
 #include "PXView/config.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
+#include "pv/core/headless_run.h"
+#include "pv/core/ui_hooks.h"
 #include "pv/api/iapp_service.h"
 #include "pv/api/isession_service.h"
 #include "pv/base/log.h"
 #include "pv/dock/logdock.h"
-#include "pv/ui/langresource.h"
+#include "pv/ui/msgbox.h"
+#include "pv/core/langresource.h"
 #include <QDateTime>
 #include <string>
 #include <ds_types.h>
@@ -53,35 +57,6 @@
 #include <windows.h>
 #include <stdio.h>
 
-void myMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-{
-    // Keep the QByteArray alive across the fprintf/strstr calls: msg.toUtf8()
-    // returns a temporary, and constData() points into it — using it after the
-    // temporary is destroyed is a use-after-free (page heap ASAN turns it into
-    // a startup SIGSEGV). Bind to a named QByteArray first.
-    const QByteArray utf8 = msg.toUtf8();
-    const char *msg_str = utf8.constData();
-    fprintf(stderr, "QtMsg: %s (file: %s, line: %d, function: %s)\n", 
-            msg_str ? msg_str : "", 
-            context.file ? context.file : "", 
-            context.line, 
-            context.function ? context.function : "");
-    fflush(stderr);
-
-    if (type == QtFatalMsg || (msg_str && strstr(msg_str, "ASSERT failure"))) {
-        fprintf(stderr, "=== FATAL/ASSERT BACKTRACE ===\n");
-        fprintf(stderr, "Base of PXView.exe: %p\n", GetModuleHandleW(nullptr));
-        fprintf(stderr, "Base of Qt6Core.dll: %p\n", GetModuleHandleA("Qt6Core.dll"));
-        
-        void* backtrace[64];
-        USHORT frames = CaptureStackBackTrace(0, 64, backtrace, nullptr);
-        for (USHORT i = 0; i < frames; ++i) {
-            fprintf(stderr, "  #%d: %p\n", i, backtrace[i]);
-        }
-        fprintf(stderr, "==============================\n");
-        fflush(stderr);
-    }
-}
 #endif
 
 
@@ -101,13 +76,19 @@ void usage()
 		"      --headless                  Run in headless mode (no GUI, MCP/WS API only)\n"
 		"      --port PORT                 MCP server port (default: 10110)\n"
 		"      --ws-port PORT              WebSocket server port (default: 10430)\n"
+		"\n"
+		"NOTE:\n"
+		"  For headless/CLI use prefer the pxviewd companion binary: it is a\n"
+		"  console application, so its log output reaches the terminal and\n"
+		"  Ctrl+C shuts it down cleanly. `PXView --headless` stays supported\n"
+		"  for scripting that launches the GUI binary in the background.\n"
 		"\n", DS_BIN_NAME, DS_DESCRIPTION);
 }
 
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
-    qInstallMessageHandler(myMessageHandler);
+    pv::install_qt_message_handler();
     // Disable Qt Accessibility to prevent UIAutomation from stalling the main thread during high-frequency data updates
     qputenv("QT_ACCESSIBILITY", "0");
 	    // Force FreeType font engine instead of DirectWrite/GDI.
@@ -127,35 +108,12 @@ int main(int argc, char *argv[])
 	int wsPort = 10430;
 
 	//----------------------rebuild command param
-#ifdef _WIN32
-        // Under Windows, we need to manually retrieve the command-line arguments and convert them from UTF-16 to UTF-8.
-        // This prevents data loss if there are any characters that wouldn't fit in the local ANSI code page.
-        int argcUTF16 = 0;		
-        LPWSTR* argvUTF16 = CommandLineToArgvW(GetCommandLineW(), &argcUTF16);
-
-		std::vector<QByteArray> argvUTF8Q;
-        std::for_each(argvUTF16, argvUTF16 + argcUTF16, [&argvUTF8Q](const LPWSTR& arg) {
-            argvUTF8Q.emplace_back(QString::fromUtf16(reinterpret_cast<const char16_t*>(arg), -1).toUtf8());
-        });
-
-        LocalFree(reinterpret_cast<HLOCAL>(argvUTF16));
-
-        // Ms::runApplication() wants an argv-style array of raw pointers to the arguments, so let's create a vector of them.
-        std::vector<char*> argvUTF8;
-        for (auto& arg : argvUTF8Q){
-            argvUTF8.push_back(arg.data());
-		}
-
-        // Don't use the arguments passed to main(), because they're in the local ANSI code page.
-        (void)argc;
-        (void)argv;
-
-        int argcFinal = argcUTF16;
-        char** argvFinal = argvUTF8.data();
-    #else
-        int argcFinal = argc;
-        char** argvFinal = argv;
-    #endif 
+	// On Windows this re-parses GetCommandLineW() (UTF-16) so non-ASCII paths
+	// survive; see pv::prepare_command_line(). cmdLine storage must outlive
+	// every consumer of argvFinal, so it stays a stack local of main().
+	pv::CommandLine cmdLine = pv::prepare_command_line(argc, argv);
+	int argcFinal = cmdLine.argc;
+	char** argvFinal = cmdLine.argv;
  
 	//----------------------command param parse
 	while (1) {
@@ -235,69 +193,15 @@ int main(int argc, char *argv[])
 	if (bHeadless) {
 		// Headless mode: no GUI, no fonts, no style, no accessibility.
 		// QCoreApplication drives the event loop for the API transports.
-		static QCoreApplication a(argcFinal, argvFinal);
-		QCoreApplication::setApplicationVersion(DS_VERSION_STRING);
-		QCoreApplication::setApplicationName(DS_TITLE);
-		QCoreApplication::setOrganizationName("PXlogicV20");
-		QCoreApplication::setOrganizationDomain("www.marrychip.com");
-
-		//----------------------init log
-		pxv_log_init();
-
-		if (bStoreLog && logLevel < XLOG_LEVEL_DBG) {
-			logLevel = XLOG_LEVEL_DBG;
-		}
-		if (logLevel != -1) {
-			pxv_log_level(logLevel);
-		}
-
-		if (bStoreLog) {
-			pxv_log_enalbe_logfile(true);
-		}
-
-		AppControl *control = AppControl::Instance();
-		AppConfig &app = AppConfig::Instance();
-		app.LoadAll();
-
-		if (app.appOptions.ableSaveLog) {
-			pxv_log_enalbe_logfile(app.appOptions.appendLogMode);
-			if (app.appOptions.logLevel >= logLevel) {
-				pxv_log_level(app.appOptions.logLevel);
-			}
-		}
-
-		pxv_info("----------------- version: %s (headless)-----------------", DS_VERSION_STRING);
-		pxv_info("Qt:%s", QT_VERSION_STR);
-
-		int bit_width = sizeof(u64_t);
-		if (bit_width != 8) {
-			pxv_err("Can only run on 64 bit systems");
-			return 0;
-		}
-
-		// init core
-		if (!control->Init()) {
-			pxv_err("init error!");
-			return 1;
-		}
-
-		// Set custom API ports before starting services
-		control->set_api_ports(mcpPort, wsPort);
-
-		// Start API services
-		control->Start();
-
-		pxv_info("Headless mode started. MCP port %d, WS port %d.", mcpPort, wsPort);
-
-		ret = a.exec();
-
-		control->Stop();
-		control->UnInit();
-		control->Destroy();
-
-		pxv_info("Headless mode stopped.");
-		pxv_log_uninit();
-		return ret;
+		// The runtime itself lives in pv::run_headless() (core layer) and is
+		// shared with the console pxviewd binary, so both entry points stay
+		// behaviourally identical.
+		pv::HeadlessOptions opt;
+		opt.log_level = logLevel;
+		opt.store_log = bStoreLog;
+		opt.mcp_port  = mcpPort;
+		opt.ws_port   = wsPort;
+		return pv::run_headless(argcFinal, argvFinal, opt);
 	}
 
 	//----------------------GUI mode
@@ -305,6 +209,19 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
     QAccessible::setActive(false);
 #endif
+
+	// Bind the GUI services the Core layer may need (see pv/core/ui_hooks.h).
+	// Headless processes never install these and get the documented no-UI
+	// fallbacks (cancelled dialog / log-only messages).
+	pv::set_ask_save_file_hook(
+		[](const QString &caption, const QString &dir, const QString &filter,
+		   QString *selected_filter) -> QString {
+			return QFileDialog::getSaveFileName(nullptr, caption, dir, filter,
+			                                    selected_filter);
+		});
+	pv::set_notify_user_hook([](const QString &message) {
+		MsgBox::Show(message);
+	});
     a.setStyle(new MyStyle);
 
     QFont font = a.font();

@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include <stddef.h>
 #include "pv/base/log.h"
 #include "pv/config/appconfig.h"

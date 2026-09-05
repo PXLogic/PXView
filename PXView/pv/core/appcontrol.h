@@ -24,10 +24,8 @@
 
 #include <string>
 #include <vector>
-#include <QRect>
 
 struct sr_context;
-class QWidget;
 class QThread;
 
 namespace pv{
@@ -87,23 +85,11 @@ public:
     inline int get_mcp_port() const { return _mcp_port; }
     inline int get_ws_port() const { return _ws_port; }
 
-    inline void SetTopWindow(QWidget *w){
-        _topWindow = w;
-    }
-
-    inline QWidget* GetTopWindow(){
-        return _topWindow;
-    }
-
-    bool TopWindowIsMaximized();
-
 public:
     std::string        _open_file_name;
-    QRect              _screenRect;
 
 private:
     pv::SigSession      *_session;
-    QWidget             *_topWindow;
 
     // API Service Layer
     pv::api::AppService* _app_service = nullptr;

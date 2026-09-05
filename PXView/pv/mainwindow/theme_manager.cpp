@@ -41,7 +41,7 @@
 #include "pv/toolbars/logobar.h"
 #include "pv/toolbars/titlebar.h"
 #include "pv/toolbars/trigbar.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/uimanager.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/view.h"

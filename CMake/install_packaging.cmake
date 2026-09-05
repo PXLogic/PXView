@@ -211,6 +211,17 @@ else()
     install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 endif()
 
+# pxviewd: console headless daemon (CLI/automation entry point; see
+# CMakeLists.txt for why it is a separate binary from the GUI executable).
+# macOS: inside the app bundle's MacOS dir, next to the GUI binary, so DMG
+# users get it as part of the bundle. Windows/Linux: bin/.
+if(APPLE)
+    install(TARGETS pxviewd
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/${PROJECT_NAME}.app/Contents/MacOS)
+else()
+    install(TARGETS pxviewd DESTINATION bin)
+endif()
+
 # Install libsigrok shared library (upstream libsigrok 0.6.0 as DLL/SO/dylib).
 # Windows: libsigrok.dll -> bin/ (alongside PXView.exe so the loader finds it)
 # Linux:   libsigrok.so  -> lib/

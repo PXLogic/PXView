@@ -20,7 +20,7 @@
 #include "pv/data/document/sessiondocument.h"
 #include "pv/ui/uimanager.h"
 #include "pv/ui/msgbox.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/string_ids.h"
 #include "pv/view/view.h"
 #include "pv/dock/protocoldock.h"
@@ -337,7 +337,13 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
           _window->device_agent()->path(), bLoadSuccess);
       if (bLoadSuccess) {
         StoreSession ss(_window->session());
-        ss.load_decoders(_window->dock_manager()->protocol_widget(), deArray);
+        auto *dock = _window->dock_manager()->protocol_widget();
+        ss.load_decoders(
+            [dock](const QString &id, bool stacked_ok,
+                   std::list<pv::data::decode::Decoder *> &subs) {
+                return dock->add_protocol_by_id(id, stacked_ok, subs);
+            },
+            deArray);
       }
     }
 

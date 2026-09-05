@@ -7,10 +7,10 @@
  */
 
 #include "pv/dock/mcpcontroldock.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/api/mcp_transport.h"
 #include "pv/config/appconfig.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/mcp/mcp_instructions_gen.h"
 

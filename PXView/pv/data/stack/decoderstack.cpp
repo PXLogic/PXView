@@ -31,7 +31,7 @@
 #include "pv/base/perflog.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/isession_host.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/view/signal/logicsignal.h"
 #include "pv/data/decode/annotation.h"
 #include "pv/data/decode/decoder.h"

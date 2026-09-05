@@ -22,13 +22,13 @@
 
 #include "pv/dock/logdock.h"
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/dscombobox.h"
 #include "pv/ui/fn.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 
 #include <QCheckBox>

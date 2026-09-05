@@ -29,7 +29,7 @@
 #include <functional>
 #include <cmath>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/datasource.h"
 #include "pv/data/snapshot/dsosnapshot.h"
@@ -37,7 +37,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/view/view.h"
 #include "pv/view/viewport/viewport.h"
 

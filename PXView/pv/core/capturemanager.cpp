@@ -11,8 +11,8 @@
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/base/log.h"
-#include "pv/ui/langresource.h"
-#include "pv/ui/msgbox.h"
+#include "pv/core/langresource.h"
+#include "pv/core/ui_hooks.h"
 #include "pv/utility/path.h"
 #include "pv/config/appconfig.h"
 
@@ -392,7 +392,9 @@ bool CaptureManager::exec_capture() {
   if (_state->device_agent().have_enabled_channel() == false) {
     QString err_str(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_NO_ENABLED_CHANNEL),
                         "No channels enabled!"));
-    MsgBox::Show(err_str);
+    // Routed through the Core UI hook: message box in GUI mode, log line in
+    // headless mode. The Core layer must not instantiate Widgets itself.
+    pv::notify_user(err_str);
     return false;
   }
 

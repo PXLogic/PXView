@@ -25,8 +25,9 @@
 #include <cassert>
 #include <QMessageBox>
 #include "pv/base/pxvdef.h"
-#include "pv/mainwindow/appcontrol.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/appcontrol.h"
+#include "pv/mainwindow/topwindowtracker.h"
+#include "pv/core/langresource.h"
 
 //QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
 //QMessageBox::information(nullptr, "Title", "Content",QMessageBox::Yes|QMessageBox::No);
@@ -64,7 +65,7 @@ void MsgBox::Show(const QString title, const QString text, const QString infoTex
     str.append(text);
 
     if (parent == nullptr){
-        parent = AppControl::Instance()->GetTopWindow();
+        parent = TopWindowTracker::Instance()->GetTopWindow();
     }
 
     pv::dialogs::DSMessageBox msg(parent, title);
@@ -99,7 +100,7 @@ bool MsgBox::Confirm(const QString text, const QString infoText,
     str.append(text);
 
     if (parent == nullptr){
-        parent = AppControl::Instance()->GetTopWindow();
+        parent = TopWindowTracker::Instance()->GetTopWindow();
     }
 
     pv::dialogs::DSMessageBox msg(parent, "");

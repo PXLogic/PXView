@@ -49,7 +49,7 @@
 #include "pv/session/sigsession.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/session/deviceagent.h"

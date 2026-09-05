@@ -34,7 +34,7 @@
 #include "pv/ui/fn.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/iconcache.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/toolbars/logobar.h"
 
 namespace pv {

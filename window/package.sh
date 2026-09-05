@@ -22,6 +22,10 @@ cd package
 
 # --- PXView executable and resources ---
 cp ../install.dir/bin/PXView.exe .
+# pxviewd: console-subsystem headless daemon (CLI/automation entry point).
+# Shares every runtime DLL with PXView.exe -- resolved by copy-deps.sh below
+# against PXView.exe -- so only the binary itself needs copying here.
+cp ../install.dir/bin/pxviewd.exe .
 cp -r ../install.dir/share/PXView/* .
 cp -r ../install.dir/share/libsigrokdecode/* .
 

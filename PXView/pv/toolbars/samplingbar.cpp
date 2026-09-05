@@ -34,7 +34,7 @@
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/iconcache.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/view/signal/dsosignal.h"
 #include "pv/view/view.h"

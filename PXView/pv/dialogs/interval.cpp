@@ -24,7 +24,7 @@
 
 #include <QGridLayout>
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 namespace pv {
 namespace dialogs {

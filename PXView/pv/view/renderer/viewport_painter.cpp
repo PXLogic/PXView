@@ -40,7 +40,7 @@
 #include "pv/base/log.h"
 #include "pv/base/perflog.h"
 #include "pv/ui/dockfonts.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 using namespace std;
 

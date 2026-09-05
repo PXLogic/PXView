@@ -6,6 +6,7 @@ add_library(pxview-config STATIC
 
 target_link_libraries(pxview-config PUBLIC
     Qt6::Core
+    Qt6::Gui
     nlohmann_json::nlohmann_json
 )
 

@@ -33,7 +33,7 @@
 #include "pv/dialogs/mathoptions.h"
 #include "pv/view/trace/trace.h"
 #include "pv/dialogs/applicationpardlg.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/config/appconfig.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/dockfonts.h"

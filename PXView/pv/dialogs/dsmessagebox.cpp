@@ -28,7 +28,7 @@
 #include <QVBoxLayout>
 #include <QAbstractButton>
 #include "pv/base/pxvdef.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/config/appconfig.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/dockfonts.h"

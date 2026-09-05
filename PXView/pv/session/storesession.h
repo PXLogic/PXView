@@ -28,8 +28,10 @@
 #include <future>
 #include <atomic>
 #include <mutex>
+#include <functional>
+#include <list>
 #include <QObject>
-#include <libsigrok/libsigrok.h> 
+#include <libsigrok/libsigrok.h>
 
 #include "pv/interface/icallbacks.h"
 
@@ -45,10 +47,9 @@ class LogicSnapshot;
 class AnalogSnapshot;
 class DsoSnapshot;
 class SessionDocument;
+namespace decode {
+class Decoder;
 }
-
-namespace dock {
-class ProtocolDock;
 }
 
 class StoreSession : public QObject
@@ -82,7 +83,16 @@ private:
 
 public:    
     bool gen_decoders_json(QJsonArray &array);
-    bool load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_array);
+    /// Decoder-creation callback supplied by the View layer. In GUI mode the
+    /// View binds ProtocolDock::add_protocol_by_id; headless/API callers bind
+    /// a Core-side creator (or skip). Returns false when the decoder id is
+    /// unknown -- the core layer must never include pv/dock/*, hence the
+    /// indirection.
+    using AddProtocolFn =
+        std::function<bool(const QString &id, bool stacked_ok,
+                           std::list<data::decode::Decoder *> &sub_decoders)>;
+
+    bool load_decoders(const AddProtocolFn &add_protocol, QJsonArray &dec_array);
     QString MakeSaveFile(bool bDlg);
     QString MakeExportFile(bool bDlg);
 

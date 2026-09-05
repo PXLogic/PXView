@@ -31,7 +31,7 @@
 #include "pv/session/sigsession.h"
 #include "pv/view/viewport/viewport.h"
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
  
 using namespace std;
 

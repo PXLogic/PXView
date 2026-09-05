@@ -30,7 +30,7 @@
 #include "pv/data/model/signalmodel.h"
 #include "pv/dialogs/fftoptions.h"
 #include "pv/dialogs/mathoptions.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"

@@ -74,7 +74,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/base/perflog.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/utility/path.h"
 

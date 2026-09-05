@@ -53,7 +53,7 @@
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/view/trace/lissajoustrace.h"
 #include "pv/view/trace/mathtrace.h"
 #include "pv/view/component/edge_nav_button.h"

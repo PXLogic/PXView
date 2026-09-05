@@ -32,7 +32,7 @@
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/view/view.h"
 #include "pv/view/trace/lissajoustrace.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/config/appconfig.h"

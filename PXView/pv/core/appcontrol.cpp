@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 
 #include <libsigrok/libsigrok.h>
 #include <libsigrokdecode.h>
@@ -28,7 +28,6 @@
 #include <QCoreApplication>
 #include <QProcess>
 #include <QFile>
-#include <QWidget>
 #include <QThread>
 #include <QStringList>
 #include <string>
@@ -85,7 +84,6 @@ QStringList bundled_sigrok_firmware_dirs()
 
 AppControl::AppControl()
 {
-    _topWindow = nullptr; 
     _session = new pv::SigSession();
 }
 
@@ -489,14 +487,6 @@ void AppControl::UnInit()
     srd_exit();
 
     _session->uninit();
-}
-
-bool AppControl::TopWindowIsMaximized()
-{
-    if (_topWindow != nullptr){
-        return _topWindow->isMaximized();
-    }
-    return false;
 }
 
 pv::api::IAppService* AppControl::GetAppService() {

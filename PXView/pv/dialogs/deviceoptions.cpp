@@ -41,7 +41,7 @@
 #include "pv/prop/property.h"
 #include "pv/session/sigsession.h"
 #include "pv/ui/dockfonts.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/ui/toast.h"
 #include "pv/dialogs/dsmessagebox.h"

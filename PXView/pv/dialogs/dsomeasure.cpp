@@ -35,7 +35,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/eventobject.h"
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/xtoolbutton.h"
 
 using namespace std;

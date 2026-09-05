@@ -25,6 +25,7 @@
 
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/decode/decoder.h"
+#include "pv/data/decode/decoder_options.h"
 #include "pv/base/gvarptr.h"
 #include "pv/base/log.h"
 #include "pv/prop/bool.h"
@@ -32,7 +33,7 @@
 #include "pv/prop/enum.h"
 #include "pv/prop/int.h"
 #include "pv/prop/string.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/config/appconfig.h"
 #include <stdexcept>
 #include <cstring>
@@ -46,16 +47,12 @@ namespace binding {
 
 namespace {
 
-enum class AnalogTriggerFamily { None, Tdm, Pwm };
-
-AnalogTriggerFamily analog_trigger_family(const srd_decoder *d) {
-  if (!d || !d->id) return AnalogTriggerFamily::None;
-  if (std::strncmp(d->id, "tdm_audio", std::strlen("tdm_audio")) == 0)
-    return AnalogTriggerFamily::Tdm;
-  if (std::strncmp(d->id, "pwm_waveform", std::strlen("pwm_waveform")) == 0)
-    return AnalogTriggerFamily::Pwm;
-  return AnalogTriggerFamily::None;
-}
+// Analog-trigger helpers (family detection, remembered values) live in the
+// Core data layer: pv/data/decode/decoder_options.cpp. This View-side binding
+// only wraps them into editable properties.
+using pv::data::decode::AnalogTriggerFamily;
+using pv::data::decode::analog_trigger_family;
+using pv::data::decode::is_analog_trigger_option;
 
 int tdm_waveform_enable_channel(const srd_decoder *d, const char *id) {
   if (!d || !d->id || !id || std::strcmp(d->id, "tdm_audio_fast") != 0)
@@ -65,49 +62,6 @@ int tdm_waveform_enable_channel(const srd_decoder *d, const char *id) {
   if (std::sscanf(id, "ch%d_enable%c", &ch, &tail) == 1 && ch >= 0 && ch < 8)
     return ch;
   return -1;
-}
-
-bool is_analog_trigger_option(const char *id) {
-  return id && (!std::strcmp(id, "display_trigger_enable") ||
-                !std::strcmp(id, "display_trigger_mode") ||
-                !std::strcmp(id, "display_trigger_channel") ||
-                !std::strcmp(id, "display_trigger_edge") ||
-                !std::strcmp(id, "display_trigger_level") ||
-                !std::strcmp(id, "display_trigger_position"));
-}
-
-GVariant *remembered_analog_trigger_value(const srd_decoder *d, const char *id) {
-  if (!is_analog_trigger_option(id)) return nullptr;
-  const auto family = analog_trigger_family(d);
-  const AppOptions &o = AppConfig::Instance().appOptions;
-  const bool tdm = family == AnalogTriggerFamily::Tdm;
-  const bool pwm = family == AnalogTriggerFamily::Pwm;
-  if ((!tdm && !pwm) || !(tdm ? o.analogDisplayTriggerTdmValid
-                               : o.analogDisplayTriggerPwmValid))
-    return nullptr;
-  if (!std::strcmp(id, "display_trigger_enable"))
-    return g_variant_ref_sink(g_variant_new_boolean(
-        tdm ? o.analogDisplayTriggerTdmEnable : o.analogDisplayTriggerPwmEnable));
-  if (!std::strcmp(id, "display_trigger_mode")) {
-    const QByteArray v = (tdm ? o.analogDisplayTriggerTdmMode
-                              : o.analogDisplayTriggerPwmMode).toUtf8();
-    return g_variant_ref_sink(g_variant_new_string(v.constData()));
-  }
-  if (!std::strcmp(id, "display_trigger_channel"))
-    return g_variant_ref_sink(g_variant_new_int64(
-        tdm ? o.analogDisplayTriggerTdmChannel : o.analogDisplayTriggerPwmChannel));
-  if (!std::strcmp(id, "display_trigger_edge")) {
-    const QByteArray v = (tdm ? o.analogDisplayTriggerTdmEdge
-                              : o.analogDisplayTriggerPwmEdge).toUtf8();
-    return g_variant_ref_sink(g_variant_new_string(v.constData()));
-  }
-  if (!std::strcmp(id, "display_trigger_level"))
-    return g_variant_ref_sink(g_variant_new_double(
-        tdm ? o.analogDisplayTriggerTdmLevel : o.analogDisplayTriggerPwmLevel));
-  if (!std::strcmp(id, "display_trigger_position"))
-    return g_variant_ref_sink(g_variant_new_int64(
-        tdm ? o.analogDisplayTriggerTdmPosition : o.analogDisplayTriggerPwmPosition));
-  return nullptr;
 }
 
 void seed_analog_trigger_memory(data::decode::Decoder *decoder, const srd_decoder *d) {
@@ -292,50 +246,15 @@ Property* DecoderOptions::bind_enum(
 
 GVariant* DecoderOptions::getter(const char *id)
 {
-	GVariant *val = nullptr;
-
 	if (!_decoder) {
 		pxv_warn("%s", "DecoderOptions::getter: _decoder is nullptr");
 		return nullptr;
 	}
 	assert(_decoder);
 
-    const srd_decoder *const definition = _decoder->decoder();
-    if (std::strcmp(id, "realtime_decode") == 0 && definition && definition->id &&
-        std::strncmp(definition->id, "tdm_audio", std::strlen("tdm_audio")) == 0) {
-        return g_variant_ref_sink(g_variant_new_boolean(
-            AppConfig::Instance().appOptions.tdmRealtimeDecode));
-    }
-    if (GVariant *remembered = remembered_analog_trigger_value(definition, id)) {
-        return remembered;
-    }
-
-	// Get the value from the hash table if it is already present
-	const map<string, GVariant*>& options = _decoder->options();
-	auto iter = options.find(id);
-
-	if (iter != options.end())
-		val = (*iter).second;
-	else
-	{
-		assert(_decoder->decoder());
-
-		// Get the default value if not
-		for (GSList *l = _decoder->decoder()->options; l; l = l->next)
-		{
-			const srd_decoder_option *const opt =
-				(srd_decoder_option*)l->data;
-			if (strcmp(opt->id, id) == 0) {
-				val = opt->def;
-				break;
-			}
-		}
-	}
-
-	if (val)
-		g_variant_ref(val);
-
-	return val;
+	// Pure data access lives in the Core data layer (pv/data/decode/
+	// decoder_options.cpp) so session save/export work without Widgets.
+	return pv::data::decode::get_decoder_option_value(_decoder, id);
 }
 
 void DecoderOptions::setter(const char *id, GVariant *value)

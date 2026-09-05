@@ -33,16 +33,11 @@
 #include "pv/data/snapshot/analogsnapshot.h"
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/decode/decoder.h"
+#include "pv/data/decode/decoder_options.h"
 #include "pv/data/decode/row.h"
 #include "pv/data/model/signalmodel.h"
-#include "pv/view/trace/trace.h"
-#include "pv/view/signal/signal.h"
-#include "pv/view/signal/logicsignal.h"
-#include "pv/view/signal/dsosignal.h"
-#include "pv/view/trace/decodetrace.h"
-#include "pv/dock/protocoldock.h"
- 
-#include <QFileDialog>
+
+#include "pv/core/ui_hooks.h"
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -61,7 +56,7 @@
 #include "pv/utility/path.h"
 #include "pv/base/log.h" 
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 #define DEOCDER_CONFIG_VERSION  2
  
@@ -1612,10 +1607,9 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
             }
 
             QJsonObject options_obj;
-            // PulseView RAII pattern: use unique_ptr instead of raw new.
-            // Previously this was `new` without a matching `delete`,
-            // leaking a DecoderOptions object on every save.
-            auto dec_binding = std::make_unique<prop::binding::DecoderOptions>(stack, dec);
+            // Option values are read directly from the Core data layer
+            // (get_decoder_option_value) instead of instantiating the
+            // View-side prop::binding::DecoderOptions wrapper.
 
             for (GSList *l = d->options; l; l = l->next)
             {
@@ -1623,19 +1617,19 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
                     (srd_decoder_option*)l->data;
 
                 if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("d"))) {
-                    GVariant *const var = dec_binding->getter(opt->id);
+                    GVariant *const var = data::decode::get_decoder_option_value(dec, opt->id);
                     if (var != nullptr) {
                         options_obj[opt->id] = QJsonValue::fromVariant(g_variant_get_double(var));
                         g_variant_unref(var);
                     }
                 } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("x"))) {
-                    GVariant *const var = dec_binding->getter(opt->id);
+                    GVariant *const var = data::decode::get_decoder_option_value(dec, opt->id);
                     if (var != nullptr) {
                         options_obj[opt->id] = QJsonValue::fromVariant(get_integer(var));
                         g_variant_unref(var);
                     }
                 } else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("s"))) {
-                    GVariant *const var = dec_binding->getter(opt->id);
+                    GVariant *const var = data::decode::get_decoder_option_value(dec, opt->id);
                     if (var != nullptr) {
                         const char *sz = g_variant_get_string(var, nullptr);
                         options_obj[opt->id] = QJsonValue::fromVariant(QString(sz));
@@ -1696,7 +1690,7 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
     return true;
 }
 
-bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_array)
+bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &dec_array)
 {
     if (_session->get_device()->get_work_mode() != LOGIC)
     {
@@ -1742,8 +1736,10 @@ bool StoreSession::load_decoders(dock::ProtocolDock *widget, QJsonArray &dec_arr
                 }
         }
 
-        //create protocol
-        bool ret = widget->add_protocol_by_id(dec_obj["id"].toString(), true, sub_decoders);
+        //create protocol (through the View-supplied callback; in headless
+        // mode the callback may not exist and every id is "unknown")
+        bool ret = add_protocol &&
+                   add_protocol(dec_obj["id"].toString(), true, sub_decoders);
         if (!ret)
         {
             for(auto sub : sub_decoders){
@@ -2051,12 +2047,12 @@ QString StoreSession::MakeSaveFile(bool bDlg)
     // Show the dialog
     if (bDlg)
     {
-        default_name = QFileDialog::getSaveFileName(
-            nullptr,
+        default_name = pv::ask_save_file(
             L_S(STR_PAGE_MSG, S_ID(IDS_MSG_SAVE_FILE),"Save File"),
             default_name,
             //tr
-            "PXView Data (*.pxl)");
+            "PXView Data (*.pxl)",
+            nullptr);
 
         if (default_name.isEmpty())
         {
@@ -2126,8 +2122,7 @@ QString StoreSession::MakeExportFile(bool bDlg)
 
     if (bDlg)
     {
-        default_name = QFileDialog::getSaveFileName(
-            nullptr,
+        default_name = pv::ask_save_file(
             L_S(STR_PAGE_MSG, S_ID(IDS_MSG_EXPORT_DATA),"Export Data"),
             default_name,
             filter,

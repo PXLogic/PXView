@@ -14,7 +14,7 @@
 
 #include "pv/api/app_service.h"
 #include "pv/api/session_service.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/session/sigsession.h"
 #include "pv/core/documentregistry.h"
 #include "pv/session/deviceagent.h"

@@ -23,7 +23,7 @@
 #include <iterator>
 #include <cmath>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signaldata.h"
@@ -36,7 +36,7 @@
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/iconcache.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/ui/xtoolbutton.h"
 #include "pv/view/cursor/cursor.h"

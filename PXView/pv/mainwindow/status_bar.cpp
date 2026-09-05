@@ -37,7 +37,7 @@
 #include "pv/session/tabcontext.h"
 #include "pv/view/view.h"
 #include "pv/view/viewport/viewport.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 namespace pv {
 

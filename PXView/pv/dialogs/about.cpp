@@ -35,7 +35,7 @@
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
 #include "pv/utility/encoding.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 
 

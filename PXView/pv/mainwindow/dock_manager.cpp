@@ -35,7 +35,7 @@
 #include <QObject>
 #include <QScrollArea>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/session/deviceagent.h"
 #include "pv/dock/deviceoptionsdock.h"
@@ -53,7 +53,7 @@
 #include "pv/toolbars/samplingbar.h"
 #include "pv/toolbars/trigbar.h"
 #include "pv/toolbars/filebar.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/string_ids.h"
 #include "pv/view/view.h"
 #include "pv/widgets/slidingdrawer.h"

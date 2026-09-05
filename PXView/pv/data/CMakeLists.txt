@@ -9,7 +9,26 @@
 # ${PXVIEW_LINK_LIBS}; libsigrok/libsigrokdecode are compiled as sources
 # directly into the executable. Qt6::Core is the only direct link needed
 # here (matches pxview-utility/pxview-config convention).
+#=== Meta-objects for this library's Q_OBJECT classes ==========================
+# RULE: a class's moc is compiled into the archive containing its
+# implementation. These classes are implemented here, so their meta-objects
+# belong here too -- putting them in pxview-core instead would create a
+# cross-archive circular dependency (impl .obj needs the vtable, the moc .obj
+# needs the impl) that single-pass GNU ld cannot resolve.
+# Absolute paths: qt6_wrap_cpp resolves relative inputs against
+# CMAKE_CURRENT_SOURCE_DIR (PXView/pv/data), and the generated moc_*.cpp
+# embeds the input path verbatim in its #include directive -- an absolute
+# path always resolves regardless of the compiler's include search path.
+qt6_wrap_cpp(PXVIEW_DATA_MOC_OUTPUT
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/signallistmodel.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/signalmodel.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/stack/decoderstack.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/stack/mathstack.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/stack/spectrumstack.h
+)
+
 add_library(pxview-data STATIC
+    ${PXVIEW_DATA_MOC_OUTPUT}
     snapshot/snapshot.cpp
     model/signaldata.cpp
     model/signalmodel.cpp
@@ -41,6 +60,7 @@ add_library(pxview-data STATIC
     decode/rowdata.cpp
     decode/row.cpp
     decode/decoder.cpp
+    decode/decoder_options.cpp
     decode/annotation.cpp
     decode/annotation_heap.cpp
     decode/annotationrestable.cpp
@@ -74,7 +94,7 @@ target_link_libraries(pxview-data PRIVATE
 )
 
 # Expose PXView/ as include path so data .cpp files can resolve
-# includes (pv/session/sigsession.h, pv/session/deviceagent.h, pv/base/log.h, pv/ui/langresource.h,
+# includes (pv/session/sigsession.h, pv/session/deviceagent.h, pv/base/log.h, pv/core/langresource.h,
 # pv/config/appconfig.h, pv/utility/array.h, pv/base/pxvdef.h, etc.).
 target_include_directories(pxview-data PUBLIC
     ${CMAKE_SOURCE_DIR}/PXView

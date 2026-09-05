@@ -60,7 +60,7 @@
 #include "pv/view/viewport/viewport.h"
 #include "pv/toolbars/samplingbar.h"
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/document/sessiondocument.h"

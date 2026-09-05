@@ -36,7 +36,7 @@
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
 #include "pv/session/deviceagent.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
  
 using namespace std;
 

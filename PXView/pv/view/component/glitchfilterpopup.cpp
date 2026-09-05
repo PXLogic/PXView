@@ -26,7 +26,7 @@
 #include <algorithm>
 
 #include "pv/config/appconfig.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include <QComboBox>
 #include <QFrame>
 #include <QHBoxLayout>

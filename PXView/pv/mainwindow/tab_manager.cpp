@@ -50,7 +50,7 @@
 #include "pv/session/tabcontext.h"
 #include "pv/toolbars/samplingbar.h"
 #include "pv/ui/draggabletabwidget.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/view/view.h"
 

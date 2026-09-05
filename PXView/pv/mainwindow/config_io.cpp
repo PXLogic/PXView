@@ -37,7 +37,7 @@
 #include "pv/session/tabcontext.h"
 #include "pv/toolbars/filebar.h"
 #include "pv/toolbars/samplingbar.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/utility/encoding.h"
 #include "pv/utility/path.h"
@@ -812,7 +812,13 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
     if (deArray.empty() == false) {
       haveDecoder = true;
       StoreSession ss(_wnd->session());
-      ss.load_decoders(_wnd->dock_manager()->protocol_widget(), deArray);
+      auto *dock = _wnd->dock_manager()->protocol_widget();
+      ss.load_decoders(
+          [dock](const QString &id, bool stacked_ok,
+                 std::list<pv::data::decode::Decoder *> &subs) {
+              return dock->add_protocol_by_id(id, stacked_ok, subs);
+          },
+          deArray);
       _wnd->current_view()->update_all_trace_postion();
     }
   }
@@ -982,7 +988,13 @@ void MainWindowConfigIO::load_demo_decoder_config(QString optname) {
 
   if (bLoadSurccess) {
     StoreSession ss(_wnd->session());
-    ss.load_decoders(_wnd->dock_manager()->protocol_widget(), deArray);
+    auto *dock = _wnd->dock_manager()->protocol_widget();
+    ss.load_decoders(
+        [dock](const QString &id, bool stacked_ok,
+               std::list<pv::data::decode::Decoder *> &subs) {
+            return dock->add_protocol_by_id(id, stacked_ok, subs);
+        },
+        deArray);
   }
 
   _wnd->current_view()->update_all_trace_postion();

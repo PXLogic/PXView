@@ -33,7 +33,7 @@
 #include "pv/base/eventobject.h"
 #include "pv/base/log.h"
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 
 using namespace std;

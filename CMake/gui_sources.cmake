@@ -4,11 +4,11 @@
 
 # GUI/View layer: Qt Widgets/Svg dependent sources (application entry, main window,
 # toolbars, docks, dialogs, view objects, widgets, ui utilities, prop bindings,
-# AppControl which references QWidget for top-window tracking).
+# TopWindowTracker which owns the QWidget top-window pointer).
 set(PXVIEW_GUI_SOURCES
     PXView/main.cpp
     PXView/application.cpp
-    PXView/pv/mainwindow/appcontrol.cpp
+    PXView/pv/mainwindow/topwindowtracker.cpp
     PXView/pv/mainwindow/mainwindow.cpp
     PXView/pv/mainwindow/config_io.cpp
     PXView/pv/mainwindow/event_dispatcher.cpp
@@ -122,7 +122,6 @@ PXView/pv/view/signal/dsosignal_paint.cpp
     PXView/pv/ui/toast.cpp
     PXView/pv/ui/dscombobox.cpp
     PXView/pv/ui/dsspinbox.cpp
-    PXView/pv/ui/langresource.cpp
     PXView/pv/ui/fn.cpp
     PXView/pv/ui/xtoolbutton.cpp
     PXView/pv/ui/draggabletabbar.cpp
@@ -224,7 +223,6 @@ set(PXView_HEADERS
     PXView/pv/view/trace/trace.h
     PXView/pv/view/trace/paint_context.h
     PXView/pv/view/trace/selectableitem.h
-    PXView/pv/data/stack/decoderstack.h
     PXView/pv/view/trace/decodetrace.h
     PXView/pv/view/trace/decodermodel.h
     PXView/pv/widgets/fakelineedit.h
@@ -233,13 +231,11 @@ set(PXView_HEADERS
     PXView/pv/widgets/decodergroupbox.h
     PXView/pv/prop/string.h
     PXView/pv/dialogs/storeprogress.h
-    PXView/pv/session/storesession.h
     PXView/pv/view/component/devmode.h
     PXView/pv/dialogs/dsomeasure.h
     PXView/pv/dialogs/protocollist.h
     PXView/pv/dialogs/protocolexp.h
     PXView/pv/dialogs/fftoptions.h
-    PXView/pv/data/stack/mathstack.h
     PXView/pv/view/trace/mathtrace.h
     PXView/pv/view/component/viewstatus.h
     PXView/pv/toolbars/titlebar.h
@@ -259,10 +255,7 @@ set(PXView_HEADERS
     PXView/pv/dialogs/lissajousoptions.h
     PXView/pv/view/trace/lissajoustrace.h
     PXView/pv/view/trace/spectrumtrace.h
-    PXView/pv/data/stack/spectrumstack.h
     PXView/pv/data/datasource.h
-    PXView/pv/data/model/signalmodel.h
-    PXView/pv/data/model/signallistmodel.h
     PXView/pv/data/document/sessionsnapshot.h
     PXView/pv/data/document/sessiondocument.h
     PXView/pv/dialogs/mathoptions.h
@@ -279,14 +272,11 @@ PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/view/component/dso_trigger_config.h
     PXView/pv/view/component/dso_measure.h
     PXView/pv/dock/protocoldock.h
-    PXView/pv/data/stack/decoderstack.h
     PXView/pv/view/trace/decodetrace.h
     PXView/pv/widgets/decodergroupbox.h
     PXView/pv/widgets/decodermenu.h
     PXView/pv/config/appconfig.h
-    PXView/pv/mainwindow/appcontrol.h
-    PXView/pv/base/dstimer.h
-    PXView/pv/base/eventobject.h
+    PXView/pv/mainwindow/topwindowtracker.h
     PXView/pv/base/ZipMaker.h
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h
@@ -314,8 +304,6 @@ PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/api/session_service.h
     PXView/pv/api/app_service.h
     PXView/pv/api/rpc_dispatcher.h
-    PXView/pv/api/ws_transport.h
-    PXView/pv/api/mcp_transport.h
     ${UI_HEADERS}
 )
  
@@ -336,7 +324,7 @@ set(PXView_HEADERS_NO_MOC
     PXView/pv/data/document/sessionsnapshot.h
     PXView/pv/data/document/sessiondocument.h
     PXView/pv/config/appconfig.h
-    PXView/pv/mainwindow/appcontrol.h
+    PXView/pv/mainwindow/topwindowtracker.h
     PXView/pv/base/ZipMaker.h
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h

@@ -66,13 +66,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/config/shortcutdefs.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
 #include "pv/ui/dscombobox.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/uimanager.h"
 
 ShortcutKeyCapture::ShortcutKeyCapture(QWidget *parent)

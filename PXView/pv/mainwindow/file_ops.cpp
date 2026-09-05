@@ -50,7 +50,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/session/sessionmanager.h"
 #include "pv/session/sigsession.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/utility/path.h"
 

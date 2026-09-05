@@ -53,8 +53,9 @@
 #include "pv/base/pxvdef.h"
 #include "pv/config/appconfig.h"
 #include "pv/ui/msgbox.h"
-#include "pv/mainwindow/appcontrol.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/appcontrol.h"
+#include "pv/mainwindow/topwindowtracker.h"
+#include "pv/core/langresource.h"
 #include "pv/base/log.h"
 #include "pv/dialogs/pxdialog.h"
 #include "pv/ui/popupdlglist.h"
@@ -89,7 +90,7 @@ MainFrame::MainFrame()
     _bottom_left = nullptr;
     _bottom_right = nullptr;
 
-    AppControl::Instance()->SetTopWindow(this);
+    TopWindowTracker::Instance()->SetTopWindow(this);
   
    bool isWin32 = false;
 

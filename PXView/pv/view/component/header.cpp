@@ -41,7 +41,7 @@
 #include <cassert>
 #include <set>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/base/pxvdef.h"
@@ -49,7 +49,7 @@
 #include "pv/session/sigsession.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/view/signal/analogsignal.h"
 #include "pv/view/trace/decodetrace.h"
 #include "pv/view/signal/dsosignal.h"

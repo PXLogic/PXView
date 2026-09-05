@@ -37,7 +37,7 @@
 #include "pv/base/log.h"
 #include "pv/view/view.h"
 #include "pv/view/cursor/cursor.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/dscombobox.h"
 
 namespace pv {

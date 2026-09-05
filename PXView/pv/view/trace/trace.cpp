@@ -34,7 +34,7 @@
 #include "pv/base/log.h"
 #include "pv/config/appconfig.h"
 #include "pv/config/appconfig.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/ui/dockfonts.h"
 
 

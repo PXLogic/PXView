@@ -34,7 +34,7 @@
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/decode/rowdata.h"
 #include "pv/data/decode/annotation.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 #include <QGuiApplication>
 #include <QClipboard>

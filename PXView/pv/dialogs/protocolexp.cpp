@@ -45,7 +45,7 @@
 #include "pv/utility/encoding.h"
 #include "pv/utility/path.h"
 #include "pv/base/log.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 
 #define EXPORT_DEC_ROW_COUNT_MAX 20

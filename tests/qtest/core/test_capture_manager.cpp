@@ -40,7 +40,7 @@
 
 #include "pv/base/log.h"          // pxv_log extern + assert redefinition
 #include "pv/core/capturemanager.h"
-#include "pv/ui/langresource.h"    // GUI l10n helper (stubbed below)
+#include "pv/core/langresource.h"    // GUI l10n helper (stubbed below)
 #include "pv/ui/msgbox.h"          // GUI message box (stubbed below)
 
 // ---- Link shims for GUI-only helpers ----

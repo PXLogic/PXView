@@ -118,7 +118,7 @@
 /* __STDC_FORMAT_MACROS is required for PRIu64 and friends (in C++). */
 #include "pv/base/ZipMaker.h"
 #include "pv/api/app_service.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/config/shortcutdefs.h"
 #include "pv/session/deviceagent.h"
@@ -126,7 +126,7 @@
 #include "pv/base/log.h"
 #include "pv/mainwindow/mainframe.h"
 #include "pv/session/sigsession.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/ui/uimanager.h"
 #include "pv/utility/encoding.h"

@@ -31,7 +31,7 @@
 #include "pv/base/gvarptr.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 using namespace std;
 

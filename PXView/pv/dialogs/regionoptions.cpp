@@ -27,7 +27,7 @@
 #include "pv/view/view.h"
 #include "pv/base/eventobject.h"
 
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 
 using namespace std;
 

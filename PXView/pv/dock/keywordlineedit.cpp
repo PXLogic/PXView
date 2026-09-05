@@ -24,7 +24,7 @@
 #include "pv/config/appconfig.h"
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include <QHBoxLayout>
 #include <QTimer>
 

@@ -26,9 +26,10 @@
 #include <QVBoxLayout>
 #include <cassert>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
+#include "pv/mainwindow/topwindowtracker.h"
 #include "pv/config/appconfig.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
@@ -713,7 +714,7 @@ void TitleBar::mousePressEvent(QMouseEvent *event) {
     int x = (int)event->position().x();
     int y = (int)event->position().y();
 
-    bool bTopWidow = AppControl::Instance()->GetTopWindow() == _parent;
+    bool bTopWidow = TopWindowTracker::Instance()->GetTopWindow() == _parent;
     bool bClick = (x >= 6 && y >= 5 && x <= width() - 6);
 
     if (!bTopWidow || bClick) {
@@ -768,7 +769,7 @@ void TitleBar::mouseMoveEvent(QMouseEvent *event) {
 
 #ifdef _WIN32
 
-      QRect screenRect = AppControl::Instance()->_screenRect;
+      QRect screenRect = TopWindowTracker::Instance()->screenRect;
 
       if (screenRect.width() > 0 && QGuiApplication::screens().size() > 1) {
 

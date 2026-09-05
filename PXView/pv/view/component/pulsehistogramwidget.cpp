@@ -24,7 +24,7 @@
 #include "pv/view/component/pulsehistogramwidget.h"
 
 #include "pv/config/appconfig.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include <QBrush>
 #include <QColor>
 #include <QFont>

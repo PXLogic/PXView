@@ -25,7 +25,7 @@
 #include <cassert>
 #include <QRegularExpressionValidator>
 #include <QTimer>
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
  
 
 namespace pv {

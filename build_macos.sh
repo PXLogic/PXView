@@ -271,10 +271,42 @@ if [ "$BUILD_DMG" = true ]; then
         echo "   [警告] 未找到 Python.framework"
     fi
 
+    # ── pxviewd: 重写 Qt 库引用为 bundle 内 rpath ──
+    # pxviewd (console headless daemon) 安装在 Contents/MacOS/ 里，紧邻 GUI
+    # 主程序，但 macdeployqt 只重写主 bundle 可执行文件。这里把它指向
+    # Homebrew 的绝对 Qt 路径改成 @rpath，使其从 Contents/Frameworks 解析 ——
+    # 与 macdeployqt 处理 GUI 主程序后的形态一致。pxviewd 依赖的 Qt 组件是
+    # GUI 主程序依赖的子集，因此 Frameworks 里一定齐全。
+    PXVIEWD_BIN="$BUNDLE/Contents/MacOS/pxviewd"
+    if [ -f "$PXVIEWD_BIN" ]; then
+        echo "   重写 pxviewd 的库引用 (otool/install_name_tool)..."
+        otool -L "$PXVIEWD_BIN" | awk 'NR>1 {print $1}' | while read -r dep; do
+            case "$dep" in
+                /usr/lib/*|/System/*|@*) continue ;;  # 系统库/已是 rpath 形式
+                *.framework/*)
+                    rel="$(printf '%s' "$dep" | sed -E 's|^.*/([A-Za-z0-9_+]+\.framework/.+)$|\1|')"
+                    ;;
+                *)
+                    rel="$(basename "$dep")"
+                    ;;
+            esac
+            install_name_tool -change "$dep" "@rpath/$rel" "$PXVIEWD_BIN" 2>/dev/null || true
+        done
+        # 自检: 不应再残留指向 Homebrew 的绝对路径
+        if otool -L "$PXVIEWD_BIN" | grep -q "$BREW_PREFIX\|/usr/local/opt"; then
+            echo "   [警告] pxviewd 仍存在指向 Homebrew 的库引用，请检查:"
+            otool -L "$PXVIEWD_BIN" | grep "$BREW_PREFIX\|/usr/local/opt" | sed 's/^/       /'
+        else
+            echo "   [OK] pxviewd 库引用已全部指向 bundle 内部"
+        fi
+    else
+        echo "   [警告] 未找到 $PXVIEWD_BIN (pxviewd 未随 bundle 安装?)"
+    fi
+
     # ── 清除隔离标记 ──
     xattr -cr "$BUNDLE" 2>/dev/null || true
 
-    # ── 递归签名 ──
+    # ── 递归签名 ── (--deep 会连同 Contents/MacOS/pxviewd 一起签)
     echo "   codesign 递归签名..."
     codesign --force --deep --sign "$CODESIGN_IDENTITY" "$BUNDLE"
 
@@ -285,12 +317,34 @@ if [ "$BUILD_DMG" = true ]; then
     fi
     echo "   [OK] 签名验证通过"
 
-    # ── 生成 DMG ──
+    # ── 生成 DMG (拖曳式安装布局) ──
+    # 内容 = PXView.app + 指向 /Applications 的符号链接，用户把 app 拖到
+    # Applications 图标即完成安装。此前 DMG 里只有裸 app、没有任何安装引导。
+    #
+    # 做法：先产出可读写镜像，挂载后在卷内直接创建符号链接，再压缩为
+    # 只读 UDZO。不依赖 hdiutil -srcfolder 对符号链接的复制语义，链接
+    # 一定准确。
     echo "   hdiutil 生成 DMG..."
     DMG_NAME="PXView-macOS-$ARCH_NAME-$VERSION.dmg"
+    DMG_RW="$INSTALL_PREFIX/.pxview-dmg-rw.dmg"
+    MOUNT_DIR="$INSTALL_PREFIX/.pxview-dmg-mount"
+    rm -f "$DMG_RW"
+    rm -rf "$MOUNT_DIR"
+    mkdir -p "$MOUNT_DIR"
+
     hdiutil create -volname PXView -srcfolder "$BUNDLE" \
-        -ov -format UDZO "$INSTALL_PREFIX/$DMG_NAME"
-    echo "   [OK] DMG 生成: $DMG_NAME"
+        -ov -format UDRW "$DMG_RW" >/dev/null
+    hdiutil attach "$DMG_RW" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
+
+    # 拖曳安装标配: /Applications 符号链接
+    ln -sfn /Applications "$MOUNT_DIR/Applications"
+
+    hdiutil detach "$MOUNT_DIR" -quiet || hdiutil detach "$MOUNT_DIR" -force
+    hdiutil convert "$DMG_RW" -format UDZO -o "$INSTALL_PREFIX/$DMG_NAME" -ov \
+        >/dev/null
+    rm -f "$DMG_RW"
+    rm -rf "$MOUNT_DIR"
+    echo "   [OK] DMG 生成 (含 Applications 拖曳链接): $DMG_NAME"
     ls -la "$INSTALL_PREFIX"/*.dmg
 else
     echo " [7/7] 跳过 DMG 打包 (--no-dmg)"

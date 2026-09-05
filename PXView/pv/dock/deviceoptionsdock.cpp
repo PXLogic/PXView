@@ -43,7 +43,7 @@
 #include <QPointer>
 #include <cassert>
 
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
 #include "pv/config/appconfig.h"
 #include "pv/core/eventbus.h"
 #include "pv/data/document/sessiondocument.h"
@@ -58,7 +58,7 @@
 #include "pv/session/tabcontext.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/ui/toast.h"
 #include "pv/view/view.h"

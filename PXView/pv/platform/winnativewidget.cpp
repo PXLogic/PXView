@@ -38,7 +38,8 @@
 #include "pv/base/log.h"
 #include "pv/mainwindow/mainframe.h"
 #include "pv/base/pxvdef.h"
-#include "pv/mainwindow/appcontrol.h"
+#include "pv/core/appcontrol.h"
+#include "pv/mainwindow/topwindowtracker.h"
 
 #define FIXED_WIDTH(widget) (widget->minimumWidth() >= widget->maximumWidth())
 #define FIXED_HEIGHT(widget) (widget->minimumHeight() >= widget->maximumHeight())
@@ -682,7 +683,7 @@ QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
     {
         if (screen->geometry().topLeft() == top_left)
         {   
-            AppControl::Instance()->_screenRect = screen->availableGeometry();
+            TopWindowTracker::Instance()->screenRect = screen->availableGeometry();
             return screen;
         }
     }

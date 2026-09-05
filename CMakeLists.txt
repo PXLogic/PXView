@@ -161,10 +161,11 @@ add_subdirectory(PXView/pv/data)
 # Compiles the Core layer sources (SigSession, DeviceAgent, Data layer, API
 # layer, utility, config) into a standalone static library that depends only
 # on Qt6::Core/Gui/Network/Concurrent/WebSockets (NOT Qt6::Widgets/Svg).
-# Q_OBJECT meta-object implementations (moc_*.cpp) for Core classes are compiled
-# in the executable target below; the static library may carry unresolved
-# meta-object symbols which get resolved at final executable link time.
-add_library(pxview-core STATIC ${PXVIEW_CORE_SOURCES})
+# Q_OBJECT meta-object implementations for Core classes are generated here and
+# compiled into this library (PXVIEW_CORE_HEADERS_MOC), so both the GUI
+# executable and the console pxviewd daemon resolve them from pxview-core.
+qt6_wrap_cpp(PXVIEW_CORE_MOC_OUTPUT ${PXVIEW_CORE_HEADERS_MOC})
+add_library(pxview-core STATIC ${PXVIEW_CORE_SOURCES} ${PXVIEW_CORE_MOC_OUTPUT})
 target_link_libraries(pxview-core PUBLIC
 	${QT_CORE_LIBS}
 	${PXVIEW_LINK_LIBS}
@@ -266,6 +267,67 @@ endif()
 
 if(NOT WIN32 AND NOT APPLE)
 	target_link_libraries(${PROJECT_NAME} "-Wl,--export-dynamic")
+endif()
+
+#===============================================================================
+#= pxviewd — console headless daemon (same pxview-core, NO Qt Widgets)
+#-------------------------------------------------------------------------------
+# pxviewd is the CLI/automation entry point. It links the same pxview-core +
+# libsigrok + libsigrokdecode as the GUI executable, but:
+#
+#   * NO ${QT_GUI_LIBS}: the Qt Widgets/Svg modules are never linked, so a
+#     GUI-less process cannot accidentally pull in GUI code. (Qt Core/Gui/
+#     Network/WebSockets arrive transitively through pxview-core's PUBLIC
+#     linkage, which is exactly the core-layer dependency set.)
+#   * NO "-mwindows" on Windows: it stays a console-subsystem binary, so
+#     stdout reaches the terminal, the shell can wait for it, and Ctrl+C
+#     delivers a clean shutdown -- the three things the GUI binary cannot do
+#     when driven headlessly (see PXView/main_daemon.cpp).
+#
+# Its runtime is pv::run_headless() (pv/core/headless_run.cpp), the very same
+# function `PXView --headless` runs, so the two entry points cannot drift.
+add_executable(pxviewd
+	${common_SOURCES}
+	PXView/main_daemon.cpp
+	${libsigrokdecode_SOURCES}
+)
+
+if(WIN32)
+	# Same Explorer/taskbar icon as the GUI binary (logo-win.ico via windres).
+	# As a console binary pxviewd has no window chrome, so the icon appears in
+	# Explorer, shortcuts and the task manager -- which is exactly where a
+	# user looks for it.
+	target_sources(pxviewd PRIVATE applogo.rc)
+endif()
+
+target_include_directories(pxviewd PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/common
+	${CMAKE_CURRENT_SOURCE_DIR}/libsigrokdecode
+)
+
+# Same whole-archive treatment as the GUI executable: libsigrok registers its
+# drivers via __attribute__((section("__sr_driver_list"))), and unreferenced
+# objects would otherwise be dropped, yielding an empty device list.
+target_link_libraries(pxviewd
+	pxview-core
+	${MIMALLOC_LIB}
+)
+if(WIN32)
+	target_link_libraries(pxviewd
+		"-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(APPLE)
+	target_link_libraries(pxviewd "-Wl,-all_load" libsigrok)
+else()
+	target_link_libraries(pxviewd
+		"-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
+
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+	# Same relocatable layout as the GUI binary: bin/pxviewd -> ../lib.
+	set_target_properties(pxviewd PROPERTIES
+		INSTALL_RPATH "\$ORIGIN/../lib"
+		BUILD_RPATH "\$ORIGIN/../lib"
+	)
 endif()
 
 #===============================================================================

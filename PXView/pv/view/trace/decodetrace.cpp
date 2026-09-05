@@ -35,7 +35,7 @@
 #include "pv/toolbars/titlebar.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/dscombobox.h"
-#include "pv/ui/langresource.h"
+#include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/view/cursor/cursor.h"
 #include "pv/view/signal/logicsignal.h"

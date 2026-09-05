@@ -324,6 +324,7 @@ cp -a "$PAYLOAD/." "$PREFIX/"
 chmod -R u+rwX,go+rX,go-w "$PREFIX"
 
 chmod 755 "$PREFIX/bin/PXView"
+chmod 755 "$PREFIX/bin/pxviewd" 2>/dev/null || true
 [ -f "$PREFIX/bin/PXView-Agent" ] && chmod 755 "$PREFIX/bin/PXView-Agent"
 [ -f "$PREFIX/bin/pxview-launcher" ] && chmod 755 "$PREFIX/bin/pxview-launcher"
 find "$PREFIX/bin" -type f -name '*.so' -exec chmod 755 {} + 2>/dev/null || true
