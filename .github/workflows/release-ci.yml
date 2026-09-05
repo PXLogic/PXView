@@ -173,7 +173,9 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/install.dir/usr/lib:${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/lib:$LD_LIBRARY_PATH"
           export QT_QPA_PLATFORM=offscreen
-          PXV_BIN="$PWD/install.dir/usr/bin/PXView"
+          # pxviewd: console headless daemon sharing pxview-core with the GUI
+          # binary -- exercises the exact binary automation users run.
+          PXV_BIN="$PWD/install.dir/usr/bin/pxviewd"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
           GROUP1="test_01_mcp_protocol.py test_02_device_management.py test_03_capture_basic.py test_05_data_integrity.py test_13_signal_data.py test_14_16_config.py test_21_error_handling.py test_27_cursor_export.py test_29_work_mode.py test_30_pxl_format.py test_34_demo_waveform_check.py test_35_trigger_e2e.py"
@@ -240,6 +242,8 @@ jobs:
           }
 
           # ---- Start 3 PXView instances (direct children of this shell; nohup avoids SIGHUP) ----
+          # pxviewd = the console headless daemon (same core as `PXView --headless`);
+          # --headless is accepted as an implicit no-op for script compatibility.
           nohup "$PXV_BIN" --headless --port 10110 --ws-port 10430 -l 4 > /tmp/pxv1.log 2>&1 &
           PID1=$!
           nohup "$PXV_BIN" --headless --port 10111 --ws-port 10431 -l 4 > /tmp/pxv2.log 2>&1 &
@@ -759,7 +763,9 @@ jobs:
       # ============================================================
       - name: TSan Phase 1 — headless mode (MCP protocol)
         run: |
-          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/PXView"
+          # pxviewd: console headless daemon (same core; exercises the
+          # binary automation users actually run).
+          export PXVIEW_EXE_PATH="$PWD/install.dir/usr/bin/pxviewd"
           export PXVIEW_STARTUP_TIMEOUT=180
           export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
           export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1"

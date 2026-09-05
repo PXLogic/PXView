@@ -375,6 +375,23 @@ install(TARGETS irmp DESTINATION ${MAC_RES_PREFIX}bin)
 
 install(DIRECTORY lang DESTINATION ${MAC_RES_PREFIX}share/PXView)
 
+#===============================================================================
+#= pxview-cli runtime sources (zero-dependency Python automation client)
+#-------------------------------------------------------------------------------
+# Installed as plain .py files, deliberately NOT pip-managed: the GUI install
+# owns them, and the platform shims (window/package.sh generates
+# pxview-cli.cmd; packaging/install.sh writes /usr/local/bin/pxview-cli) put
+# this directory on PYTHONPATH. Windows additionally bundles the matching
+# python.exe (see package.sh) so the CLI works with no system Python and no
+# pip install.
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/pxview-automation/src/pxview_automation
+    DESTINATION ${MAC_RES_PREFIX}share/pxview/python
+    FILES_MATCHING PATTERN "*.py")
+install(FILES
+    ${CMAKE_SOURCE_DIR}/pxview-automation/docs/cli-reference.md
+    ${CMAKE_SOURCE_DIR}/pxview-automation/docs/examples.md
+    DESTINATION ${MAC_RES_PREFIX}share/pxview/python/docs)
+
 # Install web client if it has been built
 install(CODE "
     if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html\")

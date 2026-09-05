@@ -107,7 +107,7 @@ marker_version() {
 # removes them.
 legacy_cleanup_externals() {
     local d s
-    rm -f -- "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent" "$BIN_DIR/pxview-uninstall"
+    rm -f -- "$BIN_DIR/pxview" "$BIN_DIR/pxview-agent" "$BIN_DIR/pxview-uninstall" "$BIN_DIR/pxview-cli"
     rm -f -- "$APPS_DIR"/pxview*.desktop
     d=/usr/lib/udev/rules.d
     [ -d "$d" ] || { d=/lib/udev/rules.d; [ -d "$d" ] || d=/etc/udev/rules.d; }
@@ -458,6 +458,24 @@ EOF
     info "$BIN_DIR/pxview-agent"
 fi
 
+# pxview-cli: bundled automation client. The .py sources live in
+# $PREFIX/share/pxview/python (installed by CMake); the wrapper puts them on
+# PYTHONPATH and runs with the SYSTEM python3 -- the client is zero-dependency
+# pure stdlib (python >= 3.8), and the bundled runtime ships no interpreter on
+# Linux. /usr/local/bin is the FHS-standard place for this and uninstall.sh
+# removes it via manifest + glob, so no user env vars are ever touched.
+if [ -d "$PREFIX/share/pxview/python/pxview_automation" ]; then
+    cat > "$BIN_DIR/pxview-cli" <<EOF
+#!/bin/sh
+# PXView automation CLI (bundled with PXView; zero-dependency pure stdlib).
+PYTHONPATH="$PREFIX/share/pxview/python\${PYTHONPATH:+:\$PYTHONPATH}" \\
+    exec python3 -m pxview_automation.cli "\$@"
+EOF
+    chmod 755 "$BIN_DIR/pxview-cli"
+    track_external "$BIN_DIR/pxview-cli"
+    info "$BIN_DIR/pxview-cli"
+fi
+
 # Uninstall wrapper: lifts to root with a graphical prompt (pkexec) when
 # available, otherwise falls back to sudo. This is what the "卸载 PXView"
 # desktop/menu entry calls.
@@ -620,7 +638,7 @@ fi
 
 # 2) Glob fallback -- covers pre-manifest installs and any stragglers; the
 #    same patterns the installer itself uses for its legacy upgrade path.
-rm -f -- "\$BIN_DIR/pxview" "\$BIN_DIR/pxview-agent" "\$BIN_DIR/pxview-uninstall"
+rm -f -- "\$BIN_DIR/pxview" "\$BIN_DIR/pxview-agent" "\$BIN_DIR/pxview-uninstall" "\$BIN_DIR/pxview-cli"
 rm -f -- "\$APPS_DIR"/pxview*.desktop
 UDEV_DIR=/usr/lib/udev/rules.d
 [ -d "\$UDEV_DIR" ] || { UDEV_DIR=/lib/udev/rules.d; [ -d "\$UDEV_DIR" ] || UDEV_DIR=/etc/udev/rules.d; }

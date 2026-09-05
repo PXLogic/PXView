@@ -134,6 +134,17 @@ Section -AdditionalIcons
   WriteIniStr "$INSTDIR\${PRODUCT_NAME}.url" "InternetShortcut" "URL" "${PRODUCT_WEB_SITE}"
   CreateShortCut "$SMPROGRAMS\PXView\Website.lnk" "$INSTDIR\${PRODUCT_NAME}.url"
   CreateShortCut "$SMPROGRAMS\PXView\Uninstall.lnk" "$INSTDIR\uninst.exe"
+  ; --- Headless/automation entries ---
+  ; PXView CLI: opens a PRE-CONFIGURED cmd window (shim sets PYTHONHOME/
+  ; PYTHONPATH itself). Deliberately NO system-PATH modification -- users who
+  ; want global terminal access add $INSTDIR to PATH themselves.
+  CreateShortCut "$SMPROGRAMS\PXView\PXView CLI.lnk" "$SYSDIR\cmd.exe" \
+    '/k "$INSTDIR\pxview-cli.cmd"'
+  ; PXView Daemon: console binary -- double-click keeps a log window open
+  ; with the MCP/WS ports visible.
+  CreateShortCut "$SMPROGRAMS\PXView\PXView Daemon.lnk" "$INSTDIR\pxviewd.exe"
+  CreateShortCut "$SMPROGRAMS\PXView\PXView Automation Docs.lnk" \
+    "$INSTDIR\share\pxview\python\docs\cli-reference.md"
 SectionEnd
 
 Section -Post
@@ -287,6 +298,9 @@ Section Uninstall
   Delete "$SMPROGRAMS\PXView\PXView.lnk"
   Delete "$DESKTOP\PXView Agent.lnk"
   Delete "$SMPROGRAMS\PXView\PXView Agent.lnk"
+  Delete "$SMPROGRAMS\PXView\PXView CLI.lnk"
+  Delete "$SMPROGRAMS\PXView\PXView Daemon.lnk"
+  Delete "$SMPROGRAMS\PXView\PXView Automation Docs.lnk"
 
   RMDir "$SMPROGRAMS\PXView"
 

@@ -851,6 +851,20 @@ jobs:
           chmod +x window/copy-deps.sh
           bash window/package.sh
 
+      - name: Verify pxviewd + pxview-cli bundle in package
+        shell: bash
+        run: |
+          echo "=== Verifying headless/CLI artifacts in package/ ==="
+          test -f package/pxviewd.exe || { echo "FATAL: package/pxviewd.exe missing"; exit 1; }
+          test -f package/pxview-cli.cmd || { echo "FATAL: package/pxview-cli.cmd missing"; exit 1; }
+          test -f package/python.exe || { echo "FATAL: package/python.exe missing"; exit 1; }
+          test -f package/python._pth || { echo "FATAL: package/python._pth missing"; exit 1; }
+          test -f package/share/pxview/python/pxview_automation/cli.py \
+            || { echo "FATAL: pxview_automation sources missing"; exit 1; }
+          echo "pxviewd.exe : $(stat -c%s package/pxviewd.exe) bytes"
+          echo "python.exe  : $(stat -c%s package/python.exe) bytes"
+          echo "pxview-cli bundle verification passed"
+
       - name: Verify Python DLL in package
         run: |
           echo "=== Verifying Python runtime in package/ ==="

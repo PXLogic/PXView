@@ -182,6 +182,66 @@ if [ -d ../web/dist ]; then
     cp -r ../web/dist/* webui/
 fi
 
+# --- pxview-cli: bundled Python console client (zero pip requirement) ---
+# The package already carries the full MinGW Python runtime for the decoders
+# (libpython DLL, stdlib, .pyd) -- only python.exe itself is missing. Adding
+# it plus the pxview_automation .py sources (installed by CMake into
+# share/pxview/python) makes `pxview-cli` work out of the box through the
+# generated shim below.
+#
+# Path isolation: python.exe alone ignores PYTHONHOME (MinGW build keeps its
+# compile-time prefix), so we ship a python._pth (isolated mode) that pins
+# sys.path to the package's own stdlib + the client sources. The _pth filename
+# derives from the EXECUTABLE name (python.exe -> python._pth), so it does NOT
+# affect PXView.exe's embedded interpreter (it would look for PXView._pth).
+# No system Python, no pip, no PATH modification needed; users who want global
+# terminal access simply add this directory to PATH themselves (the .cmd file
+# name becomes the command name).
+CLI_SRC="../install.dir/share/pxview/python/pxview_automation/cli.py"
+PYTHON_EXE=""
+for cand in /ucrt64/bin/python.exe /ucrt64/bin/python3.exe; do
+    [ -f "$cand" ] && PYTHON_EXE="$cand" && break
+done
+if [ -f "$CLI_SRC" ] && [ -n "$PYTHON_EXE" ]; then
+    echo "=== Bundling pxview-cli (python.exe + automation client) ==="
+    cp "$PYTHON_EXE" python.exe
+
+    # python.exe's own DLLs (libpython3.14.dll etc.) -- same MinGW runtime the
+    # decoders use, but ldd the interpreter explicitly to be self-contained.
+    ../window/copy-deps.sh python.exe /ucrt64
+
+    # Extension modules' extra DLLs that ldd-on-python.exe cannot see:
+    #   _bz2.pyd -> libbz2-1.dll, _lzma.pyd -> liblzma-5.dll
+    # (zlib1/libffi are already handled above / by copy-deps of PXView.exe)
+    for extra in /ucrt64/bin/libbz2*.dll /ucrt64/bin/liblzma*.dll; do
+        [ -f "$extra" ] && cp "$extra" . 2>/dev/null || true
+    done
+
+    # Isolated sys.path, relative to python.exe's directory.
+    if [ -n "$PY_VER" ]; then
+        printf '%s\r\n' \
+            "lib/python${PY_VER}" \
+            "share/pxview/python" \
+            "." \
+            > python._pth
+    else
+        echo "WARNING: PY_VER unknown, python._pth may be wrong"
+    fi
+
+    cat > pxview-cli.cmd <<'EOF'
+@echo off
+rem PXView automation CLI shim.
+rem Fully self-contained: python.exe + python._pth (isolated sys.path) +
+rem stdlib + pxview_automation sources all live in this install directory.
+rem No system Python, no pip install, no PATH modification needed.
+rem For global terminal access, add this directory to PATH manually.
+"%~dp0python.exe" -m pxview_automation.cli %*
+EOF
+    echo "   [OK] python.exe + python._pth + pxview-cli.cmd bundled"
+else
+    echo "NOTE: pxview-cli not bundled (need install.dir/share/pxview/python from 'ninja install' + /ucrt64/bin/python.exe)"
+fi
+
 # --- Tauri desktop app (PXView Agent) ---
 # The Tauri binary wraps the web UI and spawns PXView.exe --headless.
 # It is placed alongside PXView.exe so it can find and launch it.

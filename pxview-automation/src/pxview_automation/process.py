@@ -53,19 +53,26 @@ class PXViewProcess:
                        not started.
     """
 
-    # Common Windows install locations
+    # Common Windows install locations. pxviewd (console daemon) is preferred
+    # over the GUI binary: it is a console-subsystem executable, so its logs
+    # are capturable and Ctrl+C works. GUI binary stays as fallback for
+    # installs that predate pxviewd.
     _WIN_SEARCH_PATHS = [
+        r"C:\Program Files\PXView\pxviewd.exe",
         r"C:\Program Files\PXView\PXView.exe",
         r"C:\Program Files (x86)\PXView\PXView.exe",
+        r"C:\PXView\pxviewd.exe",
         r"C:\PXView\PXView.exe",
         r"D:\PXView\PXView.exe",
     ]
 
     # Common Linux install locations
     _LINUX_SEARCH_PATHS = [
+        "/usr/local/bin/pxviewd",
+        "/opt/PXView/bin/pxviewd",
         "/usr/local/bin/PXView",
+        "/opt/PXView/bin/PXView",
         "/usr/bin/PXView",
-        "/opt/PXView/PXView",
     ]
 
     def __init__(
@@ -249,13 +256,22 @@ class PXViewProcess:
 
     @classmethod
     def _find_exe(cls) -> Optional[str]:
-        """Search for PXView executable in PATH and common locations."""
-        exe_name = "PXView.exe" if sys.platform == "win32" else "PXView"
+        """Search for a PXView executable in PATH and common locations.
 
-        # Search PATH
-        found = shutil.which(exe_name)
-        if found:
-            return found
+        Prefers the console daemon ``pxviewd`` (capturable stdout, clean
+        Ctrl+C shutdown) and falls back to the GUI binary ``PXView`` for
+        installs that predate it.
+        """
+        if sys.platform == "win32":
+            path_candidates = ["pxviewd.exe", "PXView.exe"]
+        else:
+            path_candidates = ["pxviewd", "PXView"]
+
+        # Search PATH (first match wins: pxviewd preferred over PXView)
+        for exe_name in path_candidates:
+            found = shutil.which(exe_name)
+            if found:
+                return found
 
         # Search common Windows install locations
         if sys.platform == "win32":
