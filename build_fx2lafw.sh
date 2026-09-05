@@ -35,10 +35,39 @@ SDAS=sdas8051
 SDAR=sdar
 MAKEBIN=makebin
 
+# Workaround for sdcc 4.6.x on MSYS2/Windows: the native sdcpp/sdld fail to
+# resolve sdcc's internally generated system include/lib paths, so even stock
+# headers like <stdio.h> are "not found" although they exist on disk
+# (<prefix>/share/sdcc/include/stdio.h). Pass the system include/lib dirs
+# explicitly via -I/-L so the build does not depend on sdcc's own prefix
+# resolution. On MSYS2, cygpath -m converts the path to a native C:/... form;
+# on Linux/macOS the extra -I/-L merely duplicate what sdcc already searches.
+_to_native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        echo "$1"
+    fi
+}
+
+SDCC_EXTRA_INC=""
+SDCC_EXTRA_LIB=""
+if _sdcc_exe="$(command -v sdcc 2>/dev/null)" && [ -n "$_sdcc_exe" ]; then
+    _sdcc_root="$(cd "$(dirname "$_sdcc_exe")/.." && pwd)"
+    if [ -d "$_sdcc_root/share/sdcc/include" ]; then
+        SDCC_EXTRA_INC="-I$(_to_native_path "$_sdcc_root/share/sdcc/include/mcs51") -I$(_to_native_path "$_sdcc_root/share/sdcc/include")"
+    fi
+    if [ -d "$_sdcc_root/share/sdcc/lib/small" ]; then
+        # NOTE: -L in sdcc means "print library dirs" (diagnostic); the option
+        # to add a library search path is the long form --lib-path.
+        SDCC_EXTRA_LIB="--lib-path $(_to_native_path "$_sdcc_root/share/sdcc/lib/small")"
+    fi
+fi
+
 AS_INC="-Iinclude"
-C_INC="-Iinclude -Ifx2lib/include"
-LINK_FLAGS='--code-size 0x1c00 --xram-size 0x0200 --xram-loc 0x1c00 -Wl"-b DSCR_AREA=0x1e00" -Wl"-b INT2JT=0x1f00"'
-LINK_FLAGS_SCOPE='--code-size 0x3c00 --xram-size 0x0100 --xram-loc 0x3c00 -Wl"-b DSCR_AREA=0x3d00" -Wl"-b INT2JT=0x3f00"'
+C_INC="-Iinclude -Ifx2lib/include $SDCC_EXTRA_INC"
+LINK_FLAGS='--code-size 0x1c00 --xram-size 0x0200 --xram-loc 0x1c00 -Wl"-b DSCR_AREA=0x1e00" -Wl"-b INT2JT=0x1f00"'"$SDCC_EXTRA_LIB"
+LINK_FLAGS_SCOPE='--code-size 0x3c00 --xram-size 0x0100 --xram-loc 0x3c00 -Wl"-b DSCR_AREA=0x3d00" -Wl"-b INT2JT=0x3f00"'"$SDCC_EXTRA_LIB"
 
 echo "=== Step 1: Build fx2lib objects ==="
 for f in fx2lib/lib/delay.c fx2lib/lib/eputils.c fx2lib/lib/gpif.c \
