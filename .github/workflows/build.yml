@@ -169,6 +169,15 @@ jobs:
         run: |
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
 
+      - name: Verify fx2lafw firmware
+        run: |
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
+          if [ "${FW_COUNT}" -ne 15 ]; then
+            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
+            exit 1
+          fi
+
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
@@ -391,6 +400,15 @@ jobs:
       - name: Build fx2lafw firmware
         run: |
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
+
+      - name: Verify fx2lafw firmware
+        run: |
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
+          if [ "${FW_COUNT}" -ne 15 ]; then
+            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
+            exit 1
+          fi
 
       - name: Configure CMake
         run: |
@@ -733,6 +751,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libftdi
             mingw-w64-ucrt-x86_64-libusb
             mingw-w64-ucrt-x86_64-lcms2
+            mingw-w64-ucrt-x86_64-sdcc
             zip
             unzip
 
@@ -783,6 +802,15 @@ jobs:
       - name: Build fx2lafw firmware
         run: |
           bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
+
+      - name: Verify fx2lafw firmware
+        run: |
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
+          if [ "${FW_COUNT}" -ne 15 ]; then
+            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
+            exit 1
+          fi
 
       - name: Configure CMake
         run: |

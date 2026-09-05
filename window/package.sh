@@ -25,6 +25,19 @@ cp ../install.dir/bin/PXView.exe .
 cp -r ../install.dir/share/PXView/* .
 cp -r ../install.dir/share/libsigrokdecode/* .
 
+# --- sigrok firmware (asix-sigma / sysclk-lwla / fx2lafw) ---
+# CMake installs these to install.dir/share/sigrok-firmware; PXView looks for
+# them in <appdir>/share/sigrok-firmware at runtime (see AppControl::Init,
+# which appends that dir to SIGROK_FIRMWARE_PATH). NSIS packs package/ with
+# `File /r`, so the copy here is what makes firmware reach the installer.
+if [ -d ../install.dir/share/sigrok-firmware ]; then
+    mkdir -p share
+    cp -r ../install.dir/share/sigrok-firmware share/
+    echo "Sigrok firmware files: $(ls share/sigrok-firmware/ 2>/dev/null | wc -l)"
+else
+    echo "WARNING: ../install.dir/share/sigrok-firmware not found (no firmware packaged)"
+fi
+
 echo "=== Copying MinGW DLL dependencies ==="
 # --- Resolve MinGW DLL dependencies via ldd ---
 # This copies libpython3.14.dll, libgcc_s_seh-1.dll, libstdc++-6.dll, etc.
@@ -185,6 +198,7 @@ fi
 # --- Summary ---
 echo "=== package.sh summary ==="
 echo "DLLs in package: $(ls *.dll 2>/dev/null | wc -l)"
+echo "Sigrok firmware: $([ -d share/sigrok-firmware ] && echo "share/sigrok-firmware ($(ls share/sigrok-firmware | wc -l) files)" || echo 'NOT PACKAGED')"
 echo "Python DLLs: $(ls *python*.*.dll 2>/dev/null || echo 'NONE')"
 echo "Tauri desktop app: $([ -f PXView-Agent.exe ] && echo 'PXView-Agent.exe [OK]' || echo 'not built')"
 if [ -n "$PY_VER" ] && [ -d "lib/python${PY_VER}" ]; then

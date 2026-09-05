@@ -30,6 +30,7 @@
 #include <QFile>
 #include <QWidget>
 #include <QThread>
+#include <QStringList>
 #include <string>
 #include <cstdio>
 #include <cassert>
@@ -46,6 +47,41 @@
 #include "pv/api/ws_transport.h"
 #include "pv/api/mcp_transport.h"
 #include "pv/api/direct_transport.h"
+
+namespace {
+
+// Locate the bundled share/sigrok-firmware directory (asix-sigma, sysclk-lwla
+// and the fx2lafw firmwares installed by CMake/install_packaging.cmake).
+//
+// libsigrok's compile-time FIRMWARE_DIR is baked in as CMAKE_SOURCE_DIR of the
+// build machine, which never exists on a user's machine, and
+// g_get_system_data_dirs() does not cover the portable/non-installed app
+// directory. Without adding these paths to SIGROK_FIRMWARE_PATH,
+// sr_resource_open(SR_RESOURCE_FIRMWARE, ...) fails for every non-pxlogic
+// device that needs a firmware upload.
+QStringList bundled_sigrok_firmware_dirs()
+{
+    QStringList result;
+    const QDir appDir(QCoreApplication::applicationDirPath());
+
+    const char *const candidates[] = {
+        "share/sigrok-firmware",             // Windows portable + Linux <prefix>
+        "../share/sigrok-firmware",          // Linux: <prefix>/bin -> <prefix>/share
+        "../Resources/share/sigrok-firmware" // macOS bundle
+    };
+
+    for (const char *rel : candidates) {
+        const QString path = QDir::cleanPath(
+            appDir.absoluteFilePath(QString::fromLatin1(rel)));
+        if (result.contains(path))
+            continue;
+        if (QDir(path).exists())
+            result.append(path);
+    }
+    return result;
+}
+
+} // namespace
 
 AppControl::AppControl()
 {
@@ -112,6 +148,17 @@ bool AppControl::Init()
         if (!combined.isEmpty())
             combined += QString::fromLatin1(G_SEARCHPATH_SEPARATOR_S);
         combined += qs;
+
+        // Append the bundled share/sigrok-firmware directory as well, so the
+        // upstream firmware files (asix-sigma, sysclk-lwla, fx2lafw) are found
+        // next to the executable instead of only in the build machine's
+        // hard-coded FIRMWARE_DIR.
+        for (const QString &fwDir : bundled_sigrok_firmware_dirs()) {
+            if (!combined.isEmpty())
+                combined += QString::fromLatin1(G_SEARCHPATH_SEPARATOR_S);
+            combined += fwDir;
+        }
+
         g_setenv("SIGROK_FIRMWARE_PATH",
             combined.toUtf8().constData(), TRUE);
     }
