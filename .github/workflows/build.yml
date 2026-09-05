@@ -174,8 +174,12 @@ jobs:
           FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
-            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
-            exit 1
+            # WARNING, not error: the build step above is deliberately
+            # best-effort (`|| echo WARNING`) -- sdcc is flaky on some
+            # runners (fx2lib needs headers sdcc's MSYS2 package does not
+            # ship). The installer ships fine without fx2lafw firmware;
+            # failing the whole job here contradicts that design.
+            echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
       - name: Configure CMake
@@ -406,8 +410,12 @@ jobs:
           FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
-            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
-            exit 1
+            # WARNING, not error: the build step above is deliberately
+            # best-effort (`|| echo WARNING`) -- sdcc is flaky on some
+            # runners (fx2lib needs headers sdcc's MSYS2 package does not
+            # ship). The installer ships fine without fx2lafw firmware;
+            # failing the whole job here contradicts that design.
+            echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
       - name: Configure CMake
@@ -808,8 +816,12 @@ jobs:
           FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
-            echo "::error::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
-            exit 1
+            # WARNING, not error: the build step above is deliberately
+            # best-effort (`|| echo WARNING`) -- sdcc is flaky on some
+            # runners (fx2lib needs headers sdcc's MSYS2 package does not
+            # ship). The installer ships fine without fx2lafw firmware;
+            # failing the whole job here contradicts that design.
+            echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
       - name: Configure CMake

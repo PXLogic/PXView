@@ -85,6 +85,8 @@ build.ninja
 moc_*.cpp
 moc_*.h
 ui_*.h
+# ...except real sources whose names match the uic pattern
+!PXView/pv/core/ui_hooks.h
 qrc_*.cpp
 *.qrc.depends
 
