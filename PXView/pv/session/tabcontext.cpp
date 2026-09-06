@@ -253,7 +253,13 @@ void TabContext::restore_view_data()
                (_session->is_working() || _session->is_copy_in_progress() ||
                 _session->is_stopped_status()) &&
                (!_session->get_capture_owner_document() ||
-                _session->get_capture_owner_document() == _document)) {
+                _session->get_capture_owner_document() == _document) &&
+               // 数据模型重构步骤1：借用加身份门槛 —— 本 tab 无设备身份，
+               // 或全局当前设备就是本 tab 的设备。防止设备切换（restore 成功
+               // 后设备已变回，但缓冲仍残留上一设备的数据）把别的设备的数据
+               // 借给本 tab。
+               (_device_handle == NULL_HANDLE ||
+                _session->get_device()->handle() == _device_handle)) {
         // Document has no data yet, but session has data.
         // Bind signals to session data instead of clearing them.
         //
@@ -276,6 +282,11 @@ void TabContext::restore_view_data()
         // never assigned. When the owner IS set, it must match _document
         // to avoid binding another tab's data to the wrong view.
         _view->set_signal_data_from_source(_session);
+        // 数据模型重构步骤1：非采集窗口的借用（stopped/copy）立即归档进文档，
+        // 使本次展示的数据在下次设备切换后仍可由文档绑定分支恢复。采集在途
+        // （is_working）时归档由 RevEndPacket 的 owner-copy 负责。
+        if (!_session->is_working())
+            archive_session_data_if_owned();
     } else {
         pxv_info("TabContext::activate() no data, clearing signal data bindings");
         _view->clear_signal_data();
@@ -354,7 +365,35 @@ void TabContext::deactivate()
     pxv_info("TabContext::deactivate() doc=%p", _document);
     // 架构重构 Phase 3：设备意图协议 —— 收割阶段（详见 harvest_device_state）。
     harvest_device_state();
+    // 数据模型重构步骤1（per-doc 数据存档）：切走前把"属于本 tab 设备、且
+    // 文档尚未持有"的会话缓冲快照零拷贝共享进文档。此后本 tab 切回时
+    // restore_view_data 走文档绑定分支，不再依赖（易被其他设备数据覆盖的）
+    // 全局会话缓冲 —— demo tab 切到文件 tab 再切回不再空白。
+    archive_session_data_if_owned();
     _state = HISTORICAL;
+}
+
+void TabContext::archive_session_data_if_owned()
+{
+    if (!_document || _document->is_file_device_slot())
+        return;   // 文件池槽的数据来自回放/导入，绝不接收会话缓冲
+    if (_document->has_data())
+        return;   // RevEndPacket 的 owner-copy 已归档（或本就是文件槽数据）
+    if (_device_handle == NULL_HANDLE)
+        return;   // 无设备身份，缓冲无法归属
+    if (_session->is_working() || _session->is_copy_in_progress())
+        return;   // 采集/拷贝在途 —— 等事件路径的 owner-copy，不抢半程数据
+    if (!_session->have_view_data())
+        return;   // 会话缓冲无数据
+    // 归属裁决：仅当当前全局设备仍是本 tab 的设备（切走前未发生设备切换）
+    // 时，缓冲数据才可能由本 tab 的设备产生。
+    if (_session->get_device()->handle() != _device_handle)
+        return;
+    pxv_info("TabContext: archiving session buffer into doc=%p "
+             "(device handle %llu, zero-copy)",
+             (void *)_document, (unsigned long long)_device_handle);
+    _session->copy_data_to_document(_document);
+    _document->set_state(data::SessionDocument::SessionState::Stopped);
 }
 
 // 架构重构 Phase 3：设备意图协议 —— 收割阶段。
