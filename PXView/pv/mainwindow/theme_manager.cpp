@@ -194,7 +194,9 @@ void MainWindowThemeManager::switchLanguage(int language) {
   _wnd->retranslateUi();
 
   UiManager::Instance()->Update(UI_UPDATE_ACTION_LANG);
-  _wnd->session()->update_lang_text();
+  // 阶段13：移除 _wnd->session()->update_lang_text() 调用——该门面为空
+  // 实现（本地化文本刷新由 View 层 SpectrumTrace::update_lang_text() 自
+  // 己负责，经 UiManager::Update 触发）。
 }
 
 void MainWindowThemeManager::setupRibbonCategories() {

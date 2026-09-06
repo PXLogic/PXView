@@ -99,8 +99,10 @@ void MainWindowStatusBar::update_disk_cache_status() {
                              "Path: ")) +
                  cache_path;
 
-  double wspeed = session->get_disk_write_speed_mbps();
-  size_t qdepth = session->get_disk_write_queue_depth();
+  // 阶段13：一次性取磁盘缓存状态快照（原为 6 次独立查询，取值时刻不一致）。
+  const DiskCacheStats dcs = session->disk_cache_stats();
+  double wspeed = dcs.write_speed_mbps;
+  size_t qdepth = dcs.write_queue_depth;
 
   data::LogicSnapshot *logic = session->get_logic_snapshot();
   uint64_t pf = 0;
@@ -136,10 +138,10 @@ void MainWindowStatusBar::update_disk_cache_status() {
             QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DISK_CACHE_PF), "PF/s: ")) +
             QString("%1").arg(pf);
 
-    if (logic->is_disk_cache_active()) {
+    if (dcs.disk_cache_active) {
       // raw 口径 (raw 复原 spec, 用户拍板): mmap 分配器文件大小 = "磁盘当内存"
       // 的实际占用, 比块数启发式 (total_blocks * 2105376) 更准确.
-      uint64_t disk_bytes = session->get_logic_disk_bytes();
+      uint64_t disk_bytes = dcs.disk_bytes;
       text +=
           " | " +
           QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DISK_CACHE_DISK), "Disk: ")) +
@@ -147,7 +149,7 @@ void MainWindowStatusBar::update_disk_cache_status() {
     }
   }
 
-  if (session->is_disk_write_disk_full()) {
+  if (dcs.disk_full) {
     text += " | " + QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DISK_CACHE_FULL),
                                 "DISK FULL"));
     _disk_cache_label->setStyleSheet("color: red; font-weight: bold;");

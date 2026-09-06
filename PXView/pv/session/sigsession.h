@@ -126,6 +126,16 @@ using namespace pv::data;
  *      DataSource 兼容壳（对齐 DataService/RapidDataStore 查表角色）。
  * ──────────────────────────────────────────────────────────────────────
  */
+// 阶段13：磁盘缓存状态快照（见 SigSession::disk_cache_stats）。
+struct DiskCacheStats {
+  uint64_t memory_bytes = 0;      // 已采集逻辑字节数（样本数/8）
+  uint64_t disk_bytes = 0;        // mmap 分配器当前文件大小
+  bool disk_cache_active = false; // 磁盘缓存是否启用
+  double write_speed_mbps = 0.0;  // 异步写盘速度
+  size_t write_queue_depth = 0;   // 写队列深度
+  bool disk_full = false;         // 磁盘写满
+};
+
 class SigSession : public IDeviceAgentCallback,
                    public pv::data::DataSource,
                    public pv::data::ISessionHost,
@@ -408,7 +418,9 @@ void on_load_config_end();
   core::DocumentRegistry *document_registry() { return _document_registry.get(); }
   void clear_all_documents_decoders();
   std::vector<std::shared_ptr<data::DecoderStack>> &decode_traces(data::SessionDocument *doc = nullptr) { return _state->decode_traces(doc); }
-  void update_lang_text();
+  // 阶段13：update_lang_text() 已删除——空实现的废弃门面（de-view-ization
+  // 后 SigSession 不再持有 view::SpectrumTrace，本地化文本刷新由 View 层
+  // SpectrumTrace::update_lang_text() 自己负责）。
   bool have_decoded_result();
   void apply_samplerate();
   // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
@@ -444,15 +456,15 @@ void on_load_config_end();
   bool is_signal_invert_active();
   void restart_decoders();
   void start_all_decode_tasks() override;
-  size_t get_disk_write_queue_depth();
-  double get_disk_write_speed_mbps();
-  bool is_disk_write_disk_full();
 
-  // raw 版内存/磁盘缓冲指示（d39ee74a 的 raw 适配，用户拍板口径）：
-  // 内存口径 = 已采集逻辑字节数（样本数/8），磁盘口径 = mmap 分配器当前文件大小。
-  uint64_t get_logic_memory_bytes();
-  uint64_t get_logic_disk_bytes();
-  bool get_logic_disk_cache_active();
+  // 阶段13 第一批：磁盘缓存状态由 6 个零散查询合并为一次快照统计。
+  // 原 get_disk_write_speed_mbps/get_disk_write_queue_depth/
+  // is_disk_write_disk_full/get_logic_memory_bytes/get_logic_disk_bytes/
+  // get_logic_disk_cache_active 各自独立读取，消费方（状态栏/MCP）连调
+  // 多次会取到不同瞬间的值；合并后一次取值、字段一致。
+  // 口径（用户拍板，raw 适配）：内存 = 已采集逻辑字节数（样本数/8），
+  // 磁盘 = mmap 分配器当前文件大小（磁盘当内存，OS 页缓存管理）。
+  DiskCacheStats disk_cache_stats();
 private:
   void set_cur_samplelimits(uint64_t samplelimits); void set_cur_snap_samplerate(uint64_t samplerate);
   void math_disable(); void sync_trigger_to_libsigrok(bool disable_trigger = false);

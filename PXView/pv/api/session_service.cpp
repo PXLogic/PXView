@@ -3632,10 +3632,11 @@ DiskCacheInfo SessionService::get_disk_cache_info() const {
         return info;
 
     info.enabled = true; // Disk cache is always available
-    info.write_speed_mbps = _session->get_disk_write_speed_mbps();
-    info.write_queue_depth =
-        static_cast<int32_t>(_session->get_disk_write_queue_depth());
-    info.is_disk_full = _session->is_disk_write_disk_full();
+    // 阶段13：一次性快照（原 3 次独立查询，取值时刻不一致）。
+    const DiskCacheStats dcs = _session->disk_cache_stats();
+    info.write_speed_mbps = dcs.write_speed_mbps;
+    info.write_queue_depth = static_cast<int32_t>(dcs.write_queue_depth);
+    info.is_disk_full = dcs.disk_full;
 
     return info;
 }

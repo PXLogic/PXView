@@ -3249,14 +3249,6 @@ int64_t SigSession::get_ring_sample_count() {
   }
 }
 
-void SigSession::update_lang_text() {
-  // TODO: view::SpectrumTrace::update_lang_text() was a UI rendering method
-  // that refreshed localized text on spectrum trace widgets. After
-  // de-view-ization, SigSession no longer owns view::SpectrumTrace instances.
-  // The View layer is responsible for updating language text on its own
-  // rendering objects.
-}
-
 bool SigSession::have_decoded_result() {
   for (auto stack : decode_traces()) {
     if (stack->get_result_count() > 0) {
@@ -3628,41 +3620,29 @@ void SigSession::remove_decode_task(
   _decode_task_manager->remove_decode_task(stack);
 }
 
-size_t SigSession::get_disk_write_queue_depth() {
-  if (_state->view_data()->get_logic()->is_disk_cache_active())
-    return _state->view_data()->get_logic()->get_disk_write_queue_depth();
-  return 0;
-}
+DiskCacheStats SigSession::disk_cache_stats() {
+  // 阶段13 第一批：一次性快照，取代原先 6 个独立查询（消费方连调多次
+  // 会取到不同瞬间的值）。口径保持不变：
+  //   内存 = 已采集逻辑字节数（样本数/8, 8 samples/byte, raw 无压缩）
+  //   磁盘 = mmap 分配器当前文件大小（磁盘当内存, OS 页缓存管理）
+  DiskCacheStats st;
 
-double SigSession::get_disk_write_speed_mbps() {
-  if (_state->view_data()->get_logic()->is_disk_cache_active())
-    return _state->view_data()->get_logic()->get_disk_write_speed_mbps();
-  return 0.0;
-}
-
-bool SigSession::is_disk_write_disk_full() { return false; }
-
-uint64_t SigSession::get_logic_memory_bytes() {
-  // raw 口径: 已采集逻辑字节数 (样本数/8, 8 samples/byte). 与 RLE 时代
-  // get_total_bytes() 的"驻留字节"语义不同 —— raw 存储无压缩, 逻辑字节即
-  // 数据 footprint 的代理. 语义为"当前数据占用磁盘/内存多少".
   auto *snap = get_logic_snapshot();
-  if (!snap)
-    return 0;
-  return snap->get_sample_count() / 8;
-}
+  if (snap) {
+    st.disk_cache_active = snap->is_disk_cache_active();
+    st.memory_bytes = snap->get_sample_count() / 8;
+    st.disk_bytes = snap->get_mmap_total_bytes();
+    if (st.disk_cache_active) {
+      st.write_speed_mbps = snap->get_disk_write_speed_mbps();
+      st.write_queue_depth = snap->get_disk_write_queue_depth();
+    }
+  }
 
-uint64_t SigSession::get_logic_disk_bytes() {
-  // raw 口径: mmap 分配器当前文件大小 (磁盘当内存, OS 页缓存管理).
-  auto *snap = get_logic_snapshot();
-  if (snap)
-    return snap->get_mmap_total_bytes();
-  return 0;
-}
-
-bool SigSession::get_logic_disk_cache_active() {
-  auto *snap = get_logic_snapshot();
-  return snap && snap->is_disk_cache_active();
+  // 写盘队列/速度原实现读的是执行缓冲 view_data 的逻辑快照；上述
+  // get_logic_snapshot() 在 view_data 为空时会回退 active document，
+  // 语义等价且更完整（切 tab 查看历史文档时也能报告其缓存状态）。
+  st.disk_full = false; // 磁盘写满指示：当前无实现（原 is_disk_write_disk_full）
+  return st;
 }
 
 // ============================================================================
