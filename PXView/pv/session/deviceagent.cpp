@@ -349,7 +349,16 @@ void DeviceAgent::release(bool destroy_file_device)
     }
 
     if (_di) {
-        sr_dev_close(_di);
+        // File devices (DEV_TYPE_FILELOG): do NOT sr_dev_close on a
+        // "keeping" release. sr_dev_close destroys a virtual-session
+        // device's loaded session context, and open_by_handle deliberately
+        // skips sr_dev_open for file devices — so the context would never
+        // come back and the next replay/capture fails with
+        // "virtual-session device (null)". The sdi is kept alive UNTOUCHED;
+        // real cleanup happens in close_file() → remove_device() →
+        // detach_sdi/free (data-source semantics: 槽存活 = 设备存活).
+        if (_dev_type != DEV_TYPE_FILELOG)
+            sr_dev_close(_di);
 
         // File devices (loaded via sr_session_load_file_device or
         // sr_input_release_sdi) have their sdi ownership transferred to
