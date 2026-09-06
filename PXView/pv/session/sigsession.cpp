@@ -626,7 +626,13 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   // (and destroyed the channel metadata the tab still needed). Cleanup is
   // SigSession::close_file()'s job.
   _state->device_agent().release(false);
-  _state->set_device_status(ST_INIT);
+  // 数据模型重构步骤4：状态机归一 —— ST_INIT（执行层"新设备待配置"）仅在
+  // 真正的设备身份变更（UserSelection 等非 TabSwitch）时复位。TabSwitch 是
+  // "tab 恢复自己的设备"：显示层状态（ST_STOPPED = 有完整数据可显示）必须
+  // 随 kept view_data/文档快照一起保留，否则恢复后的数据会被 ST_INIT 的
+  // 显示语义否决（文件 tab 切回 demo tab 空白的根因之一）。
+  if (interface::DeviceChangeReason::TabSwitch != reason)
+    _state->set_device_status(ST_INIT);
 
   // Open the new device via DeviceAgent (handles sr_dev_open + channel setup).
   if (!_state->device_agent().open_by_handle(dev_handle, _sr_ctx)) {

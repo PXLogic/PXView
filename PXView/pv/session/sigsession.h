@@ -320,6 +320,10 @@ public:
   // 分支而从不调用 paintSignals，导致波形不渲染。此 setter 允许把 status
   // 恢复为 ST_STOPPED，让视图按"已停止"状态绘制已绑定的文档快照。
   void set_stopped_status() { _state->set_device_status(ST_STOPPED); }
+  // 数据模型重构步骤4的对称面：TabSwitch 不再无条件复位 ST_INIT 后，无数据
+  // tab（清空绑定分支）需显式回到 ST_INIT 的"待采集"显示语义（仅限非采集
+  // 中——采集进行中的显示状态不可被 tab 切换扰动）。
+  void set_init_status() { _state->set_device_status(ST_INIT); }
   void set_collect_mode(DEVICE_COLLECT_MODE m) { _capture_manager->set_collect_mode(m); }
   int get_collect_mode() { return _capture_manager->get_collect_mode(); }
   bool is_repeat_mode() override { return _capture_manager->is_repeat_mode(); }

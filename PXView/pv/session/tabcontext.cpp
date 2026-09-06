@@ -225,8 +225,10 @@ void TabContext::claim_active_document()
     }
 }
 
-// 4) 数据绑定裁决：文档有数据→绑文档（唯一真相）；会话有数据且归属匹配
-// （采集/拷贝/停止窗口）→绑会话实时缓冲；否则清空绑定。
+// 4) 数据绑定裁决（数据模型重构步骤4 收敛）：文档有数据→绑文档（唯一
+// 真相）；会话有【实时】数据且归属匹配（采集中/拷贝窗口）→绑会话缓冲；
+// 否则清空绑定。停止态的历史数据一律走文档分支——步骤1 已保证"展示过的
+// 数据切走前归档进文档"，停止态借用分支已删除。
 void TabContext::restore_view_data()
 {
     if (_document && _document->has_data()) {
@@ -239,42 +241,36 @@ void TabContext::restore_view_data()
                 s->model()->set_enabled(s->enabled());
             }
         }
-        // 修复（切回旧 tab 波形消失）：文档有历史数据且未在采集时，设备 status
-        // 仍停留在 set_device 设置的 ST_INIT，doPaint 会走 paintCursors 分支而
-        // 不调用 paintSignals，波形不渲染。显式恢复 ST_STOPPED，让视图绘制
-        // 已绑定的文档快照。
+        // 文档→显示层状态同步：本 ctx 数据完整且未在采集 = "可显示"。
+        // 显式置 ST_STOPPED 让 View 绘制管线（viewport_painter 等仍读全局
+        // is_stopped_status 的 28 个读取点）走 paintSignals 分支绘制文档
+        // 快照。步骤4 已保证 TabSwitch 不再把 ST_STOPPED 打回 ST_INIT，
+        // 此处是首绑/导入（VCD import 结束、RevEndPacket 前的窗口）等路径
+        // 的兜底同步点；待 View 全面读 per-doc SessionState 后移除。
         if (!_session->is_working()) {
             _session->set_stopped_status();
-            // 阶段3a：per-tab 状态机同步——本 ctx 数据完整（有历史数据且未在
-            // 采集），表达"可显示"语义，供 View 层逐步替代全局 ST_* 判断。
+            // 阶段3a：per-tab 状态机同步。
             _document->set_state(data::SessionDocument::SessionState::Stopped);
         }
     } else if (_session->have_view_data() &&
-               (_session->is_working() || _session->is_copy_in_progress() ||
-                _session->is_stopped_status()) &&
+               (_session->is_working() || _session->is_copy_in_progress()) &&
                (!_session->get_capture_owner_document() ||
                 _session->get_capture_owner_document() == _document) &&
                // 数据模型重构步骤1：借用加身份门槛 —— 本 tab 无设备身份，
-               // 或全局当前设备就是本 tab 的设备。防止设备切换（restore 成功
-               // 后设备已变回，但缓冲仍残留上一设备的数据）把别的设备的数据
-               // 借给本 tab。
+               // 或全局当前设备就是本 tab 的设备。防止设备切换后缓冲残留
+               // 上一设备的数据被借给本 tab。
                (_device_handle == NULL_HANDLE ||
                 _session->get_device()->handle() == _device_handle)) {
-        // Document has no data yet, but session has data.
+        // Document has no data yet, but the session has LIVE data.
         // Bind signals to session data instead of clearing them.
         //
-        // This covers three scenarios:
+        // This covers two scenarios (the old third — post-capture/stopped
+        // gap — was removed in step 4: stopped historical data always binds
+        // via the document branch, since step 1 archives displayed data
+        // into the tab's document on switch-away):
         // 1. Active capture (is_working) — waveforms update in real-time.
         // 2. Background copy (is_copy_in_progress) — data is being copied
         //    to the document; show session data in the meantime.
-        // 3. Post-capture gap (is_stopped_status) — e.g., after VCD import
-        //    where SR_DF_END has been received (device ST_STOPPED) and
-        //    capture_ended() populated the snapshot, but the async
-        //    RevEndPacket event hasn't been processed yet (so
-        //    is_copy_in_progress is still false). Without this branch,
-        //    clear_signal_data() would null out all signal data pointers,
-        //    leaving the viewport blank until RevEndPacket fires and
-        //    re-attaches the data.
         //
         // The capture owner check is relaxed to also match when no
         // capture owner is set (nullptr) — this happens for VCD imports
@@ -282,14 +278,18 @@ void TabContext::restore_view_data()
         // never assigned. When the owner IS set, it must match _document
         // to avoid binding another tab's data to the wrong view.
         _view->set_signal_data_from_source(_session);
-        // 数据模型重构步骤1：非采集窗口的借用（stopped/copy）立即归档进文档，
-        // 使本次展示的数据在下次设备切换后仍可由文档绑定分支恢复。采集在途
-        // （is_working）时归档由 RevEndPacket 的 owner-copy 负责。
+        // 拷贝窗口的借用立即归档进文档（采集在途时归档由 RevEndPacket 的
+        // owner-copy 负责）。
         if (!_session->is_working())
             archive_session_data_if_owned();
     } else {
         pxv_info("TabContext::activate() no data, clearing signal data bindings");
         _view->clear_signal_data();
+        // 步骤4 对称面：无任何可显示数据 → 显示层回到"待采集"（ST_INIT）
+        // 语义。TabSwitch 不再无条件复位 ST_INIT 后，由这里显式维护；采集
+        // 进行中（借用失败但状态是 RUNNING）绝不能扰动显示状态。
+        if (!_session->is_working())
+            _session->set_init_status();
     }
 }
 
