@@ -28,6 +28,7 @@
 #include <QDateTime>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pv/base/pxvdef.h"   // ds_device_handle / NULL_HANDLE
 
@@ -89,6 +90,41 @@ public:
     inline ds_device_handle device_handle() const { return _device_handle; }
     inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
 
+    // --- Device-keyed data pool: tab ↔ slot rebinding (rebind model) ---
+    // Rebind this tab to a different data slot document. The previously bound
+    // document is NOT released — it is kept alive in DocumentRegistry and
+    // recorded in _pinned_doc_indices (a file-device pool slot whose snapshots
+    // + decoder stacks survive the switch; switching back rebinds to it with
+    // zero data loss). If the new document is one of the pinned slots, it is
+    // unpinned (it becomes the current binding again).
+    void rebind_document(data::SessionDocument *doc, size_t doc_index);
+    // True if doc is this tab's current binding or one of its pinned slots.
+    bool owns_document(const data::SessionDocument *doc) const;
+    // Pinned slot documents (weak refs; owned by DocumentRegistry). Released
+    // in the destructor so a closing tab drops exactly its own pool entries.
+    inline const std::vector<size_t> &pinned_doc_indices() const {
+        return _pinned_doc_indices;
+    }
+
+    // --- Shared-reference semantics (rebind model v2) ---
+    // A file-device pool slot can be bound by SEVERAL tabs: the tab that
+    // opened the file (owner) and any tab that switched its data to that file
+    // (borrower). Ownership bookkeeping decides who releases what:
+    // only documents CREATED for this tab are released in its destructor;
+    // foreign slots die with their owning tab/device (close_file).
+    void mark_document_owned(size_t idx);
+    bool owns_doc_index(size_t idx) const;
+    // Drop a pinned entry (weak ref detached; the doc itself is untouched).
+    void unpin_document(size_t idx);
+    inline size_t doc_index() const { return _doc_index; }
+
+    // Harvest the tab's device intent (channel config + layout + model stash)
+    // into the bound document. Public for the rebind model: the GUI calls it
+    // in on_current_device_change_prev when the current tab LEAVES a file
+    // device (same-tab leave), so the pool slot carries the final intent for
+    // the zero-rebuild restore on switch-back.
+    void harvest_device_state();
+
     void make_live();
     void activate();
     void deactivate();
@@ -116,7 +152,6 @@ private:
     //   activate()   → apply_device_intent()（bind 链第 3 段）：把意图应用回全局设备与 Core 模型。
     // 全局 DeviceAgent 只持有一个活动设备，标签页切换 = 意图的收割/应用轮转。
     void apply_device_intent();
-    void harvest_device_state();
 
     view::View              *_view;
     SigSession              *_session;
@@ -128,6 +163,12 @@ private:
     State                   _state;
     QDateTime               _timestamp;
     ds_device_handle        _device_handle = NULL_HANDLE;
+    // Device-keyed data pool: slots pinned by this tab after rebinding away
+    // from them (file-device pool entries whose data must survive switches).
+    std::vector<size_t>     _pinned_doc_indices;
+    // Documents created for this tab (released on tab close). Foreign shared
+    // slots are NOT in this list.
+    std::vector<size_t>     _owned_doc_indices;
 };
 
 } // namespace pv

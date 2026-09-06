@@ -26,6 +26,7 @@
 #include "pv/session/sigsession.h"
 
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <map>
 #include <QDialog>
@@ -162,6 +163,11 @@ namespace pv
 
         // private:
         public:
+            // Rebind model (device-keyed data pool): GUI hook — return true
+            // when the device switch was served from the pool (data switched,
+            // no legacy set_device path). Wired by MainWindow.
+            std::function<bool(ds_device_handle)> device_data_route;
+
             SigSession *_session;
             data::ISignalSource *_signals = nullptr;
   data::IDataSource *_data = nullptr;

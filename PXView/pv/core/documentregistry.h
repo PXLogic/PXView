@@ -111,6 +111,20 @@ public:
   // Returns a snapshot vector of non-null raw pointers (weak references) for
   // iteration. Returned by value because ownership is internal to the registry.
   std::vector<data::SessionDocument *> get_all_documents() const;
+
+  // --- Device-keyed data pool (rebind model) ---
+  // Returns the data-pool slot document of a file device, or nullptr.
+  // File devices own exactly one slot document (is_file_device_slot() == true,
+  // device_handle() == handle). Hardware/demo documents are per-tab capture
+  // generations and are intentionally NOT addressed through this lookup.
+  // Linear scan is fine: pool size = number of open file devices (small).
+  data::SessionDocument *find_file_device_document(ds_device_handle handle) const;
+  // Public wrapper over the private pointer→index reverse lookup (needed by
+  // the GUI routing layer to rebind a tab to a pool slot).
+  size_t index_of_document(data::SessionDocument *doc) const {
+    return find_index_for_document(doc);
+  }
+
   void clear_all_documents_decoders();
   // 问题2修复：设备切换时只清活动文档的解码器，非活动文档的解码器保留。
   void clear_active_document_decoders();

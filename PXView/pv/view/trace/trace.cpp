@@ -23,7 +23,8 @@
 
  
 #include <cassert>
-#include <cmath> 
+#include <cmath>
+#include <typeinfo>
 #include <QFormLayout>
 #include <QApplication>
 
@@ -418,7 +419,17 @@ void Trace::compute_text_size(QPainter &p)
 
 QRect Trace::get_view_rect()
 {
-    assert(_view);
+    // Rebind model: a trace may be queried before layout_time_signals()
+    // assigns _view (e.g. during tab-close detach of a borrowing tab), or
+    // after its view was torn down. Report an empty rect instead of
+    // asserting — paint paths guard with the INT_MAX _v_offset sentinel.
+    // The error log names the concrete trace type so the calling path can
+    // be identified from the app log.
+    if (!_view) {
+        pxv_err("Trace::get_view_rect: _view not set (type=%s)",
+                typeid(*this).name());
+        return QRect();
+    }
     return QRect(0, 0, _view->viewport()->width(), _view->viewport()->height());
 }
 

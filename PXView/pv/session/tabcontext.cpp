@@ -30,6 +30,7 @@
 #include "pv/session/deviceagent.h"
 #include "pv/base/log.h"
 #include <QDebug>
+#include <algorithm>
 
 namespace pv {
 
@@ -48,15 +49,83 @@ TabContext::TabContext(view::View *view, SigSession *session, data::SessionDocum
     _timestamp(QDateTime::currentDateTime())
 {
     _next_session_id++;
+    if (_doc_index != SIZE_MAX)
+        _owned_doc_indices.push_back(_doc_index);
 }
 
 TabContext::~TabContext()
 {
-    // phase 2: document ownership is held by DocumentRegistry. Release the
-    // slot (marked deletion — frees the document, keeps index stable) instead
-    // of delete. Safe to call with SIZE_MAX / nullptr registry (no-op).
-    if (_doc_registry && _doc_index != SIZE_MAX)
-        _doc_registry->release_document(_doc_index);
+    // phase 2 + rebind model v2: only documents CREATED for this tab are
+    // released here. Foreign pool slots (a file device's slot shared from
+    // another tab) are weak references — their lifetime follows the owning
+    // tab/device (TabManager::remove_tab → close_file).
+    if (_doc_registry) {
+        if (owns_doc_index(_doc_index))
+            _doc_registry->release_document(_doc_index);
+        for (size_t idx : _pinned_doc_indices)
+            if (owns_doc_index(idx))
+                _doc_registry->release_document(idx);
+    }
+    _pinned_doc_indices.clear();
+}
+
+// ---- Shared-reference ownership bookkeeping (rebind model v2) ----
+
+bool TabContext::owns_doc_index(size_t idx) const
+{
+    return idx != SIZE_MAX &&
+           std::find(_owned_doc_indices.begin(), _owned_doc_indices.end(),
+                     idx) != _owned_doc_indices.end();
+}
+
+void TabContext::mark_document_owned(size_t idx)
+{
+    if (idx != SIZE_MAX && !owns_doc_index(idx))
+        _owned_doc_indices.push_back(idx);
+}
+
+void TabContext::unpin_document(size_t idx)
+{
+    auto it = std::find(_pinned_doc_indices.begin(),
+                        _pinned_doc_indices.end(), idx);
+    if (it != _pinned_doc_indices.end())
+        _pinned_doc_indices.erase(it);
+}
+
+// ---- Device-keyed data pool: tab ↔ slot rebinding (rebind model) ----
+
+void TabContext::rebind_document(data::SessionDocument *doc, size_t doc_index)
+{
+    // Unpin the target slot if it was pinned — it becomes the current binding.
+    if (doc_index != SIZE_MAX) {
+        auto it = std::find(_pinned_doc_indices.begin(),
+                            _pinned_doc_indices.end(), doc_index);
+        if (it != _pinned_doc_indices.end())
+            _pinned_doc_indices.erase(it);
+    }
+    // Pin the outgoing binding (unless trivially the same slot / no slot).
+    if (_doc_index != SIZE_MAX && _doc_index != doc_index &&
+        std::find(_pinned_doc_indices.begin(), _pinned_doc_indices.end(),
+                  _doc_index) == _pinned_doc_indices.end()) {
+        _pinned_doc_indices.push_back(_doc_index);
+    }
+    _document = doc;
+    _doc_index = doc_index;
+}
+
+bool TabContext::owns_document(const data::SessionDocument *doc) const
+{
+    if (!doc)
+        return false;
+    if (doc == _document)
+        return true;
+    if (!_doc_registry)
+        return false;
+    for (size_t idx : _pinned_doc_indices) {
+        if (_doc_registry->get_document_by_index(idx) == doc)
+            return true;
+    }
+    return false;
 }
 
 void TabContext::make_live()
@@ -213,7 +282,10 @@ void TabContext::apply_device_intent()
             _session->restore_signal_models_from(_document)) {
             // stash 期间模型脱离全局执行缓冲：重新绑定当前 view_data 快照
             // （与原 reload 后状态等价——解码/测量数据源恢复）。
-            _session->attach_data_to_current_view_buffer();
+            // Rebind model 例外：文件设备池槽的 stash 模型自带本槽快照
+            // （VCD/pxl 数据），绝不能绑全局执行缓冲（那是别的设备的数据）。
+            if (!_document->is_file_device_slot())
+                _session->attach_data_to_current_view_buffer();
             // R3 演进：意图应用路径已显式恢复模型，skip_model_reload 置位
             // 让 GUI 消费方照常刷新但不触发二次全量重建。
             _session->broadcast_async<interface::DeviceOptionsUpdated>({true});

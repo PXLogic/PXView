@@ -234,17 +234,42 @@ void TabManager::remove_tab(int index) {
   SigSession *_session = _wnd->session();
 
   pv::TabContext *ctx = _tab_contexts[index];
-  // 方案A（问题2）：记录被关闭的 tab 是否为文件（pxl）tab。
-  bool was_file_tab = !ctx->file_path().isEmpty();
-  // Cache the tab's device handle up-front: ctx is deleted by
-  // destroy_context() below, so it must not be dereferenced afterwards.
-  const ds_device_handle closed_file_handle = ctx->device_handle();
+  // Rebind model v2: compute the set of documents that DIE with this tab —
+  // only the ones this tab OWNS (created for it). Foreign pool slots shared
+  // from other tabs survive. Owned file devices are closed below; handles
+  // are cached up-front since ctx is destroyed further down.
+  std::vector<ds_device_handle> owned_file_handles;
+  std::vector<size_t> dying_docs;
+  auto collect_owned = [&](size_t idx) {
+    if (!ctx->owns_doc_index(idx))
+      return;
+    if (std::find(dying_docs.begin(), dying_docs.end(), idx) ==
+        dying_docs.end())
+      dying_docs.push_back(idx);
+    if (auto *d = _session->document_registry()->get_document_by_index(idx)) {
+      if (d->is_file_device_slot() && d->device_handle() != NULL_HANDLE &&
+          std::find(owned_file_handles.begin(), owned_file_handles.end(),
+                    d->device_handle()) == owned_file_handles.end())
+        owned_file_handles.push_back(d->device_handle());
+    }
+  };
+  collect_owned(ctx->doc_index());
+  for (size_t pinned_idx : ctx->pinned_doc_indices())
+    collect_owned(pinned_idx);
+  const bool owns_file_devices = !owned_file_handles.empty();
   if (ctx->is_live() && _session->is_working()) {
     _session->stop_capture();
   }
 
-  if (_session->get_active_document() == ctx->document()) {
-    _session->set_active_document(nullptr);
+  // Active-document cleanup: clear it if it is any doc dying with this tab
+  // (subsumes the old == ctx->document() check; a foreign shared doc that
+  // survives keeps the active binding — the surviving foreground tab's
+  // activate() re-claims it).
+  if (auto *ad = _session->get_active_document()) {
+    size_t ad_idx = _session->document_registry()->index_of_document(ad);
+    if (std::find(dying_docs.begin(), dying_docs.end(), ad_idx) !=
+        dying_docs.end())
+      _session->set_active_document(nullptr);
   }
 
   _tab_contexts.removeAt(index);
@@ -252,17 +277,66 @@ void TabManager::remove_tab(int index) {
              &MainWindow::on_tab_changed);
   _tab_widget->removeTab(index);
   // Task 4.3: capture owner cleanup is now RAII-managed by CaptureOwnerGuard.
-  _session->clear_capture_owner_document(ctx->document());
+  for (size_t di : dying_docs)
+    _session->clear_capture_owner_document(
+        _session->document_registry()->get_document_by_index(di));
 
-  // A2 fix: stop decoder threads working on this document's stacks before the
-  // document is destroyed.
-  auto doc = ctx->document();
-  if (doc) {
-    for (auto &stack : doc->get_decoder_stacks()) {
+  // A2 fix: stop decoder threads working on the dying documents' stacks
+  // before they are destroyed (covers the current doc and all owned pinned
+  // slots; foreign shared slots survive and keep running).
+  for (size_t di : dying_docs) {
+    auto *ddoc = _session->document_registry()->get_document_by_index(di);
+    if (!ddoc)
+      continue;
+    for (auto &stack : ddoc->get_decoder_stacks()) {
       if (stack && stack->IsRunning()) {
         stack->stop_decode_work();
       }
     }
+  }
+
+  // Rebind model v2: surviving tabs may hold weak references to dying docs
+  // (pool slots borrowed via device switching) — detach them BEFORE the docs
+  // are released by ~TabContext below.
+  for (pv::TabContext *other : _tab_contexts) {
+    if (other == ctx)
+      continue;
+    // Survivors must not carry a device identity that died with this tab
+    // (e.g. a borrower tab whose device_handle points at the closing file
+    // device): activate() would try to restore the dead handle → open_by_handle
+    // "sdi not found" → DeviceOpenFailed dialog. The global device is switched
+    // by restore_previous_device()/close_file() below; the survivor's identity
+    // is re-established on its next device selection.
+    for (ds_device_handle h : owned_file_handles)
+      if (other->device_handle() == h)
+        other->set_device_handle(NULL_HANDLE);
+    bool current_dying = false;
+    if (other->document()) {
+      size_t oidx =
+          _session->document_registry()->index_of_document(other->document());
+      current_dying = std::find(dying_docs.begin(), dying_docs.end(), oidx) !=
+                      dying_docs.end();
+    }
+    if (current_dying) {
+      // Rebind the survivor to a fresh document for its own device identity.
+      size_t nidx = _session->document_registry()->take_document(
+          std::make_unique<pv::data::SessionDocument>(
+              _wnd->session()->device()));
+      if (auto *nd =
+              _session->document_registry()->get_document_by_index(nidx)) {
+        nd->set_device_handle(other->device_handle());
+        other->rebind_document(nd, nidx);
+        other->mark_document_owned(nidx);
+      }
+      if (other->view()) {
+        other->view()->set_data_document(nullptr);
+        other->view()->clear_signal_data();
+        other->view()->mark_derived_traces_dirty();
+        other->view()->sync_derived_traces();
+      }
+    }
+    for (size_t di : dying_docs)
+      other->unpin_document(di);
   }
 
   // A2 fix: detach View→Document pointer BEFORE deleteLater().
@@ -284,14 +358,14 @@ void TabManager::remove_tab(int index) {
   //     当前设备，close_file 只从 DeviceAgent 注销并 free 其 sdi，不会触发
   //     set_default_device（避免在后续 activate() 之外多切一次设备）。
   // 这样关闭文件 tab 不再泄漏虚拟设备，设备列表里也不会残留已关闭的文件。
-  if (was_file_tab) {
+  if (owns_file_devices) {
     // Phase 1：restore_previous_device 内部以 TabSwitch 语义切换设备，
     // 排队的 CurrentDeviceChanged 不会触发 profile 加载覆盖幸存标签页 config。
     _session->restore_previous_device();
-    // NOTE: use the cached handle — ctx has already been destroyed by
-    // destroy_context() above.
-    if (closed_file_handle != NULL_HANDLE)
-      _session->close_file(closed_file_handle);
+    // NOTE: handles were cached up-front — ctx (and its pinned slots) has
+    // already been destroyed by destroy_context() above.
+    for (ds_device_handle h : owned_file_handles)
+      _session->close_file(h);
   }
 
   _tab_contexts[_current_tab_index]->activate();

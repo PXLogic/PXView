@@ -527,14 +527,17 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
       continue;
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(sdi);
     if (!drv) {
-      // Input-module device — check if it has channels.
-      GSList *chans = sr_dev_inst_channels_get(sdi);
-      if (!chans) {
-        pxv_info("set_default_device: skipping input-module device "
-                 "with no channels (handle=%llu)",
-                 (unsigned long long)h);
-        continue;
-      }
+      // Input-module / virtual file device (VCD, CSV, .pxl import, ...).
+      // NEVER pick it as the default device — the default must be a
+      // demo/hardware device. Picking a file device here made
+      // restore_previous_device()/close_file() during tab close switch INTO
+      // the file device that was being closed (known historical footgun:
+      // the async CurrentDeviceChanged then processed a dying device while
+      // its tab/document were already torn down).
+      pxv_info("set_default_device: skipping file/input-module device "
+               "(handle=%llu)",
+               (unsigned long long)h);
+      continue;
     }
     dev_handle = h;
     break;
@@ -608,6 +611,14 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   // Caller (set_device) is on the main thread (user-initiated action).
   // Plan B Phase 1: broadcast_sync → broadcast_async.
   _event_bus->broadcast_async<interface::CurrentDeviceChangePrev>({});
+  // Rebind model (device-keyed data pool): remember whether the OUTGOING
+  // device is a file device. Its active document is a data-pool slot — its
+  // snapshots + decoder stacks must survive the switch (they are restored on
+  // switch-back via the pool routing), so the active-document decoder
+  // clearing further below is skipped for file slots.
+  const bool leaving_file_device =
+      _state->device_agent().is_file() ||
+      _state->device_agent().is_input_module();
   // Release the old device.
   // destroy_file_device=false: a file device (.pxl / input-module import) is
   // owned by the tab that opened it, not by "whatever is active now". Freeing
@@ -660,7 +671,10 @@ bool SigSession::set_device(ds_device_handle dev_handle,
 
   // 问题2修复：设备切换只清活动文档的解码器，非活动文档（如 pxl 标签页
   // 的文档）的解码器保留，避免切换设备后历史文档被清空。
-  _document_registry->clear_active_document_decoders();
+  // Rebind model：离开文件设备时活动文档是数据池槽（快照+解码栈随槽钉住，
+  // 切回时原样恢复），绝不能清。
+  if (!leaving_file_device)
+    _document_registry->clear_active_document_decoders();
 
   _state->view_data()->clear();
   _state->capture_data()->clear();

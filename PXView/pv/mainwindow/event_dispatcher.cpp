@@ -300,6 +300,22 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   _window->update_toolbar_view_status();
   _window->session()->device_event_object()->device_updated();
 
+  // Rebind model (device-keyed data pool): leaving a file-device slot in the
+  // same tab rebinds the tab to a fresh document for the newly-active device.
+  // The file slot stays pinned in the TabContext (snapshots + decoder stacks +
+  // harvested intent survive); subsequent captures on the new device then
+  // write to the fresh document instead of clobbering the pool slot. This
+  // MUST run before the save_signal_config block below, so the new device's
+  // freshly-rebuilt models are saved into the new document — not into the
+  // pinned file slot (which would corrupt its harvested intent).
+  {
+    pv::TabContext *ctx = _window->current_context();
+    if (ctx && ctx->document() && ctx->document()->is_file_device_slot() &&
+        ctx->document()->device_handle() != ev.handle) {
+      _window->rebind_current_tab_to_fresh_document();
+    }
+  }
+
   {
     pv::TabContext *ctx = _window->current_context();
     if (ctx && ctx->document()) {
@@ -328,6 +344,21 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   if (_window->device_agent()->is_file()) {
     _window->check_config_file_version();
 
+    // Rebind model (device-keyed data pool) — cache-first ruling:
+    // If the current tab's document is this file device's pool slot and
+    // already holds data (+ decoder stacks), serve the switch entirely from
+    // the pool: skip the file JSON config/decoder reload AND the replay
+    // capture. The file is never re-read on switch-back ("不回退到文件").
+    // A cache miss (cold switch / data genuinely absent) falls through to
+    // the legacy load path below.
+    pv::TabContext *cur_ctx = _window->current_context();
+    const bool cache_hit =
+        cur_ctx && cur_ctx->document() &&
+        cur_ctx->document()->is_file_device_slot() &&
+        cur_ctx->document()->device_handle() == ev.handle &&
+        cur_ctx->document()->has_data();
+
+    if (!cache_hit) {
     bool bDoneDecoder = false;
     bool bLoadSuccess = false;
     QJsonDocument doc =
@@ -357,6 +388,21 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
       QTimer::singleShot(100, _window,
                          [this]() { _window->session()->start_capture(true); });
     }
+    // Cold switch adoption: the current tab's document becomes the pool slot
+    // of this file device (handle mirrored, slot tagged) so subsequent
+    // switches route back to it. For input modules there is no replay — the
+    // data arrives via the import feed that is already targeting this
+    // document.
+    if (cur_ctx && cur_ctx->document()) {
+      cur_ctx->set_device_handle(ev.handle);
+      cur_ctx->document()->set_device_handle(ev.handle);
+      cur_ctx->document()->set_file_device_slot(true);
+    }
+    } else {
+      // Cache hit: data + decoder stacks came from the pool slot — nothing to
+      // reload, just re-fit the restored traces.
+      if (auto *v = safe_current_view()) v->update_all_trace_postion();
+    }
   } else if (_window->device_agent()->is_demo()) {
     if (_window->device_agent()->get_work_mode() == LOGIC) {
       _window->pattern_mode() = _window->device_agent()->get_demo_operation_mode();
@@ -373,6 +419,17 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
       }
     }
   }
+
+  // Rebind model: reconcile View traces with the bound document's decoder
+  // stacks, then rebuild protocol dock rows from the traces. For file-device
+  // pool-slot flows del_all_protocol was skipped in the prev handler (stacks
+  // preserved) and a cache hit runs no JSON reload — this is the only
+  // row/trace refresh on those paths. Non-protected flows are unaffected.
+  if (auto *v = safe_current_view()) {
+    v->mark_derived_traces_dirty();
+    v->sync_derived_traces();
+  }
+  _window->dock_manager()->protocol_widget()->rebuild_protocol_layers();
 
   _window->calc_min_height();
 
@@ -766,7 +823,27 @@ void SessionEventDispatcher::on_current_device_change_prev(const pv::interface::
     _window->msg()->close();
     _window->msg() = nullptr;
   }
-  _window->dock_manager()->protocol_widget()->del_all_protocol();
+  // Rebind model (device-keyed data pool): del_all_protocol() funnels through
+  // View into data_source()->clear_all_decoder(), which wipes the ACTIVE
+  // document's decoder stacks. When a file-device pool slot is involved we
+  // must NOT wipe it — its snapshots + decoder stacks are pinned and restored
+  // on switch-back. Shapes covered:
+  //  - tab switch where the outgoing/active doc is a file slot, or the
+  //    incoming tab's doc is one (cache-first restore).
+  // NOTE: NO intent harvest here. This handler runs AFTER set_device() has
+  // fully completed (async broadcast), so "current device == slot device"
+  // would wrongly fire on switch-IN and stash_signal_models_to() would MOVE
+  // the live session models out mid-activation (blank view + corrupted slot
+  // config). The leave-side harvest runs synchronously at the actual leave
+  // point (SamplingBar::on_device_selected) while the outgoing device is
+  // still current.
+  pv::TabContext *ctx = _window->current_context();
+  data::SessionDocument *active_doc = _window->session()->get_active_document();
+  const bool protect_file_slot =
+      (ctx && ctx->document() && ctx->document()->is_file_device_slot()) ||
+      (active_doc && active_doc->is_file_device_slot());
+  if (!protect_file_slot)
+    _window->dock_manager()->protocol_widget()->del_all_protocol();
   if (auto *v = safe_current_view()) v->reload();
 }
 

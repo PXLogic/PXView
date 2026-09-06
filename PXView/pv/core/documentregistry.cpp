@@ -111,6 +111,17 @@ DocumentRegistry::get_document_by_index(size_t index) const {
   return _owned_documents[index].get();
 }
 
+data::SessionDocument *
+DocumentRegistry::find_file_device_document(ds_device_handle handle) const {
+  if (handle == NULL_HANDLE)
+    return nullptr;
+  for (const auto &ptr : _owned_documents) {
+    if (ptr && ptr->is_file_device_slot() && ptr->device_handle() == handle)
+      return ptr.get();
+  }
+  return nullptr;
+}
+
 size_t DocumentRegistry::find_index_for_document(
     data::SessionDocument *doc) const {
   if (!doc)

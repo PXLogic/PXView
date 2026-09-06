@@ -188,6 +188,16 @@ public:
     int resolveShortcutAction(int key, int modifiers);
     void check_usb_device_speed();
     void reset_all_view();
+    // --- Rebind model (device-keyed data pool) ---
+    // Switching to a file device that owns a cached data-pool slot serves the
+    // switch from the pool (data + decoder stacks + intent restored, the file
+    // is never re-read). Returns false when no slot exists — caller falls
+    // back to the legacy set_device path (cold load).
+    bool route_to_file_device_data(ds_device_handle handle);
+    // Called when the current tab LEAVES a file-device pool slot: rebinds the
+    // tab to a fresh document for the newly-active device (the slot stays
+    // pinned with its data/decoders/intent).
+    void rebind_current_tab_to_fresh_document();
     bool confirm_to_store_data();
     void update_toolbar_view_status();
     void update_capture_ui_status();

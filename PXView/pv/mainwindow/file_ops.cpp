@@ -62,6 +62,19 @@
 namespace pv {
 
 void MainWindowFileOps::on_load_file(QString file_name) {
+  // Rebind model: one file = one data pool slot. Opening an already-open
+  // file routes to its existing tab instead of creating a second virtual
+  // device + slot for the same file.
+  for (pv::TabContext *ctx0 : _wnd->tab_manager()->contexts()) {
+    if (QString::compare(ctx0->file_path(), file_name,
+                         Qt::CaseInsensitive) == 0) {
+      int idx0 = _wnd->tab_manager()->contexts().indexOf(ctx0);
+      if (idx0 >= 0)
+        _wnd->tab_manager()->tab_widget()->setCurrentIndex(idx0);
+      return;
+    }
+  }
+
   pv::view::View *new_view = new pv::view::View(_wnd->session(), _wnd->sampling_bar(), _wnd);
   // phase 2: document owned by DocumentRegistry.
   size_t new_doc_idx = _wnd->session()->document_registry()->take_document(
@@ -104,6 +117,9 @@ void MainWindowFileOps::on_load_file(QString file_name) {
     // Mirror the handle onto the document so the document is self-describing:
     // closing the tab releases exactly its own device (see TabManager::remove_tab).
     new_doc->set_device_handle(ctx->device_handle());
+    // Rebind model: register this document as the device-keyed data pool slot
+    // of the .pxl file device (snapshots + decoder stacks survive switches).
+    new_doc->set_file_device_slot(true);
     ctx->make_live();
     ctx->activate();
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));
@@ -117,6 +133,17 @@ void MainWindowFileOps::on_load_file(QString file_name) {
 }
 
 void MainWindowFileOps::on_import_file(QString file_name) {
+  // Rebind model: one file = one data pool slot (same dedup as on_load_file).
+  for (pv::TabContext *ctx0 : _wnd->tab_manager()->contexts()) {
+    if (QString::compare(ctx0->file_path(), file_name,
+                         Qt::CaseInsensitive) == 0) {
+      int idx0 = _wnd->tab_manager()->contexts().indexOf(ctx0);
+      if (idx0 >= 0)
+        _wnd->tab_manager()->tab_widget()->setCurrentIndex(idx0);
+      return;
+    }
+  }
+
   pv::view::View *new_view = new pv::view::View(_wnd->session(), _wnd->sampling_bar(), _wnd);
   // phase 2: document owned by DocumentRegistry.
   size_t new_doc_idx = _wnd->session()->document_registry()->take_document(
@@ -155,6 +182,9 @@ void MainWindowFileOps::on_import_file(QString file_name) {
     // Mirror the handle onto the document so the document is self-describing:
     // closing the tab releases exactly its own device (see TabManager::remove_tab).
     new_doc->set_device_handle(ctx->device_handle());
+    // Rebind model: register this document as the device-keyed data pool slot
+    // of the imported file device (snapshots survive switches, no re-import).
+    new_doc->set_file_device_slot(true);
     ctx->make_live();
     ctx->activate();
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));

@@ -267,6 +267,12 @@ void MainWindow::setup_ui() {
   // Setup the sampling bar
   _sampling_bar = new toolbars::SamplingBar(_session, this);
   _sampling_bar->setObjectName("sampling_bar");
+  // Rebind model (device-keyed data pool): device-list selection routes
+  // through the pool first — switching to a file device with a cached data
+  // slot switches the data instead of destroying/reloading.
+  _sampling_bar->device_data_route = [this](ds_device_handle h) {
+    return route_to_file_device_data(h);
+  };
   _trig_bar = new toolbars::TrigBar(_session, this);
   _trig_bar->setObjectName("trig_bar");
   _file_bar = new toolbars::FileBar(_session, this);
@@ -623,6 +629,68 @@ void MainWindow::reset_all_view() {
     current_view()->get_viewstatus()->setVisible(false);
   else
     current_view()->get_viewstatus()->setVisible(true);
+}
+
+// ---------------------------------------------------------------------------
+// Rebind model (device-keyed data pool): tab ↔ slot routing helpers.
+// ---------------------------------------------------------------------------
+
+void MainWindow::rebind_current_tab_to_fresh_document() {
+  pv::TabContext *ctx = tab_manager()->current_context();
+  if (!ctx)
+    return;
+  auto *reg = _session->document_registry();
+  size_t new_idx = reg->take_document(
+      std::make_unique<pv::data::SessionDocument>(_session->device()));
+  pv::data::SessionDocument *new_doc = reg->get_document_by_index(new_idx);
+  if (!new_doc)
+    return;
+  new_doc->set_device_handle(_session->get_device()->handle());
+  // Pin the outgoing pool slot, bind the fresh document, and follow the tab
+  // identity to the newly-active device (later tab switches restore THIS
+  // device for this tab).
+  ctx->rebind_document(new_doc, new_idx);
+  ctx->mark_document_owned(new_idx);
+  ctx->set_device_handle(_session->get_device()->handle());
+  _session->set_active_document(new_doc);
+  // Detach the view from the pinned slot: drop its trace wrappers (the
+  // slot's stacks stay alive with the slot) and its data bindings.
+  // Everything is rebuilt from the fresh (empty) document.
+  if (pv::view::View *v = ctx->view()) {
+    v->set_data_document(nullptr);
+    v->clear_signal_data();
+    v->mark_derived_traces_dirty();
+    v->sync_derived_traces();
+  }
+}
+
+bool MainWindow::route_to_file_device_data(ds_device_handle handle) {
+  // Rebind model v2 ruling: switching device = switching the CURRENT tab's
+  // data to that device's pool slot. The tab does NOT change — the current
+  // tab rebinds to the slot and runs its own restore chain. The slot may
+  // simultaneously remain bound by its original file tab (shared weak
+  // references; the slot dies with its owner tab/device, never with a
+  // borrower). No slot → return false, caller takes the legacy cold path.
+  if (handle == NULL_HANDLE)
+    return false;
+  if (_session->is_working() || _session->is_saving())
+    return false;
+  auto *reg = _session->document_registry();
+  pv::data::SessionDocument *slot = reg->find_file_device_document(handle);
+  if (!slot || !slot->has_data())
+    return false;
+
+  pv::TabContext *ctx = tab_manager()->current_context();
+  if (!ctx)
+    return false;
+  if (ctx->document() != slot)
+    ctx->rebind_document(slot, reg->index_of_document(slot));
+  // The tab identity follows the slot's device so activate() restores it.
+  ctx->set_device_handle(handle);
+  // Full five-stage restore chain (device TabSwitch restore + intent apply +
+  // data binding + view finalize) — all for THIS tab, no tab change.
+  ctx->activate();
+  return true;
 }
 
 bool MainWindow::confirm_to_store_data() {

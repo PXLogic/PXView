@@ -1207,6 +1207,40 @@ void SamplingBar::on_device_selected() {
     }
   }
 
+  // Rebind model (device-keyed data pool): if this tab is about to LEAVE its
+  // own file-device slot, harvest the device intent (channel config + layout
+  // + model stash) into the slot NOW — synchronously, while the outgoing
+  // device and its SignalModels are still current. Switching back then takes
+  // the zero-rebuild stash-restore path in apply_device_intent().
+  if (_context && _context->document() &&
+      _context->document()->is_file_device_slot() && _device_agent &&
+      _device_agent->have_instance() &&
+      _device_agent->handle() == _context->document()->device_handle()) {
+    _context->harvest_device_state();
+  }
+
+  // Rebind model (device-keyed data pool): a file device with cached data →
+  // switch the DATA (pool routing), not the destroy/reload device pipeline.
+  // The route MUST run deferred (queued): it may synchronously activate
+  // another tab (deactivate/activate/bind_docks), which rebuilds the device
+  // selector and destroys the DsComboPopup still on this click-handler's
+  // stack (this->close() on a dead object → SIGSEGV).
+  if (device_data_route) {
+    QTimer::singleShot(0, this, [this, devHandle]() {
+      if (device_data_route && device_data_route(devHandle)) {
+        _last_device_index = _device_selector->currentIndex();
+        return;
+      }
+      // No pool slot for this device — legacy switch path.
+      if (_session->set_device(devHandle)) {
+        _last_device_index = _device_selector->currentIndex();
+      } else {
+        update_device_list(); // Reload the list.
+      }
+    });
+    return;
+  }
+
   if (_session->set_device(devHandle)) {
     _last_device_index = _device_selector->currentIndex();
   } else {

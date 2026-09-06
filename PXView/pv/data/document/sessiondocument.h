@@ -233,6 +233,17 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   inline ds_device_handle device_handle() const { return _device_handle; }
   inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
 
+  // --- Device-keyed data slot (rebind model) ---
+  // True when this document is the persistent data slot of a file device
+  // (.pxl load / input-module import). File-device slots are the pool entries
+  // of the device-keyed data pool: their snapshots + decoder stacks are pinned
+  // for the device's lifetime and survive device switches (DocumentRegistry::
+  // find_file_device_document routes by device_handle). Hardware/demo tabs
+  // keep the legacy per-tab capture document semantics (slot flag stays false
+  // — captures may clobber them, which is the existing per-generation model).
+  inline bool is_file_device_slot() const { return _file_device_slot; }
+  inline void set_file_device_slot(bool b) { _file_device_slot = b; }
+
   inline const data::TriggerConfig &trigger_config() const override {
     return _trigger_config;
   }
@@ -272,6 +283,8 @@ private:
   std::unique_ptr<SignalConfigStore> _signal_config_store;
   data::TriggerConfig _trigger_config;
   ds_device_handle _device_handle = NULL_HANDLE;   // phase 2: owning device
+  // Rebind model: file-device data pool slot tag (see is_file_device_slot).
+  bool _file_device_slot = false;
   SessionState _state = SessionState::Idle;        // per-tab 状态机(阶段3a)
   // 阶段11：切走时暂存的本 tab SignalModel 列表（模型对象跨 tab 保活）。
   std::vector<std::shared_ptr<SignalModel>> _stashed_signal_models;
