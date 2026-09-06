@@ -56,6 +56,31 @@
 
 namespace pv {
 
+// 数据模型重构步骤5：新 tab 的默认采集设备 = 设备列表中第一个非文件/输入
+// 模块设备（demo/硬件）。get_device_list 返回 calloc 数组（末尾 handle=0
+// 哨兵），调用方负责 free。找不到（异常场景）返回 NULL_HANDLE。
+static ds_device_handle default_capture_handle(SigSession *session)
+{
+  if (!session)
+    return NULL_HANDLE;
+  int count = 0, active = 0;
+  struct ds_device_base_info *list = session->get_device_list(count, active);
+  if (!list) {
+    return NULL_HANDLE;
+  }
+  ds_device_handle found = NULL_HANDLE;
+  for (int i = 0; i < count; ++i) {
+    struct sr_dev_inst *sdi =
+        session->get_device()->find_sdi_by_handle(list[i].handle);
+    if (sdi && sr_dev_inst_driver_get(sdi) != nullptr) {
+      found = list[i].handle;
+      break;
+    }
+  }
+  free(list);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // TabManager — construction / destruction
 // ---------------------------------------------------------------------------
@@ -345,19 +370,15 @@ void TabManager::remove_tab(int index) {
     _current_tab_index--;
   }
 
-  // 方案A（问题2）+ 阶段2：关闭 pxl/导入文件 tab 时：
-  //  1) 先恢复之前的硬件/demo 设备（_saved_device_handle），让当前设备回到
-  //     非文件状态；
-  //  2) 再 close_file() 释放本 tab 的虚拟设备。由于此时该文件设备已不是
-  //     当前设备，close_file 只从 DeviceAgent 注销并 free 其 sdi，不会触发
-  //     set_default_device（避免在后续 activate() 之外多切一次设备）。
-  // 这样关闭文件 tab 不再泄漏虚拟设备，设备列表里也不会残留已关闭的文件。
+  // 数据模型重构步骤5：关闭 pxl/导入文件 tab 时直接 close_file() 释放本
+  // tab 的虚拟设备。若被关设备恰是当前全局设备，close_file 的 isCurrent
+  // 分支会 set_default_device() 回到非文件设备；随后的幸存 tab activate()
+  // 再经 per-tab 设备恢复精确切回自己的设备。旧的"先
+  // restore_previous_device（_saved_device_handle 单槽记忆）再 close_file"
+  // 两段式已随 _saved_device_handle 机制一并退役。
+  // NOTE: handles were cached up-front — ctx (and its pinned slots) has
+  // already been destroyed by destroy_context() above.
   if (owns_file_devices) {
-    // Phase 1：restore_previous_device 内部以 TabSwitch 语义切换设备，
-    // 排队的 CurrentDeviceChanged 不会触发 profile 加载覆盖幸存标签页 config。
-    _session->restore_previous_device();
-    // NOTE: handles were cached up-front — ctx (and its pinned slots) has
-    // already been destroyed by destroy_context() above.
     for (ds_device_handle h : owned_file_handles)
       _session->close_file(h);
   }
@@ -527,11 +548,16 @@ void TabManager::on_new_tab_requested() {
       QString::fromUtf8(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1"))
           .arg(_tab_contexts.size() + 1));
 
-  // 阶段3修复：新建空白标签同样记住当前设备 handle（与 demo 默认标签一致），
-  // 使其切回时能由 activate() 正确恢复自己的设备，而非依赖一次性兜底。
+  // 阶段3修复 + 数据模型重构步骤5：新建空白 tab 记住自己的设备身份以供
+  // activate() 恢复——但当前设备是文件/输入模块设备时绝不继承（文件设备
+  // 身份随属主 tab 的生死失效，曾导致"FileDeviceClosed 后 handle=0 →
+  // 显示全局设备"的混乱），改绑设备列表中第一个非文件设备（demo/硬件）。
   if (_device_agent && _device_agent->have_instance()) {
-    new_ctx->set_device_handle(_device_agent->handle());
-    new_doc->set_device_handle(new_ctx->device_handle());
+    ds_device_handle h = _device_agent->handle();
+    if (_device_agent->is_file() || _device_agent->is_input_module())
+      h = default_capture_handle(_session);
+    new_ctx->set_device_handle(h);
+    new_doc->set_device_handle(h);
   }
 
   add_tab(new_ctx);
@@ -579,10 +605,15 @@ void TabManager::on_tab_attached_extended(QWidget *widget,
                                                        _session->document_registry());
         ctx->set_title(title);
 
-        // 阶段3修复：拖出窗口再重新 attach 时新建的标签也记住当前设备 handle。
+        // 阶段3修复 + 数据模型重构步骤5：重新 attach 新建的标签同样记录设备
+        // 身份，文件/输入模块设备活跃时不继承（同 on_new_tab_requested）。
         if (_session->get_device() && _session->get_device()->have_instance()) {
-          ctx->set_device_handle(_session->get_device()->handle());
-          doc->set_device_handle(ctx->device_handle());
+          ds_device_handle h = _session->get_device()->handle();
+          if (_session->get_device()->is_file() ||
+              _session->get_device()->is_input_module())
+            h = default_capture_handle(_session);
+          ctx->set_device_handle(h);
+          doc->set_device_handle(h);
         }
 
         _tab_contexts.append(ctx);

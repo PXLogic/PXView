@@ -619,13 +619,28 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   const bool leaving_file_device =
       _state->device_agent().is_file() ||
       _state->device_agent().is_input_module();
+  // 数据模型重构步骤5：执行租约仲裁。libsigrok 单 sr_session 执行流 = 采集
+  // 执行全局独占——在释放旧设备【前】先拿新设备的租约，忙则拒绝切换
+  // （release 构建下替代 is_working 断言的显式运行时闸）。demo/文件设备
+  // 当前同样经由该租约（它们共用同一执行流）；per-doc 设备实例化后按设备
+  // 发放多份租约即可，接口不变。
+  if (!_state->device_agent().acquire_execution_lease(dev_handle)) {
+    pxv_err("Switch device error: execution lease busy (held by handle %llu).",
+            (unsigned long long)_state->device_agent().lease_holder());
+    _event_bus->broadcast_async<interface::DeviceOpenFailed>({});
+    return false;
+  }
   // Release the old device.
   // destroy_file_device=false: a file device (.pxl / input-module import) is
   // owned by the tab that opened it, not by "whatever is active now". Freeing
   // it here made the device vanish from the device list on every tab switch
   // (and destroyed the channel metadata the tab still needed). Cleanup is
   // SigSession::close_file()'s job.
-  _state->device_agent().release(false);
+  {
+    const ds_device_handle prev_handle = _state->device_agent().handle();
+    _state->device_agent().release(false);
+    _state->device_agent().release_execution_lease(prev_handle);
+  }
   // 数据模型重构步骤4：状态机归一 —— ST_INIT（执行层"新设备待配置"）仅在
   // 真正的设备身份变更（UserSelection 等非 TabSwitch）时复位。TabSwitch 是
   // "tab 恢复自己的设备"：显示层状态（ST_STOPPED = 有完整数据可显示）必须
@@ -637,6 +652,9 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   // Open the new device via DeviceAgent (handles sr_dev_open + channel setup).
   if (!_state->device_agent().open_by_handle(dev_handle, _sr_ctx)) {
     pxv_err("Switch device error!");
+    // 数据模型重构步骤5：打开失败必须释放刚获取的执行租约，否则租约悬挂在
+    // 一个不存在的设备上，后续所有 set_device 都会被"忙"拒绝。
+    _state->device_agent().release_execution_lease(dev_handle);
     // Broadcast DeviceOpenFailed so MainWindow can show a user-facing message
     // ("Failed to open device: <reason>") instead of leaving the UI blank.
     // The old device was already released above and the new one never opened,
@@ -717,47 +735,14 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   return true;
 }
 
-// 方案A（问题2修复）：保存当前非文件设备 handle，供 restore_previous_device 恢复。
-void SigSession::save_current_device_handle()
-{
-  if (_state->device_agent().have_instance() &&
-      !_state->device_agent().is_file() &&
-      !_state->device_agent().is_input_module()) {
-    _saved_device_handle = _state->device_agent().handle();
-  }
-}
-
-// 方案A（问题2修复）：关闭 pxl tab 后切回之前保存的非文件设备。
-bool SigSession::restore_previous_device()
-{
-  // 采集/保存进行中不能切换设备（set_device 的断言前提）。
-  if (_state->is_working() || _state->is_saving()) {
-    return false;
-  }
-  ds_device_handle h = _saved_device_handle;
-  _saved_device_handle = NULL_HANDLE;  // 一次性使用，用后清除
-  // Phase 1：本函数只在标签页关闭流程中被调用（幸存标签页的 activate()
-  // 会立即应用其自身 config），因此设备切换语义是 TabSwitch —— 避免排队
-  // 的 CurrentDeviceChanged(UserSelection) 触发 profile 加载，覆盖幸存
-  // 标签页刚恢复的 config。
-  if (h == NULL_HANDLE) {
-    return set_default_device(interface::DeviceChangeReason::TabSwitch);
-  }
-  // 确保 handle 对应的 sdi 仍然存在（未断开）
-  struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
-  if (!sdi) {
-    return set_default_device();
-  }
-  return set_device(h, interface::DeviceChangeReason::TabSwitch);
-}
+// 方案A 的 save_current_device_handle/restore_previous_device 已删除
+// （数据模型重构步骤5）：关闭文件 tab 的设备回退改由 close_file 的
+// isCurrent 分支（set_default_device）+ 幸存 tab activate() 的 per-tab
+// 设备恢复完成。
 
 bool SigSession::set_file(QString name) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
-
-  // 方案A（问题2）：加载文件设备前保存当前硬件/demo 设备 handle，
-  // 供关闭 pxl tab / 切回非文件 tab 时恢复，避免全局设备被 pxl 占用。
-  save_current_device_handle();
 
   std::string file_name = pv::path::ToUnicodePath(name);
   pxv_info("Load file: \"%s\"", file_name.c_str());
@@ -822,9 +807,6 @@ bool SigSession::set_file(QString name) {
 bool SigSession::import_file(QString name) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
-
-  // 方案A（问题2）：导入文件前保存当前硬件/demo 设备 handle，供后续恢复。
-  save_current_device_handle();
 
   std::string file_name = pv::path::ToUnicodePath(name);
   pxv_info("Import file: \"%s\"", file_name.c_str());

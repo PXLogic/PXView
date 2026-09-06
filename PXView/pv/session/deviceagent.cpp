@@ -336,6 +336,10 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
 
 void DeviceAgent::release(bool destroy_file_device)
 {
+    // 数据模型重构步骤5：入口处捕获待释放设备的 handle。set_device 的切换
+    // 路径会先拿新租约再调 release()，此时 _dev_handle 仍是旧设备——用入口
+    // 捕获值释放才不会误伤新租约（lease 幂等，旧 != 新时是 no-op）。
+    const ds_device_handle leased_handle = _dev_handle;
     if (_sr_session) {
         if (sr_session_is_running(_sr_session)) {
             sr_session_stop(_sr_session);
@@ -394,6 +398,10 @@ void DeviceAgent::release(bool destroy_file_device)
     _is_new_device = false;
     _sr_ctx = nullptr;
     _app_work_mode = LOGIC;
+    // 数据模型重构步骤5：设备执行上下文销毁 = 租约交还（幂等）。set_device
+    // 的切换路径在 release 前已显式换约（先拿新租约再放旧租约），此处兜底
+    // 覆盖 app_service::disconnect_device 等直接 release 的路径。
+    _dev_mgr.release_execution_lease(leased_handle);
 
     // Free cached mode list (GSList owned by DeviceAgent; sr_dev_mode entries
     // are static globals and not freed).

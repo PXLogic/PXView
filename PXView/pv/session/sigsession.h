@@ -202,16 +202,10 @@ public:
                       interface::DeviceChangeReason::UserSelection);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
   bool import_file(QString name);
-  // 方案A（问题2修复）：加载 pxl/导入前保存当前非文件设备 handle，
-  // 关闭 pxl tab 时调用 restore_previous_device() 恢复（以 TabSwitch 语义
-  // 切换，不触发 profile 加载），避免"导入 pxl 导致全局设备变化"破坏其他
-  // tab 的设备上下文。标签页间切换不再使用本函数 —— 各标签的 activate()
-  // 经 per-tab handle 直接恢复自己的设备（Phase 5 已删兜底）。
-  bool restore_previous_device();
-  // 阶段10：save_current_device_handle/saved_device_handle 无外部消费方，
-  // 由 public 收敛为 private（内部方案A使用）。
-  void save_current_device_handle();
-  ds_device_handle saved_device_handle() const { return _saved_device_handle; }
+  // 方案A 的 _saved_device_handle/restore_previous_device 已删除（数据模型
+  // 重构步骤5）：关闭文件 tab 的设备回退由 close_file 的 isCurrent 分支
+  // （set_default_device）+ 幸存 tab activate() 的 per-tab 设备恢复完成，
+  // 不再需要"单槽一次性"的全局 handle 记忆。
   // 阶段5：采集入口统一经 CaptureEngine（GUI / pxviewd / MCP 同一门面，
   // 按 owner ctx 寻址，执行策略可切换——见 core/captureengine.h）。
   bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override
@@ -576,10 +570,6 @@ std::vector<core::Subscription> _event_subscriptions;
   // tied to the active device.
   struct sr_context *_sr_ctx = nullptr;
 
-  // 方案A：加载文件设备前保存的硬件/demo 设备 handle。扫描设备（demo/实体）
-  // 的 sdi 常驻 _scanned_sdi，handle 跨 release 有效；文件设备 sdi 会被
-  // release() 释放，故此处只保存非文件设备，restore 时通过 set_device 切回。
-  ds_device_handle _saved_device_handle = NULL_HANDLE;
   // 演进：最近一次 set_device 的切换原因。switch_work_mode 广播
   // DeviceModeChanged 时透传，使事件自携带语义（不再依赖 GUI 层转发）。
   interface::DeviceChangeReason _device_change_reason =

@@ -132,6 +132,20 @@ public:
     // Refresh device info (name/driver/type) from the active SDI.
     void update();
 
+    // --- 执行租约（数据模型重构步骤5，委托 DeviceManager）---
+    // libsigrok 单 sr_session 执行流的显式仲裁点。set_device 在切换前
+    // acquire（忙则拒绝并广播 DeviceOpenFailed），释放旧设备时 release。
+    bool acquire_execution_lease(ds_device_handle handle) {
+        return _dev_mgr.acquire_execution_lease(handle);
+    }
+    void release_execution_lease(ds_device_handle handle) {
+        _dev_mgr.release_execution_lease(handle);
+    }
+    bool holds_execution_lease(ds_device_handle handle) const {
+        return _dev_mgr.holds_execution_lease(handle);
+    }
+    ds_device_handle lease_holder() const { return _dev_mgr.lease_holder(); }
+
     // --- Datafeed callback registration ---
     void set_datafeed_callback(sr_datafeed_callback cb, void *user_data);
 

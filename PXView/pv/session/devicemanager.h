@@ -62,6 +62,33 @@ public:
     struct sr_dev_inst *find_sdi_by_handle(ds_device_handle handle) const;
     ds_device_handle handle_of_sdi(struct sr_dev_inst *sdi) const;
 
+    // --- 执行租约（数据模型重构步骤5）---
+    // libsigrok 单 sr_session 执行流 = 采集执行全局独占。任何即将执行采集的
+    // 设备必须先持有租约；租约被占用时 acquire 返回 false（忙）。这是旧
+    // "全局唯一 DeviceAgent + is_working 断言"的显式化仲裁点：后续 per-doc
+    // 设备实例化（demo 多实例等）在此基础上扩展为按设备发放多份租约。
+    // acquire 幂等（重入同一 handle 返回 true）；release 幂等。
+    bool acquire_execution_lease(ds_device_handle handle)
+    {
+        if (_leased_handle == handle)
+            return true;
+        if (_leased_handle != NULL_HANDLE)
+            return false;
+        _leased_handle = handle;
+        return true;
+    }
+    void release_execution_lease(ds_device_handle handle)
+    {
+        if (_leased_handle == handle)
+            _leased_handle = NULL_HANDLE;
+    }
+    // 该 handle 是否当前持有执行租约。
+    bool holds_execution_lease(ds_device_handle handle) const
+    {
+        return _leased_handle == handle;
+    }
+    ds_device_handle lease_holder() const { return _leased_handle; }
+
     // 文件设备列表（get_device_list 拼接 all_sdi 用）。
     std::vector<struct sr_dev_inst *> &file_devices() { return _file_sdi; }
     const std::vector<struct sr_dev_inst *> &file_devices() const
@@ -75,6 +102,9 @@ private:
     // 稳定 handle 注册表（handle → sdi），权威查询源。
     std::map<ds_device_handle, struct sr_dev_inst *> _file_handles;
     ds_device_handle _next_file_handle = 0; // 单调递增，不复用
+    // 执行租约持有者（NULL_HANDLE = 空闲）。单 sr_session 执行流下恒为
+    // "当前活跃设备"。
+    ds_device_handle _leased_handle = NULL_HANDLE;
 };
 
 } // namespace pv
