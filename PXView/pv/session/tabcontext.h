@@ -90,33 +90,46 @@ public:
     inline ds_device_handle device_handle() const { return _device_handle; }
     inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
 
-    // --- Device-keyed data pool: tab ↔ slot rebinding (rebind model) ---
-    // Rebind this tab to a different data slot document. The previously bound
-    // document is NOT released — it is kept alive in DocumentRegistry and
-    // recorded in _pinned_doc_indices (a file-device pool slot whose snapshots
+    // --- Device-keyed data pool: tab ↔ slot rebinding (rebind model v3) ---
+    // Rebind this tab to a different data slot document (strong reference —
+    // the tab keeps the slot alive for as long as it binds/pins it). The
+    // previously bound document is NOT released — it stays alive (registry
+    // ref + this tab's pinned ref) as a file-device pool slot whose snapshots
     // + decoder stacks survive the switch; switching back rebinds to it with
-    // zero data loss). If the new document is one of the pinned slots, it is
+    // zero data loss. If the new document is one of the pinned slots, it is
     // unpinned (it becomes the current binding again).
-    void rebind_document(data::SessionDocument *doc, size_t doc_index);
+    void rebind_document(std::shared_ptr<data::SessionDocument> doc,
+                         size_t doc_index);
     // True if doc is this tab's current binding or one of its pinned slots.
     bool owns_document(const data::SessionDocument *doc) const;
-    // Pinned slot documents (weak refs; owned by DocumentRegistry). Released
-    // in the destructor so a closing tab drops exactly its own pool entries.
-    inline const std::vector<size_t> &pinned_doc_indices() const {
-        return _pinned_doc_indices;
+    // Pinned slot documents (strong refs). Dropped when the tab closes or
+    // the slot's device is invalidated; registry refs die with the owner.
+    inline const std::vector<std::shared_ptr<data::SessionDocument>> &
+    pinned_docs() const {
+        return _pinned_docs;
     }
 
-    // --- Shared-reference semantics (rebind model v2) ---
+    // --- Shared-reference semantics (rebind model v2/v3) ---
     // A file-device pool slot can be bound by SEVERAL tabs: the tab that
     // opened the file (owner) and any tab that switched its data to that file
-    // (borrower). Ownership bookkeeping decides who releases what:
+    // (borrower). Ownership bookkeeping decides who drops the REGISTRY ref:
     // only documents CREATED for this tab are released in its destructor;
-    // foreign slots die with their owning tab/device (close_file).
+    // foreign slots die with their owning tab/device (close_file). Strong
+    // references make any ordering safe — a doc lives while anyone binds it.
     void mark_document_owned(size_t idx);
     bool owns_doc_index(size_t idx) const;
-    // Drop a pinned entry (weak ref detached; the doc itself is untouched).
+    inline const std::vector<size_t> &owned_doc_indices() const {
+        return _owned_doc_indices;
+    }
+    // Drop a pinned entry by registry index (the doc itself is untouched —
+    // only this tab's reference goes away).
     void unpin_document(size_t idx);
     inline size_t doc_index() const { return _doc_index; }
+    // Unified device-identity invalidation (rebind model v3): drop every
+    // trace of a closed file device — the tab's device_handle and any pinned
+    // slot belonging to that device. A dead slot as the CURRENT binding must
+    // be rebound by the caller (needs a fresh document + view detach).
+    void invalidate_device(ds_device_handle handle);
 
     // Harvest the tab's device intent (channel config + layout + model stash)
     // into the bound document. Public for the rebind model: the GUI calls it
@@ -165,10 +178,14 @@ private:
     ds_device_handle        _device_handle = NULL_HANDLE;
     // Device-keyed data pool: slots pinned by this tab after rebinding away
     // from them (file-device pool entries whose data must survive switches).
-    std::vector<size_t>     _pinned_doc_indices;
-    // Documents created for this tab (released on tab close). Foreign shared
-    // slots are NOT in this list.
+    // Strong references — the tab keeps them alive while it may return to it.
+    std::vector<std::shared_ptr<data::SessionDocument>> _pinned_docs;
+    // Documents created for this tab (registry refs dropped on tab close).
+    // Foreign shared slots are NOT in this list.
     std::vector<size_t>     _owned_doc_indices;
+    // Strong reference to the current binding (keeps it alive across any
+    // rebinding/owner-close race). _document is the raw mirror for compat.
+    std::shared_ptr<data::SessionDocument> _doc_ref;
 };
 
 } // namespace pv

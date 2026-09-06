@@ -1107,6 +1107,11 @@ void SigSession::close_file(unsigned long long dev_handle) {
   // Remove the device from DeviceAgent's tracked list.
   _state->device_agent().remove_device(dev_handle);
 
+  // Rebind model v3: unified device-identity invalidation point. Broadcast
+  // AFTER removal — consumers (GUI tab contexts, pool slots) must drop every
+  // copy of this identity (see FileDeviceClosed in events.h).
+  _event_bus->broadcast_async<interface::FileDeviceClosed>({dev_handle});
+
   if (isCurrent)
     set_default_device();
 }

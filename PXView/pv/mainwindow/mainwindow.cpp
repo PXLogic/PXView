@@ -636,13 +636,17 @@ void MainWindow::reset_all_view() {
 // ---------------------------------------------------------------------------
 
 void MainWindow::rebind_current_tab_to_fresh_document() {
-  pv::TabContext *ctx = tab_manager()->current_context();
+  rebind_tab_to_fresh_document(tab_manager()->current_context());
+}
+
+void MainWindow::rebind_tab_to_fresh_document(pv::TabContext *ctx,
+                                              bool make_active) {
   if (!ctx)
     return;
   auto *reg = _session->document_registry();
   size_t new_idx = reg->take_document(
       std::make_unique<pv::data::SessionDocument>(_session->device()));
-  pv::data::SessionDocument *new_doc = reg->get_document_by_index(new_idx);
+  auto new_doc = reg->get_shared_by_index(new_idx);
   if (!new_doc)
     return;
   new_doc->set_device_handle(_session->get_device()->handle());
@@ -652,7 +656,8 @@ void MainWindow::rebind_current_tab_to_fresh_document() {
   ctx->rebind_document(new_doc, new_idx);
   ctx->mark_document_owned(new_idx);
   ctx->set_device_handle(_session->get_device()->handle());
-  _session->set_active_document(new_doc);
+  if (make_active)
+    _session->set_active_document(new_doc.get());
   // Detach the view from the pinned slot: drop its trace wrappers (the
   // slot's stacks stay alive with the slot) and its data bindings.
   // Everything is rebuilt from the fresh (empty) document.
@@ -676,15 +681,15 @@ bool MainWindow::route_to_file_device_data(ds_device_handle handle) {
   if (_session->is_working() || _session->is_saving())
     return false;
   auto *reg = _session->document_registry();
-  pv::data::SessionDocument *slot = reg->find_file_device_document(handle);
+  auto slot = reg->find_file_device_document_shared(handle);
   if (!slot || !slot->has_data())
     return false;
 
   pv::TabContext *ctx = tab_manager()->current_context();
   if (!ctx)
     return false;
-  if (ctx->document() != slot)
-    ctx->rebind_document(slot, reg->index_of_document(slot));
+  if (ctx->document() != slot.get())
+    ctx->rebind_document(slot, reg->index_of_document(slot.get()));
   // The tab identity follows the slot's device so activate() restores it.
   ctx->set_device_handle(handle);
   // Full five-stage restore chain (device TabSwitch restore + intent apply +

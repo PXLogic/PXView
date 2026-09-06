@@ -229,6 +229,18 @@ struct DeviceOpenFailed {
     std::string error_message;
 };
 
+// FileDeviceClosed — a file device (input-module import / .pxl virtual
+// device) was closed via SigSession::close_file(); its sdi has ALREADY been
+// freed when this event is broadcast. This is the SINGLE invalidation point
+// for the closed device's identity (rebind model v3, pool rule: 槽存活 =
+// 设备存活): every holder of the identity (TabContext::device_handle,
+// SessionDocument::device_handle of pool slots, pinned references) must drop
+// it here. Broadcast AFTER removal — handlers run against a dead handle and
+// must only invalidate, never dereference the device.
+struct FileDeviceClosed {
+    unsigned long long handle = 0;
+};
+
 // UsbDeviceArrived — a USB device arrived.
 struct UsbDeviceArrived {};
 

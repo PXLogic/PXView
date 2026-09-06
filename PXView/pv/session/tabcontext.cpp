@@ -55,21 +55,22 @@ TabContext::TabContext(view::View *view, SigSession *session, data::SessionDocum
 
 TabContext::~TabContext()
 {
-    // phase 2 + rebind model v2: only documents CREATED for this tab are
-    // released here. Foreign pool slots (a file device's slot shared from
-    // another tab) are weak references — their lifetime follows the owning
-    // tab/device (TabManager::remove_tab → close_file).
+    // phase 2 + rebind model v3: drop the REGISTRY reference for documents
+    // created by this tab. Strong references held by other tabs keep a
+    // document alive regardless of ordering — there is no detach-before-
+    // destroy requirement anymore; a document dies when the last holder
+    // (registry or tab) drops it.
     if (_doc_registry) {
-        if (owns_doc_index(_doc_index))
-            _doc_registry->release_document(_doc_index);
-        for (size_t idx : _pinned_doc_indices)
-            if (owns_doc_index(idx))
-                _doc_registry->release_document(idx);
+        for (size_t idx : _owned_doc_indices)
+            _doc_registry->release_document(idx);
     }
-    _pinned_doc_indices.clear();
+    _pinned_docs.clear();
+    _doc_ref.reset();
+    _document = nullptr;
+    _doc_index = SIZE_MAX;
 }
 
-// ---- Shared-reference ownership bookkeeping (rebind model v2) ----
+// ---- Shared-reference ownership bookkeeping (rebind model v3) ----
 
 bool TabContext::owns_doc_index(size_t idx) const
 {
@@ -86,30 +87,62 @@ void TabContext::mark_document_owned(size_t idx)
 
 void TabContext::unpin_document(size_t idx)
 {
-    auto it = std::find(_pinned_doc_indices.begin(),
-                        _pinned_doc_indices.end(), idx);
-    if (it != _pinned_doc_indices.end())
-        _pinned_doc_indices.erase(it);
+    if (!_doc_registry)
+        return;
+    _pinned_docs.erase(
+        std::remove_if(_pinned_docs.begin(), _pinned_docs.end(),
+                       [&](const std::shared_ptr<data::SessionDocument> &p) {
+                           return p && _doc_registry->index_of_document(
+                                           p.get()) == idx;
+                       }),
+        _pinned_docs.end());
+}
+
+void TabContext::invalidate_device(ds_device_handle handle)
+{
+    // Unified device-identity invalidation: a file device was closed — drop
+    // every trace of it here. A dead slot as the CURRENT binding must be
+    // rebound by the caller (needs a fresh document + view detach).
+    if (handle == NULL_HANDLE)
+        return;
+    if (_device_handle == handle)
+        _device_handle = NULL_HANDLE;
+    _pinned_docs.erase(
+        std::remove_if(_pinned_docs.begin(), _pinned_docs.end(),
+                       [handle](const std::shared_ptr<data::SessionDocument>
+                                    &p) {
+                           return p && p->is_file_device_slot() &&
+                                  p->device_handle() == handle;
+                       }),
+        _pinned_docs.end());
 }
 
 // ---- Device-keyed data pool: tab ↔ slot rebinding (rebind model) ----
 
-void TabContext::rebind_document(data::SessionDocument *doc, size_t doc_index)
+void TabContext::rebind_document(std::shared_ptr<data::SessionDocument> doc,
+                                 size_t doc_index)
 {
     // Unpin the target slot if it was pinned — it becomes the current binding.
-    if (doc_index != SIZE_MAX) {
-        auto it = std::find(_pinned_doc_indices.begin(),
-                            _pinned_doc_indices.end(), doc_index);
-        if (it != _pinned_doc_indices.end())
-            _pinned_doc_indices.erase(it);
+    if (doc) {
+        auto it = std::find_if(
+            _pinned_docs.begin(), _pinned_docs.end(),
+            [&doc](const std::shared_ptr<data::SessionDocument> &p) {
+                return p.get() == doc.get();
+            });
+        if (it != _pinned_docs.end())
+            _pinned_docs.erase(it);
     }
-    // Pin the outgoing binding (unless trivially the same slot / no slot).
-    if (_doc_index != SIZE_MAX && _doc_index != doc_index &&
-        std::find(_pinned_doc_indices.begin(), _pinned_doc_indices.end(),
-                  _doc_index) == _pinned_doc_indices.end()) {
-        _pinned_doc_indices.push_back(_doc_index);
+    // Pin the outgoing binding (unless trivially the same slot / none). The
+    // outgoing document stays alive via the pinned strong reference.
+    if (_doc_ref && _doc_ref.get() != doc.get() &&
+        std::find_if(_pinned_docs.begin(), _pinned_docs.end(),
+                     [this](const std::shared_ptr<data::SessionDocument> &p) {
+                         return p.get() == _doc_ref.get();
+                     }) == _pinned_docs.end()) {
+        _pinned_docs.push_back(_doc_ref);
     }
-    _document = doc;
+    _doc_ref = std::move(doc);
+    _document = _doc_ref.get();
     _doc_index = doc_index;
 }
 
@@ -119,10 +152,8 @@ bool TabContext::owns_document(const data::SessionDocument *doc) const
         return false;
     if (doc == _document)
         return true;
-    if (!_doc_registry)
-        return false;
-    for (size_t idx : _pinned_doc_indices) {
-        if (_doc_registry->get_document_by_index(idx) == doc)
+    for (const auto &p : _pinned_docs) {
+        if (p.get() == doc)
             return true;
     }
     return false;

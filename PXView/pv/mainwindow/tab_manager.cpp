@@ -234,28 +234,21 @@ void TabManager::remove_tab(int index) {
   SigSession *_session = _wnd->session();
 
   pv::TabContext *ctx = _tab_contexts[index];
-  // Rebind model v2: compute the set of documents that DIE with this tab —
-  // only the ones this tab OWNS (created for it). Foreign pool slots shared
-  // from other tabs survive. Owned file devices are closed below; handles
-  // are cached up-front since ctx is destroyed further down.
+  // Rebind model v3: every document this tab OWNS dies with it (registry
+  // ref dropped in ~TabContext) — its binding state (current/pinned) no
+  // longer matters with strong references. Foreign pool slots shared from
+  // other tabs survive. Owned file devices are closed below; handles are
+  // cached up-front since ctx is destroyed further down.
   std::vector<ds_device_handle> owned_file_handles;
-  std::vector<size_t> dying_docs;
-  auto collect_owned = [&](size_t idx) {
-    if (!ctx->owns_doc_index(idx))
-      return;
-    if (std::find(dying_docs.begin(), dying_docs.end(), idx) ==
-        dying_docs.end())
-      dying_docs.push_back(idx);
+  std::vector<size_t> dying_docs = ctx->owned_doc_indices();
+  for (size_t idx : dying_docs) {
     if (auto *d = _session->document_registry()->get_document_by_index(idx)) {
       if (d->is_file_device_slot() && d->device_handle() != NULL_HANDLE &&
           std::find(owned_file_handles.begin(), owned_file_handles.end(),
                     d->device_handle()) == owned_file_handles.end())
         owned_file_handles.push_back(d->device_handle());
     }
-  };
-  collect_owned(ctx->doc_index());
-  for (size_t pinned_idx : ctx->pinned_doc_indices())
-    collect_owned(pinned_idx);
+  }
   const bool owns_file_devices = !owned_file_handles.empty();
   if (ctx->is_live() && _session->is_working()) {
     _session->stop_capture();
@@ -325,7 +318,8 @@ void TabManager::remove_tab(int index) {
       if (auto *nd =
               _session->document_registry()->get_document_by_index(nidx)) {
         nd->set_device_handle(other->device_handle());
-        other->rebind_document(nd, nidx);
+        other->rebind_document(
+            _session->document_registry()->get_shared_by_index(nidx), nidx);
         other->mark_document_owned(nidx);
       }
       if (other->view()) {

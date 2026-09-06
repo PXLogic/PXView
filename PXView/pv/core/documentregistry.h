@@ -100,6 +100,16 @@ public:
   // Weak-pointer accessor by index. Returns nullptr if index is out of range
   // or the slot has been released (nullptr unique_ptr).
   data::SessionDocument *get_document_by_index(size_t index) const;
+  // Strong (shared_ptr) accessor — the returned reference keeps the document
+  // alive independently of the registry slot. Tabs hold these for their
+  // current binding and pinned pool slots so a rebinding/owner close can
+  // never dangle them (rebind model v3: reference-counted document layer).
+  std::shared_ptr<data::SessionDocument>
+  get_shared_by_index(size_t index) const;
+  // Device-keyed pool lookup, strong-reference variant (see
+  // find_file_device_document).
+  std::shared_ptr<data::SessionDocument>
+  find_file_device_document_shared(ds_device_handle handle) const;
 
   void set_active_document(data::SessionDocument *doc);
   inline data::SessionDocument *get_active_document() const {
@@ -172,8 +182,10 @@ private:
   ISessionCoordination *_coord;
 
   // Document list (owned). Released slots become nullptr but keep their index
-  // (marked deletion) so all other indices remain stable.
-  std::vector<std::unique_ptr<data::SessionDocument>> _owned_documents;
+  // (marked deletion) so all other indices remain stable. shared_ptr: a tab
+  // holding a strong reference keeps its current/pinned documents alive even
+  // if the owning tab's release races with it (rebind model v3).
+  std::vector<std::shared_ptr<data::SessionDocument>> _owned_documents;
   size_t _active_document_index;
   std::atomic<size_t> _capture_owner_index{SIZE_MAX};
 

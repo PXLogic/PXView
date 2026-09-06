@@ -111,6 +111,25 @@ DocumentRegistry::get_document_by_index(size_t index) const {
   return _owned_documents[index].get();
 }
 
+std::shared_ptr<data::SessionDocument>
+DocumentRegistry::get_shared_by_index(size_t index) const {
+  if (index == SIZE_MAX || index >= _owned_documents.size())
+    return nullptr;
+  return _owned_documents[index];
+}
+
+std::shared_ptr<data::SessionDocument>
+DocumentRegistry::find_file_device_document_shared(
+    ds_device_handle handle) const {
+  if (handle == NULL_HANDLE)
+    return nullptr;
+  for (const auto &ptr : _owned_documents) {
+    if (ptr && ptr->is_file_device_slot() && ptr->device_handle() == handle)
+      return ptr;
+  }
+  return nullptr;
+}
+
 data::SessionDocument *
 DocumentRegistry::find_file_device_document(ds_device_handle handle) const {
   if (handle == NULL_HANDLE)

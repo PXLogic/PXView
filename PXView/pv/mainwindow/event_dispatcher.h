@@ -59,6 +59,7 @@ private:
     void on_device_list_updated(const interface::DeviceListUpdated &);
     void on_current_device_changed(const interface::CurrentDeviceChanged &);
     void on_device_open_failed(const interface::DeviceOpenFailed &);
+    void on_file_device_closed(const interface::FileDeviceClosed &);
     void on_usb_device_arrived(const interface::UsbDeviceArrived &);
     void on_device_detached(const interface::DeviceDetached &);
     void on_sample_rate_changed(const interface::SampleRateChanged &);

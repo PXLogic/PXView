@@ -14,6 +14,7 @@
 #include "pv/base/log.h"
 #include "pv/mainwindow/mainwindow.h"
 #include "pv/mainwindow/dock_manager.h"
+#include "pv/mainwindow/tab_manager.h"
 #include "pv/session/deviceagent.h"
 #include "pv/session/sigsession.h"
 #include "pv/session/tabcontext.h"
@@ -161,6 +162,8 @@ SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBu
       [this](const pv::interface::StoreConfPrev &e) { on_store_conf_prev(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::CurrentDeviceChangePrev>(
       [this](const pv::interface::CurrentDeviceChangePrev &e) { on_current_device_change_prev(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::FileDeviceClosed>(
+      [this](const pv::interface::FileDeviceClosed &e) { on_file_device_closed(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::StartCollectWorkPrev>(
       [this](const pv::interface::StartCollectWorkPrev &e) { on_start_collect_work_prev(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::EndCollectWorkPrev>(
@@ -506,8 +509,36 @@ void SessionEventDispatcher::on_device_detached(const pv::interface::DeviceDetac
     _window->session()->set_default_device();
   }
 }
-void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOpenFailed &evt) {
-  QString driver = QString::fromStdString(evt.driver_name);
+// Rebind model v3: unified device-identity invalidation point (pool rule:
+// 槽存活 = 设备存活). close_file() broadcasts this AFTER the sdi has been
+// freed; every holder of the dead identity drops it here. Idempotent with
+// TabManager::remove_tab's inline detach (which runs synchronously first):
+// by the time this handler runs, tabs already detached by remove_tab see a
+// fresh document and do nothing.
+void SessionEventDispatcher::on_file_device_closed(
+    const pv::interface::FileDeviceClosed &ev) {
+  PV_WIN_GUARD();
+  const ds_device_handle h = (ds_device_handle)ev.handle;
+  if (h == NULL_HANDLE)
+    return;
+  pxv_info("FileDeviceClosed: invalidating identity of handle %llu",
+           (unsigned long long)h);
+  for (pv::TabContext *ctx : _window->tab_manager()->contexts()) {
+    const bool current_binding_is_dead_slot =
+        ctx->document() && ctx->document()->is_file_device_slot() &&
+        ctx->document()->device_handle() == h;
+    if (current_binding_is_dead_slot) {
+      // The tab still binds the dead slot (a close path that did not detach
+      // inline, e.g. an API/headless-initiated close_file). Rebind it to a
+      // fresh document; only the foreground tab may claim the active doc.
+      _window->rebind_tab_to_fresh_document(
+          ctx, ctx == _window->current_context());
+    }
+    ctx->invalidate_device(h);
+  }
+}
+
+void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOpenFailed &evt) {  QString driver = QString::fromStdString(evt.driver_name);
   QString err = QString::fromStdString(evt.error_message);
   QString title = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DEVICE_OPEN_FAILED),
                        "Failed to open device");

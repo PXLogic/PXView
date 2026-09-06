@@ -198,6 +198,11 @@ public:
     // tab to a fresh document for the newly-active device (the slot stays
     // pinned with its data/decoders/intent).
     void rebind_current_tab_to_fresh_document();
+    // Generalized variant (device-identity invalidation for any tab).
+    // make_active=false for background tabs (must not steal the active
+    // document / capture ownership).
+    void rebind_tab_to_fresh_document(pv::TabContext *ctx,
+                                      bool make_active = true);
     bool confirm_to_store_data();
     void update_toolbar_view_status();
     void update_capture_ui_status();
