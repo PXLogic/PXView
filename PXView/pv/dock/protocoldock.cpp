@@ -888,9 +888,10 @@ void ProtocolDock::on_decoder_progress() {
 }
 
 void ProtocolDock::set_model() {
-  pv::dialogs::ProtocolList *protocollist_dlg =
-      new pv::dialogs::ProtocolList(this, _session, _decoder_model);
-  protocollist_dlg->exec();
+  // Stack-allocated: the old "new + exec()" leaked the dialog every time the
+  // protocol list was opened. PxDialog does not set WA_DeleteOnClose.
+  pv::dialogs::ProtocolList protocollist_dlg(this, _session, _decoder_model);
+  protocollist_dlg.exec();
   resize_table_view(_decoder_model);
   _model_proxy.setSourceModel(_decoder_model);
   search_done();
@@ -1118,9 +1119,10 @@ void ProtocolDock::column_resize(int index, int old_size, int new_size) {
 }
 
 void ProtocolDock::export_table_view() {
-  pv::dialogs::ProtocolExp *protocolexp_dlg =
-      new pv::dialogs::ProtocolExp(this, _session, _decoder_model);
-  protocolexp_dlg->exec();
+  // Stack-allocated: the old "new + exec()" leaked the dialog on every
+  // export. PxDialog does not set WA_DeleteOnClose, so this is safe.
+  pv::dialogs::ProtocolExp protocolexp_dlg(this, _session, _decoder_model);
+  protocolexp_dlg.exec();
 }
 
 void ProtocolDock::nav_table_view() {

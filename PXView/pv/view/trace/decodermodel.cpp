@@ -97,6 +97,30 @@ void DecoderModel::setAllStacks(const std::vector<pv::data::DecoderStack *> &sta
     endResetModel();
 }
 
+QString DecoderModel::stackDisplayName(pv::data::DecoderStack *s, int index)
+{
+    if (!s)
+        return QString("Dec%1").arg(index);
+
+    QString name;
+    auto &decoders = s->stack();
+    if (!decoders.empty())
+        name = QString(decoders.back()->decoder()->name);
+    else
+        name = QString("Dec%1").arg(index);
+
+    // Distinguish instances:
+    // 1. If custom label exists: use "Name(label)"
+    // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
+    QString lbl = s->label();
+    if (lbl.isEmpty())
+        lbl = s->auto_label();
+    if (!lbl.isEmpty())
+        name += "(" + lbl + ")";
+
+    return name;
+}
+
 void DecoderModel::buildColumnMap()
 {
     _column_map.clear();
@@ -105,21 +129,7 @@ void DecoderModel::buildColumnMap()
         auto *s = _all_stacks[si];
         if (!s)
             continue;
-        QString prefix;
-        auto &decoders = s->stack();
-        if (!decoders.empty())
-            prefix = QString(decoders.back()->decoder()->name);
-        else
-            prefix = QString("Dec%1").arg(si);
-
-        // Distinguish instances:
-        // 1. If custom label exists: use "Name(label)"
-        // 2. If no custom label: auto-generate from bound channel "Name(CH1)"
-        QString lbl = s->label();
-        if (lbl.isEmpty())
-            lbl = s->auto_label();
-        if (!lbl.isEmpty())
-            prefix += "(" + lbl + ")";
+        QString prefix = stackDisplayName(s, si);
 
         int row_count = s->list_rows_size();
         for (int r = 0; r < row_count; r++) {

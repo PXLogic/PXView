@@ -80,6 +80,10 @@
         "text": "Please select a decoder!"
     },
     {
+        "id": "IDS_MSG_NO_EXPORT_ROW",
+        "text": "Please select at least one decode row!"
+    },
+    {
         "id": "IDS_MSG_FIND_BASE_DECODER_ERROR",
         "text": "No corresponding base decoder found!"
     },

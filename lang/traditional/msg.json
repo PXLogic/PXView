@@ -79,6 +79,10 @@
         "text": "請選擇一個解碼器!"
     },
     {
+        "id": "IDS_MSG_NO_EXPORT_ROW",
+        "text": "請至少選擇一行解碼數據!"
+    },
+    {
         "id": "IDS_MSG_FIND_BASE_DECODER_ERROR",
         "text": "沒有找到對應的底層解碼器!"
     },

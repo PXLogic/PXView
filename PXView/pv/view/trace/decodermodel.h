@@ -71,6 +71,17 @@ public:
     void setAllStacks(const std::vector<pv::data::DecoderStack *> &stacks);
     inline bool isMultiStackMode() const { return _multi_stack; }
     inline int stackCount() const { return (int)_all_stacks.size(); }
+    // Read-only view of the stacks backing multi-stack (All) mode. Empty when
+    // a single stack is selected. Used by the export dialog so it enumerates
+    // exactly the same stacks the table shows.
+    inline const std::vector<pv::data::DecoderStack *> &allStacks() const {
+        return _all_stacks;
+    }
+    // Display name of one stack: "Name(label)". Shared by the table column
+    // headers and the export dialog so both name a decoder identically
+    // (e.g. "UART(CH1)"). `index` is only a fallback when the stack has no
+    // decoder instance yet.
+    static QString stackDisplayName(pv::data::DecoderStack *stack, int index);
 
     // Map a model row to the owning decoder stack and row-within-stack.
     void mapRowToStack(int model_row, pv::data::DecoderStack *&stack,

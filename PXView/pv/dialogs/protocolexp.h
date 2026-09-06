@@ -30,6 +30,7 @@
 #include <QLabel>
 #include <QCheckBox> 
 #include <QString>
+#include <vector>
  
 #include "pv/prop/binding/deviceoptions.h"
 #include "pv/toolbars/titlebar.h"
@@ -39,7 +40,7 @@
 namespace pv {
 
 class SigSession;
-namespace data { class DataSource; }
+namespace data { class DataSource; class DecoderStack; }
 
 namespace data {
 namespace decode {
@@ -59,11 +60,17 @@ class ProtocolExp : public PxDialog
     Q_OBJECT
 
 private:
+    // One selectable export column. In multi-stack (All) mode a column is
+    // identified by (stack_index, row_index) so that the same decode row name
+    // coming from two different stacks (e.g. two UART instances bound to TX
+    // and RX) stays distinguishable and both can be exported at once.
     struct ExportRowInfo
     {
         QString title;
         const data::decode::Row *row;
-        int     row_index;
+        int     row_index;    // 0-based visible decode row inside its stack
+        int     stack_index;  // index into _export_stacks (0 in single-stack mode)
+        data::DecoderStack *stack;
         uint64_t    read_index;
     };
 
@@ -90,6 +97,12 @@ private:
     // dialog reads the current decoder stack from this instance to know
     // which protocol to export.
     pv::view::DecoderModel *_decoder_model;
+
+    // Snapshot taken at construction time: true when the protocol dock was in
+    // "All" (multi-stack) mode. Export then spans every stack, merged onto one
+    // shared sample timeline.
+    bool _multi_stack = false;
+    std::vector<pv::data::DecoderStack *> _export_stacks;
 
     toolbars::TitleBar *_titlebar;
     DsComboBox *_format_combobox;
