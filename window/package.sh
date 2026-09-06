@@ -204,6 +204,20 @@ for cand in /ucrt64/bin/python.exe /ucrt64/bin/python3.exe; do
 done
 if [ -f "$CLI_SRC" ] && [ -n "$PYTHON_EXE" ]; then
     echo "=== Bundling pxview-cli (python.exe + automation client) ==="
+
+    # The client sources must land at share/pxview/python -- that is the path
+    # python._pth and the Linux wrapper use. CMake installs them under
+    # share/pxview/python, but on Windows NTFS is case-insensitive, so they
+    # actually end up inside the pre-existing share/PXView/ and the earlier
+    # `cp -r ../install.dir/share/PXView/* .` flattened them to ./python.
+    # Restore the canonical layout and drop the flattened copy.
+    mkdir -p share/pxview
+    rm -rf share/pxview/python
+    for src in "../install.dir/share/PXView/python" "../install.dir/share/pxview/python"; do
+        [ -d "$src" ] && cp -r "$src" share/pxview/ && break
+    done
+    rm -rf python
+
     cp "$PYTHON_EXE" python.exe
 
     # python.exe's own DLLs (libpython3.14.dll etc.) -- same MinGW runtime the
