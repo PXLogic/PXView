@@ -458,11 +458,6 @@ void SlidingDrawer::setSlideOffset(int offset) {
 // ---- Events ----
 
 void SlidingDrawer::paintEvent(QPaintEvent *event) {
-#ifndef NDEBUG
-  QElapsedTimer timer;
-  timer.start();
-#endif
-
   _paint_in_this_second++;
   if (_is_idle || !_frame_interval_timer.isValid()) {
     _frame_interval_timer.restart();
@@ -475,11 +470,6 @@ void SlidingDrawer::paintEvent(QPaintEvent *event) {
   }
 
   QWidget::paintEvent(event);
-
-#ifndef NDEBUG
-  qint64 total = timer.elapsed();
-  pxv_warn("[DIAG] SlidingDrawer::paintEvent took %lld ms", total);
-#endif
 }
 
 void SlidingDrawer::resizeEvent(QResizeEvent *event) {
