@@ -441,6 +441,36 @@ elseif(NOT APPLE)
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
 endif()
 
+# ==== 多 Tab (Session-Centric) 集成契约测试 ====
+# 锁定 Session-Centric 演进引入的契约：per-tab 状态机、SignalModel
+# stash/restore、CaptureBuffers 执行缓冲、DeviceManager handle 身份与
+# 稳定性（原"关闭文件重开 handle 错位"回归保护）。
+# 链接桩外壳同 test_session_document：复用 pxview-core 预编译对象 +
+# libsigrokdecode/common 直编 + libsigrok --whole-archive。
+pv_add_qtest(test_multi_tab_session
+    core/test_multi_tab_session.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+)
+target_include_directories(test_multi_tab_session PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+target_sources(test_multi_tab_session PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
+)
+target_link_libraries(test_multi_tab_session PRIVATE pxview-core Qt6::Gui)
+target_link_options(test_multi_tab_session PRIVATE -Wl,--no-as-needed)
+if(WIN32)
+    target_link_libraries(test_multi_tab_session PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_multi_tab_session PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
+
 # ==== DiskCache 子系统 (config/mmap/buffer-manager/write-thread/read-cache) ====
 # 5 个 cache 类编译进目标, 内部 stub xlog。纯数据层, 无 QWidget 依赖。
 pv_add_qtest(test_disk_cache

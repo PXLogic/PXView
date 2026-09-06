@@ -112,8 +112,19 @@ using namespace pv::data;
  * pv/api/session_service.cpp + app_service.cpp 两文件（MCP 层持
  * ISessionService*，不直呼 SigSession）；View 层已走 DataSource 五合一
  * 接口（签名不可动）。
- * 已完成批次：死代码清理（repeat_analog_display_trigger_enabled_for_ui）、
- * 仅内部使用方法收敛 private（save_current_device_handle 等）。
+ * 已完成批次：死代码清理（repeat_analog_display_trigger_enabled_for_ui、
+ * update_lang_text 空门面）、仅内部使用方法收敛 private
+ * （save_current_device_handle 等）、磁盘缓存 6 查询合并为
+ * disk_cache_stats() 快照。
+ * 已核实**保留**（阶段13-B/C 评估结论，勿重复调研）：候选下沉的
+ * promote_capture_to_view（headless 双缓冲交换编排）、
+ * force_release_capture_state（事件守卫紧急兜底）、have_decoded_result
+ * （解码栈聚合）、restart_decoders/copy_data_to_document（stop+copy+
+ * restart 编排）、on_load_config_end 等均有真实编排语义而非纯转发——
+ * 机械下沉到消费方会复制逻辑或制造跨层耦合，属伪重构。
+ * 阶段12（事件 session_id 寻址）评估：单设备约束下所有事件语义即全局，
+ * CurrentDeviceChanged 已携带 reason/handle（阶段1 起消费方据此过滤）；
+ * 最小可行形态已成立，全量寻址待多设备同采启用时随 DeviceProxy 一起做。
  * 剩余批次原则（后续轮次执行，勿在本类内继续堆编排逻辑）：
  *   1) 不可动：DataSource/ISessionHost/ISessionCoordination 接口 override
  *      与被 session_service/app_service 调用的方法（headless 签名兼容）；
