@@ -391,16 +391,11 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
       QTimer::singleShot(100, _window,
                          [this]() { _window->session()->start_capture(true); });
     }
-    // Cold switch adoption: the current tab's document becomes the pool slot
-    // of this file device (handle mirrored, slot tagged) so subsequent
-    // switches route back to it. For input modules there is no replay — the
-    // data arrives via the import feed that is already targeting this
-    // document.
-    if (cur_ctx && cur_ctx->document()) {
-      cur_ctx->set_device_handle(ev.handle);
-      cur_ctx->document()->set_device_handle(ev.handle);
-      cur_ctx->document()->set_file_device_slot(true);
-    }
+    // 数据模型重构步骤3：Cold switch adoption 已删除——这里曾把"当前 tab"
+    // 的文档改绑为该文件设备的池槽并改写 tab 身份，是"demo tab 被静默变成
+    // 文件设备"的直接来源。文件设备的身份归属由建签流程（file_ops）显式
+    // 记录；设备下拉选择文件设备统一走 MainWindow::route_to_file_device_data
+    // 的"激活属主 tab"路径，不再有改绑。
     } else {
       // Cache hit: data + decoder stacks came from the pool slot — nothing to
       // reload, just re-fit the restored traces.

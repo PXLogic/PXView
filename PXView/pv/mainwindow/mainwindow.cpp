@@ -267,9 +267,8 @@ void MainWindow::setup_ui() {
   // Setup the sampling bar
   _sampling_bar = new toolbars::SamplingBar(_session, this);
   _sampling_bar->setObjectName("sampling_bar");
-  // Rebind model (device-keyed data pool): device-list selection routes
-  // through the pool first — switching to a file device with a cached data
-  // slot switches the data instead of destroying/reloading.
+  // 数据模型重构步骤3：设备下拉选择文件设备 → 激活其属主 tab（tab 与设备
+  // 一一对应，不改写当前 tab 身份）；无属主 tab 时走 legacy set_device。
   _sampling_bar->device_data_route = [this](ds_device_handle h) {
     return route_to_file_device_data(h);
   };
@@ -670,32 +669,26 @@ void MainWindow::rebind_tab_to_fresh_document(pv::TabContext *ctx,
 }
 
 bool MainWindow::route_to_file_device_data(ds_device_handle handle) {
-  // Rebind model v2 ruling: switching device = switching the CURRENT tab's
-  // data to that device's pool slot. The tab does NOT change — the current
-  // tab rebinds to the slot and runs its own restore chain. The slot may
-  // simultaneously remain bound by its original file tab (shared weak
-  // references; the slot dies with its owner tab/device, never with a
-  // borrower). No slot → return false, caller takes the legacy cold path.
+  // 数据模型重构步骤3：设备下拉选择文件设备 = 激活它的属主 tab。tab 与设备
+  // 一一对应——绝不改写当前 tab 的绑定/身份（旧 rebind 模型 v2 的"当前 tab
+  // 改绑池槽"行为是"导入 pxl 后 demo tab 变文件设备"混乱的根源）。跳转经
+  // on_tab_changed 走标准 activate 五段链：恢复本 tab 设备（TabSwitch）→
+  // 意图应用 → 文档数据绑定。无属主 tab → false，调用方走 legacy 冷路径。
   if (handle == NULL_HANDLE)
     return false;
   if (_session->is_working() || _session->is_saving())
     return false;
-  auto *reg = _session->document_registry();
-  auto slot = reg->find_file_device_document_shared(handle);
-  if (!slot || !slot->has_data())
-    return false;
-
-  pv::TabContext *ctx = tab_manager()->current_context();
-  if (!ctx)
-    return false;
-  if (ctx->document() != slot.get())
-    ctx->rebind_document(slot, reg->index_of_document(slot.get()));
-  // The tab identity follows the slot's device so activate() restores it.
-  ctx->set_device_handle(handle);
-  // Full five-stage restore chain (device TabSwitch restore + intent apply +
-  // data binding + view finalize) — all for THIS tab, no tab change.
-  ctx->activate();
-  return true;
+  const auto &contexts = _tab_manager->contexts();
+  for (int i = 0; i < contexts.size(); ++i) {
+    pv::TabContext *ctx = contexts[i];
+    if (ctx && ctx->document() && ctx->document()->is_file_device_slot() &&
+        ctx->document()->device_handle() == handle) {
+      if (_tab_manager->tab_widget()->currentIndex() != i)
+        _tab_manager->tab_widget()->setCurrentIndex(i);
+      return true;
+    }
+  }
+  return false;
 }
 
 bool MainWindow::confirm_to_store_data() {
