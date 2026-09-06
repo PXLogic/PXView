@@ -62,26 +62,30 @@ private slots:
         QVERIFY(doc.state() == S::Idle);
     }
 
-    // ---- 2) SignalModel stash/restore（阶段11 切 tab 零重建）----
-    void signalModelStashRestore()
+    // ---- 2) SignalModel 归文档所有（数据模型重构步骤2）----
+    void signalModelDocOwnership()
     {
         pv::data::SessionDocument doc(nullptr);
 
-        // 初始无暂存 → restore 路径回退到 reload 重建。
-        QVERIFY(!doc.has_stashed_signal_models());
+        // 初始为空列表。
+        QVERIFY(doc.signal_models().empty());
+        QVERIFY(doc.signal_models_snapshot().empty());
 
-        // 暂停：以空 shared_ptr 占位即可（has_stashed 只判定 vector 非空，
-        // 无需构造真实 SignalModel）。
-        std::vector<std::shared_ptr<pv::data::SignalModel>> models;
-        models.push_back(nullptr);
-        models.push_back(nullptr);
-        doc.set_signal_models(std::move(models));
-        QVERIFY(doc.has_stashed_signal_models());
+        // 文档拥有列表：写入后 live 引用与 snapshot 一致（模型对象随文档保活，
+        // 取代旧 stash/take 搬运语义）。
+        doc.signal_models().push_back(nullptr);
+        doc.signal_models().push_back(nullptr);
+        QCOMPARE(doc.signal_models().size(), (size_t)2);
+        QCOMPARE(doc.signal_models_snapshot().size(), (size_t)2);
 
-        // take 为移动语义：取出后暂存清空（保证不会二次恢复同一批模型）。
-        auto taken = doc.take_signal_models();
-        QCOMPARE(taken.size(), (size_t)2);
-        QVERIFY(!doc.has_stashed_signal_models());
+        // DataSource override 仍必须保持空 stub（document_snapshot_source
+        // 只裁决快照，不裁决模型——view_signal_sync 的裁决警示）。
+        QVERIFY(doc.get_signal_models().empty());
+
+        // clear() 只清数据，不触碰模型列表（采集启动会清 owner 文档数据，
+        // 模型必须存活）。
+        doc.clear();
+        QCOMPARE(doc.signal_models().size(), (size_t)2);
     }
 
     // ---- 3) CaptureBuffers 执行缓冲（阶段6）----

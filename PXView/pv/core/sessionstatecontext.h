@@ -118,17 +118,18 @@ public:
   // it from non-UI threads (decode thread, save/export thread) MUST hold a
   // shared_lock on signal_models_mutex() for the duration of their access.
   // Writers (init_signals, reload) MUST hold a unique_lock.
-  std::vector<std::shared_ptr<data::SignalModel>> &signal_models() {
-    return _signal_models;
-  }
+  //
+  // 数据模型重构步骤2：访问器转发到活动文档（每个 SessionDocument 拥有自己的
+  // 模型列表）。不变量：全局活动列表 == 活动文档的列表。无活动文档时
+  // （headless/API 无 tab 会话、tab 关闭窗口）回退到本地存储，保持既有语义
+  // （空列表 → capturemanager 拒绝启动采集，与旧 stash 窗口行为一致）。
+  // 活动文档由 DocumentRegistry 拥有（强引用），返回引用在调用期间有效。
+  std::vector<std::shared_ptr<data::SignalModel>> &signal_models();
   // TS-2 fix: thread-safe snapshot — copies the vector under a shared_lock
   // so callers don't need to manually acquire the mutex. Safe from any
   // thread. Prefer this over signal_models() when you only need to iterate.
-  std::vector<std::shared_ptr<data::SignalModel>> signal_models_snapshot() {
-    std::shared_lock<std::shared_mutex> lk(_signal_models_mutex);
-    return _signal_models;
-  }
-  std::shared_mutex &signal_models_mutex() { return _signal_models_mutex; }
+  std::vector<std::shared_ptr<data::SignalModel>> signal_models_snapshot();
+  std::shared_mutex &signal_models_mutex();
   std::vector<std::shared_ptr<data::SpectrumStack>> &spectrum_stacks() {
     return _spectrum_stacks;
   }
@@ -351,10 +352,16 @@ private:
   DocumentRegistry *_document_registry = nullptr;
   FilterProcessor *_filter_processor = nullptr;
 
+  // 数据模型重构步骤2：signal_models 访问器的活动文档解析。registry 未注入
+  // 或无活动文档时返回 nullptr（调用方回退到本地存储）。
+  data::SessionDocument *active_document_models() const;
+
   // mutexes wrapped in unique_ptr (mutex is non-movable)
   std::unique_ptr<std::mutex> _sampling_mutex;
   std::unique_ptr<std::mutex> _data_mutex;
 
+  // 数据模型重构步骤2：无活动文档时的回退存储（headless/API 无 tab 会话、
+  // tab 关闭窗口）。GUI 会话中模型实际存放于活动文档，此字段通常为空。
   std::vector<std::shared_ptr<data::SignalModel>> _signal_models;
   std::shared_mutex _signal_models_mutex;
   std::vector<std::shared_ptr<data::SpectrumStack>> _spectrum_stacks;

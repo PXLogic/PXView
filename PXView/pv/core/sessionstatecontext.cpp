@@ -43,6 +43,34 @@ SessionStateContext::~SessionStateContext() {
   // 阶段6：缓冲释放归 CaptureBuffers 析构（SigSession 持 unique_ptr）。
 }
 
+// --- 数据模型重构步骤2：signal_models 访问器转发到活动文档 ---
+
+data::SessionDocument *SessionStateContext::active_document_models() const {
+  return _document_registry ? _document_registry->get_active_document()
+                            : nullptr;
+}
+
+std::vector<std::shared_ptr<data::SignalModel>> &
+SessionStateContext::signal_models() {
+  if (auto *doc = active_document_models())
+    return doc->signal_models();
+  return _signal_models;
+}
+
+std::vector<std::shared_ptr<data::SignalModel>>
+SessionStateContext::signal_models_snapshot() {
+  if (auto *doc = active_document_models())
+    return doc->signal_models_snapshot();
+  std::shared_lock<std::shared_mutex> lk(_signal_models_mutex);
+  return _signal_models;
+}
+
+std::shared_mutex &SessionStateContext::signal_models_mutex() {
+  if (auto *doc = active_document_models())
+    return doc->signal_models_mutex();
+  return _signal_models_mutex;
+}
+
 void SessionStateContext::set_lissajous_model(
     std::unique_ptr<data::LissajousModel> m) {
   // Defined in .cpp so that LissajousModel's complete type is available

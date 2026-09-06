@@ -303,7 +303,12 @@ void TabContext::finalize_view()
 // 架构重构 Phase 3：设备意图协议 —— 应用阶段。
 // 把本标签页持久化的设备/通道意图（_document 的 SignalConfigStore）应用回
 // 全局设备与 Core 模型：apply_signal_config 写设备（CHANNEL_MODE、通道启用/
-// 命名等）→ reload 重建 SignalModel → 恢复 trig_type → 广播 GUI 刷新。
+// 命名等）→ 广播 GUI 刷新。
+// 数据模型重构步骤2：模型列表已归本 tab 文档所有，且 activate 第 2 段
+// （claim_active_document）已把本文档设为活动文档——全局 signal_models
+// 访问器现在解析到的就是本文档的列表，"stash/restore 原位恢复"语义天然
+// 成立，无需搬运。设备失效（restore 失败置 NULL_HANDLE，如文件设备被
+// 关闭）时才走 reload 全量重建。
 // 会话工作中（采集/拷贝）时改为暂存 pending config，待工作结束再应用。
 void TabContext::apply_device_intent()
 {
@@ -315,27 +320,20 @@ void TabContext::apply_device_intent()
             _document->get_signal_config().work_mode,
             (int)_document->get_signal_config().channels.size());
         _document->apply_signal_config();
-        // 阶段11：同设备上下文（本 tab 设备恢复成功，handle 有效）时，
-        // SignalModel 列表从文档 stash 原位恢复——零重建，R2 的 trig_type
-        // 回填也不再需要（状态就在模型对象上）。设备已失效（restore 失败
-        // 置 NULL_HANDLE，如文件设备被关闭）或首开无 stash 时，走原 reload
-        // 重建路径。
-        if (_device_handle != NULL_HANDLE &&
-            _session->restore_signal_models_from(_document)) {
-            // stash 期间模型脱离全局执行缓冲：重新绑定当前 view_data 快照
-            // （与原 reload 后状态等价——解码/测量数据源恢复）。
-            // Rebind model 例外：文件设备池槽的 stash 模型自带本槽快照
-            // （VCD/pxl 数据），绝不能绑全局执行缓冲（那是别的设备的数据）。
+        if (_device_handle != NULL_HANDLE) {
+            // 模型对象随文档保活（零重建）。仅非文件设备池槽需要重绑当前
+            // view_data 快照（解码/测量数据源恢复）——池槽的模型自带本槽
+            // 快照（VCD/pxl 数据），绝不能绑全局执行缓冲（别的设备的数据）。
             if (!_document->is_file_device_slot())
                 _session->attach_data_to_current_view_buffer();
-            // R3 演进：意图应用路径已显式恢复模型，skip_model_reload 置位
-            // 让 GUI 消费方照常刷新但不触发二次全量重建。
+            // R3 演进：skip_model_reload 置位让 GUI 消费方照常刷新但不触发
+            // 二次全量重建。
             _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
         } else {
             _session->reload();
             // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
-            // reload 内部虽从 old_model 保留 trig_type (sigsession.cpp:1141)，
-            // 但 old_model 是上一个 tab 的，需覆盖为当前 tab 的配置。
+            // （转发语义下 reload 的 old_model 查找读到的就是本文档旧列表，
+            // 但设备已失效重建，仍以文档配置为准覆盖。）
             for (const auto &ch : _document->get_channels()) {
                 auto m = _session->get_signal_by_index(ch.index);
                 if (m)
@@ -421,11 +419,9 @@ void TabContext::harvest_device_state()
     // UI 布局状态经 channel_layout 持久化到 ChannelConfig
     _document->save_signal_config(_session->get_signal_models_snapshot(),
                                   channel_layout);
-    // 阶段11：模型 stash——本 tab 的 SignalModel 列表移入文档暂存，
-    // activate 时由 apply_device_intent 原位恢复（零重建）。模型对象跨
-    // tab 保活，enabled/名称/trig_type 等状态天然随行（R2 恢复逻辑的
-    // 更优替代——状态就在对象上，无需从 config 回填）。
-    _session->stash_signal_models_to(_document);
+    // 数据模型重构步骤2：不再 stash——模型列表本来就归本文档所有
+    // （全局访问器转发到活动文档，本 tab 仍是活动文档），切走后对象随文档
+    // 保活，activate 时经转发直接可见（零搬运、零空窗期）。
 }
 
 } // namespace pv

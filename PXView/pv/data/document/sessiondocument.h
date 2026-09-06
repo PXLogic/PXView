@@ -27,6 +27,7 @@
 #include <memory>
 #include <cstdint>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace pv {
@@ -202,26 +203,26 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
     return _signal_config_store.get();
   }
 
-  // --- 阶段11: per-tab SignalModel stash（安全子集）---
-  // 切 tab 时（deactivate/harvest）把全局 SignalModel 列表暂存到本 ctx，
-  // activate 时原位恢复（零重建）——消灭"切 tab reload 重建模型"的事件
-  // 瀑布（R2/R3 补丁的根源）。注意：独立命名 set/take，**故意不启用**
-  // DataSource::get_signal_models() override（保持空 stub）——View 的
-  // SignalFactory 恒走 data_source(session) 读模型，启用 doc 侧列表会
-  // 改变 document_snapshot_source 的裁决语义（见 view_signal_sync.cpp
-  // on_signals_changed 注释）。
-  void set_signal_models(std::vector<std::shared_ptr<SignalModel>> models)
-  {
-    _stashed_signal_models = std::move(models);
+  // --- 数据模型重构步骤2：SignalModel 列表归文档所有 ---
+  // 每个文档拥有自己的模型列表（切 tab 时模型对象随文档保活，零重建——
+  // 取代旧"阶段11 stash/take 搬运"机制）。SigSession 的全局访问器转发到
+  // 活动文档（SessionStateContext::signal_models），因此"全局活动列表 =
+  // 活动文档的列表"是不变量；本文档非活动时，其列表仍随文档存活。
+  //
+  // 注意：DataSource::get_signal_models() override 仍保持空 stub（见下方
+  // get_signal_models 注释与 view_signal_sync.cpp on_signals_changed 的
+  // document_snapshot_source 裁决警示）——消费方必须经 SigSession 或直接
+  // 调用 signal_models()，绝不能经 document_snapshot_source() 读模型。
+  std::vector<std::shared_ptr<SignalModel>> &signal_models() {
+    return _signal_models;
   }
-  std::vector<std::shared_ptr<SignalModel>> take_signal_models()
-  {
-    return std::move(_stashed_signal_models);
+  std::vector<std::shared_ptr<SignalModel>> signal_models_snapshot() const {
+    std::shared_lock<std::shared_mutex> lk(_signal_models_mutex);
+    return _signal_models;
   }
-  bool has_stashed_signal_models() const
-  {
-    return !_stashed_signal_models.empty();
-  }
+  // 锁纪律与 SigSession 相同：读（decode/save 线程）持 shared_lock，
+  // 写（init_signals/reload，UI 线程）持 unique_lock。
+  std::shared_mutex &signal_models_mutex() { return _signal_models_mutex; }
 
   // --- Owning device handle (phase 2) ---
   // The device this document's data came from. For file-loaded tabs (.pxl /
@@ -286,8 +287,10 @@ private:
   // Rebind model: file-device data pool slot tag (see is_file_device_slot).
   bool _file_device_slot = false;
   SessionState _state = SessionState::Idle;        // per-tab 状态机(阶段3a)
-  // 阶段11：切走时暂存的本 tab SignalModel 列表（模型对象跨 tab 保活）。
-  std::vector<std::shared_ptr<SignalModel>> _stashed_signal_models;
+  // 数据模型重构步骤2：本文档拥有的 SignalModel 列表（原阶段11 stash 字段
+  // 转正）。模型对象跨 tab 保活；随文档销毁而释放。
+  std::vector<std::shared_ptr<SignalModel>> _signal_models;
+  mutable std::shared_mutex _signal_models_mutex;
 };
 
 } // namespace data

@@ -409,16 +409,12 @@ void on_load_config_end();
   data::SessionDocument *get_active_document() override;
   void copy_data_to_document(data::SessionDocument *doc);
   void attach_data_to_signal(SessionData *data);
-  // 阶段11：模型 stash 恢复后重绑当前执行缓冲快照（tabcontext 调用点
-  // 不接触 SessionData 指针）。
+  // 数据模型重构步骤2：模型 stash 恢复后重绑当前执行缓冲快照（tabcontext
+  // 调用点不接触 SessionData 指针）。
   void attach_data_to_current_view_buffer() { attach_data_to_signal(_state->view_data()); }
-  // --- 阶段11: per-tab SignalModel stash/restore（切 tab 零重建）---
-  // stash：deactivate 时把全局 SignalModel 列表移入本 tab 文档（全局清空）；
-  // restore：同设备上下文恢复成功返回 true（模型原位归位+重绑执行缓冲由
-  // 调用方 attach_data_to_signal 完成）；无 stash/设备上下文失效返回
-  // false，调用方走原 reload 重建路径。见 tabcontext.cpp apply_device_intent。
-  void stash_signal_models_to(data::SessionDocument *doc);
-  bool restore_signal_models_from(data::SessionDocument *doc);
+  // 阶段11 stash/restore 已删除（步骤2）：SignalModel 列表归 SessionDocument
+  // 所有，SigSession 的 signal_models 访问器经 SessionStateContext 转发到
+  // 活动文档，切 tab 零重建天然成立。
   const data::TriggerConfig& trigger_config() const override { return _state->trigger_config(); }
   void set_trigger_config(const data::TriggerConfig& cfg);
   // modernize-core-layer-radical phase 2: register/unregister removed.

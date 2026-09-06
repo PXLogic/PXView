@@ -3491,37 +3491,11 @@ void SigSession::sync_trigger_to_libsigrok(bool disable_trigger) {
   _state->sync_trigger_to_libsigrok(disable_trigger);
 }
 
-// --- 阶段11: per-tab SignalModel stash/restore ------------------------------
-
-void SigSession::stash_signal_models_to(data::SessionDocument *doc) {
-  if (!doc)
-    return;
-  // unique_lock 纪律：signal_models() 是 live 引用，写访问必须持写锁
-  // （decode/save 线程经 signal_models_snapshot() 读）。
-  int moved = 0;
-  {
-    std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
-    moved = (int)_state->signal_models().size();
-    doc->set_signal_models(_state->signal_models());
-    _state->signal_models().clear();
-  }
-  pxv_info("stash_signal_models_to: moved %d models to doc %p", moved,
-           (void *)doc);
-}
-
-bool SigSession::restore_signal_models_from(data::SessionDocument *doc) {
-  if (!doc || !doc->has_stashed_signal_models())
-    return false;
-  auto models = doc->take_signal_models();
-  if (models.empty())
-    return false;
-  {
-    std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
-    _state->signal_models() = std::move(models);
-  }
-  pxv_info("restore_signal_models_from: models restored in place (no rebuild)");
-  return true;
-}
+// --- 阶段11 stash/restore 已删除（数据模型重构步骤2）---
+// SignalModel 列表现归 SessionDocument 所有；"全局活动列表 = 活动文档的
+// 列表"由 SessionStateContext::signal_models() 的活动文档转发实现。切 tab
+// 时模型对象随文档自然保活（零重建），无需 stash/take 搬运，也消除了
+// "全局列表被搬空的窗口期"（capturemanager 判空拒绝采集的隐患）。
 
 void SigSession::copy_data_to_document(data::SessionDocument *doc) {
   if (!doc || !_state->view_data() || !have_view_data())

@@ -162,6 +162,13 @@ bool SessionDocument::decoder_stacks_empty() const {
 // never populated). See view.cpp comment near line 2625.
 // (purify-architecture-concepts Task 10) get_decoder_model() was removed from
 // the DataSource interface — DecoderModel now lives in pv::view.
+//
+// 数据模型重构步骤2注意：文档虽然拥有自己的 SignalModel 列表（signal_models()），
+// 但这个 DataSource override 必须保持空 stub——document_snapshot_source() 在
+// "文档有数据"时会返回文档本身作为 DataSource，若此处返回真实列表，View 的
+// 模型同步会读到历史文档的模型并清空波形轨道（view_signal_sync.cpp
+// on_signals_changed 的裁决注释）。消费方一律经 SigSession 转发或直呼
+// signal_models()。
 
 std::vector<std::shared_ptr<SignalModel>> &SessionDocument::get_signal_models() {
   static std::vector<std::shared_ptr<SignalModel>> empty;
