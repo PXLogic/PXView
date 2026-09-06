@@ -542,7 +542,10 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
 
     // Draw the cursors
     auto &cursor_list = _view.get_cursorList();
-    bool bWorkStoped = _view.data_source()->is_stopped_status();
+    // 遗留A2：游标标签的"完整测量"判定加 per-tab 兜底（本 ctx 文档为
+    // 显示来源时——其他 ctx 采集/静止——同样显示完整标签）。
+    bool bWorkStoped = _view.data_source()->is_stopped_status() ||
+                       _view.display_source_is_document();
 
     for (auto &cursor : cursor_list)
     {

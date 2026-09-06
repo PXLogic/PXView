@@ -187,6 +187,8 @@ public:
    * SignalModel access (e.g. SignalFactory::create_signals/update_signals).
    */
   data::DataSource *document_snapshot_source();
+  // 阶段9：本 ctx 文档是否为当前显示来源（供绘制分支退役全局 ST_* 判定）。
+  bool display_source_is_document();
 
   // ---- Session / scale / offset accessors ----
   inline SigSession &session() { return *_session; }

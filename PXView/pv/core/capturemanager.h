@@ -61,13 +61,17 @@ public:
   static constexpr int RepeatRestartRetryMs = 50;
   static constexpr int RepeatRestartMaxRetries = 40; // ~2 seconds total
 
-  CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord);
+  CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord,
+                 class CaptureBuffers *buffers = nullptr);
   ~CaptureManager();
 
   // --- Capture lifecycle ---
   bool start_capture(bool instant, data::SessionDocument *owner = nullptr);
   bool stop_capture();
-  bool exec_capture();
+  // pending_owner：action_start_capture 首帧路径传入（此时 owner 尚未
+  // acquire，registry 查不到）；repeat 重启等路径传默认 nullptr，改查
+  // registry 的 capture owner。
+  bool exec_capture(data::SessionDocument *pending_owner = nullptr);
   void exit_capture();
   void capture_init();
 
@@ -158,6 +162,10 @@ private:
   ISessionState *_state;
   // Cross-manager coordination accessed via interface (Spec v3 Task 5)
   ISessionCoordination *_coord;
+  // 阶段6：执行缓冲（CaptureBuffers）——执行层所有者引用。所有权在
+  // SigSession（unique_ptr），生命周期覆盖本对象。内部仍经 _state 转发
+  // 访问；本引用供后续阶段（owner-clear 修正等）直达缓冲。
+  class CaptureBuffers *_buffers = nullptr;
 
   data::DiskCacheConfig _disk_cache_config;
 

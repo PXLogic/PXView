@@ -38,8 +38,10 @@ static QString get_default_disk_cache_path() {
   return QDir::tempPath() + "/PXView_cache";
 }
 
-CaptureManager::CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord)
+CaptureManager::CaptureManager(EventBus *bus, ISessionState *state, ISessionCoordination *coord,
+                               CaptureBuffers *buffers)
     : _event_bus(bus), _state(state), _coord(coord),
+      _buffers(buffers),
       _clt_mode(COLLECT_SINGLE) {
   // P6: capture-cadence timers now live on SchedulerThread's worker thread;
   // the callbacks below run on the main thread (queued back from the timer).
@@ -352,13 +354,18 @@ bool CaptureManager::action_start_capture(bool instant,
 
   _event_bus->broadcast_async<interface::StartCollectWorkPrev>({});
 
-  if (exec_capture()) {
+  if (exec_capture(owner)) {
     _work_time_id.fetch_add(1);
     // CaptureOwnerGuard manages _is_working + _capture_owner_document +
     // CaptureOwnerChanged broadcast as a single RAII unit. Replaces the
     // manual _is_working=true / _capture_owner_document=... pattern.
     _state->document_registry()->acquire_capture_owner(
         owner ? owner : _state->document_registry()->get_active_document());
+    // 阶段3a：per-tab 状态机——本 ctx 发起的采集开始。执行缓冲随后在
+    // exec_capture/capture_init 中清空并换新快照，数据经零拷贝共享直达
+    // 本 ctx（引用语义即"直写"）。
+    if (auto *owner_doc = _state->document_registry()->get_capture_owner_document())
+      owner_doc->set_state(data::SessionDocument::SessionState::Collecting);
     // A2.2: reset the capture-complete SharedState AFTER acquire_capture_owner
     // has set _is_working=true — a stale set_result() from the previous
     // capture otherwise makes wait_capture_complete() return immediately with
@@ -378,7 +385,7 @@ bool CaptureManager::action_start_capture(bool instant,
   return false;
 }
 
-bool CaptureManager::exec_capture() {
+bool CaptureManager::exec_capture(data::SessionDocument *pending_owner) {
   if (_state->device_agent().is_collecting()) {
     pxv_err("Error!Device is running.");
     return false;
@@ -464,18 +471,26 @@ bool CaptureManager::exec_capture() {
     _coord->clear_all_decode_task2();
     clear_decode_result();
 
-    // CRITICAL: Release the active document's shared_ptr references to the old
-    // snapshot data. copy_data_to_document() now shares the shared_ptr (zero-copy)
-    // instead of deep-copying. If we don't reset the document's shared_ptrs here,
-    // the old multi-GB mmap stays alive (ref count > 0) while a new one is
-    // created, causing memory to double on every capture.
+    // CRITICAL: Release the capture-owner document's shared_ptr references to
+    // the old snapshot data. copy_data_to_document() now shares the shared_ptr
+    // (zero-copy) instead of deep-copying. If we don't reset the document's
+    // shared_ptrs here, the old multi-GB mmap stays alive (ref count > 0)
+    // while a new one is created, causing memory to double on every capture.
     // Note: doc->clear() resets the shared_ptrs (releasing the document's
     // reference). If SessionData still holds a shared_ptr to the same snapshot
     // (e.g. view_data), the data stays alive. We must NOT call
     // doc->get_active_logic()->clear() because that would clear the data
     // in-place, affecting SessionData's shared snapshot.
-    if (_state->document_registry()->get_active_document()) {
-      _state->document_registry()->get_active_document()->clear();
+    //
+    // 阶段7a：清的对象必须是**本帧数据落点（capture owner）**而非"当前
+    // 活动文档"——MCP/headless 发起采集时 owner 可能是后台 tab 的文档，
+    // 清 active 会误抹 GUI 当前 tab 的历史数据（per-tab 状态机同步在
+    // clear() 内复位为 Idle）。首帧路径 owner 尚未 acquire，由
+    // pending_owner 传入；repeat 重启路径 owner 已在 registry。
+    if (data::SessionDocument *owner_doc =
+            pending_owner ? pending_owner
+                          : _state->document_registry()->get_capture_owner_document()) {
+      owner_doc->clear();
     }
   }
 

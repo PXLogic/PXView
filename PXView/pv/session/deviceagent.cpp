@@ -27,6 +27,8 @@
 #include <cstring>
 #include <future>
 #include <thread>
+#include <QFileInfo>
+#include <libsigrok/libsigrok.h>  // sdi->model 字段写入需完整类型
 #include "pv/base/log.h"
 #include "pv/config/appconfig.h"
 
@@ -64,91 +66,54 @@ DeviceAgent::~DeviceAgent()
 
 void DeviceAgent::set_scanned_devices(const std::vector<struct sr_dev_inst*> &sdis)
 {
-    _scanned_sdi = sdis;
+    // 阶段4：身份/注册表职责委托 DeviceManager。
+    _dev_mgr.set_scanned_devices(sdis);
 }
 
 ds_device_handle DeviceAgent::set_file_device(struct sr_dev_inst *sdi, const QString &name)
 {
     if (!sdi)
         return NULL_HANDLE;
-    _file_sdi.push_back(sdi);
     // Capture the real on-disk path. It cannot be re-derived from the sdi
     // (SR_CONF_SESSIONFILE is SET-only in the virtual-session driver), so we
     // store it here and publish it via _path in update().
     _file_path = name;
 
-    // Assign a STABLE file handle from a monotonic counter. The handle must
-    // NOT depend on _file_sdi array position: set_device()->release() erases
-    // the active sdi from _file_sdi, which would otherwise shift the
-    // remaining entries and invalidate any position-based handle. Register
-    // the sdi in _file_handles so lookup is immune to array reordering.
-    // Start file handles above the scanned range: handle = scanned_count + k
-    // where k is a monotonic file index (1, 2, 3, ...) — distinct from
-    // scanned devices (handles 1..scanned_count) and stable across releases.
-    int scanned_count = (int)_scanned_sdi.size();
-    ds_device_handle handle = (ds_device_handle)(scanned_count + (++_next_file_handle));
-    _file_handles[handle] = sdi;
-    return handle;
+    // Session-Centric 阶段2：文件设备以文件名命名（写入 sdi->model）。
+    // virtual-session 驱动不设置 vendor/model/conn，get_device_list() 之前
+    // 对这类设备退化成 "device-N"，用户无法辨认设备对应哪个文件。
+    // 写入 model 后，get_device_list()/DeviceAgent::update() 的
+    // "vendor+model"/"model" 分支都会直接显示文件名。
+    // toLocal8Bit 与 get_device_list/update 的 fromLocal8Bit 往返一致，
+    // 中文文件名在 Windows ANSI 代码页下正确显示。
+    {
+        QFileInfo fi(name);
+        sr_dev_inst_model_set(sdi, fi.fileName().toLocal8Bit().constData());
+    }
+
+    // 阶段4：注册到 DeviceManager（稳定 handle 发放：scanned_count + 单调
+    // 递增序号，与列表位置解耦——位置式 handle 在 release 擦除活跃 sdi 后
+    // 错位，曾导致关闭文件重开时选中越界/选错设备）。
+    return _dev_mgr.register_file_device(sdi);
 }
 
 void DeviceAgent::remove_device(ds_device_handle handle)
 {
-    // File devices are tracked by stable handle in _file_handles. Look up the
-    // sdi via the registry (not array index) so removal is immune to _file_sdi
-    // reordering. Also drop it from _file_sdi (used only for listing).
-    int scanned_count = (int)_scanned_sdi.size();
-    if (handle > (ds_device_handle)scanned_count) {
-        auto it = _file_handles.find(handle);
-        if (it != _file_handles.end()) {
-            struct sr_dev_inst *sdi = it->second;
-            _file_handles.erase(it);
-
-            // Remove from the listing vector (linear scan, small N).
-            auto vit = std::find(_file_sdi.begin(), _file_sdi.end(), sdi);
-            if (vit != _file_sdi.end())
-                _file_sdi.erase(vit);
-
-            // If this is NOT the currently active device, the sdi is owned
-            // solely by _file_handles/_file_sdi and must be freed now. If it
-            // IS the current device, release() will free it when set_device()
-            // is called.
-            if (handle != _dev_handle && sdi) {
-                sr_dev_inst_free(sdi);
-                pxv_info("remove_device: freed sdi %p for file device handle %llu",
-                         (void *)sdi, (unsigned long long)handle);
-            }
-        }
-    }
+    // 阶段4：注销委托 DeviceManager。free_sdi 语义保持：仅当该 sdi 不是
+    // 当前活跃设备时才在注册表内释放；活跃设备由 release() 释放。
+    _dev_mgr.unregister_file_device(handle, handle != _dev_handle);
 }
 
 struct sr_dev_inst* DeviceAgent::find_sdi_by_handle(ds_device_handle handle)
 {
-    // Handle = index+1 (0 reserved for NULL_HANDLE).
-    // Scanned devices come first, then file devices.
-    if (handle == NULL_HANDLE)
-        return nullptr;
+    // 阶段4：查询委托 DeviceManager（唯一 handle 查询点）。
+    return _dev_mgr.find_sdi_by_handle(handle);
+}
 
-    int idx = (int)handle - 1;
-    int scanned_count = (int)_scanned_sdi.size();
-
-    if (idx < scanned_count) {
-        return _scanned_sdi[idx];
-    }
-
-    // File devices: resolve via the stable handle registry first. This is the
-    // authoritative lookup and survives array reordering in _file_sdi.
-    auto fit = _file_handles.find(handle);
-    if (fit != _file_handles.end())
-        return fit->second;
-
-    // Fallback (legacy position-based) for any handle minted before the
-    // registry existed.
-    int file_idx = idx - scanned_count;
-    if (file_idx >= 0 && file_idx < (int)_file_sdi.size()) {
-        return _file_sdi[file_idx];
-    }
-
-    return nullptr;
+ds_device_handle DeviceAgent::handle_of_sdi(struct sr_dev_inst *sdi)
+{
+    // 阶段4：反向查询委托 DeviceManager。
+    return _dev_mgr.handle_of_sdi(sdi);
 }
 
 // --- Lifecycle ---
@@ -400,16 +365,8 @@ void DeviceAgent::release(bool destroy_file_device)
         // Ownership/cleanup goes through SigSession::close_file() →
         // remove_device(), which frees the sdi.
         if (_dev_type == DEV_TYPE_FILELOG && destroy_file_device) {
-            for (auto it = _file_handles.begin(); it != _file_handles.end();) {
-                if (it->second == _di)
-                    it = _file_handles.erase(it);
-                else
-                    ++it;
-            }
-            auto vit = std::find(_file_sdi.begin(), _file_sdi.end(), _di);
-            if (vit != _file_sdi.end())
-                _file_sdi.erase(vit);
-            sr_dev_inst_free(_di);
+            // 阶段4：摘除+释放委托 DeviceManager（按 sdi 定位注册表项）。
+            _dev_mgr.detach_sdi(_di, true);
             pxv_info("release: freed sdi %p for file device", (void *)_di);
         } else if (_dev_type == DEV_TYPE_FILELOG) {
             pxv_info("release: keeping sdi %p for file device (handle %llu) "

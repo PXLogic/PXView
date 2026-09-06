@@ -264,7 +264,12 @@ void SessionEventDispatcher::on_device_list_updated(const pv::interface::DeviceL
 }
 void SessionEventDispatcher::on_current_device_changed(const pv::interface::CurrentDeviceChanged &ev) {
   PV_WIN_GUARD();
-  _window->reset_all_view();
+  // Session-Centric 阶段1（止血）：TabSwitch 是"tab 恢复自己的设备"，
+  // TabContext::activate() 已在同步路径完成数据绑定/布局恢复；
+  // reset_all_view() 的全局副作用（采样栏/触发栏/dock 全量刷新）属于
+  // 设备身份变更语义，TabSwitch 一律跳过——切换从"摧毁重建"变"恢复"。
+  if (ev.reason != pv::interface::DeviceChangeReason::TabSwitch)
+    _window->reset_all_view();
   // 架构重构 Phase 1/2：设备 profile（demo0.pxc / 硬件 per-device profile）
   // 只在「设备身份变更」的场景作为初始化来源加载 —— FirstInit（首启）与
   // UserSelection（用户/接口选择了另一设备，标签页旧 config 已过期，加载
@@ -504,7 +509,10 @@ void SessionEventDispatcher::on_sample_count_updated(const pv::interface::Sample
 void SessionEventDispatcher::on_device_mode_changed(const pv::interface::DeviceModeChanged &ev) {
   PV_WIN_GUARD();
   if (auto *v = safe_current_view()) v->mode_changed();
-  _window->reset_all_view();
+  // 阶段1（止血）：TabSwitch 期间的工作模式变化来自标签页意图应用，
+  // 与 on_current_device_changed 同理跳过 reset_all_view 的全局副作用。
+  if (ev.reason != pv::interface::DeviceChangeReason::TabSwitch)
+    _window->reset_all_view();
   // 架构演进：DeviceModeChanged 现自携带 reason（switch_work_mode 广播时
   // 透传 SigSession 记录的最近一次设备切换原因），不再依赖 MainWindow 的
   // last_device_change_reason 状态转发。裁决规则与 on_current_device_changed

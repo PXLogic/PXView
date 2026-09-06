@@ -112,6 +112,8 @@ void SessionDocument::clear() {
   _analog.reset();
   _dso.reset();
   _pending_logic.reset();
+  // 阶段3a：数据清空即回到无数据态（per-tab 状态机）。
+  _state = SessionState::Idle;
   _pending_analog.reset();
   _pending_dso.reset();
   _samplerate = 0;

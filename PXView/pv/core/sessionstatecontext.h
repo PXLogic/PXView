@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "pv/core/cursorregistry.h"
+#include "pv/core/capturebuffers.h"  // 阶段6: 执行缓冲所有权对象(转发目标)
 #include "pv/core/shared_state.h"
 #include "pv/data/datasource.h"
 #include "pv/data/document/sessiondata.h"
@@ -177,16 +178,18 @@ public:
   DeviceAgent &device_agent() { return _device_agent; }
 
   // --- Data buffers ---
-  // Thread-safety P1: _view_data / _capture_data are now
-  // std::atomic<SessionData*> for safe cross-thread reads.
-  // Writers (main thread) use store(); readers (decode thread,
-  // data feed thread) use load().
-  SessionData *view_data() { return _view_data.load(std::memory_order_acquire); }
-  void set_view_data(SessionData *d) { _view_data.store(d, std::memory_order_release); }
-  SessionData *capture_data() { return _capture_data.load(std::memory_order_acquire); }
-  // Track B1: _data_list owns SessionData via unique_ptr
-  std::vector<std::unique_ptr<SessionData>> &data_list() { return _data_list; }
-  bool is_single_buffer() const { return _view_data.load() == _capture_data.load(); }
+  // Session-Centric 阶段6：缓冲所有权已迁至 CaptureBuffers（执行层对象，
+  // SigSession 构造早期创建并 attach；CaptureManager 为执行层所有者）。
+  // 本类仅作同名转发——几十处 _state->view_data() 调用面零改动。
+  // Thread-safety P1: atomic<SessionData*> store/load 语义保留在
+  // CaptureBuffers 内。
+  void attach_buffers(CaptureBuffers *b) { _buffers = b; }
+  SessionData *view_data() { return _buffers->view_data(); }
+  void set_view_data(SessionData *d) { _buffers->set_view_data(d); }
+  SessionData *capture_data() { return _buffers->capture_data(); }
+  // Track B1: _data_list owns SessionData via unique_ptr（现属 CaptureBuffers）
+  std::vector<std::unique_ptr<SessionData>> &data_list() { return _buffers->data_list(); }
+  bool is_single_buffer() const { return _buffers->is_single_buffer(); }
 
   // --- Trigger config ---
   // Thread-safety P2: set_trigger_config() is protected by
@@ -255,7 +258,7 @@ public:
   // --- State mutation overrides (Spec v3 Task 5) ---
   void set_trigger_flag(bool v) override { _trigger_flag.store(v); }
   void set_hw_replied(bool v) override { _hw_replied.store(v); }
-  void set_capture_data(SessionData *d) override { _capture_data = d; }
+  void set_capture_data(SessionData *d) override { _buffers->set_capture_data(d); }
   void set_session_time(QDateTime t) override { _session_time = t; }
   void set_is_working(bool v) override { _is_working.store(v); }
   void set_is_triged(bool v) override { _is_triged.store(v); }
@@ -381,10 +384,8 @@ private:
 
   DeviceAgent _device_agent;
 
-  std::atomic<SessionData *> _view_data{nullptr};
-  std::atomic<SessionData *> _capture_data{nullptr};
-  // Track B1: data buffers owned via unique_ptr
-  std::vector<std::unique_ptr<SessionData>> _data_list;
+  // 阶段6：缓冲所有权在 CaptureBuffers（SigSession 注入），此处仅指针。
+  CaptureBuffers *_buffers = nullptr;
 
   data::TriggerConfig _trigger_config;
   mutable std::mutex _trigger_config_mutex;

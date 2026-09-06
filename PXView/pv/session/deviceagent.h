@@ -37,6 +37,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/data/idevice_config_port.h"
+#include "pv/session/devicemanager.h"  // 阶段4: 设备注册表(身份职责)
 
 class IDeviceAgentCallback
 {
@@ -96,7 +97,7 @@ public:
 
     // Returns the cached scanned SDI list (populated by set_scanned_devices).
     // SigSession::get_device_list() uses this to avoid repeated sr_driver_scan.
-    const std::vector<struct sr_dev_inst*> &scanned_sdi() const { return _scanned_sdi; }
+    const std::vector<struct sr_dev_inst*> &scanned_sdi() const { return _dev_mgr.scanned_sdi(); }
 
     // Called by SigSession::set_file(). Registers a file-loaded SDI.
     ds_device_handle set_file_device(struct sr_dev_inst *sdi, const QString &name);
@@ -105,7 +106,7 @@ public:
     void remove_device(ds_device_handle handle);
 
     // Called by SigSession::get_device_list(). Returns file-loaded devices.
-    std::vector<struct sr_dev_inst*> &file_devices() { return _file_sdi; }
+    std::vector<struct sr_dev_inst*> &file_devices() { return _dev_mgr.file_devices(); }
 
     // --- Lifecycle ---
     // Opens the device by handle. Creates sr_session, adds device, registers
@@ -343,6 +344,13 @@ public:
     // match last-used device by driver name + connection ID.
     struct sr_dev_inst* find_sdi_by_handle(ds_device_handle handle);
 
+    // Session-Centric 阶段2：sdi → handle 反向查询（唯一 handle 查询点）。
+    // Scanned 设备 handle = index+1；文件设备查 _file_handles 稳定注册表。
+    // SigSession::get_device_list() 必须经此获取真实 handle，不得自创
+    // "index+1"（与 DeviceAgent 单调递增的文件 handle 错位，曾导致关闭
+    // 文件后重开时设备列表选中越界/选错设备）。
+    ds_device_handle handle_of_sdi(struct sr_dev_inst *sdi);
+
 private:
     void config_changed();
     void ensure_session_thread();
@@ -385,18 +393,12 @@ private:
     bool _session_run_active = false;
     uint64_t _session_run_sequence = 0;
 
-    // Tracked devices: scanned (from sr_driver_scan) + file-loaded.
-    std::vector<struct sr_dev_inst*> _scanned_sdi;
-    std::vector<struct sr_dev_inst*> _file_sdi;
-
-    // Stable file-device handle registry. File handles are assigned from a
-    // monotonic counter (never reused, never reordered) and looked up via
-    // this map. This decouples handle identity from _file_sdi array position,
-    // which previously broke repeated set_file() loads: set_device()->release()
-    // erases the active sdi from _file_sdi, shifting the remaining entries and
-    // invalidating any handle computed as scanned_count + file_index + 1.
-    std::map<ds_device_handle, struct sr_dev_inst*> _file_handles;
-    ds_device_handle _next_file_handle = 0;
+    // Session-Centric 阶段4：设备注册表（扫描缓存/文件设备注册/handle 发放
+    // 与双向查询）已提取到 DeviceManager——唯一 handle 查询点。DeviceAgent
+    // 收缩为"活跃设备执行上下文"（_di/_sr_session/datafeed/配置读写），
+    // 身份类方法全部委托 _dev_mgr。（DeviceAgent 位于全局命名空间，须用
+    // pv:: 限定名引用 DeviceManager。）
+    pv::DeviceManager _dev_mgr;
 
     // --- App-layer config state (C-class keys, not driver-backed) ---
     // These keys (DISK_CACHE_ENABLE/PATH, STREAM_BUFF/STREAM_MEM_BUFF) are

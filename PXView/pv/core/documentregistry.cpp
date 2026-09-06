@@ -221,10 +221,22 @@ void DocumentRegistry::release_capture_owner() {
   // reset outside (guard destructor joins copy thread, which must not hold
   // the mutex — see clear_capture_owner_document for the same pattern).
   std::unique_ptr<CaptureOwnerGuard> guard_to_reset;
+  size_t owner_idx = SIZE_MAX;
   {
     std::lock_guard<std::mutex> lock(_capture_state_mutex);
-    if (_capture_owner_guard)
+    if (_capture_owner_guard) {
       guard_to_reset = std::move(_capture_owner_guard);
+      owner_idx = _capture_owner_index.load(std::memory_order_acquire);
+    }
+  }
+  // 阶段3a：采集结束（正常/中止）——owner ctx 进入 Stopped（持有完整快照，
+  // 可显示/解码）。这是所有停止路径（SessionStopped / action_stop_capture /
+  // exit_capture）的收敛点，per-tab 状态在此统一落定。
+  if (owner_idx != SIZE_MAX) {
+    if (auto *doc = get_document_by_index(owner_idx)) {
+      if (doc->is_collecting())
+        doc->set_state(data::SessionDocument::SessionState::Stopped);
+    }
   }
   guard_to_reset.reset();
 }

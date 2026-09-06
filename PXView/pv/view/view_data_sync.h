@@ -108,6 +108,9 @@ public:
   void set_data_source_ptr(pv::data::DataSource *src) { _data_source = src; }
   pv::data::SessionDocument *document_ptr() const { return _document; }
   void set_document_ptr(pv::data::SessionDocument *doc) { _document = doc; }
+  // 阶段9：本 ctx 文档是否为当前显示来源（per-tab 裁决选中且有数据）。
+  // View 绘制分支据此退役对全局 ST_* 的显示语义依赖。
+  bool document_is_display_source();
   bool back_ready() const { return _back_ready; }
   void set_back_ready(bool v) { _back_ready = v; }
   QElapsedTimer &data_updated_timer() { return _data_updated_timer; }

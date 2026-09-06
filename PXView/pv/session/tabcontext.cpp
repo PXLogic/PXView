@@ -71,16 +71,34 @@ bool TabContext::has_data()
 
 void TabContext::activate()
 {
-    // Restore this tab's device BEFORE any config/data work below.
-    //
-    // DeviceAgent holds exactly ONE active device, shared by every tab. A tab
-    // that opened a file (.pxl, or an imported VCD/CSV/...) owns a virtual
-    // device; tabbing away switches the global device to the other tab's.
-    // apply_signal_config() / reload() further down both read and write the
-    // CURRENT device's sr_channels, so running them against a foreign device
-    // writes this tab's channel config onto the wrong channels and reads back
-    // the wrong channel count — the "tabbing back shows 2 channels with
-    // default names" bug.
+    // Session-Centric 阶段8：bind(ctx) 语义链。
+    // 本函数即"View 换绑到本 tab 的 SessionContext"的完整语义，五段依次
+    // 执行（行为与重组前完全一致，仅显式化命名阶段）。阶段1 起 TabSwitch
+    // 不再走全局摧毁管线，全程零全局副作用。
+    pxv_info("TabContext::activate() bind(ctx) doc=%p handle=%llu",
+             (void *)_document, (unsigned long long)_device_handle);
+    restore_device_for_this_tab();   // 1) 恢复本 tab 设备
+    claim_active_document();         // 2) 认领 active document
+    _state = LIVE;
+    apply_device_intent();           // 3) 应用设备意图（配置→模型→布局）
+    restore_view_data();             // 4) 数据绑定裁决
+    finalize_view();                 // 5) 视图收尾
+}
+
+// ---- bind(ctx) 语义链实现（自 activate() 逐段迁移） ----
+
+// 1) Restore this tab's device BEFORE any config/data work below.
+//
+// DeviceAgent holds exactly ONE active device, shared by every tab. A tab
+// that opened a file (.pxl, or an imported VCD/CSV/...) owns a virtual
+// device; tabbing away switches the global device to the other tab's.
+// apply_signal_config() / reload() further down both read and write the
+// CURRENT device's sr_channels, so running them against a foreign device
+// writes this tab's channel config onto the wrong channels and reads back
+// the wrong channel count — the "tabbing back shows 2 channels with
+// default names" bug.
+void TabContext::restore_device_for_this_tab()
+{
     if (_device_handle != NULL_HANDLE && !_session->is_working()) {
         if (_session->get_device()->handle() != _device_handle) {
             pxv_info("TabContext::activate() restoring device handle %llu for this tab",
@@ -95,16 +113,22 @@ void TabContext::activate()
             }
         }
     }
+}
 
-    // R6: 工作中（采集/copy 进行中）跳过 set_active_document，避免覆盖
-    // capture_owner_document 导致数据归属错乱。END_COLLECT_WORK 时由
-    // MainWindow 显式调用 set_active_document 恢复当前 tab 归属。
+// 2) R6: 工作中（采集/copy 进行中）跳过 set_active_document，避免覆盖
+// capture_owner_document 导致数据归属错乱。END_COLLECT_WORK 时由
+// MainWindow 显式调用 set_active_document 恢复当前 tab 归属。
+void TabContext::claim_active_document()
+{
     if (!_session->is_working()) {
         _session->set_active_document(_document);
     }
-    _state = LIVE;
-    // 架构重构 Phase 3：设备意图协议 —— 应用阶段（详见 apply_device_intent）。
-    apply_device_intent();
+}
+
+// 4) 数据绑定裁决：文档有数据→绑文档（唯一真相）；会话有数据且归属匹配
+// （采集/拷贝/停止窗口）→绑会话实时缓冲；否则清空绑定。
+void TabContext::restore_view_data()
+{
     if (_document && _document->has_data()) {
         _view->set_data_document(_document);
         auto &sigs = _view->get_own_signals();
@@ -121,6 +145,9 @@ void TabContext::activate()
         // 已绑定的文档快照。
         if (!_session->is_working()) {
             _session->set_stopped_status();
+            // 阶段3a：per-tab 状态机同步——本 ctx 数据完整（有历史数据且未在
+            // 采集），表达"可显示"语义，供 View 层逐步替代全局 ST_* 判断。
+            _document->set_state(data::SessionDocument::SessionState::Stopped);
         }
     } else if (_session->have_view_data() &&
                (_session->is_working() || _session->is_copy_in_progress() ||
@@ -153,6 +180,11 @@ void TabContext::activate()
         pxv_info("TabContext::activate() no data, clearing signal data bindings");
         _view->clear_signal_data();
     }
+}
+
+// 5) 视图收尾：缩放/偏移更新 + 布局刷新通知。
+void TabContext::finalize_view()
+{
     _view->update_scale_offset();
     _view->signals_changed(nullptr);
 }
@@ -172,23 +204,38 @@ void TabContext::apply_device_intent()
             _document->get_signal_config().work_mode,
             (int)_document->get_signal_config().channels.size());
         _document->apply_signal_config();
-        _session->reload();
-        // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
-        // reload 内部虽从 old_model 保留 trig_type (sigsession.cpp:1141)，
-        // 但 old_model 是上一个 tab 的，需覆盖为当前 tab 的配置。
-        for (const auto &ch : _document->get_channels()) {
-            auto m = _session->get_signal_by_index(ch.index);
-            if (m)
-                m->set_trig_type(ch.trig_type);
+        // 阶段11：同设备上下文（本 tab 设备恢复成功，handle 有效）时，
+        // SignalModel 列表从文档 stash 原位恢复——零重建，R2 的 trig_type
+        // 回填也不再需要（状态就在模型对象上）。设备已失效（restore 失败
+        // 置 NULL_HANDLE，如文件设备被关闭）或首开无 stash 时，走原 reload
+        // 重建路径。
+        if (_device_handle != NULL_HANDLE &&
+            _session->restore_signal_models_from(_document)) {
+            // stash 期间模型脱离全局执行缓冲：重新绑定当前 view_data 快照
+            // （与原 reload 后状态等价——解码/测量数据源恢复）。
+            _session->attach_data_to_current_view_buffer();
+            // R3 演进：意图应用路径已显式恢复模型，skip_model_reload 置位
+            // 让 GUI 消费方照常刷新但不触发二次全量重建。
+            _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
+        } else {
+            _session->reload();
+            // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
+            // reload 内部虽从 old_model 保留 trig_type (sigsession.cpp:1141)，
+            // 但 old_model 是上一个 tab 的，需覆盖为当前 tab 的配置。
+            for (const auto &ch : _document->get_channels()) {
+                auto m = _session->get_signal_by_index(ch.index);
+                if (m)
+                    m->set_trig_type(ch.trig_type);
+            }
+            // R3: 通道配置已修改 Core (probe->enabled 等)，广播通知其他 GUI
+            // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
+            // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
+            // 不丢失)。tab 切换低频，二次重建开销可接受。
+            // 演进（事件瀑布收敛）：意图应用路径已显式 reload()，skip_model_reload
+            // 置位让 SigSession 跳过其订阅 handler 中的二次全量重建；GUI 消费方
+            // （通道名/布局刷新等）不受影响，照常执行。
+            _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
         }
-        // R3: 通道配置已修改 Core (probe->enabled 等)，广播通知其他 GUI
-        // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
-        // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
-        // 不丢失)。tab 切换低频，二次重建开销可接受。
-        // 演进（事件瀑布收敛）：意图应用路径已显式 reload()，skip_model_reload
-        // 置位让 SigSession 跳过其订阅 handler 中的二次全量重建；GUI 消费方
-        // （通道名/布局刷新等）不受影响，照常执行。
-        _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
     } else {
         pxv_info("TabContext::apply_device_intent() session working, "
                  "saving pending config");
@@ -232,6 +279,11 @@ void TabContext::harvest_device_state()
     // UI 布局状态经 channel_layout 持久化到 ChannelConfig
     _document->save_signal_config(_session->get_signal_models_snapshot(),
                                   channel_layout);
+    // 阶段11：模型 stash——本 tab 的 SignalModel 列表移入文档暂存，
+    // activate 时由 apply_device_intent 原位恢复（零重建）。模型对象跨
+    // tab 保活，enabled/名称/trig_type 等状态天然随行（R2 恢复逻辑的
+    // 更优替代——状态就在对象上，无需从 config 回填）。
+    _session->stash_signal_models_to(_document);
 }
 
 } // namespace pv

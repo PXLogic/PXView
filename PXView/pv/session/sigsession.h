@@ -59,6 +59,7 @@ namespace data { class AnalogSnapshot; class DsoSnapshot; class LogicSnapshot; }
 #include "pv/interface/events.h"
 #include "pv/core/eventbus.h"
 #include "pv/core/capturemanager.h"
+#include "pv/core/captureengine.h"
 #include "pv/core/sessionstatecontext.h"
 #include <libsigrok/libsigrok.h>
 
@@ -105,6 +106,25 @@ using namespace pv::data;
  * Public API signatures are unchanged for backward compatibility with the
  * View/API layers. Inline method bodies that previously touched private
  * fields now forward to `_state->xxx()` accessors.
+ *
+ * ── Session-Centric 阶段10：收缩路线图（基于公共 API 消费面统计）──────────
+ * 现状：110 个 public 方法 / 77 个消费文件；headless 依赖已收敛于
+ * pv/api/session_service.cpp + app_service.cpp 两文件（MCP 层持
+ * ISessionService*，不直呼 SigSession）；View 层已走 DataSource 五合一
+ * 接口（签名不可动）。
+ * 已完成批次：死代码清理（repeat_analog_display_trigger_enabled_for_ui）、
+ * 仅内部使用方法收敛 private（save_current_device_handle 等）。
+ * 剩余批次原则（后续轮次执行，勿在本类内继续堆编排逻辑）：
+ *   1) 不可动：DataSource/ISessionHost/ISessionCoordination 接口 override
+ *      与被 session_service/app_service 调用的方法（headless 签名兼容）；
+ *   2) 仅 1-2 个消费方的纯转发门面 → 逐步让消费方直呼管理器（如
+ *      restart_decoders/copy_data_to_document 的 event_dispatcher 调用
+ *      可改为经 CaptureManager/DocumentRegistry），然后本类删除转发；
+ *   3) 编排逻辑（set_device/set_file/close_file/hotplug）已属设备编排，
+ *      待阶段4 DeviceProxy 引入（多设备同采启用时）再评估归属；
+ *   4) 终态：SigSession = SessionManager 登记表 + 管理器聚合 +
+ *      DataSource 兼容壳（对齐 DataService/RapidDataStore 查表角色）。
+ * ──────────────────────────────────────────────────────────────────────
  */
 class SigSession : public IDeviceAgentCallback,
                    public pv::data::DataSource,
@@ -166,11 +186,19 @@ public:
   // 切换，不触发 profile 加载），避免"导入 pxl 导致全局设备变化"破坏其他
   // tab 的设备上下文。标签页间切换不再使用本函数 —— 各标签的 activate()
   // 经 per-tab handle 直接恢复自己的设备（Phase 5 已删兜底）。
-  void save_current_device_handle();
   bool restore_previous_device();
+  // 阶段10：save_current_device_handle/saved_device_handle 无外部消费方，
+  // 由 public 收敛为 private（内部方案A使用）。
+  void save_current_device_handle();
   ds_device_handle saved_device_handle() const { return _saved_device_handle; }
-  bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override { return _capture_manager->start_capture(instant, owner); }
-  bool stop_capture() override { return _capture_manager->stop_capture(); }
+  // 阶段5：采集入口统一经 CaptureEngine（GUI / pxviewd / MCP 同一门面，
+  // 按 owner ctx 寻址，执行策略可切换——见 core/captureengine.h）。
+  bool start_capture(bool instant = false, data::SessionDocument *owner = nullptr) override
+  {
+    return _capture_engine->submit(core::CaptureIntent{owner, instant});
+  }
+  bool stop_capture() override { return _capture_engine->stop(); }
+  core::CaptureEngine *capture_engine() { return _capture_engine.get(); }
   /// Emergency fallback: force-release the capture state when the
   /// SessionStopped event was suppressed by the EventBus broadcast
   /// depth guard (caused by processEvents() re-entrancy). This sets
@@ -274,10 +302,9 @@ public:
   void set_collect_mode(DEVICE_COLLECT_MODE m) { _capture_manager->set_collect_mode(m); }
   int get_collect_mode() { return _capture_manager->get_collect_mode(); }
   bool is_repeat_mode() override { return _capture_manager->is_repeat_mode(); }
-  // UI pre-HOLD query used before the very first Repeat acquisition starts.
-  bool repeat_analog_display_trigger_enabled_for_ui() {
-    return repeat_analog_display_trigger_enabled();
-  }
+  // 阶段10：repeat_analog_display_trigger_enabled_for_ui 已删除（全仓零
+  // 调用的死代码；pre-HOLD 查询由 repeat_analog_trigger_ui_generation_for_ui
+  // 与 repeat_analog_display_trigger_enabled() 覆盖）。
   uint64_t repeat_analog_trigger_ui_generation_for_ui() const {
     return _repeat_analog_trigger_ui_generation.load(std::memory_order_acquire);
   }
@@ -361,6 +388,16 @@ void on_load_config_end();
   data::SessionDocument *get_active_document() override;
   void copy_data_to_document(data::SessionDocument *doc);
   void attach_data_to_signal(SessionData *data);
+  // 阶段11：模型 stash 恢复后重绑当前执行缓冲快照（tabcontext 调用点
+  // 不接触 SessionData 指针）。
+  void attach_data_to_current_view_buffer() { attach_data_to_signal(_state->view_data()); }
+  // --- 阶段11: per-tab SignalModel stash/restore（切 tab 零重建）---
+  // stash：deactivate 时把全局 SignalModel 列表移入本 tab 文档（全局清空）；
+  // restore：同设备上下文恢复成功返回 true（模型原位归位+重绑执行缓冲由
+  // 调用方 attach_data_to_signal 完成）；无 stash/设备上下文失效返回
+  // false，调用方走原 reload 重建路径。见 tabcontext.cpp apply_device_intent。
+  void stash_signal_models_to(data::SessionDocument *doc);
+  bool restore_signal_models_from(data::SessionDocument *doc);
   const data::TriggerConfig& trigger_config() const override { return _state->trigger_config(); }
   void set_trigger_config(const data::TriggerConfig& cfg);
   // modernize-core-layer-radical phase 2: register/unregister removed.
@@ -487,6 +524,11 @@ std::vector<core::Subscription> _event_subscriptions;
   std::unique_ptr<core::DataFeedParser> _data_feed_parser;
   std::unique_ptr<core::DocumentRegistry> _document_registry;
   std::unique_ptr<core::CaptureManager> _capture_manager;
+  std::unique_ptr<core::CaptureEngine> _capture_engine;
+  // 阶段6：执行缓冲所有权（CaptureManager 为执行层所有者）。
+  // 声明在 _state/_capture_manager 之后 → 析构先于二者，二者析构路径
+  // 均不再访问缓冲。
+  std::unique_ptr<core::CaptureBuffers> _buffers;
 
   // Repeat + decoder gate. SessionStopped and DecodeDone may arrive in either order.
   bool _repeat_wait_decode = false;

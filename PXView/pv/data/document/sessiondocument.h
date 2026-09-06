@@ -87,6 +87,24 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   void set_trigger_pos(uint64_t pos);
   uint64_t get_trigger_pos() override;
 
+  // --- Session-Centric 阶段3a: per-tab 状态机 ---
+  // 替代全局 device_status(ST_*) 的"显示语义"职责。全局 ST_* 保留为
+  // CaptureEngine 执行层状态(libsigrok 单执行流),而"这个 tab 的数据
+  // 处于什么阶段"由本状态机表达:
+  //   Idle      无数据(空 tab / 已 clear)
+  //   Collecting 本 tab 发起的采集进行中(执行缓冲正写入本 ctx 共享的快照)
+  //   Copying    保留态:RevEndPacket→copy(零拷贝瞬时)归属
+  //   Stopped    本 ctx 持有完整快照,可显示/可解码
+  // 状态演进: acquire_capture_owner→Collecting; RevEndPacket copy 完成/
+  // stop_capture→Stopped; SessionDocument::clear()→Idle。
+  enum class SessionState { Idle, Collecting, Copying, Stopped };
+  SessionState state() const { return _state; }
+  void set_state(SessionState s) { _state = s; }
+  // 采集/拷贝进行中(含执行缓冲直写本 ctx 共享快照的窗口)。
+  bool is_collecting() const {
+    return _state == SessionState::Collecting || _state == SessionState::Copying;
+  }
+
   double get_sampletime() const;
 
   bool has_data();
@@ -184,6 +202,27 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
     return _signal_config_store.get();
   }
 
+  // --- 阶段11: per-tab SignalModel stash（安全子集）---
+  // 切 tab 时（deactivate/harvest）把全局 SignalModel 列表暂存到本 ctx，
+  // activate 时原位恢复（零重建）——消灭"切 tab reload 重建模型"的事件
+  // 瀑布（R2/R3 补丁的根源）。注意：独立命名 set/take，**故意不启用**
+  // DataSource::get_signal_models() override（保持空 stub）——View 的
+  // SignalFactory 恒走 data_source(session) 读模型，启用 doc 侧列表会
+  // 改变 document_snapshot_source 的裁决语义（见 view_signal_sync.cpp
+  // on_signals_changed 注释）。
+  void set_signal_models(std::vector<std::shared_ptr<SignalModel>> models)
+  {
+    _stashed_signal_models = std::move(models);
+  }
+  std::vector<std::shared_ptr<SignalModel>> take_signal_models()
+  {
+    return std::move(_stashed_signal_models);
+  }
+  bool has_stashed_signal_models() const
+  {
+    return !_stashed_signal_models.empty();
+  }
+
   // --- Owning device handle (phase 2) ---
   // The device this document's data came from. For file-loaded tabs (.pxl /
   // imported VCD/CSV/...) this is the virtual session device handle; for
@@ -233,6 +272,9 @@ private:
   std::unique_ptr<SignalConfigStore> _signal_config_store;
   data::TriggerConfig _trigger_config;
   ds_device_handle _device_handle = NULL_HANDLE;   // phase 2: owning device
+  SessionState _state = SessionState::Idle;        // per-tab 状态机(阶段3a)
+  // 阶段11：切走时暂存的本 tab SignalModel 列表（模型对象跨 tab 保活）。
+  std::vector<std::shared_ptr<SignalModel>> _stashed_signal_models;
 };
 
 } // namespace data

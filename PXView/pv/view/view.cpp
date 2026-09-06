@@ -411,6 +411,10 @@ data::DataSource *View::document_snapshot_source() {
   return _data_sync->document_snapshot_source();
 }
 
+bool View::display_source_is_document() {
+  return _data_sync->document_is_display_source();
+}
+
 void View::show_wait_trigger() { _time_viewport->show_wait_trigger(); }
 
 void View::set_device() { _devmode->set_device(); }

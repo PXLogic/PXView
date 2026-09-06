@@ -67,6 +67,7 @@
 #include "pv/view/signal/signalfactory.h"
 #include "pv/view/viewport/viewport.h"
 #include "pv/view/component/viewstatus.h"
+#include "pv/core/documentregistry.h"  // 阶段3b: get_capture_owner_document()
 
 using namespace std;
 
@@ -211,46 +212,46 @@ void ViewDataSync::clone_signals_for_document(
   set_data_document(doc);
 }
 
-pv::data::DataSource *ViewDataSync::document_snapshot_source() {
-  // During active capture in non-stream repeat mode, return the session
-  // (SigSession) so that get_logic_snapshot() returns view_data's live
-  // data. With single-buffer mode (capture_data == view_data), data goes
-  // directly into view_data, and the session returns it for live display.
-  //
-  // Without this check, the document (holding the PREVIOUS capture's data
-  // via shared_ptr) would be returned, causing the view to show frozen data
-  // instead of the current capture's live data.
-  //
-  // This matches the DSView original design: non-stream repeat used single
-  // buffer, and the view always read from the session's view_data.
-  // NOTE: the guard must be as narrow as possible. `is_working()` is true
-  // whenever device_status()==ST_RUNNING, and ST_RUNNING is still set while
-  // RevEndPacket/CopyToDocDone/SessionStopped are queued on the async event
-  // bus. Combined with `is_repeat_mode()` (which is a *persistent* collect-mode
-  // setting that stays true even for an instant/single shot taken while the
-  // mode selector sits on Repeat), the old condition also fired for single
-  // capture: the view then bypassed _document and read view_data, which
-  // capture_init() had already cleared to a fresh empty snapshot -> blank
-  // screen. Use is_repeating() (excludes instant) so a single shot always
-  // keeps reading the document.
-  if (_data_source && _data_source->is_running_status() &&
-      _data_source->is_repeating() &&
-      !_data_source->is_realtime_refresh())
-    return _data_source;
+bool ViewDataSync::document_is_display_source() {
+  // per-tab 裁决（document_snapshot_source）选中文档且文档有数据。
+  // 本 ctx 自身采集中返回 false（应走实时分支）；其他 ctx 采集或静止时
+  // 为 true——渲染不依赖全局 ST_*。
+  return _document && _document->has_data() &&
+         document_snapshot_source() == _document;
+}
 
-  // Active real-time refresh (loop mode, or stream+single/repeat while capturing):
-  // the live data lives in the session's capture_data/view_data, NOT in the
-  // document (which still holds the PREVIOUS capture's data via shared_ptr).
-  // Returning the document here would freeze the view on stale data while the
-  // loop capture keeps streaming underneath (PathDiag keeps advancing but no
-  // RenderDiag appears). is_realtime_refresh() is only true while is_working();
-  // a buffer-mode single shot keeps it false and falls through to the document,
-  // preserving the blank-screen guard for single shots.
-  if (_data_source && _data_source->is_working() &&
-      _data_source->is_realtime_refresh())
+pv::data::DataSource *ViewDataSync::document_snapshot_source() {
+  // Session-Centric 阶段3b：per-tab 裁决取代纯全局裁决。
+  //
+  // 旧裁决只看全局 is_working()：任何 ctx（其他 tab 经 MCP/headless 发起）
+  // 的采集都会把"本视图"的数据来源切到 session 实时缓冲——本 tab 由此
+  // 显示别的 ctx 正在写入的数据（污染），采集结束后又跳回文档。
+  // 新裁决以 per-tab 归属为准：
+  //  1) 本 ctx 是采集 owner（或其状态机处于 Collecting 的启动窗口）且
+  //     全局执行层在工作 → 读 session 实时缓冲（数据经零拷贝共享同时
+  //     直达本 ctx 的文档，引用同一快照实例）。
+  //  2) 其他 ctx 在采集 → 绝不污染本视图：有历史数据读文档，否则空。
+  //  3) 静止态 → 文档快照（单一真相）。
+  auto *session = _view->session_ptr();
+  const bool global_working =
+      _data_source && _data_source->is_working() &&
+      _data_source->is_realtime_refresh();
+  const bool owned_by_me =
+      _document && session &&
+      session->document_registry()->get_capture_owner_document() == _document;
+
+  if (global_working &&
+      (owned_by_me || (_document && _document->is_collecting()))) {
+    // 本 ctx 自己的采集进行中：实时缓冲（与文档共享同一快照实例）。
+    // 非 stream repeat 帧间 owner 仍归属本 ctx，实时性不中断。
     return _data_source;
+  }
 
   if (_document && _document->has_data()) {
+    // 采集进行中但 owner 不是本 ctx（其他 tab / headless 发起），
+    // 或静止查看：本 ctx 的文档快照是唯一真相。
+    // 注：buffer 模式 repeat/单发在 RevEndPacket 后文档与实时缓冲共享
+    // 同一快照实例（零拷贝），读文档与读 session 数据等价且更稳定。
     return _document;
   }
   return _data_source;

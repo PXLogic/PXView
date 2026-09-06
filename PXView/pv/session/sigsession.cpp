@@ -117,6 +117,13 @@ SigSession::SigSession() {
   // default values.
   _state = std::make_unique<core::SessionStateContext>();
 
+  // 阶段6：执行缓冲（CaptureBuffers）在 _state 之后立即创建并注入——
+  // CaptureManager 为执行层所有者，SessionStateContext 仅转发。
+  // 生命周期：_buffers 声明在 _state/_capture_manager 之后，析构早于二者；
+  // 二者析构路径均不再访问缓冲（原 ~SessionStateContext 的清理已随迁移删除）。
+  _buffers = std::make_unique<core::CaptureBuffers>();
+  _state->attach_buffers(_buffers.get());
+
   // EventBus must be constructed before add_event_listener(this), since
   // add_event_listener forwards to _event_bus. All typed event dispatch goes
   // through broadcast<T>() / broadcast_sync<T>() / broadcast_async<T>().
@@ -168,7 +175,10 @@ SigSession::SigSession() {
   // action_start_capture calls _document_registry->acquire_capture_owner().
   _capture_manager = std::make_unique<core::CaptureManager>(_event_bus.get(),
                                                              _state.get(),
-                                                             _state.get());
+                                                             _state.get(),
+                                                             _buffers.get());
+  // 阶段5：采集执行门面——GUI/pxviewd/MCP 的提交统一经此（串行策略）。
+  _capture_engine = std::make_unique<core::CaptureEngine>(*_capture_manager);
 
   // Inject manager back-pointers into _state so cross-manager helpers
   // (decode_traces / attach_data_to_signal / sync_trigger_to_libsigrok /
@@ -633,6 +643,12 @@ bool SigSession::set_device(ds_device_handle dev_handle,
     pxv_info("Switch to device \"%s\" done.",
              _state->device_agent().name().toUtf8().data());
 
+  // Session-Centric 阶段1（止血）：TabSwitch 是"tab 恢复自己的设备"，
+  // 不是设备身份变更。数据快照（zero-copy 属于 per-tab SessionDocument）、
+  // SignalModel、解码栈全部归 tab 所有，切换时一律保留——把"摧毁重建"
+  // 改为"恢复"。只有真正的设备身份变更（UserSelection 等）才走摧毁路径。
+  const bool tab_switch = (reason == interface::DeviceChangeReason::TabSwitch);
+  if (!tab_switch) {
   // 线程生命周期纪律：销毁解码栈前必须先等所有解码 worker 真正结束。
   // 仅 set stop 标志不够——worker 可能仍在其内部写注解/持有 shared_ptr，
   // 随即 clear_active_document_decoders() 销毁 DecoderStack 会触发 UAF/
@@ -659,6 +675,14 @@ bool SigSession::set_device(ds_device_handle dev_handle,
       AppConfig::Instance().deviceOptions.glitchShowOverlay;
 
   init_signals();
+  } else {
+    // TabSwitch：不销毁任何文档的解码栈（保留解码结果；不销毁即无 UAF，
+    // 无需等待 worker——它们读的快照由 shared_ptr 保活，跑完自然结束）。
+    // 也不清 view_data/capture_data、不重建 SignalModel——随后的
+    // TabContext::apply_device_intent() 会 apply_signal_config()+reload()
+    // 按本 tab 持久化配置重建模型，模型与设备通道自然匹配。
+    pxv_info("set_device(TabSwitch): keep per-tab data/decoders/models intact");
+  }
 
   set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
   set_cur_samplelimits(_state->device_agent().get_sample_limit());
@@ -1115,10 +1139,14 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
     return nullptr;
   }
 
-  // Fill entries. Handle = index+1 (0 is reserved for NULL_HANDLE sentinel).
+  // Fill entries. handle 必须来自 DeviceAgent 的真实分配（阶段2）：
+  // scanned 设备 = index+1，文件设备 = 稳定注册表 handle（单调递增、关闭
+  // 不回收）。此前自创 "index+1" 与真实 handle 错位，导致关闭文件后重开
+  // 时 actived_index 越界（设备列表不选中）且下拉框选中会 set_device 到
+  // 错误的设备。0 = 查询失败（与 NULL_HANDLE 哨兵一致，UI 端不可选）。
   for (int i = 0; i < count; i++) {
     struct ds_device_base_info *entry = &array[i];
-    entry->handle = static_cast<ds_device_handle>(i + 1);
+    entry->handle = _state->device_agent().handle_of_sdi(all_sdi[i]);
 
     // Build display name from vendor/model/conn fields.
     const char *vendor = sr_dev_inst_vendor_get(all_sdi[i]);
@@ -1144,9 +1172,18 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
   array[count].name[0] = '\0';
 
   out_count = count;
-  // actived_index: track via DeviceAgent's current handle.
+  // actived_index: 当前设备 handle 在列表中的位置（handle 与列表索引不再
+  // 存在 index+1 恒等关系——文件设备 handle 单调递增，必须按值匹配）。
   ds_device_handle cur = _state->device_agent().handle();
-  actived_index = (cur > 0 && cur <= (ds_device_handle)count) ? (int)(cur - 1) : -1;
+  actived_index = -1;
+  if (cur != NULL_HANDLE) {
+    for (int i = 0; i < count; i++) {
+      if (array[i].handle == cur) {
+        actived_index = i;
+        break;
+      }
+    }
+  }
 
   return array;
 }
@@ -2648,6 +2685,11 @@ void SigSession::on_rev_end_packet() {
               ? _document_registry->get_capture_owner_document()
               : _document_registry->get_active_document();
       copy_data_to_document(doc);
+      // 阶段3a：本帧快照已零拷贝直达 owner ctx——数据完整、可显示/解码。
+      // repeat 多帧时每帧重复该演进（下一帧 acquire 不重跑，状态停留
+      // Stopped 但 is_working 仍为 true，消费方需结合执行层状态判断实时性）。
+      if (doc && doc->is_collecting())
+        doc->set_state(data::SessionDocument::SessionState::Stopped);
       _event_bus->broadcast_async<interface::CopyToDocDone>({SIZE_MAX});
     } else {
       // No active document (typical in headless mode) OR stream mode (no
@@ -3436,6 +3478,38 @@ void SigSession::sync_trigger_to_libsigrok(bool disable_trigger) {
   // compatibility but is not in the active call path (CaptureManager calls
   // _state->sync_trigger_to_libsigrok() directly).
   _state->sync_trigger_to_libsigrok(disable_trigger);
+}
+
+// --- 阶段11: per-tab SignalModel stash/restore ------------------------------
+
+void SigSession::stash_signal_models_to(data::SessionDocument *doc) {
+  if (!doc)
+    return;
+  // unique_lock 纪律：signal_models() 是 live 引用，写访问必须持写锁
+  // （decode/save 线程经 signal_models_snapshot() 读）。
+  int moved = 0;
+  {
+    std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
+    moved = (int)_state->signal_models().size();
+    doc->set_signal_models(_state->signal_models());
+    _state->signal_models().clear();
+  }
+  pxv_info("stash_signal_models_to: moved %d models to doc %p", moved,
+           (void *)doc);
+}
+
+bool SigSession::restore_signal_models_from(data::SessionDocument *doc) {
+  if (!doc || !doc->has_stashed_signal_models())
+    return false;
+  auto models = doc->take_signal_models();
+  if (models.empty())
+    return false;
+  {
+    std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
+    _state->signal_models() = std::move(models);
+  }
+  pxv_info("restore_signal_models_from: models restored in place (no rebuild)");
+  return true;
 }
 
 void SigSession::copy_data_to_document(data::SessionDocument *doc) {

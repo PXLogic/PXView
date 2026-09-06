@@ -159,6 +159,13 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
     }
   }
 
+  // 【阶段9 遗留决策】本文件（及 viewport_drag.cpp）所有 is_stopped_status()
+  // 交互判定**有意保留全局执行态**，不替换为 per-tab 判定：
+  //   1) 单设备产品下，全局执行态 ≈ 当前 tab 所恢复设备的执行态，语义等价；
+  //   2) "设备忙（任何 ctx 采集进行中）时禁止缩放/拖拽/边沿导航"是合理交互；
+  //   3) 显示语义（渲染/游标/解码重绘）的 per-tab 化已在
+  //      display_source_is_document() / paint 分支完成。
+  // 若未来多设备同采启用，再按 ctx 重新评估交互归属。
   if (_viewport->action_type() == NO_ACTION &&
       event->button() == Qt::RightButton &&
       _viewport->view().session().is_stopped_status()) {

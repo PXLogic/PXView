@@ -96,10 +96,24 @@ public:
     static int _next_session_id;
 
 private:
+    // ---- Session-Centric 阶段8：bind(ctx) 语义链 ----
+    // activate() = 依次执行以下阶段，即"View 换绑到本 tab 的 SessionContext"
+    // 的完整语义（对应参考项目：PulseView 换窗 / Logic2 setActiveSession 换
+    // 指针——换绑零全局副作用）：
+    //   1) restore_device_for_this_tab()  恢复本 tab 绑定的设备（TabSwitch）
+    //   2) claim_active_document()        认领 active document 归属
+    //   3) apply_device_intent()          应用设备意图（配置→模型→布局）
+    //   4) restore_view_data()            数据绑定裁决（文档/会话/清空）
+    //   5) finalize_view()                视图收尾（缩放/布局通知）
+    void restore_device_for_this_tab();
+    void claim_active_document();
+    void restore_view_data();
+    void finalize_view();
+
     // ---- 设备意图协议（架构重构 Phase 3）----
     // 本标签页的设备/通道状态（意图）持久化于 _document 的 SignalConfigStore。
     //   deactivate() → harvest_device_state()：从 View/SignalModel 收割状态回写意图；
-    //   activate()   → apply_device_intent()：把意图应用回全局设备与 Core 模型。
+    //   activate()   → apply_device_intent()（bind 链第 3 段）：把意图应用回全局设备与 Core 模型。
     // 全局 DeviceAgent 只持有一个活动设备，标签页切换 = 意图的收割/应用轮转。
     void apply_device_intent();
     void harvest_device_state();

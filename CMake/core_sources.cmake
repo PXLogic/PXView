@@ -45,6 +45,8 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/core/cursorregistry.cpp     # Task C2.8: cursor position state (Core layer)
     PXView/pv/session/sigsession.cpp
     PXView/pv/session/deviceagent.cpp
+    PXView/pv/session/devicemanager.cpp
+    PXView/pv/core/captureengine.cpp
     PXView/pv/base/dstimer.cpp
     PXView/pv/base/eventobject.cpp
     PXView/pv/base/pxvdef.cpp

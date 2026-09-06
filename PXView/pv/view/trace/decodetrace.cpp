@@ -1421,7 +1421,14 @@ void DecodeTrace::on_new_decode_data() {
     //    Do NOT call data_updated() — it rebuilds headers/margins/scrollbars
     //    and marks the whole pixmap cache dirty; decode changes only affect
     //    the decode trace rendering.
-    if (_view && _data_source->is_stopped_status()) {
+    // 遗留A1（阶段9 收尾）：per-tab 重绘判定——解码完成的重绘只取决于
+    // "解码结果是否为当前显示内容"。原判定仅看全局 is_stopped_status()，
+    // 其他 tab/headless（MCP）发起采集时全局为 running，本 tab 的解码
+    // 结果会漏掉重绘直到下一次事件。display_source_is_document() 兜底：
+    // 本 ctx 文档是显示来源（含其他 ctx 采集、静止查看）即重绘；本 ctx
+    // 自身采集的实时刷新路径不受影响（两判定同为 false，与原行为一致）。
+    if (_view && (_data_source->is_stopped_status() ||
+                  _view->display_source_is_document())) {
       // P2: decode-only repaint — skips the signal-pixmap rebuild (signals
       // are unchanged during decode growth; the decode layer is drawn by
       // DecodeTracePass outside the cached pixmap).
@@ -1465,7 +1472,9 @@ void DecodeTrace::on_decode_done() {
   }
 
   // Coalesced final repaint (<=60 FPS): avoids completion-burst stutter.
-  if (_view && _data_source->is_stopped_status()) {
+  // 遗留A1：per-tab 兜底同上（其他 ctx 采集时不漏重绘）。
+  if (_view && (_data_source->is_stopped_status() ||
+                _view->display_source_is_document())) {
     _view->request_delayed_update();
   }
 
@@ -1486,7 +1495,9 @@ void DecodeTrace::on_error_message_changed(const QString &msg) {
   // 96 of 126 viewport_update() calls in the decode-start burst window.
   // Coalescing to the 16ms timer still repaints promptly (error text is drawn
   // by DecodeTracePass) without flooding the main thread.
-  if (_view && _data_source->is_stopped_status()) {
+  // 遗留A1：per-tab 兜底同上。
+  if (_view && (_data_source->is_stopped_status() ||
+                _view->display_source_is_document())) {
     _view->request_delayed_update();
   }
   if (!msg.isEmpty()) {
