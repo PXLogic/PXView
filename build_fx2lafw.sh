@@ -51,23 +51,32 @@ _to_native_path() {
 }
 
 SDCC_EXTRA_INC=""
-SDCC_EXTRA_LIB=""
+SDCC_EXTRA_LIBS=""
 if _sdcc_exe="$(command -v sdcc 2>/dev/null)" && [ -n "$_sdcc_exe" ]; then
     _sdcc_root="$(cd "$(dirname "$_sdcc_exe")/.." && pwd)"
     if [ -d "$_sdcc_root/share/sdcc/include" ]; then
         SDCC_EXTRA_INC="-I$(_to_native_path "$_sdcc_root/share/sdcc/include/mcs51") -I$(_to_native_path "$_sdcc_root/share/sdcc/include")"
     fi
-    if [ -d "$_sdcc_root/share/sdcc/lib/small" ]; then
-        # NOTE: -L in sdcc means "print library dirs" (diagnostic); the option
-        # to add a library search path is the long form --lib-path.
-        SDCC_EXTRA_LIB="--lib-path $(_to_native_path "$_sdcc_root/share/sdcc/lib/small")"
+    # sdcc 4.6.x on MSYS2 also fails to resolve its internal library search
+    # dir ("Couldn't find library 'mcs51'..."), and neither --lib-path nor
+    # -Wl"-k..." forwarding works there (the path ends up in the linker's
+    # file list -> "error 119: don't know what to do with file ...").
+    # Link the runtime libs explicitly instead: aslink pulls only the modules
+    # it needs from each .lib, so on Linux/macOS (where sdcc's built-in lib
+    # path works fine) the duplicate .lib inputs are simply ignored.
+    _sdcc_lib_small="$_sdcc_root/share/sdcc/lib/small"
+    if [ -d "$_sdcc_lib_small" ]; then
+        for _lib in mcs51 libsdcc libint liblong libfloat; do
+            [ -f "$_sdcc_lib_small/$_lib.lib" ] && \
+                SDCC_EXTRA_LIBS="$SDCC_EXTRA_LIBS $(_to_native_path "$_sdcc_lib_small/$_lib.lib")"
+        done
     fi
 fi
 
 AS_INC="-Iinclude"
 C_INC="-Iinclude -Ifx2lib/include $SDCC_EXTRA_INC"
-LINK_FLAGS='--code-size 0x1c00 --xram-size 0x0200 --xram-loc 0x1c00 -Wl"-b DSCR_AREA=0x1e00" -Wl"-b INT2JT=0x1f00"'"$SDCC_EXTRA_LIB"
-LINK_FLAGS_SCOPE='--code-size 0x3c00 --xram-size 0x0100 --xram-loc 0x3c00 -Wl"-b DSCR_AREA=0x3d00" -Wl"-b INT2JT=0x3f00"'"$SDCC_EXTRA_LIB"
+LINK_FLAGS='--code-size 0x1c00 --xram-size 0x0200 --xram-loc 0x1c00 -Wl"-b DSCR_AREA=0x1e00" -Wl"-b INT2JT=0x1f00"'"$SDCC_EXTRA_LIBS"
+LINK_FLAGS_SCOPE='--code-size 0x3c00 --xram-size 0x0100 --xram-loc 0x3c00 -Wl"-b DSCR_AREA=0x3d00" -Wl"-b INT2JT=0x3f00"'"$SDCC_EXTRA_LIBS"
 
 echo "=== Step 1: Build fx2lib objects ==="
 for f in fx2lib/lib/delay.c fx2lib/lib/eputils.c fx2lib/lib/gpif.c \
