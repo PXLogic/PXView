@@ -64,7 +64,7 @@ TabContext::~TabContext()
         for (size_t idx : _owned_doc_indices)
             _doc_registry->release_document(idx);
     }
-    _pinned_docs.clear();
+    _borrow_doc.reset();   // 借用随 tab 死亡解除（不延长被借用文档寿命）
     _doc_ref.reset();
     _document = nullptr;
     _doc_index = SIZE_MAX;
@@ -85,78 +85,19 @@ void TabContext::mark_document_owned(size_t idx)
         _owned_doc_indices.push_back(idx);
 }
 
-void TabContext::unpin_document(size_t idx)
-{
-    if (!_doc_registry)
-        return;
-    _pinned_docs.erase(
-        std::remove_if(_pinned_docs.begin(), _pinned_docs.end(),
-                       [&](const std::shared_ptr<data::SessionDocument> &p) {
-                           return p && _doc_registry->index_of_document(
-                                           p.get()) == idx;
-                       }),
-        _pinned_docs.end());
-}
+// 数据模型重构步骤6：unpin_document / invalidate_device / owns_document 已
+// 删除——所有权不可变，文档不在 tab 间流动，借用由 release_borrow() 解除。
 
-void TabContext::invalidate_device(ds_device_handle handle)
-{
-    // Unified device-identity invalidation: a file device was closed — drop
-    // every trace of it here. A dead slot as the CURRENT binding must be
-    // rebound by the caller (needs a fresh document + view detach).
-    if (handle == NULL_HANDLE)
-        return;
-    if (_device_handle == handle)
-        _device_handle = NULL_HANDLE;
-    _pinned_docs.erase(
-        std::remove_if(_pinned_docs.begin(), _pinned_docs.end(),
-                       [handle](const std::shared_ptr<data::SessionDocument>
-                                    &p) {
-                           return p && p->is_file_device_slot() &&
-                                  p->device_handle() == handle;
-                       }),
-        _pinned_docs.end());
-}
-
-// ---- Device-keyed data pool: tab ↔ slot rebinding (rebind model) ----
+// ---- 文档换绑（仅用于"本 tab 自己的文档被销毁/失效"的重建路径）----
 
 void TabContext::rebind_document(std::shared_ptr<data::SessionDocument> doc,
                                  size_t doc_index)
 {
-    // Unpin the target slot if it was pinned — it becomes the current binding.
-    if (doc) {
-        auto it = std::find_if(
-            _pinned_docs.begin(), _pinned_docs.end(),
-            [&doc](const std::shared_ptr<data::SessionDocument> &p) {
-                return p.get() == doc.get();
-            });
-        if (it != _pinned_docs.end())
-            _pinned_docs.erase(it);
-    }
-    // Pin the outgoing binding (unless trivially the same slot / none). The
-    // outgoing document stays alive via the pinned strong reference.
-    if (_doc_ref && _doc_ref.get() != doc.get() &&
-        std::find_if(_pinned_docs.begin(), _pinned_docs.end(),
-                     [this](const std::shared_ptr<data::SessionDocument> &p) {
-                         return p.get() == _doc_ref.get();
-                     }) == _pinned_docs.end()) {
-        _pinned_docs.push_back(_doc_ref);
-    }
+    // 不再 pin 旧绑定：本 tab 始终只有一个自己的文档，旧文档要么随 tab 死
+    // 亡（release_document），要么由 registry 强引用保活。
     _doc_ref = std::move(doc);
     _document = _doc_ref.get();
     _doc_index = doc_index;
-}
-
-bool TabContext::owns_document(const data::SessionDocument *doc) const
-{
-    if (!doc)
-        return false;
-    if (doc == _document)
-        return true;
-    for (const auto &p : _pinned_docs) {
-        if (p.get() == doc)
-            return true;
-    }
-    return false;
 }
 
 void TabContext::make_live()
@@ -175,10 +116,12 @@ void TabContext::activate()
     // 本函数即"View 换绑到本 tab 的 SessionContext"的完整语义，五段依次
     // 执行（行为与重组前完全一致，仅显式化命名阶段）。阶段1 起 TabSwitch
     // 不再走全局摧毁管线，全程零全局副作用。
-    pxv_info("TabContext::activate() bind(ctx) doc=%p handle=%llu",
-             (void *)_document, (unsigned long long)_device_handle);
-    restore_device_for_this_tab();   // 1) 恢复本 tab 设备
-    claim_active_document();         // 2) 认领 active document
+    pxv_info("TabContext::activate() bind(ctx) doc=%p handle=%llu%s",
+             (void *)_document, (unsigned long long)_device_handle,
+             is_borrowing() ? " (borrowing)" : "");
+    restore_device_for_this_tab();   // 1) 恢复本 tab 表达的设备（含借用）
+    claim_active_document();         // 2) 认领 active document（所有权）+
+                                     //    渲染文档（借用时=借用文档）
     _state = LIVE;
     apply_device_intent();           // 3) 应用设备意图（配置→模型→布局）
     restore_view_data();             // 4) 数据绑定裁决
@@ -199,17 +142,27 @@ void TabContext::activate()
 // default names" bug.
 void TabContext::restore_device_for_this_tab()
 {
-    if (_device_handle != NULL_HANDLE && !_session->is_working()) {
-        if (_session->get_device()->handle() != _device_handle) {
+    // 数据模型重构步骤6：借用时表达的是【借用文档的设备】，但本 tab 的身份
+    // （_device_handle）不变——恢复失败只解除借用，绝不篡改所有权身份。
+    ds_device_handle target = effective_device_handle();
+    if (target != NULL_HANDLE && !_session->is_working()) {
+        if (_session->get_device()->handle() != target) {
             pxv_info("TabContext::activate() restoring device handle %llu for this tab",
-                     (unsigned long long)_device_handle);
-            if (!_session->set_device(_device_handle,
+                     (unsigned long long)target);
+            if (!_session->set_device(target,
                                       interface::DeviceChangeReason::TabSwitch)) {
                 // Device is gone (e.g. closed from the device list). Drop the
                 // stale handle so we stop trying to restore it.
                 pxv_warn("TabContext::activate() failed to restore device handle %llu",
-                         (unsigned long long)_device_handle);
-                _device_handle = NULL_HANDLE;
+                         (unsigned long long)target);
+                if (is_borrowing() && _borrow_device_handle == target) {
+                    // 借用的设备没了（其属主 tab 关闭/文件设备注销）→ 解除
+                    // 借用，本 tab 回落自己的数据。
+                    pxv_warn("TabContext: borrowed device gone, releasing borrow");
+                    release_borrow();
+                } else {
+                    _device_handle = NULL_HANDLE;
+                }
             }
         }
     }
@@ -218,10 +171,18 @@ void TabContext::restore_device_for_this_tab()
 // 2) R6: 工作中（采集/copy 进行中）跳过 set_active_document，避免覆盖
 // capture_owner_document 导致数据归属错乱。END_COLLECT_WORK 时由
 // MainWindow 显式调用 set_active_document 恢复当前 tab 归属。
+// 数据模型重构步骤6：active document 表达【所有权】（采集数据落在自己的
+// 文档，绝不能落进借用的文件池槽）；渲染文档表达"画什么"，供模型访问器
+// 解析（见 SessionStateContext::active_document_models）。
 void TabContext::claim_active_document()
 {
     if (!_session->is_working()) {
-        _session->set_active_document(_document);
+        // 借用态下"当前正在操作的会话"就是被借用的文件池槽（渲染/模型/采集
+        // 归属三者一致，例如借用 pxl 时按运行 = 重放该文件、数据落回该池
+        // 槽）；本 tab 自己的文档仍然完整保留，解除借用即回到它。
+        data::SessionDocument *rd = render_document();
+        _session->set_active_document(rd);
+        _session->set_render_document(rd);
     }
 }
 
@@ -231,8 +192,10 @@ void TabContext::claim_active_document()
 // 数据切走前归档进文档"，停止态借用分支已删除。
 void TabContext::restore_view_data()
 {
-    if (_document && _document->has_data()) {
-        _view->set_data_document(_document);
+    // 数据模型重构步骤6：绑定【渲染文档】（借用时=借用的文件池槽）。
+    data::SessionDocument *rd = render_document();
+    if (rd && rd->has_data()) {
+        _view->set_data_document(rd);
         auto &sigs = _view->get_own_signals();
         for (auto &sig : sigs) {
             auto s = sig.get();
@@ -249,8 +212,8 @@ void TabContext::restore_view_data()
         // 的兜底同步点；待 View 全面读 per-doc SessionState 后移除。
         if (!_session->is_working()) {
             _session->set_stopped_status();
-            // 阶段3a：per-tab 状态机同步。
-            _document->set_state(data::SessionDocument::SessionState::Stopped);
+            // 阶段3a：per-tab 状态机同步（渲染文档 = 被画的那份数据）。
+            rd->set_state(data::SessionDocument::SessionState::Stopped);
         }
     } else if (_session->have_view_data() &&
                (_session->is_working() || _session->is_copy_in_progress()) &&
@@ -312,24 +275,29 @@ void TabContext::finalize_view()
 // 会话工作中（采集/拷贝）时改为暂存 pending config，待工作结束再应用。
 void TabContext::apply_device_intent()
 {
-    if (!_document || !_document->has_signal_config())
+    // 数据模型重构步骤6：意图应用于【渲染文档】——借用时应用被借用文件池槽
+    // 的通道配置与模型（画的是它的数据），本 tab 自己的文档不受影响。
+    data::SessionDocument *rd = render_document();
+    if (!rd || !rd->has_signal_config())
         return;
 
     if (!_session->is_working()) {
-        pxv_info("TabContext::apply_device_intent() work_mode=%d ch_count=%d",
-            _document->get_signal_config().work_mode,
-            (int)_document->get_signal_config().channels.size());
-        _document->apply_signal_config();
+        pxv_info("TabContext::apply_device_intent() work_mode=%d ch_count=%d%s",
+            rd->get_signal_config().work_mode,
+            (int)rd->get_signal_config().channels.size(),
+            is_borrowing() ? " (borrowed doc)" : "");
+        rd->apply_signal_config();
         // 数据模型重构步骤2 修正：原位恢复的前提是【本文档真的持有模型】。
         // 新建 tab / 首次激活的文档列表为空（旧机制靠 stash 缺失回退到
         // reload 来构建），必须走 reload 构建，否则核心模型为 0 —— 采集被
         // capturemanager 判空拒绝、dock/表头无通道，只剩 View 按 config 造的
         // 临时信号（表象："新建标签一个通道也没有"）。
-        if (_device_handle != NULL_HANDLE && !_document->signal_models().empty()) {
+        if (effective_device_handle() != NULL_HANDLE &&
+            !rd->signal_models().empty()) {
             // 模型对象随文档保活（零重建）。仅非文件设备池槽需要重绑当前
             // view_data 快照（解码/测量数据源恢复）——池槽的模型自带本槽
             // 快照（VCD/pxl 数据），绝不能绑全局执行缓冲（别的设备的数据）。
-            if (!_document->is_file_device_slot())
+            if (!rd->is_file_device_slot())
                 _session->attach_data_to_current_view_buffer();
             // R3 演进：skip_model_reload 置位让 GUI 消费方照常刷新但不触发
             // 二次全量重建。
@@ -337,9 +305,9 @@ void TabContext::apply_device_intent()
         } else {
             _session->reload();
             // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
-            // （转发语义下 reload 的 old_model 查找读到的就是本文档旧列表，
+            // （转发语义下 reload 的 old_model 查找读到的就是本渲染文档旧列表，
             // 但设备已失效重建，仍以文档配置为准覆盖。）
-            for (const auto &ch : _document->get_channels()) {
+            for (const auto &ch : rd->get_channels()) {
                 auto m = _session->get_signal_by_index(ch.index);
                 if (m)
                     m->set_trig_type(ch.trig_type);
@@ -356,9 +324,9 @@ void TabContext::apply_device_intent()
     } else {
         pxv_info("TabContext::apply_device_intent() session working, "
                  "saving pending config");
-        _document->set_pending_config(_document->get_signal_config());
+        rd->set_pending_config(rd->get_signal_config());
     }
-    _view->rebuild_signals_from_config(_document->get_signal_config());
+    _view->rebuild_signals_from_config(rd->get_signal_config());
     pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
         (int)_view->get_own_signals().size());
 }
@@ -376,8 +344,39 @@ void TabContext::deactivate()
     _state = HISTORICAL;
 }
 
+// --- 渲染借用（数据模型重构步骤6）---
+
+void TabContext::borrow_document(std::shared_ptr<data::SessionDocument> doc,
+                                 ds_device_handle handle)
+{
+    if (!doc || doc.get() == _document) {
+        // 借用自己 = 解除借用（回到本 tab 数据）。
+        release_borrow();
+        return;
+    }
+    _borrow_doc = std::move(doc);
+    _borrow_device_handle = handle;
+    pxv_info("TabContext: borrowing doc=%p (device %llu) for tab doc=%p",
+             (void *)_borrow_doc.get(), (unsigned long long)handle,
+             (void *)_document);
+}
+
+void TabContext::release_borrow()
+{
+    if (!_borrow_doc)
+        return;
+    pxv_info("TabContext: releasing borrow of doc=%p, back to own doc=%p",
+             (void *)_borrow_doc.get(), (void *)_document);
+    _borrow_doc.reset();
+    _borrow_device_handle = NULL_HANDLE;
+    _borrow_label.clear();
+}
+
 void TabContext::archive_session_data_if_owned()
 {
+    // 借用态下会话缓冲属于被借用的设备，本 tab 不归档（也不该污染它）。
+    if (is_borrowing())
+        return;
     if (!_document || _document->is_file_device_slot())
         return;   // 文件池槽的数据来自回放/导入，绝不接收会话缓冲
     if (_document->has_data())
@@ -407,7 +406,10 @@ void TabContext::archive_session_data_if_owned()
 // 完整保存于文档中，activate() 时经 apply_device_intent() 原样恢复。
 void TabContext::harvest_device_state()
 {
-    if (!_document)
+    // 数据模型重构步骤6：借用态下当前设备/模型都属于被借用的文档，收割会把
+    // 文件池槽的通道状态写进本 tab 文档（污染），且本 tab 自己的模型本来就
+    // 完整保存在自己的文档上——直接跳过。
+    if (!_document || is_borrowing())
         return;
 
     std::map<int, data::ChannelLayoutState> channel_layout;

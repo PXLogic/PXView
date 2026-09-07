@@ -313,49 +313,30 @@ void TabManager::remove_tab(int index) {
     }
   }
 
-  // Rebind model v2: surviving tabs may hold weak references to dying docs
-  // (pool slots borrowed via device switching) — detach them BEFORE the docs
-  // are released by ~TabContext below.
+  // 数据模型重构步骤6：所有权不可变，因此关闭一个 tab 永远不需要动其他
+  // tab 的文档/身份——幸存者各自持有自己的文档。唯一需要处理的是"借用"：
+  // 借用者若正借看着本 tab 拥有的池槽，解除借用并回落自己的数据（所有权
+  // = 寿命：被借用文档的寿命不因借用而延长）。
   for (pv::TabContext *other : _tab_contexts) {
-    if (other == ctx)
+    if (other == ctx || !other->is_borrowing())
       continue;
-    // Survivors must not carry a device identity that died with this tab
-    // (e.g. a borrower tab whose device_handle points at the closing file
-    // device): activate() would try to restore the dead handle → open_by_handle
-    // "sdi not found" → DeviceOpenFailed dialog. The global device is switched
-    // by restore_previous_device()/close_file() below; the survivor's identity
-    // is re-established on its next device selection.
-    for (ds_device_handle h : owned_file_handles)
-      if (other->device_handle() == h)
-        other->set_device_handle(NULL_HANDLE);
-    bool current_dying = false;
-    if (other->document()) {
-      size_t oidx =
-          _session->document_registry()->index_of_document(other->document());
-      current_dying = std::find(dying_docs.begin(), dying_docs.end(), oidx) !=
-                      dying_docs.end();
+    const bool borrowed_from_this_tab =
+        std::find(dying_docs.begin(), dying_docs.end(),
+                  _session->document_registry()->index_of_document(
+                      other->render_document())) != dying_docs.end();
+    if (!borrowed_from_this_tab)
+      continue;
+    const bool is_current = other == current_context();
+    other->release_borrow();
+    if (other->view()) {
+      other->view()->set_data_document(nullptr);
+      other->view()->clear_signal_data();
+      other->view()->mark_derived_traces_dirty();
+      other->view()->sync_derived_traces();
     }
-    if (current_dying) {
-      // Rebind the survivor to a fresh document for its own device identity.
-      size_t nidx = _session->document_registry()->take_document(
-          std::make_unique<pv::data::SessionDocument>(
-              _wnd->session()->device()));
-      if (auto *nd =
-              _session->document_registry()->get_document_by_index(nidx)) {
-        nd->set_device_handle(other->device_handle());
-        other->rebind_document(
-            _session->document_registry()->get_shared_by_index(nidx), nidx);
-        other->mark_document_owned(nidx);
-      }
-      if (other->view()) {
-        other->view()->set_data_document(nullptr);
-        other->view()->clear_signal_data();
-        other->view()->mark_derived_traces_dirty();
-        other->view()->sync_derived_traces();
-      }
-    }
-    for (size_t di : dying_docs)
-      other->unpin_document(di);
+    if (is_current)
+      other->activate();   // 立即回落本 tab 数据（随后的统一 activate 也会覆盖）
+    update_tab_style(_tab_contexts.indexOf(other));
   }
 
   // A2 fix: detach View→Document pointer BEFORE deleteLater().
@@ -404,7 +385,12 @@ void TabManager::update_tab_style(int index) {
     return;
 
   pv::TabContext *ctx = _tab_contexts[index];
-  _tab_widget->setTabText(index, ctx->title());
+  // 数据模型重构步骤6：借用态必须显式可见——标题加角标，用户一眼知道
+  // "本 tab 正在借看别处的数据"，避免旧 rebind 模型静默改身份的困惑。
+  QString text = ctx->title();
+  if (ctx->is_borrowing())
+    text += QString::fromUtf8("  ⇢ ") + ctx->borrow_label();
+  _tab_widget->setTabText(index, text);
 }
 
 // ---------------------------------------------------------------------------

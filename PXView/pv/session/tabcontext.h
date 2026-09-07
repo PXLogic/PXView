@@ -90,6 +90,9 @@ public:
     inline ds_device_handle device_handle() const { return _device_handle; }
     inline void set_device_handle(ds_device_handle h) { _device_handle = h; }
 
+    // 数据模型重构步骤6：pin/invalidate 机制已删除。所有权不可变（文档从不
+    // 在 tab 之间流动），因此不需要"钉住旧槽""按设备失效清除身份"——借用只
+    // 是 _borrow_doc，可被 release_borrow()/属主关闭显式解除。
     // --- Device-keyed data pool: tab ↔ slot rebinding (rebind model v3) ---
     // Rebind this tab to a different data slot document (strong reference —
     // the tab keeps the slot alive for as long as it binds/pins it). The
@@ -100,14 +103,8 @@ public:
     // unpinned (it becomes the current binding again).
     void rebind_document(std::shared_ptr<data::SessionDocument> doc,
                          size_t doc_index);
-    // True if doc is this tab's current binding or one of its pinned slots.
-    bool owns_document(const data::SessionDocument *doc) const;
-    // Pinned slot documents (strong refs). Dropped when the tab closes or
-    // the slot's device is invalidated; registry refs die with the owner.
-    inline const std::vector<std::shared_ptr<data::SessionDocument>> &
-    pinned_docs() const {
-        return _pinned_docs;
-    }
+    // 数据模型重构步骤6：owns_document 已删除（无 pin，无多槽判定）。
+    // 数据模型重构步骤6：pinned_docs 已删除（见 rebind 注释）。
 
     // --- Shared-reference semantics (rebind model v2/v3) ---
     // A file-device pool slot can be bound by SEVERAL tabs: the tab that
@@ -121,15 +118,38 @@ public:
     inline const std::vector<size_t> &owned_doc_indices() const {
         return _owned_doc_indices;
     }
-    // Drop a pinned entry by registry index (the doc itself is untouched —
-    // only this tab's reference goes away).
-    void unpin_document(size_t idx);
     inline size_t doc_index() const { return _doc_index; }
-    // Unified device-identity invalidation (rebind model v3): drop every
-    // trace of a closed file device — the tab's device_handle and any pinned
-    // slot belonging to that device. A dead slot as the CURRENT binding must
-    // be rebound by the caller (needs a fresh document + view detach).
-    void invalidate_device(ds_device_handle handle);
+    // 数据模型重构步骤6：unpin_document/invalidate_device 已删除（所有权
+    // 不可变，无需清除设备身份——借用由 release_borrow() 解除）。
+
+    // --- 渲染借用（数据模型重构步骤6：所有权不可变 + 渲染主体可借用）---
+    // 借用 = 本 tab 临时渲染【另一个文档】（典型：已打开文件设备的池槽），
+    // 仅改变"画什么"，绝不改变数据所有权：_document/_device_handle 保持原值
+    // （创建时定死），因此不需要 rebind/pin/invalidate/幸存者重绑等任何
+    // 所有权搬运机制。借用同时记录该文档对应设备，供 activate 恢复设备用。
+    // 生命周期遵循"所有权 = 寿命"：属主 tab 关闭 → 借用立即解除，本 tab 回落
+    // 自己的数据（不延长被借用文档寿命）。
+    void borrow_document(std::shared_ptr<data::SessionDocument> doc,
+                         ds_device_handle handle);
+    void release_borrow();
+    bool is_borrowing() const { return _borrow_doc != nullptr; }
+    // 当前渲染主体（借用 ? 借用的文档 : 本 tab 自己的文档）。
+    data::SessionDocument *render_document() const {
+        return _borrow_doc ? _borrow_doc.get() : _document;
+    }
+    // 当前"表达的设备"：借用时是借用文档的设备，否则是本 tab 自己的设备。
+    ds_device_handle effective_device_handle() const {
+        return _borrow_device_handle != NULL_HANDLE ? _borrow_device_handle
+                                                    : _device_handle;
+    }
+    inline ds_device_handle borrow_device_handle() const {
+        return _borrow_device_handle;
+    }
+    // 借用来源的可读名（UI 角标用；未设置时返回通用文案）。
+    inline QString borrow_label() const {
+        return _borrow_label.isEmpty() ? QString("借用中") : _borrow_label;
+    }
+    inline void set_borrow_label(const QString &label) { _borrow_label = label; }
 
     // Harvest the tab's device intent (channel config + layout + model stash)
     // into the bound document. Public for the rebind model: the GUI calls it
@@ -190,16 +210,18 @@ private:
     State                   _state;
     QDateTime               _timestamp;
     ds_device_handle        _device_handle = NULL_HANDLE;
-    // Device-keyed data pool: slots pinned by this tab after rebinding away
-    // from them (file-device pool entries whose data must survive switches).
-    // Strong references — the tab keeps them alive while it may return to it.
-    std::vector<std::shared_ptr<data::SessionDocument>> _pinned_docs;
+    // 数据模型重构步骤6：_pinned_docs 已删除（无 pin 机制）。
     // Documents created for this tab (registry refs dropped on tab close).
     // Foreign shared slots are NOT in this list.
     std::vector<size_t>     _owned_doc_indices;
     // Strong reference to the current binding (keeps it alive across any
     // rebinding/owner-close race). _document is the raw mirror for compat.
     std::shared_ptr<data::SessionDocument> _doc_ref;
+    // 渲染借用（所有权不可变）：借用中的文档 + 其设备 handle。仅影响
+    // render_document()/effective_device_handle()，不影响所有权。
+    std::shared_ptr<data::SessionDocument> _borrow_doc;
+    ds_device_handle _borrow_device_handle = NULL_HANDLE;
+    QString _borrow_label;
 };
 
 } // namespace pv

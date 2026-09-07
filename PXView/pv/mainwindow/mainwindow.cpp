@@ -267,8 +267,8 @@ void MainWindow::setup_ui() {
   // Setup the sampling bar
   _sampling_bar = new toolbars::SamplingBar(_session, this);
   _sampling_bar->setObjectName("sampling_bar");
-  // 数据模型重构步骤3：设备下拉选择文件设备 → 激活其属主 tab（tab 与设备
-  // 一一对应，不改写当前 tab 身份）；无属主 tab 时走 legacy set_device。
+  // 数据模型重构步骤6：设备下拉选择文件设备 → 当前 tab 借用该池槽（渲染
+  // 主体换绑，所有权不变）；无池槽时走 legacy set_device。
   _sampling_bar->device_data_route = [this](ds_device_handle h) {
     return route_to_file_device_data(h);
   };
@@ -669,26 +669,41 @@ void MainWindow::rebind_tab_to_fresh_document(pv::TabContext *ctx,
 }
 
 bool MainWindow::route_to_file_device_data(ds_device_handle handle) {
-  // 数据模型重构步骤3：设备下拉选择文件设备 = 激活它的属主 tab。tab 与设备
-  // 一一对应——绝不改写当前 tab 的绑定/身份（旧 rebind 模型 v2 的"当前 tab
-  // 改绑池槽"行为是"导入 pxl 后 demo tab 变文件设备"混乱的根源）。跳转经
-  // on_tab_changed 走标准 activate 五段链：恢复本 tab 设备（TabSwitch）→
-  // 意图应用 → 文档数据绑定。无属主 tab → false，调用方走 legacy 冷路径。
+  // 数据模型重构步骤6：设备下拉选择文件设备 = 【当前 tab 借用】该文件的池槽
+  // 文档（渲染主体换绑）并显示其数据。与旧 rebind 模型 v2 的本质区别：
+  // 所有权不变——TabContext 的 _document/_device_handle 一字不动，借用只是
+  // 一个可显式解除的渲染状态（_borrow_doc），因此不再产生"tab 身份被静默
+  // 改写"的混乱；属主 tab 关闭时借用自动解除、回落本 tab 数据。
+  // 无池槽 → false，调用方走 legacy 冷路径（set_device）。
   if (handle == NULL_HANDLE)
     return false;
   if (_session->is_working() || _session->is_saving())
     return false;
-  const auto &contexts = _tab_manager->contexts();
-  for (int i = 0; i < contexts.size(); ++i) {
-    pv::TabContext *ctx = contexts[i];
-    if (ctx && ctx->document() && ctx->document()->is_file_device_slot() &&
-        ctx->document()->device_handle() == handle) {
-      if (_tab_manager->tab_widget()->currentIndex() != i)
-        _tab_manager->tab_widget()->setCurrentIndex(i);
-      return true;
+  auto *reg = _session->document_registry();
+  auto slot = reg->find_file_device_document_shared(handle);
+  if (!slot)
+    return false;
+
+  pv::TabContext *ctx = tab_manager()->current_context();
+  if (!ctx)
+    return false;
+  // 已经是该文件的属主 tab（或已在借用它）→ 无需动作。
+  if (ctx->document() == slot.get() || ctx->render_document() == slot.get())
+    return true;
+
+  // 借用来源名 = 该文件的属主 tab 标题（UI 角标显示"⇢ <文件名>"）。
+  for (pv::TabContext *c : _tab_manager->contexts()) {
+    if (c && c->document() == slot.get()) {
+      ctx->set_borrow_label(c->title());
+      break;
     }
   }
-  return false;
+  ctx->borrow_document(slot, handle);
+  // 走标准 activate 五段链：恢复借用设备（TabSwitch）→ 意图应用（文件池槽
+  // 的配置/模型）→ 绑定该池槽数据 → 视图收尾。
+  ctx->activate();
+  _tab_manager->update_tab_style(_tab_manager->contexts().indexOf(ctx));
+  return true;
 }
 
 bool MainWindow::confirm_to_store_data() {

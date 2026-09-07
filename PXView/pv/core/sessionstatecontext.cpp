@@ -46,6 +46,10 @@ SessionStateContext::~SessionStateContext() {
 // --- 数据模型重构步骤2：signal_models 访问器转发到活动文档 ---
 
 data::SessionDocument *SessionStateContext::active_document_models() const {
+  // 数据模型重构步骤6：模型解析跟随【渲染文档】（借用时=被借用的文件池槽），
+  // 未设置时回退到活动文档（所有权），再回退到无（headless 本地存储）。
+  if (_render_document)
+    return _render_document;
   return _document_registry ? _document_registry->get_active_document()
                             : nullptr;
 }

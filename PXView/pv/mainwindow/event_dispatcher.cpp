@@ -516,20 +516,29 @@ void SessionEventDispatcher::on_file_device_closed(
   const ds_device_handle h = (ds_device_handle)ev.handle;
   if (h == NULL_HANDLE)
     return;
-  pxv_info("FileDeviceClosed: invalidating identity of handle %llu",
+  pxv_info("FileDeviceClosed: releasing borrows of handle %llu",
            (unsigned long long)h);
   for (pv::TabContext *ctx : _window->tab_manager()->contexts()) {
-    const bool current_binding_is_dead_slot =
+    // 数据模型重构步骤6：所有权 = 寿命。借用者只是"借看"，文件设备一死
+    // 立即解除借用并回落自己的数据——不再有"借用者身份被清零后显示全局
+    // 设备"的诡异状态。
+    if (ctx->is_borrowing() && ctx->borrow_device_handle() == h) {
+      const bool is_current = ctx == _window->current_context();
+      ctx->release_borrow();
+      if (is_current)
+        ctx->activate();   // 回落本 tab 数据 + 恢复本 tab 设备
+      _window->tab_manager()->update_tab_style(
+          _window->tab_manager()->contexts().indexOf(ctx));
+    }
+    // 属主 tab 自己的文档就是死槽（API/headless 发起的 close_file，tab 未
+    // 关闭）→ 换一份新文档，不再有 pin/invalidate 机制。
+    const bool own_doc_is_dead_slot =
         ctx->document() && ctx->document()->is_file_device_slot() &&
         ctx->document()->device_handle() == h;
-    if (current_binding_is_dead_slot) {
-      // The tab still binds the dead slot (a close path that did not detach
-      // inline, e.g. an API/headless-initiated close_file). Rebind it to a
-      // fresh document; only the foreground tab may claim the active doc.
+    if (own_doc_is_dead_slot) {
       _window->rebind_tab_to_fresh_document(
           ctx, ctx == _window->current_context());
     }
-    ctx->invalidate_device(h);
   }
 }
 

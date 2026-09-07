@@ -103,6 +103,14 @@ public:
   void set_document_registry(DocumentRegistry *m) { _document_registry = m; }
   void set_filter_processor(FilterProcessor *m) { _filter_processor = m; }
 
+  // 数据模型重构步骤6：渲染文档（"当前画的是哪个文档"）。借用态下它与
+  // active document（所有权）不同：采集数据仍落 active document，而模型/
+  // 快照渲染跟随渲染文档。未设置（headless/API）时回退到活动文档。
+  void set_render_document(data::SessionDocument *doc) {
+    _render_document = doc;
+  }
+  data::SessionDocument *render_document() const { return _render_document; }
+
   // capture_manager() / decode_task_manager() are ISessionCoordination overrides
   // (see Spec v3 Task 5 section below)
   DataFeedParser *data_feed_parser() { return _data_feed_parser; }
@@ -364,6 +372,8 @@ private:
   // tab 关闭窗口）。GUI 会话中模型实际存放于活动文档，此字段通常为空。
   std::vector<std::shared_ptr<data::SignalModel>> _signal_models;
   std::shared_mutex _signal_models_mutex;
+  // 数据模型重构步骤6：渲染文档（弱引用，由 TabContext/属主拥有）。
+  data::SessionDocument *_render_document = nullptr;
   std::vector<std::shared_ptr<data::SpectrumStack>> _spectrum_stacks;
   // Track B2: LissajousModel owned via unique_ptr
   std::unique_ptr<data::LissajousModel> _lissajous_model;

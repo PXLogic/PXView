@@ -405,6 +405,15 @@ void on_load_config_end();
   bool dso_data_is_out_off_range() { return _state->view_data()->get_dso()->data_is_out_off_range(); }
   void set_active_document(data::SessionDocument *doc);
   data::SessionDocument *get_active_document() override;
+  // 数据模型重构步骤6：渲染文档（"当前画的是哪份数据"）。借用态下与 active
+  // document（所有权）分离：采集数据仍归 active document，模型/渲染跟随
+  // 渲染文档。TabContext::claim_active_document() 在 activate 时设置。
+  void set_render_document(data::SessionDocument *doc) {
+    _state->set_render_document(doc);
+  }
+  data::SessionDocument *render_document() const {
+    return _state->render_document();
+  }
   void copy_data_to_document(data::SessionDocument *doc);
   void attach_data_to_signal(SessionData *data);
   // 数据模型重构步骤2：模型 stash 恢复后重绑当前执行缓冲快照（tabcontext
