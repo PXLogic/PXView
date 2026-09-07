@@ -32,7 +32,7 @@ on:
       version:
         description: 'Version number used in the source build (e.g. 1.5.7)'
         required: true
-        default: '1.6.0'
+        default: '1.6.1'
       tag:
         description: 'Target release tag (e.g. v1.5.7). Leave empty to derive from version.'
         required: false
