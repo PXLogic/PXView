@@ -118,9 +118,13 @@ void DsComboPopup::changeEvent(QEvent *event)
     if (event->type() == QEvent::ActivationChange) {
         bool active = this->isActiveWindow();
         if (_bReady && !active) {
+            // close() 在 WA_DeleteOnClose 下立即析构本对象——激活丢失常由
+            // "设备切换重建下拉/弹窗被关闭"引发，close 后不得再访问成员。
+            QPointer<DsComboPopup> self(this);
             pxv_info("[DsComboPopup#%d] changeEvent: closing due to activation loss", _id);
             this->close();
-            return;
+            if (self.isNull())
+                return;
         }
     }
     QDialog::changeEvent(event);
@@ -173,10 +177,14 @@ bool DsComboPopup::eventFilter(QObject *watched, QEvent *event)
         QPoint localPos = this->mapFromGlobal(globalPos);
 
         if (!this->rect().contains(localPos)) {
-            // 点击在弹窗外部 → 关闭弹窗
+            // 点击在弹窗外部 → 关闭弹窗。close() 在 WA_DeleteOnClose 下会
+            // 立即析构本对象，之后不能再访问任何成员（包括基类 eventFilter）。
+            QPointer<DsComboPopup> self(this);
             pxv_info("[DsComboPopup#%d] eventFilter: outside click at (%d,%d), closing",
                      _id, globalPos.x(), globalPos.y());
             this->close();
+            if (self.isNull())
+                return true;
         }
     }
     return QDialog::eventFilter(watched, event);
@@ -192,7 +200,14 @@ void DsComboPopup::on_item_clicked()
     pxv_info("[DsComboPopup#%d] on_item_clicked: index=%d", _id, index);
 
     if (index >= 0) {
+        // setCurrentIndex() 会同步驱动业务处理（例如设备下拉切换 → 借用/切
+        // 换设备 → 重建下拉内容并关闭本弹窗）。本弹窗带 WA_DeleteOnClose，
+        // 关闭即析构；若不自检就继续走到下面的 close()，就是在已释放对象上
+        // 操作（DsComboPopup::on_item_clicked 崩溃点）。QPointer 自保。
+        QPointer<DsComboPopup> self(this);
         _combo->setCurrentIndex(index);
+        if (self.isNull())
+            return;
     }
 
     this->close();
