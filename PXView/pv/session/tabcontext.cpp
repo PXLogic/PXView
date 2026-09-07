@@ -320,7 +320,12 @@ void TabContext::apply_device_intent()
             _document->get_signal_config().work_mode,
             (int)_document->get_signal_config().channels.size());
         _document->apply_signal_config();
-        if (_device_handle != NULL_HANDLE) {
+        // 数据模型重构步骤2 修正：原位恢复的前提是【本文档真的持有模型】。
+        // 新建 tab / 首次激活的文档列表为空（旧机制靠 stash 缺失回退到
+        // reload 来构建），必须走 reload 构建，否则核心模型为 0 —— 采集被
+        // capturemanager 判空拒绝、dock/表头无通道，只剩 View 按 config 造的
+        // 临时信号（表象："新建标签一个通道也没有"）。
+        if (_device_handle != NULL_HANDLE && !_document->signal_models().empty()) {
             // 模型对象随文档保活（零重建）。仅非文件设备池槽需要重绑当前
             // view_data 快照（解码/测量数据源恢复）——池槽的模型自带本槽
             // 快照（VCD/pxl 数据），绝不能绑全局执行缓冲（别的设备的数据）。
