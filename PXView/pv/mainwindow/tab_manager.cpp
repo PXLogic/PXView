@@ -259,6 +259,10 @@ void TabManager::remove_tab(int index) {
   SigSession *_session = _wnd->session();
 
   pv::TabContext *ctx = _tab_contexts[index];
+  // 数据模型重构步骤6 修正：removeAt(index) 之后 _tab_contexts 会移位，
+  // _current_tab_index 语义失效——"关闭前哪个 tab 是当前 tab"必须现在捕获，
+  // 供后面的借用回落判断使用。
+  pv::TabContext *was_current = current_context();
   // Rebind model v3: every document this tab OWNS dies with it (registry
   // ref dropped in ~TabContext) — its binding state (current/pinned) no
   // longer matters with strong references. Foreign pool slots shared from
@@ -326,7 +330,7 @@ void TabManager::remove_tab(int index) {
                       other->render_document())) != dying_docs.end();
     if (!borrowed_from_this_tab)
       continue;
-    const bool is_current = other == current_context();
+    const bool is_current = other == was_current;
     other->release_borrow();
     if (other->view()) {
       other->view()->set_data_document(nullptr);

@@ -182,7 +182,7 @@ void TabContext::claim_active_document()
         // 槽）；本 tab 自己的文档仍然完整保留，解除借用即回到它。
         data::SessionDocument *rd = render_document();
         _session->set_active_document(rd);
-        _session->set_render_document(rd);
+        _session->set_render_document(render_doc_shared());
     }
 }
 

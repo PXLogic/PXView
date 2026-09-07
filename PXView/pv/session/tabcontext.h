@@ -137,6 +137,11 @@ public:
     data::SessionDocument *render_document() const {
         return _borrow_doc ? _borrow_doc.get() : _document;
     }
+    // 渲染主体的强引用（供 SessionStateContext 以 weak_ptr 安全持有——
+    // 渲染文档可随属主/借用解除而销毁，弱引用悬挂自动变空）。
+    std::shared_ptr<data::SessionDocument> render_doc_shared() const {
+        return _borrow_doc ? _borrow_doc : _doc_ref;
+    }
     // 当前"表达的设备"：借用时是借用文档的设备，否则是本 tab 自己的设备。
     ds_device_handle effective_device_handle() const {
         return _borrow_device_handle != NULL_HANDLE ? _borrow_device_handle

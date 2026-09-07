@@ -408,8 +408,8 @@ void on_load_config_end();
   // 数据模型重构步骤6：渲染文档（"当前画的是哪份数据"）。借用态下与 active
   // document（所有权）分离：采集数据仍归 active document，模型/渲染跟随
   // 渲染文档。TabContext::claim_active_document() 在 activate 时设置。
-  void set_render_document(data::SessionDocument *doc) {
-    _state->set_render_document(doc);
+  void set_render_document(std::shared_ptr<data::SessionDocument> doc) {
+    _state->set_render_document(std::move(doc));
   }
   data::SessionDocument *render_document() const {
     return _state->render_document();
