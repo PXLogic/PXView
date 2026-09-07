@@ -303,6 +303,29 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   _window->update_toolbar_view_status();
   _window->session()->device_event_object()->device_updated();
 
+  // 数据模型重构步骤6：切到【非文件设备】时自动解除借用。借用是"临时渲染
+  // 别处数据"的显式状态，设备一旦切回 demo/硬件（下拉选择、热插拔、API、
+  // MCP 任一路径），本 tab 就该回到自己的数据 —— 否则会出现"设备是 demo、
+  // 画面却还是那个文件数据"的不一致。放在 CurrentDeviceChanged 里覆盖全部
+  // 切换来源；activate() 的恢复用的是 effective_device_handle（已是本 tab
+  // 设备），不会再触发 set_device，无递归风险。
+  {
+    pv::TabContext *ctx = _window->current_context();
+    if (ctx && ctx->is_borrowing() && ctx->borrow_device_handle() != ev.handle &&
+        _window->session()->get_device()->have_instance() &&
+        !_window->session()->get_device()->is_file() &&
+        !_window->session()->get_device()->is_input_module() &&
+        !_window->session()->is_working()) {
+      pxv_info("CurrentDeviceChanged: device switched to non-file (%llu), "
+               "releasing borrow",
+               (unsigned long long)ev.handle);
+      ctx->release_borrow();
+      ctx->activate();   // 回落本 tab 数据 + 应用本 tab 意图
+      _window->tab_manager()->update_tab_style(
+          _window->tab_manager()->contexts().indexOf(ctx));
+    }
+  }
+
   // Rebind model (device-keyed data pool): leaving a file-device slot in the
   // same tab rebinds the tab to a fresh document for the newly-active device.
   // The file slot stays pinned in the TabContext (snapshots + decoder stacks +
