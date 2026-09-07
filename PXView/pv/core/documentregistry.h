@@ -171,6 +171,37 @@ inline std::atomic<bool> &copy_in_progress() { return _copy_in_progress; }
     _capture_owner_index.store(index, std::memory_order_release);
   }
 
+  // --- 数据代（数据模型重构步骤7：执行缓冲的显式归属状态机）---
+  // 描述"会话执行缓冲里现在是谁的数据"：
+  //   Empty  缓冲无可归属数据（清空后/从未采集）
+  //   Live   采集进行中，正在写入 owner_doc 的数据代（device 产生）
+  //   Frozen 数据代完整，已零拷贝拷贝进 owner_doc（可显示/可归档）
+  // 消费规则（restore_view_data 查表）：
+  //   历史数据 = render_doc.has_data()
+  //   实时数据 = phase==Live && owner_doc == render_doc
+  // 转移点唯一：acquire_capture_owner→Live；on_rev_end_packet 拷贝完成→
+  // Frozen；release_capture_owner(Live 未落地)/各缓冲清空点→Empty。
+  struct DataGeneration {
+    enum class Phase { Empty, Live, Frozen };
+    Phase phase = Phase::Empty;
+    std::weak_ptr<data::SessionDocument> owner_doc;
+    ds_device_handle device_handle = NULL_HANDLE;
+  };
+  const DataGeneration &data_generation() const { return _generation; }
+  void mark_generation_live(std::shared_ptr<data::SessionDocument> owner,
+                            ds_device_handle device) {
+    _generation.phase = DataGeneration::Phase::Live;
+    _generation.owner_doc = std::move(owner);
+    _generation.device_handle = device;
+  }
+  void mark_generation_frozen() {
+    if (_generation.phase == DataGeneration::Phase::Live)
+      _generation.phase = DataGeneration::Phase::Frozen;
+  }
+  void reset_generation() {
+    _generation = DataGeneration{};
+  }
+
 private:
   // Look up the owning index for a weak pointer held by this registry. Returns
   // SIZE_MAX if not found (including nullptr input or a released slot whose
@@ -190,13 +221,12 @@ private:
   std::atomic<size_t> _capture_owner_index{SIZE_MAX};
 
   // Capture owner / copy thread state
-mutable std::mutex _capture_state_mutex;
+  mutable std::mutex _capture_state_mutex;
 std::atomic<bool> _copy_in_progress;
 std::unique_ptr<CaptureOwnerGuard> _capture_owner_guard;
 
-  // CaptureOwnerGuard is a nested class of DocumentRegistry, so under C++11+
-  // rules it has implicit access to private members without an explicit
-  // friend declaration. SigSession uses only public accessors.
+  // 数据代实例（定义与转移 API 见上方 public 区）。
+  DataGeneration _generation;
 };
 
 } // namespace core

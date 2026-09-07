@@ -186,14 +186,23 @@ void TabContext::claim_active_document()
     }
 }
 
-// 4) 数据绑定裁决（数据模型重构步骤4 收敛）：文档有数据→绑文档（唯一
-// 真相）；会话有【实时】数据且归属匹配（采集中/拷贝窗口）→绑会话缓冲；
-// 否则清空绑定。停止态的历史数据一律走文档分支——步骤1 已保证"展示过的
-// 数据切走前归档进文档"，停止态借用分支已删除。
+// 4) 数据绑定裁决（数据模型重构步骤7：查表化，唯一裁决点）。
+//
+// 输入：数据代 gen（执行缓冲归属）+ 渲染文档 rd 的数据状态。
+// 输出（互斥三分支，无时序性特判）：
+//   1. rd->has_data()                      → 绑渲染文档（历史数据，唯一真相）
+//   2. gen.phase==Live && gen.owner==rd    → 绑会话实时缓冲（实时波形）
+//   3. 否则                                → 清空（空白 tab 恒定空白）
+// 数据落 doc 由 on_rev_end_packet 的拷贝路径唯一负责（步骤7 已删除
+// deactivate 归档），因此不再有"空白 tab 继承别的采集代"的来源。
 void TabContext::restore_view_data()
 {
     // 数据模型重构步骤6：绑定【渲染文档】（借用时=借用的文件池槽）。
     data::SessionDocument *rd = render_document();
+    const auto &gen = _session->document_registry()->data_generation();
+    const bool gen_owner_is_render =
+        (gen.owner_doc.lock().get() == rd) && rd != nullptr;
+
     if (rd && rd->has_data()) {
         _view->set_data_document(rd);
         auto &sigs = _view->get_own_signals();
@@ -204,53 +213,23 @@ void TabContext::restore_view_data()
                 s->model()->set_enabled(s->enabled());
             }
         }
-        // 文档→显示层状态同步：本 ctx 数据完整且未在采集 = "可显示"。
-        // 显式置 ST_STOPPED 让 View 绘制管线（viewport_painter 等仍读全局
+        // 文档→显示层状态同步：有完整数据且未在采集 = "可显示"。显式置
+        // ST_STOPPED 让 View 绘制管线（viewport_painter 等仍读全局
         // is_stopped_status 的 28 个读取点）走 paintSignals 分支绘制文档
-        // 快照。步骤4 已保证 TabSwitch 不再把 ST_STOPPED 打回 ST_INIT，
-        // 此处是首绑/导入（VCD import 结束、RevEndPacket 前的窗口）等路径
-        // 的兜底同步点；待 View 全面读 per-doc SessionState 后移除。
-        if (!_session->is_working()) {
-            _session->set_stopped_status();
-            // 阶段3a：per-tab 状态机同步（渲染文档 = 被画的那份数据）。
-            rd->set_state(data::SessionDocument::SessionState::Stopped);
-        }
-    } else if (_session->have_view_data() &&
-               (_session->is_working() || _session->is_copy_in_progress()) &&
-               (!_session->get_capture_owner_document() ||
-                _session->get_capture_owner_document() == _document) &&
-               // 数据模型重构步骤1：借用加身份门槛 —— 本 tab 无设备身份，
-               // 或全局当前设备就是本 tab 的设备。防止设备切换后缓冲残留
-               // 上一设备的数据被借给本 tab。
-               (_device_handle == NULL_HANDLE ||
-                _session->get_device()->handle() == _device_handle)) {
-        // Document has no data yet, but the session has LIVE data.
-        // Bind signals to session data instead of clearing them.
-        //
-        // This covers two scenarios (the old third — post-capture/stopped
-        // gap — was removed in step 4: stopped historical data always binds
-        // via the document branch, since step 1 archives displayed data
-        // into the tab's document on switch-away):
-        // 1. Active capture (is_working) — waveforms update in real-time.
-        // 2. Background copy (is_copy_in_progress) — data is being copied
-        //    to the document; show session data in the meantime.
-        //
-        // The capture owner check is relaxed to also match when no
-        // capture owner is set (nullptr) — this happens for VCD imports
-        // which don't call start_capture(), so the capture owner is
-        // never assigned. When the owner IS set, it must match _document
-        // to avoid binding another tab's data to the wrong view.
-        _view->set_signal_data_from_source(_session);
-        // 拷贝窗口的借用立即归档进文档（采集在途时归档由 RevEndPacket 的
-        // owner-copy 负责）。
+        // 快照。（doc.data_state 不在此写——状态机 B 的转移点只在
+        // acquire/copy/clear 三处。）
         if (!_session->is_working())
-            archive_session_data_if_owned();
+            _session->set_stopped_status();
+    } else if (gen.phase == core::DocumentRegistry::DataGeneration::Phase::Live &&
+               gen_owner_is_render && _session->have_view_data()) {
+        // 实时数据：数据代 Live 且归属本渲染文档（本 tab 发起的采集）。
+        // 空白 tab / 别的 tab 的采集代永远不会进入此分支。
+        _view->set_signal_data_from_source(_session);
     } else {
         pxv_info("TabContext::activate() no data, clearing signal data bindings");
         _view->clear_signal_data();
-        // 步骤4 对称面：无任何可显示数据 → 显示层回到"待采集"（ST_INIT）
-        // 语义。TabSwitch 不再无条件复位 ST_INIT 后，由这里显式维护；采集
-        // 进行中（借用失败但状态是 RUNNING）绝不能扰动显示状态。
+        // 无任何可显示数据 → 显示层回到"待采集"（ST_INIT）语义。采集进行
+        // 中绝不能扰动显示状态。
         if (!_session->is_working())
             _session->set_init_status();
     }
@@ -336,11 +315,9 @@ void TabContext::deactivate()
     pxv_info("TabContext::deactivate() doc=%p", _document);
     // 架构重构 Phase 3：设备意图协议 —— 收割阶段（详见 harvest_device_state）。
     harvest_device_state();
-    // 数据模型重构步骤1（per-doc 数据存档）：切走前把"属于本 tab 设备、且
-    // 文档尚未持有"的会话缓冲快照零拷贝共享进文档。此后本 tab 切回时
-    // restore_view_data 走文档绑定分支，不再依赖（易被其他设备数据覆盖的）
-    // 全局会话缓冲 —— demo tab 切到文件 tab 再切回不再空白。
-    archive_session_data_if_owned();
+    // 数据模型重构步骤7：deactivate 归档已删除。数据落 doc 由
+    // on_rev_end_packet 的拷贝路径唯一负责（数据代 Frozen → owner doc），
+    // 归档曾是"空白 tab 继承别的采集代"（时有时无的数据）的来源。
     _state = HISTORICAL;
 }
 
@@ -372,31 +349,8 @@ void TabContext::release_borrow()
     _borrow_label.clear();
 }
 
-void TabContext::archive_session_data_if_owned()
-{
-    // 借用态下会话缓冲属于被借用的设备，本 tab 不归档（也不该污染它）。
-    if (is_borrowing())
-        return;
-    if (!_document || _document->is_file_device_slot())
-        return;   // 文件池槽的数据来自回放/导入，绝不接收会话缓冲
-    if (_document->has_data())
-        return;   // RevEndPacket 的 owner-copy 已归档（或本就是文件槽数据）
-    if (_device_handle == NULL_HANDLE)
-        return;   // 无设备身份，缓冲无法归属
-    if (_session->is_working() || _session->is_copy_in_progress())
-        return;   // 采集/拷贝在途 —— 等事件路径的 owner-copy，不抢半程数据
-    if (!_session->have_view_data())
-        return;   // 会话缓冲无数据
-    // 归属裁决：仅当当前全局设备仍是本 tab 的设备（切走前未发生设备切换）
-    // 时，缓冲数据才可能由本 tab 的设备产生。
-    if (_session->get_device()->handle() != _device_handle)
-        return;
-    pxv_info("TabContext: archiving session buffer into doc=%p "
-             "(device handle %llu, zero-copy)",
-             (void *)_document, (unsigned long long)_device_handle);
-    _session->copy_data_to_document(_document);
-    _document->set_state(data::SessionDocument::SessionState::Stopped);
-}
+// 数据模型重构步骤7：archive_session_data_if_owned 已删除——数据落 doc 由
+// on_rev_end_packet 拷贝路径唯一负责（数据代 Frozen → owner doc）。
 
 // 架构重构 Phase 3：设备意图协议 —— 收割阶段。
 // 从 View 层收集通道 UI 布局（view_index/v_offset/own_height，标签页布局的

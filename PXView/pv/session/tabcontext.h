@@ -167,19 +167,8 @@ public:
     void activate();
     void deactivate();
 
-    // Data model refactor step 1 (per-doc data archive): if this tab is
-    // switchING away while the global session buffer holds data produced
-    // under THIS tab's device and the bound document does not yet have its
-    // own copy, zero-copy share the buffer into the document. Every tab that
-    // ever displayed a capture generation keeps it — switching back binds the
-    // document instead of relying on the (transient) session buffer.
-    // Guards: no file-device slots (their data comes from replay, never the
-    // buffer), no archiving while a capture/copy is in flight (the
-    // RevEndPacket owner-copy is the correct landing for those), and the
-    // buffer is only attributed to this tab when the CURRENT device still
-    // matches the tab's device identity (no device switch since the data
-    // arrived).
-    void archive_session_data_if_owned();
+    // 数据模型重构步骤7：archive_session_data_if_owned 已删除——数据落 doc
+    // 由 on_rev_end_packet 拷贝路径唯一负责（数据代 Frozen → owner doc）。
 
     static int _next_session_id;
 

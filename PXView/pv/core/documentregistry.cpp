@@ -241,6 +241,13 @@ void DocumentRegistry::acquire_capture_owner(data::SessionDocument *doc) {
     std::lock_guard<std::mutex> lock(_capture_state_mutex);
     _capture_owner_guard = std::move(new_guard);
   }
+  // 数据模型重构步骤7：数据代 → Live。owner = 本次采集归属文档，device =
+  // 当前活跃设备。这是 Live 转移的唯一入口。
+  if (doc) {
+    if (auto shared = get_shared_by_index(idx))
+      mark_generation_live(std::move(shared),
+                           _state->device_agent().handle());
+  }
 }
 
 void DocumentRegistry::release_capture_owner() {
@@ -268,6 +275,11 @@ void DocumentRegistry::release_capture_owner() {
         doc->set_state(data::SessionDocument::SessionState::Stopped);
     }
   }
+  // 数据模型重构步骤7：采集结束（正常/中止）。Frozen（拷贝已完成）保持——
+  // 数据仍完整归属 owner doc；Live（未走到 RevEndPacket 的中止）→ Empty，
+  // 不完整的执行缓冲不能被任何 tab 认领。
+  if (_generation.phase == DataGeneration::Phase::Live)
+    reset_generation();
   guard_to_reset.reset();
 }
 

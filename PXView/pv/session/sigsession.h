@@ -374,6 +374,10 @@ template <typename EventType> void broadcast_async(const EventType &ev) { _event
 void clear_capture_owner_document(data::SessionDocument *doc);
 void on_load_config_end();
   void init_signals();
+  // 数据模型重构步骤7：模型写入守卫——渲染文档的设备与当前活跃设备不一致
+  // （借用过渡期：borrow 尚未解除而设备已切走）时，init_signals/reload 禁止
+  // 把新设备的模型写进渲染文档（曾把 demo 模型写进被借用的文件池槽）。
+  bool model_write_allowed() const;
   bool is_doing_action() { return _capture_manager->is_action(); }
   void clear_view_data();
   void set_trace_name(std::shared_ptr<data::SignalModel> model, QString name);

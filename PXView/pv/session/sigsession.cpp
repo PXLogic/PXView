@@ -702,6 +702,8 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   _state->view_data()->clear();
   _state->capture_data()->clear();
   _state->set_capture_data(_state->view_data());
+  // 数据模型重构步骤7：缓冲已清 → 数据代 Empty。
+  _document_registry->reset_generation();
 
   // 架构修复：从 AppConfig 恢复 auto_apply 默认值。
   // 这样即使没有打开 .pxl 文件（如新建采集），auto_apply 勾选状态
@@ -1342,6 +1344,20 @@ SigSession::get_signal_models() {
 return _state->signal_models();
 }
 
+// 数据模型重构步骤7：模型写入目标守卫。
+bool SigSession::model_write_allowed() const {
+  data::SessionDocument *rd = _state->render_document();
+  if (!rd || rd->device_handle() == NULL_HANDLE)
+    return true;
+  const ds_device_handle cur = _state->device_agent().handle();
+  if (rd->device_handle() == cur)
+    return true;
+  pxv_warn("model_write_allowed: render doc device %llu != active device %llu "
+           "(borrow transition), blocking model write",
+           (unsigned long long)rd->device_handle(), (unsigned long long)cur);
+  return false;
+}
+
 // TS-2 fix: thread-safe snapshot for callers that don't hold the mutex.
 std::vector<std::shared_ptr<data::SignalModel>>
 SigSession::get_signal_models_snapshot() {
@@ -1367,6 +1383,8 @@ void SigSession::init_signals() {
 
   _state->capture_data()->clear();
   _state->view_data()->clear();
+  // 数据模型重构步骤7：缓冲已清 → 数据代 Empty。
+  _document_registry->reset_generation();
   set_cur_snap_samplerate(_state->device_agent().get_sample_rate());
   set_cur_samplelimits(_state->device_agent().get_sample_limit());
 
@@ -1542,6 +1560,12 @@ void SigSession::init_signals() {
   }
 
   clear_signals();
+  if (!model_write_allowed()) {
+    // 数据模型重构步骤7：借用过渡期（渲染文档设备≠当前设备），跳过模型
+    // 写入——随后的借用解除 + activate 会以正确的渲染文档重建。
+    pxv_warn("init_signals: skipped model write (render doc device mismatch)");
+    return;
+  }
   {
     std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
@@ -1751,6 +1775,12 @@ void SigSession::reload() {
   }
 
   if (!models.empty()) {
+    // 数据模型重构步骤7：借用过渡期守卫（同 init_signals）。
+    if (!model_write_allowed()) {
+      pxv_warn("reload: skipped model write (render doc device mismatch, "
+               "borrow transition)");
+      return;
+    }
     pxv_info("SigSession::reload() end. clear signals, models.size()=%d", (int)models.size());
     clear_signals();
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
@@ -2691,10 +2721,13 @@ void SigSession::on_rev_end_packet() {
               ? _document_registry->get_capture_owner_document()
               : _document_registry->get_active_document();
       copy_data_to_document(doc);
-      // 阶段3a：本帧快照已零拷贝直达 owner ctx——数据完整、可显示/解码。
-      // repeat 多帧时每帧重复该演进（下一帧 acquire 不重跑，状态停留
-      // Stopped 但 is_working 仍为 true，消费方需结合执行层状态判断实时性）。
-      if (doc && doc->is_collecting())
+      // 数据模型重构步骤7：数据代 → Frozen（拷贝完成，数据完整归属 owner
+      // doc）。Frozen 是 Live 的唯一正常出口。
+      _document_registry->mark_generation_frozen();
+      // 阶段3a + 步骤7：拷贝完成 = Stopped（状态机 B 的唯一拷贝出口）。
+      // 无条件设置：导入（VCD 等）不经 acquire，doc 停在 Idle 也必须演进到
+      // Stopped，否则文档"有数据但状态 Idle"的状态机破洞。
+      if (doc)
         doc->set_state(data::SessionDocument::SessionState::Stopped);
       _event_bus->broadcast_async<interface::CopyToDocDone>({SIZE_MAX});
     } else {
@@ -3126,6 +3159,8 @@ bool SigSession::switch_work_mode(int mode) {
     _state->capture_data()->clear();
     _state->view_data()->clear();
     _state->set_capture_data(_state->view_data());
+    // 数据模型重构步骤7：缓冲已清 → 数据代 Empty。
+    _document_registry->reset_generation();
 
     init_signals();
 
@@ -3173,6 +3208,8 @@ void SigSession::on_load_config_end() {
 
 void SigSession::clear_view_data() {
   _state->view_data()->clear();
+  // 数据模型重构步骤7：缓冲已清 → 数据代 Empty。
+  _document_registry->reset_generation();
   data_updated();
 }
 
