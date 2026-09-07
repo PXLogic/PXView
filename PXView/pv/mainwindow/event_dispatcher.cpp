@@ -326,22 +326,10 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
     }
   }
 
-  // Rebind model (device-keyed data pool): leaving a file-device slot in the
-  // same tab rebinds the tab to a fresh document for the newly-active device.
-  // The file slot stays pinned in the TabContext (snapshots + decoder stacks +
-  // harvested intent survive); subsequent captures on the new device then
-  // write to the fresh document instead of clobbering the pool slot. This
-  // MUST run before the save_signal_config block below, so the new device's
-  // freshly-rebuilt models are saved into the new document — not into the
-  // pinned file slot (which would corrupt its harvested intent).
-  {
-    pv::TabContext *ctx = _window->current_context();
-    if (ctx && ctx->document() && ctx->document()->is_file_device_slot() &&
-        ctx->document()->device_handle() != ev.handle) {
-      _window->rebind_current_tab_to_fresh_document();
-    }
-  }
-
+  // 数据模型重构步骤6/7：旧 rebind 模型的"离开文件槽 → 换绑新空文档"已
+  // 删除。所有权不可变：文件 tab 永远拥有自己的池槽文档，切到 demo 设备后
+  // 它继续显示自己已拷贝的 pxl 数据（渲染文档绑定不受全局设备影响），绝不
+  // 被换绑成空文档（那正是"页面全空但 tab 还在"的来源）。
   {
     pv::TabContext *ctx = _window->current_context();
     if (ctx && ctx->document()) {

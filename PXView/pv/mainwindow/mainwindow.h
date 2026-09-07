@@ -194,6 +194,9 @@ public:
     // is never re-read). Returns false when no slot exists — caller falls
     // back to the legacy set_device path (cold load).
     bool route_to_file_device_data(ds_device_handle handle);
+    // 数据模型重构步骤7：设备下拉选择的统一路由（文件借用 / 文件会话跳转 /
+    // legacy 回退），见 mainwindow.cpp 实现。
+    bool route_device_selection(ds_device_handle handle);
     // Called when the current tab LEAVES a file-device pool slot: rebinds the
     // tab to a fresh document for the newly-active device (the slot stays
     // pinned with its data/decoders/intent).

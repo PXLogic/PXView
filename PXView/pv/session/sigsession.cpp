@@ -1369,6 +1369,14 @@ void SigSession::init_signals() {
     pxv_err("init_signals: no device instance, aborting");
     return;
   }
+  // 数据模型重构步骤7 修正：守卫必须在【任何清空动作之前】——本函数后续会
+  // 清执行缓冲并 clear_signals()（后者清的就是渲染文档的模型列表），守卫
+  // 放在写入点之前已经晚了：文件池槽的模型会被清光（页面全空的来源之一）。
+  if (!model_write_allowed()) {
+    pxv_warn("init_signals: skipped entirely (render doc device mismatch, "
+             "borrow transition)");
+    return;
+  }
 
   std::vector<std::shared_ptr<data::SignalModel>> models;
 
@@ -1560,12 +1568,6 @@ void SigSession::init_signals() {
   }
 
   clear_signals();
-  if (!model_write_allowed()) {
-    // 数据模型重构步骤7：借用过渡期（渲染文档设备≠当前设备），跳过模型
-    // 写入——随后的借用解除 + activate 会以正确的渲染文档重建。
-    pxv_warn("init_signals: skipped model write (render doc device mismatch)");
-    return;
-  }
   {
     std::unique_lock<std::shared_mutex> lk(_state->signal_models_mutex());
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
@@ -1616,6 +1618,13 @@ void SigSession::reload() {
 
   if (_state->is_working())
     return;
+
+  // 数据模型重构步骤7 修正：守卫在任何清空之前（同 init_signals）。
+  if (!model_write_allowed()) {
+    pxv_warn("reload: skipped entirely (render doc device mismatch, "
+             "borrow transition)");
+    return;
+  }
 
   std::vector<std::shared_ptr<data::SignalModel>> models;
   int mode = _state->device_agent().get_work_mode();
@@ -1775,12 +1784,6 @@ void SigSession::reload() {
   }
 
   if (!models.empty()) {
-    // 数据模型重构步骤7：借用过渡期守卫（同 init_signals）。
-    if (!model_write_allowed()) {
-      pxv_warn("reload: skipped model write (render doc device mismatch, "
-               "borrow transition)");
-      return;
-    }
     pxv_info("SigSession::reload() end. clear signals, models.size()=%d", (int)models.size());
     clear_signals();
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());

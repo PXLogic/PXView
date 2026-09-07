@@ -267,10 +267,9 @@ void MainWindow::setup_ui() {
   // Setup the sampling bar
   _sampling_bar = new toolbars::SamplingBar(_session, this);
   _sampling_bar->setObjectName("sampling_bar");
-  // 数据模型重构步骤6：设备下拉选择文件设备 → 当前 tab 借用该池槽（渲染
-  // 主体换绑，所有权不变）；无池槽时走 legacy set_device。
+  // 数据模型重构步骤7：设备下拉统一路由（文件借用 / 文件会话跳转 / legacy）。
   _sampling_bar->device_data_route = [this](ds_device_handle h) {
-    return route_to_file_device_data(h);
+    return route_device_selection(h);
   };
   _trig_bar = new toolbars::TrigBar(_session, this);
   _trig_bar->setObjectName("trig_bar");
@@ -704,6 +703,54 @@ bool MainWindow::route_to_file_device_data(ds_device_handle handle) {
   ctx->activate();
   _tab_manager->update_tab_style(_tab_manager->contexts().indexOf(ctx));
   return true;
+}
+
+bool MainWindow::route_device_selection(ds_device_handle handle) {
+  // 数据模型重构步骤7 补充：设备下拉选择的统一路由。
+  //  1) 文件设备（有池槽）→ 当前 tab 借用显示（route_to_file_device_data）。
+  //  2) demo/硬件设备 + 当前 tab 是文件会话（池槽属主）→ 跳到该设备的会话
+  //     tab。文件 tab 的会话就是那个文件，在它上面"就地切到 demo"既说不清
+  //     归属，又会把 demo 采集写进文件池槽——离开文件会话、回到 demo 会话
+  //     tab 才是正确语义。
+  //  3) 其余情况 → false，调用方走 legacy set_device（当前 tab 本就是该设备
+  //     的会话，或没有更合适的会话 tab 可去）。
+  if (handle == NULL_HANDLE)
+    return false;
+  if (_session->is_working() || _session->is_saving())
+    return false;
+
+  // 1) 文件设备借用路径。
+  if (_session->document_registry()->find_file_device_document(handle)) {
+    if (route_to_file_device_data(handle))
+      return true;
+  }
+
+  // 2) 当前 tab 是文件会话 → 跳到目标设备的会话 tab。
+  pv::TabContext *ctx = tab_manager()->current_context();
+  if (ctx && ctx->document() && ctx->document()->is_file_device_slot()) {
+    const auto &contexts = _tab_manager->contexts();
+    int best = -1;
+    for (int i = 0; i < contexts.size(); ++i) {
+      pv::TabContext *c = contexts[i];
+      if (!c || c == ctx || !c->document() ||
+          c->document()->is_file_device_slot())
+        continue;
+      if (c->device_handle() == handle) {
+        best = i;   // 精确匹配目标设备的会话
+        break;
+      }
+      if (best < 0)
+        best = i;   // 兜底：第一个非文件会话 tab
+    }
+    if (best >= 0) {
+      if (_tab_manager->tab_widget()->currentIndex() != best)
+        _tab_manager->tab_widget()->setCurrentIndex(best);
+      return true;   // activate 链会完成真正的 set_device(TabSwitch)
+    }
+    return false;    // 没有可去的会话 tab → legacy
+  }
+
+  return false;
 }
 
 bool MainWindow::confirm_to_store_data() {
