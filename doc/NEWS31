@@ -6,7 +6,42 @@
 FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
-  
+
+    PXView V1.6.1修改
+    时间：2026年9月7日
+    变更如下：
+
+    【新功能】
+    *新增 pxviewd 无头守护进程：headless 能力提升为一等公民产物，与 GUI 共享 pv::run_headless 运行时（不链接 Qt Widgets，控制台子系统），随包分发并在 CI 中接入（main_daemon.cpp、CMake 工程）
+    *pxview-cli 免 pip 随包分发，新增开始菜单 CLI 入口，CI 打包接入 pxviewd/cli 产物（packaging/）
+    *打包并加载 sigrok 固件文件（packaging 与固件加载路径）
+    *解码器数据导出：All 多栈模式下支持同时导出全部解码器数据（storesession/导出流程）
+
+    【重构】
+    *Session-Centric 多 tab 架构演进（阶段1-11）与 SigSession 收缩第一批（阶段13）：采集/解码/数据摄入/文档注册/测量/光标等职责拆分为独立管理器，SessionStateContext 打破 SigSession 与各 manager 的环依赖（core/、session/）
+    *数据模型重构（核心原则："Document 是唯一数据真相与所有权单元；tab 只是视图窗口；设备只是文档的数据来源适配器"，步骤1-7）：
+      - 设备键控数据池 + 文档层引用计数化 + 设备身份单一失效点 FileDeviceClosed（documentregistry、sessiondocument）
+      - TabContext 收缩为视图句柄：所有权不可变（文档与设备身份创建时定死），新增渲染借用语义（borrow_document/release_borrow，tab 标题"⇢ 来源"角标，切回非文件设备或属主关闭时自动解除）——"导入文件后其他标签页被静默变成文件设备"一类混乱根除
+      - SignalModel 列表归 SessionDocument 所有，全局访问器转发到活动/渲染文档，stash/take 搬运机制删除，"全局模型列表空窗期"消除
+      - 显式数据代状态机（Empty/Live/Frozen + owner_doc + device_handle）：数据落文档仅由 RevEndPacket 拷贝路径负责，视图绑定裁决查表化（历史绑文档/实时绑缓冲/否则清空），新建空白标签恒定空白
+      - DeviceManager 执行租约仲裁（acquire/release，libsigrok 单 sr_session 独占的显式化，忙则拒绝）；_saved_device_handle 单槽记忆机制退役
+      - 模型写入守卫：借用过渡期（渲染文档设备≠当前设备）禁止 init_signals/reload 写入，杜绝跨设备模型污染
+    *新增多 tab 集成契约测试（tests/qtest/core/test_multi_tab_session）
+
+    【问题修复】
+    *修复文件设备 "keeping" release 误调 sr_dev_close 销毁 virtual-session 会话上下文，导致 pxl 重放报 "(null)" 失败（deviceagent.cpp）
+    *修复执行租约获取顺序（须先交还旧设备租约再获取新租约），此前任何 set_device（含打开 pxl）都被误判 "lease busy"（sigsession.cpp）
+    *修复新建空白标签无通道且无法采集：模型原位恢复要求文档实际持有 SignalModel，空列表回退 reload 构建（tabcontext.cpp）
+    *修复借用中关闭属主标签的堆损坏（c0000374）：渲染文档改用 weak_ptr 持有，remove_tab 在列表移位前捕获当前 tab（sigsession.cpp、tab_manager.cpp）
+    *修复设备下拉选中项时 SIGSEGV：DsComboPopup（WA_DeleteOnClose）在 setCurrentIndex 同步触发设备切换时被销毁，on_item_clicked/eventFilter/changeEvent 三条 close 路径加 QPointer 自保守卫（dscombobox.cpp）
+    *修复文件 tab 切换到 demo 设备后整页空白且数据孤立：删除 CurrentDeviceChanged 中换绑残留块、模型写入守卫前置到任何清空动作之前、设备下拉统一路由（文件会话上选择 demo/硬件跳转对应会话 tab）（event_dispatcher.cpp、sigsession.cpp、mainwindow.cpp）
+    *修复 Windows 包内 pxview-cli 源码路径错位（packaging）
+    *修复 sdcc 4.6.x 在 MSYS2 下无法解析系统头文件与找不到运行时库（固件构建）
+    *修复 ui_hooks.h 被 .gitignore 吞掉导致的 CI 编译失败，固件验证降级为警告
+
+    【清理】
+    *移除 Application/SlidingDrawer 事件级 profiler 临时埋点
+
     PXView V1.6.0修改
     时间：2026年9月4日
     变更如下：
