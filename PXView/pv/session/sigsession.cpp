@@ -620,10 +620,13 @@ bool SigSession::set_device(ds_device_handle dev_handle,
       _state->device_agent().is_file() ||
       _state->device_agent().is_input_module();
   // 数据模型重构步骤5：执行租约仲裁。libsigrok 单 sr_session 执行流 = 采集
-  // 执行全局独占——在释放旧设备【前】先拿新设备的租约，忙则拒绝切换
-  // （release 构建下替代 is_working 断言的显式运行时闸）。demo/文件设备
-  // 当前同样经由该租约（它们共用同一执行流）；per-doc 设备实例化后按设备
-  // 发放多份租约即可，接口不变。
+  // 执行全局独占（release 构建下替代 is_working 断言的显式运行时闸）。
+  // 租约语义 = "当前活跃设备的执行权"，因此切换时必须【先交还旧设备的租约，
+  // 再获取新设备的租约】——旧设备正是租约持有者，先 acquire 会把自己的旧
+  // 租约误判为"忙"。demo/文件设备当前同样经由该租约（共用同一执行流）；
+  // per-doc 设备实例化后按设备发放多份租约即可，接口不变。
+  const ds_device_handle prev_handle = _state->device_agent().handle();
+  _state->device_agent().release_execution_lease(prev_handle);
   if (!_state->device_agent().acquire_execution_lease(dev_handle)) {
     pxv_err("Switch device error: execution lease busy (held by handle %llu).",
             (unsigned long long)_state->device_agent().lease_holder());
@@ -636,11 +639,7 @@ bool SigSession::set_device(ds_device_handle dev_handle,
   // it here made the device vanish from the device list on every tab switch
   // (and destroyed the channel metadata the tab still needed). Cleanup is
   // SigSession::close_file()'s job.
-  {
-    const ds_device_handle prev_handle = _state->device_agent().handle();
-    _state->device_agent().release(false);
-    _state->device_agent().release_execution_lease(prev_handle);
-  }
+  _state->device_agent().release(false);
   // 数据模型重构步骤4：状态机归一 —— ST_INIT（执行层"新设备待配置"）仅在
   // 真正的设备身份变更（UserSelection 等非 TabSwitch）时复位。TabSwitch 是
   // "tab 恢复自己的设备"：显示层状态（ST_STOPPED = 有完整数据可显示）必须
