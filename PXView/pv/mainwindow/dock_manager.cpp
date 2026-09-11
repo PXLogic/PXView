@@ -196,7 +196,7 @@ void DockManager::create_docks(pv::view::View *initial_view) {
 
     // ---- Function dock (FFT / Math / Lissajous) ----
     _function_dock = new QDockWidget(
-        L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"), _wnd);
+        L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FUNCTION), "Function"), _wnd);
     _function_dock->setObjectName("function_dock");
     _function_dock->setFeatures(QDockWidget::DockWidgetMovable);
     _function_dock->setAllowedAreas(Qt::RightDockWidgetArea);
@@ -279,7 +279,7 @@ void DockManager::setup_drawer(QWidget *central_widget, QVBoxLayout *layout) {
     _function_dock->setWidget(nullptr);
     _drawer_page_function = _sliding_drawer->addPage(
         _function_widget,
-        L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
+        L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
 
     _drawer_current_page = -1;
 }
@@ -476,7 +476,7 @@ void DockManager::retranslateUi() {
             L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LOG_DOCK_TITLE), "Log"));
         _sliding_drawer->setPageTitle(
             _drawer_page_function,
-            L_S(STR_PAGE_DLG, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
+            L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FUNCTION), "Function"));
     }
 }
 
