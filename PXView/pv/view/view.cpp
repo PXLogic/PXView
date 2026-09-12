@@ -102,7 +102,7 @@ const int View::MinSignalHeight = 10;
 const int View::MaxSignalHeight = 500;
 
 // const int View::SignalHeight = 30;s
-const int View::SignalMargin = 7;
+const int View::SignalMargin = IRenderView::SignalMargin;
 const int View::SignalSnapGridSize = 10;
 
 const QColor View::CursorAreaColour(220, 231, 243);
@@ -423,6 +423,31 @@ void View::capture_init() { _data_sync->capture_init(); }
 
 void View::set_update(Viewport *viewport, bool need_update) {
   viewport->set_need_update(need_update);
+}
+
+// IRenderView implementation (QML migration Phase 3, Task 3.1).
+// Behavior-preserving bridges: string-based connect (Trace::resize is a
+// private slot, unreachable via member pointer from here), Ruler static
+// formatters (stateless), and the same Viewport* the interface pointer
+// came from.
+void View::set_update_viewport(IRenderViewport *viewport, bool need_update) {
+  set_update(static_cast<Viewport *>(viewport), need_update);
+}
+
+void View::subscribe_resize(Trace *trace) {
+  connect(this, SIGNAL(resize()), trace, SLOT(resize()));
+}
+
+QString View::format_real_time(uint64_t delta_index, uint64_t sample_rate) {
+  return Ruler::format_real_time(delta_index, sample_rate);
+}
+
+QString View::format_real_freq(uint64_t delta_index, uint64_t sample_rate) {
+  return Ruler::format_real_freq(delta_index, sample_rate);
+}
+
+QString View::format_freq(double period) {
+  return Ruler::format_freq(period);
 }
 
 void View::set_all_update(bool need_update) {

@@ -29,7 +29,6 @@
 #include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"
 #include "pv/session/sigsession.h"
-#include "pv/view/view.h"
 #include "pv/view/renderer/rasterize.h"
 #include <libsigrokdecode.h>
 #include <cmath>
@@ -223,7 +222,7 @@ void LogicSignal::paint_type_options(QPainter &p, int right, const QPoint pt,
   p.setPen(Qt::NoPen);
 
   if (true) {
-    QColor color = View::Blue;
+    QColor color = _view ? _view->theme_blue() : QColor(17, 133, 209, 255);
 
     if (_view && _view->session().is_loop_mode()) {
       color = QColor(0x70, 0x70, 0x70, 255);

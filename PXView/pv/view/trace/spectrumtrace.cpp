@@ -29,7 +29,6 @@
 #include "pv/session/sigsession.h"
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/view/signal/dsosignal.h"
-#include "pv/view/viewport/viewport.h"
 #include "pv/data/stack/spectrumstack.h"
 #include "pv/base/pxvdef.h"
 #include "pv/core/langresource.h"
@@ -167,8 +166,8 @@ void SpectrumTrace::zoom(double steps, int offset)
     _offset = pre_offset - _scale*offset/width;
     _offset = max(min(_offset, 1-_scale), 0.0);
 
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
 }
 
 void SpectrumTrace::set_offset(double delta)
@@ -177,8 +176,8 @@ void SpectrumTrace::set_offset(double delta)
     _offset = _offset + (delta*_scale / width);
     _offset = max(min(_offset, 1-_scale), 0.0);
 
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
 }
 
 double SpectrumTrace::get_offset()
@@ -190,8 +189,8 @@ void SpectrumTrace::set_scale(double scale)
 {
     _scale = max(min(scale, 1.0), 100.0/_spectrum_stack->get_sample_num());
 
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
 }
 
 double SpectrumTrace::get_scale()
@@ -270,8 +269,8 @@ bool SpectrumTrace::measure(const QPoint &p)
     if (_hover_index < full_size)
         _hover_en = true;
 
-    //_view->set_update(_viewport, true);
-    _view->update();
+    //_view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
     return true;
 }
 
@@ -285,7 +284,7 @@ void SpectrumTrace::paint_back(QPainter &p, int left, int right, QColor fore, QC
     const int height = get_view_rect().height();
     const int width = right - left;
 
-    fore.setAlpha(View::BackAlpha);
+    fore.setAlpha(IRenderView::BackAlpha);
     QPen solidPen(fore);
     solidPen.setStyle(Qt::SolidLine);
     p.setPen(solidPen);
@@ -309,7 +308,7 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
             return;
 
         QColor trace_colour = _colour;
-        trace_colour.setAlpha(View::ForeAlpha);
+        trace_colour.setAlpha(IRenderView::ForeAlpha);
         p.setPen(trace_colour);
 
         const int full_size = (_spectrum_stack->get_sample_num()/2);
@@ -517,8 +516,8 @@ QRect SpectrumTrace::get_view_rect()
 {
     assert(_viewport);
     return QRect(0, UpMargin,
-                  _viewport->width() - RightMargin,
-                  _viewport->height() - UpMargin - DownMargin);
+                  _viewport->widget_width() - RightMargin,
+                  _viewport->widget_height() - UpMargin - DownMargin);
 }
 
 const std::vector<QString> SpectrumTrace::get_windows_support()

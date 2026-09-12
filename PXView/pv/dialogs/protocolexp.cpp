@@ -38,7 +38,7 @@
 #include "pv/data/decode/row.h"
 #include "pv/data/decode/annotation.h"
 #include "pv/view/trace/decodetrace.h"
-#include "pv/view/trace/decodermodel.h"
+#include "pv/data/model/decodermodel.h"
 #include "pv/base/eventobject.h"
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"

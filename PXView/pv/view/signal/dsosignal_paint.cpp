@@ -28,7 +28,6 @@
 #include "pv/view/signal/dsosignal.h"
 #include "pv/view/component/dso_trigger_config.h"
 #include "pv/view/component/dso_measure.h"
-#include <QApplication>
 #include <QCoreApplication>
 #include <QTimer>
 #include <functional>
@@ -43,8 +42,8 @@
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
 #include "pv/core/langresource.h"
-#include "pv/view/view.h"
-#include "pv/view/viewport/viewport.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/view/renderer/viewport_painter.h"
 #include "pv/view/renderer/rasterize.h"
 
 using namespace std;
@@ -62,10 +61,10 @@ QRect DsoSignal::get_view_rect() {
   // are above this DSO signal.
   if (_view && _view->is_logic_rendering_mode()) {
     int top = get_v_offset() - get_totalHeight() / 2 - _view->get_vOffset();
-    return QRect(0, top, _viewport->width() - RightMargin, get_totalHeight());
+    return QRect(0, top, _viewport->widget_width() - RightMargin, get_totalHeight());
   }
-  return QRect(0, UpMargin, _viewport->width() - RightMargin,
-               _viewport->height() - UpMargin - DownMargin);
+  return QRect(0, UpMargin, _viewport->widget_width() - RightMargin,
+               _viewport->widget_height() - UpMargin - DownMargin);
 }
 
 void DsoSignal::paint_prepare() {
@@ -126,7 +125,7 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   const int height = get_view_rect().height();
   const int width = right - left;
 
-  fore.setAlpha(View::BackAlpha);
+  fore.setAlpha(IRenderView::BackAlpha);
 
   QPen solidPen(fore);
   solidPen.setStyle(Qt::SolidLine);
@@ -135,7 +134,7 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   p.drawRect(left, UpMargin, width, height);
 
   // draw zoom region
-  fore.setAlpha(View::ForeAlpha);
+  fore.setAlpha(IRenderView::ForeAlpha);
   p.setPen(fore);
 
   const uint64_t sample_len = _data_source->cur_samplelimits();
@@ -164,7 +163,7 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   p.drawRect(shown_offset, UpMargin / 2 - 3, shown_len, 6);
 
   // draw divider
-  fore.setAlpha(View::BackAlpha);
+  fore.setAlpha(IRenderView::BackAlpha);
   QPen dashPen(fore);
   dashPen.setStyle(Qt::DashLine);
   p.setPen(dashPen);
@@ -275,13 +274,13 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
 
   assert(_view);
 
-  fore.setAlpha(View::BackAlpha);
+  fore.setAlpha(IRenderView::BackAlpha);
   QPen pen(fore);
   pen.setStyle(Qt::DotLine);
   p.setPen(pen);
   p.drawLine(left, get_zero_vpos(), right, get_zero_vpos());
 
-  fore.setAlpha(View::ForeAlpha);
+  fore.setAlpha(IRenderView::ForeAlpha);
   if (enabled()) {
     const QPointF mouse_point = ctx.hover_point;
     const QRectF label_rect = get_trig_rect(left, right);
@@ -380,7 +379,7 @@ void DsoSignal::paint_type_options(QPainter &p, int right, const QPoint pt,
   p.setRenderHint(QPainter::Antialiasing, true);
 
   QColor foreBack = fore;
-  foreBack.setAlpha(View::BackAlpha);
+  foreBack.setAlpha(IRenderView::BackAlpha);
   int y = get_y();
   const QRectF vDial_rect = get_rect(DSO_VDIAL, y, right);
   const QRectF x1_rect = get_rect(DSO_X1, y, right);

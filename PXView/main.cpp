@@ -45,9 +45,12 @@
 #include "pv/base/log.h"
 #include "pv/dock/logdock.h"
 #include "pv/ui/msgbox.h"
+#include "pv/ui/dockfonts.h"
 #include "pv/core/langresource.h"
 #include <QDateTime>
+#include <QPalette>
 #include <string>
+#include "pv/view/trace/selectableitem.h"
 #include <ds_types.h>
 #include <QFontDatabase>
 #include <QFont>
@@ -251,6 +254,20 @@ int main(int argc, char *argv[])
 
 	//----------------------init log
 	pxv_log_init(); // Don't call before QApplication be inited
+
+	// QML migration Phase 3 Task 3.1: SelectableItem's highlight pen now lives
+	// in the widget-free pxview-render library. Install the provider that maps
+	// the active application palette to the pen (same expression the former
+	// SelectableItem::highlight_pen() evaluated inline).
+	pv::view::SelectableItem::set_highlight_pen_provider(
+		[](int highlight_radius) -> QPen {
+			return QPen(QApplication::palette().brush(QPalette::Highlight),
+				highlight_radius, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+		});
+
+	// Same pattern for dockfonts.h: the widget-free render library reads the
+	// application font through the injected provider (QApplication::font()).
+	set_app_font_provider([]() -> QFont { return QApplication::font(); });
 
 	// Register the in-memory log buffer receiver early so that ALL startup
 	// logs (device scan, config load, etc.) are captured in LogDock::_log_buffer

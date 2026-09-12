@@ -20,6 +20,7 @@
 # embeds the input path verbatim in its #include directive -- an absolute
 # path always resolves regardless of the compiler's include search path.
 qt6_wrap_cpp(PXVIEW_DATA_MOC_OUTPUT
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/decodermodel.h
     ${CMAKE_CURRENT_SOURCE_DIR}/model/signallistmodel.h
     ${CMAKE_CURRENT_SOURCE_DIR}/model/signalmodel.h
     ${CMAKE_CURRENT_SOURCE_DIR}/stack/decoderstack.h
@@ -33,6 +34,7 @@ add_library(pxview-data STATIC
     model/signaldata.cpp
     model/signalmodel.cpp
     model/signallistmodel.cpp
+    model/decodermodel.cpp
     datasource.cpp
     triggerconfig.cpp
     stack/lissajousmodel.cpp

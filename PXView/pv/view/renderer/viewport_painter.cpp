@@ -23,15 +23,13 @@
 
 #include "pv/view/renderer/viewport_painter.h"
 #include "pv/view/renderer/render_pass.h"
-#include "pv/view/viewport/viewport.h"
-#include "pv/view/component/viewstatus.h"
+#include "pv/view/trace/trace.h"
+#include "pv/view/trace/decodetrace.h"
 
 #include "pv/session/sigsession.h"
-#include "pv/view/signal/dsosignal.h"
-#include "pv/view/signal/signal.h"
 
 #include <QPainter>
-#include <QStyleOption>
+#include <QPaintEvent>
 #include <cmath>
 #include <set>
 
@@ -50,14 +48,15 @@ thread_local DsoPaintTiming s_dso_timing;
 namespace pv {
 namespace view {
 
-ViewportPainter::ViewportPainter(Viewport *viewport) : _viewport(viewport) {}
+ViewportPainter::ViewportPainter(IRenderViewport *viewport)
+    : _viewport(viewport) {}
 
 ViewportPainter::~ViewportPainter() {}
 
 void ViewportPainter::paintEvent(QPaintEvent *event) {
   PXV_PERF_SCOPE_VIEWPORT();
   if (_viewport->drag_active() && !_viewport->drag_snapshot().isNull()) {
-    QPainter p(_viewport);
+    QPainter p(_viewport->paint_device());
     p.drawPixmap(0, 0, _viewport->drag_snapshot());
     return;
   }
@@ -80,12 +79,8 @@ void ViewportPainter::paintEvent(QPaintEvent *event) {
 }
 
 void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
-  using pv::view::Signal;
-
-  QStyleOption o;
-  o.initFrom(_viewport);
-  QPainter p(_viewport);
-  _viewport->style()->drawPrimitive(QStyle::PE_Widget, &o, &p, _viewport);
+  QPainter p(_viewport->paint_device());
+  _viewport->paint_widget_background(p);
 
   QFont font = theme_font_cursor();
   p.setFont(font);
@@ -95,9 +90,9 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   // ANALOG-mode repaint kick) was moved to the DataUpdated event path
   // (MainWindow::on_data_updated) so a slow paint can no longer stall the
   // capture cadence, and the painter no longer touches session state.
-  QColor fore(_viewport->palette().color(_viewport->foregroundRole()));
-  QColor back(_viewport->palette().color(_viewport->backgroundRole()));
-  fore.setAlpha(View::ForeAlpha);
+  QColor fore(_viewport->fore_color());
+  QColor back(_viewport->back_color());
+  fore.setAlpha(IRenderView::ForeAlpha);
   _viewport->view().set_back(false);
 
   std::vector<Trace *> traces;
@@ -135,7 +130,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     ctx.view = &_viewport->view();
     ctx.viewport = _viewport;
     ctx.type = _viewport->type();
-    ctx.viewWidth = _viewport->width();
+    ctx.viewWidth = _viewport->widget_width();
     ctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
     if (ctx.type == TIME_VIEW && ctx.is_logic_mode)
       ctx.groups = &_viewport->view().get_signal_groups();
@@ -187,7 +182,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (t == lastEnabledTrace)
       continue;
     int traceBottom =
-        t->get_v_offset() + t->get_totalHeight() / 2 + View::SignalMargin;
+        t->get_v_offset() + t->get_totalHeight() / 2 + IRenderView::SignalMargin;
     p.drawLine(0, traceBottom, _viewport->view().get_view_width(),
                traceBottom);
   }
@@ -362,7 +357,7 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
     // plot zoom rect
     if (_viewport->action_type() == LOGIC_ZOOM) {
       p.setPen(Qt::NoPen);
-      p.setBrush(View::LightBlue);
+      p.setBrush(_viewport->view().theme_lightblue());
       p.drawRect(
           QRectF(_viewport->mouse_down_point(), _viewport->mouse_point()));
     }
@@ -408,8 +403,6 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
     return;
   }
 
-  using pv::view::Signal;
-
   double progress = 0;
   int progress100 = 0;
   int captured_progress = 0;
@@ -420,24 +413,24 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
   p.setPen(Qt::gray);
   p.setBrush(Qt::NoBrush);
   const QPoint cenPos =
-      QPoint(_viewport->view().get_view_width() / 2, _viewport->height() / 2);
+      QPoint(_viewport->view().get_view_width() / 2, _viewport->widget_height() / 2);
   const int radius =
-      min(0.3 * _viewport->view().get_view_width(), 0.3 * _viewport->height());
+      min(0.3 * _viewport->view().get_view_width(), 0.3 * _viewport->widget_height());
   p.drawEllipse(cenPos, radius - 2, radius - 2);
-  p.setPen(QPen(View::Green, 4, Qt::SolidLine));
+  p.setPen(QPen(_viewport->view().theme_green(), 4, Qt::SolidLine));
   p.drawArc(cenPos.x() - radius, cenPos.y() - radius, 2 * radius, 2 * radius,
             180 * 16, progress);
 
   if (!_viewport->transfer_started()) {
     const int width = _viewport->view().get_view_width();
     const QPoint cenLeftPos =
-        QPoint(static_cast<int>(width / 2.0 - 0.05 * width), _viewport->height() / 2);
+        QPoint(static_cast<int>(width / 2.0 - 0.05 * width), _viewport->widget_height() / 2);
     const QPoint cenRightPos =
-        QPoint(static_cast<int>(width / 2.0 + 0.05 * width), _viewport->height() / 2);
-    const int trigger_radius = min(0.02 * width, 0.02 * _viewport->height());
+        QPoint(static_cast<int>(width / 2.0 + 0.05 * width), _viewport->widget_height() / 2);
+    const int trigger_radius = min(0.02 * width, 0.02 * _viewport->widget_height());
 
     QColor foreBack = fore;
-    foreBack.setAlpha(View::BackAlpha);
+    foreBack.setAlpha(IRenderView::BackAlpha);
     p.setPen(Qt::NoPen);
     p.setBrush((_viewport->timer_cnt() % 3) == 0 ? fore : foreBack);
     p.drawEllipse(cenLeftPos, trigger_radius, trigger_radius);
@@ -450,7 +443,7 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
 
     if (_viewport->view().session().get_capture_status(
             triggered, captured_progress)) {
-      p.setPen(View::Blue);
+      p.setPen(_viewport->view().theme_blue());
 
       QFont font = theme_font_cursor();
       p.setFont(font);
@@ -475,11 +468,11 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
                            "% Captured"));
       }
 
-      _viewport->prgRate(captured_progress);
+      _viewport->notify_prg_rate(captured_progress);
     }
 
   } else {
-    p.setPen(View::Green);
+    p.setPen(_viewport->view().theme_green());
     QFont font = p.font();
     font.setPointSize(50);
     font.setBold(true);
@@ -489,15 +482,15 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
     p.drawText(_viewport->view().get_view_rect(),
                Qt::AlignCenter | Qt::AlignVCenter,
                QString::number(progress100) + "%");
-    _viewport->prgRate(progress100);
+    _viewport->notify_prg_rate(progress100);
   }
 
-  p.setPen(QPen(View::Blue, 4, Qt::SolidLine));
+  p.setPen(QPen(_viewport->view().theme_blue(), 4, Qt::SolidLine));
   const int int_radius = max(radius - 4, 0);
   p.drawArc(cenPos.x() - int_radius, cenPos.y() - int_radius,
             2 * int_radius, 2 * int_radius, 180 * 16,
             -captured_progress * 3.6 * 16);
-  QFont font = QApplication::font();
+  QFont font = _viewport->application_font();
   p.setFont(font);
 
   p.setRenderHint(QPainter::Antialiasing, false);

@@ -60,6 +60,13 @@ public:
     // reference to the document (doc) plus its owning index and registry.
     // The document is owned by DocumentRegistry; TabContext::~TabContext
     // calls registry->release_document(doc_index) instead of delete.
+    //
+    // view 允许为 nullptr（QML/headless tab 路径，QML 迁移 Phase 2.1 起支持，
+    // 经 SessionManager::create_context(nullptr, ...) 创建）。所有解引用
+    // _view 的方法均已守护：restore_view_data()/finalize_view() 直接跳过，
+    // apply_device_intent() 只跳过尾部 View 信号重建（Core 侧意图应用照常），
+    // harvest_device_state() 原有 if (_view) 守护。Widgets 路径仍传真 View，
+    // 行为不变。
     TabContext(view::View *view, SigSession *session, data::SessionDocument *doc,
                size_t doc_index, core::DocumentRegistry *registry);
     ~TabContext();

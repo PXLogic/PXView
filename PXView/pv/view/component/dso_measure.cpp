@@ -22,7 +22,10 @@
 
 #include "pv/view/component/dso_measure.h"
 
-#include <QApplication>
+// Task 3.2: widget-free — dso_measure.cpp moved from gui_sources to
+// pxview-render; View access now goes through the IRenderView interface
+// (get_hori_res / zoom / auto_trig are default-no-op DSO autoset linkage
+// hooks that the GUI View overrides with its toolbar-driven behaviour).
 #include <functional>
 #include <cmath>
 #include <libsigrok/libsigrok.h>
@@ -33,8 +36,8 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
+#include "pv/view/cursor/cursor.h"
 #include "pv/view/signal/dsosignal.h"
-#include "pv/view/view.h"
 
 using namespace std;
 
@@ -272,6 +275,8 @@ void DsoMeasure::auto_set() {
         bool roll = false;
         _signal->_data_source->device()->is_roll_mode(roll);
 
+        // Task 3.2: toolbar linkage via the widget-free IRenderView hooks
+        // (GUI View overrides; QML shell's defaults keep autoset a no-op).
         const double hori_res = _signal->_view->get_hori_res();
         if (_signal->_level_valid &&
             ((!roll && _signal->_pcount < 3) || _signal->_period > 4 * hori_res)) {
@@ -323,14 +328,14 @@ void DsoMeasure::autoV_end() {
   _signal->_view->auto_trig(_signal->get_index());
   _signal->_trig_value = (_signal->_min + _signal->_max) / 2;
   _signal->set_trig_vpos(_signal->ratio2pos(_signal->get_trig_vrate()));
-  _signal->_view->set_update(_signal->_viewport, true);
-  _signal->_view->update();
+  _signal->_view->set_update_viewport(_signal->_viewport, true);
+  _signal->_view->request_repaint();
 }
 
 void DsoMeasure::autoH_end() {
   _signal->_autoH = false;
-  _signal->_view->set_update(_signal->_viewport, true);
-  _signal->_view->update();
+  _signal->_view->set_update_viewport(_signal->_viewport, true);
+  _signal->_view->request_repaint();
 }
 
 void DsoMeasure::auto_end() {

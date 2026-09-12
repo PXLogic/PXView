@@ -28,7 +28,7 @@
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/rowdata.h"
 #include "pv/data/stack/decoderstack.h"
-#include "pv/view/trace/decodermodel.h"
+#include "pv/data/model/decodermodel.h"
 
 using namespace std;
 

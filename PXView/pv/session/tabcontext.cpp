@@ -197,6 +197,14 @@ void TabContext::claim_active_document()
 // deactivate 归档），因此不再有"空白 tab 继承别的采集代"的来源。
 void TabContext::restore_view_data()
 {
+    // QML/headless tab（view == nullptr，QML 迁移 Phase 2.1 起支持）：无渲染
+    // 层可绑定。本函数尾部的显示状态迁移（set_stopped_status/set_init_status）
+    // 只服务于 View 绘制管线（is_stopped_status 的 28 个读取点），无 View 时
+    // 一并跳过，避免扰动全局显示状态。
+    if (!_view) {
+        pxv_info("TabContext::restore_view_data() no view, skip data binding");
+        return;
+    }
     // 数据模型重构步骤6：绑定【渲染文档】（借用时=借用的文件池槽）。
     data::SessionDocument *rd = render_document();
     const auto &gen = _session->document_registry()->data_generation();
@@ -238,6 +246,8 @@ void TabContext::restore_view_data()
 // 5) 视图收尾：缩放/偏移更新 + 布局刷新通知。
 void TabContext::finalize_view()
 {
+    if (!_view)   // QML/headless tab（view == nullptr）：无视图收尾
+        return;
     _view->update_scale_offset();
     _view->signals_changed(nullptr);
 }
@@ -305,9 +315,15 @@ void TabContext::apply_device_intent()
                  "saving pending config");
         rd->set_pending_config(rd->get_signal_config());
     }
-    _view->rebuild_signals_from_config(rd->get_signal_config());
-    pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
-        (int)_view->get_own_signals().size());
+    if (_view) {
+        // 设备意图的 Core 侧（apply_signal_config/reload）已在上方完成，
+        // 这里只做 View 层信号重建；QML/headless tab（view == nullptr）跳过。
+        _view->rebuild_signals_from_config(rd->get_signal_config());
+        pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
+            (int)_view->get_own_signals().size());
+    } else {
+        pxv_info("TabContext::apply_device_intent() no view, skip signal rebuild");
+    }
 }
 
 void TabContext::deactivate()

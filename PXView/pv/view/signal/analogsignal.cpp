@@ -29,7 +29,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
-#include "pv/view/view.h"
+#include "pv/view/cursor/cursor.h"
 #include "pv/view/renderer/rasterize.h"
 #include <cmath>
 #include <algorithm>
@@ -539,13 +539,13 @@ void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
   (void)ctx;
   assert(_view);
 
-  fore.setAlpha(View::BackAlpha);
+  fore.setAlpha(IRenderView::BackAlpha);
   QPen pen(fore);
   pen.setStyle(Qt::DotLine);
   p.setPen(pen);
   p.drawLine(left, get_zero_vpos(), right, get_zero_vpos());
 
-  fore.setAlpha(View::ForeAlpha);
+  fore.setAlpha(IRenderView::ForeAlpha);
   if (enabled()) {
     // Paint measure
     if (ctx.is_stopped_status)

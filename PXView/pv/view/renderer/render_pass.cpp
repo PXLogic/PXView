@@ -23,8 +23,6 @@
 
 #include "pv/view/renderer/render_pass.h"
 #include "pv/view/renderer/rasterize.h"
-#include "pv/view/viewport/viewport.h"
-#include "pv/view/view.h"
 #include "pv/view/trace/trace.h"
 #include "pv/view/signal/signal.h"
 #include "pv/view/signal/logicsignal.h"
@@ -34,7 +32,7 @@
 #include "pv/view/signal/analogsignal.h"
 #include "pv/view/trace/lissajoustrace.h"
 #include "pv/view/trace/decodetrace.h"
-#include "pv/view/component/ruler.h"
+#include "pv/data/datasource.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -234,22 +232,22 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
     double groupBottom = -1e9;
     for (auto gt : group.traces) {
       double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
-                        View::SignalMargin;
+                        IRenderView::SignalMargin;
       double traceBottom = gt->get_v_offset() +
-                           gt->get_totalHeight() * 0.5 + View::SignalMargin;
+                           gt->get_totalHeight() * 0.5 + IRenderView::SignalMargin;
       groupTop = std::min(groupTop, traceTop);
       groupBottom = std::max(groupBottom, traceBottom);
     }
 
-    double cardTop = groupTop - View::GroupGap * 0.5;
-    double cardHeight = groupBottom - groupTop + View::GroupGap;
+    double cardTop = groupTop - IRenderView::GroupGap * 0.5;
+    double cardHeight = groupBottom - groupTop + IRenderView::GroupGap;
 
-    QRectF cardRect(-View::GroupCardRadius, cardTop,
-                    ctx.viewWidth + View::GroupCardRadius + 1,
+    QRectF cardRect(-IRenderView::GroupCardRadius, cardTop,
+                    ctx.viewWidth + IRenderView::GroupCardRadius + 1,
                     cardHeight);
     QPainterPath groupPath;
-    groupPath.addRoundedRect(cardRect, View::GroupCardRadius,
-                             View::GroupCardRadius);
+    groupPath.addRoundedRect(cardRect, IRenderView::GroupCardRadius,
+                             IRenderView::GroupCardRadius);
 
     if (ctx.view->is_colored_card_mode()) {
       // Per-trace colored rectangles clipped within the card path
@@ -260,17 +258,17 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
       for (size_t i = 0; i < group.traces.size(); i++) {
         auto gt = group.traces[i];
         double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
-                      View::SignalMargin;
+                      IRenderView::SignalMargin;
         double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 +
-                         View::SignalMargin;
+                         IRenderView::SignalMargin;
 
         if (i == 0)
-          tTop -= View::GroupGap * 0.5;
+          tTop -= IRenderView::GroupGap * 0.5;
         if (i == group.traces.size() - 1)
-          tBottom += View::GroupGap * 0.5;
+          tBottom += IRenderView::GroupGap * 0.5;
 
-        QRectF traceRect(-View::GroupCardRadius, tTop,
-                         ctx.viewWidth + View::GroupCardRadius + 1,
+        QRectF traceRect(-IRenderView::GroupCardRadius, tTop,
+                         ctx.viewWidth + IRenderView::GroupCardRadius + 1,
                          tBottom - tTop);
         p.setBrush(ctx.view->get_trace_card_color(gt));
         p.drawRect(traceRect);
@@ -298,8 +296,8 @@ bool SignalPixmapPass::should_run(const RenderContext &ctx) const {
 }
 
 void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
-  Viewport *vp = ctx.viewport;
-  View *view = ctx.view;
+  IRenderViewport *vp = ctx.viewport;
+  IRenderView *view = ctx.view;
   const auto &traces = *ctx.traces;
 
   // Determine if view parameters changed (requires full signal rebuild)
@@ -309,8 +307,8 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
        view->get_signalHeight() != vp->curSignalHeight() ||
        view->get_vOffset() != vp->curVOffset());
 
-  const qreal dpr = vp->devicePixelRatioF();
-  const QSize pixmapSize = (QSizeF(vp->size()) * dpr).toSize();
+  const qreal dpr = vp->device_pixel_ratio();
+  const QSize pixmapSize = (QSizeF(vp->widget_size()) * dpr).toSize();
   const bool pixmap_changed =
       vp->pixmap().isNull() || vp->pixmap().size() != pixmapSize ||
       !qFuzzyCompare(vp->pixmap().devicePixelRatioF(), dpr);
@@ -375,7 +373,7 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
           QString token = QString("@logic-channel-%1").arg(idx);
           QColor theme_color = AppConfig::Instance().GetThemeColor(token);
           if (!theme_color.isValid())
-            theme_color = Viewport::PROBE_COLORS[idx];
+            theme_color = vp->probe_color(idx);
           // Same FINAL pen colour the adapter computes:
           // _colour.isValid() ? _colour : theme_color.
           const QColor colour = logic_signal->get_colour().isValid()
@@ -475,13 +473,13 @@ bool CursorOverlayPass::should_run(const RenderContext &ctx) const {
     return false;
   // Skip entirely if no cursor type is visible — avoids entering render()
   // (which does multiple if-branch checks) on every paint frame.
-  View *view = ctx.view;
+  IRenderView *view = ctx.view;
   return view->cursors_shown() || view->xcursors_shown() ||
          view->trig_cursor_shown() || view->search_cursor_shown();
 }
 
 void CursorOverlayPass::render(QPainter &p, const RenderContext &ctx) {
-  View *view = ctx.view;
+  IRenderView *view = ctx.view;
   const QRect xrect = view->get_view_rect();
   const QPoint &hover = view->hover_point();
 
@@ -491,7 +489,7 @@ void CursorOverlayPass::render(QPainter &p, const RenderContext &ctx) {
     for (auto &cursor : cursor_list) {
       const int64_t cursorX = view->index2pixel(cursor->index());
       if (xrect.contains(hover.x(), hover.y()) &&
-          qAbs(cursorX - hover.x()) <= Viewport::HitCursorMargin)
+          qAbs(cursorX - hover.x()) <= IRenderViewport::HitCursorMargin)
         cursor->paint(p, xrect, 1,
                       view->session().is_stopped_status());
       else
@@ -520,17 +518,17 @@ void CursorOverlayPass::render(QPainter &p, const RenderContext &ctx) {
         (*i)->paint(p, xrect, XCursor::XCur_All);
         hovered = true;
       } else if (!hovered && xrect.contains(hover)) {
-        if (qAbs(cursorX - hover.x()) <= Viewport::HitCursorMargin &&
+        if (qAbs(cursorX - hover.x()) <= IRenderViewport::HitCursorMargin &&
 hover.y() > std::min(cursorY0, cursorY1) &&
 hover.y() < std::max(cursorY0, cursorY1)) {
           (*i)->paint(p, xrect, XCursor::XCur_Y);
           hovered = true;
         } else if (qAbs(cursorY0 - hover.y()) <=
-                   Viewport::HitCursorMargin) {
+                   IRenderViewport::HitCursorMargin) {
           (*i)->paint(p, xrect, XCursor::XCur_X0);
           hovered = true;
         } else if (qAbs(cursorY1 - hover.y()) <=
-                   Viewport::HitCursorMargin) {
+                   IRenderViewport::HitCursorMargin) {
           (*i)->paint(p, xrect, XCursor::XCur_X1);
           hovered = true;
         } else {
@@ -554,7 +552,7 @@ hover.y() < std::max(cursorY0, cursorY1)) {
     const int64_t searchX =
         view->index2pixel(view->get_search_cursor()->index());
     if (xrect.contains(hover.x(), hover.y()) &&
-        qAbs(searchX - hover.x()) <= Viewport::HitCursorMargin)
+        qAbs(searchX - hover.x()) <= IRenderViewport::HitCursorMargin)
       view->get_search_cursor()->paint(p, xrect, 1, -1);
     else
       view->get_search_cursor()->paint(p, xrect, 0, -1);
@@ -571,7 +569,7 @@ bool MeasureOverlayPass::should_run(const RenderContext &ctx) const {
     return false;
   // Skip entirely if no measurement mode is active — avoids entering
   // render() (which checks 6 separate if-branches) on every paint frame.
-  Viewport *vp = ctx.viewport;
+  IRenderViewport *vp = ctx.viewport;
   return vp->measure_en() || vp->action_type() != NO_ACTION ||
          vp->dso_ym_valid() || vp->dso_xm_valid() ||
          vp->measure_type() != NO_MEASURE;
@@ -580,7 +578,7 @@ bool MeasureOverlayPass::should_run(const RenderContext &ctx) const {
 void MeasureOverlayPass::draw_logic_freq(QPainter &p,
                                            const RenderContext &ctx,
                                            const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!(vp->action_type() == NO_ACTION && vp->measure_type() == LOGIC_FREQ))
     return;
 
@@ -621,7 +619,7 @@ void MeasureOverlayPass::draw_logic_freq(QPainter &p,
 
     drawFloatingPanel(p, m.screen_hover_point,
                       m.view->get_view_width(),
-                      m.view->viewport()->height(), ctx.back,
+                      m.view->scroll_viewport_height(), ctx.back,
                       vp->panelBgColor(), vp->panelTextColor(),
                       rows);
   }
@@ -630,7 +628,7 @@ void MeasureOverlayPass::draw_logic_freq(QPainter &p,
 void MeasureOverlayPass::draw_dso_hover_lines(QPainter &p,
                                                 const RenderContext &ctx,
                                                 const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!(vp->action_type() == NO_ACTION && vp->measure_type() == DSO_VALUE))
     return;
 
@@ -663,7 +661,7 @@ void MeasureOverlayPass::draw_dso_y_measure(QPainter &p,
                                               const RenderContext &ctx,
                                               const MeasureCtx &m) {
   (void)ctx;
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!vp->dso_ym_valid())
     return;
 
@@ -739,7 +737,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                                               const RenderContext &ctx,
                                               const MeasureCtx &m) {
   (void)ctx;
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!vp->dso_xm_valid())
     return;
 
@@ -756,7 +754,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
   std::vector<QLineF> measure_lines_vec(measure_line_count);
   QLineF *const measure_lines = measure_lines_vec.data();
   QLineF *line = measure_lines;
-  int64_t x[Viewport::DsoMeasureStages];
+  int64_t x[IRenderViewport::DsoMeasureStages];
   int dso_xm_stage = 0;
   if (vp->action_type() == DSO_XM_STEP1)
     dso_xm_stage = 1;
@@ -766,7 +764,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
     dso_xm_stage = 3;
 
   for (int i = 0; i < dso_xm_stage; i++) {
-    x[i] = m.view->index2pixel(vp->dso_xm_index()[i]);
+    x[i] = m.view->index2pixel(vp->dso_xm_indices()[i]);
   }
   measure_line_count = 0;
   if (dso_xm_stage > 0) {
@@ -778,8 +776,8 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
     *line++ = QLine(x[1], vp->dso_xm_y() - 10, x[1],
                     vp->dso_xm_y() + 10);
     *line++ = QLine(x[0], vp->dso_xm_y(), x[1], vp->dso_xm_y());
-    vp->mm_width() = m.view->get_ruler()->format_real_time(
-        vp->dso_xm_index()[1] - vp->dso_xm_index()[0],
+    vp->mm_width() = m.view->format_real_time(
+        vp->dso_xm_indices()[1] - vp->dso_xm_indices()[0],
         sample_rate);
 
     const QString w_ctr = "W=" + vp->mm_width();
@@ -799,18 +797,18 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                      vp->dso_xm_y() + 30);
     *line++ = QLineF(x[2], vp->dso_xm_y() + 20, x[2],
                      vp->dso_xm_y() + 40);
-    vp->mm_period() = m.view->get_ruler()->format_real_time(
-        vp->dso_xm_index()[2] - vp->dso_xm_index()[0],
+    vp->mm_period() = m.view->format_real_time(
+        vp->dso_xm_indices()[2] - vp->dso_xm_indices()[0],
         sample_rate);
-    vp->mm_freq() = m.view->get_ruler()->format_real_freq(
-        vp->dso_xm_index()[2] - vp->dso_xm_index()[0],
+    vp->mm_freq() = m.view->format_real_freq(
+        vp->dso_xm_indices()[2] - vp->dso_xm_indices()[0],
         sample_rate);
     vp->mm_duty() =
-        QString::number((vp->dso_xm_index()[1] -
-                          vp->dso_xm_index()[0]) *
+        QString::number((vp->dso_xm_indices()[1] -
+                          vp->dso_xm_indices()[0]) *
                              100.0 /
-                             (vp->dso_xm_index()[2] -
-                              vp->dso_xm_index()[0]),
+                             (vp->dso_xm_indices()[2] -
+                              vp->dso_xm_indices()[0]),
                          'f', 2) +
         "%";
 
@@ -845,19 +843,19 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
     measure_line_count += 3;
   }
   p.drawLines(measure_lines, static_cast<int>(measure_line_count));
-  if (dso_xm_stage < Viewport::DsoMeasureStages) {
+  if (dso_xm_stage < IRenderViewport::DsoMeasureStages) {
     p.drawLine(x[dso_xm_stage - 1], vp->dso_xm_y(),
                vp->mouse_point().x(), vp->dso_xm_y());
     p.drawLine(vp->mouse_point().x(), 0,
-               vp->mouse_point().x(), vp->height());
+               vp->mouse_point().x(), vp->widget_height());
   }
-  vp->measure_updated();
+  vp->notify_measure_updated();
 }
 
 void MeasureOverlayPass::draw_logic_edge(QPainter &p,
                                            const RenderContext &ctx,
                                            const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!(vp->action_type() == LOGIC_EDGE &&
         m.view->session().have_view_data()))
     return;
@@ -878,7 +876,7 @@ void MeasureOverlayPass::draw_logic_edge(QPainter &p,
 
   drawFloatingPanel(p, m.screen_hover_point,
                     m.view->get_view_width(),
-                    m.view->viewport()->height(), ctx.back,
+                    m.view->scroll_viewport_height(), ctx.back,
                     vp->panelBgColor(), vp->panelTextColor(),
                     rows);
 }
@@ -886,7 +884,7 @@ void MeasureOverlayPass::draw_logic_edge(QPainter &p,
 void MeasureOverlayPass::draw_logic_jump(QPainter &p,
                                            const RenderContext &ctx,
                                            const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (vp->action_type() != LOGIC_JUMP)
     return;
 
@@ -932,7 +930,7 @@ void MeasureOverlayPass::draw_logic_jump(QPainter &p,
 
     drawFloatingPanel(p, m.screen_hover_point,
                       m.view->get_view_width(),
-                      m.view->viewport()->height(), ctx.back,
+                      m.view->scroll_viewport_height(), ctx.back,
                       vp->panelBgColor(), vp->panelTextColor(),
                       rows);
 
@@ -962,7 +960,7 @@ static QString zbFormatDecodedDuration(double captureSamples, uint64_t sampleRat
 
 void MeasureOverlayPass::draw_decoder_analog_hover(
     QPainter &p, const RenderContext &ctx, const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!vp || vp->action_type() != NO_ACTION ||
       ctx.type != TIME_VIEW || !ctx.is_logic_mode || !ctx.traces)
     return;
@@ -993,7 +991,7 @@ void MeasureOverlayPass::draw_decoder_analog_hover(
 
     auto *src = m.view->document_snapshot_source();
     const uint64_t sr = src ? src->cur_snap_samplerate() : 1;
-    const QString timeText = Ruler::format_real_time(sample.start_sample, sr) +
+    const QString timeText = m.view->format_real_time(sample.start_sample, sr) +
                              " / " + QString::number(sample.start_sample);
     const QString engText = QString::number(engineering, 'g', 7) +
         (unit.empty() ? QString() : " " + QString::fromStdString(unit));
@@ -1011,7 +1009,7 @@ void MeasureOverlayPass::draw_decoder_analog_hover(
     if (rows.empty())
       break;
     drawFloatingPanel(p, m.screen_hover_point, m.view->get_view_width(),
-                      m.view->viewport()->height(), ctx.back,
+                      m.view->scroll_viewport_height(), ctx.back,
                       vp->panelBgColor(), vp->panelTextColor(), rows);
     break;
   }
@@ -1019,7 +1017,7 @@ void MeasureOverlayPass::draw_decoder_analog_hover(
 
 void MeasureOverlayPass::draw_decoder_analog_range(
     QPainter &p, const RenderContext &ctx, const MeasureCtx &m) {
-  Viewport *vp = m.vp;
+  IRenderViewport *vp = m.vp;
   if (!vp || !vp->analog_measure_valid() || !vp->analog_measure_data() ||
       ctx.type != TIME_VIEW || !ctx.is_logic_mode || !ctx.traces)
     return;
@@ -1062,7 +1060,7 @@ void MeasureOverlayPass::draw_decoder_analog_range(
   const uint64_t sr = src ? src->cur_snap_samplerate() : 1;
   std::vector<std::pair<QString, QString>> rows;
   rows.push_back({QStringLiteral("通道"), QString("DecCh%1").arg(vp->analog_measure_channel())});
-  rows.push_back({QStringLiteral("区间"), Ruler::format_real_time(b - a, sr)});
+  rows.push_back({QStringLiteral("区间"), m.view->format_real_time(b - a, sr)});
 
   const auto &st = vp->analog_measure_stats();
   const auto data = vp->analog_measure_data();
@@ -1095,7 +1093,7 @@ void MeasureOverlayPass::draw_decoder_analog_range(
           static_cast<double>(st.last_sample - st.first_sample);
       if (decoded_rate > 0.0)
         rows.push_back({QStringLiteral("解码采样率"),
-                        Ruler::format_freq(1.0 / decoded_rate)});
+                        m.view->format_freq(1.0 / decoded_rate)});
     }
 
     const auto &cy = vp->analog_measure_cycle();
@@ -1120,7 +1118,7 @@ void MeasureOverlayPass::draw_decoder_analog_range(
           ? zbFormatDecodedDuration(cy.period_samples, sr) : unavailable});
     if (options.frequency)
       rows.push_back({QStringLiteral("频率"), cy.time_valid && sr > 0
-          ? Ruler::format_freq(cy.period_samples / static_cast<double>(sr))
+          ? m.view->format_freq(cy.period_samples / static_cast<double>(sr))
           : unavailable});
     if (options.positive_width)
       rows.push_back({QStringLiteral("正脉宽"), cy.time_valid
@@ -1155,18 +1153,20 @@ void MeasureOverlayPass::draw_decoder_analog_range(
   const qreal anchor = std::clamp(std::max(x0, x1), 0.0,
                                   static_cast<double>(m.view->get_view_width()));
   drawFloatingPanel(p, QPointF(anchor, row_rect.center().y()),
-                    m.view->get_view_width(), m.view->viewport()->height(),
+                    m.view->get_view_width(),
+                    m.view->scroll_viewport_height(),
                     ctx.back, vp->panelBgColor(), vp->panelTextColor(), rows);
 }
 
 void MeasureOverlayPass::render(QPainter &p, const RenderContext &ctx) {
-  Viewport *vp = ctx.viewport;
-  View *view = ctx.view;
+  IRenderViewport *vp = ctx.viewport;
+  IRenderView *view = ctx.view;
 
   MeasureCtx m;
   m.vp = vp;
   m.view = view;
-  m.active_color = ctx.back.black() > 0x80 ? View::Orange : View::Purple;
+  m.active_color = ctx.back.black() > 0x80 ? view->theme_orange()
+                                           : view->theme_purple();
   m.v_offset = view->get_vOffset();
   m.screen_midY = vp->cur_midY() - m.v_offset;
   m.screen_preY = vp->cur_preY() - m.v_offset;
@@ -1199,8 +1199,8 @@ bool TriggerInfoPass::should_run(const RenderContext &ctx) const {
 }
 
 void TriggerInfoPass::render(QPainter &p, const RenderContext &ctx) {
-  Viewport *vp = ctx.viewport;
-  View *view = ctx.view;
+  IRenderViewport *vp = ctx.viewport;
+  IRenderView *view = ctx.view;
 
   auto *dev = view->data_source()->device();
   int type;

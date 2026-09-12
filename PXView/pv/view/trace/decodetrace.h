@@ -24,10 +24,8 @@
 #define PXVIEW_PV_VIEW_DECODETRACE_H
 
 #include <QElapsedTimer>
-#include <QFormLayout>
 #include <QRectF>
 #include <QString>
-#include <QWidget>
 #include <cstdint>
 #include <list>
 #include <map>
@@ -36,8 +34,6 @@
 
 #include "pv/data/decoderanalogdata.h"
 #include "pv/data/decode/row.h"  // complete decode::Row (std::map key in _dense_row_cache)
-#include "pv/dialogs/pxdialog.h"
-#include "pv/prop/binding/decoderoptions.h"
 #include "pv/view/trace/trace.h"
 
 struct srd_channel;
@@ -109,7 +105,7 @@ public:
 
   inline std::shared_ptr<pv::data::DecoderStack> decoder() { return _decoder_stack; }
 
-  void set_view(pv::view::View *view);
+  void set_view(pv::view::IRenderView *view) override;
 
   /**
    * Paints the background layer of the trace with a QPainter

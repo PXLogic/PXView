@@ -21,19 +21,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
- 
+
 #include <cassert>
 #include <cmath>
 #include <typeinfo>
-#include <QFormLayout>
-#include <QApplication>
 
 #include "pv/view/trace/trace.h"
-#include "pv/view/view.h"
 #include "pv/session/sigsession.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/config/appconfig.h"
 #include "pv/config/appconfig.h"
 #include "pv/core/appcontrol.h"
 #include "pv/ui/dockfonts.h"
@@ -157,16 +153,21 @@ void Trace::resize()
 {
 }
 
-void Trace::set_view(pv::view::View *view)
+void Trace::set_view(pv::view::IRenderView *view)
 {
 	assert(view);
 	if (_view == view)
 		return; // idempotent — prevent double-connecting resize signal
 	_view = view;
-    connect(_view, &View::resize, this, &Trace::resize);
+    // QML migration Task 3.1: the resize hookup moved behind the widget-free
+    // IRenderView interface (string-based connect inside View::subscribe_resize
+    // — Trace::resize is a private slot, same effective connection as the
+    // former connect(_view, &View::resize, this, &Trace::resize)).
+    if (_view)
+        _view->subscribe_resize(this);
 }
 
-void Trace::set_viewport(pv::view::Viewport *viewport)
+void Trace::set_viewport(pv::view::IRenderViewport *viewport)
 {
     assert(viewport);
     _viewport = viewport;
@@ -183,7 +184,7 @@ void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor bac
     (void)back;
     (void)ctx;
 
-    fore.setAlpha(View::BackAlpha);
+    fore.setAlpha(IRenderView::BackAlpha);
     QPen pen(fore);
     pen.setStyle(Qt::DotLine);
     p.setPen(pen);
@@ -430,7 +431,8 @@ QRect Trace::get_view_rect()
                 typeid(*this).name());
         return QRect();
     }
-    return QRect(0, 0, _view->viewport()->width(), _view->viewport()->height());
+    return QRect(0, 0, _view->scroll_viewport_width(),
+                 _view->scroll_viewport_height());
 }
 
 QColor Trace::get_text_colour()

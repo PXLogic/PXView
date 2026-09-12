@@ -60,6 +60,8 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSettings>
+#include <QStyle>
+#include <QStyleOption>
 #include <QTableWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -372,6 +374,18 @@ bool Viewport::event(QEvent *event) {
 //--- Qt override forwarders (Phase F1/F2/F3) -------------------------------
 
 void Viewport::paintEvent(QPaintEvent *event) { _painter->paintEvent(event); }
+
+// IRenderViewport implementation (QML migration Phase 3, Task 3.1).
+// Widget bridge for the widget-free paint pipeline: styled-background
+// primitive (moved verbatim from ViewportPainter::doPaint) and the
+// application font query.
+void Viewport::paint_widget_background(QPainter &p) {
+  QStyleOption o;
+  o.initFrom(this);
+  style()->drawPrimitive(QStyle::PE_Widget, &o, &p, this);
+}
+
+QFont Viewport::application_font() const { return QApplication::font(); }
 
 void Viewport::mousePressEvent(QMouseEvent *event) {
   _interaction->mousePressEvent(event);

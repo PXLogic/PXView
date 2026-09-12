@@ -28,6 +28,7 @@
 #include <QRect>
 #include <cstdint>
 #include <vector>
+#include "pv/view/iview_delegates.h"
 #include "pv/view/trace/paint_context.h"
 
 class QPainter;
@@ -35,10 +36,7 @@ class QPainter;
 namespace pv {
 namespace view {
 
-class Viewport;
 class Trace;
-class Signal;
-struct SignalGroup;
 
 /**
  * @brief Context passed to each RenderPass during a paint cycle.
@@ -47,10 +45,15 @@ struct SignalGroup;
  * being painted (with access to configuration), the viewport
  * widget, the traces to render, current scale/offset, colors,
  * and cached geometry.
+ *
+ * Task 3.1 (QML migration): `view` / `viewport` now hold the widget-free
+ * IRenderView / IRenderViewport interfaces (implemented by View / Viewport)
+ * so this header and every RenderPass stay free of view.h (QScrollArea) and
+ * viewport.h (QWidget).
  */
 struct RenderContext {
-  class View *view = nullptr;        // The owning View (provides config access)
-  Viewport *viewport = nullptr;     // The viewport widget being painted
+  IRenderView *view = nullptr;      // Rendering services of the owning View
+  IRenderViewport *viewport = nullptr; // Rendering state of the viewport
   int type = 0;            // TIME_VIEW or FFT_VIEW
   double scale = 1.0;
   int64_t offset = 0;
@@ -168,8 +171,8 @@ public:
 private:
   // --- render() split helpers (was 350-line God-method) ---
   struct MeasureCtx {
-    Viewport *vp;
-    View *view;
+    IRenderViewport *vp;
+    IRenderView *view;
     QColor active_color;
     int v_offset;
     int screen_midY;

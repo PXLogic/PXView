@@ -34,7 +34,7 @@
 #include "pv/dock/protocolitemlayer.h"
 #include "pv/dock/searchcombobox.h"
 #include "pv/ui/dscombobox.h"
-#include "pv/view/trace/decodermodel.h"
+#include "pv/data/model/decodermodel.h"
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>

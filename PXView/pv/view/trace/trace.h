@@ -30,6 +30,7 @@
 #include <QRect>
 #include <QString>
 #include <cstdint>
+#include "pv/view/iview_delegates.h"
 #include "pv/view/trace/selectableitem.h"
 #include "pv/view/trace/paint_context.h"
 #include "pv/view/component/dsldial.h"
@@ -210,15 +211,15 @@ public:
 	 */
     virtual bool enabled() = 0;
 
-	virtual void set_view(pv::view::View *view);
+	virtual void set_view(pv::view::IRenderView *view);
 
-    inline pv::view::View* get_view(){
+    inline pv::view::IRenderView* get_view(){
         return _view;
     }
 
-    virtual void set_viewport(pv::view::Viewport *viewport);
+    virtual void set_viewport(pv::view::IRenderViewport *viewport);
 
-    inline pv::view::Viewport* get_viewport(){
+    inline pv::view::IRenderViewport* get_viewport(){
         return _viewport;
     }
 
@@ -387,8 +388,12 @@ signals:
 	void colour_changed();
 
 protected:
-	pv::view::View *_view;
-    pv::view::Viewport *_viewport;
+	// Rendering services of the owning View/Viewport (widget-free interfaces,
+	// QML migration Phase 3 Task 3.1). The concrete View/Viewport objects
+	// implement these interfaces; GUI code keeps passing the concrete
+	// pointers (implicit upcast at the call site).
+	pv::view::IRenderView *_view;
+    pv::view::IRenderViewport *_viewport;
 
 	QString _name;
 	QColor _colour;

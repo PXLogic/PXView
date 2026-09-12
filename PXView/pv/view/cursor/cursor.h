@@ -55,8 +55,12 @@ public:
 	 * @param view A reference to the view that owns this cursor pair.
 	 * @param time The time to set the flag to.
 	 * @param other A reference to the other cursor.
+	 *
+	 * Task 3.3: widget-free IRenderView (View implements it; the QML shell's
+	 * QmlRenderView too) — cursor.cpp now compiles into pxview-render.
+	 * Callers passing View& keep working via the implicit interface upcast.
 	 */
-    Cursor(View &view, int order, uint64_t sampleIndex);
+    Cursor(IRenderView &view, int order, uint64_t sampleIndex);
 
 
 public:

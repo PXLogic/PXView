@@ -39,6 +39,8 @@
 #include "pv/data/decoderanalogdata.h"
 #include "pv/interface/icallbacks.h"
 #include "pv/ui/uimanager.h"
+#include "pv/view/iview_delegates.h"
+#include "pv/view/renderer/viewport_painter.h"
 #include "pv/view/view.h"
 #include "pv/view/component/edge_nav_button.h"
 #include "pv/view/trace/trace.h"
@@ -46,20 +48,11 @@
 
 class QPainter;
 class QPaintEvent;
-class SigSession;
 class QAction;
 
-// Frame timing: thread-local DSO paint sub-timing, written by
-// DsoSignal::paint_mid and read by ViewportPainter::doPaint summary.
-struct DsoPaintTiming {
-    bool active = false;
-    qint64 get_samples_ms = 0;
-    qint64 paint_draw_ms = 0;
-    qint64 hw_offset_ms = 0;
-    int64_t sample_count = 0;
-    double samples_per_pixel = 0;
-};
-extern thread_local DsoPaintTiming s_dso_timing;
+// Frame timing (DsoPaintTiming / s_dso_timing) moved to
+// pv/view/renderer/viewport_painter.h (widget-free, Task 3.1) — included via
+// that header below.
 
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
@@ -81,60 +74,28 @@ class ViewportPainter;
 class ViewportInteraction;
 class ViewportDrag;
 
-// Action / measure enumerators — promoted from Viewport's nested enums to
-// namespace scope during Phase F so that ViewportPainter / ViewportInteraction
-// / ViewportDrag (ported verbatim from viewport.cpp) can keep using bare
-// names like LOGIC_ZOOM / NO_ACTION / DSO_VALUE without C++20 `using enum`.
-enum ActionType {
-  NO_ACTION,
-  CURS_MOVE,
-  LOGIC_EDGE,
-  LOGIC_MOVE,
-  LOGIC_ZOOM,
-  LOGIC_JUMP,
-  RESIZE_SIGNAL,
-  DSO_XM_STEP0,
-  DSO_XM_STEP1,
-  DSO_XM_STEP2,
-  DSO_YM,
-  DSO_TRIG_MOVE,
-  ANALOG_RANGE_DRAG
-};
-
-enum MeasureType { NO_MEASURE, LOGIC_FREQ, LOGIC_EDGE_CNT, DSO_VALUE };
-
-struct AnalogMeasurementV2Options {
-  bool show_channel = true;
-  bool show_time = true;
-  bool show_normalized = true;
-  bool show_engineering_value = true;
-  bool rise_time = true;
-  bool fall_time = true;
-  bool positive_overshoot = true;
-  bool negative_overshoot = true;
-  bool period = true;
-  bool frequency = true;
-  bool positive_width = true;
-  bool negative_width = true;
-  bool positive_duty_cycle = true;
-  bool negative_duty_cycle = true;
-  bool cycle_rms = true;
-};
+// Action / measure enumerators (ActionType / MeasureType) and
+// AnalogMeasurementV2Options now live in iview_delegates.h (widget-free,
+// consumed by pxview-render passes); this header re-exposes them via the
+// iview_delegates.h include above. Bare names like LOGIC_ZOOM / NO_ACTION /
+// DSO_VALUE keep working.
 
 // main graph view port, in the middle region
 // draw the left and right rule scale
 // created by View
-class Viewport : public QWidget, public IUiWindow {
+class Viewport : public QWidget, public IUiWindow, public IRenderViewport {
   Q_OBJECT
   Q_PROPERTY(QColor panelBgColor READ panelBgColor WRITE setPanelBgColor)
   Q_PROPERTY(QColor panelTextColor READ panelTextColor WRITE setPanelTextColor)
 
 public:
-  static const int HitCursorMargin = 10;
+  // Canonical values live on IRenderViewport (widget-free); these aliases
+  // keep the Viewport:: names for the GUI layer.
+  static constexpr int HitCursorMargin = IRenderViewport::HitCursorMargin;
   static const double HitCursorTimeMargin;
   static const int DragTimerInterval = 100;
   static const int MinorDragOffsetUp = 100;
-  static const int DsoMeasureStages = 3;
+  static constexpr int DsoMeasureStages = IRenderViewport::DsoMeasureStages;
   static const double MinorDragRateUp;
   static const double DragDamping;
   static const int SnapMinSpace = 10;
@@ -253,8 +214,33 @@ public:
   // Member variables are now private; delegates use these reference-returning
   // accessors instead of direct _viewport->_xxx access.
 
-  // A. Rendering state (ViewportPainter / SignalPixmapPass)
+  // ---- IRenderViewport implementation (QML migration Phase 3, Task 3.1) ----
+  // Most interface methods are satisfied by the existing reference-returning
+  // accessors below (curScale(), need_update(), measure state, ...). The
+  // widget bridge and the few accessors with different shapes:
   View& view() { return _view; }
+  View_type type() const override { return _type; }
+  int widget_width() const override { return width(); }
+  int widget_height() const override { return height(); }
+  QSize widget_size() const override { return size(); }
+  double device_pixel_ratio() const override { return devicePixelRatioF(); }
+  QPaintDevice *paint_device() override { return this; }
+  void paint_widget_background(QPainter &p) override;
+  QColor fore_color() const override {
+    return palette().color(foregroundRole());
+  }
+  QColor back_color() const override {
+    return palette().color(backgroundRole());
+  }
+  QFont application_font() const override; // QApplication::font() — impl in .cpp
+  uint64_t *dso_xm_indices() override { return _dso_xm_index; }
+  void notify_prg_rate(int progress) override { emit prgRate(progress); }
+  void notify_measure_updated() override { emit measure_updated(); }
+  const QColor &probe_color(int idx) const override {
+    return PROBE_COLORS[idx];
+  }
+
+  // A. Rendering state (ViewportPainter / SignalPixmapPass)
   View_type& type() { return _type; }
   bool& need_update() { return _need_update; }
   QPixmap& pixmap() { return _pixmap; }

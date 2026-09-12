@@ -25,8 +25,16 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/session/sessionmanager.cpp
     PXView/pv/session/tabcontext.cpp
     # View layer rendering objects
+    # (widget-free render assets — rasterize.cpp / signalfactory.cpp /
+    #  dsldial.cpp and, since Task 3.1, render_pass.cpp / viewport_painter.cpp
+    #  / trace.cpp / selectableitem.cpp / signal.cpp / logicsignal.cpp /
+    #  analogsignal.cpp / dsosignal.cpp / dsosignal_paint.cpp / mathtrace.cpp /
+    #  spectrumtrace.cpp / lissajoustrace.cpp — moved to pxview-render, see
+    #  CMake/render_sources.cmake. Task 3.2 also moved timemarker.cpp /
+    #  xcursor.cpp / dso_trigger_config.cpp / dso_measure.cpp / decodetrace.cpp
+    #  there (widget-free via IRenderView); only create_popup() remains GUI
+    #  (decodetrace_popup.cpp).)
     PXView/pv/view/viewport/viewport.cpp
-    PXView/pv/view/renderer/viewport_painter.cpp
     PXView/pv/view/viewport/viewport_interaction.cpp
     PXView/pv/view/viewport/viewport_drag.cpp
     PXView/pv/view/component/edge_nav_button.cpp
@@ -38,32 +46,16 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/view/view_glitch_filter.cpp
     PXView/pv/view/view_data_sync.cpp
     PXView/pv/view/view_context.cpp
-    PXView/pv/view/renderer/render_pass.cpp
-    PXView/pv/view/renderer/rasterize.cpp
-    PXView/pv/view/cursor/timemarker.cpp
-    PXView/pv/view/signal/signal.cpp
-    PXView/pv/view/signal/signalfactory.cpp
+    # Task 3.2: timemarker/xcursor/dso_trigger_config/dso_measure/decodetrace
+    # moved to CMake/render_sources.cmake (widget-free after their View
+    # access was routed through IRenderView). create_popup() stayed GUI.
+    # Task 3.3: cursor.cpp joined them (ctor takes IRenderView&, View/Ruler
+    # statics routed through IRenderView/ruler_format).
+    PXView/pv/view/trace/decodetrace_popup.cpp
     PXView/pv/view/component/ruler.cpp
-    PXView/pv/view/component/ruler_format.cpp
     PXView/pv/view/component/header.cpp
-    PXView/pv/view/cursor/cursor.cpp
-    PXView/pv/view/signal/logicsignal.cpp
-    PXView/pv/view/signal/analogsignal.cpp
-    PXView/pv/view/signal/dsosignal.cpp
-PXView/pv/view/signal/dsosignal_paint.cpp
-    PXView/pv/view/component/dso_trigger_config.cpp
-    PXView/pv/view/component/dso_measure.cpp
-    PXView/pv/view/component/dsldial.cpp
-    PXView/pv/view/trace/trace.cpp
-    PXView/pv/view/trace/selectableitem.cpp
-    PXView/pv/view/trace/decodetrace.cpp
-    PXView/pv/view/trace/decodermodel.cpp
-    PXView/pv/view/trace/mathtrace.cpp
-    PXView/pv/view/trace/spectrumtrace.cpp
-    PXView/pv/view/trace/lissajoustrace.cpp
     PXView/pv/view/component/devmode.cpp
     PXView/pv/view/component/viewstatus.cpp
-    PXView/pv/view/cursor/xcursor.cpp
     PXView/pv/view/component/pulsehistogramwidget.cpp
     PXView/pv/view/component/glitchfilterpopup.cpp
     PXView/pv/view/component/waveform_copy_helper.cpp
@@ -202,10 +194,13 @@ set(PXView_HEADERS
     PXView/pv/view/component/edge_nav_button.h
     PXView/pv/view/view.h
     PXView/pv/view/dock_ui_state.h
-    PXView/pv/view/cursor/timemarker.h
+    # Task 3.2: timemarker.h / xcursor.h / decodetrace.h are Q_OBJECT headers
+    # whose impls now live in pxview-render — mocs moved to
+    # PXVIEW_RENDER_HEADERS_MOC ("moc follows impl"), removed here to avoid
+    # duplicate meta-object symbols in the PXView executable link.
+    # Task 3.3: cursor.h joined them (cursor.cpp migrated to pxview-render).
     PXView/pv/view/component/ruler.h
     PXView/pv/view/component/header.h
-    PXView/pv/view/cursor/cursor.h
     PXView/pv/toolbars/trigbar.h
     PXView/pv/toolbars/filebar.h
     PXView/pv/dock/protocoldock.h
@@ -220,11 +215,7 @@ set(PXView_HEADERS
     PXView/pv/toolbars/logobar.h
     PXView/pv/dialogs/about.h
     PXView/pv/dialogs/search.h
-    PXView/pv/view/trace/trace.h
     PXView/pv/view/trace/paint_context.h
-    PXView/pv/view/trace/selectableitem.h
-    PXView/pv/view/trace/decodetrace.h
-    PXView/pv/view/trace/decodermodel.h
     PXView/pv/widgets/fakelineedit.h
     PXView/pv/widgets/searchpatterninput.h
     PXView/pv/widgets/decodermenu.h
@@ -236,7 +227,6 @@ set(PXView_HEADERS
     PXView/pv/dialogs/protocollist.h
     PXView/pv/dialogs/protocolexp.h
     PXView/pv/dialogs/fftoptions.h
-    PXView/pv/view/trace/mathtrace.h
     PXView/pv/view/component/viewstatus.h
     PXView/pv/toolbars/titlebar.h
     PXView/pv/mainwindow/mainframe.h
@@ -253,26 +243,17 @@ set(PXView_HEADERS
     PXView/pv/dialogs/pxdialog.h
     PXView/pv/dialogs/interval.h
     PXView/pv/dialogs/lissajousoptions.h
-    PXView/pv/view/trace/lissajoustrace.h
-    PXView/pv/view/trace/spectrumtrace.h
     PXView/pv/data/datasource.h
     PXView/pv/data/document/sessionsnapshot.h
     PXView/pv/data/document/sessiondocument.h
     PXView/pv/dialogs/mathoptions.h
     PXView/pv/dialogs/regionoptions.h
-    PXView/pv/view/cursor/xcursor.h
     PXView/pv/view/component/pulsehistogramwidget.h
     PXView/pv/view/component/glitchfilterpopup.h
     PXView/pv/view/component/waveform_copy_helper.h
 PXView/pv/view/component/decoderaudioplayer.h
-    PXView/pv/view/signal/signal.h
-    PXView/pv/view/signal/logicsignal.h
-    PXView/pv/view/signal/analogsignal.h
-    PXView/pv/view/signal/dsosignal.h
     PXView/pv/view/component/dso_trigger_config.h
     PXView/pv/view/component/dso_measure.h
-    PXView/pv/dock/protocoldock.h
-    PXView/pv/view/trace/decodetrace.h
     PXView/pv/widgets/decodergroupbox.h
     PXView/pv/widgets/decodermenu.h
     PXView/pv/config/appconfig.h

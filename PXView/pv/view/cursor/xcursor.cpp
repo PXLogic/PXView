@@ -23,18 +23,20 @@
 
 #include "pv/view/cursor/xcursor.h"
 #include <QPainter>
-#include "pv/view/view.h"
-#include "pv/view/component/ruler.h"
+// Task 3.2: widget-free — xcursor.cpp moved from gui_sources to
+// pxview-render; View/Ruler access now goes through IRenderView /
+// ruler_format's cursor_hsb_color.
+#include "pv/view/iview_delegates.h"
+#include "pv/view/component/ruler_format.h"
 #include "pv/view/signal/dsosignal.h"
 #include "pv/base/log.h"
-#include "pv/view/component/ruler.h"
-  
+
 using namespace std;
 
 namespace pv {
 namespace view {
 
-XCursor::XCursor(View &view, int order, double value0, double value1) :
+XCursor::XCursor(IRenderView &view, int order, double value0, double value1) :
 	_view(view),
     _yvalue(0.5),
     _value0(value0),
@@ -259,11 +261,11 @@ void XCursor::paint_label(QPainter &p, const QRect &rect)
     p.setPen(Qt::NoPen);
 
     if (close.contains(QPoint(_view.hover_point().x(), _view.hover_point().y())))
-        p.setBrush(View::Red);
+        p.setBrush(_view.theme_red());
     else if (_dsoSig != nullptr)
         p.setBrush(_dsoSig->get_colour());
     else
-        p.setBrush(View::Blue);
+        p.setBrush(_view.theme_blue());
 
     p.drawRect(close);
     p.setPen(Qt::black);
@@ -272,11 +274,11 @@ void XCursor::paint_label(QPainter &p, const QRect &rect)
 }
 
 QColor XCursor::get_color()
-{   
+{
     if (_order > 0){
-        return Ruler::GetColorByCursorOrder(_order);
+        return pv::view::cursor_hsb_color(_order);
     }
-    return _colour;    
+    return _colour;
 }
 
 } // namespace view

@@ -15,6 +15,7 @@
 #define PXVIEW_VIEW_RULER_FORMAT_H
 
 #include <cstdint>
+#include <QColor>
 #include <QString>
 
 namespace pv {
@@ -30,6 +31,12 @@ QString format_freq(double period, unsigned int precision = 2);
 QString format_time(double t, int prefix, unsigned int precision = 2);
 QString format_real_time(uint64_t delta_index, uint64_t sample_rate);
 QString format_real_freq(uint64_t delta_index, uint64_t sample_rate);
+
+// Task 3.2: per-cursor HSV color table lookup (ex-Ruler::GetColorByCursorOrder
+// body). Widget-free so cursor paint code living in pxview-render
+// (timemarker.cpp / xcursor.cpp) can link it; Ruler::GetColorByCursorOrder
+// delegates here.
+QColor cursor_hsb_color(int order);
 
 } // namespace view
 } // namespace pv

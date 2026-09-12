@@ -27,13 +27,13 @@
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/view/component/dsldial.h"
-#include "pv/view/view.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/signal/dsosignal.h"
 #include "pv/view/signal/signal.h"
+#include "pv/view/cursor/cursor.h"
+#include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
-#include "pv/view/viewport/viewport.h"
-  
+ 
 using namespace std;
 
 namespace pv {
@@ -61,7 +61,12 @@ MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
                                (uint64_t)data::MathStack::vDialValueStep,
                                vDialValue, vDialUnit, true);
     update_vDial();
-    _colour = View::Red;
+    // Task 3.1: 原取静态 View::Red（主题 @signal-red，refreshSignalColors 维护）。
+    // 构造期 _view 尚未注入，无法走 IRenderView::theme_red()，改为直接读同一
+    // 主题源（与 view_signal_sync.cpp 的 Red 定义/刷新逻辑一致，含相同 fallback）。
+    _colour = AppConfig::Instance().GetThemeColor("@signal-red").isValid()
+                  ? AppConfig::Instance().GetThemeColor("@signal-red")
+                  : QColor(213, 15, 37, 255);
     _ref_min = dsoSig1->get_ref_min();
     _ref_max = dsoSig1->get_ref_max();
 
@@ -143,8 +148,8 @@ void MathTrace::go_vDialPre()
         if (_view->session().is_stopped_status())
             _scale *= pre_vdiv/_vDial->get_value();
 
-        _view->set_update(_viewport, true);
-        _view->update();
+        _view->set_update_viewport(_viewport, true);
+        _view->request_repaint();
     }
 }
 
@@ -159,8 +164,8 @@ void MathTrace::go_vDialNext()
         if (_view->session().is_stopped_status())
             _scale *= pre_vdiv/_vDial->get_value();
 
-        _view->set_update(_viewport, true);
-        _view->update();
+        _view->set_update_viewport(_viewport, true);
+        _view->request_repaint();
     }
 }
 
@@ -212,8 +217,8 @@ QRect MathTrace::get_view_rect()
 {
     assert(_viewport);
     return QRect(0, DsoSignal::UpMargin,
-                  _viewport->width() - DsoSignal::RightMargin,
-                  _viewport->height() - DsoSignal::UpMargin - DsoSignal::DownMargin);
+                  _viewport->widget_width() - DsoSignal::RightMargin,
+                  _viewport->widget_height() - DsoSignal::UpMargin - DsoSignal::DownMargin);
 }
 
 void MathTrace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
@@ -285,14 +290,14 @@ void MathTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QColor
 
     assert(_view);
 
-    fore.setAlpha(View::BackAlpha);
+    fore.setAlpha(IRenderView::BackAlpha);
     QPen pen(fore);
     pen.setStyle(Qt::DotLine);
     p.setPen(pen);
     p.drawLine(left, get_zero_vpos(), right, get_zero_vpos());
 
     // Paint measure
-    fore.setAlpha(View::ForeAlpha);
+    fore.setAlpha(IRenderView::ForeAlpha);
     if (ctx.is_stopped_status)
         paint_hover_measure(p, fore, back);
 }
@@ -306,7 +311,7 @@ void MathTrace::paint_trace(QPainter &p,
 
     if (sample_count > 0) {
         QColor trace_colour = _colour;
-        trace_colour.setAlpha(View::ForeAlpha);
+        trace_colour.setAlpha(IRenderView::ForeAlpha);
         p.setPen(trace_colour);
 
         if ((uint64_t)end >= _math_stack->get_sample_num())
@@ -355,7 +360,7 @@ void MathTrace::paint_envelope(QPainter &p,
 
     p.setPen(QPen(NoPen));
     QColor envelope_colour = _colour;
-    envelope_colour.setAlpha(View::ForeAlpha);
+    envelope_colour.setAlpha(IRenderView::ForeAlpha);
     p.setBrush(envelope_colour);
 
 	std::vector<QRectF> rects(e.length);
@@ -398,7 +403,7 @@ void MathTrace::paint_type_options(QPainter &p, int right, const QPoint pt, QCol
     p.setRenderHint(QPainter::Antialiasing, true);
 
     QColor foreBack = fore;
-    foreBack.setAlpha(View::BackAlpha);
+    foreBack.setAlpha(IRenderView::BackAlpha);
     int y = get_y();
     const QRectF vDial_rect = get_rect(DSO_VDIAL, y, right);
 

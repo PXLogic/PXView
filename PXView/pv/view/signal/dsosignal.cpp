@@ -23,7 +23,6 @@
 #include "pv/view/signal/dsosignal.h"
 #include "pv/view/component/dso_trigger_config.h"
 #include "pv/view/component/dso_measure.h"
-#include <QApplication>
 #include <QCoreApplication>
 #include <QTimer>
 #include <functional>
@@ -38,8 +37,6 @@
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
 #include "pv/core/langresource.h"
-#include "pv/view/view.h"
-#include "pv/view/viewport/viewport.h"
 
 using namespace std;
 
@@ -196,8 +193,8 @@ void DsoSignal::set_enable(bool enable) {
     _view->update_hori_res();
 
   if (_view) {
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
   }
   _en_lock = false;
 }
@@ -238,8 +235,8 @@ bool DsoSignal::go_vDialPre(bool manul) {
       _model->set_probe_offset((uint16_t)_zero_offset, probe);
 
     _view->vDial_updated();
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
     if (_model) {
       _model->set_vdiv((double)_vDial->get_value());
     }
@@ -282,8 +279,8 @@ bool DsoSignal::go_vDialNext(bool manul) {
       _model->set_probe_offset((uint16_t)_zero_offset, probe);
 
     _view->vDial_updated();
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
     if (_model) {
       _model->set_vdiv((double)_vDial->get_value());
     }
@@ -466,8 +463,8 @@ bool DsoSignal::load_settings() {
   }
 
   if (_view) {
-    _view->set_update(_viewport, true);
-    _view->update();
+    _view->set_update_viewport(_viewport, true);
+    _view->request_repaint();
   }
   return true;
 }
@@ -600,8 +597,8 @@ void DsoSignal::set_factor(uint64_t factor) {
 
     if (prefactor != factor) {
       _vDial->set_factor(factor);
-      _view->set_update(_viewport, true);
-      _view->update();
+      _view->set_update_viewport(_viewport, true);
+      _view->request_repaint();
       if (model) {
         model->set_vfactor((double)factor);
       }

@@ -23,14 +23,17 @@
 
 #include "pv/view/cursor/timemarker.h"
 #include <QPainter>
-#include "pv/view/view.h"
-#include "pv/view/component/ruler.h"
+// Task 3.2: widget-free — timemarker.cpp moved from gui_sources to
+// pxview-render; View/Ruler access now goes through IRenderView /
+// ruler_format's cursor_hsb_color.
+#include "pv/view/iview_delegates.h"
+#include "pv/view/component/ruler_format.h"
 
 
 namespace pv {
 namespace view {
 
-TimeMarker::TimeMarker(View &view,
+TimeMarker::TimeMarker(IRenderView &view,
     uint64_t index) :
 	_view(view),
     _index(index),
@@ -55,11 +58,11 @@ void TimeMarker::set_colour(QColor color)
 }
 
 QColor TimeMarker::get_color()
-{   
+{
     if (_order > 0){
-        return Ruler::GetColorByCursorOrder(_order);
+        return pv::view::cursor_hsb_color(_order);
     }
-    return _colour;    
+    return _colour;
 }
 
 bool TimeMarker::grabbed()
@@ -90,7 +93,7 @@ void TimeMarker::paint(QPainter &p, const QRect &rect, const bool highlight, boo
 {
     const int64_t x = _view.index2pixel(_index, trig_hoff);
     if (x <= rect.right()) {
-        QColor color = (_order < 1) ? _colour : Ruler::GetColorByCursorOrder(_order);
+        QColor color = (_order < 1) ? _colour : pv::view::cursor_hsb_color(_order);
         p.setPen((_grabbed | highlight) ? QPen(color.lighter(), 2, Qt::DashLine) : QPen(color, 1, Qt::DashLine));
         p.drawLine(QPoint(x, 0), QPoint(x, rect.bottom()));
     }

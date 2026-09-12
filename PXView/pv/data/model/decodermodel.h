@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#ifndef PXVIEW_PV_VIEW_DECODERMODEL_H
-#define PXVIEW_PV_VIEW_DECODERMODEL_H
+#ifndef PXVIEW_PV_DATA_MODEL_DECODERMODEL_H
+#define PXVIEW_PV_DATA_MODEL_DECODERMODEL_H
 
 #include <QAbstractTableModel>
 #include <cstdint>
@@ -127,4 +127,4 @@ private:
 } // namespace view
 } // namespace pv
 
-#endif // PXVIEW_PV_VIEW_DECODERMODEL_H
+#endif // PXVIEW_PV_DATA_MODEL_DECODERMODEL_H

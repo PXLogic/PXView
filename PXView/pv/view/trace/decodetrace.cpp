@@ -28,30 +28,20 @@
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/document/sessiondocument.h"
-#include "pv/dialogs/decoderoptionsdlg.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/session/sigsession.h"
-#include "pv/toolbars/titlebar.h"
 #include "pv/ui/dockfonts.h"
-#include "pv/ui/dscombobox.h"
 #include "pv/core/langresource.h"
-#include "pv/ui/msgbox.h"
 #include "pv/view/cursor/cursor.h"
 #include "pv/view/signal/logicsignal.h"
-#include "pv/view/view.h"
-#include "pv/widgets/decodergroupbox.h"
-#include "pv/widgets/decodermenu.h"
 #include "pv/base/perflog.h"
-#include <QAction>
-#include <QApplication>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QFormLayout>
-#include <QLabel>
-#include <QMenu>
-#include <QPushButton>
-#include <QScrollArea>
+// Task 3.2: widget-free — decodetrace.cpp moved from gui_sources to
+// pxview-render; the QDialog/QMenu/widget includes (and create_popup) moved
+// to decodetrace_popup.cpp in the GUI archive. QGuiApplication keeps the
+// palette query (line ~315) widget-free.
+#include <QGuiApplication>
+#include <QPalette>
 #include <climits>
 #include <libsigrokdecode.h>
 #include <QDir>
@@ -232,7 +222,7 @@ DecodeTrace::~DecodeTrace() {
 
 bool DecodeTrace::enabled() { return visible(); }
 
-void DecodeTrace::set_view(pv::view::View *view) {
+void DecodeTrace::set_view(pv::view::IRenderView *view) {
   assert(view);
   Trace::set_view(view);
 }
@@ -251,7 +241,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
     return;
 
   QColor backFore = fore;
-  backFore.setAlpha(View::BackAlpha);
+  backFore.setAlpha(IRenderView::BackAlpha);
   QPen pen(backFore);
   pen.setStyle(Qt::DotLine);
   p.setPen(pen);
@@ -279,7 +269,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   const double endX = d_end / samples_per_pixel - ctx.offset;
   const double regionY = get_y() - _totalHeight * 0.5 - ControlRectWidth;
 
-  p.setBrush(View::Blue);
+  p.setBrush(_view->theme_blue());
   p.drawLine(startX, regionY, startX,
              regionY + _totalHeight + ControlRectWidth);
   p.drawLine(endX, regionY, endX, regionY + _totalHeight + ControlRectWidth);
@@ -312,7 +302,7 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
     const bool is_analog = static_cast<int>(i) >= annotation_rows;
     const int row_h = is_analog ? analog_h : base_h;
     p.setPen(QPen(Qt::NoPen));
-    p.setBrush(QApplication::palette().brush(QPalette::WindowText));
+    p.setBrush(QGuiApplication::palette().brush(QPalette::WindowText));
 
     const QRect r(left + ArrowSize * 2, cur_y, right - left, row_h);
     const QString h(_cur_row_headings[i]);
@@ -1092,7 +1082,7 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
 
   if (_decoder_stack->get_mark_index() ==
       (int64_t)(a.start_sample() + a.end_sample()) / 2) {
-    p.setPen(View::Blue);
+    p.setPen(_view->theme_blue());
     int xpos = (start + end) / 2;
     int ypos = get_y() + _totalHeight * 0.5 + 1;
     const QPoint triangle[] = {
@@ -1792,66 +1782,10 @@ QRectF DecodeTrace::get_rect(DecodeSetRegions type, int y, int right) {
 
 void *DecodeTrace::get_key_handel() { return _decoder_stack->get_key_handel(); }
 
-// to show decoder's property setting dialog
-bool DecodeTrace::create_popup(bool isnew, QPoint anchor) {
-  (void)isnew;
-
-  int ret = false; // setting have changed flag
-  bool bOpenDlg = true;
-
-  pxv_info("DecodeTrace: enter create_popup");
-  while (bOpenDlg) {
-    bOpenDlg = false;
-    QWidget *top = _view ? _view->window() : nullptr;
-    pxv_info("DecodeTrace: GetTopWindow returned %p", top);
-    dialogs::DecoderOptionsDlg dlg(top);
-    dlg.set_cursor_range(_decode_cursor1, _decode_cursor2);
-    dlg.load_options(this);
-
-    // 锚点定位(与毛刺滤波浮窗相同的弹出逻辑):若调用方提供了有效锚点,
-    // 在 exec() 前移动对话框,避免 QDialog 默认居中。
-    if (!anchor.isNull())
-      dlg.move(anchor);
-
-    pxv_info("DecodeTrace: before dlg.exec()");
-    int dlg_ret = dlg.exec();
-    pxv_info("DecodeTrace: after dlg.exec(), ret=%d (Accepted=%d)", dlg_ret,
-             QDialog::Accepted);
-
-    if (QDialog::Accepted == dlg_ret) {
-      dlg.apply_setting();
-
-  for (auto &up : _decoder_stack->stack()) {
-    auto dec = up.get();
-    if (dec->commit() || _decoder_stack->options_changed()) {
-          _decoder_stack->set_options_changed(true);
-          ret = true;
-        }
-      }
-
-      dlg.get_cursor_range(_decode_cursor1, _decode_cursor2);
-
-      // Reopen the dialog to select the required probes.
-      if (ret && _decoder_stack->check_required_probes() == false) {
-        QString errMsg =
-            L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODERSTACK_DECODE_WORK_ERROR),
-                "One or more required channels have not been specified");
-        MsgBox::Show(errMsg);
-
-        ret = false;
-        bOpenDlg = true;
-      }
-    }
-
-    if (dlg.is_reload_form()) {
-      ret = false;
-      bOpenDlg = true;
-    }
-  }
-
-  pxv_info("DecodeTrace: exit create_popup, returning %d", ret);
-  return ret;
-}
+// DecodeTrace::create_popup was split out of this TU (Task 3.2) into
+// pv/view/trace/decodetrace_popup.cpp (GUI archive): this file now compiles
+// into pxview-render (widget-free decode paint pipeline) while the QDialog
+// anchoring stays with the GUI front-end.
 
 } // namespace view
 } // namespace pv

@@ -22,15 +22,20 @@
  */
 
 #include "pv/view/trace/selectableitem.h"
- 
-#include <QMenu>
-#include <QPalette>
-#include <QApplication>
 
 namespace pv {
 namespace view {
 
 const int SelectableItem::HighlightRadius = 6;
+
+// Highlight pen provider installed by the GUI shell (QApplication palette
+// mapping). Null until installed — the fallback pen is used then.
+static SelectableItem::HighlightPenProvider s_highlight_pen_provider = nullptr;
+
+void SelectableItem::set_highlight_pen_provider(HighlightPenProvider provider)
+{
+	s_highlight_pen_provider = provider;
+}
 
 SelectableItem::SelectableItem() :
     _selected(false)
@@ -49,8 +54,10 @@ void SelectableItem::select(bool select)
 
 QPen SelectableItem::highlight_pen()
 {
-	return QPen(QApplication::palette().brush(
-		QPalette::Highlight), HighlightRadius,
+	if (s_highlight_pen_provider)
+		return s_highlight_pen_provider(HighlightRadius);
+	// Widget-free fallback (used when no GUI shell installed a provider).
+	return QPen(QColor(60, 140, 230), HighlightRadius,
 		Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
 }
 

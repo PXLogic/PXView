@@ -37,6 +37,7 @@
 #include "pv/data/pulse_analyzer.h"
 #include "pv/ui/uimanager.h"
 #include "pv/view/dock_ui_state.h"
+#include "pv/view/iview_delegates.h"
 #include "pv/view/view_cursors.h"
 #include "pv/view/view_data_sync.h"
 #include "pv/view/view_derived_traces.h"
@@ -106,29 +107,22 @@ class XCursor;
 class ViewStatus;
 class Signal;
 
-// Phase K: delegate types are now fully included above (view_layout.h,
-// view_cursors.h, view_data_sync.h, view_derived_traces.h,
-// view_signal_sync.h, view_glitch_filter.h) so that inline accessors in
-// View can reach their member variables directly.
-
-struct SignalGroup {
-  int group_id;
-  std::vector<Trace *> traces;
-  SignalGroup() : group_id(-1) {}
-};
+// SignalGroup moved to iview_delegates.h (widget-free render interfaces).
 
 // created by MainWindow
-class View : public QScrollArea, public IUiWindow {
+class View : public QScrollArea, public IUiWindow, public IRenderView {
   Q_OBJECT
   Q_PROPERTY(QColor groupCardColor READ get_group_card_color WRITE
                  set_group_card_color)
 
 public:
   // ---- Public static constants ----
+  // Canonical values live on IRenderView (widget-free); these aliases keep
+  // the View:: names for the GUI layer.
   static const int MinSignalHeight;
   static const int MaxSignalHeight;
-  static const int GroupGap = 10;
-  static const int GroupCardRadius = 6;
+  static constexpr int GroupGap = IRenderView::GroupGap;
+  static constexpr int GroupCardRadius = IRenderView::GroupCardRadius;
 
   // static const int SignalHeight;
   static const int SignalMargin;
@@ -145,8 +139,8 @@ public:
   static const int StatusHeight = 20;
   static const int DsoStatusHeight = 55;
 
-  static const int ForeAlpha = 200;
-  static const int BackAlpha = 100;
+  static constexpr int ForeAlpha = IRenderView::ForeAlpha;
+  static constexpr int BackAlpha = IRenderView::BackAlpha;
   static QColor Red;
   static QColor Orange;
   static QColor Blue;
@@ -174,6 +168,27 @@ public:
   void clone_signals_for_document(pv::data::SessionDocument *doc);
   void set_signal_data_from_source(pv::data::DataSource *source);
   void clear_signal_data();
+
+  // ---- IRenderView implementation (QML migration Phase 3, Task 3.1) ----
+  // Most interface methods are satisfied by the existing inline facades
+  // above/below (scale(), offset(), cursors_shown(), ...). The ones that
+  // need new code:
+  inline int scroll_viewport_width() override { return viewport()->width(); }
+  inline int scroll_viewport_height() override { return viewport()->height(); }
+  inline void request_repaint() override { update(); }
+  inline QObject *qt_object() override { return this; }
+  inline QColor theme_red() override { return Red; }
+  inline QColor theme_orange() override { return Orange; }
+  inline QColor theme_blue() override { return Blue; }
+  inline QColor theme_green() override { return Green; }
+  inline QColor theme_purple() override { return Purple; }
+  inline QColor theme_lightblue() override { return LightBlue; }
+  // Implemented in view.cpp (need Ruler/Viewport/Trace complete types).
+  QString format_real_time(uint64_t delta_index, uint64_t sample_rate) override;
+  QString format_real_freq(uint64_t delta_index, uint64_t sample_rate) override;
+  QString format_freq(double period) override;
+  void set_update_viewport(IRenderViewport *viewport, bool need_update) override;
+  void subscribe_resize(Trace *trace) override;
 
   /**
    * Returns the DataSource for snapshot data only. When the bound

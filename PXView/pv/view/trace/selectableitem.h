@@ -28,10 +28,6 @@
 #include <QObject>
 #include <QPen>
 
-class QAction;
-class QMenu;
-class QWidget;
-
 namespace pv {
 
 namespace view {
@@ -57,6 +53,15 @@ public:
 	 * Selects or deselects the signal.
 	 */
 	void select(bool select = true);
+
+	/**
+	 * Theme injection hook (QML migration Phase 3, Task 3.1): the GUI shell
+	 * installs a provider at startup that maps the active application
+	 * palette to the selection highlight pen (radius is passed in). Without
+	 * a provider the fallback pen below is used.
+	 */
+	typedef QPen (*HighlightPenProvider)(int highlight_radius);
+	static void set_highlight_pen_provider(HighlightPenProvider provider);
 
 protected:
 	static QPen highlight_pen();

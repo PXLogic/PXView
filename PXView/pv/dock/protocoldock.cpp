@@ -26,7 +26,7 @@
 #include "pv/dialogs/protocollist.h"
 #include "pv/session/sigsession.h"
 #include "pv/view/trace/decodetrace.h"
-#include "pv/view/trace/decodermodel.h"
+#include "pv/data/model/decodermodel.h"
 #include "pv/view/view.h"
 #include "pv/widgets/hoversplitter.h"
 #include "pv/widgets/smoothtablehelper.h"

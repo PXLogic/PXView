@@ -26,7 +26,6 @@
 #include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"
 #include "pv/session/sigsession.h"
-#include "pv/view/view.h"
 #include <cmath>
 
 namespace pv {
@@ -92,7 +91,7 @@ void Signal::set_colour(QColor colour) {
 
 void Signal::on_appearance_changed() {
   if (_view) {
-    _view->update();
+    _view->request_repaint();
     _view->header_updated();
   }
 }

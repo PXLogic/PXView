@@ -37,6 +37,7 @@ namespace pv {
 namespace view {
 
 class View;
+class IRenderView;
 class DsoSignal;
 
 //created by View
@@ -61,7 +62,7 @@ public:
      * @param value0
      * @param value1
 	 */
-    XCursor(View &view, int order, double value0, double value1);
+    XCursor(IRenderView &view, int order, double value0, double value1);
 
 	/**
 	 * Copy constructor
@@ -141,7 +142,9 @@ private slots:
     void on_signal_deleted(void *o);
 
 protected:
-    View        &_view;
+    // Task 3.2: widget-free IRenderView (View implements it; QML shell's
+    // QmlRenderView too) — xcursor.cpp now compiles into pxview-render.
+    IRenderView &_view;
     DsoSignal   *_dsoSig;
     int         _sig_index;
 

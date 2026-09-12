@@ -2,9 +2,16 @@
 #define DOCKFONTS_H
 
 #include <QFont>
-#include <QApplication>
 #include <QFontDatabase>
 #include "pv/config/appconfig.h"
+
+// QML migration Phase 3 Task 3.1: this header is shared with the widget-free
+// pxview-render library, so QApplication is no longer included. The GUI shell
+// installs an app-font provider at startup (main.cpp) that returns
+// QApplication::font(); without a provider (headless) a default QFont is used.
+inline QFont (*app_font_provider)() = nullptr;
+inline void set_app_font_provider(QFont (*provider)()) { app_font_provider = provider; }
+inline QFont app_font() { return app_font_provider ? app_font_provider() : QFont(); }
 
 // ATK QML font.pixelSize reference:
 //   Panel main title (e.g. "测量", "设置"):  18px
@@ -24,7 +31,7 @@ namespace DockFontSizes
 // Call this after any manual setFamily/setWeight/setPointSize that might reset the strategy.
 inline void apply_global_font_strategy(QFont &font)
 {
-    const QFont &appFont = QApplication::font();
+    const QFont appFont = app_font();
     font.setHintingPreference(appFont.hintingPreference());
     font.setStyleStrategy(appFont.styleStrategy());
 }
@@ -43,7 +50,7 @@ inline int get_dock_font_size(const QString& token, int defaultSize) {
 
 inline QFont dock_font_main_title()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@dock-font-main-title", DockFontSizes::MainTitle));
     apply_global_font_strategy(font);
     return font;
@@ -51,7 +58,7 @@ inline QFont dock_font_main_title()
 
 inline QFont dock_font_section_title()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@dock-font-section-title", DockFontSizes::SectionTitle));
     apply_global_font_strategy(font);
     return font;
@@ -59,7 +66,7 @@ inline QFont dock_font_section_title()
 
 inline QFont dock_font_label()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@dock-font-label", DockFontSizes::Label));
     apply_global_font_strategy(font);
     return font;
@@ -67,7 +74,7 @@ inline QFont dock_font_label()
 
 inline QFont dock_font_content()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@dock-font-content", DockFontSizes::Content));
     apply_global_font_strategy(font);
     return font;
@@ -89,7 +96,7 @@ inline int floating_panel_font_value_size()
 
 inline QFont theme_font_titlebar()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@titlebar-font-size", 13));
     apply_global_font_strategy(font);
     return font;
@@ -97,7 +104,7 @@ inline QFont theme_font_titlebar()
 
 inline QFont theme_font_toolbar()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@toolbar-font-size", 12));
     apply_global_font_strategy(font);
     return font;
@@ -105,7 +112,7 @@ inline QFont theme_font_toolbar()
 
 inline QFont theme_font_sidebar()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@sidebar-font-size", 12));
     apply_global_font_strategy(font);
     return font;
@@ -113,7 +120,7 @@ inline QFont theme_font_sidebar()
 
 inline QFont theme_font_dialog()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@dialog-font-size", 12));
     apply_global_font_strategy(font);
     return font;
@@ -151,7 +158,7 @@ inline QFont theme_font_decoder()
 
 inline QFont theme_font_cursor()
 {
-    QFont font = QApplication::font();
+    QFont font = app_font();
     font.setPixelSize(get_dock_font_size("@cursor-font-size", 10));
     apply_global_font_strategy(font);
     return font;

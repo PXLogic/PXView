@@ -21,7 +21,7 @@
  */
 
 #include "pv/config/appconfig.h" 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QSettings>
 #include <QLocale>
 #include <QDir> 
@@ -496,7 +496,7 @@ AppConfig& AppConfig::Instance()
 
 void AppConfig::LoadAll()
 {   
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _loadApp(appOptions, st);
     _loadHistory(userHistory, st);
     _loadFrame(frameOptions, st);
@@ -531,7 +531,7 @@ void AppConfig::SaveApp()
 
 void AppConfig::doSaveApp()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _saveApp(appOptions, st);
 
     st.beginGroup(keys::Group::Device.toUtf8().constData());
@@ -551,7 +551,7 @@ void AppConfig::SaveDevice()
 
 void AppConfig::doSaveDevice()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     st.beginGroup(keys::Group::Device.toUtf8().constData());
     st.setValue(keys::Device::streamMemBuff.toUtf8().constData(), deviceOptions.streamMemBuff);
     st.setValue(keys::Device::streamBuff.toUtf8().constData(), deviceOptions.streamBuff);
@@ -577,7 +577,7 @@ void AppConfig::SaveHistory()
 
 void AppConfig::doSaveHistory()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _saveHistory(userHistory, st);
 }
 
@@ -593,7 +593,7 @@ void AppConfig::SaveFrame()
 
 void AppConfig::doSaveFrame()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _saveFrame(frameOptions, st);
 }
 
@@ -609,7 +609,7 @@ void AppConfig::SaveShortcuts()
 
 void AppConfig::doSaveShortcuts()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _saveShortcuts(shortcutOptions, st);
 }
 
@@ -625,7 +625,7 @@ void AppConfig::SaveStyle()
 
 void AppConfig::doSaveStyle()
 {
-    QSettings st(QApplication::organizationName(), QApplication::applicationName());
+    QSettings st(QCoreApplication::organizationName(), QCoreApplication::applicationName());
     _saveStyle(styleOptions, st);
 
     // P2-A: Notify listeners that settings were reloaded from disk.

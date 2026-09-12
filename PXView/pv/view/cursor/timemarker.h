@@ -37,6 +37,7 @@ namespace pv {
 namespace view {
 
 class View;
+class IRenderView;
 
 //the Cursor's base class
 class TimeMarker : public QObject
@@ -50,7 +51,7 @@ protected:
 	 * @param colour A reference to the colour of this cursor.
 	 * @param time The time to set the flag to.
 	 */
-    TimeMarker(View &view, uint64_t index);
+    TimeMarker(IRenderView &view, uint64_t index);
 
 	/**
 	 * Copy constructor
@@ -119,7 +120,9 @@ signals:
 	void time_changed();
 
 protected:
-    View &_view;
+    // Task 3.2: widget-free IRenderView (View implements it; QML shell's
+    // QmlRenderView too) — timemarker.cpp now compiles into pxview-render.
+    IRenderView &_view;
 
     uint64_t _index;
 

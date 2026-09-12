@@ -44,8 +44,17 @@
 
 #include "pv/view/cursor/cursor.h"
 
-#include "pv/view/component/ruler.h"
-#include "pv/view/view.h"
+// Task 3.3: widget-free — cursor.cpp moved from gui_sources to pxview-render
+// (same pattern as timemarker/xcursor in Task 3.2). View/Ruler access now
+// goes through IRenderView / ruler_format's free functions:
+//   * View::width()                      -> IRenderView::get_view_width()
+//   * View::LabelPadding                 -> local constant copy (values equal)
+//   * View::Orange / View::Red           -> IRenderView::theme_orange/red()
+//   * Ruler::GetColorByCursorOrder       -> ruler_format::cursor_hsb_color
+//   * Ruler::format_real_time (static)   -> ruler_format::format_real_time
+#include "pv/view/iview_delegates.h"
+#include "pv/view/component/ruler_format.h"
+#include "pv/data/datasource.h"
 
 #include <QBrush>
 #include <QPainter>
@@ -55,11 +64,13 @@
 #include <cassert>
 #include <stdio.h>
 #include "pv/base/pxvdef.h"
-#include "pv/session/sigsession.h"
-#include "pv/view/component/ruler.h"
 
 namespace pv {
 namespace view {
+
+// View::LabelPadding 的本地常量副本（view.cpp L109；View 静态成员位于 GUI
+// 归档，值必须与 view.cpp 保持一致）。
+static const QSizeF kLabelPadding(4, 4);
 
 const QColor Cursor::LineColour(32, 74, 135);
 const QColor Cursor::FillColour(52, 101, 164);
@@ -69,7 +80,7 @@ const int Cursor::Offset = 1;
 const int Cursor::ArrowSize = 10;
 const int Cursor::CloseSize = 10;
 
-Cursor::Cursor(View &view, int order, uint64_t sampleIndex) :
+Cursor::Cursor(IRenderView &view, int order, uint64_t sampleIndex) :
     TimeMarker(view, sampleIndex)
 {
    (void)order;
@@ -86,16 +97,19 @@ QRect Cursor::get_label_rect(const QRect &rect, bool &visible, bool has_hoff)
     const double samples_per_pixel =
         src->cur_snap_samplerate() * _view.scale();
     const double cur_offset = _index / samples_per_pixel;
+    // Task 3.3: _view is the widget-free IRenderView; the visible-width
+    // query (ex View::width()) goes through get_view_width().
     if (cur_offset < _view.offset() ||
-        cur_offset > (_view.offset() + _view.width())) {
+        cur_offset >
+            (_view.offset() + _view.get_view_width())) {
         visible = false;
         return QRect(-1, -1, 0, 0);
     }
     const int64_t x = _view.index2pixel(_index, has_hoff);
 
     const QSize label_size(
-		_text_size.width() + View::LabelPadding.width() * 2,
-		_text_size.height() + View::LabelPadding.height() * 2);
+		_text_size.width() + kLabelPadding.width() * 2,
+		_text_size.height() + kLabelPadding.height() * 2);
     const int top = rect.height() - label_size.height() -
 		Cursor::Offset - Cursor::ArrowSize - 0.5f;
     const int height = label_size.height();
@@ -112,7 +126,6 @@ QRect Cursor::get_close_rect(const QRect &rect)
 void Cursor::paint_label(QPainter &p, const QRect &rect,
             unsigned int prefix, bool has_hoff)
 {
-    using pv::view::Ruler;
     bool visible;
 
     compute_text_size(p, prefix);
@@ -124,11 +137,11 @@ void Cursor::paint_label(QPainter &p, const QRect &rect,
     p.setPen(Qt::transparent);
 
     if (close.contains(QPoint(_view.hover_point().x(), _view.hover_point().y())))
-        p.setBrush(Ruler::GetColorByCursorOrder(_order));
+        p.setBrush(cursor_hsb_color(_order));
     else if (r.contains(QPoint(_view.hover_point().x(), _view.hover_point().y())))
-        p.setBrush(View::Orange);
+        p.setBrush(_view.theme_orange());
     else
-        p.setBrush(Ruler::GetColorByCursorOrder(_order));
+        p.setBrush(cursor_hsb_color(_order));
 
     p.drawRect(r);
 
@@ -140,9 +153,9 @@ void Cursor::paint_label(QPainter &p, const QRect &rect,
     p.drawPolygon(points, countof(points));
 
     if (close.contains(QPoint(_view.hover_point().x(), _view.hover_point().y())))
-        p.setBrush(View::Red);
+        p.setBrush(_view.theme_red());
     else
-        p.setBrush(View::Orange);
+        p.setBrush(_view.theme_orange());
     p.drawRect(close);
     p.setPen(Qt::black);
     p.drawLine(close.left() + 2, close.top() + 2, close.right() - 2, close.bottom() - 2);
@@ -152,7 +165,7 @@ void Cursor::paint_label(QPainter &p, const QRect &rect,
     if (!src)
         return;
     p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
-        Ruler::format_real_time(_index,
+        format_real_time(_index,
         src->cur_snap_samplerate()));
 
     const QRect arrowRect = QRect(r.bottomLeft().x(), r.bottomLeft().y(), r.width(), ArrowSize);
@@ -162,7 +175,6 @@ void Cursor::paint_label(QPainter &p, const QRect &rect,
 void Cursor::paint_fix_label(QPainter &p, const QRect &rect,
     unsigned int prefix, QChar label, QColor color, bool has_hoff)
 {
-    using pv::view::Ruler;
     bool visible;
 
     compute_text_size(p, prefix);
@@ -186,7 +198,7 @@ void Cursor::paint_fix_label(QPainter &p, const QRect &rect,
         auto *src = _view.document_snapshot_source();
         if (src) {
             p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter,
-                Ruler::format_real_time(_index,
+                format_real_time(_index,
                 src->cur_snap_samplerate()));
         }
     }
@@ -202,7 +214,7 @@ void Cursor::compute_text_size(QPainter &p, unsigned int prefix)
     if (!src)
         return;
     _text_size = p.boundingRect(QRect(), 0,
-        Ruler::format_real_time(_index,
+        format_real_time(_index,
         src->cur_snap_samplerate())).size();
 }
  

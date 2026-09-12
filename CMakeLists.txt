@@ -127,6 +127,7 @@ include(${CMAKE_SOURCE_DIR}/CMake/deps.cmake)
 include(${CMAKE_SOURCE_DIR}/CMake/flags.cmake)
 include(${CMAKE_SOURCE_DIR}/CMake/core_sources.cmake)
 include(${CMAKE_SOURCE_DIR}/CMake/gui_sources.cmake)
+include(${CMAKE_SOURCE_DIR}/CMake/render_sources.cmake)
 
 #===============================================================================
 #= libsigrok — upstream libsigrok 0.6.0 as a STATIC library (100% unmodified
@@ -184,6 +185,27 @@ target_include_directories(pxview-core PUBLIC
 # PCH for pxview-core: use the same PCH header directly (not REUSE_FROM,
 # which would create a circular dependency since PXView links pxview-core).
 target_precompile_headers(pxview-core PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/base/common_pch.h
+)
+
+#===============================================================================
+#= pxview-render static library — widget-free rendering assets (Phase 3, Task 3.0)
+#-------------------------------------------------------------------------------
+# Rendering assets shared by the Widgets shell (PXView) and any future front-end
+# shell — compiled exactly once. Depends only on pxview-core (which
+# transitively provides the data layer, Qt Core/Gui/Network/... and libsigrok
+# include paths) and Qt6::Gui for the QPainter/QColor painting types. Qt6::Gui
+# is restated explicitly to document the hard ceiling: NO Qt6::Widgets here.
+# Sources/debt ledger: CMake/render_sources.cmake.
+qt6_wrap_cpp(PXVIEW_RENDER_MOC_OUTPUT ${PXVIEW_RENDER_HEADERS_MOC})
+add_library(pxview-render STATIC ${PXVIEW_RENDER_SOURCES} ${PXVIEW_RENDER_MOC_OUTPUT})
+target_link_libraries(pxview-render PUBLIC
+	pxview-core
+	Qt6::Gui
+)
+# Same PCH as pxview-core / the GUI executable so migrated translation units
+# keep their previous precompiled-header semantics.
+target_precompile_headers(pxview-render PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/PXView/pv/base/common_pch.h
 )
 
@@ -247,6 +269,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # the driver section becomes empty, resulting in "Device list is empty".
 target_link_libraries(${PROJECT_NAME}
 	pxview-core
+	pxview-render
 	${QT_GUI_LIBS}
 	${MIMALLOC_LIB}
 )

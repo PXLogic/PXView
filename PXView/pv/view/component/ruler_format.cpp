@@ -8,6 +8,7 @@
 #include "ruler_format.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -81,6 +82,46 @@ QString format_real_freq(uint64_t delta_index, uint64_t sample_rate)
 {
     const double delta_period = delta_index * 1.0 / sample_rate;
     return format_freq(delta_period);
+}
+
+// Per-cursor HSV hue table (verbatim from ruler.cpp CursorHsbColorTable,
+// CURSOR_HSB_COLOR_TABLE_LENGTH entries).
+static const int kCursorHsbColorTable[22] = {
+    120,
+    195,
+    270,
+    345,
+    60, //5
+    135,
+    210,
+    285,
+    15,
+    75, //10
+    150,
+    225,
+    300,
+    30,
+    90, //15
+    165,
+    240,
+    315,
+    45,
+    105, //20
+    180,
+    255,
+};
+
+QColor cursor_hsb_color(int order)
+{
+    assert(order > 0);
+
+    constexpr int kTableLength = sizeof(kCursorHsbColorTable) / sizeof(int);
+    int hsv = kCursorHsbColorTable[(order - 1) % kTableLength];
+    QColor color;
+
+    int b = 200; // IsDarkStyle() ? 200 : 200 — both branches identical
+    color.setHsv(hsv, 200, b, 180);
+    return color;
 }
 
 } // namespace view

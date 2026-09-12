@@ -24,12 +24,10 @@
 #include <cmath>
 #include <QTimer>
 
-#include "pv/view/view.h"
 #include "pv/base/pxvdef.h"
 #include "pv/view/trace/lissajoustrace.h"
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/session/sigsession.h"
-#include "pv/view/viewport/viewport.h"
 
 #include "pv/core/langresource.h"
  
@@ -60,8 +58,8 @@ void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, Q
     (void)ctx;
     assert(_view);
 
-    fore.setAlpha(view::View::BackAlpha);
-    const int height = _viewport->height();
+    fore.setAlpha(IRenderView::BackAlpha);
+    const int height = _viewport->widget_height();
     const int width = right - left;
     const int square = min(width, height);
     const QPoint leftTop = QPoint(width > square ? (width-square)/2 : 0,
@@ -92,7 +90,7 @@ void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, Q
         p.drawLine(posX, _border.top(), posX, _border.bottom());
     }
 
-    fore.setAlpha(view::View::ForeAlpha);
+    fore.setAlpha(IRenderView::ForeAlpha);
     p.setPen(fore);
     p.drawText(_border.marginsRemoved(QMargins(10, 10, 10, 10)),
                L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LISSAJOUS_FIGURE), "Lissajous Figure"), Qt::AlignTop | Qt::AlignLeft);
@@ -119,7 +117,7 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
 
         int channel_num = _data->get_channel_num();
         if (channel_num < 2){
-            p.setPen(view::View::Red);
+            p.setPen(_view ? _view->theme_red() : QColor(213, 15, 37, 255));
             p.drawText(_border.marginsRemoved(QMargins(10, 30, 10, 30)),
                        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_CHAN_NUM_ERR2), "Requires the data of two channels."));
             return;
@@ -136,7 +134,7 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
         QPointF *point = points.data();
 
         if (_xIndex >= channel_num || _yIndex >= channel_num) {
-            p.setPen(view::View::Red);
+            p.setPen(_view ? _view->theme_red() : QColor(213, 15, 37, 255));
             p.drawText(_border.marginsRemoved(QMargins(10, 30, 10, 30)),
                        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DATA_SOURCE_ERROR), "Data source error."));
         }
@@ -153,7 +151,7 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
                                     bottom - dy[i] * scale);
             }
 
-            p.setPen(view::View::Blue);
+            p.setPen(_view ? _view->theme_blue() : QColor(17, 133, 209, 255));
             p.drawPolyline(points.data(), static_cast<int>(point - points.data()));
         }
     }

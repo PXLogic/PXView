@@ -31,7 +31,7 @@
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/row.h"
 #include "pv/view/trace/decodetrace.h"
-#include "pv/view/trace/decodermodel.h"
+#include "pv/data/model/decodermodel.h"
 #include "pv/base/eventobject.h"
 
 #include "pv/core/langresource.h"

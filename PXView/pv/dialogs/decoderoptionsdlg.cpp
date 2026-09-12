@@ -31,6 +31,7 @@
 #include <QFormLayout>
 #include <QScrollArea>
 #include <QVariant>
+#include <QApplication> // qApp->activePopupWidget() (was transitive via decodetrace.h→pxdialog.h)
 #include <QGuiApplication>
 #include <QScreen>
 #include <QCheckBox>
