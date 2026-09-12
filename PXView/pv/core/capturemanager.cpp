@@ -364,6 +364,9 @@ bool CaptureManager::action_start_capture(bool instant,
     // 阶段3a：per-tab 状态机——本 ctx 发起的采集开始。执行缓冲随后在
     // exec_capture/capture_init 中清空并换新快照，数据经零拷贝共享直达
     // 本 ctx（引用语义即"直写"）。
+    // 【定义行为】无 owner doc（headless 无 active document）时此处刻意跳过：
+    // 状态机 B（SessionDocument 状态）整段不参与，数据仅存于会话执行缓冲，
+    // doc 保持 Idle。这是定义行为而非遗漏；API 层以会话缓冲为准消费数据。
     if (auto *owner_doc = _state->document_registry()->get_capture_owner_document())
       owner_doc->set_state(data::SessionDocument::SessionState::Collecting);
     // A2.2: reset the capture-complete SharedState AFTER acquire_capture_owner
@@ -830,7 +833,14 @@ void CaptureManager::auto_end() {
 }
 
 void CaptureManager::set_collect_mode(DEVICE_COLLECT_MODE m) {
-  assert(!_state->is_working());
+  // 采集进行中拒绝切换采集模式（原为 assert）。assert 的模态对话框会在
+  // GUI 线程泵事件循环，使排队中的 DataUpdated 等事件在 tab 重绑定中途被
+  // 重入派发（曾引发 MeasureDock 悬空 _view 段错误）。典型触发场景：
+  // 采集进行中切换 tab，SamplingBar::bind_context 恢复 per-tab 采集模式。
+  if (_state->is_working()) {
+    pxv_warn("set_collect_mode ignored: capture is working.");
+    return;
+  }
 
   if (_clt_mode != m) {
     _clt_mode = m;

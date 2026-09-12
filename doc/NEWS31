@@ -7,6 +7,37 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
 
+    PXView V1.6.2修改
+    时间：2026年9月12日
+    变更如下：
+
+    【新功能】
+    *新增 widget-free 渲染库 pxview-render（CMake/render_sources.cmake）：标尺、光标、信号绘制等渲染代码脱离 Qt Widgets 独立编译，渲染层与 GUI 层解耦
+
+    【重构】
+    *渲染层与 GUI 层解耦重构（渲染资产单一编译、多前端壳复用的架构前提）：新增 IRenderView/IRenderViewport 抽象接口（iview_delegates.h，覆盖几何/游标/主题色/缓存桥等视图状态），View/Viewport 实现接口，Trace/Signal 系渲染对象对 View/Viewport 的具体指针引用改为接口注入；17 个渲染翻译单元（render_pass/viewport_painter/trace 系/signal 系/cursor 系/dso_measure/dso_trigger_config）迁入 pxview-render 并经 nm 扫描验证零 Widgets 符号；Ruler 刻度绘制本体抽取为 widget-free ruler_paint（Ruler 委托调用）；decodetrace 的 create_popup 弹窗构建拆至 GUI 侧独立翻译单元 decodetrace_popup.cpp，解码绘制本体保持可无 Widgets 编译；DecoderModel（纯 QtCore QAbstractTableModel）从 pv/view/trace 平移进 pv/data/model（moc 随实现编入 pxview-data）；selectableitem/dockfonts 的 QApplication::palette()/font() 依赖改为 provider 注入（main.cpp 启动时安装，表达式与原实现一致）——pxview-render 仅链接 Qt6::Gui，直调 QApplication 为 incomplete type 编译错误
+    *Core 层 Widgets 依赖清零：appconfig.cpp 的 QApplication → QCoreApplication（organizationName/applicationName 系 QCoreApplication 静态成员，7 处 QSettings 键读取点行为等价）——此前为 Core 层唯一 Widgets 泄漏点，使 pxview-core"零 Qt Widgets"硬约束（无头产物与多前端壳共链的架构前提）名存实亡
+    *TabContext 无渲染层路径（view==nullptr）支持：restore_view_data/finalize_view/apply_device_intent 三处 _view 解引用点补最小空守护——无 View 的 tab（无头/远控场景）激活时跳过显示层操作，不扰动全局显示状态；Widgets 版恒传真 View，行为不变
+    *数据模型重构步骤7（数据代状态机澄清收敛，documentregistry/sigsession/sessiondocument）：
+      - 数据代 DataGeneration 访问器全部经 _capture_state_mutex 串行化，data_generation() 返回锁内值拷贝（写点分布 GUI 主线程与 worker 线程）
+      - 新增数据代回边 on_capture_frame_started（Frozen→Live 唯一入口）：repeat 连续帧首包（CollectStart 事件）按 owner 归属幂等回边，对齐"执行缓冲正被新一帧重写"的实时语义
+      - copy_data_to_document 改返回 bool 门控状态演进：RevEndPacket 仅在数据实际落地时置 Stopped/Frozen，维持 "Stopped ⇒ has_data()" 不变式；release_capture_owner 的 Live 出口按 owner doc 是否持有完整数据收敛为 Frozen/Empty
+    *统一数据绑定裁决器 DocumentRegistry::resolve_data_binding：tab 激活绑定（restore_view_data）与渲染数据源（document_snapshot_source）共用唯一裁决表，消除双轨实现漂移；None 判定下外来 ctx 采集返回 nullptr（空白 tab 恒定空白）；tab 渲染身份无条件绑定，修复首次采集进度条/ruler 整场空白
+    *显示/执行状态双轨分工（数据模型澄清）：per-tab ViewDataSync::_display_status（显示层：本视图正在显示什么）与全局 _device_status（执行层：采集引擎是否在跑）语义分离；tab 激活绑定（restore_view_data）不再写全局 ST_*（删除原 !is_working() 门控的 set_stopped_status/set_init_status 双写——tab A 采集中切到 tab B 时 B 的显示状态迁移被跳过，是双轨未收敛的根因），改维护 per-tab 状态并由帧事件延续（frame_began→Running、receive_end→Stopped）；交互判定（viewport_interaction/viewport_drag）有意保留全局执行态——"设备忙（任何 ctx 采集进行中）禁止缩放/拖拽/边沿导航"是执行层语义（阶段 9 既定决策），显示/执行分工注释固化于 pxvdef.h
+    *SessionDocument::SessionState 状态机澄清（状态机 B）：删除死状态 Copying（零拷贝删除拷贝线程后全仓无任何转移点）；语义契约固化——Idle=无可显示数据（clear() 回此态）、Collecting=本 doc 是采集 owner 且采集进行中（唯一写入点 start_capture）、Stopped=最近一代数据已落地可显示；两条不变式成立并写入注释："Stopped ⇒ has_data()"（RevEndPacket 仅在拷贝实际落地时置位，修复导入路径"有数据但 Idle"破洞的同时不引入"Stopped 但无数据"反向破洞）、"数据清空 ⇒ Idle"全路径成立（clear() 是唯一清快照方法，无私改路径）；_state 原子化（std::atomic），消除 Collecting 主线程写/Stopped worker 线程写/is_collecting 主线程读的跨线程无锁读写
+    *渲染管线显示判定收敛：ruler_paint/render_pass/viewport_painter/decodetrace 的 stopped/init/running 判定统一改走 IRenderView per-tab 接口（接口新增 is_stopped_status/is_running_status/is_init_status 虚函数，View 转发 ViewDataSync），不再读全局 session 执行态，其他 ctx 采集时本 tab 完整测量/游标标签不再被错误抑制；SessionDocument 覆写 DataSource 的 is_stopped_status/is_running_status，doc 绑定的信号视图（dsosignal/analogsignal/mathtrace/dso_measure）获得真实显示状态而非恒 false 的 stub；is_run 类硬件/拨盘执行检查保留全局（执行语义正确）
+    *数据源消费端空守护（15 处）：document_snapshot_source() 在"外来 ctx 采集 + 本 tab 无历史数据"场景返回 nullptr 后，历史无判空直接解引用的消费点全部补齐——view_data_sync 的 pixel2index/capture_init/show_region/mode_changed/auto_set_max_scale/get_index_delta/resizeEvent/receive_end、View::set_trig_pos、ViewLayout 的 limit_scale_offset/update_scale_offset/get_scroll_layout/get_max_offset、ViewCursors 的触发/搜索游标与 set_cursor_middle/get_cm_time/get_cm_delta；判空策略为跳过或回退空值，正常单机路径行为不变（nullptr 仅在原会读到他人实时数据的污染场景出现）
+    *借用与文档绑定收敛修复：CopyToDocDone 处理（event_dispatcher）改绑渲染文档而非所有权文档——借用态数据落在被借的文件池槽（=渲染文档），绑所有权文档会使本 tab 视图指向旧数据/空文档（双轨失同步；owner 态两者相同、行为不变）；rebind_tab_to_fresh_document 绑新空文档而非 nullptr（空文档绑定对全部 document_ptr() 消费点与 nullptr 行为等价且同样清残留快照，此后 document_ptr() == render_document() 恒成立——统一裁决器的 owned_by_me/doc_collecting/gen_owner_is_render_doc 三项身份输入不再有"绑 nullptr 期间整场采集被误判外来"的失真窗口）；TabContext::activate 借用回落后重试恢复本 tab 自身设备（TabSwitch 语义，避免本 tab 通道配置被 apply_device_intent 写到当前全局外来设备；仍失败才置 NULL_HANDLE 走 reload 兜底）；headless 无 owner doc 采集定义为合法行为（数据仅存会话执行缓冲，doc 保持 Idle——定义行为而非遗漏）；文件池槽重放走同一采集管线，数据代 Live/Frozen 语义对借用 tab 完全适用（claim_active_document 定义行为注释）
+
+    【问题修复】
+    *修复 tab 栏右键菜单"关闭其他/关闭右侧"无效：信号转发链在 DraggableTabWidget→TabManager 断裂（仅连接了 tabCloseRequested），补齐 tabCloseOthersRequested/tabCloseRightRequested 连接并新增批量关闭处理器（自最高索引向下关闭避免列表移位）（draggabletabwidget.cpp、tab_manager.cpp）
+    *修复采集进行中切换 tab 触发断言失败与 SIGSEGV：SamplingBar::bind_context 恢复 per-tab 采集模式时触发 set_collect_mode 断言，断言对话框模态泵事件使排队的 DataUpdated 在 dock 重绑定间隙重入派发，MeasureDock 悬空 _view 空指针解引用；set_collect_mode 改为采集进行中拒绝+告警，MeasureDock update_dist/update_edge/update_cursor_info 加空视图守护（capturemanager.cpp、measuredock.cpp）
+    *修复功能坞的字符串资源页面参数（dock_manager.cpp）
+
+    【清理】
+    *删除 DataGeneration 冗余 device_handle 字段
+    *移除 copy_data_to_document 在正常路径必触发的 Tripwire 断言：拷贝（零拷贝共享）发生在数据代 Live 期属设计内时序（RevEndPacket 唯一落地路径 + restart_decoders 等），"Live 期禁止拷贝"的判定前提与设计矛盾；改为在函数头固化结构约束注释（doc 快照唯一写入路径、只在 RevEndPacket 后调用——release_capture_owner 的 Live→Frozen/Empty 判定依赖此保证）
+
     PXView V1.6.1修改
     时间：2026年9月7日
     变更如下：

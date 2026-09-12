@@ -344,6 +344,11 @@ public:
   virtual pv::data::DataSource *data_source() = 0;
   virtual pv::data::DataSource *document_snapshot_source() = 0;
   virtual bool display_source_is_document() = 0;
+  // per-tab 显示状态（数据模型重构澄清）：渲染管线的显示判定走本视图状态，
+  // 全局 session 状态保留为执行层语义。View 转发 ViewDataSync 的字段。
+  virtual bool is_stopped_status() const = 0;
+  virtual bool is_running_status() const = 0;
+  virtual bool is_init_status() const = 0;
   virtual int get_work_mode() const = 0;
   virtual bool is_logic_rendering_mode() const = 0;
 

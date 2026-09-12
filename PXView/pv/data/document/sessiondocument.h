@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
@@ -91,22 +92,35 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   // --- Session-Centric 阶段3a: per-tab 状态机 ---
   // 替代全局 device_status(ST_*) 的"显示语义"职责。全局 ST_* 保留为
   // CaptureEngine 执行层状态(libsigrok 单执行流),而"这个 tab 的数据
-  // 处于什么阶段"由本状态机表达:
-  //   Idle      无数据(空 tab / 已 clear)
-  //   Collecting 本 tab 发起的采集进行中(执行缓冲正写入本 ctx 共享的快照)
-  //   Copying    保留态:RevEndPacket→copy(零拷贝瞬时)归属
-  //   Stopped    本 ctx 持有完整快照,可显示/可解码
-  // 状态演进: acquire_capture_owner→Collecting; RevEndPacket copy 完成/
-  // stop_capture→Stopped; SessionDocument::clear()→Idle。
-  enum class SessionState { Idle, Collecting, Copying, Stopped };
-  SessionState state() const { return _state; }
-  void set_state(SessionState s) { _state = s; }
+  // 处于什么阶段"由本状态机表达。
+  // per-tab 状态机（阶段3a，语义澄清后）——单一真相约定：
+  //   Idle       无可显示数据（clear() 回此态；导入前的空文档）
+  //   Collecting 本 doc 是 capture owner 且采集进行中
+  //              （唯一写入点 capturemanager.cpp start_capture）
+  //   Stopped    最近一代数据已落地、可显示。两个出口：
+  //              a) RevEndPacket 拷贝落地后置位（覆盖导入路径"有数据但
+  //                 Idle"的破洞）；b) release_capture_owner 收敛点（前置
+  //              is_collecting 判断）。不变式：Stopped ⇒ has_data()。
+  //              补充不变式"数据清空 ⇒ Idle"全路径成立：clear() 是唯一
+  //              清快照方法且必然置 Idle，无私改快照路径。
+  enum class SessionState { Idle, Collecting, Stopped };
+  // 原子化：Collecting 由主线程写（capturemanager start_capture），Stopped
+  // 由 worker 线程写（release_capture_owner / RevEndPacket），is_collecting()
+  // 在主线程（view_data_sync / documentregistry）读——跨线程无锁读写。
+  SessionState state() const { return _state.load(std::memory_order_acquire); }
+  void set_state(SessionState s) { _state.store(s, std::memory_order_release); }
   // 采集/拷贝进行中(含执行缓冲直写本 ctx 共享快照的窗口)。
   bool is_collecting() const {
-    return _state == SessionState::Collecting || _state == SessionState::Copying;
+    return _state.load(std::memory_order_acquire) == SessionState::Collecting;
   }
 
   double get_sampletime() const;
+
+  // per-tab 显示状态（数据模型重构澄清）：doc 绑定的信号视图经 DataSource
+  // 虚函数读取本状态——doc 显示=Stopped，doc 永不 Running（实时 Running 由
+  // session 绑定路径的 SigSession 全局实现提供）。
+  bool is_stopped_status() override { return state() == SessionState::Stopped; }
+  bool is_running_status() override { return false; }
 
   bool has_data();
   bool empty();
@@ -286,7 +300,7 @@ private:
   ds_device_handle _device_handle = NULL_HANDLE;   // phase 2: owning device
   // Rebind model: file-device data pool slot tag (see is_file_device_slot).
   bool _file_device_slot = false;
-  SessionState _state = SessionState::Idle;        // per-tab 状态机(阶段3a)
+  std::atomic<SessionState> _state{SessionState::Idle}; // per-tab 状态机(阶段3a)，跨线程原子访问
   // 数据模型重构步骤2：本文档拥有的 SignalModel 列表（原阶段11 stash 字段
   // 转正）。模型对象跨 tab 保活；随文档销毁而释放。
   std::vector<std::shared_ptr<SignalModel>> _signal_models;

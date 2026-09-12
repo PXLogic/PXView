@@ -241,12 +241,11 @@ void DocumentRegistry::acquire_capture_owner(data::SessionDocument *doc) {
     std::lock_guard<std::mutex> lock(_capture_state_mutex);
     _capture_owner_guard = std::move(new_guard);
   }
-  // 数据模型重构步骤7：数据代 → Live。owner = 本次采集归属文档，device =
-  // 当前活跃设备。这是 Live 转移的唯一入口。
+  // 数据模型重构步骤7：数据代 → Live。owner = 本次采集归属文档。
+  // 这是 Live 转移的唯一入口。
   if (doc) {
     if (auto shared = get_shared_by_index(idx))
-      mark_generation_live(std::move(shared),
-                           _state->device_agent().handle());
+      mark_generation_live(std::move(shared));
   }
 }
 
@@ -275,12 +274,36 @@ void DocumentRegistry::release_capture_owner() {
         doc->set_state(data::SessionDocument::SessionState::Stopped);
     }
   }
-  // 数据模型重构步骤7：采集结束（正常/中止）。Frozen（拷贝已完成）保持——
-  // 数据仍完整归属 owner doc；Live（未走到 RevEndPacket 的中止）→ Empty，
-  // 不完整的执行缓冲不能被任何 tab 认领。
-  if (_generation.phase == DataGeneration::Phase::Live)
-    reset_generation();
+  // 数据模型重构步骤7（澄清后）：采集结束（正常/中止）的 Live 出口。
+  // 零拷贝下 doc 在 Live 期从不引用不完整执行缓冲（copy_data_to_document
+  // 只发生在 RevEndPacket 后的 share），Live 期 doc 只可能：
+  //   - 有数据（repeat≥2 帧，持有上一帧完整共享快照）→ Frozen，数据完整
+  //     归属 owner doc，保持可显示/可认领；
+  //   - 无数据（首帧中止）→ Empty，空白 tab 恒定空白。
+  if (data_generation().phase == DataGeneration::Phase::Live) {
+    data::SessionDocument *gen_owner = data_generation().owner_doc.lock().get();
+    if (gen_owner && gen_owner->has_data())
+      mark_generation_frozen();
+    else
+      reset_generation();
+  }
   guard_to_reset.reset();
+}
+
+void DocumentRegistry::on_capture_frame_started(data::SessionDocument *owner_doc) {
+  if (!owner_doc)
+    return;
+  // Frozen→Live 回边：仅当数据代归属文档就是本次采集 owner（repeat 连续帧
+  // 的同一 doc）时回边；别的文档发起的采集不能把自己的 Live 标到他人头上。
+  std::lock_guard<std::mutex> lock(_capture_state_mutex);
+  if (_generation.phase != DataGeneration::Phase::Frozen)
+    return;
+  if (_generation.owner_doc.lock().get() != owner_doc)
+    return;
+  if (get_document_by_index(_capture_owner_index.load(std::memory_order_acquire)) !=
+      owner_doc)
+    return;
+  _generation.phase = DataGeneration::Phase::Live;
 }
 
 bool DocumentRegistry::has_capture_owner() const {

@@ -106,6 +106,8 @@ public:
     void on_tab_detach(int index, QWidget *widget, const QString &title);
     void on_tab_attached(QWidget *widget, const QString &title);
     void on_new_tab_requested();
+    void on_close_others_requested(int index);
+    void on_close_right_requested(int index);
 
     // ---- Tab renamed handler ----
     void on_tab_renamed(int index, const QString &title);

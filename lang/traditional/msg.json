@@ -389,5 +389,25 @@
     {
         "id": "IDS_TAB_TITLE",
         "text": "標籤%1"
+    },
+    {
+        "id": "IDS_TAB_RENAME",
+        "text": "重新命名"
+    },
+    {
+        "id": "IDS_TAB_CLOSE",
+        "text": "關閉"
+    },
+    {
+        "id": "IDS_TAB_CLOSE_OTHERS",
+        "text": "關閉其他標籤頁"
+    },
+    {
+        "id": "IDS_TAB_CLOSE_RIGHT",
+        "text": "關閉右側所有標籤頁"
+    },
+    {
+        "id": "IDS_TAB_NEW_TAB",
+        "text": "新建標籤頁"
     }
 ]

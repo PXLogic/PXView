@@ -60,6 +60,15 @@ enum DEVICE_COLLECT_MODE {
     COLLECT_LOOP   = 2,
 };
 
+// DEVICE_STATUS_TYPE — ST_* 值被两套状态复用（数据模型重构澄清的语义分工）：
+//   1. 全局执行层状态：SessionStateContext::_device_status（原子单点），
+//      表达"CaptureEngine 是否在跑"，写入点 = 采集生命周期（capturemanager /
+//      datafeedparser / sigsession），消费点 = 执行检查（exec_capture 前置、
+//      is_run 硬件/拨盘判定、MCP get_capture_state）与交互忙判定。
+//   2. per-tab 显示层状态：ViewDataSync::_display_status（每 View 一份），
+//      表达"本视图正在显示什么"（文档快照/实时缓冲/空白），写入点 =
+//      TabContext::restore_view_data 裁决 + 帧事件，消费点 = 渲染分支、
+//      游标标签、解码重绘。
 enum DEVICE_STATUS_TYPE {
     ST_INIT    = 0,
     ST_RUNNING = 1,

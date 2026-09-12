@@ -923,6 +923,9 @@ if (sig && sig->model()) {
     }
   }
 
+  // 自洽重放（非独立决策）：把 ViewDataSync 已存的文档指针原样重设，
+  // 仅用于重建后重绑信号快照指针；绑定决策仍由 restore_view_data /
+  // CopyToDocDone 的裁决点负责，本处不引入新的绑定来源。
   if (_view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr()->has_data()) {
     _view->set_data_document(_view->data_sync_delegate()->document_ptr());
   }
@@ -1018,6 +1021,7 @@ void ViewSignalSync::on_signals_changed() {
     // SigSession（指向可能已被 set_device 清空的 view_data）。
     // 若当前 tab 的文档仍持有历史数据（zero-copy shared_ptr 共享），
     // 且当前不在实时采集，则重新绑定文档快照，避免波形消失。
+    // （自洽重放：重放 ViewDataSync 已存指针，非独立绑定决策。）
     if (_view->session_ptr() && !_view->session_ptr()->is_working() &&
         _view->data_sync_delegate()->document_ptr() &&
         _view->data_sync_delegate()->document_ptr()->has_data()) {

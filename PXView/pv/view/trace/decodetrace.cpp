@@ -1417,7 +1417,8 @@ void DecodeTrace::on_new_decode_data() {
     // 结果会漏掉重绘直到下一次事件。display_source_is_document() 兜底：
     // 本 ctx 文档是显示来源（含其他 ctx 采集、静止查看）即重绘；本 ctx
     // 自身采集的实时刷新路径不受影响（两判定同为 false，与原行为一致）。
-    if (_view && (_data_source->is_stopped_status() ||
+    // 数据模型澄清：is_stopped_status 改走 per-tab 显示状态（IRenderView）。
+    if (_view && (_view->is_stopped_status() ||
                   _view->display_source_is_document())) {
       // P2: decode-only repaint — skips the signal-pixmap rebuild (signals
       // are unchanged during decode growth; the decode layer is drawn by
@@ -1463,7 +1464,7 @@ void DecodeTrace::on_decode_done() {
 
   // Coalesced final repaint (<=60 FPS): avoids completion-burst stutter.
   // 遗留A1：per-tab 兜底同上（其他 ctx 采集时不漏重绘）。
-  if (_view && (_data_source->is_stopped_status() ||
+  if (_view && (_view->is_stopped_status() ||
                 _view->display_source_is_document())) {
     _view->request_delayed_update();
   }
@@ -1486,7 +1487,7 @@ void DecodeTrace::on_error_message_changed(const QString &msg) {
   // Coalescing to the 16ms timer still repaints promptly (error text is drawn
   // by DecodeTracePass) without flooding the main thread.
   // 遗留A1：per-tab 兜底同上。
-  if (_view && (_data_source->is_stopped_status() ||
+  if (_view && (_view->is_stopped_status() ||
                 _view->display_source_is_document())) {
     _view->request_delayed_update();
   }

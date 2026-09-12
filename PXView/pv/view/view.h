@@ -768,6 +768,12 @@ public:
   inline void set_active_viewport(Viewport* vp) { _active_viewport = vp; }
   inline ViewLayout* layout_delegate() { return _layout.get(); }
   inline ViewDataSync* data_sync_delegate() { return _data_sync.get(); }
+  // per-tab 显示状态转发（数据模型重构澄清：显示/执行双轨收敛）。全局
+  // session 状态保留为执行层语义；渲染/交互的显示判定一律走本视图状态。
+  // IRenderView override：渲染管线经接口读取。
+  bool is_stopped_status() const override { return _data_sync->is_stopped_status(); }
+  bool is_running_status() const override { return _data_sync->is_running_status(); }
+  bool is_init_status() const override { return _data_sync->is_init_status(); }
   void schedule_visible_range_notify();
   inline int maxScrollValue() const { return MaxScrollValue; }
   inline SigSession* session_ptr() { return _session; }

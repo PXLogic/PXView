@@ -830,8 +830,11 @@ void SessionEventDispatcher::on_capture_owner_changed(const pv::interface::Captu
 void SessionEventDispatcher::on_copy_to_doc_done(const pv::interface::CopyToDocDone &) {
   PV_WIN_GUARD();
   pv::TabContext *ctx = _window->current_context();
-  if (ctx && ctx->document() && ctx->document()->has_data()) {
-    if (auto *v = safe_current_view()) v->set_data_document(ctx->document());
+  // 数据模型澄清（项13 绑定收敛）：绑【渲染文档】而非所有权文档——借用态下
+  // 数据落在被借的文件池槽（= 本 tab 的 render_document），绑 document() 会
+  // 把本 tab 视图指向旧数据/空文档（双轨失同步）。owner 态两者相同。
+  if (ctx && ctx->render_document() && ctx->render_document()->has_data()) {
+    if (auto *v = safe_current_view()) v->set_data_document(ctx->render_document());
   }
 }
 void SessionEventDispatcher::on_decode_done(const pv::interface::DecodeDone &) {

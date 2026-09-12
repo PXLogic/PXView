@@ -163,6 +163,10 @@ void TabManager::setup_connections() {
           &MainWindow::on_new_tab_requested);
   QObject::connect(_tab_widget, &pv::ui::DraggableTabWidget::tabCloseRequested, _wnd,
           &MainWindow::remove_tab);
+  QObject::connect(_tab_widget, &pv::ui::DraggableTabWidget::tabCloseOthersRequested, _wnd,
+          [this](int index) { on_close_others_requested(index); });
+  QObject::connect(_tab_widget, &pv::ui::DraggableTabWidget::tabCloseRightRequested, _wnd,
+          [this](int index) { on_close_right_requested(index); });
 
   // Tab renamed — inline lambda
   QObject::connect(_tab_widget, &pv::ui::DraggableTabWidget::tabRenamed, _wnd,
@@ -551,6 +555,25 @@ void TabManager::on_new_tab_requested() {
   }
 
   add_tab(new_ctx);
+}
+
+void TabManager::on_close_others_requested(int index) {
+  if (index < 0 || index >= _tab_contexts.size())
+    return;
+  // remove_tab 会移除并移位 _tab_contexts，必须从最高索引向下关闭，
+  // 才能保证保留的 index 不失效（remove_tab 内部有 size<=1 保护）。
+  for (int i = _tab_contexts.size() - 1; i >= 0; --i) {
+    if (i == index)
+      continue;
+    remove_tab(i);
+  }
+}
+
+void TabManager::on_close_right_requested(int index) {
+  if (index < 0 || index >= _tab_contexts.size())
+    return;
+  for (int i = _tab_contexts.size() - 1; i > index; --i)
+    remove_tab(i);
 }
 
 void TabManager::on_tab_renamed(int index, const QString &title) {

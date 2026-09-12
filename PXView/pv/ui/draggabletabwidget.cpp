@@ -22,6 +22,7 @@
 #include "pv/ui/draggabletabbar.h"
 #include "pv/mainwindow/submainframe.h"
 #include "pv/config/appconfig.h"
+#include "pv/core/langresource.h"
 #include "pv/session/sessionmanager.h"
 #include "pv/session/tabcontext.h"
 
@@ -44,7 +45,7 @@ public:
         setFixedSize(16, 16);
         setCursor(Qt::ArrowCursor);
         setFocusPolicy(Qt::NoFocus);
-        setToolTip(tr("Close"));
+        setToolTip(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_CLOSE), "Close"));
     }
 
 protected:
@@ -160,7 +161,7 @@ DraggableTabWidget::DraggableTabWidget(QWidget *parent)
 
     _add_button = new QPushButton(QStringLiteral("+"), this);
     _add_button->setFixedSize(QSize(24, 24));
-    _add_button->setToolTip(tr("New Tab"));
+    _add_button->setToolTip(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_NEW_TAB), "New Tab"));
     _add_button->setCursor(Qt::PointingHandCursor);
     QString addBtnColor = AppConfig::Instance().GetThemeTokenValue("@fg-muted");
     QString addBtnHoverColor = AppConfig::Instance().GetThemeTokenValue("@fg-bright");

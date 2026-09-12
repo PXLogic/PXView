@@ -154,6 +154,9 @@ SigSession::SigSession() {
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::EndCollectWorkPrev>(
           [this](const interface::EndCollectWorkPrev &) { on_end_collect_work_prev(); }));
+  _event_subscriptions.push_back(
+      _event_bus->subscribe<interface::CollectStart>(
+          [this](const interface::CollectStart &) { on_collect_start(); }));
 
   // Managers are constructed after _event_bus (they hold a raw pointer to it)
   // and after _state (they hold a raw pointer to it). FilterProcessor accesses
@@ -2632,6 +2635,16 @@ void SigSession::on_trig_next_collect() {
   }
 }
 
+void SigSession::on_collect_start() {
+  // CollectStart（broadcast_async）在 GUI 线程执行。数据代 Frozen→Live 回边：
+  // repeat 模式第 2+ 帧（guard 跨帧存活，acquire 不再执行）首包到达时，
+  // 把停在 Frozen 的数据代拉回 Live，与"执行缓冲正被新一帧重写"对齐。
+  // 首帧 phase 已是 Live，回边条件不满足（幂等）。
+  if (_state->is_working())
+    _document_registry->on_capture_frame_started(
+        _document_registry->get_capture_owner_document());
+}
+
 void SigSession::on_rev_end_packet() {
   pxv_info("SigSession::on_event(RevEndPacket): mode=%d stream=%d single=%d",
            _state->device_agent().get_work_mode(),
@@ -2723,15 +2736,21 @@ void SigSession::on_rev_end_packet() {
           _document_registry->get_capture_owner_document()
               ? _document_registry->get_capture_owner_document()
               : _document_registry->get_active_document();
-      copy_data_to_document(doc);
-      // 数据模型重构步骤7：数据代 → Frozen（拷贝完成，数据完整归属 owner
-      // doc）。Frozen 是 Live 的唯一正常出口。
-      _document_registry->mark_generation_frozen();
-      // 阶段3a + 步骤7：拷贝完成 = Stopped（状态机 B 的唯一拷贝出口）。
-      // 无条件设置：导入（VCD 等）不经 acquire，doc 停在 Idle 也必须演进到
-      // Stopped，否则文档"有数据但状态 Idle"的状态机破洞。
-      if (doc)
-        doc->set_state(data::SessionDocument::SessionState::Stopped);
+      // 数据落地才演进状态机：landed=false（无 view 数据的异常 END）时
+      // doc 保持原状态、数据代留待 release 出口按 has_data 判 Frozen/Empty，
+      // 维持 "Stopped ⇒ has_data()" 不变式。
+      const bool landed = copy_data_to_document(doc);
+      if (landed) {
+        // 数据模型重构步骤7：数据代 → Frozen（拷贝完成，数据完整归属 owner
+        // doc）。Frozen 是 Live 的唯一正常出口。
+        _document_registry->mark_generation_frozen();
+        // 阶段3a + 步骤7：拷贝完成 = Stopped（状态机 B 的唯一拷贝出口）。
+        // 导入（VCD 等）不经 acquire，doc 停在 Idle 也由此演进到 Stopped，
+        // 覆盖"导入不经 acquire"路径。
+        if (doc)
+          doc->set_state(data::SessionDocument::SessionState::Stopped);
+      }
+      // CopyToDocDone 保持无条件：解码任务读会话缓冲快照，不依赖 doc 落地。
       _event_bus->broadcast_async<interface::CopyToDocDone>({SIZE_MAX});
     } else {
       // No active document (typical in headless mode) OR stream mode (no
@@ -3524,9 +3543,16 @@ void SigSession::sync_trigger_to_libsigrok(bool disable_trigger) {
 // 时模型对象随文档自然保活（零重建），无需 stash/take 搬运，也消除了
 // "全局列表被搬空的窗口期"（capturemanager 判空拒绝采集的隐患）。
 
-void SigSession::copy_data_to_document(data::SessionDocument *doc) {
+bool SigSession::copy_data_to_document(data::SessionDocument *doc) {
+  // 结构约束（数据代状态机 A 的前提）：本函数是 doc 快照数据的【唯一】写入
+  // 路径，且只在 RevEndPacket（数据完整）之后调用——因此 Live 期 doc 永不
+  // 引用不完整的执行缓冲，release_capture_owner 的 Live→Frozen/Empty 判定
+  // 依赖此保证。若未来新增"采集中直写 doc"路径，必须先修订状态机 A。
   if (!doc || !_state->view_data() || !have_view_data())
-    return;
+    return false;
+  // 注：调用约定是"拷贝（零拷贝共享）→ mark_generation_frozen()"——拷贝发生
+  // 在 Live 期是设计内时序（RevEndPacket 唯一落地路径 + restart_decoders），
+  // 此处不设 Live 期 Tripwire（原 Tripwire 在正常路径上每次必触发，已删）。
 
   doc->set_samplerate(_state->view_data()->_cur_snap_samplerate);
   // 修复（切回旧 tab 波形被缩放消失）：流模式下 _cur_samplelimits 是 ring
@@ -3550,6 +3576,7 @@ void SigSession::copy_data_to_document(data::SessionDocument *doc) {
   doc->share_from_logic(_state->view_data()->logic_shared());
   doc->share_from_analog(_state->view_data()->analog_shared());
   doc->share_from_dso(_state->view_data()->dso_shared());
+  return true;
 }
 
 void SigSession::attach_data_to_signal(SessionData *data) {

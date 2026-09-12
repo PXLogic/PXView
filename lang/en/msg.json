@@ -390,5 +390,25 @@
     {
         "id": "IDS_TAB_TITLE",
         "text": "Tab %1"
+    },
+    {
+        "id": "IDS_TAB_RENAME",
+        "text": "Rename"
+    },
+    {
+        "id": "IDS_TAB_CLOSE",
+        "text": "Close"
+    },
+    {
+        "id": "IDS_TAB_CLOSE_OTHERS",
+        "text": "Close Others"
+    },
+    {
+        "id": "IDS_TAB_CLOSE_RIGHT",
+        "text": "Close All to the Right"
+    },
+    {
+        "id": "IDS_TAB_NEW_TAB",
+        "text": "New Tab"
     }
 ]

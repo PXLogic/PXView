@@ -418,7 +418,10 @@ void on_load_config_end();
   data::SessionDocument *render_document() const {
     return _state->render_document();
   }
-  void copy_data_to_document(data::SessionDocument *doc);
+  // 返回 true 表示数据实际落地（share 成功）；false = doc 无效/无 view 数据。
+  // 调用方（RevEndPacket）据此门控 Stopped/Frozen 置位，维持
+  // "Stopped ⇒ has_data()" 不变式。
+  bool copy_data_to_document(data::SessionDocument *doc);
   void attach_data_to_signal(SessionData *data);
   // 数据模型重构步骤2：模型 stash 恢复后重绑当前执行缓冲快照（tabcontext
   // 调用点不接触 SessionData 指针）。
@@ -523,6 +526,10 @@ private:
   void on_session_stopped_event();
   void on_decode_done_event();
   void on_end_collect_work_prev();
+  // CollectStart（新一帧首包，broadcast_async → GUI 线程）：数据代
+  // Frozen→Live 回边挂点（repeat 模式连续帧），见
+  // DocumentRegistry::on_capture_frame_started。
+  void on_collect_start();
 static sr_input_format *determine_input_file_format(const std::string &filename);
 data::Snapshot *get_signal_snapshot(); void clear_signals();
 std::shared_ptr<data::SignalModel> get_channel_by_index(int orgIndex);

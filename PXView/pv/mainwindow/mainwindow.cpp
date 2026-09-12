@@ -574,6 +574,10 @@ void MainWindow::on_frame_began() {
   if (ctx) {
     ctx->make_live();
     if (ctx->document()) {
+      // 已知良性瞬态：此处 clear() 会把 Collecting 中的文档打回 Idle
+      //（每帧首包先清旧数据）。状态机 B 的实时分支不依赖 is_collecting()
+      //（view_data_sync 由 owned_by_me 保证归属），勿改为条件 clear——
+      // 旧快照引用必须在换新执行缓冲前释放。
       ctx->document()->clear();
       // Task 11.3 (R6 对称): is_working 时跳过 set_active_document，
       // 避免覆盖 capture owner——后台采集进行中切换 active 会造成数据归属错乱。
@@ -659,8 +663,13 @@ void MainWindow::rebind_tab_to_fresh_document(pv::TabContext *ctx,
   // Detach the view from the pinned slot: drop its trace wrappers (the
   // slot's stacks stay alive with the slot) and its data bindings.
   // Everything is rebuilt from the fresh (empty) document.
+  // 【绑定修复】绑新空文档而非 nullptr：_document 是统一裁决器识别"本 tab
+  // 自己的采集"的身份前提（owned_by_me/doc_collecting/gen_owner_is_render_doc），
+  // 绑 nullptr 会让下一次采集在整场期间被误判为外来采集 → 进度条/ruler
+  // 空白。空文档绑定即清残留（新文档无快照），残留信号指针由下方
+  // clear_signal_data() 清除；此后 document_ptr() == render_document() 恒成立。
   if (pv::view::View *v = ctx->view()) {
-    v->set_data_document(nullptr);
+    v->set_data_document(new_doc.get());
     v->clear_signal_data();
     v->mark_derived_traces_dirty();
     v->sync_derived_traces();

@@ -74,8 +74,9 @@ void ViewLayout::set_scale_offset(double scale, int64_t offset) {
 void ViewLayout::limit_scale_offset() {
   int width = _view->get_view_width();
   if (_view->get_work_mode() != DSO) {
-    double sampletime = _view->document_snapshot_source()->cur_sampletime();
-    uint64_t samplerate = _view->document_snapshot_source()->cur_snap_samplerate();
+    auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+    double sampletime = src ? src->cur_sampletime() : 0.0;
+    uint64_t samplerate = src ? src->cur_snap_samplerate() : 0;
     if (sampletime > 0 && samplerate > 0 && width > 0) {
       _maxscale = sampletime / (width * View::MaxViewRate);
       _minscale = (1.0 / samplerate) / View::MaxPixelsPerSample;
@@ -112,8 +113,9 @@ void ViewLayout::update_scale_offset() {
   }
 
   if (_view->get_work_mode() != DSO) {
-    double sampletime = _view->document_snapshot_source()->cur_sampletime();
-    uint64_t samplerate = _view->document_snapshot_source()->cur_snap_samplerate();
+    auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+    double sampletime = src ? src->cur_sampletime() : 0.0;
+    uint64_t samplerate = src ? src->cur_snap_samplerate() : 0;
     if (sampletime > 0 && samplerate > 0) {
       _maxscale = sampletime / (width * View::MaxViewRate);
       _minscale = (1.0 / samplerate) / View::MaxPixelsPerSample;
@@ -271,8 +273,8 @@ void ViewLayout::h_scroll_value_changed(int value) {
 }
 
 void ViewLayout::get_scroll_layout(int64_t &length, int64_t &offset) {
-  length = ceil(_view->document_snapshot_source()->cur_snap_sampletime() /
-                _scale);
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  length = src ? ceil(src->cur_snap_sampletime() / _scale) : 0;
   offset = _offset;
 }
 
@@ -357,8 +359,11 @@ int64_t ViewLayout::get_min_offset() {
 int64_t ViewLayout::get_max_offset() {
   int width = _view->get_view_width();
   assert(width > 0);
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return 0;
 
-  return ceil((_view->document_snapshot_source()->cur_snap_sampletime() /
+  return ceil((src->cur_snap_sampletime() /
                _scale) -
               (width * View::MaxViewRate));
 }

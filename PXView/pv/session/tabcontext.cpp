@@ -160,6 +160,20 @@ void TabContext::restore_device_for_this_tab()
                     // 借用，本 tab 回落自己的数据。
                     pxv_warn("TabContext: borrowed device gone, releasing borrow");
                     release_borrow();
+                    // 回落后重试恢复本 tab 自己的设备（TabSwitch 语义即"激活
+                    // 本 tab 的设备"），避免后续 apply_device_intent 把本 tab
+                    // 的通道配置写到当前全局（外来）设备上。仍失败才置
+                    // NULL_HANDLE（走 reload 全量重建兜底）。
+                    ds_device_handle own = _device_handle;
+                    if (own != NULL_HANDLE &&
+                        _session->get_device()->handle() != own &&
+                        !_session->set_device(
+                            own, interface::DeviceChangeReason::TabSwitch)) {
+                        pxv_warn("TabContext::activate() failed to restore own "
+                                 "device handle %llu after borrow release",
+                                 (unsigned long long)own);
+                        _device_handle = NULL_HANDLE;
+                    }
                 } else {
                     _device_handle = NULL_HANDLE;
                 }
@@ -180,6 +194,8 @@ void TabContext::claim_active_document()
         // 借用态下"当前正在操作的会话"就是被借用的文件池槽（渲染/模型/采集
         // 归属三者一致，例如借用 pxl 时按运行 = 重放该文件、数据落回该池
         // 槽）；本 tab 自己的文档仍然完整保留，解除借用即回到它。
+        // 【定义行为】文件池槽的重放走同一采集管线，数据代 Live/Frozen 语义
+        // 完全适用；借用 tab 激活时统一裁决器的 LiveBuffer 分支绑定实时缓冲。
         data::SessionDocument *rd = render_document();
         _session->set_active_document(rd);
         _session->set_render_document(render_doc_shared());
@@ -189,10 +205,11 @@ void TabContext::claim_active_document()
 // 4) 数据绑定裁决（数据模型重构步骤7：查表化，唯一裁决点）。
 //
 // 输入：数据代 gen（执行缓冲归属）+ 渲染文档 rd 的数据状态。
-// 输出（互斥三分支，无时序性特判）：
-//   1. rd->has_data()                      → 绑渲染文档（历史数据，唯一真相）
-//   2. gen.phase==Live && gen.owner==rd    → 绑会话实时缓冲（实时波形）
-//   3. 否则                                → 清空（空白 tab 恒定空白）
+// 裁决表收敛于 DocumentRegistry::resolve_data_binding（与
+// ViewDataSync::document_snapshot_source 共用，消除双轨）：
+//   Document   → 绑渲染文档（历史数据，唯一真相）
+//   LiveBuffer → 绑会话实时缓冲（实时波形，含本 tab 采集 Live 期间激活）
+//   None       → 清空（空白 tab 恒定空白）
 // 数据落 doc 由 on_rev_end_packet 的拷贝路径唯一负责（步骤7 已删除
 // deactivate 归档），因此不再有"空白 tab 继承别的采集代"的来源。
 void TabContext::restore_view_data()
@@ -207,12 +224,30 @@ void TabContext::restore_view_data()
     }
     // 数据模型重构步骤6：绑定【渲染文档】（借用时=借用的文件池槽）。
     data::SessionDocument *rd = render_document();
-    const auto &gen = _session->document_registry()->data_generation();
-    const bool gen_owner_is_render =
-        (gen.owner_doc.lock().get() == rd) && rd != nullptr;
+    // 【绑定修复】tab 渲染身份在此无条件建立：ViewDataSync::document_snapshot_source
+    // 的统一裁决器以 _document 识别"本 tab 自己的采集"（owned_by_me /
+    // doc_collecting / gen_owner_is_render_doc 三项输入均以它为前提）。
+    // 此前 None 分支不绑定，rd 尚无数据的首次采集会被误判为外来采集 →
+    // document_snapshot_source() 返回 nullptr → capture_init/进度条/ruler
+    // 整场空白，二次采集（CopyToDocDone 补绑后）才恢复。空文档绑定是平凡
+    // 操作（set_data_document 对无数据文档仅设置指针后早退，所有 document_ptr()
+    // 使用点均带 null+has_data 双守护）。
+    _view->set_data_document(rd);
+    // 数据代取加锁快照（值拷贝），经统一裁决器查表（唯一裁决点）。
+    const auto gen = _session->document_registry()->data_generation();
+    const auto verdict = core::DocumentRegistry::resolve_data_binding(
+        gen,
+        /*gen_owner_is_render_doc=*/rd && gen.owner_doc.lock().get() == rd,
+        /*render_doc_has_data=*/rd && rd->has_data(),
+        /*render_doc_is_collecting=*/rd && rd->is_collecting(),
+        /*owned_by_me=*/
+        rd && _session->document_registry()->get_capture_owner_document() == rd,
+        /*global_working=*/_session->is_working() &&
+            _session->is_realtime_refresh(),
+        /*session_have_view_data=*/_session->have_view_data());
 
-    if (rd && rd->has_data()) {
-        _view->set_data_document(rd);
+    if (verdict == core::DocumentRegistry::DataBindingSource::Document) {
+        // rd 已在函数头部绑定（身份 + 数据绑定一体）；此处只补通道状态回写。
         auto &sigs = _view->get_own_signals();
         for (auto &sig : sigs) {
             auto s = sig.get();
@@ -221,25 +256,22 @@ void TabContext::restore_view_data()
                 s->model()->set_enabled(s->enabled());
             }
         }
-        // 文档→显示层状态同步：有完整数据且未在采集 = "可显示"。显式置
-        // ST_STOPPED 让 View 绘制管线（viewport_painter 等仍读全局
-        // is_stopped_status 的 28 个读取点）走 paintSignals 分支绘制文档
-        // 快照。（doc.data_state 不在此写——状态机 B 的转移点只在
+        // 文档→显示层状态同步：per-tab 显示状态（不再写全局 ST_*——全局
+        // 保留为 CaptureEngine 执行层语义，tab 激活不得扰动）。有完整数据
+        // = "可显示"，View 绘制管线走 paintSignals 分支绘制文档快照。
+        // （doc.data_state 不在此写——状态机 B 的转移点只在
         // acquire/copy/clear 三处。）
-        if (!_session->is_working())
-            _session->set_stopped_status();
-    } else if (gen.phase == core::DocumentRegistry::DataGeneration::Phase::Live &&
-               gen_owner_is_render && _session->have_view_data()) {
-        // 实时数据：数据代 Live 且归属本渲染文档（本 tab 发起的采集）。
+        _view->data_sync_delegate()->set_display_status(ST_STOPPED);
+    } else if (verdict == core::DocumentRegistry::DataBindingSource::LiveBuffer) {
+        // 实时数据：本 tab 自己的采集进行中（含 repeat≥2 帧回边后激活）。
         // 空白 tab / 别的 tab 的采集代永远不会进入此分支。
         _view->set_signal_data_from_source(_session);
+        _view->data_sync_delegate()->set_display_status(ST_RUNNING);
     } else {
         pxv_info("TabContext::activate() no data, clearing signal data bindings");
         _view->clear_signal_data();
-        // 无任何可显示数据 → 显示层回到"待采集"（ST_INIT）语义。采集进行
-        // 中绝不能扰动显示状态。
-        if (!_session->is_working())
-            _session->set_init_status();
+        // 无任何可显示数据 → 显示层回到"待采集"（ST_INIT）语义（per-tab）。
+        _view->data_sync_delegate()->set_display_status(ST_INIT);
     }
 }
 

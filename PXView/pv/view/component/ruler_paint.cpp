@@ -187,9 +187,9 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
 
     // Draw the cursors
     auto &cursor_list = view.get_cursorList();
-    // 遗留A2：游标标签的"完整测量"判定加 per-tab 兜底（本 ctx 文档为
-    // 显示来源时——其他 ctx 采集/静止——同样显示完整标签）。
-    bool bWorkStoped = view.data_source()->is_stopped_status() ||
+    // 遗留A2 + 数据模型澄清：游标标签的"完整测量"判定改 per-tab 显示状态
+    //（本 ctx 文档为显示来源时——其他 ctx 采集/静止——同样显示完整标签）。
+    bool bWorkStoped = view.is_stopped_status() ||
                        view.display_source_is_document();
 
     for (auto &cursor : cursor_list)
@@ -348,7 +348,8 @@ void paint_osc_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
     auto &cursor_list = view.get_cursorList();
 
     if (!cursor_list.empty()) {
-        bool bWorkStoped = view.data_source()->is_stopped_status();
+        // 数据模型澄清：改 per-tab 显示状态（原经 data_source() 读全局）。
+        bool bWorkStoped = view.is_stopped_status();
 
         for (auto &cursor : cursor_list) {
             cursor->paint_label(p, rect, prefix, bWorkStoped);

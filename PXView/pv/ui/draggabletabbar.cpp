@@ -30,6 +30,7 @@
 #include <QStylePainter>
 
 #include "pv/config/appconfig.h"
+#include "pv/core/langresource.h"
 
 namespace pv {
 namespace ui {
@@ -204,11 +205,11 @@ void DraggableTabBar::contextMenuEvent(QContextMenuEvent *event)
     }
 
     QMenu menu(this);
-    QAction *rename_action = menu.addAction(tr("Rename"));
+    QAction *rename_action = menu.addAction(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_RENAME), "Rename"));
     menu.addSeparator();
-    QAction *close_action = menu.addAction(tr("Close"));
-    QAction *close_others_action = menu.addAction(tr("Close Others"));
-    QAction *close_right_action = menu.addAction(tr("Close All to the Right"));
+    QAction *close_action = menu.addAction(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_CLOSE), "Close"));
+    QAction *close_others_action = menu.addAction(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_CLOSE_OTHERS), "Close Others"));
+    QAction *close_right_action = menu.addAction(L_S(STR_PAGE_MSG, S_ID(IDS_TAB_CLOSE_RIGHT), "Close All to the Right"));
 
     QAction *chosen = menu.exec(event->globalPos());
     if (chosen == rename_action) {

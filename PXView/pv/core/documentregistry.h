@@ -179,27 +179,67 @@ inline std::atomic<bool> &copy_in_progress() { return _copy_in_progress; }
   // 消费规则（restore_view_data 查表）：
   //   历史数据 = render_doc.has_data()
   //   实时数据 = phase==Live && owner_doc == render_doc
-  // 转移点唯一：acquire_capture_owner→Live；on_rev_end_packet 拷贝完成→
-  // Frozen；release_capture_owner(Live 未落地)/各缓冲清空点→Empty。
+  // 转移点唯一：acquire_capture_owner→Live；on_capture_frame_started 回边
+  // Frozen→Live（repeat 新帧首包）；on_rev_end_packet 拷贝完成→Frozen；
+  // release_capture_owner（Live 时按 owner doc 是否有数据 → Frozen/Empty）/
+  // 各缓冲清空点→Empty。
   struct DataGeneration {
     enum class Phase { Empty, Live, Frozen };
     Phase phase = Phase::Empty;
     std::weak_ptr<data::SessionDocument> owner_doc;
-    ds_device_handle device_handle = NULL_HANDLE;
+    // Frozen 消费者：on_capture_frame_started 的回边起点 + release_capture_owner
+    // 的 Live/Frozen 出口判定（数据完整归属判定），不再是纯预防性状态。
   };
-  const DataGeneration &data_generation() const { return _generation; }
-  void mark_generation_live(std::shared_ptr<data::SessionDocument> owner,
-                            ds_device_handle device) {
+  // 数据代实例的访问器全部经 _capture_state_mutex 串行化：写点分布在 GUI
+  // 主线程（acquire/sigsession 清缓冲路径）与 worker 线程（SR_DF_END 的
+  // release_capture_owner），读点在 GUI 主线程（restore_view_data 查表）。
+  // data_generation() 返回副本（锁内拷贝），调用方不得持有引用跨事件使用。
+  DataGeneration data_generation() const {
+    std::lock_guard<std::mutex> lock(_capture_state_mutex);
+    return _generation;
+  }
+  void mark_generation_live(std::shared_ptr<data::SessionDocument> owner) {
+    std::lock_guard<std::mutex> lock(_capture_state_mutex);
     _generation.phase = DataGeneration::Phase::Live;
     _generation.owner_doc = std::move(owner);
-    _generation.device_handle = device;
   }
   void mark_generation_frozen() {
+    std::lock_guard<std::mutex> lock(_capture_state_mutex);
     if (_generation.phase == DataGeneration::Phase::Live)
       _generation.phase = DataGeneration::Phase::Frozen;
   }
   void reset_generation() {
+    std::lock_guard<std::mutex> lock(_capture_state_mutex);
     _generation = DataGeneration{};
+  }
+  // 数据代回边（repeat 模式 Frozen→Live 的唯一入口）：新一帧首包到达
+  // （CollectStart）时，若当前数据代是 Frozen 且归属文档就是本次采集的
+  // owner，则回到 Live——执行缓冲已被新一帧重写，"拷贝完成"语义不再成立。
+  // 首帧采集 phase 已是 Live，条件不满足，天然幂等。
+  void on_capture_frame_started(data::SessionDocument *owner_doc);
+
+  // --- 统一绑定裁决器（数据模型重构步骤7 澄清：唯一裁决表）---
+  // restore_view_data（tab 激活绑定）与 ViewDataSync::document_snapshot_source
+  // （渲染数据源）共用此查表，消除双轨实现。顺序即优先级：
+  //   1. 全局工作中且本渲染文档是采集 owner（或其状态机在 Collecting 的
+  //      启动窗口）→ LiveBuffer（本 ctx 自己的采集进行中）
+  //   2. 渲染文档有完整数据 → Document（历史数据唯一真相）
+  //   3. 数据代 Live 且归属本渲染文档且会话有实时数据 → LiveBuffer
+  //      （tab 在自己采集 Live 期间激活）
+  //   4. 否则 → None（空白恒定空白）
+  enum class DataBindingSource { Document, LiveBuffer, None };
+  static DataBindingSource resolve_data_binding(
+      const DataGeneration &gen, bool gen_owner_is_render_doc,
+      bool render_doc_has_data, bool render_doc_is_collecting,
+      bool owned_by_me, bool global_working, bool session_have_view_data) {
+    if (global_working && (owned_by_me || render_doc_is_collecting))
+      return DataBindingSource::LiveBuffer;
+    if (render_doc_has_data)
+      return DataBindingSource::Document;
+    if (gen.phase == DataGeneration::Phase::Live && gen_owner_is_render_doc &&
+        session_have_view_data)
+      return DataBindingSource::LiveBuffer;
+    return DataBindingSource::None;
   }
 
 private:

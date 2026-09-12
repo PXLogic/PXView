@@ -86,8 +86,9 @@ void ViewCursors::show_search_cursor(bool show) {
 }
 
 void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
   const double time =
-      trig_pos * 1.0 / _view->document_snapshot_source()->cur_snap_samplerate();
+      trig_pos * 1.0 / (src ? src->cur_snap_samplerate() : 1);
   _trig_cursor->set_index(trig_pos);
 
   int width = _view->get_view_width();
@@ -138,8 +139,9 @@ void ViewCursors::set_search_pos(uint64_t search_pos, bool hit) {
   QColor fore(_view->palette().color(_view->foregroundRole()));
   fore.setAlpha(View::BackAlpha);
 
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
   const double time =
-      search_pos * 1.0 / _view->document_snapshot_source()->cur_snap_samplerate();
+      search_pos * 1.0 / (src ? src->cur_snap_samplerate() : 1);
   _search_pos = search_pos;
   _search_hit = hit;
   _search_cursor->set_index(search_pos);
@@ -227,6 +229,9 @@ void ViewCursors::clear_cursors() {
 }
 
 void ViewCursors::set_cursor_middle(int index) {
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return;
   auto &lst = get_cursorList();
   int size = lst.size();
   if (index < 0 || index >= size) {
@@ -246,8 +251,7 @@ void ViewCursors::set_cursor_middle(int index) {
   _view->set_scale_offset(
       _view->scale(),
       (*i)->index() /
-          (_view->document_snapshot_source()->cur_snap_samplerate() *
-           _view->scale()) -
+          (src->cur_snap_samplerate() * _view->scale()) -
           (width / 2));
 }
 
@@ -293,7 +297,8 @@ uint64_t ViewCursors::get_cursor_samples(int index) {
 
 QString ViewCursors::get_cm_time(int index) {
   uint64_t sampleIndex = get_cursor_samples(index);
-  uint64_t sampleRate = _view->document_snapshot_source()->cur_snap_samplerate();
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  uint64_t sampleRate = src ? src->cur_snap_samplerate() : 0;
   // [PX1-DEBUG] 问题1排查：光标读数时间 = index/samplerate。
   pxv_info("[PX1-DEBUG] get_cm_time: idx=%d sample=%llu samplerate=%llu",
            index, (unsigned long long)sampleIndex,
@@ -305,12 +310,16 @@ QString ViewCursors::get_cm_delta(int index1, int index2) {
   if (index1 == index2)
     return "0";
 
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return "0";
+
   uint64_t samples1 = get_cursor_samples(index1);
   uint64_t samples2 = get_cursor_samples(index2);
   uint64_t delta_sample =
       (samples1 > samples2) ? samples1 - samples2 : samples2 - samples1;
   return _view->get_ruler()->format_real_time(
-      delta_sample, _view->document_snapshot_source()->cur_snap_samplerate());
+      delta_sample, src->cur_snap_samplerate());
 }
 
 int ViewCursors::get_cursor_index_by_key(uint64_t key) {

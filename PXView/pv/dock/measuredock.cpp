@@ -871,6 +871,10 @@ void MeasureDock::set_sel_cursor() {
 }
 
 void MeasureDock::update_dist() {
+  // 防重入：模态对话框/事件泵可能在 unbind_docks 与 bind_docks 之间派发
+  // DataUpdated（tab 重绑定中途），此时 _view 为空，直接跳过本次刷新。
+  if (!_view)
+    return;
   auto &cursor_list = _view->get_cursorList();
 
   auto mode_rows = get_mode_rows();
@@ -911,6 +915,9 @@ void MeasureDock::update_dist() {
 }
 
 void MeasureDock::update_edge() {
+  // 同 update_dist：dock 重绑定间隙的 DataUpdated 重入防护。
+  if (!_view)
+    return;
   auto &cursor_list = _view->get_cursorList();
   auto mode_rows = get_mode_rows();
 
@@ -963,6 +970,9 @@ void MeasureDock::update_edge() {
 }
 
 void MeasureDock::update_cursor_info() {
+  // 同 update_dist：dock 重绑定间隙的 DataUpdated 重入防护。
+  if (!_view)
+    return;
   auto &cursor_list = _view->get_cursorList();
   auto mode_rows = get_mode_rows();
 

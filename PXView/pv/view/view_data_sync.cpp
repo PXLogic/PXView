@@ -48,6 +48,7 @@
 #include "pv/view/view.h"
 
 #include "pv/config/appconfig.h"
+#include "pv/core/documentregistry.h"
 #include "pv/data/datasource.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"
@@ -222,44 +223,58 @@ bool ViewDataSync::document_is_display_source() {
 
 pv::data::DataSource *ViewDataSync::document_snapshot_source() {
   // Session-Centric 阶段3b：per-tab 裁决取代纯全局裁决。
-  //
-  // 旧裁决只看全局 is_working()：任何 ctx（其他 tab 经 MCP/headless 发起）
-  // 的采集都会把"本视图"的数据来源切到 session 实时缓冲——本 tab 由此
-  // 显示别的 ctx 正在写入的数据（污染），采集结束后又跳回文档。
-  // 新裁决以 per-tab 归属为准：
-  //  1) 本 ctx 是采集 owner（或其状态机处于 Collecting 的启动窗口）且
-  //     全局执行层在工作 → 读 session 实时缓冲（数据经零拷贝共享同时
-  //     直达本 ctx 的文档，引用同一快照实例）。
-  //  2) 其他 ctx 在采集 → 绝不污染本视图：有历史数据读文档，否则空。
-  //  3) 静止态 → 文档快照（单一真相）。
+  // 裁决表收敛于 DocumentRegistry::resolve_data_binding（与
+  // TabContext::restore_view_data 共用，消除双轨实现）：
+  //   LiveBuffer → 本 ctx 自己的采集进行中：实时缓冲（与文档共享同一快照
+  //                实例，数据经零拷贝同时直达本 ctx 的文档）。
+  //   Document   → 其他 ctx 在采集或静止查看：本 ctx 的文档快照是唯一
+  //                真相，绝不污染本视图。
+  //   None       → 按场景分流：
+  //                a) 外来 ctx 采集进行中（is_working 且 owner/Collecting
+  //                   都不是本 doc）→ 返回 nullptr（消费方已判空）：
+  //                   空白 tab 绝不显示别人的实时数据。
+  //                b) 全局静止无数据 → legacy fallback 返回 _data_source
+  //                   （空闲空缓冲，无污染，历史行为保留）。
   auto *session = _view->session_ptr();
-  const bool global_working =
-      _data_source && _data_source->is_working() &&
-      _data_source->is_realtime_refresh();
+  data::SessionDocument *doc = _document;
+  const auto gen = session ? session->document_registry()->data_generation()
+                           : core::DocumentRegistry::DataGeneration{};
+  const bool gen_owner_is_render = doc && gen.owner_doc.lock().get() == doc;
+  const bool doc_has_data = doc && doc->has_data();
+  const bool doc_collecting = doc && doc->is_collecting();
   const bool owned_by_me =
-      _document && session &&
-      session->document_registry()->get_capture_owner_document() == _document;
+      doc && session &&
+      session->document_registry()->get_capture_owner_document() == doc;
+  const auto verdict = core::DocumentRegistry::resolve_data_binding(
+      gen,
+      /*gen_owner_is_render_doc=*/gen_owner_is_render,
+      /*render_doc_has_data=*/doc_has_data,
+      /*render_doc_is_collecting=*/doc_collecting,
+      /*owned_by_me=*/owned_by_me,
+      /*global_working=*/_data_source && _data_source->is_working() &&
+          _data_source->is_realtime_refresh(),
+      /*session_have_view_data=*/_data_source && _data_source->have_view_data());
 
-  if (global_working &&
-      (owned_by_me || (_document && _document->is_collecting()))) {
-    // 本 ctx 自己的采集进行中：实时缓冲（与文档共享同一快照实例）。
+  if (verdict == core::DocumentRegistry::DataBindingSource::LiveBuffer) {
     // 非 stream repeat 帧间 owner 仍归属本 ctx，实时性不中断。
     return _data_source;
   }
-
-  if (_document && _document->has_data()) {
-    // 采集进行中但 owner 不是本 ctx（其他 tab / headless 发起），
-    // 或静止查看：本 ctx 的文档快照是唯一真相。
-    // 注：buffer 模式 repeat/单发在 RevEndPacket 后文档与实时缓冲共享
-    // 同一快照实例（零拷贝），读文档与读 session 数据等价且更稳定。
+  if (verdict == core::DocumentRegistry::DataBindingSource::Document) {
     return _document;
   }
+  // None：外来采集进行中 → 空视图（绝不污染）；静止 → legacy fallback。
+  if (session && session->is_working() && !owned_by_me && !doc_collecting)
+    return nullptr;
   return _data_source;
 }
 
 void ViewDataSync::frame_began() {
   // Reset search state via the public View API (forwards to ViewCursors)
   _view->set_search_pos(0, false);
+  // per-tab 显示状态：本视图正在实时显示自己发起的采集 → Running。
+  // （document_snapshot_source() 返回 _data_source 即 LiveBuffer 裁决。）
+  if (document_snapshot_source() == _data_source)
+    set_display_status(ST_RUNNING);
 }
 
 void ViewDataSync::receive_end() {
@@ -274,8 +289,8 @@ void ViewDataSync::receive_end() {
       ret = _view->device_agent()->get_config_uint64(SR_CONF_ACTUAL_SAMPLES,
                                                      actual_samples);
       if (ret) {
-        if (actual_samples !=
-            _view->document_snapshot_source()->cur_samplelimits()) {
+        auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+        if (ret && src && actual_samples != src->cur_samplelimits()) {
           _view->viewstatus_widget()->set_rle_depth(actual_samples);
         }
       }
@@ -284,6 +299,12 @@ void ViewDataSync::receive_end() {
   _view->get_time_view()->unshow_wait_trigger();
 
   _view->limit_scale_offset();
+
+  // per-tab 显示状态：帧结束（采集收敛）→ 本视图回到 Stopped（可显示文档
+  // 快照）。None（外来采集）不动本 tab 状态。
+  auto *src = document_snapshot_source();
+  if (src)
+    set_display_status(ST_STOPPED);
 }
 
 void ViewDataSync::receive_trigger(quint64 trig_pos1) {
@@ -412,7 +433,8 @@ uint64_t ViewDataSync::pixel2index(double pixel) {
 
   /* Clamp to [0, sample_limit-1] to prevent cursor indices from exceeding
    * the valid sample range. */
-  const uint64_t sample_limit = _view->document_snapshot_source()->cur_samplelimits();
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  const uint64_t sample_limit = src ? src->cur_samplelimits() : 0;
   if (sample_limit > 0 && sampleIndex >= sample_limit)
     return sample_limit - 1;
 
@@ -425,6 +447,10 @@ void ViewDataSync::capture_init() {
     return;
   }
 
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return;
+
   int mode = _view->get_work_mode();
 
   if (mode == DSO)
@@ -432,7 +458,7 @@ void ViewDataSync::capture_init() {
   else if (!_data_source->is_repeating())
     _view->show_trig_cursor(false);
 
-  double sampletime = _view->document_snapshot_source()->cur_sampletime();
+  double sampletime = src->cur_sampletime();
   if (sampletime > 0) {
     _view->layout_delegate()->set_maxscale(sampletime / (width * View::MaxViewRate));
 
@@ -458,24 +484,28 @@ void ViewDataSync::show_region(uint64_t start, uint64_t end, bool keep) {
     return;
   }
 
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return;
+
   if (keep) {
     _view->set_all_update(true);
     _view->update();
   } else if (_data_source->get_map_zoom() == 0) {
     const double ideal_scale = (end - start) * 2.0 /
-                               _view->document_snapshot_source()->cur_snap_samplerate() /
+                               src->cur_snap_samplerate() /
                                width;
     const double new_scale = max(min(ideal_scale, _view->layout_delegate()->maxscale()), _view->layout_delegate()->minscale());
     const double new_off =
         (start + end) * 0.5 /
-            (_view->document_snapshot_source()->cur_snap_samplerate() * new_scale) -
+            (src->cur_snap_samplerate() * new_scale) -
         (width / 2.0);
     _view->set_scale_offset(new_scale, new_off);
   } else {
     const double new_scale = _view->scale();
     const double new_off =
         (start + end) * 0.5 /
-            (_view->document_snapshot_source()->cur_snap_samplerate() * new_scale) -
+            (src->cur_snap_samplerate() * new_scale) -
         (width / 2.0);
     _view->set_scale_offset(new_scale, new_off);
   }
@@ -507,7 +537,8 @@ void ViewDataSync::mode_changed() {
   // factor back in if the user later re-enters DSO.
   _view->layout_delegate()->set_dso_zoom_factor(1.0);
   if (_view->device_agent()->is_virtual()) {
-    uint64_t samplerate = _view->document_snapshot_source()->cur_snap_samplerate();
+    auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+    uint64_t samplerate = src ? src->cur_snap_samplerate() : 0;
     if (samplerate > 0)
       _view->set_scale_offset(View::WellSamplesPerPixel * 1.0 / samplerate, _view->layout_delegate()->offset());
   }
@@ -515,7 +546,10 @@ void ViewDataSync::mode_changed() {
 }
 
 void ViewDataSync::auto_set_max_scale() {
-  const double limitTime = _view->document_snapshot_source()->cur_sampletime();
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return;
+  const double limitTime = src->cur_sampletime();
   const int width = _view->get_view_width();
 
   if (width > 0) {
@@ -599,9 +633,13 @@ QString ViewDataSync::get_index_delta(uint64_t start, uint64_t end) {
   if (start == end)
     return "0";
 
+  auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return "0";
+
   uint64_t delta_sample = (start > end) ? start - end : end - start;
   return _view->get_ruler()->format_real_time(
-      delta_sample, _view->document_snapshot_source()->cur_snap_samplerate());
+      delta_sample, src->cur_snap_samplerate());
 }
 
 // =============================================================================
@@ -680,9 +718,12 @@ void ViewDataSync::resizeEvent(QResizeEvent *event) {
   }
 
   if (_view->get_work_mode() != DSO) {
-    _view->layout_delegate()->set_maxscale(_view->document_snapshot_source()->cur_sampletime() / (width * View::MaxViewRate));
-    if (_view->layout_delegate()->scale() > _view->layout_delegate()->maxscale()) {
-      _view->set_scale_offset(_view->layout_delegate()->maxscale(), _view->layout_delegate()->offset());
+    auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
+    if (src) {
+      _view->layout_delegate()->set_maxscale(src->cur_sampletime() / (width * View::MaxViewRate));
+      if (_view->layout_delegate()->scale() > _view->layout_delegate()->maxscale()) {
+        _view->set_scale_offset(_view->layout_delegate()->maxscale(), _view->layout_delegate()->offset());
+      }
     }
   } else {
     _view->layout_delegate()->set_maxscale(1e9);

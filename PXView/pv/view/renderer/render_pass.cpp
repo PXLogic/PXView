@@ -491,10 +491,10 @@ void CursorOverlayPass::render(QPainter &p, const RenderContext &ctx) {
       if (xrect.contains(hover.x(), hover.y()) &&
           qAbs(cursorX - hover.x()) <= IRenderViewport::HitCursorMargin)
         cursor->paint(p, xrect, 1,
-                      view->session().is_stopped_status());
+                      view->is_stopped_status());
       else
         cursor->paint(p, xrect, 0,
-                      view->session().is_stopped_status());
+                      view->is_stopped_status());
     }
   }
 

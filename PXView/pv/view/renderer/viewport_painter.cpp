@@ -106,11 +106,11 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   pctx.signal_height = _viewport->view().get_signalHeight();
   pctx.view_width = _viewport->view().get_view_width();
   pctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
-  // 遗留A2（阶段9 收尾）：ctx 级"可显示测量/hover"判定加 per-tab 兜底——
-  // 本 ctx 文档是显示来源（其他 ctx 采集、静止查看）时同样视为"数据完整
-  // 可测"，不再随全局执行态翻转。本 ctx 自身采集时两判定均为 false，
+  // 遗留A2（阶段9 收尾）+ 数据模型澄清：ctx 级"可显示测量/hover"判定改为
+  // per-tab 显示状态（本视图正在显示文档快照 = Stopped），不再随全局执行态
+  // 翻转。本 ctx 自身采集时 per-tab 为 Running 且 display_doc=false，
   // 与原行为一致。
-  pctx.is_stopped_status = _viewport->view().session().is_stopped_status() ||
+  pctx.is_stopped_status = _viewport->view().is_stopped_status() ||
                            _viewport->view().display_source_is_document();
   pctx.is_loop_mode = _viewport->view().session().is_loop_mode();
   pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();
@@ -204,9 +204,9 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     // 刚恢复完设备、异步事件尚未落定），也直接渲染已绑定的文档快照。
     // ST_INIT 仅在"无文档数据"时才落入 paintCursors（等待触发/首帧）。
     const bool display_doc = _viewport->view().display_source_is_document();
-    if (_viewport->view().session().is_init_status() && !display_doc) {
+    if (_viewport->view().is_init_status() && !display_doc) {
       paintCursors(p);
-    } else if (_viewport->view().session().is_stopped_status() || display_doc) {
+    } else if (_viewport->view().is_stopped_status() || display_doc) {
 #ifdef PXVIEW_DECODE_PERF
       {
         const auto _ps_t0 = std::chrono::steady_clock::now();
@@ -227,7 +227,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
         paintSignals(p, fore, back);
       else
         paintProgress(p, fore, back);
-    } else if (_viewport->view().session().is_running_status()) {
+    } else if (_viewport->view().is_running_status()) {
       if (_viewport->view().session().is_repeat_mode()) {
         paintSignals(p, fore, back);
 
@@ -289,11 +289,11 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
   pctx.signal_height = _viewport->view().get_signalHeight();
   pctx.view_width = _viewport->view().get_view_width();
   pctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
-  // 遗留A2（阶段9 收尾）：ctx 级"可显示测量/hover"判定加 per-tab 兜底——
-  // 本 ctx 文档是显示来源（其他 ctx 采集、静止查看）时同样视为"数据完整
-  // 可测"，不再随全局执行态翻转。本 ctx 自身采集时两判定均为 false，
+  // 遗留A2（阶段9 收尾）+ 数据模型澄清：ctx 级"可显示测量/hover"判定改为
+  // per-tab 显示状态（本视图正在显示文档快照 = Stopped），不再随全局执行态
+  // 翻转。本 ctx 自身采集时 per-tab 为 Running 且 display_doc=false，
   // 与原行为一致。
-  pctx.is_stopped_status = _viewport->view().session().is_stopped_status() ||
+  pctx.is_stopped_status = _viewport->view().is_stopped_status() ||
                            _viewport->view().display_source_is_document();
   pctx.is_loop_mode = _viewport->view().session().is_loop_mode();
   pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();

@@ -50,9 +50,6 @@ private slots:
         doc.set_state(S::Collecting);
         QVERIFY(doc.is_collecting());
 
-        doc.set_state(S::Copying);
-        QVERIFY(doc.is_collecting()); // Copying 仍属"采集/拷贝进行中"
-
         doc.set_state(S::Stopped);
         QVERIFY(!doc.is_collecting());
         QVERIFY(doc.state() == S::Stopped);

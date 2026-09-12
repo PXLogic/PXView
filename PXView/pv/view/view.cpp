@@ -526,7 +526,10 @@ void View::receive_trigger(quint64 trig_pos1) {
 }
 
 void View::set_trig_pos(int percent) {
-  uint64_t index = document_snapshot_source()->cur_samplelimits() * percent / 100;
+  auto *src = document_snapshot_source(); // 可为 null（外来采集）
+  if (!src)
+    return;
+  uint64_t index = src->cur_samplelimits() * percent / 100;
 
   if (_data_sync->data_source_ptr()->have_view_data() == false || _data_sync->data_source_ptr()->is_working()) {
     set_trig_cursor_posistion(index);

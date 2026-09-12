@@ -25,9 +25,12 @@
 #define PXVIEW_PV_VIEW_VIEW_DATA_SYNC_H
 
 #include <cstdint>
+#include <atomic>
 
 #include <QtGlobal>
 #include <QElapsedTimer>  // quint64
+
+#include "pv/base/pxvdef.h" // ST_INIT/ST_RUNNING/ST_STOPPED
 
 class QObject;
 class QEvent;
@@ -111,6 +114,15 @@ public:
   // 阶段9：本 ctx 文档是否为当前显示来源（per-tab 裁决选中且有数据）。
   // View 绘制分支据此退役对全局 ST_* 的显示语义依赖。
   bool document_is_display_source();
+  // -- per-tab 显示状态（数据模型重构澄清：显示/执行双轨收敛）-----------
+  // 值域复用 pxvdef.h 的 ST_INIT/ST_RUNNING/ST_STOPPED。全局 _device_status
+  // 保留为 CaptureEngine 执行层状态；本字段表达"本视图正在显示什么"，
+  // 由 restore_view_data 裁决与帧事件维护，读取点全部走本类。
+  int display_status() const { return _display_status.load(std::memory_order_acquire); }
+  void set_display_status(int st) { _display_status.store(st, std::memory_order_release); }
+  bool is_stopped_status() const { return display_status() == ST_STOPPED; }
+  bool is_init_status() const { return display_status() == ST_INIT; }
+  bool is_running_status() const { return display_status() == ST_RUNNING; }
   bool back_ready() const { return _back_ready; }
   void set_back_ready(bool v) { _back_ready = v; }
   QElapsedTimer &data_updated_timer() { return _data_updated_timer; }
@@ -122,6 +134,7 @@ private:
   pv::data::SessionDocument *_document = nullptr;
   bool _back_ready = false;
   QElapsedTimer _data_updated_timer;
+  std::atomic<int> _display_status{ST_INIT}; // per-tab 显示状态（非执行态）
 
   // --- DRY helpers (eliminate repeated switch-case boilerplate) ---
   // Uses Signal::set_data_from_source() polymorphism instead of per-type
