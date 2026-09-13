@@ -217,6 +217,20 @@ bool ViewDataSync::document_is_display_source() {
   // per-tab 裁决（document_snapshot_source）选中文档且文档有数据。
   // 本 ctx 自身采集中返回 false（应走实时分支）；其他 ctx 采集或静止时
   // 为 true——渲染不依赖全局 ST_*。
+  //
+  // 等待触发窗口修复：非 stream 模式下裁决器规则 1 的 global_working 含
+  // is_realtime_refresh()（stream 才为 true），规则 2 又被文档中【上一次
+  // 采集的残留数据】命中 → 返回 Document → 旧波形被当作显示真相，
+  // paintProgress（进度圈 + "Waiting for Trigger!"）永不执行。本 ctx 是
+  // 采集 owner 时文档数据即将被本帧零拷贝覆盖，属于陈旧数据，必须返回
+  // false 让渲染走 running/进度分支。repeat 模式帧间依赖显示上一帧数据
+  // （paintSignals），明确豁免。
+  if (_document && _document->has_data() && !_view->session().is_repeat_mode()) {
+    auto *session = _view->session_ptr();
+    if (session && session->document_registry() &&
+        session->document_registry()->get_capture_owner_document() == _document)
+      return false;
+  }
   return _document && _document->has_data() &&
          document_snapshot_source() == _document;
 }
@@ -442,6 +456,19 @@ uint64_t ViewDataSync::pixel2index(double pixel) {
 }
 
 void ViewDataSync::capture_init() {
+  // 本 ctx 发起的采集开始：per-tab 显示状态立即进入 Running。渲染分支
+  // （viewport_painter）先判 is_stopped_status() 再判 display_doc——若停留
+  // 在上次采集结束时的 Stopped，等待触发窗口（首包前，frame_began 未触发）
+  // 会走 paintSignals 画旧波形，进度圈/"Waiting for Trigger!" 不出现。
+  // 置 Running 恢复 per-tab 化之前"采集中全局即 ST_RUNNING"的语义。
+  // 仅当本文档是本次采集 owner 时置位（MCP 发起、当前 tab 非 owner 时不
+  // 污染其显示状态）。Prev 事件经 broadcast_async 排队，此刻 exec_capture
+  // 已返回、owner 已 acquire，判定可靠。
+  auto *session = _view->session_ptr();
+  if (session && session->document_registry() &&
+      session->document_registry()->get_capture_owner_document() == _document)
+    set_display_status(ST_RUNNING);
+
   int width = _view->get_view_width();
   if (width == 0) {
     return;

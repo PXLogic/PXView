@@ -1233,6 +1233,24 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // INVARIANT: _ch_fraction == 0, _byte_fraction == 0, _ring_sample_count % Scale == 0
   assert(_ch_fraction == 0);
   assert(_byte_fraction == 0);
+  // Mixed-format capture: soft-trigger pre-trigger data arrives as
+  // LA_SPLIT_DATA (sample-interleaved — generic soft-trigger.c sends the
+  // pre-trigger ring buffer with format unset) and advances _ring_sample_count
+  // by an arbitrary amount (e.g. 16 samples when the trigger fires mid-chunk).
+  // The following LA_CROSS_DATA payloads then violate the 64-alignment
+  // invariant and the assert below fired as a crash dialog (2nd capture with
+  // trigger enabled). Re-anchor to the chunk boundary instead: dropping the
+  // partial (<64) pre-trigger samples keeps post-trigger CROSS chunks
+  // contiguous — an acceptable loss for a sub-chunk tail.
+  if (_ring_sample_count % Scale != 0) {
+    const uint64_t rem = _ring_sample_count % Scale;
+    pxv_warn("append_cross_payload: _ring_sample_count=%llu not %d-aligned "
+             "(mixed SPLIT/CROSS capture after soft trigger); re-anchoring, "
+             "dropping %llu partial samples",
+             (unsigned long long)_ring_sample_count, (int)Scale,
+             (unsigned long long)rem);
+    _ring_sample_count -= rem;
+  }
   assert(_ring_sample_count % Scale == 0);
 
   uint64_t align_sample_count = _ring_sample_count;

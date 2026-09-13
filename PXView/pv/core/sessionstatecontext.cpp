@@ -197,7 +197,7 @@ uint16_t SessionStateContext::get_ch_num(int type) {
   uint16_t analog_ch_num = 0;
 
   if (_device_agent.have_instance()) {
-    for (auto m : _signal_models) {
+    for (auto m : signal_models_snapshot()) {
       if (!m->enabled())
         continue;
 
@@ -250,7 +250,7 @@ _buffers->capture_data()->get_dso()->set_samplerate(samplerate);
   int mode = _device_agent.get_work_mode();
 
   if (mode == DSO) {
-    for (auto m : _signal_models) {
+    for (auto m : signal_models_snapshot()) {
       if (m->type() == SR_CHANNEL_DSO) {
         _buffers->capture_data()->get_dso()->set_measure_voltage_factor(
             (uint64_t)m->vfactor(), m->index());
@@ -368,7 +368,7 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
   }
 
   bool any_triggered = false;
-  for (const auto &m : _signal_models) {
+  for (const auto &m : signal_models_snapshot()) {
     if (!m || m->type() != SR_CHANNEL_LOGIC)
       continue;
 

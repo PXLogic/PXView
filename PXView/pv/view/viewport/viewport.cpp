@@ -774,7 +774,10 @@ void Viewport::on_trigger_timer() {
     }
   }
 
-  if (_view.get_work_mode() == DSO) {
+  // LOGIC 等待触发窗口没有数据流驱动重绘（buffer 模式首包前无 DataUpdated），
+  // 进度圈的出现与三点动画都依赖本定时器刷新（333ms ≈ 3fps，仅等待期运行，
+  // 首包到达即 stop_trigger_timer）。
+  if (_view.get_work_mode() == DSO || _view.is_logic_rendering_mode()) {
     update(UpdateEventType::UPDATE_EV_GENERIC);
   }
 }
