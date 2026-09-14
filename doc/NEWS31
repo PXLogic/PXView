@@ -7,6 +7,26 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
 
+    PXView V1.6.3修改
+    时间：2026年9月14日
+    变更如下：
+
+    【问题修复】
+    *修复等待触发窗口（采集首包到达前）多处显示异常：
+      - 逻辑渲染模式下等待触发窗口无数据流驱动重绘，进度圈与三点动画不显示：等待触发定时器（333ms）原先仅在 DSO 模式触发 update()，而 LOGIC 等待期没有 DataUpdated 事件驱动重绘，刷新条件扩展为 DSO 或逻辑渲染模式（viewport.cpp）
+      - 修复等待触发期间显示上一次采集的旧波形：本 ctx 为采集 owner 时，文档中残留的上一代数据即将被本帧零拷贝覆盖，属陈旧数据，显示源裁决 document_is_display_source() 须返回 false 以走 running/进度分支；repeat 模式帧间依赖显示上一帧数据（paintSignals），明确豁免（view_data_sync.cpp）
+      - 修复首包到达前未进入 Running 态：capture_init() 在本文档为本次采集 owner 时立即置 per-tab 显示状态为 ST_RUNNING（此前停留在上次采集结束的 Stopped，而渲染先判 is_stopped_status() 再判 display_doc，会走 paintSignals 画旧波形，进度圈与 "Waiting for Trigger!" 不出现）（view_data_sync.cpp）
+    *修复混合格式（SPLIT/CROSS）捕获开启触发时第二帧 64 对齐断言失败并弹出崩溃框：软触发的前触发数据以 LA_SPLIT_DATA（采样交织）到达，把 _ring_sample_count 推进任意值（触发落在块中时如 16 个样本），随后的 LA_CROSS_DATA 破坏对齐不变式；改为在 append_cross_payload() 中重锚到块边界（丢弃 <64 的部分前触发样本）并输出告警日志，保持后触发 CROSS 块连续（logicsnapshot.cpp）
+    *修复遍历 _signal_models 期间修改容器导致的崩溃：通道数统计 get_ch_num()、DSO 测量电压系数同步、触发同步 sync_trigger_to_libsigrok() 三处改为遍历 signal_models_snapshot() 快照（sessionstatecontext.cpp）
+
+    【构建与工程】
+    *版本号提升到 1.6.3（CMakeLists.txt、README 版本徽章、NSIS 安装脚本、CI 默认版本）
+    *修复 macOS 构建 libzip 依赖查找失败（CMake 配置报 "Please install libzip!"）：zlib 为 keg-only，zlib.pc 不在 pkgconf 默认搜索路径，PKG_CONFIG_PATH 补充 $(brew --prefix zlib)/lib/pkgconfig（build.yml、macos-debug.yml）
+
+    【测试与 CI】
+    *macOS CI 运行器由 macos-14 迁移至 macos-15（macos-14 将于 2026-11-02 退役），同步更新工作流内注释（build.yml、macos-debug.yml）
+    *修复 build.yml 开头双重 UTF-8 BOM 导致的工作流校验失败（报 "Required property is missing: jobs"）：第二个 BOM 变成首行前不可见字符，删除重复 BOM、保留单个编码标记
+
     PXView V1.6.2修改
     时间：2026年9月12日
     变更如下：
