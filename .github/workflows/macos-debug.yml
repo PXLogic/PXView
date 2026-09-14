@@ -90,7 +90,9 @@ jobs:
           rm -rf build && mkdir -p build && cd build
           export LDFLAGS="-L$(brew --prefix gettext)/lib"
           export CPPFLAGS="-I$(brew --prefix gettext)/include"
-          export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          # zlib 是 keg-only,zlib.pc 不在 pkgconf 默认搜索路径;libzip.pc 依赖 zlib,
+          # 不加此路径 pkgconf 解析 libzip 失败导致 CMake 配置报 "Please install libzip!"
+          export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
           echo "BUILD_TYPE=$BUILD_TYPE"
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \

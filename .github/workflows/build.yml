@@ -10,7 +10,7 @@ on:
       version:
         description: 'Version number for package naming (e.g. 1.5.4)'
         required: true
-        default: '1.6.2'
+        default: '1.6.3'
       targets:
         description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
@@ -86,7 +86,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.2" >> $GITHUB_OUTPUT
+            echo "value=1.6.3" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -373,7 +373,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.2" >> $GITHUB_OUTPUT
+            echo "value=1.6.3" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -423,7 +423,9 @@ jobs:
           rm -rf build && mkdir -p build && cd build
           export LDFLAGS="-L$(brew --prefix gettext)/lib"
           export CPPFLAGS="-I$(brew --prefix gettext)/include"
-          export PKG_CONFIG_PATH="$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          # zlib 是 keg-only,zlib.pc 不在 pkgconf 默认搜索路径;libzip.pc 依赖 zlib,
+          # 不加此路径 pkgconf 解析 libzip 失败导致 CMake 配置报 "Please install libzip!"
+          export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
           OSX_ARCH_FLAG=""
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
@@ -789,7 +791,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.2" >> $GITHUB_OUTPUT
+            echo "value=1.6.3" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
