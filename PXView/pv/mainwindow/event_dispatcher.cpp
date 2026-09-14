@@ -574,23 +574,54 @@ void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOp
 }
 
 // --- Device options group ---
+#include <fstream>
+static void dock_dbg(const std::string &s) {
+    std::ofstream f("C:/Users/admin/AppData/Local/Temp/pxv_dock_dbg.log",
+                    std::ios::app);
+    if (f) {
+        f << "[" << QDateTime::currentMSecsSinceEpoch() << "] " << s << "\n";
+    }
+}
 void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &ev) {
+  pxv_info("on_device_options_updated: from_external=%d", (int)ev.from_external);
+  dock_dbg(std::string("on_device_options_updated: from_external=") +
+           std::to_string((int)ev.from_external));
   if (ev.from_external) {
-    // 修复（MCP/GUI 不同步）：MCP 等外部路径写驱动后，dock 属性控件不会
-    // 自己更新 —— device_updated() 在绑定已存在时是空转，必须全量重读。
-    // 采样栏同理（采样率/深度经 MCP 修改后原先不刷新）。
-    if (_window->dock_manager()->device_options_widget())
-      _window->dock_manager()->device_options_widget()->update_view();
-    if (_window->dock_manager()->trigger_widget())
-      _window->dock_manager()->trigger_widget()->device_updated();
-    _window->sampling_bar()->reload();
-    if (_window->dock_manager()->measure_widget())
-      _window->dock_manager()->measure_widget()->reload();
-  } else {
-    _window->dock_manager()->trigger_widget()->device_updated();
-    _window->dock_manager()->device_options_widget()->device_updated();
-    _window->dock_manager()->measure_widget()->reload();
+    // 修复（MCP/GUI 不同步）：外部写入的刷新必须延迟一拍执行。同一个
+    // DeviceOptionsUpdated 广播会依次派发 SigSession 的 reload()（重建
+    // SignalModel）与本 handler——若在本 handler 里立刻 update_view/
+    // rebuild_signals，读到的是 reload 前的旧模型（被禁通道仍在旧列表/
+    // 旧状态中）→ dock 网格、viewport 分组卡片残留旧色块。singleShot(0)
+    // 排到队列下一拍，reload 一定已完成，全部读到最终状态。
+    QTimer::singleShot(0, _window, [this]() {
+      dock_dbg("deferred refresh: begin");
+      if (_window->dock_manager()->device_options_widget())
+        _window->dock_manager()->device_options_widget()->update_view();
+      dock_dbg("deferred refresh: dock update_view done");
+      if (_window->dock_manager()->trigger_widget())
+        _window->dock_manager()->trigger_widget()->device_updated();
+      _window->sampling_bar()->reload();
+      if (_window->dock_manager()->measure_widget())
+        _window->dock_manager()->measure_widget()->reload();
+
+      pv::TabContext *ctx = _window->current_context();
+      if (ctx && ctx->document()) {
+        ctx->document()->save_signal_config(
+            _window->session()->get_signal_models(),
+            _window->build_channel_layout(safe_current_view()));
+      }
+      dock_dbg("deferred refresh: save_signal_config done");
+      if (auto *v = safe_current_view()) {
+        v->rebuild_signals();
+        v->signals_changed(nullptr);
+      }
+      dock_dbg("deferred refresh: rebuild_signals done");
+    });
+    return;
   }
+  _window->dock_manager()->trigger_widget()->device_updated();
+  _window->dock_manager()->device_options_widget()->device_updated();
+  _window->dock_manager()->measure_widget()->reload();
 
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {

@@ -620,9 +620,13 @@ void SessionService::notify_device_options_updated() {
     // 写配置后的广播语义一致。
     // 采集中跳过：GUI 等价操作同样被禁止，且事件触发的 reload() 会破坏
     // 采集状态（历史教训：采集中模型重建引发崩溃）。
-    if (_session && !_session->is_working())
+    if (_session && !_session->is_working()) {
+        pxv_info("SessionService: MCP config write -> broadcast DeviceOptionsUpdated(from_external)");
         _session->broadcast_async<pv::interface::DeviceOptionsUpdated>(
             {false, true});
+    } else {
+        pxv_warn("SessionService: MCP config write during capture, skip GUI sync broadcast");
+    }
 }
 
 void SessionService::sync_capture_ratio_to_core(uint64_t ratio) {
@@ -1437,6 +1441,9 @@ Result<void> SessionService::set_channel_enabled(int16_t index, bool enabled) {
             if (m)
                 m->set_enabled(enabled);
         }
+        // 广播 typed DeviceOptionsUpdated → GUI 刷新 dock 网格/viewport
+        // （此前漏掉，dock 数字通道网格与 viewport 分组卡片不同步）。
+        notify_device_options_updated();
         broadcast_event(ServiceEvent::ChannelConfigChanged,
                         {{"field", "enabled"},
                          {"channel_index", std::to_string(index)},
@@ -1464,6 +1471,8 @@ Result<void> SessionService::set_channel_name(int16_t index,
             if (m)
                 m->set_name(name);
         }
+        // dock 数字通道网格的标签名也依赖重建刷新
+        notify_device_options_updated();
         broadcast_event(ServiceEvent::ChannelConfigChanged,
                         {{"field", "name"},
                          {"channel_index", std::to_string(index)},

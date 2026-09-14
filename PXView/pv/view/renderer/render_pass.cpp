@@ -210,17 +210,23 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
     return;
 
   // Sort group indices by their first trace's v_offset
+  // 排序键取组内第一个"可绘制"通道（enabled/DSO 且已完成布局）的 v_offset。
+  // traces[0] 可能是 disabled（陈旧偏移）或未布局（INT_MAX 哨兵）的通道，
+  // 用它排序会导致卡片绘制顺序错乱、互相覆盖。
+  auto first_drawable_offset = [&groups = *ctx.groups](size_t gi) -> double {
+    for (auto gt : groups[gi].traces) {
+      if ((gt->enabled() || gt->as_dso()) &&
+          gt->get_v_offset() != INT_MAX)
+        return gt->get_v_offset();
+    }
+    return 1e9;
+  };
   std::vector<size_t> group_indices(ctx.groups->size());
   for (size_t i = 0; i < ctx.groups->size(); i++)
     group_indices[i] = i;
   std::sort(group_indices.begin(), group_indices.end(),
-            [&groups = *ctx.groups](size_t a, size_t b) {
-              if (groups[a].traces.empty())
-                return false;
-              if (groups[b].traces.empty())
-                return true;
-              return groups[a].traces[0]->get_v_offset() <
-                     groups[b].traces[0]->get_v_offset();
+            [&first_drawable_offset](size_t a, size_t b) {
+              return first_drawable_offset(a) < first_drawable_offset(b);
             });
 
   for (size_t idx = 0; idx < group_indices.size(); idx++) {
@@ -228,9 +234,25 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
     if (group.traces.empty())
       continue;
 
+    // 与 Header 画卡片规则一致（header.cpp 同名逻辑）：跳过 disabled 的
+    // 非 DSO 通道。compute_signal_groups 有意把 disabled 的 LOGIC 通道留在
+    // 分组内（view_index 归一化需要），但 disabled 通道的 v_offset 不再被
+    // layout_time_signals 更新（保持陈旧值），若不过滤会画出与 header 行
+    // 不对应的残留色块并污染分组边界。
+    std::vector<Trace *> drawable;
+    drawable.reserve(group.traces.size());
+    for (auto gt : group.traces) {
+      // INT_MAX 是"尚未布局"的哨兵值（Trace 构造初始值），参与边界计算
+      // 会把卡片撑到无穷远。
+      if ((gt->enabled() || gt->as_dso()) && gt->get_v_offset() != INT_MAX)
+        drawable.push_back(gt);
+    }
+    if (drawable.empty())
+      continue;
+
     double groupTop = 1e9;
     double groupBottom = -1e9;
-    for (auto gt : group.traces) {
+    for (auto gt : drawable) {
       double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
                         IRenderView::SignalMargin;
       double traceBottom = gt->get_v_offset() +
@@ -255,8 +277,8 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
       p.setClipPath(groupPath);
       p.setPen(Qt::NoPen);
 
-      for (size_t i = 0; i < group.traces.size(); i++) {
-        auto gt = group.traces[i];
+      for (size_t i = 0; i < drawable.size(); i++) {
+        auto gt = drawable[i];
         double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
                       IRenderView::SignalMargin;
         double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 +
@@ -264,7 +286,7 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
 
         if (i == 0)
           tTop -= IRenderView::GroupGap * 0.5;
-        if (i == group.traces.size() - 1)
+        if (i == drawable.size() - 1)
           tBottom += IRenderView::GroupGap * 0.5;
 
         QRectF traceRect(-IRenderView::GroupCardRadius, tTop,

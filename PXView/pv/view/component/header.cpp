@@ -172,14 +172,21 @@ void Header::paintEvent(QPaintEvent *) {
       std::vector<size_t> group_indices(groups.size());
       for (size_t i = 0; i < groups.size(); i++)
         group_indices[i] = i;
+      // 排序键取组内第一个"可绘制"通道（enabled/DSO 且已完成布局）的
+      // v_offset —— traces[0] 可能是 disabled（陈旧偏移）或未布局
+      // （INT_MAX 哨兵）的通道，用它排序会导致卡片顺序错乱。
+      // 与 GroupCardBackgroundPass::render 的排序规则保持一致。
+      auto first_drawable_offset = [&groups](size_t gi) -> double {
+        for (auto gt : groups[gi].traces) {
+          if ((gt->enabled() || gt->as_dso()) &&
+              gt->get_v_offset() != INT_MAX)
+            return gt->get_v_offset();
+        }
+        return 1e9;
+      };
       std::sort(group_indices.begin(), group_indices.end(),
-                [&groups](size_t a, size_t b) {
-                  if (groups[a].traces.empty())
-                    return false;
-                  if (groups[b].traces.empty())
-                    return true;
-                  return groups[a].traces[0]->get_v_offset() <
-                         groups[b].traces[0]->get_v_offset();
+                [&first_drawable_offset](size_t a, size_t b) {
+                  return first_drawable_offset(a) < first_drawable_offset(b);
                 });
 
       for (size_t idx = 0; idx < group_indices.size(); idx++) {
@@ -190,8 +197,10 @@ void Header::paintEvent(QPaintEvent *) {
         double groupBottom = -1e9;
         for (auto gt : group.traces) {
           // 跳过 disabled 通道：其 v_offset 未被 layout 更新，
-          // 会干扰分组卡片的边界计算
-          if (!gt->enabled() && !gt->as_dso())
+          // 会干扰分组卡片的边界计算；INT_MAX 是"尚未布局"哨兵值，
+          // 参与边界计算会把卡片撑到无穷远。
+          if ((!gt->enabled() && !gt->as_dso()) ||
+              gt->get_v_offset() == INT_MAX)
             continue;
           double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
                             View::SignalMargin;
@@ -216,21 +225,28 @@ void Header::paintEvent(QPaintEvent *) {
           painter.setClipPath(groupPath);
           painter.setPen(Qt::NoPen);
           
-          // 预计算第一个和最后一个 enabled trace 的索引，
-          // 用于正确应用 GroupGap 边缘扩展
+          // 预计算第一个和最后一个可绘制 trace 的索引，
+          // 用于正确应用 GroupGap 边缘扩展（跳过 disabled 与未布局通道）
           int firstEnabled = -1, lastEnabled = -1;
           for (size_t i = 0; i < group.traces.size(); i++) {
             auto gt = group.traces[i];
-            if (gt->enabled() || gt->as_dso()) {
+            if ((gt->enabled() || gt->as_dso()) &&
+                gt->get_v_offset() != INT_MAX) {
               if (firstEnabled < 0)
                 firstEnabled = (int)i;
               lastEnabled = (int)i;
             }
           }
+          if (firstEnabled < 0) {
+            // 组内无可绘制通道：跳过本组（与边界计算的全跳过语义一致）
+            painter.restore();
+            continue;
+          }
           for (size_t i = 0; i < group.traces.size(); i++) {
             auto gt = group.traces[i];
-            // 跳过 disabled 通道
-            if (!gt->enabled() && !gt->as_dso())
+            // 跳过 disabled 与未布局（INT_MAX 哨兵）通道
+            if ((!gt->enabled() && !gt->as_dso()) ||
+                gt->get_v_offset() == INT_MAX)
               continue;
             double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 - View::SignalMargin;
             double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 + View::SignalMargin;
