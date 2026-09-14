@@ -597,8 +597,33 @@ jobs:
           # 签名完成后生成 dmg
           echo "=== hdiutil (DMG 生成) ==="
           SECS_HD=$SECONDS
-          hdiutil create -volname PXView -srcfolder install.dir/PXView.app \
-            -ov -format UDZO "install.dir/PXView-macOS-${{ matrix.arch }}-${{ steps.version.outputs.value }}.dmg"
+          DMG="install.dir/PXView-macOS-${{ matrix.arch }}-${{ steps.version.outputs.value }}.dmg"
+
+          # 同名卷残留挂载或上轮残留 DMG 会导致 "Resource busy" — 先清理
+          if [ -d "/Volumes/PXView" ]; then
+            echo "Detaching stale volume /Volumes/PXView"
+            hdiutil detach "/Volumes/PXView" -force || true
+          fi
+          rm -f "$DMG"
+
+          # macOS runner 上 hdiutil 偶发 "Resource busy"(磁盘仲裁/Spotlight
+          # 短暂占用),属已知 flake — 线性退避重试 5 次
+          HD_OK=0
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname PXView -srcfolder install.dir/PXView.app \
+                 -ov -format UDZO "$DMG"; then
+              HD_OK=1
+              break
+            fi
+            echo "hdiutil create attempt $attempt failed — retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+            hdiutil detach "/Volumes/PXView" -force 2>/dev/null || true
+            rm -f "$DMG"
+          done
+          if [ "$HD_OK" -ne 1 ]; then
+            echo "ERROR: hdiutil create failed after 5 attempts"
+            exit 1
+          fi
           echo "hdiutil 耗时: $((SECONDS - SECS_HD))s"
           ls -la install.dir/*.dmg
 
