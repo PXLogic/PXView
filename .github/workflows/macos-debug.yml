@@ -6,7 +6,7 @@
 #
 # 为什么用 lldb 而不是 gdb:
 #   - macOS 上 gdb 需要额外 codesign,且非 Apple 分发,基本不可用;
-#   - lldb 是 Apple 官方 (clang/LLVM) 调试器,macos-14 runner 自带。
+#   - lldb 是 Apple 官方 (clang/LLVM) 调试器,macos-15 runner 自带。
 #
 # 触发方式:
 #   - 推荐: push 到 main 分支即自动构建并抓取崩溃堆栈(无需手动操作)
@@ -17,7 +17,7 @@ name: macOS Debug (lldb backtrace)
 
 # 默认不自动构建：本工作流需在 macOS runner 上完整编译 PXView 再跑 lldb，
 # 成本高。改为仅 manual dispatch 时构建并上传 backtrace 产物；
-# push 到 main 不再自动触发（避免每次提交都占用 macos-14 runner）。
+# push 到 main 不再自动触发（避免每次提交都占用 macos-15 runner）。
 # 如需恢复自动构建，把下面注释掉的 push 段恢复即可。
 on:
   # push:
@@ -46,7 +46,7 @@ on:
 
 jobs:
   macos-debug:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 120
     steps:
       - name: Resolve ref

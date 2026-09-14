@@ -1,4 +1,4 @@
-﻿name: PXView Build
+﻿﻿name: PXView Build
 
 on:
   workflow_dispatch:
@@ -345,7 +345,8 @@ jobs:
         # and GitHub retired the macos-13 Intel runner, making it unbuildable on
         # GitHub-hosted runners.
         arch: [ARM64]
-    runs-on: macos-14
+    # macos-14 runner 于 2026-11-02 退役,迁移到 macos-15 (仍为 arm64)
+    runs-on: macos-15
     steps:
       - name: Resolve ref
         id: ref
