@@ -146,6 +146,9 @@ void SignalConfigStore::save_signal_config(
     return;
   }
 
+  // 捕获旧 work_mode（供 view_index 继承判断），必须在下方覆盖前读取。
+  const int old_work_mode = _signal_config.work_mode;
+
   _signal_config.work_mode = agent->get_work_mode();
 
   /* Task 10/Phase 3: read operation_mode/channel_mode as strings (driver
@@ -160,8 +163,10 @@ void SignalConfigStore::save_signal_config(
 
   // 保存旧配置的布局信息，用于为不在 channel_layout 中的通道（被禁用且
   // 已从 View 的 _own_signals 中移除的通道）保留其 v_offset / own_height。
-  // view_index 不继承（写 -1），由 normalize_view_indices() 按类型 + index
-  // 统一赋值，防止过期 view_index 跨模式传播导致通道交错排序。
+  // view_index 的继承见下方 else 分支：仅在 work_mode 与通道类型都未变化时
+  // 继承（修复禁用通道重新启用后排到尾部的问题），跨模式仍写 -1 由
+  // normalize_view_indices() 按类型 + index 统一赋值，防止过期 view_index
+  // 跨模式传播导致通道交错排序。
   std::map<int, ChannelConfig> old_channels;
   for (const auto &ch : _signal_config.channels)
     old_channels[ch.index] = ch;
@@ -283,10 +288,23 @@ void SignalConfigStore::save_signal_config(
     } else {
       auto old_it = old_channels.find(cfg.index);
       if (old_it != old_channels.end()) {
-        // 只继承 v_offset / own_height，不继承 view_index
-        cfg.view_index = -1;
+        // 继承 v_offset / own_height。
         cfg.v_offset = old_it->second.v_offset;
         cfg.own_height = old_it->second.own_height;
+        // 修复（禁用通道重新启用后排到尾部）：通道被禁用期间会被
+        // SigSession::reload() 从 SignalModel 列表移除（reload 只为 enabled
+        // 通道建模型），View 侧 Removed 事件随之删除其 view::Signal ——
+        // 之后任何 save_signal_config 的 channel_layout 里都没有该通道。
+        // 原逻辑此时把 view_index 强制写 -1，重新启用后归一化把它排到
+        // 所有显式 view_index 通道之后（尾部）。
+        // 现在仅在 work_mode 与通道类型都未变化时继承 view_index，保持
+        // 原防跨模式过期传播的设计意图（跨模式仍写 -1）。
+        if (old_work_mode == mode && old_it->second.type == cfg.type &&
+            old_it->second.view_index >= 0) {
+          cfg.view_index = old_it->second.view_index;
+        } else {
+          cfg.view_index = -1;
+        }
       }
     }
 

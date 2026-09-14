@@ -487,9 +487,14 @@ void ViewSignalSync::layout_time_signals(
   int label_size = 0;
 
   for (auto t : time_traces) {
-    if (t->as_dso() || t->visible())
+    // 修复（禁用通道占位）：header 只画 enabled() 的行（header.cpp），布局
+    // 却按 visible() 分配高度 —— MCP configure_channel 禁用 / dock "全部禁用"
+    // 只改 enabled 不改 visible 时，禁用通道仍占一行高度，波形区出现空位
+    // （并触发 rasterize_logic_channel 对空数据行的无效绘制）。布局与 header
+    // 统一按 enabled() 跳过（DSO 通道保持常显）。
+    if (t->as_dso() || (t->visible() && t->enabled()))
       total_rows += t->rows_size();
-    if (t->rows_size() != 0)
+    if (t->rows_size() != 0 && (t->as_dso() || (t->visible() && t->enabled())))
       label_size++;
   }
 
@@ -581,7 +586,7 @@ void ViewSignalSync::layout_time_signals(
     if (t->rows_size() == 0)
       continue;
 
-    if (!t->as_dso() && !t->visible())
+    if (!t->as_dso() && (!t->visible() || !t->enabled()))
       continue;
 
     int trace_group_id = -1;

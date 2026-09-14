@@ -90,6 +90,14 @@ void Signal::set_colour(QColor colour) {
 }
 
 void Signal::on_appearance_changed() {
+  // 修复（MCP/GUI 不同步）：MCP configure_channel 改名等外部路径直接改
+  // Core SignalModel，不经过 Signal::set_name，而 header 绘制用的是
+  // Trace 缓存的 _name —— 重绘前必须从模型回读，否则画的是旧名。
+  if (_model) {
+    const QString model_name = QString::fromStdString(_model->name());
+    if (get_name() != model_name)
+      Trace::set_name(model_name);
+  }
   if (_view) {
     _view->request_repaint();
     _view->header_updated();
@@ -97,6 +105,14 @@ void Signal::on_appearance_changed() {
 }
 
 void Signal::on_visibility_changed() {
+  // 修复（MCP/GUI 不同步）：同上，MCP configure_channel 启用/禁用直接改
+  // 模型，header 勾选框读的是本对象缓存的 _local_enabled —— 回读模型。
+  // 同时同步 _visible（paint_label/layout 以 visible 决定是否画行/占位），
+  // 与 apply_model_properties 的 set_enabled+set_visible 配对语义一致。
+  if (_model) {
+    _local_enabled = _model->enabled();
+    set_visible(_local_enabled);
+  }
   if (_view)
     _view->signals_changed(this);
 }

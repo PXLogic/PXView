@@ -574,10 +574,23 @@ void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOp
 }
 
 // --- Device options group ---
-void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &) {
-  _window->dock_manager()->trigger_widget()->device_updated();
-  _window->dock_manager()->device_options_widget()->device_updated();
-  _window->dock_manager()->measure_widget()->reload();
+void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &ev) {
+  if (ev.from_external) {
+    // 修复（MCP/GUI 不同步）：MCP 等外部路径写驱动后，dock 属性控件不会
+    // 自己更新 —— device_updated() 在绑定已存在时是空转，必须全量重读。
+    // 采样栏同理（采样率/深度经 MCP 修改后原先不刷新）。
+    if (_window->dock_manager()->device_options_widget())
+      _window->dock_manager()->device_options_widget()->update_view();
+    if (_window->dock_manager()->trigger_widget())
+      _window->dock_manager()->trigger_widget()->device_updated();
+    _window->sampling_bar()->reload();
+    if (_window->dock_manager()->measure_widget())
+      _window->dock_manager()->measure_widget()->reload();
+  } else {
+    _window->dock_manager()->trigger_widget()->device_updated();
+    _window->dock_manager()->device_options_widget()->device_updated();
+    _window->dock_manager()->measure_widget()->reload();
+  }
 
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {
@@ -585,6 +598,10 @@ void SessionEventDispatcher::on_device_options_updated(const pv::interface::Devi
         _window->session()->get_signal_models(), _window->build_channel_layout(safe_current_view()));
   }
 
+  // 外部写入后 reload() 已重建 SignalModel —— 必须同步 rebuild View 的
+  // Signal 对象（重建时按 model->enabled() 决定显示/占位），否则 MCP
+  // configure_channel 禁用通道后 header 里通道仍占位（原 from_external
+  // 分支提前 return 跳过了这一步）。
   if (auto *v = safe_current_view()) {
     v->rebuild_signals();
     v->signals_changed(nullptr);
@@ -822,6 +839,9 @@ void SessionEventDispatcher::on_simple_trigger_changed(const pv::interface::Simp
 void SessionEventDispatcher::on_trigger_config_changed(const pv::interface::TriggerConfigChanged &) {
   if (_window->dock_manager()->trigger_widget())
     _window->dock_manager()->trigger_widget()->update_view();
+  // MCP set_dso_trigger_config / DSO 配置变更也经此广播，需同步刷新 DSO 触发 dock
+  if (_window->dock_manager()->dso_trigger_widget())
+    _window->dock_manager()->dso_trigger_widget()->update_view();
 }
 
 // --- Empty-body / pre-broadcast overrides ---

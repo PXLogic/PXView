@@ -7,6 +7,37 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
 
+    PXView V1.6.4修改
+    时间：2026年9月15日
+    变更如下：
+
+    【问题修复】
+    *修复 MCP 配置写入与 Qt GUI 不同步（系统性梳理全部 10 个写配置类 MCP 工具后统一修复）：
+      - TriggerDock::update_view() 原为空函数，TriggerConfigChanged 广播链（MCP configure_trigger / DeviceOptionsDock CAPTURE_RATIO 同步钩子）到达 GUI 后什么都不做，滑条/阶段控件不回填；实现改为统一走 refresh_ui_from_core()（triggerdock.cpp）
+      - on_trigger_config_changed 补刷新 DsoTriggerDock，MCP set_dso_trigger_config 新增广播 typed TriggerConfigChanged（event_dispatcher.cpp、session_service.cpp）
+      - MCP 通用 set_config_*（string/bool/uint64/int32/double/byte）原只写驱动零广播，DeviceOptionsDock 所有键均不刷新；新增 notify_device_options_updated() 成功后广播 typed DeviceOptionsUpdated（采集中跳过，避免 reload() 破坏采集状态）（session_service.cpp、session_service.h）
+      - MCP configure_probe 旧实现只下发 PROBE_FACTOR，vdiv/coupling/mapDefault 三个参数形同虚设；且 PROBE_FACTOR/PROBE_VDIV 驱动声明类型为 SR_T_UINT64，原 double 读写会被 hwdriver 层类型检查静默拒绝；补齐 4 键下发（vdiv 伏特→毫伏换算、API 耦合 AC=0/DC=1→驱动 0=GND/1=DC/2=AC 映射）、改用 DeviceAgent typed wrapper 读写并同步 Core SignalModel（session_service.cpp）
+      - MCP configure_channel 的 enabled/name 原只写驱动，GUI header 勾选与标签不更新；补 SignalModel::set_enabled/set_name 同步（镜像 sr_channel 并 emit 信号实时刷新 View）（session_service.cpp）
+      - configure_and_start 的 capture_ratio 原只写驱动，采集启动时被陈旧 Core TriggerConfig 覆盖；补同步写 Core TriggerConfig（session_service.cpp）
+      - MCP set_sample_rate/set_sample_limit/set_time_base 成功后补广播 DeviceOptionsUpdated，与 GUI SamplingBar 提交后的广播语义一致（session_service.cpp）
+      - MCP 通用 set_config 写 SR_CONF_CAPTURE_RATIO（uint64/int32/byte）成功后同步 Core TriggerConfig，与 GUI DeviceOptions::config_setter 钩子一致，避免采集启动时被陈旧 Core 值覆盖（session_service.cpp、session_service.h）
+      - 修复 DeviceAgent::set_channel_name 为空壳实现（写入代码被注释、直接 return true），MCP configure_channel 改名从未落盘到 sr_channel->name；改为直接 g_strdup 写入（deviceagent.cpp）
+      - 修复 MCP set_dso_trigger_config 的 TRIGGER_SOURCE/TRIGGER_SLOPE 静默失败：驱动声明类型为 SR_T_UINT8（hwdriver.c），原 set_config_int32/get_config_int32 被类型检查拒绝，且 any_ok 被成功的 horizPos 掩盖；改用 set_config_byte/get_config_byte，实测 source/slope/horizPos 全部落盘回读（session_service.cpp）
+      - 修复 configure_probe 探针通道定位错误：API channelIndex 是 sr_channel index（demo 的 DSO/模拟通道 A0=32 起），原脚本用 0 命中逻辑通道导致驱动拒绝；检查表脚本改用 O0(37) 并实测 vdiv/vfactor/coupling/mapDefault 落盘（tests/check_mcp_gui_sync.py）
+      - 修复 MCP 改名/启停通道后 GUI header 不刷新：view::Signal 的 Trace 名称缓存与 _local_enabled 不回读 Core SignalModel，on_appearance_changed/on_visibility_changed 重绘前从模型同步（signal.cpp）
+      - DeviceOptionsUpdated 新增 from_external 字段区分事件来源；MCP 写入触发时 GUI 的 DeviceOptionsDock 全量重读驱动（原 device_updated() 在绑定存在时空转，RLE 等键值控件不刷新）、SamplingBar reload（采样率/深度 MCP 修改后不刷新）；GUI 自身提交路径行为不变（events.h、session_service.cpp、event_dispatcher.cpp）
+      - 修复 MCP configure_channel 禁用通道后 GUI 通道仍占位：from_external 分支原先提前 return，跳过了 rebuild_signals()/signals_changed()——reload() 重建 SignalModel 后 View 的 Signal 对象必须同步重建（按 model->enabled() 决定显示/占位）；改为两个分支共用保存布局 + rebuild 尾部（event_dispatcher.cpp）
+      - DeviceOptionsDock::update_view() 全量重建后保留外层滚动容器位置（修复 MCP 触发 dock 刷新后滑动条回顶）（deviceoptionsdock.cpp）
+      - 检查表脚本修正：DSO 触发 horizPos 单位为 0..100 整数百分比（原 0.3 被驱动取整为 0，无法核对）、slope 改 1 便于观察变化、探针步骤写明 channelIndex 是 get_channels 的 sr_channel index（GUI 显示名 O0）（tests/check_mcp_gui_sync.py）
+      - 修复禁用通道在波形区占位（MCP configure_channel 禁用与 DeviceOptionsDock"全部禁用"均复现）：header 只画 enabled() 的行而布局按 visible() 分配高度，禁用通道仍占一行（并触发 rasterize_logic_channel 对空数据行的无效绘制告警"no data or samplerate==0"）；布局统一按 enabled() 跳过禁用的非 DSO 通道（view_signal_sync.cpp）
+      - 修正 MCP 工具描述的工作模式编号错误：实际映射为 0=Logic, 1=Analog, 2=DSO, 3=MSO（api WorkMode 枚举），原描述"1=DSO, 2=Analog"与实现相反，导致按文档切 DSO 实际切到 Analog；同步修正 switch_work_mode/get_work_mode/get_supported_work_modes/get_channels 的描述与 configure_probe 错误提示（mcp_tool_registry.cpp、tests/check_mcp_gui_sync.py）
+      - 修复禁用通道灰行残留的真正根因（MCP configure_channel 禁用后 header 仍画灰色占位行，而 DeviceOptionsDock 路径正常）：SignalFactory::update_signals(AllReplaced) 的 restore_ui_state 用旧 Signal 的 visible（恒为 true）覆盖了 apply_model_properties 刚按模型设置的 visible=false，paint_label（trace.cpp 对非 DSO 仅挡 !visible()）照画灰行并占旧槽位；restore 时以 model->enabled() 钳制 visible，Signal::on_visibility_changed 同步 set_visible（signalfactory.cpp、signal.cpp；运行日志证据：禁用后 reload models.size()=31 但灰行仍绘制）
+
+    *修复被禁用通道重新启用后排序到尾部（无需拖动其它通道即可复现）：根因是禁用期间 SigSession::reload() 只为 enabled 通道创建 SignalModel，被禁通道的模型与 view::Signal 一并移除，此后任何 save_signal_config 的 channel_layout 中都没有该通道，SignalConfigStore 对缺失通道把 view_index 强制写 -1（本意防跨模式过期传播），重新启用后 restore 只认 view_index>=0，归一化把 -1 通道排在所有显式通道之后；改为 channel_layout 缺失时若 work_mode 与通道类型均未变化则从旧配置继承 view_index，跨模式仍写 -1（signalconfigstore.cpp）
+
+    【测试与 CI】
+    *新增 MCP→GUI 同步修复人工检查表脚本：逐项发送 MCP 命令（configure_trigger/set_config/configure_channel/configure_probe/set_sample_config/switch_work_mode 等）并给出 GUI 核对点，交互式按回车记录通过/失败/跳过，结束输出汇总（失败退出码 1）；支持 --url/--no-send（tests/check_mcp_gui_sync.py）
+
     PXView V1.6.3修改
     时间：2026年9月14日
     变更如下：

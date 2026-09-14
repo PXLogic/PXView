@@ -377,6 +377,14 @@ void broadcast_event(ServiceEvent event,
         int capture_ratio,
         double duration_seconds,
         uint64_t sample_count);
+    // 修复（MCP/GUI 不同步）：MCP 写驱动成功后广播 typed DeviceOptionsUpdated，
+    // 让 GUI dock 重读驱动刷新控件。采集中跳过（GUI 等价操作同样被禁止，
+    // 且事件触发的 reload() 会破坏采集状态）。
+    void notify_device_options_updated();
+    // SR_CONF_CAPTURE_RATIO 双向同步：与 GUI DeviceOptions::config_setter
+    // 的钩子一致，通用 set_config 写驱动成功后同步 Core TriggerConfig，
+    // 否则采集启动时 sync_trigger_to_libsigrok() 会用陈旧 Core 值覆盖驱动值。
+    void sync_capture_ratio_to_core(uint64_t ratio);
 public:
     // Returns true when running inside the GUI (QApplication), false when
     // running headless (QCoreApplication only).

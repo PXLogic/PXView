@@ -322,7 +322,12 @@ void SignalFactory::restore_ui_state(
       continue;
     const SignalUiState &ui = it->second;
     s->select(ui.selected);
-    s->set_visible(ui.visible);
+    // 修复（禁用通道灰行残留）：AllReplaced 重建时 apply_model_properties
+    // 已按模型置 visible=model->enabled()（禁用通道不画行），但此处又用旧
+    // Signal 的 visible（恒为 true）覆盖回去，导致 MCP configure_channel
+    // 禁用后 header 仍画灰色占位行。以模型 enabled 状态钳制：禁用通道
+    // 恢复后仍不可见；DSO 等合法的"启用但隐藏"状态不受影响。
+    s->set_visible(ui.visible && (!s->model() || s->model()->enabled()));
     s->set_view_index(ui.view_index);
     s->set_v_offset(ui.v_offset);
     s->set_own_height(ui.own_height);

@@ -613,6 +613,29 @@ listener->on_service_event(data);
 }
 }
 
+void SessionService::notify_device_options_updated() {
+    // 修复（MCP/GUI 不同步）：MCP 写驱动成功后广播 typed DeviceOptionsUpdated
+    // （from_external=true），GUI 的 on_device_options_updated 由此让
+    // DeviceOptionsDock 全量重读驱动刷新控件、采样栏重载，并与 GUI 自身
+    // 写配置后的广播语义一致。
+    // 采集中跳过：GUI 等价操作同样被禁止，且事件触发的 reload() 会破坏
+    // 采集状态（历史教训：采集中模型重建引发崩溃）。
+    if (_session && !_session->is_working())
+        _session->broadcast_async<pv::interface::DeviceOptionsUpdated>(
+            {false, true});
+}
+
+void SessionService::sync_capture_ratio_to_core(uint64_t ratio) {
+    // SR_CONF_CAPTURE_RATIO 双向同步：与 GUI DeviceOptions::config_setter
+    // 的钩子一致（deviceoptions.cpp）。set_trigger_config 内部广播
+    // TriggerConfigChanged，TriggerDock 滑条自动回填。
+    if (!_session || ratio > 100)
+        return;
+    data::TriggerConfig cfg = _session->trigger_config();
+    cfg.set_trigger_pos(static_cast<int>(ratio));
+    _session->set_trigger_config(cfg);
+}
+
 ChannelType SessionService::sr_channel_type_to_api(int sr_type) const {
     switch (sr_type) {
     case SR_CHANNEL_LOGIC:
@@ -826,6 +849,15 @@ void SessionService::configure_capture_timing(
     if (capture_ratio >= 0 && capture_ratio <= 100) {
         _device->set_config_uint64(SR_CONF_CAPTURE_RATIO,
                                     static_cast<uint64_t>(capture_ratio));
+        // 修复（MCP/GUI 不同步）：采集启动时 sync_trigger_to_libsigrok() 会用
+        // Core TriggerConfig.trigger_pos() 无条件覆盖驱动值，因此这里必须
+        // 同步写 Core（与 DeviceOptions::config_setter 的双向同步钩子一致），
+        // 否则 configure_and_start 传入的 capture_ratio 会被陈旧 Core 值冲掉。
+        if (_session) {
+            data::TriggerConfig cfg = _session->trigger_config();
+            cfg.set_trigger_pos(capture_ratio);
+            _session->set_trigger_config(cfg);
+        }
     }
 
     // Set duration (sample limit) if specified.
@@ -1397,6 +1429,14 @@ Result<void> SessionService::set_channel_enabled(int16_t index, bool enabled) {
         if (!ok)
             return Result<void>::Fail(ErrorCode::ChannelNotFound,
                                       "Failed to enable/disable channel");
+        // 修复（MCP/GUI 不同步）：同步 Core SignalModel（set_enabled 镜像
+        // sr_channel.enabled 并 emit visibility_changed，View 的 Signal 对象
+        // 监听该信号实时刷新 header 勾选状态）。
+        if (_session) {
+            auto m = _session->get_signal_by_index(index);
+            if (m)
+                m->set_enabled(enabled);
+        }
         broadcast_event(ServiceEvent::ChannelConfigChanged,
                         {{"field", "enabled"},
                          {"channel_index", std::to_string(index)},
@@ -1417,6 +1457,13 @@ Result<void> SessionService::set_channel_name(int16_t index,
         if (!ok)
             return Result<void>::Fail(ErrorCode::ChannelNotFound,
                                       "Failed to set channel name");
+        // 修复（MCP/GUI 不同步）：同步 Core SignalModel（set_name 镜像
+        // sr_channel.name 并 emit appearance_changed 刷新 GUI header 标签）。
+        if (_session) {
+            auto m = _session->get_signal_by_index(index);
+            if (m)
+                m->set_name(name);
+        }
         broadcast_event(ServiceEvent::ChannelConfigChanged,
                         {{"field", "name"},
                          {"channel_index", std::to_string(index)},
@@ -1475,6 +1522,8 @@ Result<void> SessionService::set_sample_rate(uint64_t rate) {
         if (!ok)
             return Result<void>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set sample rate");
+        // 修复（MCP/GUI 不同步）：与 GUI SamplingBar 提交后的广播语义一致
+        notify_device_options_updated();
         broadcast_event(ServiceEvent::SampleConfigChanged,
                         {{"field", "sample_rate"},
                          {"value", std::to_string(rate)}});
@@ -1493,6 +1542,8 @@ Result<void> SessionService::set_sample_limit(uint64_t limit) {
         if (!ok)
             return Result<void>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set sample limit");
+        // 修复（MCP/GUI 不同步）：与 GUI SamplingBar 提交后的广播语义一致
+        notify_device_options_updated();
         broadcast_event(ServiceEvent::SampleConfigChanged,
                         {{"field", "sample_limit"},
                          {"value", std::to_string(limit)}});
@@ -1511,6 +1562,8 @@ Result<void> SessionService::set_time_base(uint64_t tb) {
         if (!ok)
             return Result<void>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set time base");
+        // 修复（MCP/GUI 不同步）：与 GUI 时基切换后的广播语义一致
+        notify_device_options_updated();
         broadcast_event(ServiceEvent::SampleConfigChanged,
                         {{"field", "time_base"},
                          {"value", std::to_string(tb)}});
@@ -1671,9 +1724,11 @@ DsoTriggerConfig SessionService::get_dso_trigger_config() const {
         if (!_device || !_device->have_instance())
             return config;
         int value = 0;
-        if (_device->get_config_int32(SR_CONF_TRIGGER_SOURCE, value))
+        /* TRIGGER_SOURCE/TRIGGER_SLOPE 驱动声明类型为 SR_T_UINT8
+         * （hwdriver.c:91-108），用 int32 读会被类型检查拒绝。 */
+        if (_device->get_config_byte(SR_CONF_TRIGGER_SOURCE, value))
             config.source = static_cast<TriggerSource>(value);
-        if (_device->get_config_int32(SR_CONF_TRIGGER_SLOPE, value))
+        if (_device->get_config_byte(SR_CONF_TRIGGER_SLOPE, value))
             config.slope = static_cast<TriggerSlope>(value);
         double dval = 0;
         if (_device->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dval))
@@ -1692,11 +1747,14 @@ Result<void> SessionService::set_dso_trigger_config(
 
         bool any_ok = false;
 
-        if (_device->set_config_int32(SR_CONF_TRIGGER_SOURCE,
-                                      static_cast<int>(config.source)))
+        /* 修复：TRIGGER_SOURCE/TRIGGER_SLOPE 驱动声明类型为 SR_T_UINT8
+         * （hwdriver.c:91-108），原 set_config_int32 会被类型检查静默拒绝
+         * （仅 horizPos 成功，any_ok 仍为 true，掩盖了失败）。改用 byte。 */
+        if (_device->set_config_byte(SR_CONF_TRIGGER_SOURCE,
+                                     static_cast<int>(config.source)))
             any_ok = true;
-        if (_device->set_config_int32(SR_CONF_TRIGGER_SLOPE,
-                                      static_cast<int>(config.slope)))
+        if (_device->set_config_byte(SR_CONF_TRIGGER_SLOPE,
+                                     static_cast<int>(config.slope)))
             any_ok = true;
         if (_device->set_config_double(SR_CONF_HORIZ_TRIGGERPOS,
                                        config.horiz_pos))
@@ -1705,6 +1763,9 @@ Result<void> SessionService::set_dso_trigger_config(
         if (!any_ok)
             return Result<void>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set any DSO trigger config");
+        // 修复（MCP/GUI 不同步）：补广播 typed 事件，GUI 的
+        // on_trigger_config_changed 由此刷新 DsoTriggerDock 控件。
+        _session->broadcast_async<pv::interface::TriggerConfigChanged>({});
         broadcast_event(ServiceEvent::TriggerConfigChanged,
                         {{"kind", "dso"},
                          {"channel", std::to_string(config.channel)}});
@@ -1731,14 +1792,23 @@ ProbeConfig SessionService::get_probe_config(int16_t channel) const {
                 break;
             }
         }
-        double dval = 0;
-        if (target_ch) {
-            if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval, target_ch))
-                config.vfactor = dval;
-        } else {
-            if (_device->get_config_double(SR_CONF_PROBE_FACTOR, dval))
-                config.vfactor = dval;
+        /* 修复：PROBE_FACTOR/PROBE_VDIV 均为 SR_T_UINT64（hwdriver.c），
+         * 旧实现用 get_config_double 会被类型检查拒绝 → vfactor 恒为默认
+         * 值。改用 DeviceAgent typed wrapper 读取，并补齐 vdiv/coupling/
+         * map_default（与 set_probe_config 对应）。 */
+        uint64_t u64 = 0;
+        int ival = 0;
+        bool bval = true;
+        if (_device->get_probe_factor(u64, target_ch))
+            config.vfactor = (double)u64;
+        if (_device->get_probe_vdiv(u64, target_ch))
+            config.vdiv = (double)u64 / 1000.0; // 驱动单位毫伏/格
+        if (_device->get_probe_coupling(ival, target_ch)) {
+            // 驱动 0=GND/1=DC/2=AC → API AC=0/DC=1（GND 无 API 表示）
+            config.coupling = (ival == 1) ? Coupling::DC : Coupling::AC;
         }
+        if (_device->get_probe_map_default(bval, target_ch))
+            config.map_default = bval;
         return config;
     };
     return run_value_on_main_thread<ProbeConfig>(fn);
@@ -1763,18 +1833,57 @@ Result<void> SessionService::set_probe_config(int16_t channel,
 
         bool any_ok = false;
 
-        if (target_ch) {
-            if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor,
+        /* 修复（MCP/GUI 不同步 + 类型不匹配静默失败）：
+         * 1. 旧实现只下发 PROBE_FACTOR，vdiv/coupling/mapDefault 完全没有
+         *    写驱动（configure_probe 的三个参数形同虚设）。
+         * 2. PROBE_FACTOR 的驱动声明类型是 SR_T_UINT64（hwdriver.c:255），
+         *    旧实现用 set_config_double 会被 hwdriver 层类型检查直接拒绝。
+         * 3. 耦合枚举映射：API Coupling AC=0/DC=1，驱动 int32 0=GND/1=DC/2=AC。
+         * 键类型与 GUI 写入路径（signalmodel.cpp/dsosignal.cpp）保持一致。 */
+        if (config.vdiv > 0.0) {
+            // API vdiv 单位为伏特/格；驱动 PROBE_VDIV 为 uint64 毫伏/格
+            const uint64_t vdiv_mv =
+                (uint64_t)llround(config.vdiv * 1000.0);
+            if (_device->set_config_uint64(SR_CONF_PROBE_VDIV, vdiv_mv,
                                            target_ch))
                 any_ok = true;
-        } else {
-            if (_device->set_config_double(SR_CONF_PROBE_FACTOR, config.vfactor))
+        }
+        {
+            // API AC=0/DC=1 → 驱动 AC=2/DC=1（GND=0 不经 API 暴露）
+            const int drv_coupling =
+                (config.coupling == Coupling::DC) ? 1 : 2;
+            if (_device->set_config_int32(SR_CONF_PROBE_COUPLING,
+                                          drv_coupling, target_ch))
                 any_ok = true;
         }
+        {
+            const uint64_t factor =
+                (config.vfactor > 0.0) ? (uint64_t)llround(config.vfactor) : 1;
+            if (_device->set_config_uint64(SR_CONF_PROBE_FACTOR, factor,
+                                           target_ch))
+                any_ok = true;
+        }
+        if (_device->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT,
+                                     config.map_default, target_ch))
+            any_ok = true;
 
         if (!any_ok)
             return Result<void>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set probe config");
+
+        // 同步 Core SignalModel，让 GUI 控件立即反映新值
+        if (_session) {
+            auto m = _session->get_signal_by_index(channel);
+            if (m) {
+                if (config.vdiv > 0.0)
+                    m->set_vdiv(config.vdiv);
+                m->set_coupling((config.coupling == Coupling::DC) ? 1 : 2);
+                if (config.vfactor > 0.0)
+                    m->set_vfactor(config.vfactor);
+                m->set_map_default(config.map_default);
+            }
+            notify_device_options_updated();
+        }
         broadcast_event(ServiceEvent::ChannelConfigChanged,
                         {{"field", "probe_config"},
                          {"channel_index", std::to_string(channel)}});
@@ -1812,6 +1921,7 @@ Result<bool> SessionService::set_config_string(int key,
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config string");
+        notify_device_options_updated();
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);
@@ -1841,6 +1951,7 @@ Result<bool> SessionService::set_config_bool(int key, bool value) {
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config bool");
+        notify_device_options_updated();
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);
@@ -1870,6 +1981,9 @@ Result<bool> SessionService::set_config_uint64(int key, uint64_t value) {
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config uint64");
+        notify_device_options_updated();
+        if (key == SR_CONF_CAPTURE_RATIO)
+            sync_capture_ratio_to_core(value);
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);
@@ -1899,6 +2013,9 @@ Result<bool> SessionService::set_config_int32(int key, int32_t value) {
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config int32");
+        notify_device_options_updated();
+        if (key == SR_CONF_CAPTURE_RATIO && value >= 0)
+            sync_capture_ratio_to_core(static_cast<uint64_t>(value));
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);
@@ -1928,6 +2045,7 @@ Result<bool> SessionService::set_config_double(int key, double value) {
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config double");
+        notify_device_options_updated();
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);
@@ -1957,6 +2075,9 @@ Result<bool> SessionService::set_config_byte(int key, uint8_t value) {
         if (!ok)
             return Result<bool>::Fail(ErrorCode::ConfigInvalid,
                                       "Failed to set config byte");
+        notify_device_options_updated();
+        if (key == SR_CONF_CAPTURE_RATIO)
+            sync_capture_ratio_to_core(value);
         return Result<bool>::Success(true);
     };
     return run_result_on_main_thread<bool>(fn);

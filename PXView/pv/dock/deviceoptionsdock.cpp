@@ -23,6 +23,8 @@
 #include "pv/dock/deviceoptionsdock.h"
 
 #include <QAbstractButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
@@ -1445,6 +1447,18 @@ void DeviceOptionsDock::build_mode_section() {
 }
 
 void DeviceOptionsDock::update_view() {
+  // 修复（MCP 外部刷新导致滚动条回顶）：全量重建会销毁并重建内容控件，
+  // 外层滚动容器的滚动位置随之丢失 —— 重建前保存、重建后恢复。
+  QScrollArea *scroll_area = nullptr;
+  for (QObject *p = this->parent(); p; p = p->parent()) {
+    if (auto *sa = qobject_cast<QScrollArea *>(p)) {
+      scroll_area = sa;
+      break;
+    }
+  }
+  const int scroll_pos =
+      scroll_area ? scroll_area->verticalScrollBar()->value() : -1;
+
   // Preserve sampling settings widget from being deleted
   if (_sampling_settings_widget) {
     _container_lay->removeWidget(_sampling_settings_widget);
@@ -1497,6 +1511,10 @@ void DeviceOptionsDock::update_view() {
   _container_lay->addStretch();
 
   try_resize_scroll();
+
+  // 恢复滚动位置（见函数头部说明）
+  if (scroll_area && scroll_pos >= 0)
+    scroll_area->verticalScrollBar()->setValue(scroll_pos);
 
   // Ensure separator visibility matches dynamic panel content
   QLabel *dyn_title = _dynamic_panel->findChild<QLabel *>("dock_section_title");

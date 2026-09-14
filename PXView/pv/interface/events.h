@@ -134,6 +134,10 @@ struct SampleCountUpdated {
 // broadcast sites leave it false (unchanged behavior).
 struct DeviceOptionsUpdated {
     bool skip_model_reload = false;
+    // 修复（MCP/GUI 不同步）：区分事件来源。MCP 等外部路径写入驱动后广播
+    // 时置 true —— GUI 需全量重读驱动刷新 dock 控件；GUI 自身提交置 false
+    // （控件已本地更新，避免全量重建导致的 UI 跳动）。
+    bool from_external = false;
 };
 
 // DsoViewOptionChanged — DSO view-layer option changed from header interaction

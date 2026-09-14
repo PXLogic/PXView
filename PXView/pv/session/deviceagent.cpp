@@ -637,9 +637,15 @@ bool DeviceAgent::set_channel_name(int ch_index, const char *name)
     for (const GSList *l = get_channels(); l; l = l->next) {
         sr_channel *probe = (sr_channel *)l->data;
         if (probe && probe->index == ch_index) {
-            // Upstream libsigrok provides sr_dev_channel_name_set.
-            // If not available, set the name field directly (sdi owns the channel).
-            // sr_dev_channel_name_set(probe, name);
+            // 修复：原实现是空壳（直接 return true，写入被注释），导致
+            // MCP configure_channel 改名从未落盘到 sr_channel->name。
+            // sdi 拥有通道结构，name 由 g_strdup 分配（与
+            // SignalModel::set_name 的写回方式一致）。
+            if (probe->name) {
+                g_free(probe->name);
+                probe->name = nullptr;
+            }
+            probe->name = g_strdup(name);
             return true;
         }
     }

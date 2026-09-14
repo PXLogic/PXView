@@ -494,7 +494,13 @@ bool TriggerDock::commit_trigger() {
   }
 }
 
-void TriggerDock::update_view() {}
+void TriggerDock::update_view() {
+  // 修复（MCP 配置不同步）：原为空函数，导致 TriggerConfigChanged 广播链
+  // （MCP configure_trigger / DeviceOptionsDock CAPTURE_RATIO 同步钩子）
+  // 到达 GUI 后什么都不做，滑条/阶段等控件不回填。统一走
+  // refresh_ui_from_core()（Task 6 既定的 UI 填充唯一入口）。
+  refresh_ui_from_core();
+}
 
 QJsonObject TriggerDock::get_session() {
   // Task 8.5: serialize from Core TriggerConfig (the canonical state) instead

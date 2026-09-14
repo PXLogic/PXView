@@ -459,8 +459,8 @@ ToolResult handle_configure_probe(ISessionService* session,
     if (mode == WorkMode::Logic)
         throw ToolError("Probe configuration is not available in "
             "Logic mode (current mode: 0). "
-            "Call switch_work_mode(1) for DSO or "
-            "switch_work_mode(2) for Analog.");
+            "Call switch_work_mode(2) for DSO or "
+            "switch_work_mode(1) for Analog.");
 
     auto idx = p.get<int16_t>("channelIndex");
     if (!p.has("vdiv") && !p.has("coupling") &&
@@ -787,19 +787,19 @@ static void register_mode_management_tools(McpServer& server,
     server.tool("switch_work_mode",
         "Switch the device work mode. MUST be called before configuring "
         "channels/triggers/probes. Modes: 0=Logic (digital channels, logic "
-        "triggers, glitch filter, RLE), 1=DSO (oscilloscope, DSO triggers, "
-        "probe config, math/spectrum), 2=Analog (analog/DAQ channels), "
-        "3=MSO (mixed signal). Use get_supported_work_modes to check "
-        "which modes the device supports.")
-        .param<int8_t>("mode", "Work mode: 0=Logic, 1=DSO, 2=Analog, 3=MSO",
+        "triggers, glitch filter, RLE), 1=Analog (analog/DAQ channels), "
+        "2=DSO (oscilloscope, DSO triggers, "
+        "probe config, math/spectrum), 3=MSO (mixed signal). Use "
+        "get_supported_work_modes to check which modes the device supports.")
+        .param<int8_t>("mode", "Work mode: 0=Logic, 1=Analog, 2=DSO, 3=MSO",
                         Required)
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
             auto mode = static_cast<WorkMode>(p.get<int8_t>("mode"));
             if (static_cast<int>(mode) < 0 || static_cast<int>(mode) > 3)
-                throw ToolError("Invalid mode value. Use 0=Logic, 1=DSO, "
-                                "2=Analog, 3=MSO.");
+                throw ToolError("Invalid mode value. Use 0=Logic, 1=Analog, "
+                                "2=DSO, 3=MSO.");
             auto r = session->switch_work_mode(mode);
             check_void(r);
             return json_result({{"success", true},
@@ -808,8 +808,8 @@ static void register_mode_management_tools(McpServer& server,
 
     // get_work_mode
     server.tool_void("get_work_mode",
-        "Get the current device work mode. Returns: 0=Logic, 1=DSO, "
-        "2=Analog, 3=MSO, -1=Unknown. Call this to determine which "
+        "Get the current device work mode. Returns: 0=Logic, 1=Analog, "
+        "2=DSO, 3=MSO, -1=Unknown. Call this to determine which "
         "channels/triggers/probe configs are available.")
         .read_only()
         .on_call([app_svc]() -> ToolResult {
@@ -821,7 +821,7 @@ static void register_mode_management_tools(McpServer& server,
     // get_supported_work_modes
     server.tool_void("get_supported_work_modes",
         "Get the work modes supported by the current device. Returns an "
-        "array of mode integers (0=Logic, 1=DSO, 2=Analog, 3=MSO). Call "
+        "array of mode integers (0=Logic, 1=Analog, 2=DSO, 3=MSO). Call "
         "this before switch_work_mode to check device capabilities.")
         .read_only()
         .on_call([app_svc]() -> ToolResult {
@@ -1096,7 +1096,7 @@ static void register_core_workflow_tools(McpServer& server,
         "current mode or is omitted, returns full channel details for the "
         "current active mode.")
         .param<int8_t>("mode", "Optional: query channels for a specific mode "
-                       "without switching (0=Logic, 1=DSO, 2=Analog, 3=MSO)")
+                       "without switching (0=Logic, 1=Analog, 2=DSO, 3=MSO)")
         .read_only()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
