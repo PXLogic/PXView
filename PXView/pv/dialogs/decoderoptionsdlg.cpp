@@ -31,7 +31,7 @@
 #include <QFormLayout>
 #include <QScrollArea>
 #include <QVariant>
-#include <QApplication> // qApp->activePopupWidget() (was transitive via decodetrace.h→pxdialog.h)
+#include <QApplication> // QApplication::topLevelAt() —— 判定鼠标落点所属顶层窗口 (was transitive via decodetrace.h→pxdialog.h)
 #include <QGuiApplication>
 #include <QScreen>
 #include <QCheckBox>
@@ -126,37 +126,50 @@ int DecoderOptionsDlg::exec()
     return result();
 }
 
+// 判断 w 是否"属于"本对话框的 UI 体系:即 w 本身或沿 parentWidget() 链
+// 上溯能追到 this。用于识别对话框自身的子控件,以及挂在它们下面的独立顶层
+// 弹出窗口(如 DsComboPopup——它的 parentWidget() 是 DsComboBox,父链能
+// 一路追到 this,所以判定成立)。
+//
+// 注意:不要依赖 qApp->activePopupWidget()。它只跟踪 Qt::Popup 类型的窗口,
+// 而 DsComboPopup 为了规避 Qt::Popup 的 grabMouse 闪烁问题已改用 Qt::Tool
+// (见 dscombobox.cpp 构造函数注释),因此永远不注册为 active popup widget,
+// 该接口在这里恒为 nullptr。
+static bool belongs_to_dialog(QWidget *w, const QWidget *dlg)
+{
+    while (w) {
+        if (w == dlg)
+            return true;
+        w = w->parentWidget();
+    }
+    return false;
+}
+
 bool DecoderOptionsDlg::eventFilter(QObject *obj, QEvent *event)
 {
-    // 全局事件过滤器(安装在 qApp 上):检测鼠标按下事件落在对话框几何范围外时
-    // 调用 reject() 关闭(与毛刺滤波浮窗 Qt::Popup 的行为一致)。
+    // 全局事件过滤器(安装在 qApp 上):检测鼠标按下事件落在对话框"所属窗口
+    // 范围"之外时调用 reject() 关闭(与毛刺滤波浮窗 Qt::Popup 的行为一致)。
     // Tool 窗口非模态不 grabMouse,外部 widget 的鼠标事件能正常到达 qApp 过滤器。
+    //
+    // 判定基准是"鼠标落点所属的顶层窗口"而非本对话框的 rect():对话框 rect()
+    // 只覆盖对话框本体,而 DsComboPopup 下拉列表是独立顶层窗口,当它延伸到
+    // rect() 之外时,点击落在溢出的列表项上会被旧的 rect().contains() 误判为
+    // "点了窗口外",从而 reject() 掉整个对话框——下拉列表伸到框外就点不中。
     if (event->type() == QEvent::MouseButtonPress) {
         auto *me = static_cast<QMouseEvent *>(event);
-        QPoint globalPos = me->globalPosition().toPoint();
-        if (!rect().contains(mapFromGlobal(globalPos))) {
-            // 点击在对话框 rect 外。但需排除对话框子控件(如 DsComboBox 的
-            // DsComboPopup 下拉列表——它是 Qt::Popup 类型的独立顶层窗口,
-            // 可能延伸到 rect 之外,且其 parent 链可能因 Qt 内部 viewport
-            // reparent 机制而无法遍历到 this)。
-            // 修复:先用 qApp->activePopupWidget() 检查是否有活跃 popup,
-            // 如果鼠标点击落在活跃 popup 的几何范围内,则不关闭对话框。
-            QWidget *popup = qApp->activePopupWidget();
-            if (popup && popup->isVisible()) {
-                QRect popupRect = popup->geometry();
-                if (popupRect.contains(globalPos)) {
-                    return PxDialog::eventFilter(obj, event);
-                }
-            }
+        const QPoint globalPos = me->globalPosition().toPoint();
 
-            // 向上查找父链,若属于 this 则不关闭。
-            QWidget *w = qobject_cast<QWidget *>(obj);
-            bool is_child = false;
-            while (w) {
-                if (w == this) { is_child = true; break; }
-                w = w->parentWidget();
-            }
-            if (!is_child) {
+        // 鼠标落点处最上层的顶层窗口。
+        QWidget *top = QApplication::topLevelAt(globalPos);
+
+        // top != this 说明点在了别的顶层窗口上。但以下情形仍属于本对话框:
+        //   1. top 是 this 的子控件所在窗口(含 DsComboPopup 之类的 Qt::Tool 弹出层),
+        //      此时其 parentWidget() 父链能追到 this;
+        //   2. 事件接收者 obj 自身属于本对话框的控件树(obj 可能是被 top 包裹的
+        //      子控件,父链同样能追到 this)。
+        // 只有两种情况都不成立时,才是真正的"点了对话框外面"。
+        if (top != this && !belongs_to_dialog(top, this)) {
+            if (!belongs_to_dialog(qobject_cast<QWidget *>(obj), this)) {
                 reject();
                 return true;
             }
