@@ -46,6 +46,9 @@ class PXViewProcess:
         store_log:  If True, pass ``--storelog`` to save logs to file.
         startup_timeout: Seconds to wait for the MCP port to become
                          reachable (default: 30).
+        log_file:   If set, daemon stdout/stderr is appended to this
+                     file instead of being discarded (DEVNULL).  Useful
+                     for CI post-mortem diagnostics.
 
     Attributes:
         port:          MCP port.
@@ -83,12 +86,15 @@ class PXViewProcess:
         log_level: int = -1,
         store_log: bool = False,
         startup_timeout: float = 30.0,
+        log_file: Optional[str] = None,
     ):
         self.port = port
         self.ws_port = ws_port
         self.log_level = log_level
         self.store_log = store_log
         self.startup_timeout = startup_timeout
+        self.log_file = log_file
+        self._log_fh = None
         self._exe_path = exe_path or self._find_exe()
         self.process: Optional[subprocess.Popen] = None
 
@@ -142,12 +148,20 @@ class PXViewProcess:
                     else 0x08000000
                 )
 
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                **kwargs,
-            )
+            # Route daemon output to a log file when requested (CI
+            # post-mortem); otherwise discard it.
+            if self.log_file:
+                try:
+                    self._log_fh = open(self.log_file, "a",
+                                        encoding="utf-8", buffering=1)
+                    kwargs["stdout"] = self._log_fh
+                    kwargs["stderr"] = subprocess.STDOUT
+                except OSError:
+                    self._log_fh = None
+            kwargs.setdefault("stdout", subprocess.DEVNULL)
+            kwargs.setdefault("stderr", subprocess.DEVNULL)
+
+            self.process = subprocess.Popen(cmd, **kwargs)
         except OSError as exc:
             raise ProcessError(
                 f"Failed to start PXView: {exc}"
@@ -195,6 +209,14 @@ class PXViewProcess:
                 pass
 
         self.process = None
+
+        # Close the daemon log file handle (safe even if never opened).
+        if self._log_fh is not None:
+            try:
+                self._log_fh.close()
+            except OSError:
+                pass
+            self._log_fh = None
 
     @property
     def is_running(self) -> bool:

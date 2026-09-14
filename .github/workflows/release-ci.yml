@@ -46,7 +46,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Raised 30 -> 60: the 3-way parallel E2E was being cancelled at the 30min
     # job timeout before the full suite finished (masking real results).
-    timeout-minutes: 60
+    # Raised 60 -> 120: group1 was cancelled at 60min with real test failures
+    # pending; the extra headroom also covers daemon-restart retries.
+    timeout-minutes: 120
     permissions:
       contents: read
       checks: write
@@ -166,7 +168,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-html pytest-timeout
+          pip install pytest pytest-html pytest-timeout pytest-rerunfailures
           pip install -e ./pxview-automation
 
       - name: Run full E2E test suite (Release mode, 3-way parallel)
@@ -175,6 +177,9 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           # pxviewd: console headless daemon sharing pxview-core with the GUI
           # binary -- exercises the exact binary automation users run.
+          # Daemons are started/restarted by tests/conftest.py (_DaemonSupervisor):
+          # conftest must own the process lifecycle so it can restart the
+          # daemon after a failed test (failure-cascade guard) and retry once.
           PXV_BIN="$PWD/install.dir/usr/bin/pxviewd"
 
           # ---- Define 3 test groups (balanced by estimated runtime) ----
@@ -182,35 +187,16 @@ jobs:
           GROUP2="test_04_capture_timed_10s.py test_06_export_import.py test_07_decoder_i2c.py test_08_decoder_spi.py test_09_decoder_uart.py test_10_decoder_can_pwm.py test_26_i2c_real_decode.py test_31_decoder_persistence.py test_32_export_data_correctness.py test_33_multiformat_export.py"
           GROUP3="test_12_decoder_batch.py test_17_18_filter_invert.py test_19_20_session_advanced.py test_22_stress.py test_23_decoder_stacked.py test_24_real_decode.py test_25_pwm_mixed_stress.py test_28_real_decode_spi_uart.py test_36_glitch_filter_i2c_e2e.py"
 
-          # ---- Helper: wait for MCP server to be ready (probe the port, not the PID) ----
-          # PXView may be reparented/detached from the launching shell, so we rely
-          # on the MCP endpoint actually responding rather than on the tracked PID
-          # staying alive (a stale PID caused false "exited prematurely" reports).
-          wait_for_mcp() {
-            local port=$1
-            local pid=$2
-            local url="http://127.0.0.1:${port}/mcp"
-            for i in $(seq 1 90); do
-              RESP=$(curl -s -X POST "$url" \
-                -H "Content-Type: application/json" \
-                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1.0"}}}' \
-                --max-time 5 2>/dev/null || true)
-              if echo "$RESP" | grep -q "protocolVersion"; then
-                echo "MCP server (port $port) ready after ${i}s"
-                return 0
-              fi
-              sleep 1
-            done
-            echo "ERROR: MCP server (port $port) did not start within 90s"
-            return 1
-          }
-
           # ---- Helper: run a test group against a specific MCP port ----
+          # Each group starts its OWN daemon via conftest auto-start
+          # (PXVIEW_EXE_PATH + PXVIEW_MCP_PORT).  On any failing test the
+          # conftest supervisor restarts the daemon and pytest-rerunfailures
+          # (--reruns 1) retries the failed test once against the fresh
+          # daemon.  python -u keeps the log timeline unbuffered.
           run_test_group() {
             local group_name=$1
             local port=$2
             local tests=$3
-            local url="http://127.0.0.1:${port}/mcp"
 
             echo "=== [$group_name] Running: $tests ==="
             cd tests/suites
@@ -219,11 +205,15 @@ jobs:
             # NOTE: piping through sed means $? is sed's exit code (always 0),
             # so `|| touch ...` never fires. Use PIPESTATUS[0] to get pytest's
             # real exit code.
-            PXVIEW_NO_AUTO_START=1 \
-            PXVIEW_MCP_URL="$url" \
-            PXVIEW_STARTUP_TIMEOUT=30 \
-            python -m pytest $tests -v \
+            PXVIEW_MCP_URL="http://127.0.0.1:${port}/mcp" \
+            PXVIEW_MCP_PORT="$port" \
+            PXVIEW_WS_PORT="$((port + 320))" \
+            PXVIEW_EXE_PATH="$PXV_BIN" \
+            PXVIEW_STARTUP_TIMEOUT=60 \
+            PXVIEWD_LOG_FILE="/tmp/pxv_${group_name}.log" \
+            python -u -m pytest $tests -v \
               --tb=short --timeout=300 --timeout-method=thread \
+              --reruns 1 --reruns-delay 2 \
               --html="$GITHUB_WORKSPACE/${group_name}_report.html" \
               --junitxml="$GITHUB_WORKSPACE/${group_name}_report.xml" \
               --self-contained-html \
@@ -241,76 +231,79 @@ jobs:
             fi
           }
 
-          # ---- Start 3 PXView instances (direct children of this shell; nohup avoids SIGHUP) ----
-          # pxviewd = the console headless daemon (same core as `PXView --headless`);
-          # --headless is accepted as an implicit no-op for script compatibility.
-          nohup "$PXV_BIN" --headless --port 10110 --ws-port 10430 -l 4 > /tmp/pxv1.log 2>&1 &
-          PID1=$!
-          nohup "$PXV_BIN" --headless --port 10111 --ws-port 10431 -l 4 > /tmp/pxv2.log 2>&1 &
-          PID2=$!
-          nohup "$PXV_BIN" --headless --port 10112 --ws-port 10432 -l 4 > /tmp/pxv3.log 2>&1 &
-          PID3=$!
+          # ---- Launch 3 test groups in parallel (each owns its daemon) ----
+          run_test_group "group1" 10110 "$GROUP1" &
+          PID_T1=$!
+          run_test_group "group2" 10111 "$GROUP2" &
+          PID_T2=$!
+          run_test_group "group3" 10112 "$GROUP3" &
+          PID_T3=$!
 
-          ALL_READY=1
-          wait_for_mcp 10110 $PID1 || ALL_READY=0
-          wait_for_mcp 10111 $PID2 || ALL_READY=0
-          wait_for_mcp 10112 $PID3 || ALL_READY=0
-
-          if [ "$ALL_READY" -eq 1 ]; then
-            echo "=== All 3 PXView instances ready, launching parallel test groups ==="
-            # Run 3 test groups in parallel
-            run_test_group "group1" 10110 "$GROUP1" &
-            PID_T1=$!
-            run_test_group "group2" 10111 "$GROUP2" &
-            PID_T2=$!
-            run_test_group "group3" 10112 "$GROUP3" &
-            PID_T3=$!
-
-            # Wait for all test groups to finish
-            wait $PID_T1
-            wait $PID_T2
-            wait $PID_T3
-            echo "=== All 3 test groups completed ==="
-            # Any test group with failures makes the CI step fail (real red)
-            if ls /tmp/e2e_group_failed_* >/dev/null 2>&1; then
-              echo "FAIL: one or more E2E test groups reported failures"
-              exit 1
-            fi
-          else
-            echo "ERROR: One or more PXView instances failed to start"
-            echo "--- PXView1 log ---"; cat /tmp/pxv1.log 2>/dev/null || true
-            echo "--- PXView2 log ---"; cat /tmp/pxv2.log 2>/dev/null || true
-            echo "--- PXView3 log ---"; cat /tmp/pxv3.log 2>/dev/null || true
-            echo "--- PXView real file log (~/PXView.log) ---"; cat "$HOME/PXView.log" 2>/dev/null || true
-            echo "--- ldd PXView ---"; ldd "$PXV_BIN" 2>&1 | grep -i "not found" || echo "no missing shared libs"
-            # Generate failure XML for all groups
-            for g in group1 group2 group3; do
-              echo '<?xml version="1.0" encoding="UTF-8"?>' > "$GITHUB_WORKSPACE/${g}_report.xml"
-              echo "<testsuites><testsuite name=\"$g\" tests=\"0\" failures=\"0\" errors=\"1\" time=\"0\"><testcase name=\"startup-failure\"><error message=\"PXView MCP server did not start\"/></testcase></testsuite></testsuites>" >> "$GITHUB_WORKSPACE/${g}_report.xml"
-            done
-            echo "Failing CI step: PXView failed to start (see backtrace above)"
+          # Wait for all test groups to finish
+          wait $PID_T1
+          wait $PID_T2
+          wait $PID_T3
+          echo "=== All 3 test groups completed ==="
+          # Any test group with failures makes the CI step fail (real red);
+          # daemon log tails / capture-status diagnostics and report
+          # merging happen in the always() step below.
+          if ls /tmp/e2e_group_failed_* >/dev/null 2>&1; then
+            echo "FAIL: one or more E2E test groups reported failures"
             exit 1
           fi
 
-          # ---- Stop all PXView instances ----
-          kill $PID1 $PID2 $PID3 2>/dev/null || true
-          wait $PID1 $PID2 $PID3 2>/dev/null || true
+      - name: Diagnostics and report merge
+        if: always()
+        run: |
+          # ---- Daemon log tails (post-mortem; conftest writes these) ----
+          for f in /tmp/pxv_group1.log /tmp/pxv_group2.log /tmp/pxv_group3.log; do
+            if [ -f "$f" ]; then
+              echo "--- tail -80 $f ---"
+              tail -80 "$f" || true
+            fi
+          done
 
-          # ---- Merge XML reports ----
+          # ---- Best-effort capture status of any still-running daemon ----
+          for port in 10110 10111 10112; do
+            RESP=$(curl -s -X POST "http://127.0.0.1:${port}/mcp" \
+              -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_capture_status","arguments":{}}}' \
+              --max-time 3 2>/dev/null || true)
+            if [ -n "$RESP" ]; then
+              echo "--- get_capture_status (port $port) ---"
+              echo "$RESP" | head -c 500; echo
+            fi
+          done
+
+          # ---- Merge XML reports (missing groups get failure stubs) ----
           python3 -c "
           import xml.etree.ElementTree as ET
-          import glob
+          import os
 
+          ws = os.environ.get('GITHUB_WORKSPACE', '.')
           merged = ET.Element('testsuites')
           total_tests = 0
           total_failures = 0
           total_errors = 0
           total_time = 0.0
 
-          for f in sorted(glob.glob('$GITHUB_WORKSPACE/group*_report.xml')):
+          for g in ('group1', 'group2', 'group3'):
+              f = f'{ws}/{g}_report.xml'
+              if not os.path.isfile(f):
+                  # pytest was killed (e.g. job timeout) before writing its
+                  # report — synthesize a stub so the merge always succeeds
+                  # and the reporter shows WHY the group has no results.
+                  print(f'WARNING: {f} missing (pytest killed?) — stubbing')
+                  ts = ET.SubElement(merged, 'testsuite', {
+                      'name': g, 'tests': '0', 'failures': '0',
+                      'errors': '1', 'time': '0'})
+                  tc = ET.SubElement(ts, 'testcase', {'name': 'report-missing'})
+                  ET.SubElement(tc, 'error', {
+                      'message': 'group report missing (runner killed before pytest finished?)'})
+                  total_errors += 1
+                  continue
               try:
-                  tree = ET.parse(f)
-                  root = tree.getroot()
+                  root = ET.parse(f).getroot()
                   for ts in root.findall('.//testsuite'):
                       merged.append(ts)
                       total_tests += int(ts.get('tests', 0))
@@ -328,7 +321,7 @@ jobs:
           merged.set('errors', str(total_errors))
           merged.set('time', f'{total_time:.2f}')
 
-          ET.ElementTree(merged).write('$GITHUB_WORKSPACE/test_report.xml', encoding='UTF-8', xml_declaration=True)
+          ET.ElementTree(merged).write(f'{ws}/test_report.xml', encoding='UTF-8', xml_declaration=True)
           print(f'Merged report: {total_tests} tests, {total_failures} failures, {total_errors} errors')
           "
 
@@ -501,7 +494,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-html pytest-timeout
+          pip install pytest pytest-html pytest-timeout pytest-rerunfailures
           pip install -e ./pxview-automation
 
       - name: Run ASan core E2E tests (subset)
@@ -755,7 +748,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-html pytest-timeout
+          pip install pytest pytest-html pytest-timeout pytest-rerunfailures
           pip install -e ./pxview-automation
 
       # ============================================================

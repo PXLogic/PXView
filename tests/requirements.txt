@@ -6,4 +6,5 @@
 pytest>=8.0
 pytest-html>=4.1
 pytest-timeout>=2.0
+pytest-rerunfailures>=14.0
 # requests is no longer needed — pxview-automation uses only stdlib urllib
