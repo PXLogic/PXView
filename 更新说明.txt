@@ -18,6 +18,8 @@ FPGA/IC吹水群：377248676
       - 修复首包到达前未进入 Running 态：capture_init() 在本文档为本次采集 owner 时立即置 per-tab 显示状态为 ST_RUNNING（此前停留在上次采集结束的 Stopped，而渲染先判 is_stopped_status() 再判 display_doc，会走 paintSignals 画旧波形，进度圈与 "Waiting for Trigger!" 不出现）（view_data_sync.cpp）
     *修复混合格式（SPLIT/CROSS）捕获开启触发时第二帧 64 对齐断言失败并弹出崩溃框：软触发的前触发数据以 LA_SPLIT_DATA（采样交织）到达，把 _ring_sample_count 推进任意值（触发落在块中时如 16 个样本），随后的 LA_CROSS_DATA 破坏对齐不变式；改为在 append_cross_payload() 中重锚到块边界（丢弃 <64 的部分前触发样本）并输出告警日志，保持后触发 CROSS 块连续（logicsnapshot.cpp）
     *修复遍历 _signal_models 期间修改容器导致的崩溃：通道数统计 get_ch_num()、DSO 测量电压系数同步、触发同步 sync_trigger_to_libsigrok() 三处改为遍历 signal_models_snapshot() 快照（sessionstatecontext.cpp）
+    *修复 PXLogic 设备无法连接（报“无法打开设备。请检查USB连接、驱动程序，以及设备是否被其它程序占用。”，日志 Failed to claim interface D: LIBUSB_ERROR_NOT_FOUND.）：设备活动配置仅声明 1 个 USB 接口（bNumInterfaces=1，14 个端点 0x01..0x07/0x81..0x87 全位于接口 0），不存在接口 1；驱动仍多 claim 了一个不存在的 USB_INTERFACE_D，WinUSB 后端对该调用走 GetAssociatedInterface(handle, iface-1) 分支，接口不存在时返回 ERROR_NO_MORE_ITEMS→LIBUSB_ERROR_NOT_FOUND。1.4.x 未检查 claim 返回值故该失败被忽略，新增的严格返回值检查（失败即 libusb_release_interface + libusb_close + return SR_ERR）使其升级为设备打开失败；接口 D 未被任何传输路径使用（usb_ctrl.c 仅用接口 0 上的端点），直接移除该多余 claim 及其失败回滚分支，同步清理 hw_usb_close() 的 release 调用与 USB_INTERFACE_D 宏定义（pxlogic.c、pxlogic.h）
+    *修复 DeviceOptionsDock"触发前采样比例"修改不生效：该控件与 TriggerDock"触发位置"写的是同一个驱动键 SR_CONF_CAPTURE_RATIO，采集启动时 sync_trigger_to_libsigrok() 无条件用 Core TriggerConfig.trigger_pos() 覆盖驱动值，Dock 侧修改在下次采集开始时被冲掉；改为 DeviceOptions 绑定提交成功后同步写入 Core TriggerConfig 并广播 TriggerConfigChanged，TriggerDock 滑条自动回填，两个 UI 保持一致（deviceoptions.cpp）
 
     【构建与工程】
     *版本号提升到 1.6.3（CMakeLists.txt、README 版本徽章、NSIS 安装脚本、CI 默认版本）
@@ -26,6 +28,8 @@ FPGA/IC吹水群：377248676
     【测试与 CI】
     *macOS CI 运行器由 macos-14 迁移至 macos-15（macos-14 将于 2026-11-02 退役），同步更新工作流内注释（build.yml、macos-debug.yml）
     *修复 build.yml 开头双重 UTF-8 BOM 导致的工作流校验失败（报 "Required property is missing: jobs"）：第二个 BOM 变成首行前不可见字符，删除重复 BOM、保留单个编码标记
+    *修复 macOS 构建 dmg 时 hdiutil 偶发 "Resource busy" 导致工作流偶现失败：添加 5 次线性退避重试，并在构建前清理残留挂载与旧 dmg 文件（build.yml）
+    *增强 CI 测试稳定性与可调试性：新增 pytest-rerunfailures 实现测试失败自动重试；PXViewProcess 新增日志文件输出参数并支持用环境变量自定义守护进程日志路径，便于 CI 事后调试；重构测试夹具新增守护进程管理模块实现自动重启；延长 CI 任务超时时间并优化测试流程（release-ci.yml、conftest.py、process.py、tests/requirements.txt）
 
     PXView V1.6.2修改
     时间：2026年9月12日

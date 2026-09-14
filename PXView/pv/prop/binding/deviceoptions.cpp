@@ -288,6 +288,26 @@ if (ok && key == SR_CONF_NUM_LOGIC_CHANNELS && _session) {
 // SLogic packing changes active sr_channel objects; rebuild signal UI.
 _session->reload();
 }
+	/* 双向同步：DeviceOptionsDock 的"触发前采样比例"与 TriggerDock 的"触发位置"
+	 * 写的是同一个驱动键 SR_CONF_CAPTURE_RATIO。采集启动时
+	 * sync_trigger_to_libsigrok() 无条件用 Core TriggerConfig.trigger_pos()
+	 * 覆盖驱动值，因此这里必须把 Dock 侧的修改同步进 Core TriggerConfig
+	 * （并广播 TriggerConfigChanged 让 TriggerDock 回填滑条），否则
+	 * DeviceOptionsDock 的修改会在下次采集开始时被冲掉。 */
+	if (ok && key == SR_CONF_CAPTURE_RATIO && _session) {
+		int pos = -1;
+		if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT64))
+			pos = (int)g_variant_get_uint64(value);
+		else if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT32))
+			pos = g_variant_get_int32(value);
+		else if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32))
+			pos = (int)g_variant_get_uint32(value);
+		if (pos >= 0 && pos <= 100) {
+			data::TriggerConfig cfg = _session->trigger_config();
+			cfg.set_trigger_pos(pos);
+			_session->set_trigger_config(cfg);
+		}
+	}
 }
 
 void DeviceOptions::bind_bool(const QString &name, const QString label, int key)
