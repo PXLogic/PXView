@@ -91,9 +91,11 @@ MCP_SCHEMA(StartCaptureParams)
     .opt("deviceId", &StartCaptureParams::deviceId,
          "Device ID (optional, uses active device if omitted)")
     .opt_arr("digitalChannels", &StartCaptureParams::digitalChannels,
-             "Digital channel indices (Logic/MSO mode)")
+             "Digital channel indices (Logic/MSO mode; as returned by "
+             "get_channels)")
     .opt_arr("analogChannels", &StartCaptureParams::analogChannels,
-             "Analog channel indices (Analog/MSO mode)")
+             "Analog channel indices (Analog/MSO mode; as returned by "
+             "get_channels)")
     .opt("digitalSampleRate", &StartCaptureParams::digitalSampleRate,
          "Digital sample rate in Hz")
     .opt("analogSampleRate", &StartCaptureParams::analogSampleRate,

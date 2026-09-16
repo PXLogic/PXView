@@ -913,8 +913,12 @@ static void register_core_workflow_tools(McpServer& server,
 
     // load_capture
     server.tool("load_capture",
-        "Load a previously saved capture from a file.")
-        .param<std::string>("filePath", "Path to the capture file", Required)
+        "Load a previously saved capture from a file into the active "
+        "session (switches the session's device to the file device).")
+        .param<std::string>("filePath", "Path to a PXView session archive: "
+            "'.pxl' (capture data, as written by save_capture) or '.pxc' "
+            "(session/config file). Upstream sigrok session zip files are "
+            "also supported.", Required)
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -927,7 +931,8 @@ static void register_core_workflow_tools(McpServer& server,
     // save_capture
     server.tool("save_capture",
         "Save the current capture to a file.")
-        .param<std::string>("filePath", "Output file path", Required)
+        .param<std::string>("filePath", "Output file path — written as a "
+                            "PXView session archive ('.pxl')", Required)
         .param<uint64_t>("startSample", "Start sample for partial save")
         .param<uint64_t>("endSample", "End sample for partial save. "
             "Omit both startSample and endSample for a full save; "
@@ -963,9 +968,15 @@ static void register_core_workflow_tools(McpServer& server,
         "decoders (e.g., SPI on top of I2C).")
         .param<std::string>("decoderId", "Decoder ID (e.g. 'i2c', 'spi')", Required)
         .param<std::string>("label", "Display label for this analyzer instance")
-        .param<std::string>("stackOnAnalyzerId", "Instance ID to stack on top of")
-        .any_param("options", "Decoder options as key-value pairs", "object")
-        .any_param("channelMap", "Channel mapping (decoder channel → hardware index)", "object")
+        .param<std::string>("stackOnAnalyzerId", "Analyzer instance ID to "
+                            "stack on top of (e.g. stack a secondary decoder "
+                            "onto a lower-level one)")
+        .any_param("options", "Decoder options as key-value pairs (keys = "
+                   "option ids from get_analyzer_options; values are strings "
+                   "or JSON scalars)", "object")
+        .any_param("channelMap", "Channel mapping: key = decoder channel "
+                   "name as listed by get_analyzer_options ('channels' "
+                   "array), value = hardware channel index", "object")
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -975,7 +986,8 @@ static void register_core_workflow_tools(McpServer& server,
     // remove_analyzer
     server.tool("remove_analyzer",
         "Remove a previously added protocol decoder.")
-        .param<std::string>("analyzerId", "Analyzer instance ID", Required)
+        .param<std::string>("analyzerId", "Analyzer instance ID (from the add_analyzer response or "
+            "get_active_decoders 'instance_id')", Required)
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1026,7 +1038,8 @@ static void register_core_workflow_tools(McpServer& server,
         "Returns annotation array with sample ranges and text. "
         "Set includeMetadata=true to get annotation class names in the "
         "top-level 'metadata' field (not affected by maxCount).")
-        .param<std::string>("analyzerId", "Analyzer instance ID", Required)
+        .param<std::string>("analyzerId", "Analyzer instance ID (from the add_analyzer response or "
+            "get_active_decoders 'instance_id')", Required)
         .param<uint64_t>("startSample", "Start sample (default 0)")
         .param<uint64_t>("endSample", "End sample (default = all)")
         .param<int>("maxCount", "Max annotations to return (default 1000)")
@@ -1049,8 +1062,16 @@ static void register_core_workflow_tools(McpServer& server,
         "(channel_N.<ext> / analog_N.<ext>).")
         .param<std::string>("format", "Output format: csv | binary | vcd | hex | bits (default: csv)")
         .param<std::string>("directory", "Output directory path", Required)
-        .array_param<int32_t>("digitalChannels", "Digital channel indices")
-        .array_param<int32_t>("analogChannels", "Analog channel indices")
+        .array_param<int32_t>("digitalChannels", "Digital channel indices "
+                              "(as returned by get_channels). REQUIRED for "
+                              "csv/vcd/hex/bits — omitted lists export "
+                              "nothing; only 'binary' defaults to all "
+                              "enabled channels when omitted")
+        .array_param<int32_t>("analogChannels", "Analog channel indices "
+                              "(as returned by get_channels). REQUIRED for "
+                              "csv/vcd/hex/bits — omitted lists export "
+                              "nothing; only 'binary' defaults to all "
+                              "enabled channels when omitted")
         .param<int>("analogDownsampleRatio", "Analog downsample ratio (default 1)")
         .param<bool>("iso8601Timestamp", "Use ISO8601 timestamp in filename")
         .destructive()
@@ -1077,7 +1098,8 @@ static void register_core_workflow_tools(McpServer& server,
         "objects — generates separate files named <prefix>_<analyzerId>.csv. "
         "'analyzers' overrides analyzerId when provided.")
         .param<std::string>("filePath", "Output CSV file path (or prefix for multi mode)", Required)
-        .param<std::string>("analyzerId", "Single mode: analyzer instance ID")
+        .param<std::string>("analyzerId", "Single mode: analyzer instance ID "
+                            "(from add_analyzer response or get_active_decoders)")
         .param<int>("radixType", "Radix for numeric values: 0=keep decoder "
                     "text (default), 1=Binary, 2=Decimal, 3=Hex, 4=Ascii")
         .param<bool>("iso8601Timestamp", "Use ISO8601 timestamp")
@@ -1472,9 +1494,14 @@ static void register_advanced_feature_tools(McpServer& server,
     server.tool("reconfigure_decoder",
         "Reconfigure an existing decoder's options and channel map "
         "in place (no remove + re-add). Triggers re-decode.")
-        .param<std::string>("analyzerId", "Analyzer instance ID", Required)
-        .any_param("options", "Decoder options as key-value pairs", "object")
-        .any_param("channelMap", "Channel mapping (decoder channel → hardware index)", "object")
+        .param<std::string>("analyzerId", "Analyzer instance ID (from the add_analyzer response or "
+            "get_active_decoders 'instance_id')", Required)
+        .any_param("options", "Decoder options as key-value pairs (keys = "
+                   "option ids from get_analyzer_options; values are strings "
+                   "or JSON scalars)", "object")
+        .any_param("channelMap", "Channel mapping: key = decoder channel "
+                   "name as listed by get_analyzer_options ('channels' "
+                   "array), value = hardware channel index", "object")
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1497,7 +1524,9 @@ static void register_advanced_feature_tools(McpServer& server,
         "Create a new session. Optionally connect to a device or "
         "load a file.")
         .param<std::string>("deviceId", "Device ID to connect (optional)")
-        .param<std::string>("filePath", "File path to load (optional)")
+        .param<std::string>("filePath", "File path to load (optional): "
+                            "'.pxl'/'.pxc' PXView session archive or "
+                            "upstream sigrok session zip")
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto device_id = p.get_or<std::string>("deviceId", "");
             auto file_path = p.get_or<std::string>("filePath", "");
@@ -1573,7 +1602,8 @@ static void register_advanced_feature_tools(McpServer& server,
         .enum_param<std::string>("action", {"get", "add", "remove", "clear"},
             "Action: 'get' (default), 'add', 'remove', or 'clear'")
         .param<uint64_t>("samplePos", "Sample position for new cursor (action='add')")
-        .param<int32_t>("index", "Cursor index to remove (action='remove')")
+        .param<int32_t>("index", "Cursor index to remove (action='remove'; "
+                        "as listed by action='get')")
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
             return handle_configure_cursors(session, p);
