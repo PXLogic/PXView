@@ -20,22 +20,24 @@
 
 // Typed event bus for PXView.
 //
-// STATUS (modernize-core-layer-radical — Task 12 complete):
+// STATUS (命令/通知拆分收尾 — 2026-09-16):
 //   * The legacy IMessageListener / DSV_MSG_* / broadcast_msg / trigger_message
 //     infrastructure has been COMPLETELY REMOVED. All dispatch now goes through
-//     broadcast<T>() (sync), broadcast_sync<T>() (sync direct), or
+//     EventBus::subscribe<T>() lambdas (IEventListener was removed) with three
+//     dispatch modes: broadcast<T>() (sync), broadcast_sync<T>() (sync direct),
 //     broadcast_async<T>() (async via Qt::QueuedConnection).
-//   * 4 pre/post ordering codes (CurrentDeviceChangePrev / StartCollectWorkPrev
-//     / EndCollectWorkPrev / StoreConfPrev) are emitted via broadcast_sync<T>()
-//     — synchronous direct dispatch, no Qt::QueuedConnection queue. Callers
-//     MUST be on the main thread.
-//   * MainWindow overrides ALL 45 on_event(const T&) virtuals (41 original +
-//     StoreConfPrev + CurrentDeviceChangePrev + StartCollectWorkPrev +
-//     EndCollectWorkPrev). Each override contains its handler body directly
-//     (no int dispatch, no switch).
-//   * DataUpdated is emitted by DataFeedParser::feed_in_* (radical Task 13).
-//   * The "new code MUST use IEventListener" hard constraint is in effect
-//     (see AGENTS.md "Typed event bus (HARD CONSTRAINT — C1+ complete)").
+//   * 命令/通知约定（AGENTS.md "Command / Notice split" — HARD CONSTRAINT）：
+//     事件只描述"已发生的事"，订阅者不得借事件执行 Core 状态转换。状态变更
+//     走显式命令（如 SigSession::apply_device_options()），广播方先命令后
+//     通知。DeviceOptionsUpdated 为纯通知；EndDeviceOptions / StoreConfPrev
+//     已退役（其订阅者逻辑迁为显式命令，由 Qt 信号直连调用）。
+//   * *Prev 事件（CurrentDeviceChangePrev / StartCollectWorkPrev /
+//     EndCollectWorkPrev）实际经 broadcast_async 派发（历史漂移：设计文档
+//     曾声称 broadcast_sync）。"前置"保证只剩队列顺序 —— handler 可能晚于
+//     它名义上先于的 mutation 执行，因此 handler 只允许做 UI 预处理
+//     （关闭弹窗等），绝不允许依赖"mutation 未发生"或执行状态转换。
+//   * DataUpdated is emitted by DataFeedParser::feed_in_*.
+//   * 新代码 MUST 使用 EventBus::subscribe<T>()（见 AGENTS.md）。
 //
 // This header defines a set of semantic event structs and the IEventListener
 // interface. Each event carries its full context as typed fields rather than a
@@ -127,16 +129,16 @@ struct SampleCountUpdated {
     uint64_t sample_count;
 };
 
-// DeviceOptionsUpdated — device options changed; signals need reload.
-// skip_model_reload: set by TabContext::apply_device_intent() — the intent
-// apply path has already run reload() explicitly; SigSession skips its
-// redundant second full model rebuild (event-cascade convergence). All other
-// broadcast sites leave it false (unchanged behavior).
+// DeviceOptionsUpdated — 纯通知事件（notice）：设备配置已变更，GUI dock 控件
+// 需要重读驱动值刷新显示。
+// 事件语义约定（命令/通知拆分，2026-09-16）：本事件不再触发 Core 状态转换。
+// 模型重建由命令阶段负责 —— 广播方在发本事件之前显式调用
+// SigSession::apply_device_options()（内部 reload()，末尾经 signals_changed()
+// 终态链完成 View 重建）。订阅者读到本事件时 Core 状态已一致，无需延迟等待。
+// from_external: MCP 等外部路径写入驱动后置 true —— GUI 需全量重读驱动刷新
+// dock 控件；GUI 自身提交置 false（控件已本地更新，避免全量重建导致的跳动）。
 struct DeviceOptionsUpdated {
-    bool skip_model_reload = false;
-    // 修复（MCP/GUI 不同步）：区分事件来源。MCP 等外部路径写入驱动后广播
-    // 时置 true —— GUI 需全量重读驱动刷新 dock 控件；GUI 自身提交置 false
-    // （控件已本地更新，避免全量重建导致的 UI 跳动）。
+    // 修复（MCP/GUI 不同步）：区分事件来源。
     bool from_external = false;
 };
 
@@ -287,8 +289,11 @@ struct SessionStopped {};
 // the libsigrok data-feed worker thread (DataFeedParser).
 struct RevEndPacket {};
 
-// EndDeviceOptions — device options batch update ended.
-struct EndDeviceOptions {};
+// EndDeviceOptions — 已退役（命令/通知拆分收尾，2026-09-16）。原语义
+// "设备选项批量更新结束"的唯一消费者在订阅者内执行 demo pattern 状态
+// 转移（违反命令/通知约定）；现由 DeviceOptionsDock::device_options_committed()
+// 信号直连 MainWindow::apply_end_device_options() 显式执行。
+// struct EndDeviceOptions {};
 
 // DeviceConfigUpdated — device config changed.
 struct DeviceConfigUpdated {};
@@ -352,15 +357,17 @@ struct StyleChanged {};
 // delayed user-facing message. Emitted from the device event callback thread.
 struct DeviceSpeedNotMatch {};
 
-// modernize-core-layer-radical Task 10: StoreConfPrev pre-broadcast ordering
-// event. Emitted synchronously via broadcast_sync() BEFORE SigSession commits
-// a config-store mutation, so observers can read the pre-mutation state.
-struct StoreConfPrev {};
+// modernize-core-layer-radical Task 10 历史注释：StoreConfPrev 曾是保存前
+// 预提交的 ordering 事件，实际经 broadcast_async 派发（"前置"保证名存实亡
+// —— 提交落在 sig_store_session 读取之后）。已退役：保存前置提交改为
+// FileBar::store_conf_pending() 信号直连 MainWindow::commit_settings_before_store()。
+// （原 struct StoreConfPrev {} 已删除。）
 
 // modernize-core-layer-radical Task 11: pre-broadcast ordering events for the
-// remaining 3 PREV codes. Each is emitted synchronously via broadcast_sync()
-// BEFORE the corresponding state mutation. Callers MUST be on the main thread
-// (broadcast_sync is synchronous direct dispatch, no Qt::QueuedConnection).
+// remaining 3 PREV codes.
+// 实际状态（2026-09-16 文档修正）：三个事件均经 broadcast_async 派发而非
+// broadcast_sync —— "前置"保证只剩队列顺序（先于对应 Post 事件被处理），
+// handler 运行时 mutation 可能已发生。handler 只允许做 UI 预处理。
 struct CurrentDeviceChangePrev {};
 struct StartCollectWorkPrev {};
 struct EndCollectWorkPrev {};

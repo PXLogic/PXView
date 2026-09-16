@@ -1,12 +1,16 @@
 #===============================================================================
-#= PXView MCP E2E Test Suite
+#= PXView C++ Unit Tests (QTest + CTest)
 #-------------------------------------------------------------------------------
 # This directory is added via `add_subdirectory(tests)` from the top-level
 # CMakeLists.txt when ENABLE_TESTS is ON.
 #
-# Tests are implemented as Python pytest files in suites/.
-# They communicate with PXView via MCP (HTTP JSON-RPC 2.0 on port 10110).
-# Requires PXView to be running in --headless mode.
+# 历史说明（2026-09-16）：本目录曾注册 MCP E2E pytest 测试（mcp_e2e_all /
+# mcp_e2e_p0/p1/p2 + pytest_venv 自定义目标）。这些用例依赖运行中的 PXView
+# MCP 端口（10110）与 pytest 虚拟环境，在常规 ctest 流程中恒为 Not Run，
+# 已从 CTest 移除。MCP 端到端验证改用独立脚本：
+#   - tests/check_mcp_gui_sync.py   交互式检查表（--no-send 可仅打印）
+#   - tests/suites/                 pytest 套件（手动启动 headless 后运行）
+# CTest 仅保留纯 C++/Qt 单元测试 —— 无 Python 依赖，无环境门槛。
 #===============================================================================
 
 #===============================================================================
@@ -14,84 +18,5 @@
 #-------------------------------------------------------------------------------
 # QTest-based unit tests for Core/Data/API/View layers.
 # Test files live in tests/qtest/ with subdirectories: core/, data/, api/, view/.
-#
-# NOTE: add_subdirectory(qtest) MUST come before the Python3 gate below —
-# qtest is pure C++/Qt and has no Python dependency. The previous layout ran
-# find_package(Python3) first and return()'d on failure, which silently
-# dropped all C++ unit tests whenever Python wasn't discoverable in the
-# current shell (find_package results from the root scope are not visible
-# in this subdirectory scope, and a failed lookup caches NOTFOUND).
 #===============================================================================
 add_subdirectory(qtest)
-
-find_package(Python3 COMPONENTS Interpreter)
-
-if(NOT Python3_FOUND)
-    message(STATUS "Python3 not found — MCP E2E tests will be skipped")
-    return()
-endif()
-
-# ---- Install pytest + requests into the build tree ----
-# This ensures the test runner has its dependencies available.
-set(PYTEST_VENV_DIR "${CMAKE_BINARY_DIR}/pytest_venv")
-
-if(WIN32)
-    set(PYTEST_PYTHON "${PYTEST_VENV_DIR}/Scripts/python.exe")
-    set(PYTEST_PIP "${PYTEST_VENV_DIR}/Scripts/pip.exe")
-else()
-    set(PYTEST_PYTHON "${PYTEST_VENV_DIR}/bin/python")
-    set(PYTEST_PIP "${PYTEST_VENV_DIR}/bin/pip")
-endif()
-
-# Create venv and install deps (only if not already done)
-add_custom_command(
-    OUTPUT "${PYTEST_PYTHON}"
-    COMMAND ${Python3_EXECUTABLE} -m venv "${PYTEST_VENV_DIR}"
-    COMMAND "${PYTEST_PIP}" install --quiet pytest pytest-html requests
-    COMMENT "Creating pytest virtual environment"
-)
-add_custom_target(pytest_venv DEPENDS "${PYTEST_PYTHON}")
-
-# ---- Register CTest entries ----
-
-# Option 1: Run all tests as a single CTest case
-add_test(
-    NAME "mcp_e2e_all"
-    COMMAND "${PYTEST_PYTHON}" -m pytest
-            "${CMAKE_CURRENT_SOURCE_DIR}/suites/"
-            -v
-            --tb=short
-            --html=${CMAKE_BINARY_DIR}/test_report.html
-            --junitxml=${CMAKE_BINARY_DIR}/test_report.xml
-            --self-contained-html
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-set_tests_properties("mcp_e2e_all" PROPERTIES
-    TIMEOUT 1500
-    DEPENDS pytest_venv
-    ENVIRONMENT "PXVIEW_MCP_URL=http://127.0.0.1:10110/mcp"
-)
-
-# Option 2: Run by priority level (for faster feedback)
-foreach(level p0 p1 p2)
-    add_test(
-        NAME "mcp_e2e_${level}"
-        COMMAND "${PYTEST_PYTHON}" -m pytest
-                "${CMAKE_CURRENT_SOURCE_DIR}/suites/"
-                -v
-                --tb=short
-                -m "${level}"
-                --junitxml=${CMAKE_BINARY_DIR}/test_report_${level}.xml
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
-    set_tests_properties("mcp_e2e_${level}" PROPERTIES
-        TIMEOUT 1200
-        DEPENDS pytest_venv
-        ENVIRONMENT "PXVIEW_MCP_URL=http://127.0.0.1:10110/mcp"
-    )
-endforeach()
-
-#===============================================================================
-#= C++ unit tests (QTest + CTest) — registered at the top of this file
-# (add_subdirectory(qtest) runs before the Python3 gate; see NOTE above).
-#===============================================================================

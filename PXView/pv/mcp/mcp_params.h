@@ -42,9 +42,11 @@ struct json_type_name {
 };
 
 template <> struct json_type_name<bool>           { static constexpr const char* value = "boolean"; static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
+template <> struct json_type_name<int8_t>         { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<int16_t>        { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<int32_t>        { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<int64_t>        { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
+template <> struct json_type_name<uint8_t>        { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<uint16_t>       { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<uint32_t>       { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };
 template <> struct json_type_name<uint64_t>       { static constexpr const char* value = "integer";  static constexpr const char* items = ""; static constexpr bool is_array = false; static constexpr bool is_optional = false; };

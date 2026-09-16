@@ -61,13 +61,18 @@ private:
     void UpdateFont() override;
 
 signals:
-    void sig_load_file(QString); 
+    void sig_load_file(QString);
     void sig_save();
     void sig_export();
     void sig_import_file(QString); //post import data file event message
     void sig_screenShot(); //post screen capture event message
     void sig_load_session(QString); //post load session event message
     void sig_store_session(QString); //post store session event message
+    // 命令/通知拆分（2026-09-16）：保存流程的前置提交命令通道。由
+    // MainWindow 直连执行采样栏设置提交（保证 sig_store_session 读到
+    // 最新值），取代原 StoreConfPrev 事件 —— 异步事件的"前置"保证
+    // 名存实亡（提交落在读取之后）。
+    void store_conf_pending();
 
 private slots:
     void on_actionLoad_triggered();

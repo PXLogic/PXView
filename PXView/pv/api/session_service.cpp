@@ -504,7 +504,9 @@ _api_worker_pool(std::make_unique<pv::core::ThreadPool>(1)) {
 if (_session && _session->get_event_bus()) {
 auto *bus = _session->get_event_bus();
 auto *self = this;
-_event_subscriptions.push_back(bus->subscribe<pv::interface::StoreConfPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::SaveComplete, {{"detail", "store_conf_prev"}}); self->dispatch_notification("SaveComplete", "file_op", nlohmann::json(nullptr)); }));
+// StoreConfPrev API 桥订阅已删除（2026-09-16）：该事件已随保存前置提交
+// 的命令显式化（FileBar 信号直连）而退役 —— 无广播者。原推送把"保存前"
+// 误标为 SaveComplete，属语义错位，一并消除。
 _event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect_prev"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
 _event_subscriptions.push_back(bus->subscribe<pv::interface::EndCollectWorkPrev>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "end_collect_prev"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
 _event_subscriptions.push_back(bus->subscribe<pv::interface::StartCollectWork>([self](const auto &) { self->broadcast_event(ServiceEvent::CaptureStateChanged, {{"detail", "start_collect"}}); self->dispatch_notification("CaptureStateChanged", "capture_state", nlohmann::json(nullptr)); }));
@@ -614,16 +616,22 @@ listener->on_service_event(data);
 }
 
 void SessionService::notify_device_options_updated() {
-    // 修复（MCP/GUI 不同步）：MCP 写驱动成功后广播 typed DeviceOptionsUpdated
-    // （from_external=true），GUI 的 on_device_options_updated 由此让
-    // DeviceOptionsDock 全量重读驱动刷新控件、采样栏重载，并与 GUI 自身
-    // 写配置后的广播语义一致。
-    // 采集中跳过：GUI 等价操作同样被禁止，且事件触发的 reload() 会破坏
-    // 采集状态（历史教训：采集中模型重建引发崩溃）。
+    // 命令/通知拆分（2026-09-16）：MCP 写驱动成功后的同步分两段 ——
+    // 命令阶段：显式调用 SigSession::apply_device_options()（内部 reload()
+    // 完成模型重建 + View 终态重建）。DeviceOptionsUpdated 订阅者不再代劳
+    // 状态转换（原实现使 GUI handler 隐式依赖"另一订阅者先跑完"，只能靠
+    // singleShot(0) 时序补偿）。经 invoke_or_call 封送主线程 —— reload 创建
+    // QObject 派生的 SignalModel，禁止在 MCP 工作线程直接执行。
+    // 通知阶段：广播 from_external=true 的纯通知事件，GUI dock 全量重读
+    // 驱动刷新控件、采样栏重载；API 层同时向 WS/MCP 客户端推送
+    // DeviceConfigChanged。
+    // 采集中跳过：GUI 等价操作同样被禁止，且 reload() 会破坏采集状态
+    // （历史教训：采集中模型重建引发崩溃）。
     if (_session && !_session->is_working()) {
-        pxv_info("SessionService: MCP config write -> broadcast DeviceOptionsUpdated(from_external)");
+        pxv_info("SessionService: MCP config write -> apply_device_options + broadcast DeviceOptionsUpdated(from_external)");
+        invoke_or_call(nullptr, [s = _session]() { s->apply_device_options(); });
         _session->broadcast_async<pv::interface::DeviceOptionsUpdated>(
-            {false, true});
+            {true});
     } else {
         pxv_warn("SessionService: MCP config write during capture, skip GUI sync broadcast");
     }

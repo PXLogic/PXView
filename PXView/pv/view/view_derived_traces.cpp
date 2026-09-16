@@ -158,14 +158,12 @@ bool ViewDerivedTraces::add_decoder(
   // 4. Mark derived traces NOT dirty since we just synced manually.
   _derived_traces_dirty = false;
 
-  // 5. Broadcast DeviceOptionsUpdated so SigSession::on_event triggers reload()
-  //    to sync channel state. Note: broadcast_async is ASYNC — reload() runs
-  //    in the NEXT event loop iteration, AFTER start_all_decode_tasks() below.
-  //    This creates a race where reload() recreates SignalModels with nullptr
-  //    snapshots while decode threads are already running. The fix is in
-  //    reload() itself: it now sets snapshot pointers on the new models
-  //    immediately after creating them, so decode threads always find valid
-  //    snapshots regardless of timing.
+  // 5. 命令阶段：显式触发 Core 状态收敛（模型重建 + 快照重绑）。同步执行
+  //    于 start_all_decode_tasks() 之前 —— 消除旧实现的竞态（旧实现经
+  //    broadcast_async 在下一拍才 reload，decode 线程已启动，依赖 reload
+  //    内部的快照指针补绑兜底）。命令/通知拆分后 reload 在本拍完成。
+  _view->session().apply_device_options();
+  // 6. 通知阶段：API 层订阅此事件向 MCP/WS 客户端推送 DeviceConfigChanged。
   _view->session().broadcast_async<interface::DeviceOptionsUpdated>({});
 
   // 6. Start the decode task for all decoders (including the newly added one).
@@ -237,7 +235,9 @@ void ViewDerivedTraces::remove_decoder(DecodeTrace *trace) {
     _view->data_source()->remove_decoder_by_key_handel(key_handel);
   }
 
-  // 3. Broadcast so the API layer can push a ServiceEvent.
+  // 3. 命令阶段：显式触发 Core 状态收敛（命令/通知拆分约定）。
+  _view->session().apply_device_options();
+  // 4. 通知阶段：API 层订阅此事件向 MCP/WS 客户端推送 DeviceConfigChanged。
   _view->session().broadcast_async<interface::DeviceOptionsUpdated>({});
 }
 
@@ -286,7 +286,9 @@ void ViewDerivedTraces::clear_all_decoders() {
   // 2. Notify Core to clear all DecoderStacks.
   _view->data_source()->clear_all_decoder(true);
 
-  // 3. Broadcast so the API layer can push a ServiceEvent.
+  // 3. 命令阶段：显式触发 Core 状态收敛（命令/通知拆分约定）。
+  _view->session().apply_device_options();
+  // 4. 通知阶段：API 层订阅此事件向 MCP/WS 客户端推送 DeviceConfigChanged。
   _view->session().broadcast_async<interface::DeviceOptionsUpdated>({});
 }
 

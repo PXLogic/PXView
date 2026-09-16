@@ -71,6 +71,10 @@ public:
 
 signals:
   void settings_applied();
+  // 命令/通知拆分（2026-09-16）：设备选项批量提交通道。由 dock_manager
+  // 直连 MainWindow::apply_end_device_options()（demo pattern 转移），
+  // 取代已退役的 EndDeviceOptions 事件（事件订阅者不得暗改状态）。
+  void device_options_committed();
 
 private:
   QLayout *get_property_form(QWidget *parent);

@@ -174,11 +174,12 @@ public:
     //
     // For empty (parameterless) event types — detected at compile time via
     // std::is_empty_v — e.g. DataUpdated, CollectEnd, EndCollectWork,
-    // DeviceOptionsUpdated, SessionStopped — same-type async events are
-    // coalesced: if an event of the same type is already pending in the qApp
-    // event queue, subsequent calls are silently dropped.  The pending flag
-    // is cleared just before dispatch, so a genuinely new event posted during
-    // dispatch will still be queued.
+    // SessionStopped — same-type async events are coalesced: if an event of
+    // the same type is already pending in the qApp event queue, subsequent
+    // calls are silently dropped.  The pending flag is cleared just before
+    // dispatch, so a genuinely new event posted during dispatch will still
+    // be queued. 带载荷字段的事件（如 DeviceOptionsUpdated{from_external}）
+    // 自动落入非空分支逐条派发 —— 合并不会丢字段。
     //
     // For non-empty event types (TriggerReceived{pos}, CaptureStateChanged{...},
     // SignalsChanged{rebuild_kind,...}, ...) every call is dispatched

@@ -1381,6 +1381,9 @@ void ProtocolDock::OnProtocolVisibilityChanged(void *handle) {
     }
   }
 
+  // 命令/通知拆分：命令阶段显式触发 Core 状态收敛（保持历史 reload 行为），
+  // 随后广播通知供 dock 重读驱动 / API 客户端推送。
+  _session->apply_device_options();
   _session->broadcast_async<interface::DeviceOptionsUpdated>({});
 }
 

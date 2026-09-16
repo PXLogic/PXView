@@ -68,8 +68,9 @@ private:
     void on_collect_start(const interface::CollectStart &);
     void on_collect_end(const interface::CollectEnd &);
     void on_end_collect_work(const interface::EndCollectWork &);
-    void on_end_device_options(const interface::EndDeviceOptions &);
-    void on_device_config_updated(const interface::DeviceConfigUpdated &);
+    // on_end_device_options / on_device_config_updated 已删除：
+    // 前者逻辑迁至 MainWindow::apply_end_device_options()（dock 提交信号
+    // 直连）；后者为空端点，DeviceConfigUpdated 仅由 API 桥消费。
     void on_demo_mode_changed(const interface::DemoModeChanged &);
     void on_data_pool_changed(const interface::DataPoolChanged &);
     void on_simple_trigger_changed(const interface::SimpleTriggerChanged &);
@@ -87,7 +88,13 @@ private:
     void on_font_options_changed(const interface::FontOptionsChanged &);
     void on_shortcut_changed(const interface::ShortcutChanged &);
     void on_style_changed(const interface::StyleChanged &);
-    void on_store_conf_prev(const interface::StoreConfPrev &);
+    // on_store_conf_prev / on_end_device_options / on_device_config_updated
+    // 已删除（声明随实现移除）：
+    // - 保存前置提交迁至 MainWindow::commit_settings_before_store()
+    //   （FileBar::store_conf_pending 信号直连，同步于 sig_store_session 读取前）
+    // - demo pattern 转移迁至 MainWindow::apply_end_device_options()
+    //   （DeviceOptionsDock::device_options_committed 信号直连）
+    // - DeviceConfigUpdated 为空端点，仅 API 桥消费
     void on_current_device_change_prev(const interface::CurrentDeviceChangePrev &);
     void on_start_collect_work_prev(const interface::StartCollectWorkPrev &);
     void on_end_collect_work_prev(const interface::EndCollectWorkPrev &);

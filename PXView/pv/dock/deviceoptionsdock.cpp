@@ -287,8 +287,14 @@ void DeviceOptionsDock::commit_channels() {
     }
 
     QTimer::singleShot(0, this, [this]() {
+      // 命令阶段：显式触发 Core 状态收敛（模型重建 + View 终态重建），
+      // 不再依赖 DeviceOptionsUpdated 订阅者代劳（命令/通知拆分约定）。
+      _session->apply_device_options();
+      // 通知阶段：dock 重读驱动 / API 客户端推送。
       _session->broadcast_async<interface::DeviceOptionsUpdated>({});
-      _session->broadcast_async<interface::EndDeviceOptions>({});
+      // 提交收尾命令：demo pattern 转移（信号直连，原 EndDeviceOptions
+      // 事件订阅者逻辑）。
+      emit device_options_committed();
       emit settings_applied();
     });
   } else {
@@ -833,8 +839,13 @@ void DeviceOptionsDock::channel_check() {
   try_resize_scroll();
 
   QTimer::singleShot(0, this, [this]() {
+    // 命令阶段：显式触发 Core 状态收敛（命令/通知拆分约定）。
+    _session->apply_device_options();
+    // 通知阶段：dock 重读驱动 / API 客户端推送。
     _session->broadcast_async<interface::DeviceOptionsUpdated>({});
-    _session->broadcast_async<interface::EndDeviceOptions>({});
+    // 提交收尾命令：demo pattern 转移（信号直连，原 EndDeviceOptions
+    // 事件订阅者逻辑）。
+    emit device_options_committed();
     emit settings_applied();
   });
 }

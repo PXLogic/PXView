@@ -275,6 +275,10 @@ void MainWindow::setup_ui() {
   _trig_bar->setObjectName("trig_bar");
   _file_bar = new toolbars::FileBar(_session, this);
   _file_bar->setObjectName("file_bar");
+  // 命令/通知拆分（2026-09-16）：保存前置提交直连（同步执行采样栏设置
+  // 提交，保证 sig_store_session 读到最新值），取代 StoreConfPrev 事件。
+  connect(_file_bar, &toolbars::FileBar::store_conf_pending,
+          this, &MainWindow::commit_settings_before_store);
   _logo_bar = new toolbars::LogoBar(_session, this);
   _logo_bar->setObjectName("logo_bar");
 
@@ -900,6 +904,44 @@ void MainWindow::update_title_bar_text() {
 }
 
 void MainWindow::load_demo_decoder_config(QString optname) { _config_io->load_demo_decoder_config(optname); }
+
+void MainWindow::apply_end_device_options() {
+  // 命令/通知拆分（2026-09-16）：原 SessionEventDispatcher::on_end_device_options
+  // 的事件订阅者逻辑整体迁入。demo pattern 变化时的状态转移（Core 命令
+  // clear_view_data/init_signals/set_collect_mode/start_capture + View 层
+  // 解码器配置重载）由 dock 提交流程显式调用，不再经 EventBus 订阅者暗改。
+  if (_device_agent->is_demo() && _device_agent->get_work_mode() == LOGIC) {
+    QString pattern_mode = _device_agent->get_demo_operation_mode();
+
+    if (pattern_mode != _pattern_mode) {
+      _pattern_mode = pattern_mode;
+
+      _device_agent->update();
+      _session->clear_view_data();
+      _session->init_signals();
+      update_toolbar_view_status();
+      _sampling_bar->update_sample_rate_list();
+      _dock_manager->protocol_widget()->del_all_protocol();
+
+      if (_pattern_mode != "random") {
+        _session->set_collect_mode(COLLECT_SINGLE);
+        load_demo_decoder_config(_pattern_mode);
+        _session->start_capture(false);
+      }
+    }
+  }
+  calc_min_height();
+}
+
+void MainWindow::commit_settings_before_store() {
+  // 命令/通知拆分（2026-09-16）：原 SessionEventDispatcher::on_store_conf_prev
+  // 的事件订阅者逻辑迁入。保存流程的前置提交 —— 同步执行（信号直连），
+  // 保证 sig_store_session 读取时驱动内已是最新采样设置。
+  if (_device_agent && _device_agent->is_hardware() && _session &&
+      !_session->have_hardware_data()) {
+    _sampling_bar->commit_settings();
+  }
+}
 
 QWidget *MainWindow::GetBodyView() { return current_view(); }
 

@@ -338,6 +338,12 @@ public:
   void set_saving(bool flag) { _state->set_saving(flag); }
   DeviceEventObject *device_event_object() { return &_device_event; }
   void reload();
+  // 命令入口（命令/通知拆分约定）：设备配置变更后的 Core 状态收敛。
+  // 状态转换经由本显式命令执行，不由 DeviceOptionsUpdated 订阅者代劳 ——
+  // 事件只描述"已发生的事"。内部执行 reload()（末尾 signals_changed() 终态
+  // 广播完成 View 重建）。调用方须在主线程（reload 创建 QObject 派生的
+  // SignalModel，跨线程调用会破坏线程亲和性）。
+  void apply_device_options() { reload(); }
   void refresh(int holdtime) override { _capture_manager->refresh(holdtime); }
   void check_update() { _capture_manager->check_update(); }
   void set_map_zoom(int index) { _state->set_map_zoom(index); }
@@ -518,7 +524,8 @@ private:
   void DeviceSessionStopped() override;
   // --- Core-internal state-machine event handlers ---
   // Called via EventBus::subscribe<T>() from the constructor.
-  void on_device_options_updated(const interface::DeviceOptionsUpdated &ev);
+  // on_device_options_updated 已删除（命令/通知拆分）：DeviceOptionsUpdated
+  // 为纯通知事件，模型重建走显式命令 apply_device_options()。
   void on_trig_next_collect();
   void on_rev_end_packet();
   void on_copy_to_doc_done();

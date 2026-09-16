@@ -130,9 +130,12 @@ SigSession::SigSession() {
   _event_bus = std::make_unique<core::EventBus>();
   _state->set_event_bus(_event_bus.get());
   // Register event handlers via subscribe<T>() (replaces IEventListener).
-  _event_subscriptions.push_back(
-      _event_bus->subscribe<interface::DeviceOptionsUpdated>(
-          [this](const interface::DeviceOptionsUpdated &e) { on_device_options_updated(e); }));
+  // 命令/通知拆分（2026-09-16）：DeviceOptionsUpdated 已改为纯通知事件，
+  // SigSession 不再订阅它触发 reload() —— 状态转换由广播方显式调用
+  // apply_device_options() 命令完成（事件描述"已发生的事"，订阅者不得
+  // 借事件执行状态转换）。历史实现（on_device_options_updated -> reload）
+  // 使 GUI 订阅者隐式依赖"另一订阅者先跑完"，只能靠 singleShot(0) 时序
+  // 补偿，已随拆分移除。
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::TrigNextCollect>(
           [this](const interface::TrigNextCollect &) { on_trig_next_collect(); }));
@@ -2591,14 +2594,10 @@ Snapshot *SigSession::get_signal_snapshot() {
 // safe via qApp queue).
 // ============================================================================
 
-void SigSession::on_device_options_updated(
-    const interface::DeviceOptionsUpdated &ev) {
-  // 演进（事件瀑布收敛）：skip_model_reload=true 由 TabContext::
-  // apply_device_intent() 置位 —— 意图应用路径已显式 reload() 过，模型
-  // 即为最新，跳过此处的二次全量重建。其余广播点默认 false，行为不变。
-  if (!ev.skip_model_reload)
-    reload();
-}
+// on_device_options_updated 已删除（命令/通知拆分，2026-09-16）：
+// DeviceOptionsUpdated 改为纯通知事件，模型重建由广播方显式调用
+// apply_device_options()（内部 reload()）。原订阅者内执行状态转换的
+// 实现使事件拓扑跨越状态阶段，是 singleShot(0) 时序补偿的根因。
 
 void SigSession::on_trig_next_collect() {
   if (_state->is_working() && is_repeat_mode()) {

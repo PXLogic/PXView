@@ -181,6 +181,11 @@ void DockManager::create_docks(pv::view::View *initial_view) {
                 _wnd->sampling_bar()->reload();
             });
 
+    // 命令/通知拆分（2026-09-16）：批量提交收尾命令直连（demo pattern
+    // 转移），取代已退役的 EndDeviceOptions 事件订阅者。
+    QObject::connect(_device_options_widget, &dock::DeviceOptionsDock::device_options_committed,
+            _wnd, &MainWindow::apply_end_device_options);
+
     // ---- Log dock ----
     _log_dock = new QDockWidget(
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_LOG_DOCK_TITLE), "Log"), _wnd);

@@ -82,8 +82,9 @@ public:
     ///        View::signals_changed(), which does a synchronous full relayout
     ///        (normalize + group + layout_time_signals). Emitting it from
     ///        inside a widget-construction loop re-enters the View and is both
-    ///        wasteful and unsafe. Those call sites refresh the View once
-    ///        afterwards via broadcast<DeviceOptionsUpdated>.
+    ///        wasteful and unsafe. Those call sites converge Core state once
+    ///        afterwards via the explicit command apply_device_options(),
+    ///        then broadcast the DeviceOptionsUpdated notice.
     void set_enabled(bool enabled, bool notify = true);
 
     [[nodiscard]] inline const std::string &color() const { return _color; }

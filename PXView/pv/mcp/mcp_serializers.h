@@ -101,11 +101,16 @@ MCP_SCHEMA(StartCaptureParams)
     .opt("digitalThresholdVolts", &StartCaptureParams::digitalThresholdVolts,
          "Digital threshold voltage (e.g. 1.8)")
     .opt("captureMode", &StartCaptureParams::captureMode,
-         "Capture mode: 'timed', 'manual', 'stream'")
+         "Collect mode: 'manual'/'single' (default, one-shot), 'repeat', "
+         "'loop'. NOTE: this is NOT the hardware Buffer/Stream mode — "
+         "see channelMode. Values 'timed'/'stream' are NOT valid here.")
     .opt("durationSeconds", &StartCaptureParams::durationSeconds,
-         "Duration in seconds (timed mode, ignored in Stream mode)")
+         "Timed capture length in seconds (converted to sample limit; "
+         "ignored in Stream mode)")
     .opt("channelMode", &StartCaptureParams::channelMode,
-         "Buffer/Stream mode")
+         "Hardware acquisition mode: 'Buffer' (default) or 'Stream'. "
+         "In Stream mode durationSeconds and sampleCount are ignored; "
+         "call stop_capture to end streaming. Case-sensitive.")
     .opt("rleEnabled", &StartCaptureParams::rleEnabled,
          "Enable RLE compression (Logic mode)")
     .opt("sampleCount", &StartCaptureParams::sampleCount,

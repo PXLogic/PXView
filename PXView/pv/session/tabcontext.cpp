@@ -320,9 +320,9 @@ void TabContext::apply_device_intent()
             // 快照（VCD/pxl 数据），绝不能绑全局执行缓冲（别的设备的数据）。
             if (!rd->is_file_device_slot())
                 _session->attach_data_to_current_view_buffer();
-            // R3 演进：skip_model_reload 置位让 GUI 消费方照常刷新但不触发
-            // 二次全量重建。
-            _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
+            // 纯通知（命令/通知拆分）：意图应用路径的模型状态已就位，无需
+            // 命令阶段；广播仅让 dock 重读驱动刷新。
+            _session->broadcast_async<interface::DeviceOptionsUpdated>({});
         } else {
             _session->reload();
             // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
@@ -333,14 +333,9 @@ void TabContext::apply_device_intent()
                 if (m)
                     m->set_trig_type(ch.trig_type);
             }
-            // R3: 通道配置已修改 Core (probe->enabled 等)，广播通知其他 GUI
-            // 组件刷新。MainWindow::on_event 会调 rebuild_signals 重建 view::Signal，
-            // SigSession::on_event 会调 reload (二次 reload 从 old_model 保留 trig_type，
-            // 不丢失)。tab 切换低频，二次重建开销可接受。
-            // 演进（事件瀑布收敛）：意图应用路径已显式 reload()，skip_model_reload
-            // 置位让 SigSession 跳过其订阅 handler 中的二次全量重建；GUI 消费方
-            // （通道名/布局刷新等）不受影响，照常执行。
-            _session->broadcast_async<interface::DeviceOptionsUpdated>({true});
+            // 命令阶段（上方显式 reload()）已完成状态收敛；此处广播为纯通知
+            // （命令/通知拆分）：GUI 消费方只做通道名/布局收割与 dock 刷新。
+            _session->broadcast_async<interface::DeviceOptionsUpdated>({});
         }
     } else {
         pxv_info("TabContext::apply_device_intent() session working, "

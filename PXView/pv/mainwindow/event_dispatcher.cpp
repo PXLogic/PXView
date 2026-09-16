@@ -120,10 +120,6 @@ SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBu
       [this](const pv::interface::CollectEnd &e) { on_collect_end(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::EndCollectWork>(
       [this](const pv::interface::EndCollectWork &e) { on_end_collect_work(e); }));
-  _subscriptions.push_back(_bus->subscribe<pv::interface::EndDeviceOptions>(
-      [this](const pv::interface::EndDeviceOptions &e) { on_end_device_options(e); }));
-  _subscriptions.push_back(_bus->subscribe<pv::interface::DeviceConfigUpdated>(
-      [this](const pv::interface::DeviceConfigUpdated &e) { on_device_config_updated(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::DemoModeChanged>(
       [this](const pv::interface::DemoModeChanged &e) { on_demo_mode_changed(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::DataPoolChanged>(
@@ -158,8 +154,8 @@ SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBu
       [this](const pv::interface::ShortcutChanged &e) { on_shortcut_changed(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::StyleChanged>(
       [this](const pv::interface::StyleChanged &e) { on_style_changed(e); }));
-  _subscriptions.push_back(_bus->subscribe<pv::interface::StoreConfPrev>(
-      [this](const pv::interface::StoreConfPrev &e) { on_store_conf_prev(e); }));
+  // StoreConfPrev 订阅已删除：保存前置提交改为 FileBar 信号直连（见
+  // on_store_conf_prev 删除注释）。
   _subscriptions.push_back(_bus->subscribe<pv::interface::CurrentDeviceChangePrev>(
       [this](const pv::interface::CurrentDeviceChangePrev &e) { on_current_device_change_prev(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::FileDeviceClosed>(
@@ -586,57 +582,38 @@ void SessionEventDispatcher::on_device_options_updated(const pv::interface::Devi
   pxv_info("on_device_options_updated: from_external=%d", (int)ev.from_external);
   dock_dbg(std::string("on_device_options_updated: from_external=") +
            std::to_string((int)ev.from_external));
+  // 命令/通知拆分（2026-09-16）：本 handler 是纯通知订阅者 —— 只刷新读
+  // 驱动值的控件并收割当前布局到 tab 文档。Core 模型重建已由广播方在发
+  // 事件之前经显式命令 apply_device_options()（内部 reload()）同步完成，
+  // reload 末尾的 signals_changed() 终态广播已驱动 View 完成重建 —— 本处
+  // 不再 rebuild_signals（历史上与终态链重复的第二次重建），也不再需要
+  // singleShot(0) 时序补偿（原根因是状态转换藏在另一订阅者里，本 handler
+  // 同步执行会读到 reload 前的旧模型；命令显式化后依赖消失）。
   if (ev.from_external) {
-    // 修复（MCP/GUI 不同步）：外部写入的刷新必须延迟一拍执行。同一个
-    // DeviceOptionsUpdated 广播会依次派发 SigSession 的 reload()（重建
-    // SignalModel）与本 handler——若在本 handler 里立刻 update_view/
-    // rebuild_signals，读到的是 reload 前的旧模型（被禁通道仍在旧列表/
-    // 旧状态中）→ dock 网格、viewport 分组卡片残留旧色块。singleShot(0)
-    // 排到队列下一拍，reload 一定已完成，全部读到最终状态。
-    QTimer::singleShot(0, _window, [this]() {
-      dock_dbg("deferred refresh: begin");
-      if (_window->dock_manager()->device_options_widget())
-        _window->dock_manager()->device_options_widget()->update_view();
-      dock_dbg("deferred refresh: dock update_view done");
-      if (_window->dock_manager()->trigger_widget())
-        _window->dock_manager()->trigger_widget()->device_updated();
-      _window->sampling_bar()->reload();
-      if (_window->dock_manager()->measure_widget())
-        _window->dock_manager()->measure_widget()->reload();
-
-      pv::TabContext *ctx = _window->current_context();
-      if (ctx && ctx->document()) {
-        ctx->document()->save_signal_config(
-            _window->session()->get_signal_models(),
-            _window->build_channel_layout(safe_current_view()));
-      }
-      dock_dbg("deferred refresh: save_signal_config done");
-      if (auto *v = safe_current_view()) {
-        v->rebuild_signals();
-        v->signals_changed(nullptr);
-      }
-      dock_dbg("deferred refresh: rebuild_signals done");
-    });
-    return;
+    // 修复（MCP/GUI 不同步）：MCP 等外部路径写驱动后，dock 属性控件不会
+    // 自己更新 —— device_updated() 在绑定已存在时是空转，必须全量重读。
+    // 采样栏同理（采样率/深度经 MCP 修改后原先不刷新）。
+    if (_window->dock_manager()->device_options_widget())
+      _window->dock_manager()->device_options_widget()->update_view();
+    if (_window->dock_manager()->trigger_widget())
+      _window->dock_manager()->trigger_widget()->device_updated();
+    _window->sampling_bar()->reload();
+    if (_window->dock_manager()->measure_widget())
+      _window->dock_manager()->measure_widget()->reload();
+  } else {
+    _window->dock_manager()->trigger_widget()->device_updated();
+    _window->dock_manager()->device_options_widget()->device_updated();
+    _window->dock_manager()->measure_widget()->reload();
   }
-  _window->dock_manager()->trigger_widget()->device_updated();
-  _window->dock_manager()->device_options_widget()->device_updated();
-  _window->dock_manager()->measure_widget()->reload();
 
+  // 收割当前布局到 tab 文档（持久化新 enabled 状态与归一化后的布局）。
+  // 此刻命令阶段已完成：模型与 View 均为最终状态，收割值为幂等快照。
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {
     ctx->document()->save_signal_config(
         _window->session()->get_signal_models(), _window->build_channel_layout(safe_current_view()));
   }
-
-  // 外部写入后 reload() 已重建 SignalModel —— 必须同步 rebuild View 的
-  // Signal 对象（重建时按 model->enabled() 决定显示/占位），否则 MCP
-  // configure_channel 禁用通道后 header 里通道仍占位（原 from_external
-  // 分支提前 return 跳过了这一步）。
-  if (auto *v = safe_current_view()) {
-    v->rebuild_signals();
-    v->signals_changed(nullptr);
-  }
+  dock_dbg("on_device_options_updated: notice handling done");
 }
 void SessionEventDispatcher::on_dso_view_option_changed(const pv::interface::DsoViewOptionChanged &) {
   _window->dock_manager()->trigger_widget()->device_updated();
@@ -717,29 +694,12 @@ void SessionEventDispatcher::on_collect_mode_changed(const pv::interface::Collec
   _window->dock_manager()->trigger_widget()->device_updated();
   if (auto *v = safe_current_view()) v->update();
 }
-void SessionEventDispatcher::on_end_device_options(const pv::interface::EndDeviceOptions &) {
-  if (_window->device_agent()->is_demo() && _window->device_agent()->get_work_mode() == LOGIC) {
-    QString pattern_mode = _window->device_agent()->get_demo_operation_mode();
-
-    if (pattern_mode != _window->pattern_mode()) {
-      _window->pattern_mode() = pattern_mode;
-
-      _window->device_agent()->update();
-      _window->session()->clear_view_data();
-      _window->session()->init_signals();
-      _window->update_toolbar_view_status();
-      _window->sampling_bar()->update_sample_rate_list();
-      _window->dock_manager()->protocol_widget()->del_all_protocol();
-
-      if (_window->pattern_mode() != "random") {
-        _window->session()->set_collect_mode(COLLECT_SINGLE);
-        _window->load_demo_decoder_config(_window->pattern_mode());
-        _window->session()->start_capture(false);
-      }
-    }
-  }
-  _window->calc_min_height();
-}
+// on_end_device_options 已删除（命令/通知拆分收尾，2026-09-16）：demo
+// pattern 转移逻辑是 dock 提交流程的延续动作，现由 DeviceOptionsDock 的
+// device_options_committed() 信号直连 MainWindow::apply_end_device_options()
+// 显式执行（用户交互入口的调用链，非事件订阅者暗改状态）。EndDeviceOptions
+// 事件随之退役（唯一消费者即本 handler）。外部路径（MCP 写 PATTERN_MODE）
+// 的转移仍由 DemoModeChanged 事件驱动 —— 那是对"外部已发生的变更"的适配。
 void SessionEventDispatcher::on_demo_mode_changed(const pv::interface::DemoModeChanged &) {
   if (_window->device_agent()->is_demo() && _window->device_agent()->get_work_mode() == LOGIC) {
     QString pattern_mode = _window->device_agent()->get_demo_operation_mode();
@@ -898,25 +858,25 @@ void SessionEventDispatcher::on_decode_done(const pv::interface::DecodeDone &) {
   _window->on_decode_done();
 }
 void SessionEventDispatcher::on_signals_changed(const pv::interface::SignalsChanged &) {
-  // Throttle: if the timer is already pending, this event is coalesced.
-  // This prevents N full signal-layout passes from running back-to-back
-  // when N SignalsChanged events are queued (e.g. when MCP adds multiple
-  // decoders in rapid succession). The timer fires once after 50ms of
-  // quiet, processing the latest state.
-  if (!_signals_changed_timer.isActive())
-    _signals_changed_timer.start();
+  // 命令/通知拆分 + 一致性修正（2026-09-16）：本事件是 Core 模型列表变更的
+  // 终态通知（reload()/init_signals() 末尾发出）。消费方必须立即执行增量
+  // 重建（compute_change_event）—— 否则在命令完成与本 handler 之间 View
+  // 的 _own_signals 处于陈旧窗口（被禁通道对象仍在），任何在此窗口读布局
+  // 的通知订阅者会拿到"恰好正确"的脆弱结果。
+  // 旧实现的 50ms 节流只服务于"合并密集重绘"，但它同时延迟了模型列表
+  // 一致性；批量合并需求仅存在于 MCP 解码器连发场景（on_service_event 的
+  // DecoderAdded/Removed 分支），节流定时器为该路径保留。
+  _window->on_signals_changed();
 }
 void SessionEventDispatcher::on_data_updated(const pv::interface::DataUpdated &) {
   _window->on_data_updated();
 }
-void SessionEventDispatcher::on_device_config_updated(const pv::interface::DeviceConfigUpdated &) {}
 
-void SessionEventDispatcher::on_store_conf_prev(const pv::interface::StoreConfPrev &) {
-  if (_window->device_agent() && _window->device_agent()->is_hardware() &&
-      _window->session() && !_window->session()->have_hardware_data()) {
-    _window->sampling_bar()->commit_settings();
-  }
-}
+// on_store_conf_prev 已删除（命令/通知拆分收尾，2026-09-16）：保存前置
+// 提交现由 FileBar::store_conf_pending() 信号直连
+// MainWindow::commit_settings_before_store() 同步执行 —— 原 async 派发下
+// 提交落在 sig_store_session 读取之后，"前置"保证名存实亡。
+// StoreConfPrev 事件退役（唯一广播者 FileBar、唯一消费者本 handler）。
 
 void SessionEventDispatcher::on_current_device_change_prev(const pv::interface::CurrentDeviceChangePrev &) {
   if (_window->msg() != nullptr) {

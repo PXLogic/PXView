@@ -1088,13 +1088,14 @@ void SamplingBar::commit_settings() {
           sample_count != _device_agent->get_driver_sample_limit())
         _device_agent->set_config_uint64(SR_CONF_LIMIT_SAMPLES, sample_count);
     }
-    // R3: 采样率/采样数已修改，广播通知其他 GUI 组件刷新
-    // (MainWindow::on_event(DeviceOptionsUpdated) -> rebuild_signals;
-    // SigSession::on_event(DeviceOptionsUpdated) -> reload) R7: 同时发布
-    // DEVICE_CONFIG_UPDATED（sample_rate/sample_limit 属于 设备配置变化），
-    // 触发 SessionService 中此前为死代码的对应 case。
+    // R3: 采样率/采样数已修改。命令/通知拆分：命令阶段显式触发 Core 状态
+    // 收敛（模型重建），随后广播通知供其他 GUI 组件重读驱动刷新
+    // (DeviceOptionsUpdated -> dock refresh + API 桥推送 DeviceConfigChanged)。
+    // 注：不再同时广播 DeviceConfigUpdated —— 其 GUI 端点为空且 API 桥与
+    // DeviceOptionsUpdated 映射到同一 ServiceEvent::DeviceConfigChanged，
+    // 双广播只会对 MCP/WS 客户端产生重复推送。
     if (_session) {
-      _session->broadcast_async<interface::DeviceConfigUpdated>({});
+      _session->apply_device_options();
       _session->broadcast_async<interface::DeviceOptionsUpdated>({});
     }
   }

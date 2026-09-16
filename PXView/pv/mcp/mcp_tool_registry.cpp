@@ -32,6 +32,7 @@
 
 #include "pv/mcp/mcp.h"
 #include "pv/mcp/mcp_serializers.h"
+#include "pv/mcp/mcp_instructions_gen.h"
 #include "pv/api/iapp_service.h"
 #include "pv/api/types.h"
 #include "PXView/config.h"
@@ -928,7 +929,9 @@ static void register_core_workflow_tools(McpServer& server,
         "Save the current capture to a file.")
         .param<std::string>("filePath", "Output file path", Required)
         .param<uint64_t>("startSample", "Start sample for partial save")
-        .param<uint64_t>("endSample", "End sample for partial save (0 = all)")
+        .param<uint64_t>("endSample", "End sample for partial save. "
+            "Omit both startSample and endSample for a full save; "
+            "if provided, must satisfy startSample <= endSample.")
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1075,7 +1078,8 @@ static void register_core_workflow_tools(McpServer& server,
         "'analyzers' overrides analyzerId when provided.")
         .param<std::string>("filePath", "Output CSV file path (or prefix for multi mode)", Required)
         .param<std::string>("analyzerId", "Single mode: analyzer instance ID")
-        .param<int>("radixType", "Radix: 1=Binary, 2=Decimal, 3=Hex, 4=Ascii")
+        .param<int>("radixType", "Radix for numeric values: 0=keep decoder "
+                    "text (default), 1=Binary, 2=Decimal, 3=Hex, 4=Ascii")
         .param<bool>("iso8601Timestamp", "Use ISO8601 timestamp")
         .any_param("analyzers",
             "Multi mode: array of {analyzerId, radixType} objects. "
@@ -1124,11 +1128,13 @@ static void register_configuration_tools(McpServer& server,
     server.tool("set_sample_config",
         "Set sample configuration parameters. All params optional — only "
         "provided params are updated. Sample rate type (digital/analog/dso) "
-        "is determined by current work mode. Call get_sample_config to "
-        "read current values.")
+        "is determined by current work mode. Call get_session_status with "
+        "include='config' to read current values.")
         .param<uint64_t>("sampleRate", "Sample rate in Hz (applies to current mode)")
         .param<uint64_t>("sampleLimit", "Sample count limit")
-        .param<uint64_t>("timeBase", "Time base in samples")
+        .param<uint64_t>("timeBase", "Time base in nanoseconds "
+                         "(written as SR_CONF_TIMEBASE uint64; mainly "
+                         "meaningful in DSO/Analog modes)")
         .param<int8_t>("collectMode", "0=Single, 1=Repeat, 2=Loop")
         .param<double>("repeatInterval", "Repeat interval in seconds")
         .destructive()
@@ -1158,7 +1164,8 @@ static void register_configuration_tools(McpServer& server,
         "Configure a channel: enable/disable and/or set display name. "
         "All params except channelIndex are optional — only provided "
         "params are updated.")
-        .param<int16_t>("channelIndex", "Channel index", Required)
+        .param<int16_t>("channelIndex", "Channel index as returned by "
+                        "get_channels ('index' field)", Required)
         .param<bool>("enabled", "Enable/disable the channel")
         .param<std::string>("name", "Display name for the channel")
         .destructive()
@@ -1178,17 +1185,27 @@ static void register_configuration_tools(McpServer& server,
     server.tool("configure_trigger",
         "Get or set trigger configuration. Automatically uses LogicTrigger "
         "or DsoTrigger based on current work mode. Call with no args to "
-        "get current config. Include trigger params to set. "
+        "get current config (recommended BEFORE setting: edit the returned "
+        "configJson instead of building one from scratch). "
         "Logic mode: stageCount + configJson. "
-        "DSO mode: source, slope, horizPos, holdoff, margin, channel.")
+        "DSO mode: source, slope, horizPos (percentage 0-100). "
+        "Note: holdoff/margin/channel are accepted but not yet applied "
+        "to hardware (reserved for future use).")
         .param<int32_t>("stageCount", "Logic trigger: stage count")
-        .param<std::string>("configJson", "Logic trigger: config JSON")
-        .param<int32_t>("source", "DSO trigger: source (0=Auto, 1=CH0, 2=CH1)")
+        .param<std::string>("configJson", "Logic trigger: config JSON object "
+            "as returned by a no-arg GET call: {\"enabled\":0|1, "
+            "\"position\":0-100, \"trigger_config\":{...}}")
+        .param<int32_t>("source", "DSO trigger: source (0=Auto, 1=CH0, "
+                        "2=CH1, 3=CH0 and CH1, 4=CH0 or CH1)")
         .param<int32_t>("slope", "DSO trigger: slope (0=Rising, 1=Falling)")
-        .param<double>("horizPos", "DSO trigger: horizontal position")
-        .param<double>("holdoff", "DSO trigger: holdoff time")
-        .param<double>("margin", "DSO trigger: margin")
-        .param<int32_t>("channel", "DSO trigger: channel index")
+        .param<double>("horizPos", "DSO trigger: horizontal trigger "
+                       "position as percentage 0-100")
+        .param<double>("holdoff", "DSO trigger: holdoff (reserved, "
+                       "not yet applied to hardware)")
+        .param<double>("margin", "DSO trigger: margin (reserved, "
+                       "not yet applied to hardware)")
+        .param<int32_t>("channel", "DSO trigger: channel index (reserved, "
+                        "not yet applied to hardware)")
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
             return handle_configure_trigger(session, p);
@@ -1199,9 +1216,10 @@ static void register_configuration_tools(McpServer& server,
         "Get or set probe configuration (vdiv/coupling/vfactor). Only "
         "available in DSO/Analog/MSO mode — returns error in Logic mode. "
         "Call with just channelIndex to get current config.")
-        .param<int16_t>("channelIndex", "Channel index", Required)
+        .param<int16_t>("channelIndex", "Channel index as returned by "
+                        "get_channels ('index' field)", Required)
         .param<double>("vdiv", "Volts per division")
-        .param<int8_t>("coupling", "Coupling: 0=DC, 1=AC")
+        .param<int8_t>("coupling", "Coupling: 0=AC, 1=DC")
         .param<double>("vfactor", "Voltage factor (probe attenuation)")
         .param<bool>("mapDefault", "Use default probe mapping")
         .on_call([app_svc](const Params& p) -> ToolResult {
@@ -1217,8 +1235,11 @@ static void register_configuration_tools(McpServer& server,
         "Set channels to [] to clear. "
         "Returns error in DSO/Analog mode.")
         .array_param<int32_t>("channels", "Channel indices. Empty array = clear.")
-        .array_param<int32_t>("thresholds", "Min pulse width in samples per channel")
-        .array_param<int32_t>("modes", "Filter mode per channel")
+        .array_param<int32_t>("thresholds", "Min pulse width in samples per "
+                              "channel (parallel array, same length as channels)")
+        .array_param<int32_t>("modes", "Filter mode per channel (parallel "
+                              "array, same length as channels): "
+                              "0=Both, 1=High, 2=Low")
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
             return handle_configure_glitch_filter(session, p);
@@ -1230,7 +1251,8 @@ static void register_configuration_tools(McpServer& server,
         "current config. Set channels+invertStates to enable. "
         "Set channels to [] to clear.")
         .array_param<int32_t>("channels", "Channel indices. Empty array = clear.")
-        .array_param<bool>("invertStates", "Invert state per channel")
+        .array_param<bool>("invertStates", "Invert state per channel "
+                           "(parallel array, same length as channels)")
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
             return handle_configure_signal_invert(session, p);
@@ -1239,12 +1261,17 @@ static void register_configuration_tools(McpServer& server,
     // get_config
     server.tool("get_config",
         "Read a generic SR_CONF_* config value by key. The 'type' field "
-        "selects how to interpret the value. NOTE: 'int64' currently maps "
-        "to int32 (no int64 getter exists yet). Use this to access device "
-        "options not covered by dedicated tools (e.g. PWM, VTH, Filter, "
-        "ClockType, TriggerOut, RLE, BandwidthLimit, OperationMode, etc.).")
-        .param<int32_t>("key", "SR_CONF_* config key (numeric)", Required)
-        .param<std::string>("type", "Value type: bool, int, int64, string, double", Required)
+        "selects how to interpret the value — it must match the driver's "
+        "declared type or the call fails (retry with another type). "
+        "NOTE: 'int64' currently maps to int32 (no int64 getter exists yet). "
+        "Common key numbers are listed in the server instructions "
+        "(## Generic Config Keys). Use this to access device options not "
+        "covered by dedicated tools.")
+        .param<int32_t>("key", "SR_CONF_* config key number (see the "
+                        "Generic Config Keys table in server instructions)",
+                        Required)
+        .param<std::string>("type", "Value type: bool, int, int64, uint64, "
+                            "string, double", Required)
         .read_only()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1254,12 +1281,21 @@ static void register_configuration_tools(McpServer& server,
     // set_config
     server.tool("set_config",
         "Write a generic SR_CONF_* config value by key. The 'type' field "
-        "selects how to interpret the value. Use this to configure device "
-        "options not covered by dedicated tools (e.g. PWM, VTH, Filter, "
-        "ClockType, TriggerOut, RLE, BandwidthLimit, OperationMode, etc.).")
-        .param<int32_t>("key", "SR_CONF_* config key (numeric)", Required)
-        .param<std::string>("type", "Value type: bool, int, int64, string, double", Required)
-        .any_param("value", "Value to set (type depends on 'type' field)", "object")
+        "selects how to interpret the value — it must match the driver's "
+        "declared type or the call fails. NOTE: a successful write does "
+        "NOT reload the SignalModel; prefer dedicated tools (set_sample_"
+        "config, configure_probe, configure_trigger) when one exists. "
+        "Common key numbers are listed in the server instructions "
+        "(## Generic Config Keys).")
+        .param<int32_t>("key", "SR_CONF_* config key number (see the "
+                        "Generic Config Keys table in server instructions)",
+                        Required)
+        .param<std::string>("type", "Value type: bool, int, int64, uint64, "
+                            "string, double", Required)
+        .any_param("value", "Value to set: a JSON scalar whose type must "
+                   "match the 'type' field (e.g. true for bool, 1000000 "
+                   "for uint64, \"some text\" for string)",
+                   "")  // empty json_type = schema accepts any scalar type
         .destructive()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1342,9 +1378,11 @@ static void register_advanced_feature_tools(McpServer& server,
         "Read raw samples from a channel. channelType must match the "
         "current work mode: 'logic' for Logic/MSO mode, 'analog' for "
         "Analog mode, 'dso' for DSO mode. Use get_work_mode to check "
-        "current mode. Returns base64-encoded data for logic channels, "
-        "float arrays for analog/DSO channels.")
-        .param<int16_t>("channelIndex", "Channel index", Required)
+        "current mode. Returns base64-encoded data for logic channels "
+        "(one byte per sample, each byte is 0 or 1) and float arrays "
+        "for analog/DSO channels.")
+        .param<int16_t>("channelIndex", "Channel index as returned by "
+                        "get_channels ('index' field)", Required)
         .enum_param<std::string>("channelType",
             {"logic", "analog", "dso"},
             "Channel type — must match current work mode", Required)
@@ -1361,8 +1399,10 @@ static void register_advanced_feature_tools(McpServer& server,
         "Find the next signal edge (rising or falling) starting from "
         "a given sample position.")
         .param<uint64_t>("fromSample", "Start searching from this sample", Required)
-        .param<int16_t>("channelIndex", "Channel index", Required)
-        .param<bool>("risingEdge", "true=rising edge, false=falling edge")
+        .param<int16_t>("channelIndex", "Channel index as returned by "
+                        "get_channels ('index' field)", Required)
+        .param<bool>("risingEdge", "true=rising edge (default), "
+                     "false=falling edge")
         .read_only()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1383,10 +1423,14 @@ static void register_advanced_feature_tools(McpServer& server,
         "objects to match a combined pattern across channels (e.g. I2C SCL=1+SDA=0). "
         "\"channels\" overrides channelIndex/pattern when provided.")
         .param<uint64_t>("fromSample", "Start searching from this sample", Required)
-        .param<int16_t>("channelIndex", "Single-channel mode: channel index")
-        .param<std::string>("pattern", "Single-channel mode: pattern string ('1','0','x')")
+        .param<int16_t>("channelIndex", "Single-channel mode: channel index "
+                        "as returned by get_channels ('index' field)")
+        .param<std::string>("pattern", "Single-channel mode: pattern string "
+                            "('1'=high, '0'=low, 'x'=don't care)")
         .any_param("channels",
-            "Multi-channel mode: array of {channelIndex, state} objects. "
+            "Multi-channel mode: array of {channelIndex, state} objects "
+            "(state: '1'/'0'/'x'), all channels must match simultaneously "
+            "at the same sample. "
             "When provided, overrides channelIndex/pattern.",
             "array", "object")
         .read_only()
@@ -1398,9 +1442,11 @@ static void register_advanced_feature_tools(McpServer& server,
     // get_active_decoders
     server.tool("get_active_decoders",
         "Get the list of currently active (added) protocol decoders "
-        "with their instance IDs. Optionally include full configurations.")
+        "with their instance IDs.")
         .param<bool>("includeConfig",
-            "If true (default), include decoder configurations")
+            "Accepted for compatibility; currently ignored — the response "
+            "always includes instance_id/decoder_id/display_name/row_index/"
+            "is_running/progress per decoder")
         .read_only()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);
@@ -1542,8 +1588,12 @@ std::unique_ptr<McpServer>
 create_mcp_server(IAppService* app_svc) {
     auto server = std::make_unique<McpServer>("pxview", DS_VERSION_STRING);
 
-    // Load instructions from file (Layer 1 of three-layer guidance)
-    server->set_instructions_file("pv/mcp/mcp_instructions.txt");
+    // Load instructions from the compile-time embedded constant (single
+    // source of truth: PXView/pv/mcp/mcp_instructions.txt, regenerated by
+    // CMake configure). The previous set_instructions_file() call relied
+    // on CWD-relative file I/O that silently failed at runtime, leaving
+    // the initialize response's "instructions" field empty.
+    server->set_instructions(pv::mcp::kInstructions);
 
     // Register tools by tier (Improvement 1: split for readability)
     register_mode_management_tools(*server, app_svc);     // Tier 0: 3 tools

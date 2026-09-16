@@ -241,6 +241,18 @@ public:
     void check_config_file_version(); 
     void load_demo_decoder_config(QString optname);
 
+    // 命令/通知拆分（2026-09-16）：设备选项提交流程的收尾命令 —— demo
+    // pattern 变化时的视图/采集状态转移（原 EndDeviceOptions 事件订阅者
+    // 逻辑迁入）。由 DeviceOptionsDock::device_options_committed() 信号
+    // 直连调用（用户交互入口调用链），不再经 EventBus 订阅者暗改状态。
+    void apply_end_device_options();
+
+    // 命令/通知拆分（2026-09-16）：保存流程前置提交 —— 采样栏设置写入
+    // 驱动（硬件且无数据时），保证 sig_store_session 读到最新值。
+    // 由 FileBar::store_conf_pending() 信号直连调用（同步，保存读取之前），
+    // 取代已退役的 StoreConfPrev 事件订阅者。
+    void commit_settings_before_store();
+
     // ---- Delegate accessors (Spec v2 Task 2) ----
     // unique_ptr delegate members are now private; delegates use these.
     MainWindowConfigIO* config_io() const { return _config_io.get(); }

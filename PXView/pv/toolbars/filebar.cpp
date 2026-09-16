@@ -317,14 +317,12 @@ void FileBar::on_actionStore_triggered()
             app.SaveHistory();
         }
 
-        // modernize-core-layer-radical Task 11: pre-broadcast synchronously
-        // so MainWindow commits sampling-bar settings BEFORE sig_store_session
-        // reads them. The legacy async int-message path is removed.
-        // Caller (on_actionStore_triggered) is on the main thread
-        // (user-initiated save action).
-        // Plan B Phase 1: broadcast_sync → broadcast_async.
-        _session->broadcast_async<interface::StoreConfPrev>({});
-         
+        // 命令/通知拆分（2026-09-16）：保存前的前置提交经 store_conf_pending()
+        // 信号直连 MainWindow（同步执行采样栏设置提交，保证 sig_store_session
+        // 读到最新值）。原 StoreConfPrev 事件已退役 —— async 派发下提交落在
+        // 读取之后，"前置"保证名存实亡。
+        emit store_conf_pending();
+
         sig_store_session(file_name);
     }
 }

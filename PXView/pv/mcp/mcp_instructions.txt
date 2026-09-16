@@ -8,11 +8,11 @@ mode before configuring channels, triggers, or probes:
 
   0 = Logic  — Digital signal analysis (digital channels, logic triggers,
                glitch filter, RLE compression, digital threshold)
-  1 = DSO    — Digital Storage Oscilloscope (oscilloscope channels, DSO
-               triggers with source/slope/holdoff, probe config, math/
-               spectrum/lissajous)
-  2 = Analog — Analog/DAQ acquisition (analog channels, probe config,
+  1 = Analog — Analog/DAQ acquisition (analog channels, probe config,
                math/spectrum/lissajous)
+  2 = DSO    — Digital Storage Oscilloscope (oscilloscope channels, DSO
+               triggers with source/slope/horizPos, probe config, math/
+               spectrum/lissajous)
   3 = MSO    — Mixed Signal Oscilloscope (both digital + analog channels,
                all features available)
 
@@ -23,8 +23,8 @@ Logic mode covers the most common use cases: digital signal analysis,
 protocol decoding (SPI, I2C, UART, CAN, etc.), and digital triggers.
 
 Do NOT ask the user which mode to use. Instead, infer from context:
-- User mentions oscilloscope/probe/vdiv/coupling/math/spectrum → DSO mode (1)
-- User mentions analog/DAQ/sensor → Analog mode (2)
+- User mentions oscilloscope/probe/vdiv/coupling/math/spectrum → DSO mode (2)
+- User mentions analog/DAQ/sensor → Analog mode (1)
 - User explicitly needs mixed digital + analog → MSO mode (3)
 - Otherwise → Logic mode (0), proceed silently
 
@@ -60,19 +60,65 @@ These tools will return an error if called in the wrong mode:
   configure_probe:        Only in DSO/Analog/MSO mode
   configure_glitch_filter: Only in Logic/MSO mode
   add_analyzer:           Only in Logic/MSO mode (decoders need digital channels)
-  get_math_results:       Only in DSO/Analog/MSO mode
-  get_spectrum_results:   Only in DSO/Analog/MSO mode
-  get_lissajous_results:  Only in DSO/Analog/MSO mode
+  get_measurement_results: Only in DSO/Analog/MSO mode (math/spectrum/lissajous)
 
 The error message will tell you which mode to switch to.
 
 ## Capture Modes
 
-  Buffer mode: Traditional fixed-length capture. Use captureMode="timed" with
-               durationSeconds, or captureMode="manual".
-  Stream mode: Continuous acquisition with no sample limit. Use
-               captureMode="stream" and call stop_capture to end.
-               In Stream mode, durationSeconds and sampleCount are IGNORED.
+start_capture has TWO independent mode parameters:
+
+  captureMode (collect mode — how captures repeat):
+    'manual' or 'single' : one-shot capture (default)
+    'repeat'             : repeated captures, repeatIntervalSeconds between
+    'loop'               : loop mode
+
+  channelMode (hardware acquisition mode — how the buffer fills):
+    'Buffer' (default)   : traditional fixed-length capture. Use
+                           durationSeconds for a timed capture.
+    'Stream'             : continuous acquisition, no sample limit.
+                           durationSeconds and sampleCount are IGNORED.
+                           Call stop_capture to end streaming.
+
+## Generic Config Keys (get_config / set_config)
+
+The 'key' parameter is the numeric SR_CONF_* value. Common keys and the
+required 'type' (a mismatched type fails — retry with another type):
+
+  Acquisition / sampling
+    30000 SAMPLERATE        uint64  (Hz)
+    50001 LIMIT_SAMPLES     uint64  (sample count)
+    50000 LIMIT_MSEC        uint64  (milliseconds)
+    30001 CAPTURE_RATIO     uint64  (trigger position 0-100)
+    60001 LOOP_MODE         bool
+    60022 INSTANT           bool
+    30003 RLE               bool    (compression, Logic mode)
+    30002 PATTERN_MODE      string  (demo pattern, e.g. 'random')
+
+  DSO / probe (per-channel keys target the channel given by channelIndex
+  in dedicated tools; generic set_config applies device/group level)
+    30010 TIMEBASE          uint64  (nanoseconds)
+    30008 HORIZ_TRIGGERPOS  double  (percentage 0-100)
+    30007 TRIGGER_SOURCE    int     (0=Auto, 1=CH0, 2=CH1)
+    30004 TRIGGER_SLOPE     int     (0=Rising, 1=Falling)
+    60035 PROBE_VDIV        uint64  (millivolts per division)
+    40005 PROBE_FACTOR      uint64  (probe attenuation, e.g. 10 = 10x)
+    60036 PROBE_COUPLING    int     (0=GND, 1=DC, 2=AC)
+    60044 PROBE_MAP_DEFAULT bool
+
+  Logic device options (PXLogic)
+    60027 OPERATION_MODE    string
+    60029 CHANNEL_MODE      string  ('Buffer' / 'Stream')
+    60033 VTH               double  (logic threshold volts)
+    30011 FILTER            string
+    30041 CLOCK_EDGE        string
+    60003 TRIGGER_OUT       bool
+    60004 PWM0_EN / 60007 PWM1_EN        bool
+    60005 PWM0_FREQ / 60008 PWM1_FREQ    double (Hz)
+    60006 PWM0_DUTY / 60009 PWM1_DUTY    double (percent)
+
+Prefer dedicated tools when one exists (set_sample_config,
+configure_probe, configure_trigger) — they also keep the GUI in sync.
 
 ## Tool Organization (45 tools)
 
