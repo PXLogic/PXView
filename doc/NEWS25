@@ -75,6 +75,7 @@ FPGA/IC吹水群：377248676
 
     【构建与工程】
     *MCP E2E 测试从 CTest 移除（mcp_e2e_all / mcp_e2e_p0 / mcp_e2e_p1 / mcp_e2e_p2 + pytest_venv 自定义目标整体删除）：这些用例依赖运行中的 PXView MCP 端口（10110）与 pytest 虚拟环境，在常规 ctest 流程中恒为 Not Run 且被 86% 通过率噪声掩盖真实回归信号；MCP 端到端验证改用独立脚本（tests/check_mcp_gui_sync.py 交互检查表、tests/suites/ pytest 套件手动运行）；CTest 现仅含 24 项纯 C++/Qt 单元测试（无 Python 依赖、无环境门槛、100% 通过），Python3 查找门控与 early-return 一并删除（tests/CMakeLists.txt）
+    *修复 Windows Debug 构建启动即 abort（gdb 现象：unknown target exception 0xC0000409 at ucrtbase!abort，栈顶为 mimalloc mi_add_stderr_output 的 mi_assert_internal(mi_out_default == NULL)）：根因是 vendored mimalloc 仅凭 $ENV{MSYSTEM}=UCRT64 识别工具链（mimalloc/CMakeLists.txt），本项目通常在普通 PowerShell/cmd 里 configure、该变量不存在，于是 MI_MINGW_UCRT64 缺失，mimalloc 在 MinGW 下同时启用了两条初始化路径——src/prim/prim.c 的 GCC 构造函数 mi_process_attach（因 MI_PRIM_HAS_PROCESS_ATTACH 未定义而编译）与 src/prim/windows/prim.c 注册的 .CRT$XLB/.CRT$XLY TLS 回调（该注册不受同一宏保护），两者都调用 _mi_auto_process_init() → _mi_options_post_init() → mi_add_stderr_output()，第二次调用触发上述断言；Release 构建 MI_DEBUG=0（NDEBUG）断言被编译掉故该重复初始化长期静默，Debug 构建 MI_DEBUG=2 则直接 fail-fast。改为在 CMake/deps.cmake 用 check_c_source_compiles 探测 _UCRT 后为 mimalloc-static 显式加 -DMI_MINGW_UCRT64=1，使 mimalloc 只保留 TLS/CRT 单一路径；重建后 prim.c.obj 不再含 .ctors，install.dir 下 PXView.exe/pxviewd.exe 启动正常（CMake/deps.cmake）
 
     【测试与 CI】
     *新增 MCP→GUI 同步修复人工检查表脚本：逐项发送 MCP 命令（configure_trigger/set_config/configure_channel/configure_probe/set_sample_config/switch_work_mode 等）并给出 GUI 核对点，交互式按回车记录通过/失败/跳过，结束输出汇总（失败退出码 1）；支持 --url/--no-send（tests/check_mcp_gui_sync.py）

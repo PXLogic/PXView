@@ -271,8 +271,34 @@ set(MI_BUILD_TESTS   OFF CACHE BOOL "Build test executables (not needed)" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/mimalloc EXCLUDE_FROM_ALL)
 set(MIMALLOC_LIB mimalloc-static)
 
+#= mimalloc 仅通过 $ENV{MSYSTEM} 识别 MSYS2 UCRT64（mimalloc/CMakeLists.txt 的
+#= `if("$ENV{MSYSTEM}" STREQUAL "UCRT64")`），而本项目通常在普通 PowerShell/cmd 里
+#= configure，该环境变量不存在 —— 于是 MI_MINGW_UCRT64 缺失，mimalloc 在 MinGW 下
+#= 会同时编译两条初始化路径：
+#=   * src/prim/prim.c 的 GCC 构造函数 mi_process_attach（因 MI_PRIM_HAS_PROCESS_ATTACH
+#=     未定义而被启用），
+#=   * src/prim/windows/prim.c 里 .CRT$XLB/.CRT$XLY/.CRT$XIB 的 TLS 回调注册
+#=     （该注册不受同一宏保护）。
+#= 两条路径都会调用 _mi_auto_process_init() → _mi_options_post_init() →
+#= mi_add_stderr_output()，第二次调用触发 options.c 的
+#= `mi_assert_internal(mi_out_default == NULL)`。Release 构建 MI_DEBUG=0 断言被编译
+#= 掉所以一直静默，Debug 构建（MI_DEBUG=2）则直接 abort（0xC0000409）。
+#= 这里按编译器实际 CRT 显式补上该宏，使 mimalloc 只保留 TLS/CRT 单一路径。
+if(WIN32 AND MINGW)
+	include(CheckCSourceCompiles)
+	check_c_source_compiles("#include <_mingw.h>
+#ifndef _UCRT
+#error not a UCRT based toolchain
+#endif
+int main(void) { return 0; }" PXVIEW_MINGW_UCRT_TOOLCHAIN)
+	if(PXVIEW_MINGW_UCRT_TOOLCHAIN)
+		target_compile_definitions(mimalloc-static PRIVATE MI_MINGW_UCRT64=1)
+	endif()
+endif()
+
 message("----- mimalloc:")
 message(STATUS "	 library: ${MIMALLOC_LIB} (vendored submodule, MI_OVERRIDE=OFF)")
+message(STATUS "	 init path: ${PXVIEW_MINGW_UCRT_TOOLCHAIN} (UCRT toolchain → MI_MINGW_UCRT64)")
 
 #===============================================================================
 #= Aggregated link libraries for pxview-core / PXView executable
