@@ -173,6 +173,36 @@ elseif(NOT APPLE)
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
 endif()
 
+# ==== FilterProcessor 离线并发/排队单测（缺口审计③）====
+# 覆盖此前只有手工 MCP pytest 套件才碰得到、CTest 零覆盖的 Core 逻辑：
+# 清除排队（park 在 _edit_mutex）、_edit_intent_seq 最新写者优先、
+# 同步清除等待真实还原、无活动时空操作。外壳同 test_decode_task_manager：
+# FakeDispatcher 排队异步事件（测试内 drain 显式投递，不需要 Qt 事件循环），
+# StubSession 提供真实 SessionData（内含真实 LogicSnapshot）。
+pv_add_qtest(test_filter_processor
+    core/test_filter_processor.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+)
+target_include_directories(test_filter_processor PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+target_sources(test_filter_processor PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
+)
+target_link_libraries(test_filter_processor PRIVATE pxview-core Qt6::Gui)
+target_link_options(test_filter_processor PRIVATE -Wl,--no-as-needed)
+if(WIN32)
+    target_link_libraries(test_filter_processor PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_filter_processor PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()
+
 # ==== Data layer tests ====
 pv_add_qtest(test_trigger_config
     data/test_trigger_config.cpp

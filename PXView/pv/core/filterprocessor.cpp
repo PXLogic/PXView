@@ -27,6 +27,15 @@ constexpr int kFilterRefreshIntervalMs = 150;
 // GUI) wait for their worker task. The undo is bounded by the edit log, i.e. by
 // ~one copy of the channel data, so this is far more than a healthy case needs;
 // it only turns a pathological hang into a warning.
+//
+// KNOWN NARROW EDGE (gap audit ⑤, accepted): since clears are queued while a
+// pass runs, the synchronous variant may wait for "rest of the pass + undo".
+// On timeout it RETURNS FIRST (the MCP tool still reports success) while the
+// worker keeps going and restores the data shortly after — a client that reads
+// samples immediately after a timeout warning may still see filtered data.
+// Realistic cases fit easily (an undo of a full-capture filter is on the order
+// of a few seconds: touched blocks x ~10-30 ms mipmap rebuild); raising the
+// bound further would only extend a pathological block instead of fixing it.
 constexpr int kClearTaskWaitSeconds = 120;
 
 } // anonymous namespace
@@ -304,14 +313,16 @@ bool FilterProcessor::rebuild_filtered_state(
     return false;
   }
 
-  if (logic->memory_failed() || logic->edit_log_overflowed()) {
+  if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
     // Roll back instead of publishing a half-applied pass. The old code kept
     // going and set _glitch_filter_active = true, so an out-of-memory filter
     // reported success and the UI showed a partially filtered waveform with
-    // no indication anything had gone wrong.
-    pxv_err("FilterProcessor: glitch filter aborted (memory_failed=%d, "
+    // no indication anything had gone wrong. edit_pass_failed() (NOT the
+    // inherited memory_failed()) is the right signal here: that one is the
+    // capture-pipeline degradation flag and must not fail edit passes.
+    pxv_err("FilterProcessor: glitch filter aborted (edit_pass_failed=%d, "
             "edit_log_overflow=%d); rolling back to capture data",
-            (int)logic->memory_failed(), (int)logic->edit_log_overflowed());
+            (int)logic->edit_pass_failed(), (int)logic->edit_log_overflowed());
     // Make the refusal USER-VISIBLE for BOTH failure kinds (they are the same
     // OOM family). Rolling back and only logging leaves the waveform exactly
     // as it was, which is indistinguishable from "the filter did nothing" —
@@ -680,20 +691,51 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
                                    [this]() { notify_batch_committed(); });
   }
 
-  if (logic->memory_failed() || logic->edit_log_overflowed()) {
+  if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
     pxv_err("FilterProcessor::signal_invert_task: pass failed "
-            "(memory_failed=%d, edit_log_overflow=%d); rolling back",
-            (int)logic->memory_failed(), (int)logic->edit_log_overflowed());
+            "(edit_pass_failed=%d, edit_log_overflow=%d); rolling back",
+            (int)logic->edit_pass_failed(), (int)logic->edit_log_overflowed());
     // Same user-visible report as the glitch-filter pass: OOM-family
     // failures must not look like "the invert did nothing".
     if (_coord) {
       _coord->set_error(SessionStateContext::Malloc_err);
       _coord->session_error();
     }
-    if (!logic->revert_all_edits([this]() { notify_batch_committed(); }))
+    const bool rollback_ok =
+        logic->revert_all_edits([this]() { notify_batch_committed(); });
+    if (!rollback_ok) {
+      // DOUBLE FAILURE (the pass OOM'd AND the rollback OOM'd): the snapshot
+      // stays partially edited and the applied-state flags are deliberately
+      // left AS-IS below — they still claim "applied", which is the truthful
+      // reading of a half-edited store, and the user-visible Malloc_err was
+      // already raised above. Nothing further can be done from here; the next
+      // pass starts with its own revert_all_edits() (which re-resets the
+      // edit-pass scope) and either finishes the restore or reports again.
       pxv_err("FilterProcessor::signal_invert_task: rollback undo also "
-              "failed (OOM); snapshot left partially edited");
+              "failed (OOM); snapshot left partially edited, applied-state "
+              "flags kept as-is");
+    }
     logic->clear_filtered_ranges();
+    if (rollback_ok) {
+      // The rollback restored capture-original data: NEITHER the invert nor
+      // the glitch filter is applied anymore. Leaving the previous active
+      // flags set would make the UI claim a filtered/inverted waveform over
+      // unfiltered samples — reconcile the state with the data.
+      //
+      // Only the APPLIED state is cleared. `_glitch_filter_thresholds/_modes`
+      // are deliberately KEPT: they are the user's filter CONFIGURATION, not
+      // applied state — the convention the rest of the session already relies
+      // on (SigSession::clear_glitch_filter_state_for_capture and
+      // restore_glitch_filter_config both clear only `_active` and keep the
+      // config so the auto-apply path can re-apply it). Clearing them here
+      // would reset the filter panel's sliders after a transient OOM.
+      // `_signal_invert_channels` has no such config role (there is no invert
+      // auto-apply), so it goes with the applied state.
+      std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+      _state->view_data()->_signal_invert_active = false;
+      _state->view_data()->_signal_invert_channels.clear();
+      _state->view_data()->_glitch_filter_active = false;
+    }
     if (_coord)
       _coord->restart_decode_tasks();
     _signal_invert_running = false;
@@ -805,17 +847,42 @@ void FilterProcessor::clear_signal_invert_locked() {
                                        [this]() { notify_batch_committed(); });
       }
 
-      if (logic->memory_failed() || logic->edit_log_overflowed()) {
+      if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
         pxv_err("FilterProcessor::clear_signal_invert: re-filter failed; "
                 "rolling back");
         if (_coord) {
           _coord->set_error(SessionStateContext::Malloc_err);
           _coord->session_error();
         }
-        if (!logic->revert_all_edits([this]() { notify_batch_committed(); }))
+        const bool rollback_ok =
+            logic->revert_all_edits([this]() { notify_batch_committed(); });
+        if (!rollback_ok) {
+          // DOUBLE FAILURE (re-filter OOM'd AND the rollback OOM'd): the
+          // snapshot stays partially edited and the applied-state flags are
+          // deliberately left AS-IS below (they still claim "applied"), which
+          // is the truthful reading of a half-edited store; the user-visible
+          // Malloc_err already fired above. The next clear/pass starts with
+          // its own revert_all_edits() and either finishes the restore or
+          // reports again.
           pxv_err("FilterProcessor::clear_signal_invert: rollback undo also "
-                  "failed (OOM); snapshot left partially edited");
+                  "failed (OOM); snapshot left partially edited, applied-state "
+                  "flags kept as-is");
+        }
         logic->clear_filtered_ranges();
+        if (rollback_ok) {
+          // The rollback restored capture-original data: the glitch filter
+          // did NOT survive (the re-apply failed and was undone). Clearing
+          // only the invert state here would leave _glitch_filter_active
+          // claiming a filtered waveform over unfiltered samples.
+          //
+          // Clear the APPLIED flag only; keep the user's threshold/mode
+          // CONFIG — same convention as signal_invert_task() and as
+          // SigSession::clear_glitch_filter_state_for_capture (config is kept
+          // for the auto-apply path; only `_active` describes whether it is
+          // applied to the current data).
+          std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+          _state->view_data()->_glitch_filter_active = false;
+        }
       }
     }
   }

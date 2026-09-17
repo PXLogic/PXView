@@ -348,11 +348,13 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
   // Per-pass scope reset (see the header's SCOPE NOTE): every FilterProcessor
-  // edit pass begins here, so a _memory_failed left by a PREVIOUS pass (its
-  // own failed revert, a failed filter, a transient OOM) must not roll this
-  // pass back. Failures recorded from here on belong to THIS pass and stay
-  // visible to the caller's end-of-pass check.
-  _host->_memory_failed = false;
+  // edit pass begins here, so an edit_pass_failed left by a PREVIOUS pass
+  // (its own failed revert, a failed filter, a transient OOM) must not roll
+  // this pass back. The inherited _memory_failed is deliberately NOT touched:
+  // it is the capture-pipeline degradation signal and stays whatever the
+  // capture path last set it to. Failures recorded from here on belong to
+  // THIS pass and stay visible to the caller's end-of-pass check.
+  _host->_edit_pass_failed = false;
 
   if (!has_edits())
     return true;
@@ -463,7 +465,7 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
         const bool const_val = (rn.first & (1ULL << e.idx1)) != 0;
         ptr = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
         if (ptr == nullptr) {
-          _host->_memory_failed = true;
+          _host->_edit_pass_failed = true;
           return false;   // this record could not be restored
         }
         if (const_val)
@@ -755,7 +757,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
               (_host->_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
           void *lbp = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
           if (lbp == nullptr) {
-            _host->_memory_failed = true;
+            _host->_edit_pass_failed = true;
             return;
           }
           if (const_val)
@@ -940,7 +942,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
           // 若堆积过多则刷入硬盘缓存及重建 Mipmap，避免占用过多内存
           if (fills.size() >= 65536) {
             apply_batch();
-            if (_host->_memory_failed || _edit_log_overflow)
+            if (_host->_edit_pass_failed || _edit_log_overflow)
               break;
           }
         } else {
@@ -1019,7 +1021,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
 
   // 发布不可变区间表（换入一个新 shared_ptr，读者不会被阻塞）。
   // 预算超限或 OOM 时整趟会被调用方 revert，这里不发布，避免渲染端看到半截区间。
-  if (!_edit_log_overflow && !_host->_memory_failed) {
+  if (!_edit_log_overflow && !_host->_edit_pass_failed) {
     auto table = std::make_shared<std::vector<LogicSnapshot::FillRange>>(
         std::move(ranges));
     std::lock_guard<std::mutex> rlk(_ranges_mutex);
@@ -1036,6 +1038,14 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
     const std::map<int, GlitchFilterMode> &filter_modes,
     const std::atomic<bool> *cancel,
     std::function<void()> batch_callback) {
+  // Per-pass scope reset, symmetric with revert_all_edits(): this is the other
+  // top-level edit entry, so a failure left by a PREVIOUS operation must not
+  // fail this one (and a direct caller that never reverts still gets clean
+  // per-pass semantics). Safe for the Core paths: FilterProcessor aborts a
+  // pass immediately when the leading revert fails, so apply_glitch_filter_all
+  // never runs on top of a failed revert whose flag this reset could mask.
+  _host->_edit_pass_failed = false;
+
   // 架构修复：按 channel_index 查找阈值，与 _ch_index 中的位置无关
   for (size_t i = 0; i < _host->_ch_index.size(); i++) {
     if (cancel && cancel->load(std::memory_order_relaxed))
@@ -1051,7 +1061,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
                           batch_callback);
       // 失败/超预算时停止遍历：调用方会整趟 revert 并上报失败，
       // 继续滤后面的通道只会扩大需要回滚的范围。
-      if (_edit_log_overflow || _host->_memory_failed)
+      if (_edit_log_overflow || _host->_edit_pass_failed)
         return;
     }
     if (progress_callback) {

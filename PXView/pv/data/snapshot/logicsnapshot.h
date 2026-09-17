@@ -358,6 +358,13 @@ public:
     // UI. It must neither block nor read this snapshot — it runs inside the
     // batch's exclusive EditWriteGuard. See
     // LogicSnapshotGlitchFilter::apply_glitch_filter.
+    //
+    // Top-level edit entry: like revert_all_edits(), its entry resets
+    // edit_pass_failed(), so every data-layer edit operation starts from a
+    // clean failure scope and a stale flag from a previous operation cannot
+    // fail this one. apply_glitch_filter() below is the single-channel
+    // primitive used internally; direct external callers should prefer this
+    // _all entry (or revert first) to keep the per-pass semantics.
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds, std::function<void(int)> progress_callback,
         const std::map<int, GlitchFilterMode> &filter_modes = {},
         const std::atomic<bool> *cancel = nullptr,
@@ -394,6 +401,15 @@ public:
     /// and report a failure instead of accepting a partially filtered
     /// snapshot. Cleared by revert_all_edits().
     bool edit_log_overflowed() const;
+    /// True when the CURRENT/last edit pass (revert / invert / glitch filter)
+    /// hit an allocation failure. Deliberately SEPARATE from the inherited
+    /// memory_failed(): that flag is the CAPTURE-pipeline degradation signal
+    /// (DataFeedParser drops packets and stops the capture on it), while this
+    /// one only reports "this edit pass could not allocate". Reset at the
+    /// entry of every top-level edit operation (revert_all_edits and
+    /// apply_glitch_filter_all), so a transient OOM in one pass never
+    /// poisons later passes and never touches capture semantics.
+    bool edit_pass_failed() const;
 
     void set_disk_cache_config(const DiskCacheConfig &config);
     bool is_disk_cache_active();
@@ -702,6 +718,13 @@ private:
     // the guard fails loudly in debug instead of silently reintroducing the
     // torn-revision read this whole mechanism exists to prevent.
     std::atomic<int> _edit_write_depth{0};
+
+    // Edit-pass-local allocation-failure flag (see edit_pass_failed()). Set by
+    // the glitch-filter subsystem (a friend) when a block re-materialisation
+    // or materialisation fails mid-pass; reset at the entry of every top-level
+    // edit operation. NEVER set or cleared by the capture path — that is what
+    // the inherited Snapshot::_memory_failed is for.
+    std::atomic<bool> _edit_pass_failed{false};
 
 public:
     /// True while this thread (or any thread) holds an EditWriteGuard on this

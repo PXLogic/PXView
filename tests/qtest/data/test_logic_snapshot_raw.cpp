@@ -145,9 +145,9 @@ private slots:
     void test_revert_publishes_in_uninvert_branch();
     // invert_channel 登记 toggle: 二次反相必须回到原始态且不留撤销状态
     void test_invert_channel_double_call_is_idempotent();
-    // _memory_failed 是"每趟编辑作用域": revert 入口复位, 上一趟的瞬时 OOM
-    // 不得把之后的滤波/撤销永久判死
-    void test_revert_resets_stale_memory_failed();
+    // 编辑趟失败标志是"每趟编辑作用域": revert/apply_all 入口复位, 上一趟的
+    // 瞬时 OOM 不得把之后的滤波/撤销永久判死; 且不得触碰采集层的 _memory_failed
+    void test_revert_resets_stale_edit_pass_failed();
 
     // 编辑可见性守卫成本 (seqlock 快路径 vs 无条件 shared_lock)
     void test_edit_guard_cost_ratio();
@@ -840,14 +840,16 @@ void TestLogicSnapshotRaw::test_revert_publishes_in_uninvert_branch()
     QVERIFY2(!snap.has_filter_edits(), "un-invert must clear the registration");
 }
 
-void TestLogicSnapshotRaw::test_revert_resets_stale_memory_failed()
+void TestLogicSnapshotRaw::test_revert_resets_stale_edit_pass_failed()
 {
-    // _memory_failed 是快照级粘滞标志（采集期分配失败、上一趟滤波/撤销失败
-    // 都会置位），原先只在重新采集/清缓冲时清零。而 Core 的每个编辑趟都
-    // 以 revert_all_edits() 开头 —— 现在它在入口复位该标志，复位点即
-    // "每趟编辑作用域"的起点：上一趟遗留的瞬时 OOM 不得把这一趟也判死
-    // （旧行为：出过一次内存问题之后滤波/撤销永久回滚，只有重新采集能
-    // 恢复，比单次 OOM 本身严重得多）。
+    // 编辑趟失败标志的"每趟作用域"契约（缺口审计①拆分后）：
+    //   - edit_pass_failed 由编辑路径（撤销重实体化/滤波实体化）置位，在
+    //     revert_all_edits() 与 apply_glitch_filter_all() 两个顶层入口复位，
+    //     上一趟遗留的瞬时 OOM 不得把这一趟也判死（旧行为：出过一次内存
+    //     问题之后滤波/撤销永久回滚，只有重新采集能恢复）。
+    //   - 该标志与采集层的 _memory_failed 刻意分离：后者是 DataFeedParser
+    //     的降级/停采信号（收包入口按它丢包），编辑路径不得置位也不得清除
+    //     ——否则一次编辑趟会解除采集守卫的武装。
     const size_t N = 200000;
     Fixture fx(2, N);
     fx.data = build_interleaved(N, [](size_t s, int ch) {
@@ -858,34 +860,52 @@ void TestLogicSnapshotRaw::test_revert_resets_stale_memory_failed()
     fx.feed(snap, N);
     const int sig = 0;
 
-    // 场景 A：无可撤销编辑 + 粘滞标志 → revert 返回 true 并复位标志。
+    // 场景 A：无可撤销编辑 + 粘滞编辑标志 → revert 返回 true 并复位之；
+    //         采集层 _memory_failed 原样保留（revert 无权碰它）。
+    snap._edit_pass_failed = true;
     snap._memory_failed = true;
     QVERIFY2(snap.revert_all_edits(),
              "revert with no edits must succeed even with a stale flag");
-    QVERIFY2(!snap._memory_failed.load(),
-             "revert_all_edits must clear the sticky flag at pass start");
+    QVERIFY2(!snap._edit_pass_failed.load(),
+             "revert_all_edits must clear the stale edit-pass flag at entry");
+    QVERIFY2(snap._memory_failed.load(),
+             "revert must NOT touch the capture-layer _memory_failed");
 
-    // 场景 B：有可撤销编辑 + 粘滞标志（模拟上一趟遗留的瞬时 OOM）→
-    // 撤销照常执行、返回 true、标志复位、数据逐位还原。
+    // 场景 B：有可撤销编辑 + 粘滞编辑标志（模拟上一趟遗留的瞬时 OOM）→
+    //         撤销照常执行、返回 true、编辑标志复位、采集标志原样、数据逐位还原。
     snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
     QVERIFY(snap.has_filter_edits());
+    snap._edit_pass_failed = true;
     snap._memory_failed = true;
 
     QVERIFY2(snap.revert_all_edits(),
-             "a stale _memory_failed from a previous pass must not fail "
+             "a stale edit_pass_failed from a previous pass must not fail "
              "this undo");
-    QVERIFY2(!snap._memory_failed.load(),
-             "flag must be clear after a healthy undo");
+    QVERIFY2(!snap._edit_pass_failed.load(),
+             "edit-pass flag must be clear after a healthy undo");
+    QVERIFY2(snap._memory_failed.load(),
+             "_memory_failed still untouched by edit passes");
     QVERIFY2(!snap.has_filter_edits(), "revert must consume the edit log");
     for (size_t s = 0; s < N; s += 997)
         QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)((s % 20) == 0));
 
-    // 场景 C：撤销成功之后又滤波失败（标志再次置位）→ 下一趟撤销仍然
-    // 从干净状态开始（入口再复位），这正是"每趟作用域"的循环不变式。
+    // 场景 C：撤销成功之后又滤波失败（编辑标志再次置位）→ 下一趟撤销仍然
+    //         从干净状态开始（入口再复位），这正是"每趟作用域"的循环不变式。
     snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
-    snap._memory_failed = true;
+    snap._edit_pass_failed = true;
     QVERIFY(snap.revert_all_edits());
-    QVERIFY(!snap._memory_failed.load());
+    QVERIFY(!snap._edit_pass_failed.load());
+
+    // 场景 D：apply_glitch_filter_all 入口同样复位（顶层编辑入口对称性，
+    //         直接调用方不经过 revert 也获得每趟语义）。
+    snap._edit_pass_failed = true;
+    std::map<int, uint32_t> thresholds;
+    thresholds[sig] = 2;
+    snap.apply_glitch_filter_all(thresholds, nullptr, {}, nullptr, nullptr);
+    QVERIFY2(!snap._edit_pass_failed.load(),
+             "apply_glitch_filter_all must reset the stale flag at entry "
+             "(a healthy pass must not inherit a previous OOM)");
+    snap.revert_all_edits();
 }
 
 void TestLogicSnapshotRaw::test_dense_glitch_train_merges_edit_records()

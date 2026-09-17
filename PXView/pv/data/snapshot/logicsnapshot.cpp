@@ -237,6 +237,7 @@ void LogicSnapshot::init_all() {
   _ch_fraction = 0;
   _dest_ptr = nullptr;
   _memory_failed = false;
+  _edit_pass_failed = false;
   _last_ended = true;
   _loop_offset = 0;
   _able_free = true;
@@ -1703,6 +1704,9 @@ if (!_ch_data.empty()) {
   _unit_bytes = src._unit_bytes;
   _unit_pitch = src._unit_pitch;
   _memory_failed = src._memory_failed.load();
+  // A fresh copy is not mid-edit: edit-pass state does not transfer
+  // (unlike _memory_failed, which describes the capture data itself).
+  _edit_pass_failed = false;
   _last_ended = src._last_ended.load();
   _samplerate = src._samplerate.load();
   _ch_index = src._ch_index;
@@ -2763,6 +2767,10 @@ bool LogicSnapshot::has_filter_edits() const {
 
 bool LogicSnapshot::edit_log_overflowed() const {
   return _glitch_filter->edit_log_overflowed();
+}
+
+bool LogicSnapshot::edit_pass_failed() const {
+  return _edit_pass_failed.load(std::memory_order_acquire);
 }
 
 } // namespace data

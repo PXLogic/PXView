@@ -160,15 +160,16 @@ public:
     // treat false as "the snapshot is NOT back at capture-original": do not
     // report success, do not build new edits on top, and let the user retry.
     //
-    // SCOPE NOTE: the entry also clears the snapshot's sticky _memory_failed
-    // flag. Every FilterProcessor edit pass begins with this call, so the
-    // reset marks the start of a pass: failures recorded DURING the pass
-    // (revert / invert / filter) survive to the caller's end-of-pass check,
-    // while a transient OOM from a PREVIOUS pass no longer poisons every
-    // later pass (previously one OOM made filter/undo permanently roll back
-    // until the next capture). Capture-path failures (datafeed allocation)
-    // are unrelated to this flag's edit-pass scope and keep their own
-    // reporting at the capture boundary.
+    // SCOPE NOTE: the entry also clears the snapshot's edit-pass-local
+    // edit_pass_failed() flag. Every FilterProcessor edit pass begins with
+    // this call, so the reset marks the start of a pass: failures recorded
+    // DURING the pass (revert / invert / filter) survive to the caller's
+    // end-of-pass check, while a transient OOM from a PREVIOUS pass no longer
+    // poisons every later pass (previously one OOM made filter/undo
+    // permanently roll back until the next capture). This flag is
+    // deliberately SEPARATE from the inherited memory_failed(), which stays
+    // the CAPTURE-pipeline degradation signal (DataFeedParser drops packets
+    // on it) and is never touched by edit passes.
     bool revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_edits() const;
     /// Forget the edit log without restoring. Only for snapshot teardown
