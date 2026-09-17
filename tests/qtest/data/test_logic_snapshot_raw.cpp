@@ -934,6 +934,18 @@ void TestLogicSnapshotRaw::test_revert_resets_stale_edit_pass_failed()
              "an exceeded edit-log budget must read as 'pass aborted' too");
     snap._glitch_filter->_edit_log_overflow = false;
     QVERIFY(!snap.edit_pass_aborted());
+
+    // 场景 F：is_glitch_filtered() 由 worker（滤波趟末 / 撤销）写、渲染侧
+    //   （GUI 线程）读，因此该标志是 atomic（跨线程可见性、无 data race）。
+    //   这里钉住它的语义：应用后为真、撤销后为假——否则渲染侧会给一张
+    //   未滤波的波形画上"已滤波"的提示，或反之。
+    QVERIFY(!snap.is_glitch_filtered());
+    snap.apply_glitch_filter_all(thresholds, nullptr, {}, nullptr, nullptr);
+    QVERIFY2(snap.is_glitch_filtered(),
+             "a completed filter pass must mark the snapshot as filtered");
+    snap.revert_all_edits();
+    QVERIFY2(!snap.is_glitch_filtered(),
+             "a revert must clear the filtered marker");
 }
 
 void TestLogicSnapshotRaw::test_dense_glitch_train_merges_edit_records()

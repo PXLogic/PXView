@@ -363,6 +363,16 @@ void ViewGlitchFilter::undo_filter() {
     return;
   auto &sess = _view->session();
   FilterSnapshot snap = _filter_undo_stack.back();
+  // OPTIMISTIC POP — documented trade-off, not an oversight: the entry is
+  // consumed BEFORE the (asynchronous, worker-side) request is known to have
+  // succeeded. If that request fails on OOM, the Core keeps the previous state
+  // and reports it visibly (Malloc_err dialog), but this undo step is already
+  // gone, so the user has to re-apply the previous filter manually instead of
+  // pressing Ctrl+Z again. Re-pushing on failure would need a completion
+  // callback carrying "which stack entry this request came from", i.e. a
+  // request id the View would have to track through Clear/Completed events —
+  // not worth it for a path that only triggers on out-of-memory. It is
+  // therefore accepted and written down here.
   _filter_undo_stack.pop_back();
   // I4: restore the prior state captured at apply time. If the filter was
   // active before the now-undone apply, re-apply the previous thresholds/
@@ -374,6 +384,7 @@ void ViewGlitchFilter::undo_filter() {
   if (snap.was_active) {
     sess.set_glitch_filter(snap.thresholds, snap.modes);
   } else {
+    // Fire-and-forget: completion arrives as GlitchFilterCleared + DataUpdated.
     sess.request_clear_glitch_filter();
   }
   _preview_ranges.clear();

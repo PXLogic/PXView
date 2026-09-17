@@ -228,7 +228,15 @@ private:
 
     LogicSnapshot *_host;
 
-    bool        _glitch_filtered;
+    // "This snapshot currently carries filter edits" — READ by the render path
+    // (is_glitch_filtered → rasterize) on the GUI thread, WRITTEN by the edit
+    // worker at the end of a pass / during a revert. atomic for the same reason
+    // as the snapshot's own cross-thread flags (Snapshot::_memory_failed): the
+    // reader never takes the edit locks, and an unsynchronised plain bool would
+    // be a data race (benign in practice, but UB and TSan-visible). The flag's
+    // staleness DURING a chunked revert is a separate, documented trade-off —
+    // see the note at the end of revert_all_edits().
+    std::atomic<bool> _glitch_filtered;
 
     // Reversible edit log. Appended by the worker while it writes; replayed
     // in reverse by revert_all_edits().
