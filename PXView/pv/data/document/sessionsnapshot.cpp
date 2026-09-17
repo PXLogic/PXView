@@ -164,30 +164,6 @@ void SessionSnapshot::set_samplelimits(uint64_t limits) {
 
 void SessionSnapshot::set_trigger_pos(uint64_t pos) { _trig_pos = pos; }
 
-void SessionSnapshot::copy_from_logic(LogicSnapshot *src) {
-if (!src || src->empty())
-return;
-
-if (!_logic) _logic = std::make_shared<LogicSnapshot>();
-_logic->copy_from(*src);
-}
-
-void SessionSnapshot::copy_from_analog(AnalogSnapshot *src) {
-if (!src || src->empty())
-return;
-
-if (!_analog) _analog = std::make_shared<AnalogSnapshot>();
-_analog->copy_from(*src);
-}
-
-void SessionSnapshot::copy_from_dso(DsoSnapshot *src) {
-if (!src || src->empty())
-return;
-
-if (!_dso) _dso = std::make_shared<DsoSnapshot>();
-_dso->copy_from(*src);
-}
-
 bool SessionSnapshot::load_from_file(const QString &file_name) {
   (void)file_name;
   return false;

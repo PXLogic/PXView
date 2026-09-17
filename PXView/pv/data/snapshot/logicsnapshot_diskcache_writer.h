@@ -65,9 +65,6 @@ public:
     uint64_t get_disk_total_blocks_written() const;
     uint64_t get_async_queue_bytes() const;
 
-    // ---- Hot loading (currently a no-op stub) ----
-    void ensure_all_blocks_hot();
-
     // ---- Enqueue (called by LogicSnapshot::append_payload) ----
     // `format` follows libsigrok's LA_DATA_FORMAT enum:
     //   LA_SPLIT_DATA (0): sample-interleaved (upstream sigrok drivers)

@@ -56,7 +56,7 @@ Snapshot::~Snapshot()
 void Snapshot::free_data()
 {
     // TS-4 fix: Callers MUST hold _mutex when calling free_data().
-    // All current callers (LogicSnapshot::clear, first_payload, copy_from)
+    // All current callers (LogicSnapshot::clear, first_payload)
     // already acquire _mutex before calling this method. The destructor
     // (~Snapshot) calls it without locking, which is safe because no
     // concurrent access is possible (the object is being destroyed after

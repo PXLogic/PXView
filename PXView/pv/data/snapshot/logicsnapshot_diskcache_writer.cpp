@@ -131,15 +131,6 @@ uint64_t LogicSnapshotDiskCacheWriter::get_async_queue_bytes() const
 }
 
 // ----------------------------------------------------------------------------
-// Hot loading (stub)
-// ----------------------------------------------------------------------------
-
-void LogicSnapshotDiskCacheWriter::ensure_all_blocks_hot()
-{
-    // No-op stub (preserved from LogicSnapshot::ensure_all_blocks_hot).
-}
-
-// ----------------------------------------------------------------------------
 // Enqueue (called by LogicSnapshot::append_payload)
 // ----------------------------------------------------------------------------
 

@@ -274,7 +274,7 @@ inline Result<void> run_void_on_main_thread(
 // DEADLOCKS when the caller is already on the main thread (the posted lambda
 // can never run because the main thread is blocked waiting on the cv).
 template <typename F>
-inline void invoke_or_call(QObject *ctx, F &&fn) {
+inline void invoke_or_call(F &&fn) {
     if (on_main_thread()) {
         fn();
         return;
@@ -629,7 +629,7 @@ void SessionService::notify_device_options_updated() {
     // （历史教训：采集中模型重建引发崩溃）。
     if (_session && !_session->is_working()) {
         pxv_info("SessionService: MCP config write -> apply_device_options + broadcast DeviceOptionsUpdated(from_external)");
-        invoke_or_call(nullptr, [s = _session]() { s->apply_device_options(); });
+        invoke_or_call([s = _session]() { s->apply_device_options(); });
         _session->broadcast_async<pv::interface::DeviceOptionsUpdated>(
             {true});
     } else {

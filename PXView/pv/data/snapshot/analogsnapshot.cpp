@@ -131,59 +131,6 @@ void AnalogSnapshot::free_data()
     }
 }
 
-void AnalogSnapshot::copy_from(const AnalogSnapshot &src)
-{
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-
-    free_data();
-    free_envelop();
-
-    _capacity = src._capacity;
-    _channel_num = src._channel_num;
-    _sample_count = src._sample_count;
-    _total_sample_count = src._total_sample_count;
-    _ring_sample_count = src._ring_sample_count;
-    _unit_size = src._unit_size;
-    _unit_bytes = src._unit_bytes;
-    _unit_pitch = src._unit_pitch;
-    _memory_failed = src._memory_failed.load();
-    _last_ended = src._last_ended.load();
-    _samplerate = src._samplerate.load();
-    _ch_index = src._ch_index;
-    _enabled_channel_indexs = src._enabled_channel_indexs;
-
-    if (src._data && src._capacity > 0) {
-        _data = malloc(src._capacity);
-        if (_data) {
-            memcpy(_data, src._data, src._capacity);
-        } else {
-            _memory_failed = true;
-        }
-    }
-
-    for (unsigned int i = 0; i < src._channel_num; i++) {
-        for (unsigned int level = 0; level < ScaleStepCount; level++) {
-            const Envelope &src_env = src._envelope_levels[i][level];
-            Envelope &dst_env = _envelope_levels[i][level];
-
-            dst_env.length = src_env.length;
-            dst_env.ring_length = src_env.ring_length;
-            dst_env.count = src_env.count;
-            dst_env.data_length = src_env.data_length;
-            dst_env.samples = nullptr;
-            dst_env.max = nullptr;
-            dst_env.min = nullptr;
-
-            if (src_env.count > 0) {
-                dst_env.samples = (EnvelopeSample *)malloc(src_env.count * sizeof(EnvelopeSample));
-                if (dst_env.samples && src_env.samples) {
-                    memcpy(dst_env.samples, src_env.samples, src_env.count * sizeof(EnvelopeSample));
-                }
-            }
-        }
-    }
-}
-
 void AnalogSnapshot::clear()
 {
     std::lock_guard<std::recursive_mutex> lock(_mutex);

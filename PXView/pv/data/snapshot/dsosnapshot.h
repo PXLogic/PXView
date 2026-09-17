@@ -87,8 +87,6 @@ public:
     void clear();
     void init();
 
-    void copy_from(const DsoSnapshot &src);
-
     void first_payload(const sr_datafeed_dso &dso, uint64_t total_sample_count,
                        GSList *channels, bool instant, bool isFile);
 

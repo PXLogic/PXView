@@ -94,8 +94,6 @@ public:
     void clear();
     void init();
 
-    void copy_from(const AnalogSnapshot &src);
-
     void first_payload(const sr_datafeed_analog &analog,
                        uint64_t total_sample_count, GSList *channels);
 

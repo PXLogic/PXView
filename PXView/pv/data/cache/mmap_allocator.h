@@ -43,7 +43,8 @@ public:
     void wait_prefault_initial_blocks(uint64_t block_count);
     void notify_writer_block_seq(uint64_t block_seq);
 
-    // 停止 prefault 后台线程（用于 copy_from 等场景，防止竞态写零覆盖已复制的数据）。
+    // 停止 prefault 后台线程（first_payload 复用同一 allocator 时调用：prefault
+    // 线程会向每个页写零以建立页表项，会把上一场采集的数据一并抹掉）。
     // 线程 join 后返回，保证调用方可以安全地写入 mmap 区域。
     void stop_prefault();
 

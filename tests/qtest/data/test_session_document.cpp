@@ -18,7 +18,7 @@
  *     round trip (mock IDeviceConfigPort).
  *   - clear().
  *   - SessionSnapshot basics (set_samplerate lazily allocates snapshots,
- *     copy_from_* deep copy, get_snapshot type routing).
+ *     get_snapshot type routing).
  */
 
 #include <QtTest>
@@ -223,8 +223,6 @@ private slots:
     // --- SessionSnapshot (basic) ---
     void SessionSnapshotBasics();
     void SessionSnapshotSetSamplerateCreatesSnapshots();
-    void SessionSnapshotCopyFromLogic();
-
     void initTestCase();
     void cleanupTestCase();
 
@@ -690,24 +688,6 @@ void TestSessionDocument::SessionSnapshotSetSamplerateCreatesSnapshots() {
     QCOMPARE(snap.cur_sampletime(), 4000.0 / 2000000.0);
     // Shared getters keep the snapshots alive and point at the same objects.
     QVERIFY(snap.get_logic_snapshot_shared().get() == snap.get_logic());
-}
-
-void TestSessionDocument::SessionSnapshotCopyFromLogic() {
-    SessionSnapshot snap;
-    auto src = make_logic_snapshot(8192);
-    snap.copy_from_logic(src.get());
-    QVERIFY(snap.get_logic() != nullptr);
-    QVERIFY(!snap.get_logic()->empty());
-    QVERIFY(snap.get_logic()->get_sample_count() > 0);
-    // Deep copy: different instance, same sample count.
-    QVERIFY(snap.get_logic() != src.get());
-    QVERIFY(snap.get_logic()->get_sample_count() == src->get_sample_count());
-
-    // Empty source is a no-op (copy_from_* guards on src->empty()).
-    LogicSnapshot empty;
-    SessionSnapshot snap2;
-    snap2.copy_from_logic(&empty);
-    QVERIFY(snap2.get_logic() == nullptr);
 }
 
 QTEST_GUILESS_MAIN(TestSessionDocument)

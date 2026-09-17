@@ -168,7 +168,7 @@ bool LogicSnapshot::wait_active_iterators_zero(int max_wait_ms) {
 void LogicSnapshot::free_data() {
   // P1-6 fix: Skip memory optimization if there are active iterators
   // (e.g. the decode thread calling get_samples). This prevents
-  // use-after-free when free_data is called from clear/copy_from while
+  // use-after-free when free_data is called from clear/first_payload while
   // the decode thread holds a raw pointer into the data.
   if (has_active_iterators()) {
     pxv_info("LogicSnapshot::free_data: deferred — %d active iterators",
@@ -331,10 +331,6 @@ uint64_t LogicSnapshot::get_mmap_total_bytes() {
   if (_mmap_alloc)
     return _mmap_alloc->get_total_bytes();
   return 0;
-}
-
-void LogicSnapshot::ensure_all_blocks_hot() {
-  _disk_cache_writer->ensure_all_blocks_hot();
 }
 
 void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
@@ -789,7 +785,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   uint64_t index0 = align_sample_count / LeafBlockSamples / RootScale;
   uint64_t index1 = (align_sample_count / LeafBlockSamples) % RootScale;
   // Derive _byte_fraction from the persisted ring position (robust against
-  // copy_from / loop-mode state transitions).
+  // loop-mode state transitions).
   _byte_fraction = (uint8_t)(offset % 8);
 
   if (index0 >= _ch_data[0].size()) {
@@ -1627,159 +1623,6 @@ void LogicSnapshot::capture_ended() {
     }
   }
 
-}
-
-void LogicSnapshot::copy_from(const LogicSnapshot &src) {
-std::lock_guard<std::recursive_mutex> lock(_mutex);
-
-// Pin the SOURCE's revision for the whole copy. This deep-copies leaf blocks
-// byte-for-byte by raw pointer, so without the pin a glitch-filter/invert batch
-// running on `src` could rewrite a block between its mipmap refresh and our
-// memcpy and the copy would splice two revisions. The pin makes the batch wait
-// instead — acceptable, because the batch runs on a background thread while
-// copy_from serves a user-initiated save/copy.
-EditReadPin src_pin(&src);
-
-// [group3 crash fix] Guard the SOURCE snapshot with a read iterator for the
-// whole copy. Below we memcpy src._ch_data leaf blocks by raw pointer; a
-// concurrent free_data()/clear on src (first_payload / capture boundary,
-// e.g. while a glitch-filter task copies/restores the live snapshot) honors
-// has_active_iterators() + wait_active_iterators_zero(), so raising src's
-// count makes the release DEFER until this copy completes. This closes the
-// use-after-free (SIGSEGV in copy_from -> memmove) that crashed the group3
-// E2E at test_36_glitch_filter_i2c_e2e.py.
-auto &src_mut = const_cast<LogicSnapshot &>(src);
-const bool src_is_self = (this == &src_mut);
-if (!src_is_self) {
-  src_mut.begin_iteration();
-}
-struct SrcIteratorGuard {
-  LogicSnapshot *s;
-  LogicSnapshot *self;
-  ~SrcIteratorGuard() {
-    if (s && self && s != self) s->end_iteration();
-  }
-} src_iter_guard{&src_mut, this};
-
-// H4 fix: drain the async writer before free_data() resets _mmap_alloc.
-// Without this, the async worker could still be accessing the old mmap
-// allocator through _owner->_mmap_alloc while free_data() resets it.
-_disk_cache_writer->drain_and_join();
-
-const_cast<LogicSnapshot &>(src).ensure_all_blocks_hot();
-
-// free_data() silently no-ops while a reader (e.g. a decode thread holding a
-// get_samples() iterator) is active, leaving _ch_data populated. The rebuild
-// loop below push_back()s unconditionally, so the previous code would double
-// _ch_data.size() and leave the first half pointing at the *pre-copy* blocks:
-// memory doubles and readers silently observe stale data. Drain first, and
-// refuse the copy rather than corrupt the snapshot if the drain times out.
-if (!wait_active_iterators_zero(3000)) {
-  pxv_err("LogicSnapshot::copy_from: %d active iterators still present; "
-          "aborting copy instead of double-appending _ch_data",
-          _iterator_count.load());
-  _memory_failed = true;
-  return;
-}
-
-free_data();
-
-// Belt and braces: free_data() re-checks the iterator count itself, so a
-// reader that appeared between the drain and the call could still have made
-// it defer. Verify the destination really is empty before rebuilding.
-if (!_ch_data.empty()) {
-  pxv_err("LogicSnapshot::copy_from: free_data() deferred, _ch_data still "
-          "holds %zu channels; aborting copy",
-          _ch_data.size());
-  _memory_failed = true;
-  return;
-}
-
-  _capacity = src._capacity;
-  _channel_num = src._channel_num;
-  _sample_count = src._sample_count;
-  _total_sample_count = src._total_sample_count;
-  _ring_sample_count = src._ring_sample_count;
-  _unit_size = src._unit_size;
-  _unit_bytes = src._unit_bytes;
-  _unit_pitch = src._unit_pitch;
-  _memory_failed = src._memory_failed.load();
-  // A fresh copy is not mid-edit: edit-pass state does not transfer
-  // (unlike _memory_failed, which describes the capture data itself).
-  _edit_pass_failed = false;
-  _last_ended = src._last_ended.load();
-  _samplerate = src._samplerate.load();
-  _ch_index = src._ch_index;
-
-  _byte_fraction = src._byte_fraction;
-  _ch_fraction = src._ch_fraction;
-  _dest_ptr = nullptr;
-  memcpy(_last_sample, src._last_sample, sizeof(_last_sample));
-  memcpy(_last_calc_count, src._last_calc_count, sizeof(_last_calc_count));
-  _is_loop = src._is_loop;
-  _loop_offset = src._loop_offset;
-  _able_free = src._able_free;
-  memcpy(_cur_ref_block_indexs, src._cur_ref_block_indexs,
-         sizeof(_cur_ref_block_indexs));
-  _lst_free_block_index = src._lst_free_block_index;
-
-  _max_blocks_per_channel = src._max_blocks_per_channel;
-
-  if (src._mmap_alloc) {
-      _mmap_alloc = std::make_shared<MmapAllocator>();
-      _mmap_alloc->configure(false, "", src._mmap_alloc->get_total_bytes(),
-                             LeafBlockSpace, _max_blocks_per_channel, _channel_num);
-      // CRITICAL FIX: stop the prefault thread immediately after configure().
-      // configure() spawns a background thread that writes zero bytes to every
-      // page in the mmap region to pre-fault them into RAM.  That thread races
-      // with the memcpy loop below: if it reaches a page AFTER memcpy has
-      // already written real data there, it overwrites the first byte of that
-      // page with 0, silently corrupting both sample data and mipmap data.
-      // This was the root cause of "first ~2ms of both channels show phantom
-      // waveform after applying glitch filter to a second channel": the second
-      // filter call invokes copy_from() to restore from backup, the prefault
-      // thread corrupts the restored data, and the glitch filter then operates
-      // on corrupted data producing wrong results for BOTH channels.
-      _mmap_alloc->stop_prefault();
-  } else {
-      _disk_cache_writer->clear_all_mmap_slots();
-      _mmap_alloc = nullptr;
-  }
-
-  for (size_t i = 0; i < src._ch_data.size(); i++) {
-    std::vector<struct RootNode> new_channel;
-    for (size_t j = 0; j < src._ch_data[i].size(); j++) {
-      const RootNode &rn = src._ch_data[i][j];
-      RootNode new_rn;
-      new_rn.tog = rn.tog;
-      new_rn.first = rn.first;
-      new_rn.last = rn.last;
-      for (unsigned int k = 0; k < Scale; k++) {
-        if (rn.lbp[k] != nullptr) {
-          if (_mmap_alloc && src._mmap_alloc && src._mmap_alloc->is_mmap_address(rn.lbp[k])) {
-            uint64_t global_block_seq = j * RootScale + k;
-            void* new_lbp = _mmap_alloc->get_block_data(i, global_block_seq, _max_blocks_per_channel, LeafBlockSpace);
-            if (new_lbp) {
-                memcpy(new_lbp, rn.lbp[k], LeafBlockSpace);
-            } else {
-                _memory_failed = true;
-            }
-            new_rn.lbp[k] = new_lbp;
-          } else {
-            new_rn.lbp[k] = LeafBlockPool::instance().acquire(LeafBlockSpace);
-            if (new_rn.lbp[k])
-              memcpy(new_rn.lbp[k], rn.lbp[k], LeafBlockSpace);
-            else
-              _memory_failed = true;
-          }
-        } else {
-          new_rn.lbp[k] = nullptr;
-        }
-      }
-      new_channel.push_back(new_rn);
-    }
-    _ch_data.push_back(std::move(new_channel));
-  }
 }
 
 void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,

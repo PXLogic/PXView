@@ -100,10 +100,6 @@ public:
     void set_samplelimits(uint64_t limits);
     void set_trigger_pos(uint64_t pos);
 
-    void copy_from_logic(data::LogicSnapshot *src);
-    void copy_from_analog(data::AnalogSnapshot *src);
-    void copy_from_dso(data::DsoSnapshot *src);
-
     inline LogicSnapshot* get_logic() { return _logic.get(); }
     inline AnalogSnapshot* get_analog() { return _analog.get(); }
     inline DsoSnapshot* get_dso() { return _dso.get(); }

@@ -319,8 +319,6 @@ public:
 
     void capture_ended();
 
-    void copy_from(const LogicSnapshot &src);
-
     bool get_display_edges(std::vector<std::pair<bool, bool>> &edges,
                            std::vector<std::pair<uint16_t, bool>> &togs,
                            uint64_t start, uint64_t end, uint16_t width,
@@ -442,8 +440,6 @@ public:
     double get_disk_write_speed_mbps();
     size_t get_disk_write_queue_depth();
     uint64_t get_disk_total_blocks_written();
-    void ensure_all_blocks_hot();
-
     uint64_t get_page_fault_count();
     uint64_t get_working_set_bytes();
     uint64_t get_async_queue_bytes();
@@ -682,7 +678,7 @@ private:
     int         _lst_free_block_index;
 
     // mmap-backed chunk allocator state (cluster A — heavily used by
-    // allocate_block / copy_from / push_to_free_list / free_data / first_payload).
+    // allocate_block / push_to_free_list / free_data / first_payload).
     // _disk_cache_config + _mmap_slot_written moved to LogicSnapshotDiskCacheWriter.
     std::shared_ptr<MmapAllocator> _mmap_alloc;
     uint64_t _max_blocks_per_channel;
