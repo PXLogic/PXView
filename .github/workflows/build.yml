@@ -392,7 +392,10 @@ jobs:
           HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
           brew update
-          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json mimalloc
+          # 注意：不再安装 Homebrew 的 mimalloc —— 项目改用 vendored 子模块源码构建
+          # （CMake/deps.cmake，MIMALLOC_LIB=mimalloc-static，MI_OVERRIDE=OFF）。
+          # Homebrew 版 mimalloc.h 与子模块版本不一致时会污染 vendored 源码的编译。
+          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v6

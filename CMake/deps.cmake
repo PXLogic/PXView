@@ -261,7 +261,30 @@ find_package(Threads)
 #= Building with the override off keeps the explicit mi_heap_* API (used by
 #= the annotation heaps) but registers no malloc override — one code path on
 #= all platforms, no per-platform #ifdefs.
+#=
+#= IMPORTANT — vendored headers must win over any system-installed mimalloc.h.
+#= The include_directories() calls earlier in this file inject prefix dirs such
+#= as /opt/homebrew/include (Boost/ZLIB/libusb/FFTW on macOS, /ucrt64/include on
+#= MSYS2), and CMake emits *directory-level* -I flags BEFORE *target-level*
+#= ones — so mimalloc's own
+#=     target_include_directories(mimalloc-static PUBLIC .../mimalloc/include)
+#= is searched LAST and loses to the system header. When the system mimalloc is
+#= not exactly v3.5.0, vendored sources compile against a foreign header:
+#= macOS runners hit `static declaration of 'mi_theap_alloc_new' follows
+#= non-static declaration` (Homebrew's newer mimalloc.h declares it
+#= mi_decl_export, v3.5.0 src/alloc.c defines it static).
+#= Fix: push the vendored include dir to the FRONT of the directory-level list
+#= (BEFORE) so every target — mimalloc's own objects AND PXView/pxviewd, which
+#= consume <mimalloc.h> through MIMALLOC_LIB's PUBLIC interface — sees the
+#= header matching the library that is actually linked.
 #-------------------------------------------------------------------------------
+if(EXISTS "${CMAKE_SOURCE_DIR}/mimalloc/include/mimalloc.h")
+	include_directories(BEFORE ${CMAKE_SOURCE_DIR}/mimalloc/include)
+else()
+	message(WARNING "mimalloc submodule not initialized (mimalloc/include/mimalloc.h missing) "
+	                "— falling back to any system mimalloc.h, which may not match the vendored sources.")
+endif()
+
 set(MI_OVERRIDE      OFF CACHE BOOL "Override standard malloc interface (disabled)" FORCE)
 set(MI_OSX_ZONE      OFF CACHE BOOL "macOS malloc-zone override (disabled)" FORCE)
 set(MI_OSX_INTERPOSE OFF CACHE BOOL "macOS interpose override (disabled)" FORCE)
