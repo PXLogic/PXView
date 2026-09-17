@@ -2687,11 +2687,11 @@ int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
   return block;
 }
 
-void LogicSnapshot::invert_channel(int sig_index) {
+void LogicSnapshot::invert_channel(int sig_index,
+                                   std::function<void()> progress_callback) {
   // Exclusive visibility: this is the external entry point, and the helper
   // deliberately does not lock itself (see its contract comment) so that
-  // revert_all_edits() can hold one exclusive section across the whole
-  // transaction.
+  // revert_all_edits() can hold one exclusive section across a chunk.
   //
   // LOCK ORDER IS MANDATORY: _mutex must be taken BEFORE _edit_visibility, to
   // match apply_batch() and revert_all_edits(). Taking them the other way
@@ -2700,7 +2700,17 @@ void LogicSnapshot::invert_channel(int sig_index) {
   // re-acquiring it below is fine.
   std::lock_guard<std::recursive_mutex> lock(_mutex);
   EditWriteGuard edit_vis(this);
-  _glitch_filter->invert_channel(sig_index);
+
+  // Inverting a channel rewrites every one of its leaf blocks (2 MB XOR each)
+  // and rebuilds each block's whole mipmap, i.e. seconds on a large capture.
+  // Publishing per chunk keeps a reader's wait at one chunk instead of the whole
+  // channel, and makes the progress notice observable (the render path skips its
+  // rebuild while edit_in_progress() is true).
+  _glitch_filter->invert_channel(sig_index, [&] {
+    edit_vis.publish();
+    if (progress_callback)
+      progress_callback();
+  });
 }
 
 void LogicSnapshot::apply_glitch_filter(

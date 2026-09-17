@@ -114,7 +114,14 @@ public:
     void clear_filtered_ranges();
 
     // Signal invert (rebuilds mipmap per block).
-    void invert_channel(int sig_index);
+    //
+    // `on_chunk`, when non-null, is called every N leaf blocks. It is supplied by
+    // whoever OWNS the edit transaction (LogicSnapshot::invert_channel for the
+    // external entry, revert_all_edits for the un-invert step) and its job is to
+    // publish the chunk (EditWriteGuard::publish) and optionally report progress
+    // — this function never touches the lock itself, because its callers may
+    // already be inside a transaction and std::shared_mutex is not recursive.
+    void invert_channel(int sig_index, const std::function<void()> &on_chunk = {});
 
     // ------------------------------------------------------------------
     // Reversible edit log
@@ -132,19 +139,18 @@ public:
     // samples per removed glitch), and — crucially — no published block is
     // ever freed or unmapped, so the lock-free finite-capture readers keep
     // their "no block is freed during capture" invariant intact.
-    // `progress_callback` (optional) is invoked periodically while the log is
-    // replayed and the mipmaps are rebuilt. Same contract as
-    // apply_glitch_filter's batch_callback: it must neither block nor read this
-    // snapshot, because it runs inside the revert's exclusive EditWriteGuard.
+    // `progress_callback` (optional) is invoked once per published chunk, i.e.
+    // every N leaf blocks, right after the exclusive transaction was closed and
+    // reopened. Same contract as apply_glitch_filter's batch_callback: it must
+    // neither block nor read this snapshot, because it runs inside that
+    // transaction (taking an EditReadGuard here would self-deadlock).
     //
-    // VISIBILITY: the revert still holds ONE exclusive transaction for its whole
-    // duration, and the render path deliberately skips its signal rebuild while a
-    // transaction is open (LogicSnapshot::edit_in_progress) so a paint can never
-    // block behind the writer. A notice therefore only reaches the screen when
-    // the writer also publishes a revision between chunks
-    // (EditWriteGuard::publish) — which apply_batch() does per batch, so
-    // filtering is progressive, whereas the undo is not chunked yet. This
-    // callback is the hook that such chunking will drive.
+    // VISIBILITY: because each chunk is published, a reader may enter between
+    // chunks (it waits at most one chunk — the rule stated at the top of
+    // logicsnapshot.h) and the render path's "transaction in progress" check
+    // (LogicSnapshot::edit_in_progress, see render_pass.cpp) lets the frame
+    // through, so the undo is observable while it runs instead of appearing as a
+    // frozen window. This is the same mechanism apply_batch() uses per batch.
     void revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_edits() const;
     /// Forget the edit log without restoring. Only for snapshot teardown

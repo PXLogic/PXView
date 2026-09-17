@@ -209,10 +209,46 @@ public:
     };
 
     /// Owner of the exclusive (writer) side. Held for one batch / one revert
-    /// transaction. Lock order: _mutex first, then this.
+    /// chunk. Lock order: _mutex first, then this.
     class EditWriteGuard {
     public:
-        explicit EditWriteGuard(LogicSnapshot *s) noexcept : _snap(s) {
+        explicit EditWriteGuard(LogicSnapshot *s) noexcept : _snap(s) { open(); }
+
+        ~EditWriteGuard() { close(); }
+
+        EditWriteGuard(const EditWriteGuard &) = delete;
+        EditWriteGuard &operator=(const EditWriteGuard &) = delete;
+
+        /// Close and immediately reopen this transaction, so that a reader can
+        /// interleave between two chunks of one long in-place operation.
+        ///
+        /// WHY THIS EXISTS: the contract above (logicsnapshot.h, "readers must
+        /// never wait for more than one edit BATCH") is what keeps the GUI alive
+        /// while a background edit runs. A reader that arrives while a
+        /// transaction is open blocks in lock_shared() until the writer closes
+        /// it, so an operation that holds ONE transaction for its whole duration
+        /// (the undo, the signal invert) makes every render wait for the whole
+        /// operation. Publishing per chunk bounds that wait at one chunk.
+        ///
+        /// PRECONDITIONS:
+        ///  - The state published by this call must be SELF-CONSISTENT: for every
+        ///    block the current chunk touched, bytes + mipmap + tog/first/last
+        ///    must already be in their final form for this chunk. A reader gets in
+        ///    the instant the lock is dropped.
+        ///  - This thread must be the only writer at this moment (guaranteed for
+        ///    the filter/invert/clear paths by FilterProcessor::_edit_mutex).
+        ///    Otherwise two writers could interleave chunk by chunk.
+        ///  - Call it only from the thread that owns this guard.
+        ///
+        /// A reader already waiting on lock_shared() gets the lock at the
+        /// next close(), i.e. after at most one chunk.
+        void publish() noexcept {
+            close();
+            open();
+        }
+
+    private:
+        void open() noexcept {
             _snap->_edit_visibility.lock();
             // Declare the transaction open. Both increments happen under the
             // exclusive lock, so readers holding the shared lock never observe
@@ -221,16 +257,12 @@ public:
             _snap->_edit_write_depth.fetch_add(1, std::memory_order_relaxed);
         }
 
-        ~EditWriteGuard() {
+        void close() noexcept {
             _snap->_edit_write_depth.fetch_sub(1, std::memory_order_relaxed);
             _snap->_edit_epoch.fetch_add(1, std::memory_order_release);
             _snap->_edit_visibility.unlock();
         }
 
-        EditWriteGuard(const EditWriteGuard &) = delete;
-        EditWriteGuard &operator=(const EditWriteGuard &) = delete;
-
-    private:
         LogicSnapshot *_snap;
     };
 
@@ -295,7 +327,19 @@ public:
     bool get_pre_edge(uint64_t &index, bool last_sample,
                       double min_length, int sig_index);
 
-    void invert_channel(int sig_index);
+    // Bit-invert one channel in place (rebuilds the mipmap of every block).
+    //
+    // `progress_callback` (optional) fires once per published chunk, i.e. every
+    // N leaf blocks, right after the exclusive transaction was closed and
+    // reopened (EditWriteGuard::publish) — so a caller observes a revision that
+    // is already complete and a reader is free to read it.
+    //
+    // Same contract as the other edit callbacks: it runs inside the edit
+    // transaction and must neither block nor read this snapshot (taking an
+    // EditReadGuard on this thread would self-deadlock — std::shared_mutex is not
+    // recursive).
+    void invert_channel(int sig_index,
+                        std::function<void()> progress_callback = nullptr);
     // `cancel` (optional, polled once per scan iteration) lets a config/capture
     // boundary make an in-flight pass finish promptly instead of blocking for
     // the whole pass. Results are then partial — the caller must revert.
@@ -676,6 +720,15 @@ public:
     /// load — cheaper than any lock, and never blocking.
     bool edit_in_progress() const noexcept {
         return (_edit_epoch.load(std::memory_order_acquire) & 1u) != 0;
+    }
+
+    /// Number of transaction open/close transitions on this snapshot (two per
+    /// transaction: one when it opens, one when it closes). Exposed so tests can
+    /// assert that a long operation really PUBLISHED between chunks — i.e. that
+    /// the exclusive side was released and re-taken instead of being held for the
+    /// whole operation. Monotonic; only the writer moves it.
+    uint64_t edit_revision() const noexcept {
+        return _edit_epoch.load(std::memory_order_acquire);
     }
 
 private:

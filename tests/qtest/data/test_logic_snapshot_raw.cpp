@@ -585,41 +585,106 @@ void TestLogicSnapshotRaw::test_batch_callback_publishes_each_committed_batch()
 
 void TestLogicSnapshotRaw::test_revert_publishes_progress()
 {
-    // 撤销(点"清除滤波"/Ctrl+Z)现在整个跑在滤波 worker 线程上, 因为大文件上
-    // 它要重放 ~一份通道数据并重建每个被触及块的 mipmap, 在 GUI 线程上做就是
-    // "点一下卡几秒"。撤销期间界面唯一的进展依据就是这条进度通知。
+    // 撤销(点"清除滤波"/Ctrl+Z)现在**按叶块分块发布**编辑事务:
+    //   - 每 kEditPublishEveryBlocks(=2) 个块 publish 一次(关+开编辑事务),
+    //     排队读者在下次 close 时拿到锁 ⇒ 等待上限 = 一块, 而不是整趟;
+    //   - 进度通报与 publish 同节奏, 所以"回调次数"== "发布次数"; 渲染侧在
+    //     事务开启时跳过重建, 因此撤销期间能逐块显示(这正是本用例要钉住的语义)。
     //
-    // 契约: 只要撤销真的做了事, 就必须至少发一次通知; 没有编辑时是空操作,
-    // 不能发通知(否则会白白触发一次重绘)。
-    const size_t N = 2000000;
+    // 用例必须跨**多块**才有意义: LeafBlockSamples = 16,777,216, 取 5 块, 每块
+    // 放一个 5 采样窄脉冲(threshold=20 全部抹平) ⇒ 5 个块都被编辑日志触及 ⇒
+    // 5/2 = 2 次发布。旧版用例用 N=200 万(单块)在分块后不会中途发布, 已失效。
+    const size_t LB = (size_t)LogicSnapshot::LeafBlockSamples;
+    const size_t BLOCKS = 5;
+    const size_t N = BLOCKS * LB;
+    const size_t PULSE_OFF = 5000;   // 块内偏移: 避开采样 0 处状态机的初始基准
+
     Fixture fx(2, N);
-    fx.data = build_interleaved(N, [](size_t s, int ch) {
-        if (ch != 0) return false;
-        return (s % 20) == 0;      // 1-sample 窄高脉冲
+    fx.data = build_interleaved(N, [PULSE_OFF](size_t s, int ch) {
+        if (ch != 0)
+            return false;
+        const size_t off = s % (size_t)LogicSnapshot::LeafBlockSamples;
+        return off >= PULSE_OFF && off < PULSE_OFF + 5;   // 每块一个窄高脉冲
     });
 
     LogicSnapshot snap;
     fx.feed(snap, N);
 
     const int sig = 0;
-    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
-    QVERIFY(snap.has_filter_edits());
+    QVERIFY2(snap.get_sample((uint64_t)PULSE_OFF, sig),
+             "采集数据本身带脉冲");
 
+    snap.apply_glitch_filter(sig, 20, nullptr, GlitchFilterMode::Both);
+
+    QVERIFY2(!snap.edit_log_overflowed(),
+             "5 块的少量改动远在编辑日志预算内");
+    QVERIFY2(snap.has_filter_edits(), "成功的滤波必须可撤销");
+
+    // 反同义反复: 脉冲确实被抹平了, 否则下面的还原断言就是空话。
+    for (size_t k = 0; k < BLOCKS; ++k) {
+        QVERIFY2(!snap.get_sample((uint64_t)(k * LB + PULSE_OFF), sig),
+                 "窄脉冲应被抹平(否则本用例没有覆盖到编辑)");
+    }
+
+    const uint64_t rev_before = snap.edit_revision();
     uint64_t calls = 0;
     snap.revert_all_edits([&calls]() {
         // 与 batch_callback 同样的约束: 通知在独占写事务内发出, 回调里读快照
         // 会在同一线程上取 EditReadGuard 而自死锁。
         ++calls;
     });
-    QVERIFY2(calls >= 1,
-             "an undo that performs work must publish at least one progress "
-             "notice, otherwise the GUI shows a frozen window for its duration");
-    QVERIFY2(!snap.has_filter_edits(), "revert must consume the edit log");
 
-    // 空操作(已无可撤销的编辑)不应发通知。
+    QVERIFY2(calls >= 2,
+             qPrintable(QString("跨 %1 块(%2 采样/块)的撤销必须分块发布多次, "
+                                "实际 %3 次 —— 否则读者仍要等整趟")
+                            .arg((qulonglong)BLOCKS)
+                            .arg((qulonglong)LB)
+                            .arg((qulonglong)calls)));
+
+    // 发布 == 事务被关开: 每次 publish 贡献 2 次 epoch 递增, 另有首尾各一次,
+    // 故 2 次发布 ⇒ 6 次; 这里留余量断言 >= 4, 直接锁住"事务真的放开过"。
+    const uint64_t rev_after = snap.edit_revision();
+    QVERIFY2(rev_after - rev_before >= 4,
+             qPrintable(QString("撤销必须在块之间真正关闭并重开事务(epoch %1 -> %2)")
+                            .arg((qulonglong)rev_before)
+                            .arg((qulonglong)rev_after)));
+
+    QVERIFY2(!snap.has_filter_edits(), "撤销必须消费掉编辑日志");
+
+    // 逐位还原: 脉冲回到高电平, 其余回到低电平。抽查块首/块尾/块边界与均布点,
+    // 不对 8400 万采样做全量比较(那是秒级 + 无额外收益)。
+    for (size_t k = 0; k < BLOCKS; ++k) {
+        const uint64_t base = (uint64_t)(k * LB);
+        QVERIFY2(snap.get_sample(base + PULSE_OFF, sig), "撤销后脉冲必须还原");
+        QVERIFY2(!snap.get_sample(base, sig), "块首应还原为低电平");
+        QVERIFY2(!snap.get_sample(base + LB - 1, sig), "块尾应还原为低电平");
+    }
+    for (uint64_t s = 0; s < (uint64_t)N; s += 1048576)
+        QVERIFY2(!snap.get_sample(s, sig), "抽查点应还原为低电平");
+
+    // 空操作(已无可撤销的编辑)不得发通知。
     uint64_t noop = 0;
     snap.revert_all_edits([&noop]() { ++noop; });
     QCOMPARE(noop, Q_UINT64_C(0));
+
+    // 反相走的是同一条分块发布路径, 但入口不同(LogicSnapshot::invert_channel
+    // 自开事务并把 publish 交给内部循环), 所以单独覆盖: 5 块的通道反相也必须
+    // 分块发布多次, 且撤销(反相自逆)后逐位还原。
+    uint64_t invert_calls = 0;
+    snap.invert_channel(sig, [&invert_calls]() { ++invert_calls; });
+    QVERIFY2(invert_calls >= 2,
+             qPrintable(QString("跨 %1 块的通道反相必须分块发布(实际 %2 次)")
+                            .arg((qulonglong)BLOCKS)
+                            .arg((qulonglong)invert_calls)));
+    QVERIFY2(!snap.get_sample((uint64_t)(0 * LB + PULSE_OFF), sig),
+             "反相后脉冲应变为低电平");
+    QVERIFY2(!snap.get_sample((uint64_t)(4 * LB + PULSE_OFF), sig),
+             "反相必须覆盖全部块(末块)");
+
+    snap.revert_all_edits();
+    QVERIFY2(snap.get_sample((uint64_t)(0 * LB + PULSE_OFF), sig),
+             "撤销反相后脉冲必须还原");
+    QVERIFY2(!snap.has_filter_edits(), "撤销反相应清空编辑/反相登记");
 }
 
 void TestLogicSnapshotRaw::test_revert_all_edits_invert_round_trip()

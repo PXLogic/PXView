@@ -142,16 +142,18 @@ void FilterProcessor::apply_signal_invert(data::LogicSnapshot *logic,
     if (!m || m->type() != SR_CHANNEL_LOGIC)
       continue;
     if (ch_idx < (int)channels.size() && channels[ch_idx]) {
-      logic->invert_channel(m->index());
       // Same progressive-refresh need as the glitch filter (see
-      // notify_batch_committed): inverting a channel rewrites every leaf block
-      // and rebuilds its mipmap, and without a notice the GUI keeps showing
-      // the cached pixmap for the whole invert. Per-channel is the finest
-      // granularity the invert API exposes; published unthrottled on purpose,
-      // because the number of notices is bounded by the channel count, not by
-      // the data size. The edit transaction for the channel is already closed
-      // by the time invert_channel() returns, so a reader entering now sees a
-      // complete revision.
+      // notify_batch_committed): inverting a channel XORs every one of its leaf
+      // blocks (2 MB each) and rebuilds each block's whole mipmap, which is
+      // seconds on a large capture. invert_channel() publishes its edit
+      // transaction per chunk of blocks, so this callback fires while the pass
+      // runs and the render path — which skips its rebuild only while a
+      // transaction is open — can show the result chunk by chunk. Throttled by
+      // notify_batch_committed like every other edit notice.
+      logic->invert_channel(m->index(), [this]() { notify_batch_committed(); });
+
+      // Final notice for the channel: makes sure the completed state is
+      // repainted even if the per-chunk notices were all throttled away.
       if (_coord)
         _coord->data_updated();
     }
