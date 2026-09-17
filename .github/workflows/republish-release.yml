@@ -11,7 +11,7 @@
 #      — each artifact zip is auto-extracted to a sub-directory.
 #   2. Collect single-file assets (.sh installer / .dmg / .exe / .zip) as-is.
 #   3. Re-zip the Windows Portable directory with max compression (-9).
-#   4. Upload everything to a GitHub Release via softprops/action-gh-release@v2.
+#   4. Upload everything to a GitHub Release via softprops/action-gh-release@v3.
 #
 # Usage:
 #   GitHub repo → Actions → "Republish Release Assets" → Run workflow
@@ -188,7 +188,7 @@ jobs:
           fi
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.value }}
           files: release-assets/*
