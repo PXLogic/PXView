@@ -2707,20 +2707,23 @@ void LogicSnapshot::apply_glitch_filter(
     int sig_index, uint32_t threshold,
     std::function<void(int)> progress_callback,
     GlitchFilterMode filter_mode,
-    const std::atomic<bool> *cancel) {
+    const std::atomic<bool> *cancel,
+    std::function<void()> batch_callback) {
   _glitch_filter->apply_glitch_filter(sig_index, threshold,
                                      std::move(progress_callback), filter_mode,
-                                     cancel);
+                                     cancel, std::move(batch_callback));
 }
 
 void LogicSnapshot::apply_glitch_filter_all(
     const std::map<int, uint32_t> &thresholds,
     std::function<void(int)> progress_callback,
     const std::map<int, GlitchFilterMode> &filter_modes,
-    const std::atomic<bool> *cancel) {
+    const std::atomic<bool> *cancel,
+    std::function<void()> batch_callback) {
   _glitch_filter->apply_glitch_filter_all(thresholds,
                                          std::move(progress_callback),
-                                         filter_modes, cancel);
+                                         filter_modes, cancel,
+                                         std::move(batch_callback));
 }
 
 bool LogicSnapshot::is_glitch_filtered() {
@@ -2740,8 +2743,8 @@ void LogicSnapshot::clear_filtered_ranges() {
   _glitch_filter->clear_filtered_ranges();
 }
 
-void LogicSnapshot::revert_all_edits() {
-  _glitch_filter->revert_all_edits();
+void LogicSnapshot::revert_all_edits(std::function<void()> progress_callback) {
+  _glitch_filter->revert_all_edits(std::move(progress_callback));
 }
 
 bool LogicSnapshot::has_filter_edits() const {

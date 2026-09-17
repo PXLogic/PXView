@@ -43,13 +43,49 @@ namespace data {
 
 namespace {
 
-// Safety valve for the reversible edit log. The log is what replaced the
-// 976 MB full-snapshot backup, so it must itself be bounded: a pathologically
-// dense glitch train could otherwise rewrite (and therefore have to save)
-// every sample byte of the capture. When a budget is exceeded the filter
-// aborts and reverts instead of silently degrading into a half-applied state.
-constexpr uint64_t kMaxEditBytes = 256ull * 1024ull * 1024ull; // 256 MB
-constexpr uint64_t kMaxEditRecords = 8ull * 1000ull * 1000ull; // 8 M
+// ---- Reversible edit log budget -------------------------------------------
+//
+// THE BUDGET IS EXPRESSED IN MEMORY, NOT IN RECORD COUNT. A count cap is a bad
+// proxy, and one shipped as a field bug: filtering a 2.5 G-sample capture whose
+// signal is a 5-sample glitch every 10 samples produced 8.06 MILLION records
+// holding only 11.6 MB of payload — the records' own overhead (~96 B each:
+// vector control block + heap metadata) was ~900 MB. The 8 M count cap tripped
+// while the byte budget sat at 4% utilisation, the pass aborted and rolled
+// back, and the user saw "large file: filter did nothing, small file: fine".
+constexpr uint64_t kEditRecordOverheadBytes = 96;
+
+// Merge the previous record with the current write-run when both hit the same
+// block and the gap between them is at most this many bytes. Without merging, a
+// dense glitch train degenerates into one record per glitch; with it, the log
+// holds ~one record per block per batch. The price is re-saving the small gaps
+// in between, which is far cheaper than a record per glitch.
+constexpr uint64_t kEditMergeGapBytes = 64;
+
+// The log may cost at most this much. Deliberately expressed RELATIVE TO THE
+// SNAPSHOT so the guard means "never worse than the full-backup strategy this
+// log replaced": when glitches are dense enough that the touched spans cover
+// the whole channel, the log necessarily degenerates to ~1x the channel data —
+// which is exactly what _logic_backup used to cost. Refusing there would be a
+// regression against the code we replaced, not a safety improvement. The
+// ceiling only bounds the pathological multi-channel case.
+constexpr uint64_t kEditLogFloorBytes = 64ull * 1024 * 1024;          // 64 MB
+constexpr uint64_t kEditLogCeilingBytes = 2ull * 1024 * 1024 * 1024;  // 2 GB
+
+// ---- Revert progress granularity -------------------------------------------
+// revert_all_edits() may now run on a worker thread (the GUI no longer performs
+// the undo inline), and it can take seconds on a large capture: it replays up to
+// ~one copy of the channel data and rebuilds the mipmap of every block it
+// touched. Emit a "visible revision moved on" notice per unit of work so the
+// undo can be shown progressing instead of looking like a frozen window.
+//
+// Granularity is expressed in BYTES REPLAYED and BLOCKS REBUILT, not in record
+// count: the edit log merges a dense glitch train into ~one record per block, so
+// the dominant case for a large capture is a handful of huge records — a
+// record-count rule would stay silent through the most expensive undo there is.
+// The caller throttles the actual repaint; these numbers only bound how stale
+// the notice can be, and a notice costs one lambda call plus a timestamp check.
+constexpr uint64_t kRevertProgressBytes = 1ull * 1024 * 1024;   // 1 MB replayed
+constexpr uint64_t kRevertProgressBlocks = 4;                   // 4 mipmaps
 
 } // anonymous namespace
 
@@ -150,6 +186,10 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
     // The block did not exist (RLE constant representation) and is about to
     // be materialised. Undo = free it again and restore the nullptr plus the
     // constant-value metadata it carried.
+    if (!edit_log_can_grow(0, 1)) {
+      _edit_log_overflow = true;
+      return;
+    }
     EditRecord e;
     e.order = order;
     e.idx0 = idx0;
@@ -159,8 +199,6 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
     e.meta_first = _host->_ch_data[order][idx0].first;
     e.meta_last = _host->_ch_data[order][idx0].last;
     _edits.push_back(std::move(e));
-    if (_edits.size() > kMaxEditRecords)
-      _edit_log_overflow = true;
     return;
   }
 
@@ -174,8 +212,49 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
   if (lbp == nullptr)
     return;
 
+  // 1) Extend the previous record when it already covers this block and the gap
+  //    is small (see kEditMergeGapBytes). The condition is `<=` and NOT
+  //    `byte_lo >= prev_hi` on purpose: a byte holds 8 samples, so a write-run
+  //    usually OVERLAPS the previous record's last byte whenever the glitches
+  //    are closer than 8 samples apart. Requiring non-overlap made the merge
+  //    fail on exactly the dense trains it exists for (measured: 104,859
+  //    records for 419,430 glitches instead of ~6).
+  //
+  //    Overlap is safe: the overlapping bytes in prev.bytes are the ORIGINAL
+  //    content (recorded before the previous run wrote them), and the extension
+  //    [prev_hi, byte_hi) is still original because the current run's bytes are
+  //    written only after this call returns. So the merged blob is the original
+  //    content of [prev.byte_lo, byte_hi) either way. Runs are visited in
+  //    ascending order, so the extension only ever grows forward.
+  if (!_edits.empty()) {
+    EditRecord &prev = _edits.back();
+    if (!prev.allocated && prev.order == order && prev.idx0 == idx0 &&
+        prev.idx1 == idx1) {
+      const uint64_t prev_hi = prev.byte_lo + prev.bytes.size();
+      if (byte_lo <= prev_hi + kEditMergeGapBytes) {
+        if (byte_hi > prev_hi) {
+          const uint64_t add = byte_hi - prev_hi;
+          if (!edit_log_can_grow(add, 0)) {
+            _edit_log_overflow = true;
+            return;
+          }
+          const size_t old_size = prev.bytes.size();
+          prev.bytes.resize(old_size + (size_t)add);
+          memcpy(prev.bytes.data() + old_size, (const uint8_t *)lbp + prev_hi,
+                 (size_t)add);
+          _edit_bytes += add;
+        }
+        return;
+      }
+    }
+  }
+
+  // 2) Otherwise start a new record. Recording per write-run (rather than per
+  //    block) keeps the payload minimal for sparse glitches; reverse replay
+  //    handles a block rewritten across several batches because each record
+  //    holds the bytes as they were immediately before its own write.
   const uint64_t len = byte_hi - byte_lo;
-  if (_edit_bytes + len > kMaxEditBytes || _edits.size() >= kMaxEditRecords) {
+  if (!edit_log_can_grow(len, 1)) {
     _edit_log_overflow = true;
     return;
   }
@@ -187,12 +266,31 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
   e.byte_lo = byte_lo;
   e.allocated = false;
   e.bytes.resize((size_t)len);
-  // Snapshot the bytes we are about to clobber. Because records are replayed
-  // in reverse, recording per write-run (rather than per block) is already
-  // sufficient to restore a block that is rewritten across several batches.
   memcpy(e.bytes.data(), (const uint8_t *)lbp + byte_lo, (size_t)len);
   _edit_bytes += len;
   _edits.push_back(std::move(e));
+}
+
+bool LogicSnapshotGlitchFilter::edit_log_can_grow(uint64_t extra_payload,
+                                                 uint64_t extra_records) const {
+  const uint64_t records = (uint64_t)_edits.size() + extra_records;
+  const uint64_t estimated =
+      _edit_bytes + extra_payload + records * kEditRecordOverheadBytes;
+  return estimated <= edit_log_budget_bytes();
+}
+
+uint64_t LogicSnapshotGlitchFilter::edit_log_budget_bytes() const {
+  // ~one copy of the capture data, with a floor for tiny captures and a ceiling
+  // for the pathological multi-channel case. See kEditLogFloorBytes.
+  uint64_t snapshot_bytes = 0;
+  if (!_host->_ch_data.empty()) {
+    const uint64_t samples = _host->_ring_sample_count;
+    snapshot_bytes = (uint64_t)_host->_ch_data.size() * (samples / 8);
+  }
+  uint64_t budget = snapshot_bytes + kEditLogFloorBytes;
+  if (budget > kEditLogCeilingBytes)
+    budget = kEditLogCeilingBytes;
+  return budget;
 }
 
 void LogicSnapshotGlitchFilter::clear_edits() {
@@ -210,7 +308,8 @@ bool LogicSnapshotGlitchFilter::has_edits() const {
   return !_edits.empty() || !_inverted_orders.empty() || _edit_log_overflow;
 }
 
-void LogicSnapshotGlitchFilter::revert_all_edits() {
+void LogicSnapshotGlitchFilter::revert_all_edits(
+    std::function<void()> progress_callback) {
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
   if (!has_edits())
@@ -226,6 +325,23 @@ void LogicSnapshotGlitchFilter::revert_all_edits() {
   //    BEFORE the glitch filter, so the logged bytes are post-inversion
   //    content. Restoring the log therefore yields the inverted waveform,
   //    which step 3 then flips back to capture-original.
+  // Progress plumbing shared by the two loops below. The FIRST notice always
+  // fires, so any undo that does work publishes at least once — which also means
+  // a single huge record (the shape a dense capture's log collapses into) cannot
+  // end up silent — and afterwards the notice is bounded by the thresholds.
+  uint64_t pending = 0;
+  bool published = false;
+  const auto publish = [&](uint64_t units, uint64_t threshold) {
+    if (!progress_callback)
+      return;
+    pending += units;
+    if (published && pending < threshold)
+      return;
+    pending = 0;
+    published = true;
+    progress_callback();
+  };
+
   for (auto it = _edits.rbegin(); it != _edits.rend(); ++it) {
     const EditRecord &e = *it;
     if (e.order >= _host->_ch_data.size())
@@ -256,9 +372,43 @@ void LogicSnapshotGlitchFilter::revert_all_edits() {
         _host->push_to_free_list(ptr);
     } else {
       void *ptr = rn.lbp[e.idx1];
+      if (ptr == nullptr && !e.bytes.empty()) {
+        // The edit pass left this block with no transitions, so calc_mipmap()
+        // collapsed it to the constant-value (RLE) representation and RELEASED
+        // its storage — that path runs whenever `_able_free` allows it (stream
+        // / repeat sessions and able_free captures). The undo data is then
+        // unreachable through a null pointer, and the old code silently skipped
+        // the restore: the block stayed filtered, `tog` stayed 0, and readers
+        // fell back to the constant representation. Net effect: "revert did
+        // nothing" (a dense glitch train that flattens to a constant level is
+        // exactly the case that triggers it).
+        //
+        // Re-materialise the block from the constant the metadata records,
+        // then write the original bytes back over it below. The bytes outside
+        // the recorded window were never touched by the filter, so they still
+        // have the constant value — filling them with it is exactly right.
+        const bool const_val = (rn.first & (1ULL << e.idx1)) != 0;
+        ptr = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
+        if (ptr == nullptr) {
+          _host->_memory_failed = true;
+          continue;
+        }
+        if (const_val)
+          memset(ptr, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
+        else
+          memset(ptr, 0, LogicSnapshot::LeafBlockSamples / 8);
+        memset((uint8_t *)ptr + LogicSnapshot::LeafBlockSamples / 8, 0,
+               LogicSnapshot::LeafBlockSpace -
+                   LogicSnapshot::LeafBlockSamples / 8);
+        rn.lbp[e.idx1] = ptr;
+      }
       if (ptr && !e.bytes.empty())
         memcpy((uint8_t *)ptr + e.byte_lo, e.bytes.data(), e.bytes.size());
     }
+
+    // This record's cost is its payload, so progress is reported in proportion
+    // to the bytes actually restored (see kRevertProgressBytes).
+    publish(e.bytes.size(), kRevertProgressBytes);
   }
 
   // 2) tog/first/last and the mipmap levels are pure functions of the
@@ -278,6 +428,10 @@ void LogicSnapshotGlitchFilter::revert_all_edits() {
     if (std::get<1>(t) >= _host->_ch_data[std::get<0>(t)].size())
       continue;
     recalc_mipmap(std::get<0>(t), std::get<1>(t), std::get<2>(t));
+
+    // recalc_mipmap() rebuilds the whole mipmap of a 16.7 M-sample block, so
+    // this loop is the other dominant cost of a large undo.
+    publish(1, kRevertProgressBlocks);
   }
 
   // Capture-side derived accumulators. They are only meaningful while the
@@ -364,7 +518,8 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
     int sig_index, uint32_t threshold,
     std::function<void(int)> progress_callback,
     GlitchFilterMode filter_mode,
-    const std::atomic<bool> *cancel) {
+    const std::atomic<bool> *cancel,
+    std::function<void()> batch_callback) {
   if (threshold == 0)
     return;
 
@@ -581,6 +736,21 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
     }
     dirty.clear();
 
+    // 本批已提交为一份完整可见修订（字节 + mipmap + tog/first/last 都在同一个
+    // EditWriteGuard 事务内），通知上层"可见数据变了"。
+    //
+    // 这是渐进刷新的唯一触发点：整趟滤波期间采集已停止（没有数据包），解码被
+    // 暂停，DataUpdated 只在整趟结束时发一次 —— 没有任何东西会把信号 pixmap
+    // 置脏，界面就一直显示滤波前的缓存画面，直到用户滚动视图改变 scale/offset
+    // 强制重建 pixmap 才看到已经滤好的部分。
+    //
+    // 回调契约：非阻塞，且**不得读本快照** —— 此刻独占写事务（EditWriteGuard）
+    // 仍然开着，在同一线程上取 EditReadGuard 会自死锁（std::shared_mutex 不可
+    // 重入）。上层实现只是限流后 post 一个异步通知，读者（渲染）会在这个事务
+    // 结束后才真正开始画，因此它读到的必然是一份完整修订。
+    if (batch_callback)
+      batch_callback();
+
     fills.clear();
   };
 
@@ -758,7 +928,8 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
     const std::map<int, uint32_t> &thresholds,
     std::function<void(int)> progress_callback,
     const std::map<int, GlitchFilterMode> &filter_modes,
-    const std::atomic<bool> *cancel) {
+    const std::atomic<bool> *cancel,
+    std::function<void()> batch_callback) {
   // 架构修复：按 channel_index 查找阈值，与 _ch_index 中的位置无关
   for (size_t i = 0; i < _host->_ch_index.size(); i++) {
     if (cancel && cancel->load(std::memory_order_relaxed))
@@ -770,7 +941,8 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
       auto mit = filter_modes.find(ch_idx);
       if (mit != filter_modes.end())
         mode = mit->second;
-      apply_glitch_filter(ch_idx, it->second, nullptr, mode, cancel);
+      apply_glitch_filter(ch_idx, it->second, nullptr, mode, cancel,
+                          batch_callback);
       // 失败/超预算时停止遍历：调用方会整趟 revert 并上报失败，
       // 继续滤后面的通道只会扩大需要回滚的范围。
       if (_edit_log_overflow || _host->_memory_failed)

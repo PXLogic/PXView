@@ -2,11 +2,14 @@
 #define PXVIEW_CORE_FILTERPROCESSOR_H
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <vector>
-#include <cstdint>
 
 #include "pv/core/thread_pool.h"
 
@@ -30,12 +33,6 @@ namespace core {
 class EventBus;
 class SessionStateContext;
 
-// Upper bound on how long a GUI-reachable clear path will wait for a busy
-// writer before giving up. Chosen to be imperceptible when it does fire, and
-// far shorter than a filter pass over a large capture — the whole point is
-// that the GUI degrades to "did nothing, try again" instead of freezing.
-constexpr int kEditLockWaitMs = 200;
-
 /**
  * FilterProcessor — owns the glitch filter and signal invert background
  * threads and their running flags. Extracted from SigSession (SubTask 10.5)
@@ -53,11 +50,35 @@ public:
   // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
   void set_glitch_filter(const std::map<int, uint32_t> &thresholds,
                          const std::map<int, GlitchFilterMode> &filter_modes);
+
+  /// Synchronous clear: returns only once capture-original data has actually
+  /// been restored. This is the API/MCP contract — the returned "cleared" must
+  /// mean the samples are already back, or a client that reads them next gets
+  /// filtered data. The wait happens on the caller's own (non-GUI) thread.
+  ///
+  /// GUI callers MUST use request_clear_glitch_filter(): the undo rewrites up
+  /// to ~one copy of the channel data and rebuilds the mipmap of every touched
+  /// block, so running it inline froze the window for the whole undo.
   void clear_glitch_filter();
+
+  /// Asynchronous clear for the GUI thread: submits the undo to the worker pool
+  /// and returns immediately. Completion is announced by GlitchFilterCleared +
+  /// DataUpdated, exactly as on the synchronous path, so the View/toast/repaint
+  /// behaviour is unchanged — only the blocking is gone.
+  void request_clear_glitch_filter();
+
   bool is_glitch_filter_active();
 
   void set_signal_invert(const std::vector<bool> &channels);
+
+  /// Synchronous clear of the signal invert. See clear_glitch_filter() for why
+  /// the API keeps a blocking variant and the GUI must not use it.
   void clear_signal_invert();
+
+  /// Asynchronous clear for the GUI thread: completes via SignalInvertCleared +
+  /// DataUpdated.
+  void request_clear_signal_invert();
+
   bool is_signal_invert_active();
 
   /// Stop both background tasks. Called from SigSession::Close().
@@ -85,6 +106,20 @@ private:
                           const std::map<int, GlitchFilterMode> filter_modes);
   void signal_invert_task(const std::vector<bool> channels);
 
+  /// Submit the undo work onto _filter_pool and hand back its future. An
+  /// INVALID future means the request was skipped, which happens when there is
+  /// nothing to clear or when another writer owns the data (see the guards).
+  /// Both clear paths (sync and async) go through these, so the decision logic
+  /// exists once.
+  std::future<void> submit_clear_glitch_filter();
+  std::future<void> submit_clear_signal_invert();
+
+  /// Worker-side bodies of the two clears. They block on _edit_mutex (a worker
+  /// may wait; the GUI may not) and re-check the active flag under that lock,
+  /// because the state may have changed between submission and execution.
+  void clear_glitch_filter_task();
+  void clear_signal_invert_task();
+
   /// Rebuild the live snapshot into the target state
   /// "capture data -> signal invert -> glitch filter", starting from
   /// Snapshot::revert_all_edits() (capture-original) instead of copying a
@@ -104,6 +139,28 @@ private:
   /// the View layer's channel ordering.
   void apply_signal_invert(data::LogicSnapshot *logic,
                            const std::vector<bool> &channels);
+
+  /// Throttled "the sample store has a new visible revision" notice, driven by
+  /// the data layer's per-batch batch_callback (see
+  /// LogicSnapshot::apply_glitch_filter).
+  ///
+  /// Why this is needed at all: while a filter pass runs, NOTHING else on the
+  /// GUI side invalidates the signal pixmap. Capture has stopped, so no data
+  /// packets reach Viewport::feed_in_* and the progress timer is idle; the
+  /// decoders are paused; and DataUpdated is broadcast only once, after the
+  /// whole pass. The renderer therefore kept blitting its cached pixmap for
+  /// the entire pass — which is why the waveform appeared to "refresh only
+  /// when scrolled" (a scroll changes scale/offset and forces a rebuild).
+  ///
+  /// Throttled because one pass can commit thousands of batches (measured:
+  /// 3943 batches for a 2.5 GS/s file), and each notice costs the GUI a full
+  /// data_updated() pass (layout + margins + scrollbars + pixmap rebuild).
+  void notify_batch_committed();
+
+  /// Steady-clock stamp of the last publication. Only the filter worker thread
+  /// ever touches it. Zero-value means "never published in this pass", which
+  /// makes the first batch of a pass publish immediately.
+  std::chrono::steady_clock::time_point _last_batch_refresh{};
 
   EventBus *_event_bus;
   ISessionState *_state;
@@ -139,11 +196,11 @@ private:
   // SIGSEGV'd (group3 test_36). The same mutual exclusion is still required
   // now that the paths replay an edit log, so the requirement is unchanged.
   //
-  // std::timed_mutex (not std::mutex) is deliberate: clear_glitch_filter /
-  // clear_signal_invert are reachable from the GUI thread, and they must
-  // degrade to "try, then give up" instead of blocking the event loop behind
-  // a multi-second background pass. See the guard ordering note in
-  // clear_glitch_filter().
+  // std::timed_mutex (not std::mutex) so a caller that cannot afford an
+  // unbounded wait can bound it. Note that no GUI-reachable path takes this
+  // lock directly any more: the clear paths submit their work to _filter_pool
+  // (request_clear_*) and block HERE, on a worker. That is what removed the
+  // multi-second freeze from "undo filter" on a large capture.
   std::timed_mutex _edit_mutex;
 };
 

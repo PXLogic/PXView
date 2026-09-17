@@ -62,15 +62,38 @@ public:
     // boundary for the whole pass. The pass stops at the next iteration and
     // leaves a partially applied result — the caller is responsible for
     // reverting (revert_all_edits()).
+    //
+    // `batch_callback`, when non-null, is invoked once per COMMITTED write
+    // batch, i.e. every time a group of in-place edits becomes one complete
+    // visible revision. It exists so the layer above can tell the UI that the
+    // sample store changed.
+    //
+    // Without it nothing on the GUI side marked the signal pixmap dirty while a
+    // pass ran: capture has stopped (no data packets arrive), decode is paused,
+    // and DataUpdated is only emitted once the whole pass ends. The renderer
+    // therefore kept blitting its cached pixmap and the waveform stayed frozen
+    // on the pre-filter picture until the user scrolled (which changes
+    // scale/offset and forces a rebuild) — reported as "only refreshes when I
+    // scroll".
+    //
+    // MUST NOT BLOCK, AND MUST NOT READ THIS SNAPSHOT: it is called while the
+    // exclusive write transaction (EditWriteGuard) for the batch is still open.
+    // Reading samples from inside it — get_sample / get_display_edges / any
+    // consistent_read() — would take an EditReadGuard on the same thread and
+    // self-deadlock, because std::shared_mutex is not recursive. The intended
+    // implementation only posts an async notice to the GUI thread, throttled by
+    // the caller.
     void apply_glitch_filter(int sig_index, uint32_t threshold,
                              std::function<void(int)> progress_callback,
                              GlitchFilterMode filter_mode = GlitchFilterMode::Both,
-                             const std::atomic<bool> *cancel = nullptr);
+                             const std::atomic<bool> *cancel = nullptr,
+                             std::function<void()> batch_callback = nullptr);
     // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds,
                                  std::function<void(int)> progress_callback,
                                  const std::map<int, GlitchFilterMode> &filter_modes = {},
-                                 const std::atomic<bool> *cancel = nullptr);
+                                 const std::atomic<bool> *cancel = nullptr,
+                                 std::function<void()> batch_callback = nullptr);
     bool is_glitch_filtered() const;
     void set_glitch_filtered(bool filtered);
 
@@ -109,7 +132,20 @@ public:
     // samples per removed glitch), and — crucially — no published block is
     // ever freed or unmapped, so the lock-free finite-capture readers keep
     // their "no block is freed during capture" invariant intact.
-    void revert_all_edits();
+    // `progress_callback` (optional) is invoked periodically while the log is
+    // replayed and the mipmaps are rebuilt. Same contract as
+    // apply_glitch_filter's batch_callback: it must neither block nor read this
+    // snapshot, because it runs inside the revert's exclusive EditWriteGuard.
+    //
+    // VISIBILITY: the revert still holds ONE exclusive transaction for its whole
+    // duration, and the render path deliberately skips its signal rebuild while a
+    // transaction is open (LogicSnapshot::edit_in_progress) so a paint can never
+    // block behind the writer. A notice therefore only reaches the screen when
+    // the writer also publishes a revision between chunks
+    // (EditWriteGuard::publish) — which apply_batch() does per batch, so
+    // filtering is progressive, whereas the undo is not chunked yet. This
+    // callback is the hook that such chunking will drive.
+    void revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_edits() const;
     /// Forget the edit log without restoring. Only for snapshot teardown
     /// (free_data / init_all), where the blocks are being dropped anyway.
@@ -132,6 +168,16 @@ private:
     // restoring the nullptr (unwritten/constant) representation.
     void record_edit(unsigned int order, uint64_t idx0, uint64_t idx1,
                      uint64_t byte_lo, uint64_t byte_hi, bool allocated);
+
+    /// Estimated-cost gate for the edit log: payload + per-record overhead.
+    /// Deliberately not a record COUNT cap — see kEditRecordOverheadBytes for
+    /// the field bug a count cap caused (8.06M records / 11.6 MB of payload /
+    /// ~900 MB of overhead / a large file that silently appeared unfiltered).
+    bool edit_log_can_grow(uint64_t extra_payload, uint64_t extra_records) const;
+
+    /// Total budget for the log, derived from the snapshot size so the guard is
+    /// never stricter than the full-snapshot backup strategy this log replaced.
+    uint64_t edit_log_budget_bytes() const;
 
     /// One reversible write. Replaying all records in reverse order
     /// restores the exact pre-edit byte stream, including the case where a

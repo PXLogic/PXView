@@ -301,10 +301,17 @@ public:
     // the whole pass. Results are then partial — the caller must revert.
     void apply_glitch_filter(int sig_index, uint32_t threshold, std::function<void(int)> progress_callback,
         GlitchFilterMode filter_mode = GlitchFilterMode::Both,
-        const std::atomic<bool> *cancel = nullptr);
+        const std::atomic<bool> *cancel = nullptr,
+        std::function<void()> batch_callback = nullptr);
+    // `batch_callback` (optional) fires once per committed write batch so
+    // callers can publish "the sample store has a new visible revision" to the
+    // UI. It must neither block nor read this snapshot — it runs inside the
+    // batch's exclusive EditWriteGuard. See
+    // LogicSnapshotGlitchFilter::apply_glitch_filter.
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds, std::function<void(int)> progress_callback,
         const std::map<int, GlitchFilterMode> &filter_modes = {},
-        const std::atomic<bool> *cancel = nullptr);
+        const std::atomic<bool> *cancel = nullptr,
+        std::function<void()> batch_callback = nullptr);
     bool is_glitch_filtered();
     void set_glitch_filtered(bool filtered);
 
@@ -321,7 +328,12 @@ public:
     // 方案（8 通道 × 1 G 采样 = 976 MB + 每次重滤一整趟 480 次 commit）。
     // 代价正比于真正被改写的字节数（每个被抹平的毛刺只有几个采样）。
     // 幂等：没有编辑时是空操作。
-    void revert_all_edits();
+    // `progress_callback` (optional; must not block or read this snapshot, it
+    // runs inside the revert's exclusive edit transaction) fires periodically
+    // during a long undo. When that notice becomes visible depends on the
+    // transaction being published between chunks — see the visibility note in
+    // LogicSnapshotGlitchFilter::revert_all_edits.
+    void revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_filter_edits() const;
     /// True when the reversible edit log hit its memory budget during the
     /// last pass, i.e. the filter bailed out mid-way. Callers must revert
@@ -643,6 +655,27 @@ public:
     /// do not branch on it in production logic.
     bool edit_write_owned() const {
         return _edit_write_depth.load(std::memory_order_relaxed) > 0;
+    }
+
+    /// True while an edit transaction is open on this snapshot, i.e. while its
+    /// leaf blocks are being rewritten in place by the glitch filter, the
+    /// signal invert, or the undo pass.
+    ///
+    /// This IS meant to be branched on from the render path. A guarded read
+    /// taken while a transaction is open BLOCKS until the writer finishes
+    /// (EditReadGuard takes the shared lock in that case), and the undo holds a
+    /// single transaction for its whole duration — seconds on a large capture.
+    /// A paint that reached get_display_edges() during that window froze the
+    /// GUI thread inside paintEvent, which the window manager reports as "not
+    /// responding", even though the work itself now runs on a worker thread.
+    ///
+    /// The renderer therefore checks this first and skips its signal-pixmap
+    /// rebuild for the frame (the cached pixmap is a complete, self-consistent
+    /// revision; the dirty flag stays set), and paints the new revision on the
+    /// first frame after the writer publishes or finishes. One relaxed atomic
+    /// load — cheaper than any lock, and never blocking.
+    bool edit_in_progress() const noexcept {
+        return (_edit_epoch.load(std::memory_order_acquire) & 1u) != 0;
     }
 
 private:

@@ -347,7 +347,41 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
   const bool decode_only_skip =
       ctx.decode_only && !view_params_changed && !pixmap_changed &&
       !vp->need_update();
-  const bool rebuild = !decode_only_skip &&
+
+  // A background edit transaction rewrites published leaf blocks in place (the
+  // glitch filter's batches, the signal invert, the undo pass). Any guarded read
+  // taken now — which is exactly what the rebuild below does, through
+  // get_display_edges() — would BLOCK until that transaction closes, and the
+  // undo of a large capture holds ONE transaction for its whole duration.
+  // Blocking there freezes the GUI thread inside paintEvent, which the window
+  // manager reports as "not responding" — even though the editing work itself
+  // now runs on a worker thread (moving it there is not enough on its own).
+  //
+  // So skip the rebuild instead of waiting for the lock. The cached pixmap is a
+  // complete, self-consistent revision, and `need_update` stays set, so the
+  // first frame after the writer publishes (each committed batch, and once more
+  // when the operation finishes) rebuilds with the new revision. Cost is one
+  // relaxed atomic load per frame — cheaper than any lock, and never blocking.
+  //
+  // Exempt: a rebuild that must allocate a fresh pixmap (first paint / resize /
+  // DPR change). There is nothing to blit in that case, and it is a transient
+  // state, so waiting is the lesser evil.
+  bool edit_in_progress = false;
+  if (!pixmap_changed) {
+    for (auto t : traces) {
+      if (!t->enabled())
+        continue;
+      if (auto *logic_signal = t->as_logic()) {
+        auto *snap = logic_signal->data();
+        if (snap && snap->edit_in_progress()) {
+          edit_in_progress = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const bool rebuild = !decode_only_skip && !edit_in_progress &&
                        (view_params_changed || vp->need_update() ||
                         pixmap_changed);
 

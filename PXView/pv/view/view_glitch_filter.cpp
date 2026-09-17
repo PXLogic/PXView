@@ -106,17 +106,27 @@ void ViewGlitchFilter::on_show_glitch_filter_popup(
 }
 
 void ViewGlitchFilter::on_clear_glitch_filter_requested(bool all_channels) {
-  // Core's clear_glitch_filter() is global (clears all channels); the
-  // all_channels flag only affects the toast message. A per-channel clear
-  // would require a Core API extension.
-  _view->session().clear_glitch_filter();
+  // Core's clear is global (clears all channels); the all_channels flag only
+  // affects the toast message. A per-channel clear would require a Core API
+  // extension.
+  //
+  // The undo rewrites up to ~one copy of the capture data and rebuilds a mipmap
+  // per touched block, i.e. seconds on a large capture. It therefore runs on the
+  // filter worker (request_*), and this handler returns immediately; the view is
+  // refreshed by GlitchFilterCleared + DataUpdated when the undo completes. The
+  // toast is the immediate feedback, so only show it when there was something to
+  // clear (the request is dropped when nothing is active).
+  const bool was_active = _view->session().is_glitch_filter_active();
+  _view->session().request_clear_glitch_filter();
   _preview_ranges.clear();
   if (_view->get_time_view())
     _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
-  pv::ui::Toast::show(_view,
-                      all_channels ? View::tr("已清除所有通道滤波")
-                                   : View::tr("已清除通道滤波"),
-                      pv::ui::Toast::Info);
+  if (was_active) {
+    pv::ui::Toast::show(_view,
+                        all_channels ? View::tr("已清除所有通道滤波")
+                                     : View::tr("已清除通道滤波"),
+                        pv::ui::Toast::Info);
+  }
 }
 
 void ViewGlitchFilter::on_toggle_invert_requested(
@@ -131,7 +141,10 @@ void ViewGlitchFilter::on_toggle_invert_requested(
   // if any invert is active, clear all; otherwise apply invert to the
   // target channel only.
   if (sess.is_signal_invert_active()) {
-    sess.clear_signal_invert();
+    // Same worker-side undo as the glitch-filter clear (see
+    // on_clear_glitch_filter_requested): request_* returns immediately and the
+    // view is refreshed by SignalInvertCleared + DataUpdated on completion.
+    sess.request_clear_signal_invert();
     pv::ui::Toast::show(_view, View::tr("已清除信号取反"), pv::ui::Toast::Info);
     if (_view->get_time_view())
       _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
@@ -346,10 +359,14 @@ void ViewGlitchFilter::undo_filter() {
   // I4: restore the prior state captured at apply time. If the filter was
   // active before the now-undone apply, re-apply the previous thresholds/
   // modes; otherwise clear the filter entirely.
+  //
+  // Both branches are submitted to the filter worker, so Ctrl+Z no longer
+  // freezes the window for the duration of a revert + re-filter (the clear used
+  // to run inline on this GUI thread).
   if (snap.was_active) {
     sess.set_glitch_filter(snap.thresholds, snap.modes);
   } else {
-    sess.clear_glitch_filter();
+    sess.request_clear_glitch_filter();
   }
   _preview_ranges.clear();
   if (_view->get_time_view())

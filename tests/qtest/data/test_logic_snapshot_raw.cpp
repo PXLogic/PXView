@@ -50,6 +50,11 @@ int xlog_detail(xlog_writer *w, const char *, ...) { (void)w; return 0; }
 #define private public
 #define protected public
 #include "pv/data/snapshot/logicsnapshot.h"
+// Also pull in the glitch-filter subsystem while privates are exposed: the
+// dense-train regression test asserts on the edit RECORD COUNT (that is the
+// mechanism the field bug broke), and _edits is private. logicsnapshot.h only
+// forward-declares the class, so without this include it stays incomplete.
+#include "pv/data/snapshot/logicsnapshot_glitch_filter.h"
 #undef private
 #undef protected
 
@@ -131,6 +136,11 @@ private slots:
     // (foo_data() 约定)，会静默地从不执行。
     void test_revert_all_edits_restores_capture_samples();
     void test_revert_all_edits_invert_round_trip();
+    void test_dense_glitch_train_merges_edit_records();
+    // 渐进刷新: 每提交一批就地编辑, 必须对外发出一次"可见数据变了"通知
+    void test_batch_callback_publishes_each_committed_batch();
+    // 撤销(clear/undo)同样跑在 worker 线程, 大文件撤销期间靠进度通知显示进展
+    void test_revert_publishes_progress();
 
     // 编辑可见性守卫成本 (seqlock 快路径 vs 无条件 shared_lock)
     void test_edit_guard_cost_ratio();
@@ -507,6 +517,111 @@ void TestLogicSnapshotRaw::test_revert_all_edits_restores_capture_samples()
         QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
 }
 
+void TestLogicSnapshotRaw::test_batch_callback_publishes_each_committed_batch()
+{
+    // 渐进刷新契约: 每提交一批就地编辑, 数据层必须对外通知一次"可见数据变了"。
+    //
+    // 界面侧完全依赖这条通知把信号 pixmap 置脏。整趟滤波期间采集已停止(没有
+    // 数据包驱动 Viewport::feed_in_*)、解码被暂停、DataUpdated 只在整趟结束时
+    // 广播一次 —— 缺少每批通知时, 渲染会一直 blit 缓存里那份"滤波前"的
+    // pixmap, 表现为"波形只有滚动视图才刷新"(滚动改变 scale/offset 才强制重建
+    // pixmap)。这正是现场日志里"整趟滤波期间 GUI 侧一条活动都没有"的根因。
+    //
+    // 数据规模与 test_revert_all_edits_restores_capture_samples 同构:
+    // N/20 = 100000 个毛刺 > apply_batch 的 65536 阈值, 必然跨多个 batch。
+    const size_t N = 2000000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        if (ch != 0) return false;
+        return (s % 20) == 0;      // 1-sample 窄高脉冲
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    uint64_t calls = 0;
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both, nullptr,
+                             [&calls]() {
+                                 // 注意: 回调在独占写事务内被调用, 里面**不能**
+                                 // 读快照 —— EditReadGuard 在同一线程上会自死锁
+                                 // (std::shared_mutex 不可重入)。
+                                 ++calls;
+                             });
+
+    QVERIFY2(calls >= 2,
+             qPrintable(QString("a multi-batch pass must publish once per "
+                                "committed batch (got %1) — otherwise the GUI "
+                                "shows the pre-filter pixmap for the whole pass")
+                            .arg((qulonglong)calls)));
+    QVERIFY(snap.has_filter_edits());
+    snap.revert_all_edits();
+
+    // 单批(小数据)也必须通知一次: 扫尾那次 apply_batch() 同样是一次提交。
+    // 用与 test_glitch_filter_removes_narrow_pulses 相同的构造, 保证确有改动。
+    const size_t M = 100000;
+    Fixture fx2(2, M);
+    fx2.data = build_interleaved(M, [](size_t s, int ch) {
+        if (ch != 0) return false;
+        if (s >= 1000 && s < 1005) return true;    // 窄脉冲 len=5
+        if (s >= 2000 && s < 2002) return true;    // 窄脉冲 len=2
+        if (s >= 10000 && s < 12000) return true;  // 宽脉冲 len=2000 (保留)
+        return false;
+    });
+    LogicSnapshot snap2;
+    fx2.feed(snap2, M);
+    uint64_t one_batch = 0;
+    snap2.apply_glitch_filter(0, 20, nullptr, GlitchFilterMode::Both, nullptr,
+                              [&one_batch]() { ++one_batch; });
+    QCOMPARE(one_batch, Q_UINT64_C(1));
+    snap2.revert_all_edits();
+
+    // 没有提交任何批次就不得通知: threshold==0 立即返回, 不应触发界面重绘。
+    uint64_t noop = 0;
+    snap2.apply_glitch_filter(0, 0, nullptr, GlitchFilterMode::Both, nullptr,
+                              [&noop]() { ++noop; });
+    QCOMPARE(noop, Q_UINT64_C(0));
+}
+
+void TestLogicSnapshotRaw::test_revert_publishes_progress()
+{
+    // 撤销(点"清除滤波"/Ctrl+Z)现在整个跑在滤波 worker 线程上, 因为大文件上
+    // 它要重放 ~一份通道数据并重建每个被触及块的 mipmap, 在 GUI 线程上做就是
+    // "点一下卡几秒"。撤销期间界面唯一的进展依据就是这条进度通知。
+    //
+    // 契约: 只要撤销真的做了事, 就必须至少发一次通知; 没有编辑时是空操作,
+    // 不能发通知(否则会白白触发一次重绘)。
+    const size_t N = 2000000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        if (ch != 0) return false;
+        return (s % 20) == 0;      // 1-sample 窄高脉冲
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
+    QVERIFY(snap.has_filter_edits());
+
+    uint64_t calls = 0;
+    snap.revert_all_edits([&calls]() {
+        // 与 batch_callback 同样的约束: 通知在独占写事务内发出, 回调里读快照
+        // 会在同一线程上取 EditReadGuard 而自死锁。
+        ++calls;
+    });
+    QVERIFY2(calls >= 1,
+             "an undo that performs work must publish at least one progress "
+             "notice, otherwise the GUI shows a frozen window for its duration");
+    QVERIFY2(!snap.has_filter_edits(), "revert must consume the edit log");
+
+    // 空操作(已无可撤销的编辑)不应发通知。
+    uint64_t noop = 0;
+    snap.revert_all_edits([&noop]() { ++noop; });
+    QCOMPARE(noop, Q_UINT64_C(0));
+}
+
 void TestLogicSnapshotRaw::test_revert_all_edits_invert_round_trip()
 {
     // 反相靠 XOR 自逆撤销, 由 _inverted_orders 记住"当前仍是反相态"。
@@ -545,6 +660,96 @@ void TestLogicSnapshotRaw::test_revert_all_edits_invert_round_trip()
     snap.revert_all_edits();
     for (size_t s = 0; s < N; s += 7)
         QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+}
+
+void TestLogicSnapshotRaw::test_dense_glitch_train_merges_edit_records()
+{
+    // 现场 bug 的回归: "大文件滤完波之后没有更新"。编辑日志原先按"每个写入段
+    // 一条记录"记账，于是毛刺挨得很近的信号会退化成"每个毛刺一条记录"；而预算
+    // 用的是**记录条数**上限，2.5 G 采样、每 10 采样一个 5 采样窄脉冲的采集在
+    // 8,060,928 条记录处撞上限，而有效载荷只有 11.6 MB（记录自身开销约 900 MB）
+    // —— 整趟中止并回滚，用户看到的就是"大文件没变、小文件正常"。
+    //
+    // 这里不追求规模（复现 800 万毛刺需要 8000 万采样），而是直接断言**机制**：
+    // 相邻写入段必须合并，因此记录数随"被触及的块数"增长，而不是随毛刺数增长。
+    const size_t N = 4 * 1024 * 1024;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        if (ch != 0) return false;
+        return (s % 10) >= 5;      // 每 10 采样一个 5 采样窄脉冲
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    std::vector<uint8_t> original(N);
+    for (size_t s = 0; s < N; ++s)
+        original[s] = snap.get_sample(s, sig) ? 1 : 0;
+
+    snap.apply_glitch_filter(sig, 8, nullptr, GlitchFilterMode::Both);
+
+    QVERIFY2(!snap.edit_log_overflowed(),
+             "a dense but in-budget pass must not abort");
+    QVERIFY(snap.has_filter_edits());
+
+    const size_t records = snap._glitch_filter->_edits.size();
+    QVERIFY2(records < 200,
+             qPrintable(QString("nearby write-runs must merge into a few records "
+                                "per block; got %1 for a %2-sample dense train "
+                                "(one record per glitch would be ~%3)")
+                            .arg((qulonglong)records)
+                            .arg((qulonglong)N)
+                            .arg((qulonglong)(N / 10))));
+
+    // 另一半 bug 是"静默"：这趟必须真的改了数据，且必须逐位可还原。
+    size_t changed = 0;
+    for (size_t s = 0; s < N; ++s)
+        if ((snap.get_sample(s, sig) ? 1 : 0) != original[s]) ++changed;
+    QVERIFY2(changed >= N / 2 - 16,
+             "every narrow high pulse should have been flattened");
+
+    qInfo("dense-train edit log: %zu record(s) for ~%zu glitches (merging must "
+          "keep this in the tens, not one per glitch)",
+          records, N / 10);
+
+    snap.revert_all_edits();
+    size_t mismatches = 0;
+    size_t first_bad = SIZE_MAX;
+    for (size_t s = 0; s < N; ++s) {
+        if ((snap.get_sample(s, sig) ? 1 : 0) != original[s]) {
+            if (first_bad == SIZE_MAX) first_bad = s;
+            ++mismatches;
+        }
+    }
+    // The revert must also re-establish BLOCK-LEVEL state, not just bytes:
+    // flattening every pulse drives the block to a constant level, at which
+    // point calc_mipmap() collapses it to the RLE representation and releases
+    // the storage (able_free sessions). A revert that only wrote bytes back
+    // through a now-null pointer silently did nothing — the assertion below
+    // covers it, and the block must be non-null with its mipmap rebuilt.
+    {
+        const int o = snap.get_ch_order(sig);
+        auto &rn = snap._ch_data[o][0];
+        QVERIFY2(rn.lbp[0] != nullptr,
+                 "a block released by the RLE collapse must be re-materialised "
+                 "when the edit is reverted");
+        QVERIFY2((rn.tog & 1ULL) != 0,
+                 "the restored block has transitions, so its tog bit must be set "
+                 "or readers will fall back to the constant representation");
+    }
+
+    QVERIFY2(mismatches == 0,
+             qPrintable(QString("merged records must still revert bit-exactly; "
+                                "%1 mismatches, first at sample %2 "
+                                "(original=%3 after-revert=%4)")
+                            .arg((qulonglong)mismatches)
+                            .arg((qulonglong)(first_bad == SIZE_MAX ? 0 : first_bad))
+                            .arg(first_bad == SIZE_MAX ? -1 : (int)original[first_bad])
+                            .arg(first_bad == SIZE_MAX
+                                     ? -1
+                                     : (int)(snap.get_sample(first_bad, sig) ? 1 : 0))));
+    qInfo("dense train: records=%zu glitches~=%zu", records, N / 10);
 }
 
 void TestLogicSnapshotRaw::test_edit_guard_cost_ratio()
