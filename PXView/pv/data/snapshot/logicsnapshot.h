@@ -240,8 +240,14 @@ public:
         ///    Otherwise two writers could interleave chunk by chunk.
         ///  - Call it only from the thread that owns this guard.
         ///
-        /// A reader already waiting on lock_shared() gets the lock at the
-        /// next close(), i.e. after at most one chunk.
+        /// A reader already waiting on lock_shared() is typically admitted at
+        /// the next close(), i.e. after at most one chunk — but treat this as
+        /// best-effort, not a guarantee: std::shared_mutex has no fairness
+        /// contract, so a writer that immediately re-acquires may in theory
+        /// barge across several chunks and starve queued readers.
+        /// Empirically one chunk; a hard bound would need a writer-side
+        /// handshake that is not worth the complexity (see the
+        /// chunk-granularity note in logicsnapshot_glitch_filter.cpp).
         void publish() noexcept {
             close();
             open();
@@ -372,12 +378,16 @@ public:
     // 方案（8 通道 × 1 G 采样 = 976 MB + 每次重滤一整趟 480 次 commit）。
     // 代价正比于真正被改写的字节数（每个被抹平的毛刺只有几个采样）。
     // 幂等：没有编辑时是空操作。
+    // 返回 false 表示至少一条记录未能还原（重实体化时内存池分配失败）——
+    // 调用方必须视为"快照未回到采集原始态"，不得上报成功，也不得在其上
+    // 继续叠加新编辑；同时入口会把粘滞的 _memory_failed 复位（每趟编辑
+    // 作用域的起点，见 logicsnapshot_glitch_filter.h 的 SCOPE NOTE）。
     // `progress_callback` (optional; must not block or read this snapshot, it
     // runs inside the revert's exclusive edit transaction) fires periodically
     // during a long undo. When that notice becomes visible depends on the
     // transaction being published between chunks — see the visibility note in
     // LogicSnapshotGlitchFilter::revert_all_edits.
-    void revert_all_edits(std::function<void()> progress_callback = nullptr);
+    bool revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_filter_edits() const;
     /// True when the reversible edit log hit its memory budget during the
     /// last pass, i.e. the filter bailed out mid-way. Callers must revert

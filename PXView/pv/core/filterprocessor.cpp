@@ -100,6 +100,9 @@ void FilterProcessor::set_glitch_filter(
     _pending_glitch_thresholds = thresholds;
     _pending_glitch_modes = filter_modes;
     _has_pending_glitch.store(true);
+    // The queued apply is a writer intent: it must supersede a clear that was
+    // queued earlier (see _edit_intent_seq).
+    _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
@@ -118,6 +121,7 @@ void FilterProcessor::set_glitch_filter(
     return;
 
   _glitch_filter_running = true;
+  _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
   _event_bus->broadcast_async<interface::GlitchFilterStarted>({});
 
   // Gap 1: submit to ThreadPool instead of creating raw std::thread.
@@ -243,7 +247,22 @@ bool FilterProcessor::rebuild_filtered_state(
   // data and rebuilds a mipmap per touched block), so it publishes progressive
   // notices exactly like the write batches below.
   _last_batch_refresh = std::chrono::steady_clock::time_point{};
-  logic->revert_all_edits([this]() { notify_batch_committed(); });
+  if (!logic->revert_all_edits([this]() { notify_batch_committed(); })) {
+    // The undo itself hit an allocation failure (re-materialising a collapsed
+    // block). The snapshot is in a PARTIALLY restored state — building a new
+    // invert+filter result on top of mixed data would be garbage-in-garbage-
+    // out. Report it visibly and abort; a retry (once memory allows) starts
+    // from the same revert.
+    pxv_err("FilterProcessor: initial undo failed (OOM while re-materialising "
+            "blocks); aborting the pass");
+    if (_coord) {
+      _coord->set_error(SessionStateContext::Malloc_err);
+      _coord->session_error();
+    }
+    logic->clear_filtered_ranges();
+    replay_decode();
+    return false;
+  }
 
   // Signal invert is applied BEFORE the glitch filter, matching the previous
   // ordering (the two compose as `filter(invert(raw))`).
@@ -276,7 +295,10 @@ bool FilterProcessor::rebuild_filtered_state(
     // rather than leaving a half-filtered snapshot behind.
     pxv_info("FilterProcessor: pass cancelled by a config boundary; "
              "rolling back to capture data");
-    logic->revert_all_edits([this]() { notify_batch_committed(); });
+    if (!logic->revert_all_edits([this]() { notify_batch_committed(); })) {
+      pxv_err("FilterProcessor: cancelled pass's rollback undo failed (OOM); "
+              "snapshot left partially filtered");
+    }
     logic->clear_filtered_ranges();
     replay_decode();
     return false;
@@ -290,15 +312,22 @@ bool FilterProcessor::rebuild_filtered_state(
     pxv_err("FilterProcessor: glitch filter aborted (memory_failed=%d, "
             "edit_log_overflow=%d); rolling back to capture data",
             (int)logic->memory_failed(), (int)logic->edit_log_overflowed());
-    // Make the refusal USER-VISIBLE. Rolling back and only logging leaves the
-    // waveform exactly as it was, which is indistinguishable from "the filter
-    // did nothing" — that is precisely how the dense-glitch budget bug showed
-    // up in the field ("the large file isn't updated after filtering").
-    if (logic->edit_log_overflowed() && _coord) {
+    // Make the refusal USER-VISIBLE for BOTH failure kinds (they are the same
+    // OOM family). Rolling back and only logging leaves the waveform exactly
+    // as it was, which is indistinguishable from "the filter did nothing" —
+    // that is precisely how the dense-glitch budget bug showed up in the
+    // field ("the large file isn't updated after filtering").
+    if (_coord) {
       _coord->set_error(SessionStateContext::Malloc_err);
       _coord->session_error();
     }
-    logic->revert_all_edits([this]() { notify_batch_committed(); });
+    if (!logic->revert_all_edits([this]() { notify_batch_committed(); })) {
+      // The rollback itself could not finish; the snapshot stays partially
+      // filtered. Nothing further can be done here — the next pass starts
+      // with its own revert and reports honestly again.
+      pxv_err("FilterProcessor: rollback undo also failed (OOM); snapshot "
+              "left partially filtered");
+    }
     logic->clear_filtered_ranges();
     replay_decode();
     return false;
@@ -399,6 +428,10 @@ void FilterProcessor::clear_glitch_filter() {
   //
   // The wait is bounded on purpose: a pathological case degrades to a warning
   // instead of hanging the caller, and the task runs to completion either way.
+  // With queueing, a valid future now also covers "a pass was running at
+  // submission": the future completes only after the parked clear task has
+  // actually restored the data, instead of the old behaviour of returning
+  // immediately with the samples still filtered.
   if (fut.wait_for(std::chrono::seconds(kClearTaskWaitSeconds)) !=
       std::future_status::ready) {
     pxv_warn("FilterProcessor::clear_glitch_filter: undo still running after "
@@ -406,49 +439,84 @@ void FilterProcessor::clear_glitch_filter() {
   }
 }
 
-void FilterProcessor::request_clear_glitch_filter() {
+bool FilterProcessor::request_clear_glitch_filter() {
   // Fire and forget as far as the caller (the GUI thread) is concerned.
   // Completion is announced by GlitchFilterCleared + DataUpdated, so the View's
   // refresh path is identical to the synchronous variant — only the blocking on
   // a multi-second undo is gone.
-  submit_clear_glitch_filter();
+  //
+  // The return value tells the View whether the request was parked behind a
+  // running pass, so it can show "will run when the current pass finishes"
+  // instead of a premature "cleared" toast.
+  const bool was_running = _glitch_filter_running.load();
+  auto fut = submit_clear_glitch_filter();
+  return was_running && fut.valid();
 }
 
 std::future<void> FilterProcessor::submit_clear_glitch_filter() {
-  // GUARD ORDER MATTERS, and now for a second reason: these checks are the only
-  // part of the clear that still runs on the caller's (possibly GUI) thread, so
-  // they must stay cheap and must NOT take _edit_mutex. The original version
-  // acquired the edit lock first and only then tested whether a pass was in
-  // flight, so clicking "clear / undo filter" during a pass blocked the caller
-  // for the entire pass and *then* discovered it had nothing to do.
+  // These checks run on the caller's (possibly GUI) thread, so they must stay
+  // cheap and must NOT take _edit_mutex. The original version acquired the
+  // edit lock first and only then tested whether a pass was in flight, so
+  // clicking "clear / undo filter" during a pass blocked the caller for the
+  // entire pass and *then* discovered it had nothing to do.
   std::lock_guard<std::mutex> launch_lk(_glitch_launch_mutex);
 
-  if (_glitch_filter_running.load())
-    return {};
+  // A clear during a running pass is QUEUED, not dropped: the pool task parks
+  // on _edit_mutex and runs the undo right after the pass finishes. Previously
+  // the request was silently discarded here and the user had to click again —
+  // and the sync API/MCP variant even returned with the data still filtered.
+  if (_glitch_filter_running.load()) {
+    // The latest instruction wins: drop a queued apply, otherwise the pass
+    // loop would re-apply the filter immediately before our queued clear runs.
+    {
+      std::lock_guard<std::mutex> lk(_pending_mutex);
+      _has_pending_glitch.store(false);
+      _pending_glitch_thresholds.clear();
+      _pending_glitch_modes.clear();
+    }
+    const uint64_t seq =
+        _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+    auto self = this;
+    return _filter_pool.submit([self, seq]() {
+      self->clear_glitch_filter_task(seq);
+    });
+  }
 
   if (!_state->view_data()->_glitch_filter_active)
     return {};
 
-  // The latest instruction wins: drop a queued apply, otherwise the pass loop
-  // would re-apply the filter immediately after we have restored the data.
-  {
-    std::lock_guard<std::mutex> lk(_pending_mutex);
-    _has_pending_glitch.store(false);
-    _pending_glitch_thresholds.clear();
-    _pending_glitch_modes.clear();
-  }
-
+  const uint64_t seq =
+      _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
   auto self = this;
-  return _filter_pool.submit([self]() { self->clear_glitch_filter_task(); });
+  return _filter_pool.submit([self, seq]() {
+    self->clear_glitch_filter_task(seq);
+  });
 }
 
-void FilterProcessor::clear_glitch_filter_task() {
+void FilterProcessor::clear_glitch_filter_task(uint64_t intent_seq) {
   // Worker thread: blocking on _edit_mutex here is correct and is the whole
   // point of the split — undoing a filter over a large capture takes seconds
   // (up to ~one copy of the channel data rewritten, plus one full mipmap
-  // rebuild per touched block), and the GUI must not perform that work.
+  // rebuild per touched block), and the GUI must not perform that work. When
+  // the task was queued behind a running pass, this acquisition is exactly
+  // where it waits for the pass to finish.
   std::lock_guard<std::timed_mutex> edit_lk(_edit_mutex);
 
+  // Latest-writer-wins: if another apply/clear intent was submitted after
+  // this clear was queued, this clear is stale — running it would undo the
+  // user's newer instruction. The newer intent produces the final state on
+  // its own (a queued apply is serviced by the pass; a newer clear queued its
+  // own task).
+  if (_edit_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
+    pxv_info("FilterProcessor: queued clear superseded by a newer apply/clear "
+             "intent; skipping");
+    return;
+  }
+
+  clear_glitch_filter_locked();
+}
+
+void FilterProcessor::clear_glitch_filter_locked() {
   // Re-check under the lock: the state may have changed between submission and
   // execution (a pass that finished meanwhile may have re-applied, or an
   // earlier queued clear already did the work). The clear is idempotent.
@@ -456,30 +524,48 @@ void FilterProcessor::clear_glitch_filter_task() {
     return;
 
   auto *logic = _state->view_data()->get_logic();
+  bool revert_ok = true;
   if (logic) {
     // Undo the filter edits only; signal invert is a separate feature and
     // must survive a filter clear.
     //
     // The revert publishes progress notices (throttled by notify_batch_committed).
-    // Whether they reach the screen depends on the render path's behaviour while
-    // a transaction is open — see the visibility note in
-    // LogicSnapshotGlitchFilter::revert_all_edits: the undo is a single
-    // transaction today, so the frame is painted once it finishes.
     _last_batch_refresh = std::chrono::steady_clock::time_point{};
-    logic->revert_all_edits([this]() { notify_batch_committed(); });
+    revert_ok = logic->revert_all_edits([this]() { notify_batch_committed(); });
 
-    bool has_invert = false;
-    std::vector<bool> channels_copy;
-    {
-      std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
-      has_invert = _state->view_data()->_signal_invert_active;
-      channels_copy = _state->view_data()->_signal_invert_channels;
+    if (revert_ok) {
+      bool has_invert = false;
+      std::vector<bool> channels_copy;
+      {
+        std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+        has_invert = _state->view_data()->_signal_invert_active;
+        channels_copy = _state->view_data()->_signal_invert_channels;
+      }
+      if (has_invert)
+        apply_signal_invert(logic, channels_copy);
+
+      // 清除滤波后清空持久化区间，恢复原始数据无 overlay
+      logic->clear_filtered_ranges();
     }
-    if (has_invert)
-      apply_signal_invert(logic, channels_copy);
+  }
 
-    // 清除滤波后清空持久化区间，恢复原始数据无 overlay
-    logic->clear_filtered_ranges();
+  if (!revert_ok) {
+    // The undo could not finish (OOM while re-materialising blocks): the
+    // waveform is still (partially) filtered. Reporting "cleared" here would
+    // be a lie — the old code cleared the active flag and broadcast
+    // GlitchFilterCleared regardless, so the UI showed an unfiltered state
+    // over filtered data. Keep the filter state active so the user can retry
+    // once memory allows (the retry's revert re-resets the OOM scope), and
+    // make the failure visible instead.
+    pxv_err("FilterProcessor::clear_glitch_filter: undo failed (OOM while "
+            "re-materialising blocks); filter state kept active for retry");
+    if (_coord) {
+      _coord->set_error(SessionStateContext::Malloc_err);
+      _coord->session_error();
+    }
+    _event_bus->broadcast_async<interface::GlitchFilterCompleted>({});
+    _coord->data_updated();
+    return;
   }
 
   {
@@ -528,6 +614,7 @@ void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
     return;
 
   _signal_invert_running = true;
+  _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
   _event_bus->broadcast_async<interface::SignalInvertStarted>({});
 
   // Gap 1: submit to ThreadPool.
@@ -557,7 +644,21 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
   // Back to capture-original, then re-apply invert, then re-apply the glitch
   // filter if it is active — same composition as before, without the backup.
   _last_batch_refresh = std::chrono::steady_clock::time_point{};
-  logic->revert_all_edits([this]() { notify_batch_committed(); });
+  if (!logic->revert_all_edits([this]() { notify_batch_committed(); })) {
+    // Undo failed (OOM): the data is partially restored, so re-applying the
+    // invert (and possibly the filter) on top would be garbage. Report and
+    // bail — the user can retry, the retry's revert resets the OOM scope.
+    pxv_err("FilterProcessor::signal_invert_task: initial undo failed (OOM); "
+            "aborting the pass");
+    if (_coord) {
+      _coord->set_error(SessionStateContext::Malloc_err);
+      _coord->session_error();
+    }
+    _signal_invert_running = false;
+    _event_bus->broadcast_async<interface::SignalInvertCompleted>({});
+    _coord->data_updated();
+    return;
+  }
   apply_signal_invert(logic, channels);
 
   // If glitch filter is active, re-apply on the inverted data.
@@ -583,7 +684,15 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
     pxv_err("FilterProcessor::signal_invert_task: pass failed "
             "(memory_failed=%d, edit_log_overflow=%d); rolling back",
             (int)logic->memory_failed(), (int)logic->edit_log_overflowed());
-    logic->revert_all_edits([this]() { notify_batch_committed(); });
+    // Same user-visible report as the glitch-filter pass: OOM-family
+    // failures must not look like "the invert did nothing".
+    if (_coord) {
+      _coord->set_error(SessionStateContext::Malloc_err);
+      _coord->session_error();
+    }
+    if (!logic->revert_all_edits([this]() { notify_batch_committed(); }))
+      pxv_err("FilterProcessor::signal_invert_task: rollback undo also "
+              "failed (OOM); snapshot left partially edited");
     logic->clear_filtered_ranges();
     if (_coord)
       _coord->restart_decode_tasks();
@@ -623,18 +732,19 @@ void FilterProcessor::clear_signal_invert() {
   }
 }
 
-void FilterProcessor::request_clear_signal_invert() {
+bool FilterProcessor::request_clear_signal_invert() {
   // Fire and forget for the GUI thread. See request_clear_glitch_filter().
-  submit_clear_signal_invert();
+  // Returns true when the request was parked behind a running invert pass.
+  const bool was_running = _signal_invert_running.load();
+  auto fut = submit_clear_signal_invert();
+  return was_running && fut.valid();
 }
 
 std::future<void> FilterProcessor::submit_clear_signal_invert() {
-  // Same guard-before-lock ordering and same rationale as
-  // submit_clear_glitch_filter(): only cheap checks on the caller's thread.
+  // Same cheap-checks-on-caller-thread ordering as submit_clear_glitch_filter().
+  // A clear during a running invert pass is QUEUED (pool task parks on
+  // _edit_mutex), never silently dropped.
   std::lock_guard<std::mutex> launch_lk(_signal_invert_launch_mutex);
-
-  if (_signal_invert_running.load())
-    return {};
 
   {
     std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
@@ -642,15 +752,30 @@ std::future<void> FilterProcessor::submit_clear_signal_invert() {
       return {};
   }
 
+  const uint64_t seq =
+      _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
   auto self = this;
-  return _filter_pool.submit([self]() { self->clear_signal_invert_task(); });
+  return _filter_pool.submit([self, seq]() {
+    self->clear_signal_invert_task(seq);
+  });
 }
 
-void FilterProcessor::clear_signal_invert_task() {
+void FilterProcessor::clear_signal_invert_task(uint64_t intent_seq) {
   // Worker thread — see clear_glitch_filter_task() for why blocking is right
   // here and wrong on the GUI thread.
   std::lock_guard<std::timed_mutex> edit_lk(_edit_mutex);
 
+  // Latest-writer-wins, see clear_glitch_filter_task().
+  if (_edit_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
+    pxv_info("FilterProcessor: queued invert-clear superseded by a newer "
+             "edit intent; skipping");
+    return;
+  }
+
+  clear_signal_invert_locked();
+}
+
+void FilterProcessor::clear_signal_invert_locked() {
   bool invert_active = false;
   bool gf_active = false;
   std::map<int, uint32_t> gf_th;
@@ -666,24 +791,48 @@ void FilterProcessor::clear_signal_invert_task() {
     return;   // re-checked under the lock: idempotent
 
   auto *logic = _state->view_data()->get_logic();
+  bool revert_ok = true;
   if (logic) {
     // Progressive notices for the undo (see notify_batch_committed).
     _last_batch_refresh = std::chrono::steady_clock::time_point{};
-    logic->revert_all_edits([this]() { notify_batch_committed(); });
+    revert_ok = logic->revert_all_edits([this]() { notify_batch_committed(); });
 
-    // If glitch filter is active, re-apply it on the restored
-    // (non-inverted) data. This is a full pass and gets the same treatment.
-    if (gf_active && !gf_th.empty()) {
-      logic->apply_glitch_filter_all(gf_th, nullptr, gf_md, nullptr,
-                                     [this]() { notify_batch_committed(); });
-    }
+    if (revert_ok) {
+      // If glitch filter is active, re-apply it on the restored
+      // (non-inverted) data. This is a full pass and gets the same treatment.
+      if (gf_active && !gf_th.empty()) {
+        logic->apply_glitch_filter_all(gf_th, nullptr, gf_md, nullptr,
+                                       [this]() { notify_batch_committed(); });
+      }
 
-    if (logic->memory_failed() || logic->edit_log_overflowed()) {
-      pxv_err("FilterProcessor::clear_signal_invert: re-filter failed; "
-              "rolling back");
-      logic->revert_all_edits([this]() { notify_batch_committed(); });
-      logic->clear_filtered_ranges();
+      if (logic->memory_failed() || logic->edit_log_overflowed()) {
+        pxv_err("FilterProcessor::clear_signal_invert: re-filter failed; "
+                "rolling back");
+        if (_coord) {
+          _coord->set_error(SessionStateContext::Malloc_err);
+          _coord->session_error();
+        }
+        if (!logic->revert_all_edits([this]() { notify_batch_committed(); }))
+          pxv_err("FilterProcessor::clear_signal_invert: rollback undo also "
+                  "failed (OOM); snapshot left partially edited");
+        logic->clear_filtered_ranges();
+      }
     }
+  }
+
+  if (!revert_ok) {
+    // Undo failed (OOM): the invert is NOT cleared — the data is still
+    // (partially) inverted. Keep the state active for a retry and report
+    // visibly instead of broadcasting a false "cleared".
+    pxv_err("FilterProcessor::clear_signal_invert: undo failed (OOM while "
+            "re-materialising blocks); invert state kept active for retry");
+    if (_coord) {
+      _coord->set_error(SessionStateContext::Malloc_err);
+      _coord->session_error();
+    }
+    _event_bus->broadcast_async<interface::SignalInvertCompleted>({});
+    _coord->data_updated();
+    return;
   }
 
   {

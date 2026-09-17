@@ -74,11 +74,17 @@ constexpr uint64_t kEditLogCeilingBytes = 2ull * 1024 * 1024 * 1024;  // 2 GB
 // ---- Edit-chunk granularity ------------------------------------------------
 // Long in-place operations (revert_all_edits, invert_channel) process leaf blocks
 // one at a time and call EditWriteGuard::publish() every N blocks, so a reader
-// waits at most ONE CHUNK instead of the whole operation — the contract stated at
-// the top of logicsnapshot.h ("readers must never wait for more than one edit
-// batch"). The same points report progress, and because each chunk is published
-// the render path's "transaction in progress" check lets the frame through, which
-// is what makes such an operation observable while it runs.
+// typically waits ONE CHUNK instead of the whole operation — the design goal
+// stated at the top of logicsnapshot.h. This is best-effort, not a provable
+// bound: std::shared_mutex (SRWLOCK on Windows, pthread_rwlock on glibc) has no
+// fairness contract, so a writer that closes and immediately re-acquires can
+// in theory barge across several chunks and keep queued readers waiting.
+// Empirically a queued reader is admitted at the next close(); making the
+// guarantee hard would need a writer-side handshake before every open(), which
+// is not worth the complexity. The same points report progress, and because
+// each chunk is published the render path's "transaction in progress" check
+// lets the frame through, which is what makes such an operation observable
+// while it runs.
 //
 // The unit is LEAF BLOCKS, not records or bytes: the edit log merges a dense
 // glitch train into ~one record per block, so the dominant case for a large
@@ -86,8 +92,8 @@ constexpr uint64_t kEditLogCeilingBytes = 2ull * 1024 * 1024 * 1024;  // 2 GB
 // through the most expensive undo there is.
 //
 // One block costs a full mipmap rebuild (16.7 M samples, ~10-30 ms), so N=2 caps
-// a reader's wait at roughly 20-60 ms, while publishing costs just two lock
-// operations and two epoch increments.
+// a reader's typical wait at roughly 20-60 ms, while publishing costs just two
+// lock operations and two epoch increments.
 constexpr uint64_t kEditPublishEveryBlocks = 2;
 
 } // anonymous namespace
@@ -174,14 +180,23 @@ void LogicSnapshotGlitchFilter::invert_channel(
     }
   }
 
-  // Remember that this order is currently inverted. XOR is an involution, so
-  // revert_all_edits() undoes the inversion by running it again — but only
+  // Remember whether this order is currently inverted. XOR is an involution,
+  // so revert_all_edits() undoes the inversion by running it again — but only
   // because this list tells it the inversion is still applied.
+  //
+  // The registration TOGGLES with the data: a second call on the same channel
+  // returns the samples to capture-original, so leaving the order registered
+  // would make a later revert_all_edits() invert the RAW data (the undo would
+  // itself be an edit — an API-level trap for any caller that inverts twice
+  // without an intervening revert). Toggling keeps the list equal to "orders
+  // whose bytes are currently inverted", whatever the call pattern.
   const unsigned int uorder = (unsigned int)order;
-  if (std::find(_inverted_orders.begin(), _inverted_orders.end(), uorder) ==
-      _inverted_orders.end()) {
+  const auto it = std::find(_inverted_orders.begin(), _inverted_orders.end(),
+                            uorder);
+  if (it != _inverted_orders.end())
+    _inverted_orders.erase(it);
+  else
     _inverted_orders.push_back(uorder);
-  }
 }
 
 // ----------------------------------------------------------------------------
@@ -328,12 +343,19 @@ bool LogicSnapshotGlitchFilter::has_edits() const {
   return !_edits.empty() || !_inverted_orders.empty() || _edit_log_overflow;
 }
 
-void LogicSnapshotGlitchFilter::revert_all_edits(
+bool LogicSnapshotGlitchFilter::revert_all_edits(
     std::function<void()> progress_callback) {
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
+  // Per-pass scope reset (see the header's SCOPE NOTE): every FilterProcessor
+  // edit pass begins here, so a _memory_failed left by a PREVIOUS pass (its
+  // own failed revert, a failed filter, a transient OOM) must not roll this
+  // pass back. Failures recorded from here on belong to THIS pass and stay
+  // visible to the caller's end-of-pass check.
+  _host->_memory_failed = false;
+
   if (!has_edits())
-    return;
+    return true;
 
   // 1) Group the log by leaf block.
   //
@@ -384,20 +406,24 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
   // take the guard itself (std::shared_mutex is not recursive).
   LogicSnapshot::EditWriteGuard edit_vis(_host);
 
-  // Restore one record. The RLE branches are the subtle part: a block that did
-  // not exist before the edit (it was in the constant/compressed representation)
-  // goes back to "no storage", and a block that the edit pass collapsed to a
-  // constant and RELEASED has to be re-materialised before its bytes can be
-  // written back.
-  const auto restore_record = [&](const EditRecord &e) {
+  // Restore one record. Returns false when the record could not be restored
+  // (the pool refused to re-materialise a collapsed block — OOM). The RLE
+  // branches are the subtle part: a block that did not exist before the edit
+  // (it was in the constant/compressed representation) goes back to "no
+  // storage", and a block that the edit pass collapsed to a constant and
+  // RELEASED has to be re-materialised before its bytes can be written back.
+  // Bounds guards return TRUE: a record whose block no longer exists (loop
+  // rotation freed it) has nothing to restore — the data is gone either way,
+  // that is not an undo failure.
+  const auto restore_record = [&](const EditRecord &e) -> bool {
     if (e.order >= _host->_ch_data.size())
-      return;
+      return true;
     if (e.idx0 >= _host->_ch_data[e.order].size())
-      return;
+      return true;
 
     LogicSnapshot::RootNode &rn = _host->_ch_data[e.order][e.idx0];
     if (e.idx1 >= LogicSnapshot::Scale)
-      return;
+      return true;
 
     if (e.allocated) {
       void *ptr = rn.lbp[e.idx1];
@@ -416,6 +442,7 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
       // first/last representation — which is exactly the pre-edit state.
       if (ptr)
         _host->push_to_free_list(ptr);
+      return true;
     } else {
       void *ptr = rn.lbp[e.idx1];
       if (ptr == nullptr && !e.bytes.empty()) {
@@ -437,7 +464,7 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
         ptr = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
         if (ptr == nullptr) {
           _host->_memory_failed = true;
-          return;   // this record could not be restored (see _memory_failed)
+          return false;   // this record could not be restored
         }
         if (const_val)
           memset(ptr, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
@@ -450,6 +477,7 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
       }
       if (ptr && !e.bytes.empty())
         memcpy((uint8_t *)ptr + e.byte_lo, e.bytes.data(), e.bytes.size());
+      return true;
     }
   };
 
@@ -457,6 +485,7 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
   //    and the mipmap levels are pure functions of the restored data, so they are
   //    recomputed rather than logged.
   uint64_t chunk_blocks = 0;
+  bool all_restored = true;
   for (size_t bi = 0; bi < touched.size(); ++bi) {
     const unsigned int order = std::get<0>(touched[bi]);
     const uint64_t idx0 = std::get<1>(touched[bi]);
@@ -472,8 +501,13 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
       continue;
 
     const std::vector<uint32_t> &recs = per_block[bi];
-    for (auto it = recs.rbegin(); it != recs.rend(); ++it)
-      restore_record(_edits[*it]);
+    for (auto it = recs.rbegin(); it != recs.rend(); ++it) {
+      if (!restore_record(_edits[*it])) {
+        // Keep going: every other block that CAN be restored should be, so
+        // the snapshot ends as close to capture-original as memory allows.
+        all_restored = false;
+      }
+    }
 
     recalc_mipmap(order, idx0, idx1);
 
@@ -502,9 +536,10 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
   }
 
   // 3) Undo the inversion (involution). Only channels we know are currently
-  //    inverted are touched. _inverted_orders must be cleared AFTER the loop:
-  //    invert_channel() re-registers the order, and leaving it registered
-  //    would make the next revert un-invert already-raw data (i.e. invert it).
+  //    inverted are touched. invert_channel() toggles its registration: the
+  //    list was emptied above, so each un-invert re-registers its order even
+  //    though the bytes are back to capture-original — the explicit clear
+  //    below puts the list back in sync with the data (empty).
   const std::vector<unsigned int> inverted = _inverted_orders;
   _edits.clear();
   _edit_bytes = 0;
@@ -525,10 +560,18 @@ void LogicSnapshotGlitchFilter::revert_all_edits(
   _inverted_orders.clear();
 
   {
+    // Cleared only here, at the very end — deliberately NOT per chunk. Between
+    // chunks a reader can therefore see restored waveform bytes with the red
+    // filtered-range overlay (and the "filtered" channel icon) still drawn on
+    // top: a transient mixed revision that is visual-only (the overlay is
+    // derived state, never fed back into the sample store) and gone within
+    // one publish cadence. Accepted trade-off; do not "fix" by publishing the
+    // range table per chunk — that would hand renderers a half-cleared table.
     std::lock_guard<std::mutex> rlk(_ranges_mutex);
     _published_ranges.clear();
   }
   _glitch_filtered = false;
+  return all_restored;
 }
 
 void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,

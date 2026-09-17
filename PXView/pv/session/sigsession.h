@@ -456,7 +456,9 @@ void on_load_config_end();
   // GUI 路径专用：把撤销/重滤交给线程池，立即返回（完成时由
   // GlitchFilterCleared + DataUpdated 通知）。同步版 clear_glitch_filter()
   // 供 API/MCP 使用，会阻塞调用线程直到数据真正还原，绝不可在 GUI 线程调用。
-  void request_clear_glitch_filter();
+  // 返回 true 表示请求已排队（滤波趟正在运行，撤销会在其完成后自动执行），
+  // View 层据此给出"完成后自动清除"而非误导性的"已清除"提示。
+  bool request_clear_glitch_filter();
   bool is_glitch_filter_active();
   // Per-channel glitch filter state (Task 9 / I4): public read accessors for
   // the current thresholds/modes so the View layer can snapshot prior state
@@ -484,8 +486,9 @@ void on_load_config_end();
   void clear_glitch_filter_state_for_capture();
   void set_signal_invert(const std::vector<bool> &channels);
   void clear_signal_invert();
-  // GUI 路径专用（见 request_clear_glitch_filter 的说明）。
-  void request_clear_signal_invert();
+  // GUI 路径专用（见 request_clear_glitch_filter 的说明）。返回 true 表示
+  // 请求已排队（取反趟正在运行）。
+  bool request_clear_signal_invert();
   bool is_signal_invert_active();
   void restart_decoders();
   void start_all_decode_tasks() override;

@@ -146,12 +146,30 @@ public:
     // transaction (taking an EditReadGuard here would self-deadlock).
     //
     // VISIBILITY: because each chunk is published, a reader may enter between
-    // chunks (it waits at most one chunk — the rule stated at the top of
-    // logicsnapshot.h) and the render path's "transaction in progress" check
-    // (LogicSnapshot::edit_in_progress, see render_pass.cpp) lets the frame
-    // through, so the undo is observable while it runs instead of appearing as a
-    // frozen window. This is the same mechanism apply_batch() uses per batch.
-    void revert_all_edits(std::function<void()> progress_callback = nullptr);
+    // chunks (typically after waiting one chunk — see the fairness note on
+    // EditWriteGuard::publish; std::shared_mutex gives no hard fairness
+    // guarantee, so a barging writer could in theory keep a queued reader
+    // waiting across several chunks) and the render path's "transaction in
+    // progress" check (LogicSnapshot::edit_in_progress, see render_pass.cpp)
+    // lets the frame through, so the undo is observable while it runs instead
+    // of appearing as a frozen window. This is the same mechanism apply_batch()
+    // uses per batch.
+    //
+    // Returns false when at least one record could not be restored (the pool
+    // refused to re-materialise a collapsed block — OOM). The caller must
+    // treat false as "the snapshot is NOT back at capture-original": do not
+    // report success, do not build new edits on top, and let the user retry.
+    //
+    // SCOPE NOTE: the entry also clears the snapshot's sticky _memory_failed
+    // flag. Every FilterProcessor edit pass begins with this call, so the
+    // reset marks the start of a pass: failures recorded DURING the pass
+    // (revert / invert / filter) survive to the caller's end-of-pass check,
+    // while a transient OOM from a PREVIOUS pass no longer poisons every
+    // later pass (previously one OOM made filter/undo permanently roll back
+    // until the next capture). Capture-path failures (datafeed allocation)
+    // are unrelated to this flag's edit-pass scope and keep their own
+    // reporting at the capture boundary.
+    bool revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_edits() const;
     /// Forget the edit log without restoring. Only for snapshot teardown
     /// (free_data / init_all), where the blocks are being dropped anyway.

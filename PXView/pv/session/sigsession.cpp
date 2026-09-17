@@ -3606,8 +3606,8 @@ void SigSession::set_glitch_filter(
 void SigSession::clear_glitch_filter() {
   _filter_processor->clear_glitch_filter();
 }
-void SigSession::request_clear_glitch_filter() {
-  _filter_processor->request_clear_glitch_filter();
+bool SigSession::request_clear_glitch_filter() {
+  return _filter_processor->request_clear_glitch_filter();
 }
 bool SigSession::is_glitch_filter_active() {
   return _filter_processor->is_glitch_filter_active();
@@ -3630,8 +3630,8 @@ void SigSession::set_signal_invert(const std::vector<bool> &channels) {
 void SigSession::clear_signal_invert() {
   _filter_processor->clear_signal_invert();
 }
-void SigSession::request_clear_signal_invert() {
-  _filter_processor->request_clear_signal_invert();
+bool SigSession::request_clear_signal_invert() {
+  return _filter_processor->request_clear_signal_invert();
 }
 bool SigSession::is_signal_invert_active() {
   return _filter_processor->is_signal_invert_active();

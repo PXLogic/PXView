@@ -65,7 +65,12 @@ public:
   /// and returns immediately. Completion is announced by GlitchFilterCleared +
   /// DataUpdated, exactly as on the synchronous path, so the View/toast/repaint
   /// behaviour is unchanged — only the blocking is gone.
-  void request_clear_glitch_filter();
+  ///
+  /// Returns true when the request was QUEUED behind a running pass (the
+  /// caller can use this to give the user "will run after the current pass"
+  /// feedback instead of a misleading "cleared" toast). False means accepted
+  /// for immediate execution or dropped (nothing to clear).
+  bool request_clear_glitch_filter();
 
   bool is_glitch_filter_active();
 
@@ -76,8 +81,9 @@ public:
   void clear_signal_invert();
 
   /// Asynchronous clear for the GUI thread: completes via SignalInvertCleared +
-  /// DataUpdated.
-  void request_clear_signal_invert();
+  /// DataUpdated. Returns true when the request was queued behind a running
+  /// pass (see request_clear_glitch_filter()).
+  bool request_clear_signal_invert();
 
   bool is_signal_invert_active();
 
@@ -107,18 +113,30 @@ private:
   void signal_invert_task(const std::vector<bool> channels);
 
   /// Submit the undo work onto _filter_pool and hand back its future. An
-  /// INVALID future means the request was skipped, which happens when there is
-  /// nothing to clear or when another writer owns the data (see the guards).
+  /// INVALID future means the request was skipped because there is nothing to
+  /// clear. A VALID future means the clear is queued as a pool task: when a
+  /// pass is running, the task parks on _edit_mutex and runs the undo after
+  /// the pass finishes — the request is never silently dropped any more, and
+  /// the sync API/MCP variant now genuinely waits for the data to be restored
+  /// even when a pass is in flight (previously an in-flight pass made it
+  /// return immediately with the data still filtered).
   /// Both clear paths (sync and async) go through these, so the decision logic
   /// exists once.
   std::future<void> submit_clear_glitch_filter();
   std::future<void> submit_clear_signal_invert();
 
-  /// Worker-side bodies of the two clears. They block on _edit_mutex (a worker
-  /// may wait; the GUI may not) and re-check the active flag under that lock,
-  /// because the state may have changed between submission and execution.
-  void clear_glitch_filter_task();
-  void clear_signal_invert_task();
+  /// Worker-side bodies of the two clears. Called with _edit_mutex ALREADY
+  /// HELD (by the clear task or by a pass servicing a queued clear), so they
+  /// must not take it themselves. They re-check the active flag under that
+  /// lock, because the state may have changed between submission and
+  /// execution.
+  void clear_glitch_filter_locked();
+  void clear_signal_invert_locked();
+
+  /// Worker-side task wrappers: take _edit_mutex, honour the latest-writer
+  /// intent check (see _edit_intent_seq), then call the *_locked() body.
+  void clear_glitch_filter_task(uint64_t intent_seq);
+  void clear_signal_invert_task(uint64_t intent_seq);
 
   /// Rebuild the live snapshot into the target state
   /// "capture data -> signal invert -> glitch filter", starting from
@@ -188,6 +206,17 @@ private:
   std::atomic<bool> _signal_invert_running;
   // H2 fix: same TOCTOU protection for signal invert launch path
   std::mutex _signal_invert_launch_mutex;
+
+  // Latest-writer-wins sequence for edit intents. Every accepted submission
+  // (set_glitch_filter, set_signal_invert, submit_clear_*) bumps it; a queued
+  // clear task captures its own value at submission and, once it finally gets
+  // _edit_mutex, skips its body if the counter has moved on. That preserves
+  // the pre-queue semantics of "a clear submitted while a pass runs is
+  // superseded by a LATER apply" while still queueing the clear when the
+  // clear itself is the latest instruction. Without the check, an apply
+  // queued right after a clear would be applied by the pass and then
+  // immediately undone by the stale clear.
+  std::atomic<uint64_t> _edit_intent_seq{0};
 
   // Serializes every writer of the live snapshot's derived state: the
   // glitch-filter task, the signal-invert task, and the two clear paths.

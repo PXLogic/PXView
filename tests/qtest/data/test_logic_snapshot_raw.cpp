@@ -141,6 +141,13 @@ private slots:
     void test_batch_callback_publishes_each_committed_batch();
     // 撤销(clear/undo)同样跑在 worker 线程, 大文件撤销期间靠进度通知显示进展
     void test_revert_publishes_progress();
+    // 撤销内部的"反相解除"分支(step-3)也必须分块发布
+    void test_revert_publishes_in_uninvert_branch();
+    // invert_channel 登记 toggle: 二次反相必须回到原始态且不留撤销状态
+    void test_invert_channel_double_call_is_idempotent();
+    // _memory_failed 是"每趟编辑作用域": revert 入口复位, 上一趟的瞬时 OOM
+    // 不得把之后的滤波/撤销永久判死
+    void test_revert_resets_stale_memory_failed();
 
     // 编辑可见性守卫成本 (seqlock 快路径 vs 无条件 shared_lock)
     void test_edit_guard_cost_ratio();
@@ -587,7 +594,9 @@ void TestLogicSnapshotRaw::test_revert_publishes_progress()
 {
     // 撤销(点"清除滤波"/Ctrl+Z)现在**按叶块分块发布**编辑事务:
     //   - 每 kEditPublishEveryBlocks(=2) 个块 publish 一次(关+开编辑事务),
-    //     排队读者在下次 close 时拿到锁 ⇒ 等待上限 = 一块, 而不是整趟;
+    //     排队读者通常在下次 close 时拿到锁 ⇒ 典型等待 = 一块, 而不是整趟
+    //     (std::shared_mutex 无公平性契约, 见 logicsnapshot_glitch_filter.cpp
+    //     的分块粒度注释; 本用例断言的是"事务真的放开过"这一确定性事实);
     //   - 进度通报与 publish 同节奏, 所以"回调次数"== "发布次数"; 渲染侧在
     //     事务开启时跳过重建, 因此撤销期间能逐块显示(这正是本用例要钉住的语义)。
     //
@@ -725,6 +734,158 @@ void TestLogicSnapshotRaw::test_revert_all_edits_invert_round_trip()
     snap.revert_all_edits();
     for (size_t s = 0; s < N; s += 7)
         QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+}
+
+void TestLogicSnapshotRaw::test_invert_channel_double_call_is_idempotent()
+{
+    // API 级陷阱回归：invert_channel 原先只在"登记表没有该通道"时登记、
+    // 从不因"二次反相还原"而移除。若调用方对同一通道连续反相两次（中间
+    // 不 revert），字节已回到原始态而登记仍在 —— 之后任何一次
+    // revert_all_edits() 都会把**原始数据再反相一次**（撤销本身变成了
+    // 编辑）。现在登记与数据同进退（toggle）：登记表恒等于"当前字节
+    // 确实处于反相态的通道集合"，任何调用模式下撤销都只会还原。
+    const size_t N = 200000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        return ch == 0 ? ((s % 100) < 40) : false;
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    std::vector<uint8_t> original(N);
+    for (size_t s = 0; s < N; ++s)
+        original[s] = snap.get_sample(s, sig) ? 1 : 0;
+
+    // 第一次反相：数据翻转，登记存在
+    snap.invert_channel(sig);
+    QVERIFY(snap.has_filter_edits());
+    for (size_t s = 0; s < N; s += 11)
+        QVERIFY2((snap.get_sample(s, sig) ? 1 : 0) != (int)original[s],
+                 "first invert must flip samples");
+
+    // 第二次反相：字节回到原始态，且不得留下任何撤销状态。
+    // （旧行为：has_filter_edits() 仍为 true，随后的撤销会把原始数据反相。）
+    snap.invert_channel(sig);
+    for (size_t s = 0; s < N; s += 11)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+    QVERIFY2(!snap.has_filter_edits(),
+             "double invert returns the data to capture-original, so there "
+             "must be nothing left to undo");
+
+    // 此时的撤销必须是真正的空操作：不发通知、不动数据。
+    uint64_t noop = 0;
+    QVERIFY2(snap.revert_all_edits([&noop]() { ++noop; }),
+             "revert after double invert must report success");
+    QCOMPARE(noop, Q_UINT64_C(0));
+    for (size_t s = 0; s < N; s += 7)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+}
+
+void TestLogicSnapshotRaw::test_revert_publishes_in_uninvert_branch()
+{
+    // 撤销内部的"反相解除"分支(step-3)也必须分块发布。既有用例钉住了
+    // "还原编辑日志"分支和"反相施加"分支的发布节奏，但 revert 的 step-3
+    // （对登记过的通道重新 invert_channel 以还原原始电平）走的是嵌套
+    // invert_channel 路径，其发布次数此前没有断言 —— 若有人改坏该分支的
+    // on_chunk 传递，撤销的后半段就会退化成"一次事务持到底"，读者又得
+    // 等整趟。本用例只放反相、不放滤波，使 revert 的全部发布都来自
+    // step-3，从而直接断言该分支的节奏。
+    const size_t LB = (size_t)LogicSnapshot::LeafBlockSamples;
+    const size_t BLOCKS = 5;
+    const size_t N = BLOCKS * LB;
+
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        if (ch != 0)
+            return false;
+        const size_t off = s % LB;
+        return off < LB / 2;   // 每块半高半低: 反相前后都有内容
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    // 反相施加分支本身分块发布（对照组: 与 test_revert_publishes_progress 同判据）
+    uint64_t apply_calls = 0;
+    snap.invert_channel(sig, [&apply_calls]() { ++apply_calls; });
+    QVERIFY2(apply_calls >= 2,
+             qPrintable(QString("invert across %1 blocks must publish per chunk "
+                                "(got %2)").arg((qulonglong)BLOCKS)
+                                .arg((qulonglong)apply_calls)));
+    // 抽查: 块首(高)应变低, 块中(低)应变高
+    QVERIFY2(!snap.get_sample(0, sig), "block head (high) must invert to low");
+    QVERIFY2(snap.get_sample(LB / 2, sig), "block middle (low) must invert to high");
+
+    const uint64_t rev_before = snap.edit_revision();
+    uint64_t calls = 0;
+    QVERIFY2(snap.revert_all_edits([&calls]() { ++calls; }),
+             "a healthy un-invert must report success");
+    QVERIFY2(calls >= 2,
+             qPrintable(QString("the un-invert branch must publish per chunk too "
+                                "(got %1 for %2 blocks)").arg((qulonglong)calls)
+                                .arg((qulonglong)BLOCKS)));
+    const uint64_t rev_after = snap.edit_revision();
+    QVERIFY2(rev_after - rev_before >= 4,
+             qPrintable(QString("un-invert must close/reopen the transaction "
+                                "between chunks (epoch %1 -> %2)")
+                            .arg((qulonglong)rev_before)
+                            .arg((qulonglong)rev_after)));
+
+    // 数据还原 + 无残留撤销状态
+    QVERIFY2(snap.get_sample(0, sig), "block head must be restored to high");
+    QVERIFY2(!snap.get_sample(LB / 2, sig), "block middle must be restored to low");
+    QVERIFY2(!snap.has_filter_edits(), "un-invert must clear the registration");
+}
+
+void TestLogicSnapshotRaw::test_revert_resets_stale_memory_failed()
+{
+    // _memory_failed 是快照级粘滞标志（采集期分配失败、上一趟滤波/撤销失败
+    // 都会置位），原先只在重新采集/清缓冲时清零。而 Core 的每个编辑趟都
+    // 以 revert_all_edits() 开头 —— 现在它在入口复位该标志，复位点即
+    // "每趟编辑作用域"的起点：上一趟遗留的瞬时 OOM 不得把这一趟也判死
+    // （旧行为：出过一次内存问题之后滤波/撤销永久回滚，只有重新采集能
+    // 恢复，比单次 OOM 本身严重得多）。
+    const size_t N = 200000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        return ch == 0 ? ((s % 20) == 0) : false;   // 1 采样窄高脉冲
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+    const int sig = 0;
+
+    // 场景 A：无可撤销编辑 + 粘滞标志 → revert 返回 true 并复位标志。
+    snap._memory_failed = true;
+    QVERIFY2(snap.revert_all_edits(),
+             "revert with no edits must succeed even with a stale flag");
+    QVERIFY2(!snap._memory_failed.load(),
+             "revert_all_edits must clear the sticky flag at pass start");
+
+    // 场景 B：有可撤销编辑 + 粘滞标志（模拟上一趟遗留的瞬时 OOM）→
+    // 撤销照常执行、返回 true、标志复位、数据逐位还原。
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
+    QVERIFY(snap.has_filter_edits());
+    snap._memory_failed = true;
+
+    QVERIFY2(snap.revert_all_edits(),
+             "a stale _memory_failed from a previous pass must not fail "
+             "this undo");
+    QVERIFY2(!snap._memory_failed.load(),
+             "flag must be clear after a healthy undo");
+    QVERIFY2(!snap.has_filter_edits(), "revert must consume the edit log");
+    for (size_t s = 0; s < N; s += 997)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)((s % 20) == 0));
+
+    // 场景 C：撤销成功之后又滤波失败（标志再次置位）→ 下一趟撤销仍然
+    // 从干净状态开始（入口再复位），这正是"每趟作用域"的循环不变式。
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
+    snap._memory_failed = true;
+    QVERIFY(snap.revert_all_edits());
+    QVERIFY(!snap._memory_failed.load());
 }
 
 void TestLogicSnapshotRaw::test_dense_glitch_train_merges_edit_records()

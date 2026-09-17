@@ -114,14 +114,19 @@ void ViewGlitchFilter::on_clear_glitch_filter_requested(bool all_channels) {
   // per touched block, i.e. seconds on a large capture. It therefore runs on the
   // filter worker (request_*), and this handler returns immediately; the view is
   // refreshed by GlitchFilterCleared + DataUpdated when the undo completes. The
-  // toast is the immediate feedback, so only show it when there was something to
-  // clear (the request is dropped when nothing is active).
+  // toast is the immediate feedback: "queued" (a pass is still running and the
+  // clear will execute after it) must be shown as such, and "cleared" is only
+  // shown when there actually was something to clear.
   const bool was_active = _view->session().is_glitch_filter_active();
-  _view->session().request_clear_glitch_filter();
+  const bool queued = _view->session().request_clear_glitch_filter();
   _preview_ranges.clear();
   if (_view->get_time_view())
     _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
-  if (was_active) {
+  if (queued) {
+    pv::ui::Toast::show(_view,
+                        View::tr("滤波处理中，完成后将自动清除"),
+                        pv::ui::Toast::Info);
+  } else if (was_active) {
     pv::ui::Toast::show(_view,
                         all_channels ? View::tr("已清除所有通道滤波")
                                      : View::tr("已清除通道滤波"),
@@ -144,8 +149,11 @@ void ViewGlitchFilter::on_toggle_invert_requested(
     // Same worker-side undo as the glitch-filter clear (see
     // on_clear_glitch_filter_requested): request_* returns immediately and the
     // view is refreshed by SignalInvertCleared + DataUpdated on completion.
-    sess.request_clear_signal_invert();
-    pv::ui::Toast::show(_view, View::tr("已清除信号取反"), pv::ui::Toast::Info);
+    const bool queued = sess.request_clear_signal_invert();
+    pv::ui::Toast::show(_view,
+                        queued ? View::tr("取反撤销处理中，完成后将自动清除")
+                               : View::tr("已清除信号取反"),
+                        pv::ui::Toast::Info);
     if (_view->get_time_view())
       _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
     return;

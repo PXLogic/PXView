@@ -2753,8 +2753,8 @@ void LogicSnapshot::clear_filtered_ranges() {
   _glitch_filter->clear_filtered_ranges();
 }
 
-void LogicSnapshot::revert_all_edits(std::function<void()> progress_callback) {
-  _glitch_filter->revert_all_edits(std::move(progress_callback));
+bool LogicSnapshot::revert_all_edits(std::function<void()> progress_callback) {
+  return _glitch_filter->revert_all_edits(std::move(progress_callback));
 }
 
 bool LogicSnapshot::has_filter_edits() const {
