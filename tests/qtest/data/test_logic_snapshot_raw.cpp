@@ -26,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -124,6 +125,15 @@ private slots:
     // 毛刺滤波正确性
     void test_glitch_filter_removes_narrow_pulses();
     void test_glitch_filter_keeps_wide_pulses();
+
+    // 可逆编辑日志 (取代 _logic_backup 全量备份的撤销机制)
+    // 注意: 槽名不得以 "_data" 结尾 —— QtTest 把它当作数据提供者
+    // (foo_data() 约定)，会静默地从不执行。
+    void test_revert_all_edits_restores_capture_samples();
+    void test_revert_all_edits_invert_round_trip();
+
+    // 编辑可见性守卫成本 (seqlock 快路径 vs 无条件 shared_lock)
+    void test_edit_guard_cost_ratio();
 };
 
 void TestLogicSnapshotRaw::test_find_first_different_matches_tree()
@@ -407,6 +417,195 @@ void TestLogicSnapshotRaw::test_glitch_filter_keeps_wide_pulses()
     // 宽低脉冲保留
     for (uint64_t s = 10000; s < 12000; ++s)
         QVERIFY2(!snap.get_sample(s, 0), "wide low pulse should be kept");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 可逆编辑日志
+// ────────────────────────────────────────────────────────────────────────────
+
+void TestLogicSnapshotRaw::test_revert_all_edits_restores_capture_samples()
+{
+    // 数据设计要点:
+    //   - 1 采样宽的窄高脉冲每 20 采样一个 → N/20 = 100000 个毛刺,
+    //     超过 apply_batch 的 65536 条刷写阈值, 因此同一个叶子块会在
+    //     **多个 batch** 里被反复改写。这正好覆盖"反序回放"的关键路径:
+    //     每笔记录保存的是它自己那次写之前的字节, 只有倒序回放才能回到
+    //     采集原始态 (正序回放会停在中间某一版)。
+    const size_t N = 2000000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        if (ch != 0) return false;
+        return (s % 20) == 0;      // 1-sample 窄高脉冲
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    QVERIFY(snap.get_sample(0, sig));
+
+    // 记录采集原始数据
+    std::vector<uint8_t> original(N);
+    for (size_t s = 0; s < N; ++s)
+        original[s] = snap.get_sample(s, sig) ? 1 : 0;
+
+    QVERIFY(!snap.has_filter_edits());
+
+    // threshold=2 > 脉冲宽度 1 → 全部判为毛刺并抹平
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
+
+    QVERIFY2(!snap.edit_log_overflowed(),
+             "edit log budget must not be hit for 100k single-sample glitches");
+    QVERIFY2(snap.has_filter_edits(), "a successful pass must be reversible");
+
+    // 滤波确实改动了数据 (若这一条不成立, 下面的还原断言就是同义反复)
+    size_t changed = 0;
+    for (size_t s = 0; s < N; ++s) {
+        if ((snap.get_sample(s, sig) ? 1 : 0) != original[s])
+            ++changed;
+    }
+    // 反同义反复护栏: 若一趟滤波没改动任何数据, 下面的还原断言就是空话。
+    // 不写成精确的 N/20: 采样 0 处的高电平是状态机的**初始基准**而非毛刺,
+    // 它不会被抹平 (相差恰好 1), 把这种实现细节写进断言会让测试变脆。
+    QVERIFY2(changed > 0,
+             "the pass must actually modify data, otherwise the restore "
+             "assertion below is vacuous");
+    QVERIFY2(changed >= N / 20 - 2,
+             "essentially every 1-sample glitch should have been flattened");
+
+    // 撤销 → 必须逐位回到采集原始态
+    snap.revert_all_edits();
+    QVERIFY2(!snap.has_filter_edits(), "revert must consume the edit log");
+
+    size_t mismatches = 0;
+    size_t first_mismatch = 0;
+    for (size_t s = 0; s < N; ++s) {
+        if ((snap.get_sample(s, sig) ? 1 : 0) != original[s]) {
+            if (mismatches == 0)
+                first_mismatch = s;
+            ++mismatches;
+        }
+    }
+    QVERIFY2(mismatches == 0,
+             qPrintable(QString("revert_all_edits must restore all %1 samples "
+                                "bit-exactly (first mismatch at %2, total %3)")
+                            .arg((qulonglong)N)
+                            .arg((qulonglong)first_mismatch)
+                            .arg((qulonglong)mismatches)));
+
+    // 撤销是幂等的, 且还原后仍可正常渲染级搜索 (mipmap 已被重建)
+    snap.revert_all_edits();
+    uint64_t idx = 0;
+    const bool has_edge = snap.get_nxt_edge(idx, snap.get_sample(0, sig), N - 1, 0, sig);
+    Q_UNUSED(has_edge);
+
+    // 还原后可再次滤波 (证明编辑日志被正确复用, 而非一次性)
+    snap.apply_glitch_filter(sig, 2, nullptr, GlitchFilterMode::Both);
+    QVERIFY(snap.has_filter_edits());
+    snap.revert_all_edits();
+    for (size_t s = 0; s < N; s += 997)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+}
+
+void TestLogicSnapshotRaw::test_revert_all_edits_invert_round_trip()
+{
+    // 反相靠 XOR 自逆撤销, 由 _inverted_orders 记住"当前仍是反相态"。
+    // 这里覆盖一次反相+撤销的往返, 以及"反相后再撤销"不会二次翻转
+    // (即撤销是幂等的, 不会把已还原的数据又反相回去)。
+    const size_t N = 200000;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        return ch == 0 ? (s % 100) < 40 : false;
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    std::vector<uint8_t> original(N);
+    for (size_t s = 0; s < N; ++s)
+        original[s] = snap.get_sample(s, sig) ? 1 : 0;
+
+    snap.invert_channel(sig);
+
+    size_t inverted = 0;
+    for (size_t s = 0; s < N; ++s) {
+        if ((snap.get_sample(s, sig) ? 1 : 0) == original[s])
+            ++inverted;
+    }
+    QVERIFY2(inverted == 0, "invert_channel must flip every sample");
+
+    snap.revert_all_edits();
+    QVERIFY(!snap.has_filter_edits());
+
+    for (size_t s = 0; s < N; ++s)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+
+    // 幂等: 再撤销一次不得把数据翻回去
+    snap.revert_all_edits();
+    for (size_t s = 0; s < N; s += 7)
+        QCOMPARE(snap.get_sample(s, sig) ? 1 : 0, (int)original[s]);
+}
+
+void TestLogicSnapshotRaw::test_edit_guard_cost_ratio()
+{
+    // 为什么需要这条测试: 编辑可见性最初用"无条件 shared_lock"实现, 在数据
+    // 查询热路径上实测明显变慢; 改成 seqlock 快路径后无编辑批次时只剩两次
+    // acquire 载入。跨会话计时不可比 (同一台机器不同时段能差 1.8x), 所以这里
+    // 在**同一进程内交替**测两种写法, 各取多轮最小值 (最小值最能代表无干扰
+    // 状态), 比较的是比值而非绝对时间。
+    const size_t N = 4 * 1024 * 1024;
+    Fixture fx(2, N);
+    fx.data = build_interleaved(N, [](size_t s, int ch) {
+        return ch == 0 ? (s % 50) < 25 : false;
+    });
+
+    LogicSnapshot snap;
+    fx.feed(snap, N);
+
+    const int sig = 0;
+    const int iters = 200000;
+    double best_seqlock = 1e30;
+    double best_lock = 1e30;
+
+    for (int round = 0; round < 7; ++round) {
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            uint64_t sink = 0;
+            for (int i = 0; i < iters; ++i)
+                sink += snap.get_sample((uint64_t)(i * 37) % N, sig) ? 1u : 0u;
+            const auto t1 = std::chrono::steady_clock::now();
+            Q_UNUSED(sink);
+            best_seqlock = std::min(
+                best_seqlock,
+                std::chrono::duration<double, std::nano>(t1 - t0).count() / iters);
+        }
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            uint64_t sink = 0;
+            for (int i = 0; i < iters; ++i) {
+                std::shared_lock<std::shared_mutex> g(snap._edit_visibility);
+                sink += snap.get_sample_self((uint64_t)(i * 37) % N, sig) ? 1u : 0u;
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            Q_UNUSED(sink);
+            best_lock = std::min(
+                best_lock,
+                std::chrono::duration<double, std::nano>(t1 - t0).count() / iters);
+        }
+    }
+
+    qInfo("edit-visibility guard, best-of-7 rounds: "
+          "seqlock=%.1f ns/call, shared_lock=%.1f ns/call, ratio=%.2fx",
+          best_seqlock, best_lock, best_lock / best_seqlock);
+
+    // 结构性要求 (不是性能门禁): 无编辑批次在跑时, 快路径只是两次原子读,
+    // 不允许比"取/放一次共享锁"更贵。留 1.25x 余量以免负载抖动误判。
+    QVERIFY2(best_seqlock <= best_lock * 1.25,
+             qPrintable(QString("seqlock fast path (%1 ns) must not cost more "
+                                "than the shared lock (%2 ns)")
+                            .arg(best_seqlock, 0, 'f', 1)
+                            .arg(best_lock, 0, 'f', 1)));
 }
 
 QTEST_GUILESS_MAIN(TestLogicSnapshotRaw)

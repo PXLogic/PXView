@@ -176,6 +176,12 @@ void LogicSnapshot::free_data() {
     return;
   }
 
+  // The leaf blocks are about to go away, so the reversible filter/invert
+  // edit log — which holds pre-edit copies of those blocks' bytes — is no
+  // longer applicable and must be dropped before the pointers dangle.
+  // It must NOT be replayed here: the content is being discarded wholesale.
+  _glitch_filter->clear_edits();
+
   // Clear the mmap slot bitmap via the writer (it owns _mmap_slot_written).
   _disk_cache_writer->clear_all_mmap_slots();
 
@@ -234,6 +240,9 @@ void LogicSnapshot::init_all() {
   _last_ended = true;
   _loop_offset = 0;
   _able_free = true;
+  // Fresh logical state — any recorded filter/invert edit refers to data that
+  // this snapshot no longer represents.
+  _glitch_filter->clear_edits();
 }
 
 void LogicSnapshot::clear() {
@@ -1622,6 +1631,14 @@ void LogicSnapshot::capture_ended() {
 void LogicSnapshot::copy_from(const LogicSnapshot &src) {
 std::lock_guard<std::recursive_mutex> lock(_mutex);
 
+// Pin the SOURCE's revision for the whole copy. This deep-copies leaf blocks
+// byte-for-byte by raw pointer, so without the pin a glitch-filter/invert batch
+// running on `src` could rewrite a block between its mipmap refresh and our
+// memcpy and the copy would splice two revisions. The pin makes the batch wait
+// instead — acceptable, because the batch runs on a background thread while
+// copy_from serves a user-initiated save/copy.
+EditReadPin src_pin(&src);
+
 // [group3 crash fix] Guard the SOURCE snapshot with a read iterator for the
 // whole copy. Below we memcpy src._ch_data leaf blocks by raw pointer; a
 // concurrent free_data()/clear on src (first_payload / capture boundary,
@@ -1650,7 +1667,32 @@ _disk_cache_writer->drain_and_join();
 
 const_cast<LogicSnapshot &>(src).ensure_all_blocks_hot();
 
+// free_data() silently no-ops while a reader (e.g. a decode thread holding a
+// get_samples() iterator) is active, leaving _ch_data populated. The rebuild
+// loop below push_back()s unconditionally, so the previous code would double
+// _ch_data.size() and leave the first half pointing at the *pre-copy* blocks:
+// memory doubles and readers silently observe stale data. Drain first, and
+// refuse the copy rather than corrupt the snapshot if the drain times out.
+if (!wait_active_iterators_zero(3000)) {
+  pxv_err("LogicSnapshot::copy_from: %d active iterators still present; "
+          "aborting copy instead of double-appending _ch_data",
+          _iterator_count.load());
+  _memory_failed = true;
+  return;
+}
+
 free_data();
+
+// Belt and braces: free_data() re-checks the iterator count itself, so a
+// reader that appeared between the drain and the call could still have made
+// it defer. Verify the destination really is empty before rebuilding.
+if (!_ch_data.empty()) {
+  pxv_err("LogicSnapshot::copy_from: free_data() deferred, _ch_data still "
+          "holds %zu channels; aborting copy",
+          _ch_data.size());
+  _memory_failed = true;
+  return;
+}
 
   _capacity = src._capacity;
   _channel_num = src._channel_num;
@@ -1906,6 +1948,13 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   // committed sample range (`_ring_published`, release-published after mipmap
   // completes) from the immutable non-loop tree. Loop/∞ mode keeps the lock
   // (it rotates + frees blocks and rebases via `_loop_offset`).
+  //
+  // NOT covered by _edit_visibility: this returns a raw pointer into a leaf
+  // block and the caller (decoder) keeps reading it AFTER the call returns, so
+  // a lock scoped to this function cannot exclude an in-flight edit batch.
+  // That exposure is the pre-existing `_able_free` contract, and the edit path
+  // mitigates it by draining sample iterators first (see
+  // FilterProcessor::rebuild_filtered_state).
   const bool looped = _is_loop;
   std::unique_lock<std::recursive_mutex> lock(_mutex, std::defer_lock);
   if (looped)
@@ -2203,32 +2252,40 @@ void LogicSnapshot::end_sample_iteration(std::unique_ptr<SegmentDataIterator> it
 }
 
 bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {
-  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free. The committed
-  // sample count is acquire-loaded; only fully-captured samples are read, so
-  // there is no data race with mipmap metadata mutation or block writes, and
-  // (non-loop) no block is ever freed during capture, so the leaf pointer is
-  // always valid. `_loop_offset` is 0 for finite captures — not read here.
+  // C3 (P9-on-raw): FINITE (non-loop) fast path is lock-free with respect to
+  // the capture protocol: the committed sample count is acquire-loaded, only
+  // fully-captured samples are read, and (non-loop) no block is ever freed
+  // during capture, so the leaf pointer is always valid. `_loop_offset` is 0
+  // for finite captures — not read here.
+  //
+  // `_edit_visibility` (shared) covers the other mutation source: an in-flight
+  // glitch-filter/invert batch rewrites the mipmap metadata and the block bytes
+  // IN PLACE, so an unlocked read could otherwise land between the two and
+  // return a value belonging to neither the old nor the new revision. Shared
+  // mode never waits longer than one batch.
   if (!_is_loop) {
     const uint64_t N = _ring_published.load(std::memory_order_acquire);
     if (index >= N)
       return false;
-    int order = get_ch_order(sig_index);
-    if (order == -1 || (unsigned int)order >= _ch_data.size())
-      return false;
-    uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
-    if (index0 >= _ch_data[order].size())
-      return false;
-    const RootNode &rn = _ch_data[order][index0];
-    uint64_t index1 = (index & RootMask) >> LeafBlockPower;
-    uint64_t root_pos_mask = 1ULL << index1;
-    if ((rn.tog & root_pos_mask) == 0)
-      return (rn.first & root_pos_mask) != 0;
-    const uint64_t *ptr = (const uint64_t *)rn.lbp[index1];
-    if (ptr == nullptr)
-      return (rn.first & root_pos_mask) != 0;
-    uint64_t u64_idx = (index & LeafMask) >> ScalePower;
-    uint64_t index_mask = 1ULL << (index & LevelMask[0]);
-    return ptr[u64_idx] & index_mask;
+    return consistent_read([&]() -> bool {
+      int order = get_ch_order(sig_index);
+      if (order == -1 || (unsigned int)order >= _ch_data.size())
+        return false;
+      uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
+      if (index0 >= _ch_data[order].size())
+        return false;
+      const RootNode &rn = _ch_data[order][index0];
+      uint64_t index1 = (index & RootMask) >> LeafBlockPower;
+      uint64_t root_pos_mask = 1ULL << index1;
+      if ((rn.tog & root_pos_mask) == 0)
+        return (rn.first & root_pos_mask) != 0;
+      const uint64_t *ptr = (const uint64_t *)rn.lbp[index1];
+      if (ptr == nullptr)
+        return (rn.first & root_pos_mask) != 0;
+      uint64_t u64_idx = (index & LeafMask) >> ScalePower;
+      uint64_t index_mask = 1ULL << (index & LevelMask[0]);
+      return (ptr[u64_idx] & index_mask) != 0;
+    });
   }
 
   std::lock_guard<std::recursive_mutex> lock(_mutex);
@@ -2631,24 +2688,39 @@ int LogicSnapshot::get_block_with_sample(uint64_t index, uint64_t *out_offset) {
 }
 
 void LogicSnapshot::invert_channel(int sig_index) {
+  // Exclusive visibility: this is the external entry point, and the helper
+  // deliberately does not lock itself (see its contract comment) so that
+  // revert_all_edits() can hold one exclusive section across the whole
+  // transaction.
+  //
+  // LOCK ORDER IS MANDATORY: _mutex must be taken BEFORE _edit_visibility, to
+  // match apply_batch() and revert_all_edits(). Taking them the other way
+  // round would deadlock against a revert that already holds _mutex and is
+  // waiting for the visibility lock. _mutex is recursive, so the helper
+  // re-acquiring it below is fine.
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
+  EditWriteGuard edit_vis(this);
   _glitch_filter->invert_channel(sig_index);
 }
 
 void LogicSnapshot::apply_glitch_filter(
     int sig_index, uint32_t threshold,
     std::function<void(int)> progress_callback,
-    GlitchFilterMode filter_mode) {
+    GlitchFilterMode filter_mode,
+    const std::atomic<bool> *cancel) {
   _glitch_filter->apply_glitch_filter(sig_index, threshold,
-                                      std::move(progress_callback), filter_mode);
+                                     std::move(progress_callback), filter_mode,
+                                     cancel);
 }
 
 void LogicSnapshot::apply_glitch_filter_all(
     const std::map<int, uint32_t> &thresholds,
     std::function<void(int)> progress_callback,
-    const std::map<int, GlitchFilterMode> &filter_modes) {
+    const std::map<int, GlitchFilterMode> &filter_modes,
+    const std::atomic<bool> *cancel) {
   _glitch_filter->apply_glitch_filter_all(thresholds,
-                                          std::move(progress_callback),
-                                          filter_modes);
+                                         std::move(progress_callback),
+                                         filter_modes, cancel);
 }
 
 bool LogicSnapshot::is_glitch_filtered() {
@@ -2659,13 +2731,25 @@ void LogicSnapshot::set_glitch_filtered(bool filtered) {
   _glitch_filter->set_glitch_filtered(filtered);
 }
 
-const std::vector<LogicSnapshot::FillRange>&
+std::shared_ptr<const std::vector<LogicSnapshot::FillRange>>
 LogicSnapshot::get_filtered_ranges(int sig_index) const {
   return _glitch_filter->get_filtered_ranges(sig_index);
 }
 
 void LogicSnapshot::clear_filtered_ranges() {
   _glitch_filter->clear_filtered_ranges();
+}
+
+void LogicSnapshot::revert_all_edits() {
+  _glitch_filter->revert_all_edits();
+}
+
+bool LogicSnapshot::has_filter_edits() const {
+  return _glitch_filter->has_edits();
+}
+
+bool LogicSnapshot::edit_log_overflowed() const {
+  return _glitch_filter->edit_log_overflowed();
 }
 
 } // namespace data

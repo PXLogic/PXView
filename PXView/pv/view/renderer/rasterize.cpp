@@ -105,9 +105,26 @@ void rasterize_logic_channel(
       min(width, (uint16_t)ceil((end_index + 1) / samples_per_pixel - offset));
   const uint16_t max_togs = width / kRasterizeTogMaxScale;
 
-  // Local buffers (were LogicSignal::_cur_pulses/_cur_edges members).
-  std::vector<std::pair<bool, bool>> cur_pulses;
-  std::vector<std::pair<uint16_t, bool>> cur_edges;
+  // Scratch buffers (were LogicSignal::_cur_pulses/_cur_edges members).
+  //
+  // These used to be plain locals, i.e. three heap allocations per signal per
+  // frame, executed on the GUI thread inside paintEvent(). Their contents are
+  // fully regenerated below, so they are pure scratch: keeping one set alive
+  // per rasterizer thread takes the allocator out of the paint path
+  // completely. Painting is single-threaded, so thread_local is sufficient and
+  // needs no lock (a per-frame std::pmr arena would be the other option, but
+  // this is smaller and has zero per-frame bookkeeping).
+  struct RasterizeScratch {
+    std::vector<std::pair<bool, bool>> pulses;
+    std::vector<std::pair<uint16_t, bool>> edges;
+    std::vector<QLine> wave_lines;
+  };
+  thread_local RasterizeScratch scratch;
+  std::vector<std::pair<bool, bool>> &cur_pulses = scratch.pulses;
+  std::vector<std::pair<uint16_t, bool>> &cur_edges = scratch.edges;
+  std::vector<QLine> &wave_lines = scratch.wave_lines;
+  wave_lines.clear();
+
   const bool first_sample = snapshot->get_display_edges(
       cur_pulses, cur_edges, start_index, end_index, width, max_togs, offset,
       samples_per_pixel, channel_index);
@@ -116,7 +133,6 @@ void rasterize_logic_channel(
   int preX = 0;
   int preY = first_sample ? high_offset : low_offset;
   int x = preX;
-  std::vector<QLine> wave_lines;
 
   if (cur_edges.size() < max_togs) {
     std::vector<std::pair<uint16_t, bool>>::const_iterator i;
@@ -161,12 +177,31 @@ void rasterize_logic_channel(
   //     live preview.
   if (snapshot && snapshot->is_glitch_filtered() &&
       ctx.show_glitch_overlay) {
-    const auto &ranges = snapshot->get_filtered_ranges(sig_idx);
-    if (!ranges.empty()) {
+    // Immutable table, ref-counted: safe to walk while a background filter
+    // pass is publishing a new revision, and never invalidated mid-loop.
+    const auto ranges = snapshot->get_filtered_ranges(sig_idx);
+    if (ranges && !ranges->empty()) {
+      // Ranges are published in ascending `start` order (the filter scans
+      // samples forward), so binary-search the visible window instead of
+      // walking the whole table. The previous loop iterated every range on
+      // every frame for every signal and culled off-screen ones *inside* the
+      // loop — O(total ranges) per frame on the GUI thread, which on a dense
+      // capture (millions of ranges) is itself enough to stall painting.
+      auto it = std::lower_bound(
+          ranges->begin(), ranges->end(), start_index,
+          [](const data::LogicSnapshot::FillRange &r, uint64_t v) {
+            return r.start < v;
+          });
+      // lower_bound lands on the first range *starting* at/after the window;
+      // step back over any range that began earlier but still overlaps it.
+      while (it != ranges->begin() && (it - 1)->end >= start_index)
+        --it;
+
       p.setBrush(QColor(255, 82, 82, 90));
       p.setPen(Qt::NoPen);
-      for (const auto &r : ranges) {
-        if (r.end < start_index || r.start > end_index)
+      for (; it != ranges->end() && it->start <= end_index; ++it) {
+        const auto &r = *it;
+        if (r.end < start_index)
           continue; // off-screen cull
         int x1 = (int)(r.start / samples_per_pixel - offset);
         int x2 = (int)(r.end / samples_per_pixel - offset);

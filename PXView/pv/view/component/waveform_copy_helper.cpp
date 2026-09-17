@@ -96,6 +96,13 @@ QString WaveformCopyHelper::format_signal(LogicSignal *signal, uint64_t start, u
     result += "Sample Rate: " + QString::number(sample_rate, 'f', 0) + " Hz\n";
     result += "Format: [Time(s)] [Level] [Duration(s)]\n";
 
+    // Pin one revision for the whole export. get_sample / get_nxt_edge are
+    // individually consistent, but this loop calls them once per edge; without
+    // the pin an edit batch landing mid-export would emit rows stitched from
+    // two revisions — wrong timings in a durable artifact. See
+    // LogicSnapshot::EditReadPin.
+    data::LogicSnapshot::EditReadPin read_pin(snapshot);
+
     // CSV body — one row per edge transition
     bool level = snapshot->get_sample(start, sig_index);
     uint64_t current = start;
@@ -134,8 +141,11 @@ QString WaveformCopyHelper::format_signals(const std::vector<LogicSignal*> &sigs
 
     // Use first signal's sample rate for the header
     double sample_rate = 0;
+    data::LogicSnapshot *any_snapshot = nullptr;
     for (auto *s : sigs) {
         if (s && s->data()) {
+            if (!any_snapshot)
+                any_snapshot = s->data();
             sample_rate = (double)s->data()->samplerate();
             if (sample_rate > 0)
                 break;
@@ -149,6 +159,15 @@ QString WaveformCopyHelper::format_signals(const std::vector<LogicSignal*> &sigs
 
     QString high_label = L_S(STR_PAGE_SIGNAL_PROC, "IDS_GLITCH_FILTER_HIGH", "High");
     QString low_label = L_S(STR_PAGE_SIGNAL_PROC, "IDS_GLITCH_FILTER_LOW", "Low");
+
+    // Pin one revision for the whole multi-channel export. Pinned OUTSIDE the
+    // per-signal loop on purpose: with a per-signal pin an edit batch landing
+    // between two channels would emit channel A from one revision and channel B
+    // from another, so the timestamps would no longer be comparable.
+    // See LogicSnapshot::EditReadPin.
+    std::unique_ptr<data::LogicSnapshot::EditReadPin> read_pin;
+    if (any_snapshot)
+        read_pin = std::make_unique<data::LogicSnapshot::EditReadPin>(any_snapshot);
 
     // Each signal's edges interleaved into the CSV, sorted by timestamp
     // For simplicity, output each signal's block sequentially (channel column disambiguates)

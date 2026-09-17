@@ -38,6 +38,7 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <thread>
 #include <atomic>
@@ -111,6 +112,144 @@ private:
 public:
     using EdgePair = std::pair<uint64_t, bool>;
 
+    // ------------------------------------------------------------------
+    // Edit visibility: reader / writer guards for the in-place edit pass
+    // ------------------------------------------------------------------
+    // The glitch filter and signal invert rewrite leaf-block content IN PLACE
+    // (bytes + mipmap + tog/first/last). On a FINITE capture the public
+    // readers bypass _mutex entirely (they synchronize on
+    // committed_sample_count()), so without these guards a renderer could
+    // observe a block whose `tog` bit had been cleared but whose bytes were
+    // only half written, and paint a garbage waveform for a frame.
+    //
+    // Semantics: readers must never wait for more than one edit BATCH; the
+    // writer is a background thread, so making it wait for readers costs
+    // nothing user-visible.
+
+    /// Owner of the shared (reader) side. While no edit transaction is open
+    /// this acquires nothing at all; it only checks the revision counter.
+    class EditReadGuard {
+    public:
+        struct ForceLock {};
+
+        explicit EditReadGuard(const LogicSnapshot *s) noexcept : _snap(s) {
+            _epoch = _snap->_edit_epoch.load(std::memory_order_acquire);
+            if (_epoch & 1u) {
+                // An edit transaction is open. Taking the shared lock makes us
+                // wait for it (and excludes the next one), after which the
+                // content is a complete revision again.
+                _snap->_edit_visibility.lock_shared();
+                _locked = true;
+            }
+        }
+
+        EditReadGuard(const LogicSnapshot *s, ForceLock) noexcept : _snap(s) {
+            _snap->_edit_visibility.lock_shared();
+            _locked = true;
+            _epoch = _snap->_edit_epoch.load(std::memory_order_acquire);
+        }
+
+        ~EditReadGuard() {
+            if (_locked)
+                _snap->_edit_visibility.unlock_shared();
+        }
+
+        EditReadGuard(const EditReadGuard &) = delete;
+        EditReadGuard &operator=(const EditReadGuard &) = delete;
+
+        /// True when the read performed under this guard is guaranteed to have
+        /// observed one complete revision (either because we held the lock, or
+        /// because no writer opened a transaction while we read).
+        bool consistent() const noexcept {
+            return _locked ||
+                   _snap->_edit_epoch.load(std::memory_order_acquire) == _epoch;
+        }
+
+    private:
+        const LogicSnapshot *_snap;
+        uint64_t _epoch = 0;
+        bool _locked = false;
+    };
+
+    /// Multi-call read pin.
+    ///
+    /// consistent_read() gives per-CALL consistency: one get_sample() or
+    /// get_display_edges() never observes a torn revision. But a caller that
+    /// makes many of those calls in a loop — a pulse scan, a CSV export, a
+    /// pattern search — can still straddle an edit revision and compute a
+    /// result stitched from two revisions. No individual read is wrong; the
+    /// aggregate is. Those are exactly the callers whose output is a durable
+    /// artifact (exported text, a measured histogram), so a transient mix is
+    /// not acceptable.
+    ///
+    /// Holding a pin for the whole scan closes that hole: it takes the shared
+    /// visibility lock, so an edit batch waits for the scan to finish instead
+    /// of interleaving into the middle of it. Making the WRITER wait is free —
+    /// it is a background thread; making the renderer wait would not be.
+    ///
+    /// Cost is one shared-lock acquisition for the whole scan, not per call,
+    /// and the inner consistent_read() paths do not nest (while we hold the
+    /// pin no writer can be inside, so the edit epoch reads even and
+    /// EditReadGuard skips the lock — which is also what keeps this from
+    /// self-deadlocking on a non-recursive std::shared_mutex).
+    ///
+    /// Use it for long scans, NOT for per-frame render paths: pinning during a
+    /// paint would stall the writer once per frame.
+    class EditReadPin {
+    public:
+        explicit EditReadPin(const LogicSnapshot *s) noexcept : _snap(s) {
+            _snap->_edit_visibility.lock_shared();
+        }
+        ~EditReadPin() { _snap->_edit_visibility.unlock_shared(); }
+        EditReadPin(const EditReadPin &) = delete;
+        EditReadPin &operator=(const EditReadPin &) = delete;
+
+    private:
+        const LogicSnapshot *_snap;
+    };
+
+    /// Owner of the exclusive (writer) side. Held for one batch / one revert
+    /// transaction. Lock order: _mutex first, then this.
+    class EditWriteGuard {
+    public:
+        explicit EditWriteGuard(LogicSnapshot *s) noexcept : _snap(s) {
+            _snap->_edit_visibility.lock();
+            // Declare the transaction open. Both increments happen under the
+            // exclusive lock, so readers holding the shared lock never observe
+            // the counter move.
+            _snap->_edit_epoch.fetch_add(1, std::memory_order_release);
+            _snap->_edit_write_depth.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        ~EditWriteGuard() {
+            _snap->_edit_write_depth.fetch_sub(1, std::memory_order_relaxed);
+            _snap->_edit_epoch.fetch_add(1, std::memory_order_release);
+            _snap->_edit_visibility.unlock();
+        }
+
+        EditWriteGuard(const EditWriteGuard &) = delete;
+        EditWriteGuard &operator=(const EditWriteGuard &) = delete;
+
+    private:
+        LogicSnapshot *_snap;
+    };
+
+    /// Undo an overlapping edit revision: run the read, and if a writer
+    /// slipped in mid-read, redo it. After a bounded number of losses the
+    /// shared lock is taken so the retry cannot spin indefinitely.
+    template <typename ReadFn>
+    auto consistent_read(ReadFn &&fn) -> decltype(fn()) {
+        for (int attempt = 0; attempt < kEditReadRetries; ++attempt) {
+            EditReadGuard guard(this);
+            decltype(fn()) result = fn();
+            if (guard.consistent())
+                return result;
+        }
+        EditReadGuard guard(this, EditReadGuard::ForceLock{});
+        return fn();
+    }
+
+
     // 持久化的滤波区间信息（apply_glitch_filter 滤除的区间），供 View 层渲染 overlay
     struct FillRange {
         uint64_t start;
@@ -157,16 +296,38 @@ public:
                       double min_length, int sig_index);
 
     void invert_channel(int sig_index);
+    // `cancel` (optional, polled once per scan iteration) lets a config/capture
+    // boundary make an in-flight pass finish promptly instead of blocking for
+    // the whole pass. Results are then partial — the caller must revert.
     void apply_glitch_filter(int sig_index, uint32_t threshold, std::function<void(int)> progress_callback,
-        GlitchFilterMode filter_mode = GlitchFilterMode::Both);
+        GlitchFilterMode filter_mode = GlitchFilterMode::Both,
+        const std::atomic<bool> *cancel = nullptr);
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds, std::function<void(int)> progress_callback,
-        const std::map<int, GlitchFilterMode> &filter_modes = {});
+        const std::map<int, GlitchFilterMode> &filter_modes = {},
+        const std::atomic<bool> *cancel = nullptr);
     bool is_glitch_filtered();
     void set_glitch_filtered(bool filtered);
 
-    // 持久化访问 apply_glitch_filter 滤除的区间列表，供 View 层渲染 overlay
-    const std::vector<FillRange>& get_filtered_ranges(int sig_index) const;
+    // 持久化访问 apply_glitch_filter 滤除的区间列表，供 View 层渲染 overlay。
+    // 返回不可变表的 shared_ptr：读者持有期间表不会被改写或替换（旧 API
+    // 返回 const& 指向 worker 正在 push_back 的 vector，扩容即悬垂）。
+    // 表按 start 升序，调用方应对可见窗口做二分而不是每帧全量遍历。
+    std::shared_ptr<const std::vector<FillRange>> get_filtered_ranges(
+        int sig_index) const;
     void clear_filtered_ranges();
+
+    // 把快照恢复到"采集原始数据"：撤销所有毛刺滤波 / 信号反相编辑。
+    // 取代原先"整份快照深拷贝到 _logic_backup，再 copy_from 回来"的撤销
+    // 方案（8 通道 × 1 G 采样 = 976 MB + 每次重滤一整趟 480 次 commit）。
+    // 代价正比于真正被改写的字节数（每个被抹平的毛刺只有几个采样）。
+    // 幂等：没有编辑时是空操作。
+    void revert_all_edits();
+    bool has_filter_edits() const;
+    /// True when the reversible edit log hit its memory budget during the
+    /// last pass, i.e. the filter bailed out mid-way. Callers must revert
+    /// and report a failure instead of accepting a partially filtered
+    /// snapshot. Cleared by revert_all_edits().
+    bool edit_log_overflowed() const;
 
     void set_disk_cache_config(const DiskCacheConfig &config);
     bool is_disk_cache_active();
@@ -217,6 +378,11 @@ public:
     }
     inline bool has_active_iterators() const {
         return _iterator_count.load(std::memory_order_acquire) > 0;
+    }
+    /// Number of live get_samples()/SegmentDataIterator readers. For logging
+    /// the edit pass's bounded drain.
+    inline int active_iterator_count() const {
+        return _iterator_count.load(std::memory_order_acquire);
     }
 
     /// Capture-boundary drain: block (bounded) until no active sample
@@ -416,6 +582,70 @@ private:
     std::atomic<uint64_t> _last_pf_count{0};
     std::atomic<int64_t> _last_pf_time{0};
     std::atomic<uint64_t> _pf_per_sec{0};
+
+    // ---- Edit-visibility lock ------------------------------------------
+    // The glitch filter and signal invert rewrite leaf-block content IN PLACE
+    // (bytes + mipmap + tog/first/last). On a FINITE capture the public
+    // readers bypass _mutex entirely — they synchronize on
+    // committed_sample_count() — so without this lock a renderer could
+    // observe a block whose `tog` bit had been cleared but whose bytes were
+    // only half written, and paint a garbage waveform for a frame.
+    //
+    // Readers take it SHARED, the edit writer takes it EXCLUSIVE for the
+    // duration of ONE BATCH (not the whole pass). A reader therefore never
+    // waits longer than a single batch, which is what keeps the GUI
+    // responsive; the writer is a background thread, so making it wait for
+    // readers costs nothing user-visible.
+    //
+    // Deliberately NOT _mutex: that one is recursive and guards the
+    // capture/structure lifecycle (its recursion is genuinely relied upon by
+    // recalc_mipmap -> calc_mipmap and revert_all_edits -> invert_channel),
+    // and readers must be able to enter concurrently with each other.
+    //
+    // MUST be acquired after _mutex, never before (writer order is
+    // _mutex -> _edit_visibility); readers take only this one, so there is no
+    // cycle. Do not nest acquisitions of this lock in one thread:
+    // std::shared_mutex is not recursive and a shared -> shared upgrade
+    // behind a waiting writer would deadlock.
+    //
+    // NOT covered by this lock: get_samples() iterators. They hand out a raw
+    // pointer that the decoder keeps reading after the call returns, so no
+    // per-call lock can protect it — that is the pre-existing `_able_free`
+    // contract. Edit passes additionally drain iterators (bounded) before
+    // writing; see LogicSnapshotGlitchFilter::apply_glitch_filter.
+    mutable std::shared_mutex _edit_visibility;
+
+    // Edit revision counter. ODD = an edit transaction is open (readers must
+    // synchronize); EVEN = the content is a complete, self-consistent
+    // revision. It is only ever modified while _edit_visibility is held
+    // exclusively, which is what makes the unlocked reader fast path below
+    // sound: a reader that holds nothing can detect "a writer slipped in" by
+    // re-reading this, and a reader that holds the shared lock cannot see it
+    // change at all.
+    //
+    // This exists because taking the shared lock unconditionally on every
+    // sample read is far too expensive: it measured 3-7x slower on the data
+    // query paths (millions of get_sample()/pattern_search() calls). With the
+    // counter, the common case costs two acquire loads instead of a lock.
+    std::atomic<uint64_t> _edit_epoch{0};
+    static constexpr int kEditReadRetries = 8;
+
+    // Debug-build conformance counter: non-zero exactly while an
+    // EditWriteGuard is alive. Every in-place writer of published leaf data
+    // asserts on it (see edit_write_owned()), so a future writer that forgets
+    // the guard fails loudly in debug instead of silently reintroducing the
+    // torn-revision read this whole mechanism exists to prevent.
+    std::atomic<int> _edit_write_depth{0};
+
+public:
+    /// True while this thread (or any thread) holds an EditWriteGuard on this
+    /// snapshot. Used by the in-place write sites as a debug conformance check;
+    /// do not branch on it in production logic.
+    bool edit_write_owned() const {
+        return _edit_write_depth.load(std::memory_order_relaxed) > 0;
+    }
+
+private:
 
     // Extracted disk-cache/async-writer subsystem (cluster D). Declared LAST so
     // its destructor (which joins the async writer thread) runs FIRST — before

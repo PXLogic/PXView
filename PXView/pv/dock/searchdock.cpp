@@ -429,6 +429,12 @@ void SearchDock::on_frame_ended() {
 
 int64_t SearchDock::find_match_end(data::LogicSnapshot *snapshot,
                                    int64_t start_pos) {
+  // Pin one revision for the whole walk. Each get_sample() below is
+  // individually consistent, but the loop advances sample by sample and a
+  // glitch-filter batch landing mid-walk would decide the match on a mixture
+  // of two revisions. See LogicSnapshot::EditReadPin.
+  data::LogicSnapshot::EditReadPin read_pin(snapshot);
+
   const int64_t end = snapshot->get_sample_count() - 1;
   bool has_edge = false;
   for (auto &it : _pattern) {

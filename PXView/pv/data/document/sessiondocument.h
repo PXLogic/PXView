@@ -129,6 +129,16 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
 
   std::vector<std::shared_ptr<DecoderStack>> &
   get_decoder_stacks(SessionDocument *doc = nullptr) override;
+
+  /// Thread-safe COPY of the decoder stacks. Use this from non-GUI threads:
+  /// the raw get_decoder_stacks() reference above is unsynchronized and races
+  /// add_decoder_stack / remove_decoder_stack / clear_decoder_stacks, which all
+  /// run on the GUI thread. Mirrors signal_models_snapshot().
+  std::vector<std::shared_ptr<DecoderStack>> decoder_stacks_snapshot() const {
+    std::lock_guard<std::mutex> lk(_stacks_mutex);
+    return _decoder_stacks;
+  }
+
   void add_decoder_stack(std::shared_ptr<DecoderStack> stack);
   void remove_decoder_stack(std::shared_ptr<DecoderStack> stack);
   // 并发安全地清空解码器栈（含 stop）。load_capture/set_device（MCP worker

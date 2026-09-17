@@ -68,7 +68,14 @@ bool LogicSnapshotPatternSearch::pattern_search(int64_t start, int64_t end,
       start = 0;
     if (end >= (int64_t)sample_count)
       end = (int64_t)sample_count - 1;
-    return pattern_search_self(start, end, index, pattern, isNext);
+    // Exclude an in-flight edit batch. `pattern` is read-only in
+    // pattern_search_self, and `index` is advanced by reference, so a retry
+    // just has to put the search cursor back.
+    const int64_t index_in = index;
+    return _host->consistent_read([&] {
+      index = index_in;
+      return pattern_search_self(start, end, index, pattern, isNext);
+    });
   }
 
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);

@@ -181,6 +181,42 @@ void SessionStateContext::clear_all_decode_task2() {
   _decode_task_manager->clear_all_decode_task2();
 }
 
+void SessionStateContext::restart_decode_tasks() {
+  // 解码任务生命周期的单一实现（原 SigSession::restart_decoders 的顺序骨架）。
+  // 拆出来的理由：FilterProcessor 必须在广播 GlitchFilterCompleted 等通知
+  // **之前**完成这次状态转换（Command/Notice 拆分），而它只持有
+  // ISessionState/ISessionCoordination，够不到 SigSession。
+  //
+  // 线程：在调用方（worker）线程上执行。clear_all_decode_task2() 会 join 解码
+  // worker，这正是 DataFeedParser 在数据源线程上做同一件事的原因。
+  _decode_task_manager->clear_all_decode_task2();
+
+  // 丢弃按改写前样本算出的注解。
+  _capture_manager->clear_decode_result();
+
+  // 取一份**加锁快照**再遍历：本方法跑在 worker 线程上，而
+  // decode_traces() 返回的是文档内部 vector 的引用，GUI 线程可能正在
+  // add/remove/clear 同一份栈（原实现在主线程上调用，不存在这个问题）。
+  data::SessionDocument *doc = _document_registry->get_capture_owner_document()
+                                   ? _document_registry->get_capture_owner_document()
+                                   : _document_registry->get_active_document();
+
+  std::vector<std::shared_ptr<data::DecoderStack>> stacks;
+  if (doc)
+    stacks = doc->decoder_stacks_snapshot();
+
+  if (stacks.empty())
+    return;
+
+  // 逐栈推进版本号：API/MCP 消费方据此作废绑定在旧版本上的缓存结果。
+  for (auto &stack : stacks) {
+    if (stack)
+      stack->bump_version();
+  }
+
+  _decode_task_manager->start_all_decode_tasks();
+}
+
 void SessionStateContext::add_decode_task(
     std::shared_ptr<data::DecoderStack> stack) {
   _decode_task_manager->add_decode_task(stack);
@@ -427,13 +463,12 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
 }
 
 void SessionStateContext::clear_glitch_filter_state_for_capture() {
-  // 新采集开始时调用:清除滤波激活状态和 backup,
+  // 新采集开始时调用:清除滤波激活状态,
   // 但保留 thresholds/modes(供 auto-apply 使用)。
   // 不恢复数据 — _view_data->get_logic() 已被 clear(),无数据可恢复。
-  // Track B3: _logic_backup is now unique_ptr — use reset() instead of delete
-  if (_buffers->view_data()->_logic_backup) {
-    _buffers->view_data()->_logic_backup.reset();
-  }
+  // 撤销信息现在由 LogicSnapshot 的可逆编辑日志承载,随快照一起被 clear()
+  // 丢弃(free_data()/init_all() 会 clear_edits()),这里无需再手工释放
+  // backup 快照。
   if (_buffers->view_data()->_glitch_filter_active) {
     _buffers->view_data()->_glitch_filter_active = false;
     _event_bus->broadcast_async<interface::GlitchFilterCleared>({});

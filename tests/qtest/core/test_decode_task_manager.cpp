@@ -144,6 +144,9 @@ public:
 
     // --- coordination / notification (ISessionCoordination half) ---
     void clear_all_decode_task2() override {}
+    // FilterProcessor's post-edit decode replay command. This stub has no
+    // document/decode wiring, so the no-op is the correct behaviour.
+    void restart_decode_tasks() override {}
     void add_decode_task(std::shared_ptr<DecoderStack>) override {}
     void attach_data_to_signal(pv::SessionData *) override {}
     void sync_trigger_to_libsigrok(bool) override {}

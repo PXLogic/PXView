@@ -1130,7 +1130,8 @@ void Header::contextMenuEvent(QContextMenuEvent *event) {
     if (!model)
       return false;
     const int sig_index = model->index();
-    return !logic_sig->data()->get_filtered_ranges(sig_index).empty();
+    const auto ranges = logic_sig->data()->get_filtered_ranges(sig_index);
+    return ranges && !ranges->empty();
   }();
   clear_act->setEnabled(channel_filtered);
 

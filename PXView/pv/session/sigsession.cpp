@@ -160,6 +160,12 @@ SigSession::SigSession() {
   _event_subscriptions.push_back(
       _event_bus->subscribe<interface::CollectStart>(
           [this](const interface::CollectStart &) { on_collect_start(); }));
+  // NOTE: no subscription for GlitchFilterCompleted / SignalInvertCompleted /
+  // *Cleared. The decode replay those events used to trigger is a state
+  // transition, and per the Command/Notice split (AGENTS.md) it must be an
+  // explicit command issued by FilterProcessor BEFORE the notice is broadcast
+  // — see ISessionCoordination::restart_decode_tasks(). Subscribing here would
+  // put the mutation back inside a notice handler.
 
   // Managers are constructed after _event_bus (they hold a raw pointer to it)
   // and after _state (they hold a raw pointer to it). FilterProcessor accesses
@@ -1389,10 +1395,19 @@ void SigSession::init_signals() {
   // [group3 crash fix] init_signals is a capture/config boundary that clears
   // view_data / rebuilds signal models below, destroying the live logic
   // snapshot. A running glitch-filter/invert background task reads that
-  // snapshot by raw pointer (copy_from/apply); wait for it to finish first,
-  // else SIGSEGV in LogicSnapshot::copy_from (group3 test_36 crash).
-  if (_filter_processor) {
-    _filter_processor->wait_idle();
+  // snapshot by raw pointer; wait for it to finish first, else
+  // use-after-free (group3 test_36 crash).
+  //
+  // The wait is bounded AND the failure is fatal for this call: falling
+  // through after a timeout would drop the snapshot out from under the
+  // worker, which is exactly the crash the guard exists to prevent. The
+  // previous unbounded wait "worked" only by freezing the event loop for the
+  // whole duration of the filter pass.
+  if (_filter_processor && !_filter_processor->wait_idle(60000)) {
+    pxv_err("init_signals: glitch-filter/invert still running after 60s; "
+            "aborting the signal rebuild rather than destroying the live "
+            "snapshot underneath the worker");
+    return;
   }
 
   _state->capture_data()->clear();
@@ -3596,13 +3611,11 @@ bool SigSession::is_glitch_filter_active() {
 }
 
 void SigSession::clear_glitch_filter_state_for_capture() {
-  // 新采集开始时调用:清除滤波激活状态和 backup,
+  // 新采集开始时调用:清除滤波激活状态,
   // 但保留 thresholds/modes(供 auto-apply 使用)。
   // 不恢复数据 — _state->view_data()->get_logic() 已被 clear(),无数据可恢复。
-  // Track B3: unique_ptr reset() replaces manual delete
-  if (_state->view_data()->_logic_backup) {
-    _state->view_data()->_logic_backup.reset();
-  }
+  // 撤销信息由 LogicSnapshot 的可逆编辑日志承载,随快照一起被丢弃
+  // (free_data()/init_all() → clear_edits()),这里无需再释放 backup 快照。
   if (_state->view_data()->_glitch_filter_active) {
     _state->view_data()->_glitch_filter_active = false;
     _event_bus->broadcast_async<interface::GlitchFilterCleared>({});
@@ -3622,11 +3635,17 @@ void SigSession::restart_decoders() {
   if (decode_traces().empty())
     return;
 
-  // Stop running decoders
-  clear_all_decode_task2();
-  _capture_manager->clear_decode_result();
-
-  // Copy current data to document for decoders
+  // Document re-share (zero-copy shared_ptr hand-off) — this half is the
+  // document-binding side and stays here, because it is a View/detail-visible
+  // decision that belongs with the caller. The decode-task lifecycle itself is
+  // now single-sourced in SessionStateContext::restart_decode_tasks() so that
+  // FilterProcessor can run it as an explicit command from a worker thread
+  // without a second copy of the sequence existing somewhere else.
+  //
+  // Order note: the copy used to happen AFTER stopping the decoders. Doing it
+  // first is harmless — the re-share only reassigns the document's shared_ptr,
+  // while each DecoderStack keeps its own reference — and it keeps the
+  // "stop → clear → bump → start" block atomic inside the delegated command.
   auto doc =
       _document_registry->get_capture_owner_document()
           ? _document_registry->get_capture_owner_document()
@@ -3635,21 +3654,22 @@ void SigSession::restart_decoders() {
     copy_data_to_document(doc);
   }
 
-  // restart_decoders() reuses the existing DecoderStack instances in place
-  // (it does NOT create new ones, so they keep their handle_id). Bump the
-  // version on each stack so API/MCP consumers can invalidate any cached
-  // results bound to a prior version.
-  for (auto stack : decode_traces()) {
-    if (stack)
-      stack->bump_version();
-  }
-
-  start_all_decode_tasks();
+  // Was inlined here: clear_all_decode_task2 → clear_decode_result →
+  // bump_version on each stack (so API/MCP consumers invalidate results bound
+  // to a prior version) → start_all_decode_tasks.
+  _state->restart_decode_tasks();
 }
 
 void SigSession::start_all_decode_tasks() {
   _decode_task_manager->start_all_decode_tasks();
 }
+
+// on_snapshot_edited() removed: the post-edit decode replay is now an explicit
+// COMMAND issued by FilterProcessor BEFORE it broadcasts GlitchFilterCompleted
+// / SignalInvertCompleted etc. (ISessionCoordination::restart_decode_tasks),
+// instead of a state transition performed inside the notice's subscriber —
+// which is what the AGENTS.md Command/Notice split forbids and what the
+// notification-system audit in the V1.6.4 section was cleaning up.
 
 // --- DecodeTaskManager forwarding wrappers --------------------------------
 void SigSession::rst_decoder(int index, data::SessionDocument *doc) {

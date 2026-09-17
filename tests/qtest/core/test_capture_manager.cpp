@@ -110,6 +110,7 @@ public:
 
     // --- ISessionCoordination ---
     void clear_all_decode_task2() override {}
+    void restart_decode_tasks() override {}
     void add_decode_task(std::shared_ptr<pv::data::DecoderStack>) override {}
     void attach_data_to_signal(pv::SessionData*) override {}
     void sync_trigger_to_libsigrok(bool) override {}

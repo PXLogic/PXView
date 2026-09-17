@@ -47,27 +47,46 @@ public:
     /// different size will trigger an assert (debug) and fall through to
     /// malloc (release) to avoid returning an undersized block.
     void* acquire(size_t block_size) {
-        std::lock_guard<std::mutex> lock(_mutex);
+        void* ptr = nullptr;
+        bool size_mismatch = false;
 
-        // MS-1 fix: validate block_size against the pool's fixed size.
-        if (_block_size == 0) {
-            // First call — fix the pool's block size.
-            _block_size = block_size;
-        } else if (_block_size != block_size) {
-            // Size mismatch — the pool was initialized with a different size.
-            // This is a programming error. In debug builds, assert; in
-            // release, fall through to malloc so the caller gets a valid
-            // (correctly-sized) block instead of a recycled too-small one.
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+
+            // MS-1 fix: validate block_size against the pool's fixed size.
+            if (_block_size == 0) {
+                // First call — fix the pool's block size.
+                _block_size = block_size;
+            } else if (_block_size != block_size) {
+                // Size mismatch — the pool was initialized with a different
+                // size. This is a programming error. In debug builds assert;
+                // in release fall through to malloc so the caller gets a
+                // correctly-sized block instead of a too-small recycled one.
+                size_mismatch = true;
+            }
+
+            if (!size_mismatch && !_free_blocks.empty()) {
+                ptr = _free_blocks.back();
+                _free_blocks.pop_back();
+            }
+        }
+
+        if (ptr)
+            return ptr;
+
+        if (size_mismatch) {
             assert(false && "LeafBlockPool::acquire: block_size mismatch — "
                    "pool was initialized with a different size");
-            return malloc(block_size);
         }
 
-        if (!_free_blocks.empty()) {
-            void* ptr = _free_blocks.back();
-            _free_blocks.pop_back();
-            return ptr;
-        }
+        // malloc() MUST stay outside the lock. A leaf block is ~2.03 MB, well
+        // above glibc's mmap threshold and Windows' small-block heap path, so
+        // this routinely enters the kernel to service a page-table / commit
+        // request. Holding the process-wide pool mutex across that call
+        // serialized every decoder thread and the filter worker behind
+        // microsecond-to-millisecond syscalls. The free list itself is a
+        // pointer pop, so the critical section above is now O(1) and
+        // allocation is fully concurrent.
         return malloc(block_size);
     }
 

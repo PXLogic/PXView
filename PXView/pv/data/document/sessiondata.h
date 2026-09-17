@@ -76,8 +76,11 @@ public:
   void clear();
 
   uint64_t _cur_snap_samplerate, _cur_samplelimits, _trig_pos;
-  // Track B3: _logic_backup owned via unique_ptr (was raw pointer)
-  std::unique_ptr<data::LogicSnapshot> _logic_backup;
+  // NOTE: the former `_logic_backup` full-snapshot deep copy is gone. Filter
+  // and invert undo now lives inside LogicSnapshot as a reversible edit log
+  // (LogicSnapshot::revert_all_edits), which costs O(bytes rewritten) instead
+  // of a second complete copy of the sample store and never tears down the
+  // mmap allocator. See logicsnapshot_glitch_filter.h.
   bool _glitch_filter_active, _signal_invert_active;
   bool _glitch_filter_auto_apply = false;  // 采集后自动重新应用滤波
   bool _show_glitch_filter_overlay = true; // 显示波形轨道红色滤波提示叠加层

@@ -50,6 +50,12 @@ std::vector<PulseAnalyzer::Pulse> PulseAnalyzer::find_pulses(
     if (scan_end == 0)
         return pulses;
 
+    // 整趟扫描钉住一个版本。get_sample / get_nxt_edge 只保证**单次调用**不会
+    // 读到撕裂版本; 这个循环要调用上百万次, 若中途插进一批毛刺滤波写入, 脉冲
+    // 统计就会由"两个版本拼起来"的数据算出 —— 每次读取都对, 合起来是错的。
+    // 直方图是持久产物(还用于滤波阈值推荐), 不能容忍这种混合。
+    LogicSnapshot::EditReadPin read_pin(snap);
+
     // 读取第 0 个采样作为初始基准电平
     // (get_sample / get_nxt_edge 内部均已处理 _loop_offset,这里使用用户坐标系)
     bool level = snap->get_sample(0, sig_index);

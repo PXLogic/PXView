@@ -783,11 +783,17 @@ void SessionEventDispatcher::on_glitch_filter_progress(const pv::interface::Glit
       MainWindow::tr("毛刺滤波进行中... %1%").arg(p), 2000);
 }
 void SessionEventDispatcher::on_glitch_filter_completed(const pv::interface::GlitchFilterCompleted &) {
+  // copy_data_to_document: 保持"本 tab 的文档拿到编辑后的快照"这一绑定决策
+  // (所有权文档 vs 渲染文档的裁决属于 View 侧, 见 on_copy_to_doc_done)。
+  //
+  // restart_decoders() 的职责已上移到 Core 的
+  // SigSession::on_snapshot_edited()（同一事件的订阅者）。原因是编辑前
+  // FilterProcessor 会先停解码, 而有停就必须有重启 —— 挂在 View 上的话
+  // pxviewd / MCP 这类没有 View 的进程会把解码永久停掉。
   pv::TabContext *ctx = _window->current_context();
   if (ctx && ctx->document()) {
     _window->session()->copy_data_to_document(ctx->document());
   }
-  _window->session()->restart_decoders();
   if (auto *v = safe_current_view()) {
     v->on_glitch_filter_completed();
   }
@@ -797,7 +803,6 @@ void SessionEventDispatcher::on_glitch_filter_cleared(const pv::interface::Glitc
   if (ctx && ctx->document()) {
     _window->session()->copy_data_to_document(ctx->document());
   }
-  _window->session()->restart_decoders();
   if (auto *v = safe_current_view()) {
     v->on_glitch_filter_cleared();
   }
@@ -807,18 +812,18 @@ void SessionEventDispatcher::on_signal_invert_started(const pv::interface::Signa
     _window->disk_cache_status_label()->setText(MainWindow::tr("信号反相处理中..."));
 }
 void SessionEventDispatcher::on_signal_invert_completed(const pv::interface::SignalInvertCompleted &) {
+  // 重启解码见 on_glitch_filter_completed 的说明（已上移到 Core）。
   pv::TabContext *ctx2 = _window->current_context();
   if (ctx2 && ctx2->document()) {
     _window->session()->copy_data_to_document(ctx2->document());
   }
-  _window->session()->restart_decoders();
 }
 void SessionEventDispatcher::on_signal_invert_cleared(const pv::interface::SignalInvertCleared &) {
+  // 重启解码见 on_glitch_filter_completed 的说明（已上移到 Core）。
   pv::TabContext *ctx2 = _window->current_context();
   if (ctx2 && ctx2->document()) {
     _window->session()->copy_data_to_document(ctx2->document());
   }
-  _window->session()->restart_decoders();
 }
 
 // --- Trigger group ---

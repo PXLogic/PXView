@@ -2,6 +2,7 @@
 #define PXVIEW_CORE_THREAD_POOL_H
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -65,11 +66,32 @@ public:
   /// Block until all queued tasks are completed and no worker is active.
   /// Thread-safe. Can be called concurrently with submit() (it will
   /// wait for tasks submitted before the call).
+  ///
+  /// WARNING: unbounded. Never call this from the GUI thread — a long task
+  /// (e.g. glitch filter over a 1 GS/s capture) would freeze the event loop
+  /// and the window manager would mark the app "not responding". Use
+  /// wait_for_idle_for() on any GUI-reachable path.
   void wait_for_idle() {
     std::unique_lock<std::mutex> lock(_mutex);
     _idle_cv.wait(lock, [this]() {
       return _tasks.empty() && _active_count.load() == 0;
     });
+  }
+
+  /// Bounded variant of wait_for_idle(). Returns true if the pool became idle
+  /// within `timeout`, false on timeout (the pool keeps running the task).
+  /// This is the only join variant safe to call from the GUI thread.
+  bool wait_for_idle_for(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(_mutex);
+    return _idle_cv.wait_for(lock, timeout, [this]() {
+      return _tasks.empty() && _active_count.load() == 0;
+    });
+  }
+
+  /// True when no task is queued and no worker is executing one.
+  bool is_idle() const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _tasks.empty() && _active_count.load() == 0;
   }
 
   /// Grow the pool to at least min_threads worker threads.

@@ -139,9 +139,17 @@ bool LogicSnapshotEdgeScan::get_display_edges(
       return false;
     }
 
-    return get_display_edges_common(edges, togs, start, end, width, max_togs,
-                                    pixels_offset, min_length, sig_index,
-                                    sample_count);
+    // Exclude an in-flight glitch-filter/invert batch: it rewrites tog/first/
+    // last and the mipmap levels in place, so an unlocked scan could mix the
+    // pre- and post-edit revisions of a block and emit a phantom edge.
+    // consistent_read() redos the scan if a writer slipped in mid-flight; the
+    // scan body already clears `edges`/`togs` on entry, so a retry is
+    // idempotent.
+    return _host->consistent_read([&] {
+      return get_display_edges_common(edges, togs, start, end, width, max_togs,
+                                      pixels_offset, min_length, sig_index,
+                                      sample_count);
+    });
   }
 
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
@@ -243,7 +251,14 @@ bool LogicSnapshotEdgeScan::get_nxt_edge(uint64_t &index, bool last_sample,
     const uint64_t sample_count = _host->committed_sample_count();
     if (sample_count == 0 || index > end || index >= sample_count)
       return false;
-    return get_nxt_edge_self(index, last_sample, end, min_length, sig_index);
+    // Edit-visibility against an in-flight batch (see get_display_edges
+    // above). get_nxt_edge_self advances `index` by reference, so the
+    // original has to be restored before a retry.
+    const uint64_t index_in = index;
+    return _host->consistent_read([&] {
+      index = index_in;
+      return get_nxt_edge_self(index, last_sample, end, min_length, sig_index);
+    });
   }
 
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
@@ -408,7 +423,14 @@ bool LogicSnapshotEdgeScan::get_pre_edge(uint64_t &index, bool last_sample,
     const uint64_t sample_count = _host->committed_sample_count();
     if (sample_count == 0 || index >= sample_count)
       return false;
-    return get_pre_edge_self(index, last_sample, min_length, sig_index);
+    // Edit-visibility against an in-flight batch (see get_display_edges
+    // above). get_pre_edge_self advances `index` by reference, so the
+    // original has to be restored before a retry.
+    const uint64_t index_in = index;
+    return _host->consistent_read([&] {
+      index = index_in;
+      return get_pre_edge_self(index, last_sample, min_length, sig_index);
+    });
   }
 
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);

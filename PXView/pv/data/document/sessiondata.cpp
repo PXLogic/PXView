@@ -32,7 +32,6 @@ SessionData::SessionData() {
   _cur_snap_samplerate = 0;
   _cur_samplelimits = 0;
   _trig_pos = 0;
-  _logic_backup = nullptr;
   _glitch_filter_active = false;
   _glitch_filter_modes.clear();
   _signal_invert_active = false;
@@ -62,8 +61,6 @@ void SessionData::clear() {
     _dso->set_samplerate(sr);
   }
   _trig_pos = 0;
-  // Track B3: unique_ptr auto-releases on reset
-  _logic_backup.reset();
   _glitch_filter_active = false;
   // 架构修复：clear() 不清除 thresholds/modes/auto_apply。
   // 这些是用户配置（滤波面板滑块位置），不是数据。

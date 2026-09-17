@@ -21,10 +21,20 @@ enum class GlitchFilterMode : int;
 
 namespace pv {
 
+namespace data {
+class LogicSnapshot;
+} // namespace data
+
 namespace core {
 
 class EventBus;
 class SessionStateContext;
+
+// Upper bound on how long a GUI-reachable clear path will wait for a busy
+// writer before giving up. Chosen to be imperceptible when it does fire, and
+// far shorter than a filter pass over a large capture — the whole point is
+// that the GUI degrades to "did nothing, try again" instead of freezing.
+constexpr int kEditLockWaitMs = 200;
 
 /**
  * FilterProcessor — owns the glitch filter and signal invert background
@@ -56,14 +66,44 @@ public:
   /// Block (bounded) until no glitch-filter / signal-invert background task
   /// is running. Called by capture/config boundaries (init_signals / capture
   /// start) BEFORE they clear or rebuild the live logic snapshot, because a
-  /// running task reads that snapshot by raw pointer (copy_from/apply) and
+  /// running task reads that snapshot by raw pointer (apply/revert) and
   /// would SIGSEGV if it were destroyed underneath it (group3 test_36 crash).
-  void wait_idle(int max_wait_ms = 15000);
+  ///
+  /// Returns true if the pool became idle within `max_wait_ms`, false on
+  /// timeout. The timeout is honoured: the previous implementation ignored
+  /// the parameter and waited forever, so any GUI-reachable caller
+  /// (init_signals on a samplerate change / re-capture / device switch)
+  /// stalled the event loop for the whole duration of a running task.
+  ///
+  /// When it returns false the caller MUST NOT tear down the snapshot; the
+  /// safe response is to defer/abort the rebuild (the task itself holds
+  /// _edit_mutex and will finish on its own).
+  bool wait_idle(int max_wait_ms = 15000);
 
 private:
   void glitch_filter_task(const std::map<int, uint32_t> thresholds,
                           const std::map<int, GlitchFilterMode> filter_modes);
   void signal_invert_task(const std::vector<bool> channels);
+
+  /// Rebuild the live snapshot into the target state
+  /// "capture data -> signal invert -> glitch filter", starting from
+  /// Snapshot::revert_all_edits() (capture-original) instead of copying a
+  /// whole backup snapshot back in.
+  ///
+  /// Returns false when the pass failed (allocation failure or edit-log
+  /// budget exhaustion) AND the snapshot was rolled back to capture-original
+  /// data. A false return must be treated as "the filter did not take
+  /// effect" — the previous code left _glitch_filter_active = true anyway,
+  /// which produced the "partially filtered but reported as successful"
+  /// state that looks exactly like a stuck filter.
+  bool rebuild_filtered_state(const std::map<int, uint32_t> &thresholds,
+                              const std::map<int, GlitchFilterMode> &filter_modes);
+
+  /// Bit-invert the requested channels. Iterates SignalModels (the source of
+  /// truth for channel metadata) so the boolean-index correspondence matches
+  /// the View layer's channel ordering.
+  void apply_signal_invert(data::LogicSnapshot *logic,
+                           const std::vector<bool> &channels);
 
   EventBus *_event_bus;
   ISessionState *_state;
@@ -74,6 +114,11 @@ private:
   ThreadPool _filter_pool;
 
   std::atomic<bool> _glitch_filter_running;
+  // Cooperative cancellation for an in-flight pass. Raised by wait_idle()
+  // before it starts waiting, so a capture/config boundary does not have to
+  // sit through the remainder of a long filter — the scan polls this once per
+  // iteration and stops. Cleared afterwards so later passes run normally.
+  std::atomic<bool> _filter_cancel{false};
   // S1/H2 fix: mutex protects the launch path (check _running + submit task)
   // so concurrent callers cannot both see _running==false and create
   // duplicate tasks.
@@ -87,15 +132,19 @@ private:
   // H2 fix: same TOCTOU protection for signal invert launch path
   std::mutex _signal_invert_launch_mutex;
 
-  // [group3 crash fix] Serializes all access to the (live logic snapshot,
-  // _logic_backup) pair. glitch_filter_task / signal_invert_task (worker) and
-  // clear_glitch_filter (main thread) each perform copy_from(live <-> backup);
-  // running two of them concurrently causes a cross copy_from race: one thread
-  // frees/reconstructs the live snapshot's leaf blocks while the other memcpy's
-  // from that same block -> SIGSEGV in LogicSnapshot::copy_from. One mutex
-  // across all three makes the accessible data stable (crashed the group3 E2E
-  // at test_36_glitch_filter_i2c_e2e.py).
-  std::mutex _backup_mutex;
+  // Serializes every writer of the live snapshot's derived state: the
+  // glitch-filter task, the signal-invert task, and the two clear paths.
+  // Before the reversible-edit refactor these paths performed
+  // copy_from(live <-> backup); two concurrent copy_from calls raced and
+  // SIGSEGV'd (group3 test_36). The same mutual exclusion is still required
+  // now that the paths replay an edit log, so the requirement is unchanged.
+  //
+  // std::timed_mutex (not std::mutex) is deliberate: clear_glitch_filter /
+  // clear_signal_invert are reachable from the GUI thread, and they must
+  // degrade to "try, then give up" instead of blocking the event loop behind
+  // a multi-second background pass. See the guard ordering note in
+  // clear_glitch_filter().
+  std::timed_mutex _edit_mutex;
 };
 
 } // namespace core

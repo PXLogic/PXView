@@ -69,6 +69,22 @@ public:
     virtual void add_decode_task(std::shared_ptr<data::DecoderStack> stack) = 0;
     virtual void attach_data_to_signal(SessionData *data) = 0;
 
+    /// Explicit COMMAND (never something an event subscriber may do): re-derive
+    /// the decode output because the capture samples changed. Stops the decode
+    /// tasks, discards the annotations computed from the previous samples,
+    /// bumps each stack's version (so API/MCP consumers drop cached results)
+    /// and starts decoding again.
+    ///
+    /// FilterProcessor calls this BEFORE broadcasting GlitchFilterCompleted /
+    /// GlitchFilterCleared / SignalInvertCompleted / SignalInvertCleared, so
+    /// those events stay pure notices and their subscribers observe a
+    /// consistent state — the Command/Notice split in AGENTS.md.
+    ///
+    /// Runs on the caller's (worker) thread: clear_all_decode_task2() joins the
+    /// decode workers, which DataFeedParser already does from the datafeed
+    /// thread for the same reason.
+    virtual void restart_decode_tasks() = 0;
+
     // --- Trigger coordination (Spec v2) ---
     virtual void sync_trigger_to_libsigrok(bool disable_trigger = false) = 0;
 

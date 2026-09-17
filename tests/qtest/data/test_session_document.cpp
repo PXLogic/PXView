@@ -277,7 +277,11 @@ void TestSessionDocument::SessionDataDefaultEmpty() {
     QCOMPARE(data._trig_pos, uint64_t(0));
     QVERIFY(!data._glitch_filter_active);
     QVERIFY(!data._signal_invert_active);
-    QVERIFY(data._logic_backup == nullptr);
+    // The full-snapshot undo buffer (_logic_backup) was replaced by the
+    // snapshot's reversible edit log, so the equivalent invariant is "a fresh
+    // snapshot carries no recorded filter/invert edits to undo".
+    QVERIFY(!data.get_logic()->has_filter_edits());
+    QVERIFY(!data.get_logic()->edit_log_overflowed());
 }
 
 void TestSessionDocument::SessionDataClearCreatesNewSnapshots() {

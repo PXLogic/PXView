@@ -24,9 +24,12 @@
 #ifndef PXVIEW_PV_DATA_LOGICSNAPSHOT_GLITCH_FILTER_H
 #define PXVIEW_PV_DATA_LOGICSNAPSHOT_GLITCH_FILTER_H
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 // This header needs the full definition of LogicSnapshot because the public
@@ -52,22 +55,69 @@ public:
     ~LogicSnapshotGlitchFilter();
 
     // ---- Glitch filter API (forwarded by LogicSnapshot) ----
+    //
+    // `cancel`, when non-null, is polled once per scan iteration. A capture or
+    // configuration boundary that has to invalidate the snapshot can raise it
+    // to make an in-flight pass finish promptly instead of blocking the
+    // boundary for the whole pass. The pass stops at the next iteration and
+    // leaves a partially applied result — the caller is responsible for
+    // reverting (revert_all_edits()).
     void apply_glitch_filter(int sig_index, uint32_t threshold,
                              std::function<void(int)> progress_callback,
-                             GlitchFilterMode filter_mode = GlitchFilterMode::Both);
+                             GlitchFilterMode filter_mode = GlitchFilterMode::Both,
+                             const std::atomic<bool> *cancel = nullptr);
     // 架构修复：thresholds/modes 用 channel_index 作 key，消除 View/Core 位置序号错位
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds,
                                  std::function<void(int)> progress_callback,
-                                 const std::map<int, GlitchFilterMode> &filter_modes = {});
+                                 const std::map<int, GlitchFilterMode> &filter_modes = {},
+                                 const std::atomic<bool> *cancel = nullptr);
     bool is_glitch_filtered() const;
     void set_glitch_filtered(bool filtered);
 
     // Persisted filtered ranges for View-layer overlay rendering.
-    const std::vector<LogicSnapshot::FillRange>& get_filtered_ranges(int sig_index) const;
+    //
+    // Returned by value as a shared_ptr to an IMMUTABLE table (see
+    // _published_ranges). The previous API returned `const&` into a vector
+    // that the worker thread was concurrently push_back()-ing into, so a
+    // reallocation could hand the render thread a dangling iterator. With
+    // publication the reader keeps a ref-counted snapshot alive for as long
+    // as it needs it and can never observe a mutation.
+    //
+    // The returned table is sorted by `start` (the filter scans samples in
+    // ascending order), so callers can binary-search the visible window
+    // instead of walking every range per frame.
+    std::shared_ptr<const std::vector<LogicSnapshot::FillRange>>
+    get_filtered_ranges(int sig_index) const;
     void clear_filtered_ranges();
 
     // Signal invert (rebuilds mipmap per block).
     void invert_channel(int sig_index);
+
+    // ------------------------------------------------------------------
+    // Reversible edit log
+    // ------------------------------------------------------------------
+    // Every destructive write to leaf-block sample bytes (glitch-filter
+    // fill, signal invert) is preceded by recording the bytes it is about
+    // to overwrite. revert_all_edits() replays the log in reverse and
+    // restores the capture-original content.
+    //
+    // This replaces the former "deep-copy the whole snapshot into
+    // _logic_backup" undo strategy, which cost a second full copy of the
+    // sample store (976 MB for 8 channels x 1 GS/s) plus a complete
+    // MmapAllocator reset/unmap on every re-filter. Here the cost is
+    // proportional to the number of bytes actually rewritten (a handful of
+    // samples per removed glitch), and — crucially — no published block is
+    // ever freed or unmapped, so the lock-free finite-capture readers keep
+    // their "no block is freed during capture" invariant intact.
+    void revert_all_edits();
+    bool has_edits() const;
+    /// Forget the edit log without restoring. Only for snapshot teardown
+    /// (free_data / init_all), where the blocks are being dropped anyway.
+    void clear_edits();
+    /// True when the edit log hit its budget during the last pass, meaning
+    /// the filter was aborted mid-way. Callers must revert and report a
+    /// failure rather than leaving a partially filtered snapshot behind.
+    bool edit_log_overflowed() const { return _edit_log_overflow; }
 
 private:
     // Recompute mipmap for a single leaf block. Extracted from
@@ -75,12 +125,54 @@ private:
     // apply_glitch_filter's batch flush.
     void recalc_mipmap(unsigned int order, uint64_t index0, uint64_t index1);
 
-private:
+    // Record the original bytes of [byte_lo, byte_hi) inside block
+    // (order, idx0, idx1) of _host->_ch_data BEFORE they are overwritten.
+    // `allocated` marks the RLE case where the block did not exist and was
+    // just materialised — reverting then means freeing it again and
+    // restoring the nullptr (unwritten/constant) representation.
+    void record_edit(unsigned int order, uint64_t idx0, uint64_t idx1,
+                     uint64_t byte_lo, uint64_t byte_hi, bool allocated);
+
+    /// One reversible write. Replaying all records in reverse order
+    /// restores the exact pre-edit byte stream, including the case where a
+    /// single block was rewritten across multiple batches.
+    struct EditRecord {
+        uint32_t order = 0;
+        uint64_t idx0 = 0;
+        uint64_t idx1 = 0;
+        uint64_t byte_lo = 0;          // offset inside the leaf data region
+        bool     allocated = false;    // block was materialised by this edit
+        std::vector<uint8_t> bytes;    // original bytes (empty when allocated)
+        // Only meaningful for `allocated` records: recalc_mipmap() bails out
+        // for a nullptr block, so the constant-value metadata (tog/first/last)
+        // of the pre-materialisation RLE representation has to be restored
+        // explicitly instead of being recomputed from the data.
+        uint64_t meta_tog = 0;
+        uint64_t meta_first = 0;
+        uint64_t meta_last = 0;
+    };
+
     LogicSnapshot *_host;
 
     bool        _glitch_filtered;
-    std::map<int, std::vector<LogicSnapshot::FillRange>> _filtered_ranges_per_channel;
-    static const std::vector<LogicSnapshot::FillRange> _empty_filtered_ranges;
+
+    // Reversible edit log. Appended by the worker while it writes; replayed
+    // in reverse by revert_all_edits().
+    std::vector<EditRecord> _edits;
+    uint64_t _edit_bytes = 0;
+    bool     _edit_log_overflow = false;
+    // Leaf-block orders (indices into _host->_ch_data) that are currently
+    // bit-inverted. Invert is an involution, so undoing it is running it
+    // again — but only if we know it is still applied.
+    std::vector<unsigned int> _inverted_orders;
+
+    // Published filtered-range tables, one per signal index. Written only
+    // after a channel's filter pass completes, so readers always observe a
+    // complete table. _ranges_mutex is held for the duration of a pointer
+    // copy by readers and a pointer swap by the writer, never across
+    // filtering work.
+    mutable std::mutex _ranges_mutex;
+    std::map<int, std::shared_ptr<const std::vector<LogicSnapshot::FillRange>>> _published_ranges;
 };
 
 // ----------------------------------------------------------------------------

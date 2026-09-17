@@ -537,6 +537,10 @@ private:
   // Frozen→Live 回边挂点（repeat 模式连续帧），见
   // DocumentRegistry::on_capture_frame_started。
   void on_collect_start();
+  // on_snapshot_edited() 已删除：采样编辑后的重新解码改为 FilterProcessor 在
+  // 广播 GlitchFilterCompleted 等通知**之前**发出的显式命令
+  // （ISessionCoordination::restart_decode_tasks），不再由通知订阅者执行状态
+  // 转换（见 AGENTS.md 的 Command / Notice split 硬约束）。
 static sr_input_format *determine_input_file_format(const std::string &filename);
 data::Snapshot *get_signal_snapshot(); void clear_signals();
 std::shared_ptr<data::SignalModel> get_channel_by_index(int orgIndex);

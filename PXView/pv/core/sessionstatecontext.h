@@ -283,6 +283,10 @@ public:
   void clear_all_decode_task2() override;
   void add_decode_task(std::shared_ptr<data::DecoderStack> stack) override;
   void attach_data_to_signal(SessionData *data) override;
+  // 采样数据被就地改写后的"重新解码"命令。见 ISessionCoordination 的说明：
+  // 由 FilterProcessor 在广播通知之前显式调用。解码任务生命周期(停→清注解→
+  // bump→启)的单一实现，SigSession::restart_decoders() 复用它。
+  void restart_decode_tasks() override;
   // Core→libsigrok 触发配置唯一同步点。
   // disable_trigger=true 时（instant 模式）清除 session 上的 sr_trigger，
   // 让所有 driver（demo/pxlogic/fx2lafw）都不等待触发，立即采集数据。
