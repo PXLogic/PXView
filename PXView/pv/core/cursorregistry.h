@@ -53,6 +53,13 @@ namespace core {
  * SessionStateContext::data_mutex() inside SigSession::add_cursor /
  * remove_cursor / set_cursor_position overrides.
  *
+ * 更正（2026-09 核实）：上面"MCP 路径在 SigSession 的 cursor override 里取了
+ * data_mutex"这一约定**实际不存在**——sigsession.cpp 的 get_cursors /
+ * add_cursor / remove_cursor / clear_cursors 与 set_cursor_position 均未加锁。
+ * 现行串行化方式已改为：GUI 在主线程改，MCP 侧在 SessionService 层显式封送
+ * 主线程（get_cursors/add_cursor/remove_cursor 用 run_value_on_main_thread、
+ * clear_cursors 用 invoke_or_call）。
+ *
  * The registry uses positional indexing: add_cursor appends and
  * returns size-1; remove_cursor erases at the given position (shifting
  * subsequent entries down). This mirrors the positional semantics of

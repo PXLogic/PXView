@@ -121,7 +121,9 @@ using namespace pv::data;
  * force_release_capture_state（事件守卫紧急兜底）、have_decoded_result
  * （解码栈聚合）、restart_decoders/copy_data_to_document（stop+copy+
  * restart 编排）、on_load_config_end 等均有真实编排语义而非纯转发——
- * 机械下沉到消费方会复制逻辑或制造跨层耦合，属伪重构。
+ * （注：restart_decoders() 已删除：全仓零调用者，其 stop/clear/
+ * bump/start 已单点收敛到 SessionStateContext::restart_decode_tasks()；
+ * copy_data_to_document 仍在用。）
  * 阶段12（事件 session_id 寻址）评估：单设备约束下所有事件语义即全局，
  * CurrentDeviceChanged 已携带 reason/handle（阶段1 起消费方据此过滤）；
  * 最小可行形态已成立，全量寻址待多设备同采启用时随 DeviceProxy 一起做。
@@ -131,6 +133,8 @@ using namespace pv::data;
  *   2) 仅 1-2 个消费方的纯转发门面 → 逐步让消费方直呼管理器（如
  *      restart_decoders/copy_data_to_document 的 event_dispatcher 调用
  *      可改为经 CaptureManager/DocumentRegistry），然后本类删除转发；
+ *      ——注：restart_decoders 已完成上一步（已删除，见上），
+ *      剩 copy_data_to_document 待办。
  *   3) 编排逻辑（set_device/set_file/close_file/hotplug）已属设备编排，
  *      待阶段4 DeviceProxy 引入（多设备同采启用时）再评估归属；
  *   4) 终态：SigSession = SessionManager 登记表 + 管理器聚合 +
@@ -504,7 +508,6 @@ void on_load_config_end();
   // 请求已排队（取反趟正在运行）。
   bool request_clear_signal_invert();
   bool is_signal_invert_active();
-  void restart_decoders();
   void start_all_decode_tasks() override;
 
   // 阶段13 第一批：磁盘缓存状态由 6 个零散查询合并为一次快照统计。

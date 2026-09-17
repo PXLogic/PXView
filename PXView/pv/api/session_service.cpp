@@ -183,8 +183,15 @@ static std::string ensure_utf8(const char *str) {
 // owned by McpTransport lives on the main thread, so its `readyRead` signal
 // (and therefore `on_add_analyzer`) runs on the main thread.
 //
-// The helpers below detect this case and invoke the lambda inline. Otherwise
-// they fall back to the queued dispatch + condition_variable wait.
+// 更正（2026-09 核实）：上面"MCP 请求在主线程"的说明**已不成立**——AppControl
+// 把 McpTransport/WsTransport 整体 moveToThread 到专用 IO 线程，业务处理提交到
+// transport 自带 worker 池（mcp_transport.cpp "Phase 2: Business logic"），而
+// RpcDispatcher::handle_request 不做线程切换。因此凡涉及与 GUI 共享的 Core 状态的
+// SessionService 方法都必须显式封送（见 get_cursors / get_math_results 等）。
+//
+// The helpers below invoke the lambda inline when the caller is already on the
+// main thread — that is exactly the deadlock case above. Otherwise they fall
+// back to the queued dispatch + condition_variable wait.
 inline bool on_main_thread() {
     // Use EventBus::on_main_thread() (std::this_thread::get_id()) instead of
     // QThread::currentThread() — the latter creates a QThreadData on worker
@@ -3575,20 +3582,29 @@ std::vector<CursorInfo> SessionService::get_cursors() const {
     if (!_session)
         return {};
 
-    std::vector<CursorInfo> out;
-    auto entries = _session->get_cursors();
-    const uint64_t samplerate = _session->cur_snap_samplerate();
-    out.reserve(entries.size());
-    for (const auto &e : entries) {
-        CursorInfo ci;
-        ci.index      = e.index;
-        ci.sample_pos = static_cast<int64_t>(e.sample_position);
-        ci.time_sec   = (samplerate > 0)
-                          ? static_cast<double>(e.sample_position) / static_cast<double>(samplerate)
-                          : 0.0;
-        out.push_back(ci);
-    }
-    return out;
+    // 线程：MCP/WS 的 tools/call 跑在 transport 的 worker 池线程上
+    // （mcp_transport.cpp 的 "Phase 2: Business logic (worker thread)"），
+    // 而 CursorRegistry 的同一个 std::vector<CursorEntry> 同时被 GUI 线程
+    // （鼠标拖拽 view::Cursor → 同一注册表）与 add/remove/clear 改写。
+    // 这里在工作线程上"取值 + 遍历"的旧写法与那些改写是纯 data race
+    // （vector 边改边读可读到已释放的存储）。改为封送主线程后整体取值：
+    // GUI 的写入也在主线程，二者自然串行。
+    return run_value_on_main_thread<std::vector<CursorInfo>>([this]() {
+        std::vector<CursorInfo> out;
+        auto entries = _session->get_cursors();
+        const uint64_t samplerate = _session->cur_snap_samplerate();
+        out.reserve(entries.size());
+        for (const auto &e : entries) {
+            CursorInfo ci;
+            ci.index      = e.index;
+            ci.sample_pos = static_cast<int64_t>(e.sample_position);
+            ci.time_sec   = (samplerate > 0)
+                              ? static_cast<double>(e.sample_position) / static_cast<double>(samplerate)
+                              : 0.0;
+            out.push_back(ci);
+        }
+        return out;
+    });
 }
 
 Result<void> SessionService::add_cursor(uint64_t sample_pos) {
@@ -3602,7 +3618,11 @@ Result<void> SessionService::add_cursor(uint64_t sample_pos) {
     // MainWindow's IServiceEventListener handler. In headless mode the
     // broadcast is received by no-one and the Core state is the sole
     // effect, which is the intended behaviour.
-    int new_index = _session->add_cursor(sample_pos);
+    // 线程：本方法在 MCP worker 线程上执行（见 get_cursors 的说明），
+    // 而 CursorRegistry 同时被 GUI 线程改写 → 写侧同样封送主线程。
+    const int new_index = run_value_on_main_thread<int>([this, sample_pos]() {
+        return _session->add_cursor(sample_pos);
+    });
     if (new_index < 0)
         return Result<void>::Fail(ErrorCode::InternalError,
                                   "Failed to add cursor to Core registry");
@@ -3620,7 +3640,9 @@ Result<void> SessionService::remove_cursor(int index) {
     // Task C2.5: remove from the Core-layer CursorRegistry. The broadcast
     // is retained so the GUI View layer (when present) can remove the
     // matching view::Cursor rendering object.
-    bool ok = _session->remove_cursor(index);
+    const bool ok = run_value_on_main_thread<bool>([this, index]() {
+        return _session->remove_cursor(index);
+    });
     if (!ok)
         return Result<void>::Fail(ErrorCode::InvalidRequest,
                                   "Cursor index out of range");
@@ -3638,7 +3660,7 @@ Result<void> SessionService::clear_cursors() {
     // Task C2.5: clear the Core-layer CursorRegistry. The broadcast is
     // retained so the GUI View layer (when present) clears its rendering
     // objects.
-    _session->clear_cursors();
+    invoke_or_call([this]() { _session->clear_cursors(); });
 
     broadcast_event(ServiceEvent::ViewCursorsCleared);
     return Result<void>::Success();
@@ -5129,30 +5151,36 @@ Result<MathResult> SessionService::get_math_results() {
         return Result<MathResult>::Fail(ErrorCode::InternalError,
                                         "Session is nullptr");
 
-    MathResult result;
-    auto math_stack = _session->get_math_stack();
-    if (!math_stack) {
-        result.is_enabled = false;
-        return Result<MathResult>::Success(result);
-    }
-
-    result.is_enabled = true;
-    result.ch1_index = math_stack->ch1_index();
-    result.ch2_index = math_stack->ch2_index();
-    result.math_type = static_cast<int>(math_stack->get_type());
-    result.sample_num = math_stack->get_sample_num();
-
-    // Copy computed math samples. get_math(start) returns a pointer into
-    // the stack's internal _math vector; we copy [0, sample_num) so the
-    // caller gets a stable snapshot.
-    if (result.sample_num > 0) {
-        const double *samples = math_stack->get_math(0);
-        if (samples) {
-            result.samples.assign(samples, samples + result.sample_num);
+    // 线程：MCP worker。MathStack 由 GUI 线程经 math_rebuild() 换入/销毁
+    // （set_math_stack(nullptr) 再重建），而这里直接解引用其内部 _math 向量
+    // （get_math(0) + assign 拷贝）。shared_ptr 只保住对象存活，重建期间向量
+    // 的重分配仍会让 assign 读到已释放的存储 → 封送主线程取值。
+    return run_result_on_main_thread<MathResult>([this]() -> Result<MathResult> {
+        MathResult result;
+        auto math_stack = _session->get_math_stack();
+        if (!math_stack) {
+            result.is_enabled = false;
+            return Result<MathResult>::Success(result);
         }
-    }
 
-    return Result<MathResult>::Success(result);
+        result.is_enabled = true;
+        result.ch1_index = math_stack->ch1_index();
+        result.ch2_index = math_stack->ch2_index();
+        result.math_type = static_cast<int>(math_stack->get_type());
+        result.sample_num = math_stack->get_sample_num();
+
+        // Copy computed math samples. get_math(start) returns a pointer into
+        // the stack's internal _math vector; we copy [0, sample_num) so the
+        // caller gets a stable snapshot.
+        if (result.sample_num > 0) {
+            const double *samples = math_stack->get_math(0);
+            if (samples) {
+                result.samples.assign(samples, samples + result.sample_num);
+            }
+        }
+
+        return Result<MathResult>::Success(result);
+    });
 }
 
 Result<SpectrumResult> SessionService::get_spectrum_results() {
@@ -5160,35 +5188,41 @@ Result<SpectrumResult> SessionService::get_spectrum_results() {
         return Result<SpectrumResult>::Fail(ErrorCode::InternalError,
                                             "Session is nullptr");
 
-    SpectrumResult result;
-    auto &stacks = _session->get_spectrum_stacks();
-    if (stacks.empty()) {
-        result.is_enabled = false;
+    // 线程：MCP worker。get_spectrum_stacks() 返回的是**容器引用**，而
+    // GUI 线程的 spectrum_rebuild() 会对同一 vector 做 push_back/clear
+    // （元素增删会重分配），这里再 front() 取元素属于典型的"边改边读"
+    // 悬垂引用。整体封送主线程取值，引用不出本 lambda。
+    return run_result_on_main_thread<SpectrumResult>([this]() -> Result<SpectrumResult> {
+        SpectrumResult result;
+        auto &stacks = _session->get_spectrum_stacks();
+        if (stacks.empty()) {
+            result.is_enabled = false;
+            return Result<SpectrumResult>::Success(result);
+        }
+
+        // Expose the first spectrum stack. MCP callers that need a specific
+        // channel's spectrum should use enable_spectrum first.
+        auto &stack = stacks.front();
+        if (!stack) {
+            result.is_enabled = false;
+            return Result<SpectrumResult>::Success(result);
+        }
+
+        result.is_enabled = true;
+        result.channel_index = stack->get_index();
+        result.sample_num = stack->get_sample_num();
+        result.windows_index = stack->get_windows_index();
+        result.dc_ignored = stack->dc_ignored();
+        result.sample_interval = stack->get_sample_interval();
+
+        // get_fft_spectrum() returns const std::vector<double> by value (a copy
+        // of the internal _power_spectrum vector). The const return type
+        // prevents move semantics, so this is a copy assignment — acceptable
+        // for a snapshot read.
+        result.spectrum = stack->get_fft_spectrum();
+
         return Result<SpectrumResult>::Success(result);
-    }
-
-    // Expose the first spectrum stack. MCP callers that need a specific
-    // channel's spectrum should use enable_spectrum first.
-    auto &stack = stacks.front();
-    if (!stack) {
-        result.is_enabled = false;
-        return Result<SpectrumResult>::Success(result);
-    }
-
-    result.is_enabled = true;
-    result.channel_index = stack->get_index();
-    result.sample_num = stack->get_sample_num();
-    result.windows_index = stack->get_windows_index();
-    result.dc_ignored = stack->dc_ignored();
-    result.sample_interval = stack->get_sample_interval();
-
-    // get_fft_spectrum() returns const std::vector<double> by value (a copy
-    // of the internal _power_spectrum vector). The const return type
-    // prevents move semantics, so this is a copy assignment — acceptable
-    // for a snapshot read.
-    result.spectrum = stack->get_fft_spectrum();
-
-    return Result<SpectrumResult>::Success(result);
+    });
 }
 
 Result<LissajousResult> SessionService::get_lissajous_results() {
@@ -5196,19 +5230,24 @@ Result<LissajousResult> SessionService::get_lissajous_results() {
         return Result<LissajousResult>::Fail(ErrorCode::InternalError,
                                              "Session is nullptr");
 
-    LissajousResult result;
-    auto *model = _session->get_lissajous_model();
-    if (!model) {
-        result.is_enabled = false;
+    // 线程：MCP worker。get_lissajous_model() 返回的是 unique_ptr 持有的
+    // **裸指针**，而 GUI 线程的 lissajous_rebuild() 会整体替换该 unique_ptr
+    // → 旧对象可能已被销毁，这里解引用就是 use-after-free。封送主线程取值。
+    return run_result_on_main_thread<LissajousResult>([this]() -> Result<LissajousResult> {
+        LissajousResult result;
+        auto *model = _session->get_lissajous_model();
+        if (!model) {
+            result.is_enabled = false;
+            return Result<LissajousResult>::Success(result);
+        }
+
+        result.is_enabled = model->enabled();
+        result.x_index = model->x_index();
+        result.y_index = model->y_index();
+        result.percent = model->percent();
+
         return Result<LissajousResult>::Success(result);
-    }
-
-    result.is_enabled = model->enabled();
-    result.x_index = model->x_index();
-    result.y_index = model->y_index();
-    result.percent = model->percent();
-
-    return Result<LissajousResult>::Success(result);
+    });
 }
 
 // ---------------------------------------------------------------------------

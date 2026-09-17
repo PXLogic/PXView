@@ -321,6 +321,11 @@ void Ruler::mouseReleaseEvent(QMouseEvent *event)
                         (*i)->set_index(index);
                         updatedCursor = true;
                         _view.cursor_moved();
+                        // Task C2.7: 单击重定位同样要写回 Core 的 CursorRegistry。
+                        // 这是 View::sync_cursor_position 的另一半调用点（拖拽
+                        // 释放见下方 mouseReleaseEvent）——此前两者都缺失，
+                        // 使"View 光标位置 → Core 注册表"整条链成为死代码。
+                        _view.sync_cursor_position((*i).get());
                     }
                     _cursor_sel_visible = false;
                 }
@@ -337,7 +342,11 @@ void Ruler::mouseReleaseEvent(QMouseEvent *event)
         }
 
         if (_curs_moved && _grabbed_marker) {
+            // Task C2.7: 拖拽结束把新位置写回 Core 的 CursorRegistry。必须在
+            // rel_grabbed_cursor() 之前取指针——它会把 _grabbed_marker 置空。
+            TimeMarker *moved = _grabbed_marker;
             rel_grabbed_cursor();
+            _view.sync_cursor_position(moved);
             _hitCursor = false;
             _curs_moved = false;
             _view.cursor_moved();

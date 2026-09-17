@@ -3621,35 +3621,6 @@ bool SigSession::is_signal_invert_active() {
   return _filter_processor->is_signal_invert_active();
 }
 
-void SigSession::restart_decoders() {
-  if (decode_traces().empty())
-    return;
-
-  // Document re-share (zero-copy shared_ptr hand-off) — this half is the
-  // document-binding side and stays here, because it is a View/detail-visible
-  // decision that belongs with the caller. The decode-task lifecycle itself is
-  // now single-sourced in SessionStateContext::restart_decode_tasks() so that
-  // FilterProcessor can run it as an explicit command from a worker thread
-  // without a second copy of the sequence existing somewhere else.
-  //
-  // Order note: the copy used to happen AFTER stopping the decoders. Doing it
-  // first is harmless — the re-share only reassigns the document's shared_ptr,
-  // while each DecoderStack keeps its own reference — and it keeps the
-  // "stop → clear → bump → start" block atomic inside the delegated command.
-  auto doc =
-      _document_registry->get_capture_owner_document()
-          ? _document_registry->get_capture_owner_document()
-          : _document_registry->get_active_document();
-  if (doc) {
-    copy_data_to_document(doc);
-  }
-
-  // Was inlined here: clear_all_decode_task2 → clear_decode_result →
-  // bump_version on each stack (so API/MCP consumers invalidate results bound
-  // to a prior version) → start_all_decode_tasks.
-  _state->restart_decode_tasks();
-}
-
 void SigSession::start_all_decode_tasks() {
   _decode_task_manager->start_all_decode_tasks();
 }

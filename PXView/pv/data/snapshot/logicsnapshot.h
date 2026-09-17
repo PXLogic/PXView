@@ -659,7 +659,13 @@ private:
 
     uint64_t    _last_sample[CHANNEL_MAX_COUNT];
     uint64_t    _last_calc_count[CHANNEL_MAX_COUNT];
-    bool        _is_loop;
+    // std::atomic：写方是数据馈送线程（DataFeedParser 在每场采集开始时经
+    // set_loop() 置位，见 datafeedparser.cpp 的 last_ended() 分支），读方遍布
+    // 采样/迭代/边沿扫描/渲染等 10+ 处**无锁**读——它们据此决定"走 _mutex 路径
+    // 还是走 _ring_published 无锁发布路径"。普通 bool 下这一写多读没有任何同步，
+    // 读者可能看到翻转前后的中间态而选错路径。与 _memory_failed/_last_ended
+    // 同一约定（见 snapshot.h 的说明）。
+    std::atomic<bool> _is_loop;
     uint64_t    _loop_offset;
 
     // C3 (P9-on-raw): committed-sample-count publication for lock-free FINITE

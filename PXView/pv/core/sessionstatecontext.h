@@ -400,8 +400,16 @@ private:
   std::atomic<bool> _frame_end_pending{false};
 
   uint8_t _trigger_ch = 0;
-  SESSION_ERROR_STATUS _error = No_err;
-  uint64_t _error_pattern = 0, _save_start = 0, _save_end = 0;
+  // 跨线程标量（MCP handler 验证的产物）：_error / _error_pattern 由数据馈送线程
+  // （DataFeedParser 的 OOM 路径 set_error(Malloc_err) + session_error()）与主线程
+  // 写入，被 GUI（错误提示）与 MCP worker（session->get_error_state）读取；
+  // _save_start / _save_end 由 MCP worker（set_save_range）、GUI 光标保存与
+  // save_file（worker）读写。按本文件既定约定（见上方 Track A5）统一改 atomic，
+  // 消除"数据馈送线程写 + worker 读"的 data race。
+  std::atomic<SESSION_ERROR_STATUS> _error{No_err};
+  std::atomic<uint64_t> _error_pattern{0};
+  std::atomic<uint64_t> _save_start{0};
+  std::atomic<uint64_t> _save_end{0};
   int _map_zoom = 0;
 
   std::atomic<bool> _is_working{false};

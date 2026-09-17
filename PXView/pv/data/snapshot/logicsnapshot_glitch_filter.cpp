@@ -666,13 +666,21 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
   // waited for the entire pass. The write phase (apply_batch) now takes the
   // lock for its own duration only, so render frames interleave between
   // batches.
-  const bool need_whole_run_lock = _host->_is_loop || !_host->last_ended();
+  // 单一快照 loop 标志：它同时决定"是否持整趟锁"与"是否做坐标平移"，两处引用
+  // 必须是同一个值——若中途翻转，+= / -= 会不对称，永久污染 _ring_sample_count。
+  const bool loop_mode = _host->_is_loop;
+  const bool need_whole_run_lock = loop_mode || !_host->last_ended();
   std::unique_lock<std::recursive_mutex> lock(_host->_mutex, std::defer_lock);
   if (need_whole_run_lock)
     lock.lock();
 
-  // 转换为绝对偏移坐标系
-  _host->_ring_sample_count += _host->_loop_offset;
+  // 转换为绝对偏移坐标系。仅 loop 模式需要平移：有限模式的 _loop_offset 恒为 0，
+  // 且该分支**不持整趟锁**（见上面的说明），此时对 _ring_sample_count 的任何
+  // 读改写都会与"持 _mutex 的读者"（Snapshot::get_ring_sample_count）以及
+  // feed/writer 的写入构成 data race（值虽然不变，但 load+store 仍可能覆盖掉
+  // 并发写入）。改成条件执行后，有限模式下彻底不触碰该标量。
+  if (loop_mode)
+    _host->_ring_sample_count += _host->_loop_offset;
 
   uint64_t end_pos = max_sample + _host->_loop_offset;
   uint64_t scan_pos = _host->_loop_offset;
@@ -1028,8 +1036,9 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
     _published_ranges[sig_index] = std::move(table);
   }
 
-  // 恢复坐标系
-  _host->_ring_sample_count -= _host->_loop_offset;
+  // 恢复坐标系（条件与上方对称：只有 loop 模式平移过）
+  if (loop_mode)
+    _host->_ring_sample_count -= _host->_loop_offset;
 }
 
 void LogicSnapshotGlitchFilter::apply_glitch_filter_all(

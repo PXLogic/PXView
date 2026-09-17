@@ -89,7 +89,6 @@ DecoderStack::DecoderStack(pv::data::ISessionHost *host,
   assert(dec);
   assert(decoder_status);
 
-  _samples_decoded = 0;
   _sample_count.store(0);
   _decode_state.store(Stopped);
   _options_changed = false;
@@ -180,22 +179,6 @@ void DecoderStack::remove_sub_decoder(Decoder *decoder) {
   _options_changed = true;
   // Scheme A: republish so the render path sees the reduced row set.
   publish_snapshot();
-}
-
-void DecoderStack::remove_decoder_by_handel(const srd_decoder *dec) {
-  Decoder *decoder = nullptr;
-
-  for (auto &up : _stack) {
-    auto d = up.get();
-    if (d->get_dec_handel() == dec) {
-      decoder = d;
-      break;
-    }
-  }
-
-  if (decoder) {
-    remove_sub_decoder(decoder);
-  }
 }
 
 void DecoderStack::build_row() {
@@ -296,12 +279,6 @@ void DecoderStack::build_row() {
   }
 }
 
-int64_t DecoderStack::samples_decoded() {
-  // P1-4 fix: use _state_mutex instead of _output_mutex
-  std::lock_guard<std::mutex> decode_lock(_state_mutex);
-  return _samples_decoded;
-}
-
 void DecoderStack::get_annotation_subset(
     std::vector<const pv::data::decode::Annotation *> &dest, const Row &row,
     uint64_t start_sample, uint64_t end_sample) {
@@ -314,15 +291,6 @@ void DecoderStack::get_annotation_subset(
   auto iter = _rows.find(row);
   if (iter != _rows.end())
     (*iter).second->get_annotation_subset(dest, start_sample, end_sample);
-}
-
-decode::RowData* DecoderStack::get_row_data(const decode::Row &row)
-{
-    std::shared_lock<std::shared_mutex> lock(_rows_mutex);
-    auto iter = _rows.find(row);
-    if (iter != _rows.end())
-        return (*iter).second.get();
-    return nullptr;
 }
 
 uint64_t DecoderStack::get_annotation_index(const Row &row,
@@ -664,10 +632,6 @@ void DecoderStack::clear() { init(); }
 void DecoderStack::init() {
   clear_analog_data();
   _sample_count.store(0);
-  {
-    std::lock_guard<std::mutex> lk(_state_mutex);
-    _samples_decoded = 0;
-  }
 set_error_message(QString());
 _no_memory = false;
   _snapshot.reset();
@@ -819,27 +783,6 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
   }
 
   execute_decode_stack();
-}
-
-uint64_t DecoderStack::get_max_sample_count() {
-  const auto snap = published_snapshot();
-  if (snap) {
-    uint64_t max_sample_count = 0;
-    for (const auto &kv : *snap) {
-      if (kv.second.data)
-        max_sample_count =
-            max(max_sample_count, kv.second.data->get_max_sample());
-    }
-    return max_sample_count;
-  }
-  std::shared_lock<std::shared_mutex> lock(_rows_mutex);
-  uint64_t max_sample_count = 0;
-
-  for (auto i = _rows.begin(); i != _rows.end(); i++) {
-    max_sample_count = max(max_sample_count, (*i).second->get_max_sample());
-  }
-
-  return max_sample_count;
 }
 
 void DecoderStack::notify_data_ready() {
@@ -1053,10 +996,6 @@ return;
 
     i = chunk_end;
 
-    {
-      std::lock_guard<std::mutex> lock(_state_mutex);
-      _samples_decoded = i - decode_start + 1;
-    }
 
     if ((i - last_cnt) > notify_cnt) {
       last_cnt = i;
@@ -1550,11 +1489,6 @@ void DecoderStack::clear_analog_data() {
 std::vector<std::shared_ptr<DecoderAnalogData>> DecoderStack::analog_data_copy() const {
   std::lock_guard<std::mutex> lock(_analog_mutex);
   return _analog_data;
-}
-
-size_t DecoderStack::analog_data_size() const {
-  std::lock_guard<std::mutex> lock(_analog_mutex);
-  return _analog_data.size();
 }
 
 namespace {

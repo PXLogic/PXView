@@ -135,11 +135,9 @@ public:
 
 	void add_sub_decoder(std::unique_ptr<decode::Decoder> decoder);
     void remove_sub_decoder(decode::Decoder *decoder);
-    void remove_decoder_by_handel(const srd_decoder *dec);
     
     void build_row();
 
-	int64_t samples_decoded();
 
 	/**
 	 * Extracts sorted annotations between two period into a vector.
@@ -149,7 +147,6 @@ public:
 		const decode::Row &row, uint64_t start_sample,
 		uint64_t end_sample);
 
-    decode::RowData* get_row_data(const decode::Row &row);
 
     uint64_t get_annotation_index(
         const decode::Row &row, uint64_t start_sample);
@@ -201,7 +198,6 @@ public:
 	 
 	void clear();
     void init();
-	uint64_t get_max_sample_count();
 
     inline bool IsRunning(){
         return _decode_state.load(std::memory_order_acquire) == Running;
@@ -223,7 +219,6 @@ public:
 
     // decoded analog output exposed to DecodeTrace.
     std::vector<std::shared_ptr<DecoderAnalogData>> analog_data_copy() const;
-    size_t analog_data_size() const;
     void clear_analog_data();
     bool analog_visible() const { return _analog_visible; }
     void set_analog_visible(bool v) { _analog_visible = v; }
@@ -349,7 +344,6 @@ private:
     // TS-3 fix: _decoder_status owned via unique_ptr — no DESTROY_OBJECT needed.
     std::unique_ptr<DecoderStatus> _decoder_status;
     QString         _error_message;
-    int64_t	        _samples_decoded;
     std::atomic<uint64_t> _sample_count{0};
  
     // P3-11 fix: _stask_stauts is protected by _status_mutex instead of
@@ -364,6 +358,9 @@ private:
     //                  so shared_mutex allows concurrent reads.
     //   _state_mutex — mutex protecting _error_message, _samples_decoded.
     //                  Write-heavy (decode thread updates frequently).
+    //   （注：_samples_decoded 已删除——随其零调用者的 samples_decoded() 取值器
+    //   一并移除，连带走掉解码热循环里每块一次的加锁；_state_mutex 现在只保护
+    //   _error_message。）
     mutable std::shared_mutex _rows_mutex;
     mutable std::mutex _state_mutex;
 

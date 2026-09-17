@@ -2283,6 +2283,13 @@ bool LogicSnapshot::has_data(int sig_index) {
 }
 
 int LogicSnapshot::get_block_num() {
+  // 本族 get_block_* 只被保存/导出路径使用（StoreSession 在 std::async 线程上
+  // 调用），它们读的 _ring_sample_count / _loop_offset / _ch_data 由 feed 线程与
+  // 磁盘写线程在 _mutex 内改写（loop 模式下块还会轮转回收）。以前这里完全无锁：
+  // 与持锁写入者是"锁写 + 无锁读"，且 _loop_offset 只在 loop 模式非 0——正是
+  // 保存 loop 录波时会读到不一致的块数。统一在 _mutex 内取值；_mutex 是
+  // recursive_mutex，调用方已持锁时重入安全。
+  std::lock_guard<std::recursive_mutex> lock(_mutex);
   int block =
       ceil((_ring_sample_count + _loop_offset) * 1.0 / LeafBlockSamples) -
       floor(_loop_offset * 1.0 / LeafBlockSamples);
@@ -2290,6 +2297,7 @@ int LogicSnapshot::get_block_num() {
 }
 
 uint64_t LogicSnapshot::get_block_size(int block_index) {
+  std::lock_guard<std::recursive_mutex> lock(_mutex);  // 同 get_block_num 的说明
   int block_num = get_block_num();
   uint64_t samples = 0;
 
@@ -2329,6 +2337,7 @@ uint64_t LogicSnapshot::get_block_size(int block_index) {
 
 uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
                                       bool &sample) {
+  std::lock_guard<std::recursive_mutex> lock(_mutex);  // 同 get_block_num 的说明
   // Guard: block_index may be out of range during file loading.
   if (block_index < 0 || block_index >= get_block_num()) {
     pxv_warn("LogicSnapshot::get_block_buf: block_index=%d out of range, returning nullptr",

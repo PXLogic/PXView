@@ -103,6 +103,7 @@ class LissajousTrace;
 class GlitchFilterPopup;
 class LogicSignal;
 class Cursor;
+class TimeMarker;
 class XCursor;
 class ViewStatus;
 class Signal;
@@ -355,7 +356,7 @@ public:
   // Task C2.7: write a dragged cursor's new position back to the Core-layer
   // CursorRegistry via DataSource::set_cursor_position. Called by the
   // ruler / viewport drag handlers after TimeMarker::set_index.
-  void sync_cursor_position(Cursor *cursor);
+  void sync_cursor_position(TimeMarker *marker);
 
   // Task C2.7: reconcile the View's rendering cursor list with the Core
   // CursorRegistry. Called on data-source binding so cursors added by MCP
