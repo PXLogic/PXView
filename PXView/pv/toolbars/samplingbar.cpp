@@ -564,24 +564,43 @@ void SamplingBar::update_sample_rate_selector() {
 
   if (_device_agent->have_instance() == false) {
     pxv_info("SamplingBar::update_sample_rate_selector, have no device.");
+    // 上面已 disconnect，提前返回必须重连，否则采样率下拉框永久失联。
+    connect(_sample_rate, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &SamplingBar::on_samplerate_sel);
     return;
   }
 
   _updating_sample_rate = true;
 
   gvar_dict = _device_agent->get_config_list(nullptr, SR_CONF_SAMPLERATE);
-  if (gvar_dict == nullptr) {
-    _sample_rate->clear();
-    _sample_rate->show();
-    _updating_sample_rate = false;
-    return;
-  }
-
   _sample_rate->clear();
 
+  // 文件回放设备（session_driver）只声明 SR_CONF_SAMPLERATE 的 GET，没有
+  // LIST —— sr_config_list 直接 SR_ERR_ARG，取不到任何可选列表。此时回退为
+  // "当前值单项"：pxl 的采样率是文件固有属性，本就不可改。并且必须继续走下方
+  // 公共尾巴（update_sample_rate_selector_value + update_sample_count_selector），
+  // 让采样深度按 total samples / samplerate 显示真实采集时长。旧实现在此直接
+  // return，既清空了采样率框，也连带跳过了采样深度框的重建 —— 即"加载 pxl
+  // 后采样率与采样时间不显示"的根因。
+  if (gvar_dict == nullptr) {
+    const uint64_t cur_rate = _device_agent->get_sample_rate();
+    if (cur_rate > 0) {
+      char *const s = sr_samplerate_string(cur_rate);
+      _sample_rate->addItem(QString(s), QVariant::fromValue(cur_rate));
+      g_free(s);
+      pxv_info("SamplingBar: driver %s provides no samplerate list, "
+               "fallback to current value %llu",
+               _device_agent->driver_name().toUtf8().constData(),
+               (unsigned long long)cur_rate);
+    } else {
+      pxv_warn("SamplingBar: driver %s provides no samplerate list and "
+               "samplerate is 0",
+               _device_agent->driver_name().toUtf8().constData());
+    }
+  }
   // 优先处理离散列表格式（"samplerates"）
-  if ((gvar_list = g_variant_lookup_value(gvar_dict, "samplerates",
-                                          G_VARIANT_TYPE("at")))) {
+  else if ((gvar_list = g_variant_lookup_value(gvar_dict, "samplerates",
+                                               G_VARIANT_TYPE("at")))) {
     elements = (const uint64_t *)g_variant_get_fixed_array(
         gvar_list, &num_elements, sizeof(uint64_t));
 
@@ -616,7 +635,8 @@ void SamplingBar::update_sample_rate_selector() {
   _sample_rate->view()->setMinimumWidth(_sample_rate->sizeHint().width() + 30);
 
   _updating_sample_rate = false;
-  g_variant_unref(gvar_dict);
+  if (gvar_dict)
+    g_variant_unref(gvar_dict);
 
   update_sample_rate_selector_value();
 
