@@ -30,7 +30,7 @@
 #include <cmath>
 #include <libsigrok/libsigrok.h>
 
-#include "pv/api/types.h"        // Task C1.7: api::MeasurementValue
+#include "pv/api/types.h"        // Task C1.7: data::MeasurementValue
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"
@@ -64,7 +64,7 @@ QString DsoMeasure::get_measure(int type) {
   auto measurements = _signal->_data_source->get_measurements(
       _signal->get_index(), view_rect_height);
 
-  const api::MeasurementValue *found = nullptr;
+  const data::MeasurementValue *found = nullptr;
   for (const auto &mv : measurements) {
     if (mv.type == type) {
       found = &mv;

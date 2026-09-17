@@ -29,7 +29,7 @@
 #include <memory>
 #include <list>
 
-#include "pv/api/types.h"  // api::MeasurementValue (for get_measurements return type)
+#include "pv/data/measure_types.h"   // data::MeasurementValue
 #include "pv/data/cursor_types.h"   // data::CursorEntry (get_cursors return type)
 
 // Spec v2 Task 8: DataSource now inherits from 5 fine-grained interfaces
@@ -193,7 +193,7 @@ public:
 
     // ---- Measurements (Task C1: route DSO measurement computation through
     //      DataSource so headless mode can read real values without a View).
-    //      Returns a flat list of api::MeasurementValue (one per DSO_MS_*
+    //      Returns a flat list of data::MeasurementValue (one per DSO_MS_*
     //      measurement type per DSO channel). channel_index == -1 returns
     //      measurements for all enabled DSO channels; a specific channel
     //      index returns only that channel's measurements. Default returns
@@ -210,7 +210,7 @@ public:
     //      Non-const to match the pattern of other data accessors
     //      (get_signal_models / get_decoder_stacks / get_dso_snapshot)
     //      which read non-const SessionStateContext state.
-    virtual std::vector<api::MeasurementValue> get_measurements(
+    virtual std::vector<data::MeasurementValue> get_measurements(
         int channel_index = -1,
         int view_rect_height = 0);
 

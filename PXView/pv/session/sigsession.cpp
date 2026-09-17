@@ -3389,7 +3389,7 @@ std::shared_ptr<data::DsoSnapshot> SigSession::get_dso_snapshot_shared() {
 
 // Task C1.5: DSO measurement computation via core::MeasureCalculator.
 // Computes raw MeasurementResult list from the view_data() DsoSnapshot +
-// signal_models, then converts each result to api::MeasurementValue list
+// signal_models, then converts each result to data::MeasurementValue list
 // using the per-channel data_scale (vdiv) + measure_vf (probe factor from
 // SignalModel via DsoSnapshot) + vfactor (probe factor from SignalModel —
 // same value as the View layer's _vDial->get_factor(), kept in sync via
@@ -3406,7 +3406,7 @@ std::shared_ptr<data::DsoSnapshot> SigSession::get_dso_snapshot_shared() {
 // view_rect_height: 0 = use headless default (256). The View layer passes
 // its actual get_view_rect().height() so GUI-displayed voltages match the
 // original DsoMeasure computation exactly.
-std::vector<api::MeasurementValue>
+std::vector<data::MeasurementValue>
 SigSession::get_measurements(int channel_index, int view_rect_height) {
   SessionData *data = _state->view_data();
   if (!data)
@@ -3428,13 +3428,13 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
   }
 
   auto signal_models = get_signal_models_snapshot();
-  std::vector<api::MeasurementValue> result;
+  std::vector<data::MeasurementValue> result;
 
   // Step 1: compute raw MeasurementResult list (max/min/rms/mean per channel)
   auto raw_results = core::MeasureCalculator::compute(
       data, signal_models, channel_index, view_rect_height);
 
-  // Step 2: convert each raw result to api::MeasurementValue list
+  // Step 2: convert each raw result to data::MeasurementValue list
   for (const auto &r : raw_results) {
     // Look up data_scale and measure_vf from the DsoSnapshot (same source
     // as the original DsoMeasure::get_voltage — set by

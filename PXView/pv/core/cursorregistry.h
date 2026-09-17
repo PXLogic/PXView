@@ -32,12 +32,11 @@
 namespace pv {
 namespace core {
 
-/**
- * CursorEntry (the pure-data value handed out through the DataSource
- * interface, and the Core-layer mirror of measurement cursor state) now
- * lives in pv/data/cursor_types.h - see that file for the rationale.
- * It moved out of this header so the DATA layer no longer includes a CORE
- * header just to name a return type.
+// CursorEntry (the pure-data value handed out through the DataSource
+// interface, and the Core-layer mirror of measurement cursor state) now
+// lives in pv/data/cursor_types.h - see that file for the rationale.
+// It moved out of this header so the DATA layer no longer includes a CORE
+// header just to name a return type.
 
 /**
  * CursorRegistry — Core-layer store of measurement cursor positions.

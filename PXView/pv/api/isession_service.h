@@ -237,7 +237,7 @@ public:
         const std::string& instance_id, int output_id) = 0;
 
     // 14. Measurements
-    virtual std::vector<MeasurementValue> get_measurements() const = 0;
+    virtual std::vector<data::MeasurementValue> get_measurements() const = 0;
 
     // 15. Cursors
     virtual std::vector<CursorInfo> get_cursors() const = 0;

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "pv/api/types.h"  // api::MeasurementValue
+#include "pv/data/measure_types.h"   // data::MeasurementValue
 #include "pv/data/cursor_types.h"   // data::CursorEntry (get_cursors return type)
 
 namespace pv {
@@ -15,7 +15,7 @@ namespace data {
 class IMeasureSource {
 public:
     virtual ~IMeasureSource() = default;
-    virtual std::vector<api::MeasurementValue> get_measurements(
+    virtual std::vector<data::MeasurementValue> get_measurements(
         int channel_index = -1,
         int view_rect_height = 0) = 0;
     virtual std::vector<data::CursorEntry> get_cursors() const = 0;

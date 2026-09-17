@@ -224,7 +224,7 @@ explicit SessionService(SigSession *session, DeviceAgent *device);
         const std::string &instance_id, int output_id) override;
 
     // ---- ISessionService: 14. Measurements ----
-    std::vector<MeasurementValue> get_measurements() const override;
+    std::vector<data::MeasurementValue> get_measurements() const override;
 
     // ---- ISessionService: 15. Cursors ----
     std::vector<CursorInfo> get_cursors() const override;

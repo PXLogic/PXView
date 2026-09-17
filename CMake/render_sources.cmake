@@ -2,8 +2,16 @@
 #= pxview-render sources (QML migration Phase 3, Task 3.0)
 #-------------------------------------------------------------------------------
 # Widget-free rendering assets compiled ONCE into the pxview-render STATIC
-# library and linked by both front-end shells (PXView.exe Widgets UI and
-# PXViewQml Quick UI) — "one library, many shells".
+# library and linked by PXView.exe (the only front-end shell).
+#
+# NOTE (QML removal): this library was introduced for a second, QML/Quick shell
+# (PXViewQml) that is no longer part of the project — no .qml file, no Qt6::Qml
+# dependency and no pv/qmlbridge/ header remains. The widget-free constraint is
+# kept and still enforced: it is what keeps the render pipeline testable without
+# Qt Widgets and usable by the headless paths. The "Task 3.x / QML migration"
+# comments inside the source files are kept as the historical reason those
+# interface splits (IRenderView/IRenderViewport/RenderContext) exist — they
+# document why, not a shell that still needs them.
 #
 # HARD CONSTRAINT: zero Qt Widgets. Files in this list must not include
 # QWidget/QDialog/QMainWindow/QScrollArea (directly or via view.h/viewport.h)
@@ -68,8 +76,8 @@ set(PXVIEW_RENDER_SOURCES
 
 # Q_OBJECT headers whose meta-objects are generated in the root CMakeLists.txt
 # and compiled INTO pxview-render ("moc follows impl" rule — same pattern as
-# PXVIEW_CORE_HEADERS_MOC / PXVIEW_QMLBRIDGE_HEADERS_MOC; the project does not
-# use CMAKE_AUTOMOC). Task 3.1: the migrated Trace/Signal class hierarchy
+# PXVIEW_CORE_HEADERS_MOC; the project does not use CMAKE_AUTOMOC). Task 3.1: the
+# migrated Trace/Signal class hierarchy
 # (SelectableItem → Trace → Signal → Logic/Analog/Dso + Math/Spectrum/Lissajous
 # traces) is moc'd here; removed from the GUI moc list in gui_sources.cmake.
 set(PXVIEW_RENDER_HEADERS_MOC

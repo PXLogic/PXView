@@ -237,10 +237,11 @@ public:
         return _decoder_status.get();
     }
 
-    inline bool is_capture_end(){
-        return _is_capture_end;
-    }
-
+    // Cross-thread: written by the main / device thread (session_service,
+    // DecodeTaskManager, CaptureManager) and read by the decode worker
+    // (do_decode_work()'s wait predicate and end-check). Predicate state of
+    // _data_cond, so it lives with the other atomics of this class rather than
+    // being a plain bool (see _is_capture_end's declaration comment).
     inline void set_capture_end_flag(bool isEnd){
         _is_capture_end = isEnd;
         if (!isEnd){
@@ -372,7 +373,15 @@ private:
     std::condition_variable _data_cond;
     std::mutex _data_wait_mutex;
 
-    bool            _is_capture_end;
+    // std::atomic: same rule as _progress / _is_decoding / _no_memory above.
+    // Written by set_capture_end_flag() on the main / device thread and read by
+    // the decode worker inside do_decode_work()'s wait predicate (under
+    // _data_wait_mutex) and its loop-end checks (no lock). As a plain bool that
+    // was a data race (unprotected write + lock-protected read of the same
+    // object, i.e. UB and no visibility guarantee for the worker) — atomic is
+    // what the rest of this class already does. Was found by the cross-thread
+    // scan (tests/scan_cross_thread_flags.py).
+    std::atomic<bool> _is_capture_end;
     std::atomic<int> _progress{0};
     std::atomic<bool> _is_decoding{false};
     std::atomic<uint64_t> _result_count{0};

@@ -53,7 +53,7 @@ private:
     static nlohmann::json to_json(const DiskCacheInfo& d);
     static nlohmann::json to_json(const DecoderDescriptor& d);
     static nlohmann::json to_json(const DecoderAnnotation& a);
-    static nlohmann::json to_json(const MeasurementValue& m);
+    static nlohmann::json to_json(const data::MeasurementValue& m);
     static nlohmann::json to_json(const CursorInfo& c);
     static nlohmann::json to_json(const SignalInfo& s);
     static nlohmann::json to_json(const LogicTriggerConfig& c);

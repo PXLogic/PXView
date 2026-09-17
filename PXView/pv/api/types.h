@@ -4,6 +4,8 @@
 #include <expected>
 #include <map>
 #include <string>
+
+#include "pv/data/measure_types.h"
 #include <utility>
 #include <variant>
 #include <vector>
@@ -368,12 +370,11 @@ struct DecoderAnnotation {
     std::vector<std::string>   texts;
 };
 
-struct MeasurementValue {
-    int32_t     type  = 0;
-    double      value = 0.0;
-    std::string unit  = "";
-    bool        valid = false;
-};
+// MeasurementValue now lives in the DATA layer (pv/data/measure_types.h):
+// it is the return type of the DataSource contract, so declaring it here
+// forced the data layer to include this API header. Re-exported by the
+// include below so existing `api::`-namespaced users keep resolving it via
+// the moved definition.
 
 struct CursorInfo {
     int32_t index       = 0;

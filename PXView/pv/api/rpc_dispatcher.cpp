@@ -175,7 +175,7 @@ json RpcDispatcher::to_json(const DecoderAnnotation& a) {
     };
 }
 
-json RpcDispatcher::to_json(const MeasurementValue& m) {
+json RpcDispatcher::to_json(const data::MeasurementValue& m) {
     return json{
         {"type",  m.type},
         {"value", m.value},

@@ -29,7 +29,7 @@
 
 #include <QString>
 
-#include "pv/api/types.h"        // api::MeasurementValue (Core-layer API type)
+#include "pv/data/measure_types.h"   // data::MeasurementValue
 #include "pv/data/model/signalmodel.h" // data::SignalModel (Core-layer channel model)
 #include "pv/base/pxvdef.h"           // DSO_MS_* / DS_CONF_DSO_VDIVS
 
@@ -126,7 +126,7 @@ public:
         int view_rect_height = 0);
 
     /**
-     * Convert a raw MeasurementResult into a list of API MeasurementValue
+     * Convert a raw MeasurementResult into a list of API data::MeasurementValue
      * structs (one per DSO_MS_* measurement type). Applies the same formula
      * switch as the original DsoMeasure::get_measure(int type):
      *   - Voltage measurements (VMAX/VMIN/VP2P/VRMS/VMEA/VHIG/VLOW/AMPT)
@@ -140,8 +140,8 @@ public:
      *   - Frequency (FREQ) uses the same period -> Hz/kHz/MHz conversion.
      *   - Pulse count (PCNT) uses the same count formatting.
      *
-     * Each output MeasurementValue.value is in the base unit (mV / % / Hz /
-     * ns) and MeasurementValue.unit is the SI base unit string. Callers
+     * Each output data::MeasurementValue.value is in the base unit (mV / % / Hz /
+     * ns) and data::MeasurementValue.unit is the SI base unit string. Callers
      * (View layer or MCP JSON serializer) may rescale for display.
      *
      * @param r              The raw measurement result.
@@ -149,11 +149,11 @@ public:
      * @param measure_vf     measure_voltage_factor from DsoSnapshot (vfactor).
      * @param vfactor        vDial probe factor (1/10/100).
      * @param view_rect_height Pixel height of the trace (0 = use default).
-     * @return Vector of MeasurementValue (one per DSO_MS_* type, in enum
+     * @return Vector of data::MeasurementValue (one per DSO_MS_* type, in enum
      *         order; entries with valid=false when the underlying value is
      *         not available).
      */
-    static std::vector<api::MeasurementValue> to_measurement_values(
+    static std::vector<data::MeasurementValue> to_measurement_values(
         const MeasurementResult &r,
         double data_scale,
         uint64_t measure_vf,

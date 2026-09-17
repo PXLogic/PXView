@@ -278,7 +278,7 @@ public:
   // values from the view_data() DsoSnapshot + signal_models. The View layer
   // (view::DsoMeasure::get_measure) and the MCP API (SessionService::
   // get_measurements) both call this so headless mode returns real data.
-  std::vector<api::MeasurementValue> get_measurements(
+  std::vector<data::MeasurementValue> get_measurements(
       int channel_index = -1,
       int view_rect_height = 0) override;
   // Task C2.4: cursor position state forwarded to
@@ -679,7 +679,7 @@ std::vector<core::Subscription> _event_subscriptions;
   uint64_t _measure_cache_ring = 0;
   int _measure_cache_h = 0;
   bool _measure_cache_valid = false;
-  std::vector<api::MeasurementValue> _measure_cache_val;
+  std::vector<data::MeasurementValue> _measure_cache_val;
 };
 
 } // namespace pv

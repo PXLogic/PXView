@@ -417,7 +417,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
 }
 
 // ---------------------------------------------------------------------------
-// to_measurement_values() — convert raw result → API MeasurementValue list
+// to_measurement_values() — convert raw result → API data::MeasurementValue list
 //
 // This is the Core-layer port of the switch statement in
 // view::DsoMeasure::get_measure(int type) (dso_measure.cpp L47-L183).
@@ -425,18 +425,18 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
 // raw ADC counts to millivolts via convert_voltage().
 // ---------------------------------------------------------------------------
 
-std::vector<api::MeasurementValue>
+std::vector<data::MeasurementValue>
 MeasureCalculator::to_measurement_values(const MeasurementResult &r,
                                          double data_scale,
                                          uint64_t measure_vf,
                                          uint64_t vfactor,
                                          int view_rect_height)
 {
-    std::vector<api::MeasurementValue> out;
+    std::vector<data::MeasurementValue> out;
 
     auto make = [&](int type, double value, const char *unit,
                     bool valid) -> void {
-        api::MeasurementValue mv;
+        data::MeasurementValue mv;
         mv.type = type;
         mv.value = value;
         mv.unit = unit;

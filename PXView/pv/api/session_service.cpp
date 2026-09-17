@@ -3543,7 +3543,7 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
 // 14. Measurements
 // ===========================================================================
 
-std::vector<MeasurementValue> SessionService::get_measurements() const {
+std::vector<data::MeasurementValue> SessionService::get_measurements() const {
     // Task C1.6: measurement computation now lives in the Core layer
     // (core::MeasureCalculator, reached via SigSession::get_measurements).
     // This works in both headless and GUI modes — no View pointer needed.
