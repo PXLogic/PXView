@@ -2788,14 +2788,10 @@ void SigSession::on_rev_end_packet() {
       }
     }
 
-    // 采集完成后自动重新应用毛刺滤波(若用户启用了 auto-apply)
-    if (_state->view_data()->_glitch_filter_auto_apply &&
-        !_state->view_data()->_glitch_filter_thresholds.empty() &&
-        _state->view_data()->get_logic() && !_state->view_data()->get_logic()->empty()) {
-      _filter_processor->set_glitch_filter(
-          _state->view_data()->_glitch_filter_thresholds,
-          _state->view_data()->_glitch_filter_modes);
-    }
+    // 采集完成后自动重新应用毛刺滤波(若用户启用了 auto-apply)。
+    // 判定条件与"锁内取配置拷贝、出锁再提交"的纪律统一在
+    // FilterProcessor::auto_apply_saved_filter() 里，两条采集完成路径共用。
+    _filter_processor->auto_apply_saved_filter();
 
     if (is_repeat_mode()) {
       _repeat_wait_decode =
@@ -3613,17 +3609,6 @@ bool SigSession::is_glitch_filter_active() {
   return _filter_processor->is_glitch_filter_active();
 }
 
-void SigSession::clear_glitch_filter_state_for_capture() {
-  // 新采集开始时调用:清除滤波激活状态,
-  // 但保留 thresholds/modes(供 auto-apply 使用)。
-  // 不恢复数据 — _state->view_data()->get_logic() 已被 clear(),无数据可恢复。
-  // 撤销信息由 LogicSnapshot 的可逆编辑日志承载,随快照一起被丢弃
-  // (free_data()/init_all() → clear_edits()),这里无需再释放 backup 快照。
-  if (_state->view_data()->_glitch_filter_active) {
-    _state->view_data()->_glitch_filter_active = false;
-    _event_bus->broadcast_async<interface::GlitchFilterCleared>({});
-  }
-}
 void SigSession::set_signal_invert(const std::vector<bool> &channels) {
   _filter_processor->set_signal_invert(channels);
 }

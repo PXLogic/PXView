@@ -500,8 +500,8 @@ void GlitchFilterPopup::open_for_signal(LogicSignal* sig, const QPoint& anchor_p
     uint32_t initial_threshold = _recommended_threshold;
     GlitchFilterMode initial_mode = GlitchFilterMode::Both;
     auto &sess = _view.session();
-    const auto &saved_th = sess.glitch_filter_thresholds();
-    const auto &saved_md = sess.glitch_filter_modes();
+    const auto saved_th = sess.glitch_filter_thresholds();
+    const auto saved_md = sess.glitch_filter_modes();
     bool has_restored_config = !saved_th.empty();
 
     if (sess.is_glitch_filter_active() || has_restored_config) {
@@ -609,8 +609,8 @@ void GlitchFilterPopup::open_for_batch(const std::vector<LogicSignal*>& sigs, co
     uint32_t initial_threshold = _recommended_threshold;
     GlitchFilterMode initial_mode = GlitchFilterMode::Both;
     auto &sess = _view.session();
-    const auto &th = sess.glitch_filter_thresholds();
-    const auto &md = sess.glitch_filter_modes();
+    const auto th = sess.glitch_filter_thresholds();
+    const auto md = sess.glitch_filter_modes();
     bool has_restored_config = !th.empty();
 
     if (sess.is_glitch_filter_active() || has_restored_config) {

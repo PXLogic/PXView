@@ -95,7 +95,8 @@ public:
                                  const std::atomic<bool> *cancel = nullptr,
                                  std::function<void()> batch_callback = nullptr);
     bool is_glitch_filtered() const;
-    void set_glitch_filtered(bool filtered);
+    // (set_glitch_filtered(bool) removed: zero callers — the flag is maintained
+    //  internally by apply_glitch_filter_all / revert_all_edits.)
 
     // Persisted filtered ranges for View-layer overlay rendering.
     //
@@ -160,16 +161,18 @@ public:
     // treat false as "the snapshot is NOT back at capture-original": do not
     // report success, do not build new edits on top, and let the user retry.
     //
-    // SCOPE NOTE: the entry also clears the snapshot's edit-pass-local
-    // edit_pass_failed() flag. Every FilterProcessor edit pass begins with
-    // this call, so the reset marks the start of a pass: failures recorded
-    // DURING the pass (revert / invert / filter) survive to the caller's
-    // end-of-pass check, while a transient OOM from a PREVIOUS pass no longer
-    // poisons every later pass (previously one OOM made filter/undo
-    // permanently roll back until the next capture). This flag is
-    // deliberately SEPARATE from the inherited memory_failed(), which stays
-    // the CAPTURE-pipeline degradation signal (DataFeedParser drops packets
-    // on it) and is never touched by edit passes.
+    // SCOPE NOTE: this call is the ONLY opener of the snapshot's edit-pass
+    // failure scope — it clears edit_pass_failed() at entry, before the
+    // has_edits() early-out, so even a no-op revert starts a fresh scope. Every
+    // FilterProcessor edit pass begins here (aborting if this returns false),
+    // which is what keeps a transient OOM from a previous pass from poisoning
+    // later passes (previously one OOM made filter/undo permanently roll back
+    // until the next capture). No other method — not apply_glitch_filter_all,
+    // not the capture path — resets it; that is what makes "a pass begins with
+    // a return to capture-original data" a single, greppable invariant. This
+    // flag is deliberately SEPARATE from the inherited memory_failed(), which
+    // stays the CAPTURE-pipeline degradation signal (DataFeedParser drops
+    // packets on it) and is never touched by edit passes.
     bool revert_all_edits(std::function<void()> progress_callback = nullptr);
     bool has_edits() const;
     /// Forget the edit log without restoring. Only for snapshot teardown

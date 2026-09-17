@@ -503,16 +503,10 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       // 且有保存的 thresholds，则自动重新应用毛刺滤波。
       // LOGIC 模式走 RevEndPacket 路径已在 on_event(RevEndPacket) 中处理；
       // MSO 模式走本 else 分支，原代码遗漏了 auto-apply。
-      if (mode == MSO &&
-          _state->view_data()->_glitch_filter_auto_apply &&
-          !_state->view_data()->_glitch_filter_thresholds.empty() &&
-          _state->view_data()->get_logic() &&
-          !_state->view_data()->get_logic()->empty() &&
-          _state->filter_processor()) {
-        _state->filter_processor()->set_glitch_filter(
-            _state->view_data()->_glitch_filter_thresholds,
-            _state->view_data()->_glitch_filter_modes);
-      }
+      // 判定条件与"锁内取配置拷贝、出锁再提交"的纪律统一在
+      // FilterProcessor::auto_apply_saved_filter() 里，两条路径共用。
+      if (mode == MSO && _state->filter_processor())
+        _state->filter_processor()->auto_apply_saved_filter();
     }
 
     break;

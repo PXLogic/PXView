@@ -3700,8 +3700,8 @@ GlitchFilterConfig SessionService::get_glitch_filter_config() const {
 
     if (_session->is_glitch_filter_active()) {
         // 架构修复：从 map 读取当前配置，用 channel_index 作 key
-        const auto &th = _session->glitch_filter_thresholds();
-        const auto &md = _session->glitch_filter_modes();
+        const auto th = _session->glitch_filter_thresholds();
+        const auto md = _session->glitch_filter_modes();
         for (const auto &kv : th) {
             config.channels.push_back(kv.first);
             config.thresholds.push_back(static_cast<int32_t>(kv.second));

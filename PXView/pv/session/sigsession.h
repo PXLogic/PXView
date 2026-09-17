@@ -460,14 +460,24 @@ void on_load_config_end();
   // View 层据此给出"完成后自动清除"而非误导性的"已清除"提示。
   bool request_clear_glitch_filter();
   bool is_glitch_filter_active();
-  // Per-channel glitch filter state (Task 9 / I4): public read accessors for
-  // the current thresholds/modes so the View layer can snapshot prior state
-  // before applying a new filter, then restore it via set_glitch_filter() on
-  // undo_filter(). Returns references to the view-data maps; callers must
-  // copy if they need a stable snapshot. Safe to call from the GUI thread.
-  const std::map<int, uint32_t>& glitch_filter_thresholds() const { return _state->view_data()->_glitch_filter_thresholds; }
-  const std::map<int, GlitchFilterMode>& glitch_filter_modes() const { return _state->view_data()->_glitch_filter_modes; }
-  // 采集后自动重新应用滤波(保留上次阈值/模式)
+  // Per-channel glitch filter state (Task 9 / I4): these accessors hand back a
+  // COPY taken under the filter-state lock, which sessiondata.h documents as
+  // the owner of these fields. They used to return a naked reference into
+  // SessionData while the FilterProcessor worker clears that map — a GUI
+  // reader iterating it (the glitch-filter popup) could therefore race the
+  // .clear(). A reference cannot be protected across the caller's use, so a
+  // copy is the only correct shape; the maps hold a handful of entries.
+  std::map<int, uint32_t> glitch_filter_thresholds() const {
+    std::lock_guard<std::mutex> lk(_state->view_data()->_filter_state_mutex);
+    return _state->view_data()->_glitch_filter_thresholds;
+  }
+  std::map<int, GlitchFilterMode> glitch_filter_modes() const {
+    std::lock_guard<std::mutex> lk(_state->view_data()->_filter_state_mutex);
+    return _state->view_data()->_glitch_filter_modes;
+  }
+  // 采集后自动重新应用滤波(保留上次阈值/模式)。
+  // atomic: 读方是数据馈送线程（DataFeedParser 的 auto-apply 判定）与主线程，
+  // 写方是 GUI 线程，与快照层 *_failed 标志同样的跨线程约定。
   void set_glitch_filter_auto_apply(bool en) { _state->view_data()->_glitch_filter_auto_apply = en; }
   bool glitch_filter_auto_apply() const { return _state->view_data()->_glitch_filter_auto_apply; }
   // 显示波形轨道红色滤波提示叠加层
@@ -477,13 +487,17 @@ void on_load_config_end();
   // 实际滤波在采集完成后由 auto-apply 路径或用户手动应用时执行。
   void restore_glitch_filter_config(const std::map<int, uint32_t> &thresholds,
                                      const std::map<int, GlitchFilterMode> &modes) {
+    // 三处写入都在 filter-state 锁内（该锁是这几个字段的文档化归属）。
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
     _state->view_data()->_glitch_filter_thresholds = thresholds;
     _state->view_data()->_glitch_filter_modes = modes;
     // 标记为非 active —— 实际滤波未应用，但配置已恢复供 auto-apply 使用
     _state->view_data()->_glitch_filter_active = false;
   }
-  // 新采集开始时清除滤波状态(不恢复数据,因为数据已被 clear)
-  void clear_glitch_filter_state_for_capture();
+  // 新采集开始时清除滤波状态(不恢复数据,因为数据已被 clear)。
+  // 注意：该操作由 SessionStateContext::clear_glitch_filter_state_for_capture()
+  // 单点实现（CaptureManager 经 ISessionCoordination 调用它）；SigSession 曾
+  // 复制过一份同逻辑实现但零调用，已删除（去冗余）。
   void set_signal_invert(const std::vector<bool> &channels);
   void clear_signal_invert();
   // GUI 路径专用（见 request_clear_glitch_filter 的说明）。返回 true 表示

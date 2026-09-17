@@ -24,6 +24,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -82,7 +83,10 @@ public:
   // of a second complete copy of the sample store and never tears down the
   // mmap allocator. See logicsnapshot_glitch_filter.h.
   bool _glitch_filter_active, _signal_invert_active;
-  bool _glitch_filter_auto_apply = false;  // 采集后自动重新应用滤波
+  // 采集后自动重新应用滤波。atomic：写入来自 GUI 线程，读取来自数据馈送线程
+  // （DataFeedParser 的 auto-apply 判定）——不属于 _filter_state_mutex 保护的
+  // 那组"已应用状态"，因为它是一个不随采集重置的用户偏好。
+  std::atomic<bool> _glitch_filter_auto_apply{false};
   bool _show_glitch_filter_overlay = true; // 显示波形轨道红色滤波提示叠加层
   // 架构修复：用 channel_index 作 key（消除 View/Core 位置序号错位）
   std::map<int, uint32_t> _glitch_filter_thresholds;
@@ -92,6 +96,13 @@ public:
   // Mutex protects _glitch_filter_active/_thresholds/_modes and
   // _signal_invert_active/_channels from concurrent access by the
   // FilterProcessor worker thread (writer) and main thread (reader).
+  //
+  // CONTRACT: every read AND write of those five fields must take this lock.
+  // Returning a reference into one of the containers escapes the lock and is
+  // therefore not allowed — accessors hand back copies (see
+  // SigSession::glitch_filter_thresholds). Fields that are cross-thread but
+  // not part of this "applied state" set (e.g. _glitch_filter_auto_apply) use
+  // std::atomic instead, so nothing silently relies on the lock's protection.
   mutable std::mutex _filter_state_mutex;
 
 private:

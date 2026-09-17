@@ -2744,10 +2744,6 @@ bool LogicSnapshot::is_glitch_filtered() {
   return _glitch_filter->is_glitch_filtered();
 }
 
-void LogicSnapshot::set_glitch_filtered(bool filtered) {
-  _glitch_filter->set_glitch_filtered(filtered);
-}
-
 std::shared_ptr<const std::vector<LogicSnapshot::FillRange>>
 LogicSnapshot::get_filtered_ranges(int sig_index) const {
   return _glitch_filter->get_filtered_ranges(sig_index);
@@ -2771,6 +2767,14 @@ bool LogicSnapshot::edit_log_overflowed() const {
 
 bool LogicSnapshot::edit_pass_failed() const {
   return _edit_pass_failed.load(std::memory_order_acquire);
+}
+
+bool LogicSnapshot::edit_pass_aborted() const {
+  // One predicate for "this edit pass produced no usable result" (see the
+  // declaration): the Core checks this at every pass exit instead of
+  // re-spelling the OR at each site.
+  return _edit_pass_failed.load(std::memory_order_acquire) ||
+         _glitch_filter->edit_log_overflowed();
 }
 
 } // namespace data

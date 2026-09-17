@@ -359,18 +359,23 @@ public:
     // batch's exclusive EditWriteGuard. See
     // LogicSnapshotGlitchFilter::apply_glitch_filter.
     //
-    // Top-level edit entry: like revert_all_edits(), its entry resets
-    // edit_pass_failed(), so every data-layer edit operation starts from a
-    // clean failure scope and a stale flag from a previous operation cannot
-    // fail this one. apply_glitch_filter() below is the single-channel
-    // primitive used internally; direct external callers should prefer this
-    // _all entry (or revert first) to keep the per-pass semantics.
+    // EDIT-PASS SCOPE: this is NOT a scope opener. The edit-pass failure scope
+    // is opened by revert_all_edits() alone — the single point where a pass
+    // starts from capture-original data. Calling this on top of an existing
+    // pass (without reverting) deliberately keeps that pass's failure state:
+    // that is what makes "revert first, then re-filter" one atomic scope, and
+    // what lets a Core pass abort on a failed revert instead of masking it
+    // (see FilterProcessor::rebuild_filtered_state). Data-layer callers that
+    // want a clean scope must revert first — which they must do anyway to
+    // avoid stacking edits.
     void apply_glitch_filter_all(const std::map<int, uint32_t> &thresholds, std::function<void(int)> progress_callback,
         const std::map<int, GlitchFilterMode> &filter_modes = {},
         const std::atomic<bool> *cancel = nullptr,
         std::function<void()> batch_callback = nullptr);
     bool is_glitch_filtered();
-    void set_glitch_filtered(bool filtered);
+    // NOTE: the former set_glitch_filtered(bool) has been removed — it had no
+    // callers (the state is maintained internally by apply_glitch_filter_all /
+    // revert_all_edits and only ever READ from outside, by the renderer).
 
     // 持久化访问 apply_glitch_filter 滤除的区间列表，供 View 层渲染 overlay。
     // 返回不可变表的 shared_ptr：读者持有期间表不会被改写或替换（旧 API
@@ -387,29 +392,50 @@ public:
     // 幂等：没有编辑时是空操作。
     // 返回 false 表示至少一条记录未能还原（重实体化时内存池分配失败）——
     // 调用方必须视为"快照未回到采集原始态"，不得上报成功，也不得在其上
-    // 继续叠加新编辑；同时入口会把粘滞的 _memory_failed 复位（每趟编辑
-    // 作用域的起点，见 logicsnapshot_glitch_filter.h 的 SCOPE NOTE）。
+    // 继续叠加新编辑；同时入口会**开启新的编辑趟作用域**（复位
+    // edit_pass_failed，见 logicsnapshot_glitch_filter.h 的 SCOPE NOTE）。
+    // 这是全库唯一的趟作用域开启点：编辑路径以它开头，采集层的
+    // memory_failed 与它无关。
     // `progress_callback` (optional; must not block or read this snapshot, it
     // runs inside the revert's exclusive edit transaction) fires periodically
     // during a long undo. When that notice becomes visible depends on the
     // transaction being published between chunks — see the visibility note in
     // LogicSnapshotGlitchFilter::revert_all_edits.
     bool revert_all_edits(std::function<void()> progress_callback = nullptr);
+    /// Edit-log observability query. NOT used by the Core edit paths any more
+    /// (they decide with edit_pass_aborted()); kept because it is the only way
+    /// to ask "is this snapshot currently carrying un-reverted edits", which
+    /// is what the save/load and regression tests assert on.
     bool has_filter_edits() const;
     /// True when the reversible edit log hit its memory budget during the
     /// last pass, i.e. the filter bailed out mid-way. Callers must revert
     /// and report a failure instead of accepting a partially filtered
     /// snapshot. Cleared by revert_all_edits().
+    ///
+    /// Kept SEPARATE from edit_pass_failed() because it has a second, lasting
+    /// effect beyond the failure report: while it is set, recording is
+    /// disabled, so apply_glitch_filter() refuses to run (it would modify data
+    /// it could no longer undo) until a revert clears it.
     bool edit_log_overflowed() const;
-    /// True when the CURRENT/last edit pass (revert / invert / glitch filter)
-    /// hit an allocation failure. Deliberately SEPARATE from the inherited
+    /// True when the CURRENT edit pass (revert / invert / glitch filter) hit
+    /// an allocation failure. Deliberately SEPARATE from the inherited
     /// memory_failed(): that flag is the CAPTURE-pipeline degradation signal
     /// (DataFeedParser drops packets and stops the capture on it), while this
-    /// one only reports "this edit pass could not allocate". Reset at the
-    /// entry of every top-level edit operation (revert_all_edits and
-    /// apply_glitch_filter_all), so a transient OOM in one pass never
-    /// poisons later passes and never touches capture semantics.
+    /// one only reports "this edit pass could not allocate".
+    ///
+    /// The pass scope is opened by revert_all_edits() ALONE (the single point
+    /// where a pass returns to capture-original data) and is not touched by
+    /// the capture path or by apply_glitch_filter_all() — see the scope note
+    /// on that method. Consequently a transient OOM in one pass never poisons
+    /// later passes, and no edit operation can disarm capture semantics.
     bool edit_pass_failed() const;
+    /// Single predicate for "this edit pass did not produce a usable result":
+    /// an allocation failure OR an exceeded edit-log budget. This is what the
+    /// Core checks at every pass exit, so the definition of "the pass failed"
+    /// lives in one place instead of being re-spelled at each call site. The
+    /// two underlying states stay separately queryable for diagnosis (and
+    /// because the overflow state has the lasting effect described above).
+    bool edit_pass_aborted() const;
 
     void set_disk_cache_config(const DiskCacheConfig &config);
     bool is_disk_cache_active();
@@ -721,9 +747,10 @@ private:
 
     // Edit-pass-local allocation-failure flag (see edit_pass_failed()). Set by
     // the glitch-filter subsystem (a friend) when a block re-materialisation
-    // or materialisation fails mid-pass; reset at the entry of every top-level
-    // edit operation. NEVER set or cleared by the capture path — that is what
-    // the inherited Snapshot::_memory_failed is for.
+    // or materialisation fails mid-pass. Reset ONLY by revert_all_edits(), the
+    // single edit-pass scope opener (apply_glitch_filter_all deliberately does
+    // not reset it — see that method's scope note). NEVER set or cleared by the
+    // capture path — that is what the inherited Snapshot::_memory_failed is for.
     std::atomic<bool> _edit_pass_failed{false};
 
 public:

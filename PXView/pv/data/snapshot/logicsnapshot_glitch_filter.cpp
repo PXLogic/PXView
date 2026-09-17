@@ -1038,13 +1038,11 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
     const std::map<int, GlitchFilterMode> &filter_modes,
     const std::atomic<bool> *cancel,
     std::function<void()> batch_callback) {
-  // Per-pass scope reset, symmetric with revert_all_edits(): this is the other
-  // top-level edit entry, so a failure left by a PREVIOUS operation must not
-  // fail this one (and a direct caller that never reverts still gets clean
-  // per-pass semantics). Safe for the Core paths: FilterProcessor aborts a
-  // pass immediately when the leading revert fails, so apply_glitch_filter_all
-  // never runs on top of a failed revert whose flag this reset could mask.
-  _host->_edit_pass_failed = false;
+  // NOT an edit-pass scope opener (see logicsnapshot.h): the scope is opened
+  // by revert_all_edits() alone. Keeping the failure state of the enclosing
+  // pass here is deliberate — Core always reverts first and aborts if that
+  // revert failed, so a failed invert/filter step is reported rather than
+  // masked by a second reset.
 
   // 架构修复：按 channel_index 查找阈值，与 _ch_index 中的位置无关
   for (size_t i = 0; i < _host->_ch_index.size(); i++) {
@@ -1150,10 +1148,6 @@ void apply_glitch_filter_one_pass(const uint8_t *in, uint8_t *out,
 
 bool LogicSnapshotGlitchFilter::is_glitch_filtered() const {
   return _glitch_filtered;
-}
-
-void LogicSnapshotGlitchFilter::set_glitch_filtered(bool filtered) {
-  _glitch_filtered = filtered;
 }
 
 std::shared_ptr<const std::vector<LogicSnapshot::FillRange>>

@@ -842,11 +842,12 @@ void TestLogicSnapshotRaw::test_revert_publishes_in_uninvert_branch()
 
 void TestLogicSnapshotRaw::test_revert_resets_stale_edit_pass_failed()
 {
-    // 编辑趟失败标志的"每趟作用域"契约（缺口审计①拆分后）：
-    //   - edit_pass_failed 由编辑路径（撤销重实体化/滤波实体化）置位，在
-    //     revert_all_edits() 与 apply_glitch_filter_all() 两个顶层入口复位，
-    //     上一趟遗留的瞬时 OOM 不得把这一趟也判死（旧行为：出过一次内存
-    //     问题之后滤波/撤销永久回滚，只有重新采集能恢复）。
+    // 编辑趟失败标志的"每趟作用域"契约（缺口审计①拆分 + B2 单一开启点）：
+    //   - edit_pass_failed 由编辑路径（撤销重实体化/滤波实体化）置位，且**只**
+    //     由 revert_all_edits() 复位（全库唯一的趟作用域开启点，Core 每个编辑
+    //     趟都以它开头且在其失败时立即中止）；上一趟遗留的瞬时 OOM 不得把这
+    //     一趟也判死（旧行为：出过一次内存问题之后滤波/撤销永久回滚）。
+    //   - edit_pass_aborted() 是 Core 用的聚合判据（分配失败 ∨ 编辑日志超预算）。
     //   - 该标志与采集层的 _memory_failed 刻意分离：后者是 DataFeedParser
     //     的降级/停采信号（收包入口按它丢包），编辑路径不得置位也不得清除
     //     ——否则一次编辑趟会解除采集守卫的武装。
@@ -896,16 +897,43 @@ void TestLogicSnapshotRaw::test_revert_resets_stale_edit_pass_failed()
     QVERIFY(snap.revert_all_edits());
     QVERIFY(!snap._edit_pass_failed.load());
 
-    // 场景 D：apply_glitch_filter_all 入口同样复位（顶层编辑入口对称性，
-    //         直接调用方不经过 revert 也获得每趟语义）。
+    // 场景 D：编辑趟作用域的唯一开启点是 revert（B2 之后的契约）
+    //   D1: 只调 apply_glitch_filter_all（不 revert）**不复位**陈旧标志 ——
+    //       这是刻意的：作用域 = "一趟从采集原始数据出发"，Core 恒以 revert
+    //       开头并在其失败时立即中止，所以不存在被掩盖的失败。
+    //   D2: revert 开启新作用域后，同一趟里健康的滤波不会把趟标成失败。
     snap._edit_pass_failed = true;
     std::map<int, uint32_t> thresholds;
     thresholds[sig] = 2;
     snap.apply_glitch_filter_all(thresholds, nullptr, {}, nullptr, nullptr);
+    QVERIFY2(snap._edit_pass_failed.load(),
+             "apply_glitch_filter_all is NOT a scope opener: it must keep the "
+             "enclosing pass's failure state (scope opens in revert_all_edits)");
+    QVERIFY2(snap.revert_all_edits(),
+             "revert (the scope opener) must succeed on a healthy snapshot");
     QVERIFY2(!snap._edit_pass_failed.load(),
-             "apply_glitch_filter_all must reset the stale flag at entry "
-             "(a healthy pass must not inherit a previous OOM)");
+             "revert_all_edits must clear the stale flag at entry");
+    snap.apply_glitch_filter_all(thresholds, nullptr, {}, nullptr, nullptr);
+    QVERIFY2(!snap._edit_pass_failed.load(),
+             "a healthy filter inside a freshly-opened scope must not be "
+             "reported as a failed pass");
     snap.revert_all_edits();
+
+    // 场景 E（B3）：edit_pass_aborted() 是"本趟不可用"的唯一判据，由分配失败
+    //   与编辑日志超预算两者合成；两个子状态仍可分别查询（超预算另有"禁止
+    //   记录直到 revert"的持久副作用，故不能合并存储）。
+    QVERIFY(!snap.edit_pass_aborted());
+    snap._edit_pass_failed = true;
+    QVERIFY(snap.edit_pass_failed());
+    QVERIFY(snap.edit_pass_aborted());
+    snap._edit_pass_failed = false;
+    QVERIFY(!snap.edit_pass_aborted());
+    snap._glitch_filter->_edit_log_overflow = true;
+    QVERIFY(!snap.edit_pass_failed());
+    QVERIFY2(snap.edit_pass_aborted(),
+             "an exceeded edit-log budget must read as 'pass aborted' too");
+    snap._glitch_filter->_edit_log_overflow = false;
+    QVERIFY(!snap.edit_pass_aborted());
 }
 
 void TestLogicSnapshotRaw::test_dense_glitch_train_merges_edit_records()

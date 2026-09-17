@@ -469,10 +469,18 @@ void SessionStateContext::clear_glitch_filter_state_for_capture() {
   // 撤销信息现在由 LogicSnapshot 的可逆编辑日志承载,随快照一起被 clear()
   // 丢弃(free_data()/init_all() 会 clear_edits()),这里无需再手工释放
   // backup 快照。
-  if (_buffers->view_data()->_glitch_filter_active) {
-    _buffers->view_data()->_glitch_filter_active = false;
-    _event_bus->broadcast_async<interface::GlitchFilterCleared>({});
+  // 读写都在 filter-state 锁内：该锁是这几个字段的文档化归属（sessiondata.h）。
+  // 这里虽在采集起点（CaptureManager）执行，但 FilterProcessor 的 worker
+  // 可能正在翻转同一标志，读取必须与写入串行。
+  bool was_active = false;
+  {
+    std::lock_guard<std::mutex> flk(_buffers->view_data()->_filter_state_mutex);
+    was_active = _buffers->view_data()->_glitch_filter_active;
+    if (was_active)
+      _buffers->view_data()->_glitch_filter_active = false;
   }
+  if (was_active)
+    _event_bus->broadcast_async<interface::GlitchFilterCleared>({});
 }
 
 SessionStateContext::CaptureStateSnapshot

@@ -109,9 +109,9 @@ void FilterProcessor::set_glitch_filter(
     _pending_glitch_thresholds = thresholds;
     _pending_glitch_modes = filter_modes;
     _has_pending_glitch.store(true);
-    // The queued apply is a writer intent: it must supersede a clear that was
-    // queued earlier (see _edit_intent_seq).
-    _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
+    // The queued apply is a glitch-filter writer intent: it must supersede a
+    // glitch clear that was queued earlier (see _glitch_intent_seq).
+    _glitch_intent_seq.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
@@ -130,7 +130,7 @@ void FilterProcessor::set_glitch_filter(
     return;
 
   _glitch_filter_running = true;
-  _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
+  _glitch_intent_seq.fetch_add(1, std::memory_order_relaxed);
   _event_bus->broadcast_async<interface::GlitchFilterStarted>({});
 
   // Gap 1: submit to ThreadPool instead of creating raw std::thread.
@@ -313,7 +313,7 @@ bool FilterProcessor::rebuild_filtered_state(
     return false;
   }
 
-  if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
+  if (logic->edit_pass_aborted()) {
     // Roll back instead of publishing a half-applied pass. The old code kept
     // going and set _glitch_filter_active = true, so an out-of-memory filter
     // reported success and the UI showed a partially filtered waveform with
@@ -428,8 +428,8 @@ void FilterProcessor::glitch_filter_task(
 }
 
 void FilterProcessor::clear_glitch_filter() {
-  auto fut = submit_clear_glitch_filter();
-  if (!fut.valid())
+  auto sub = submit_clear_glitch_filter();
+  if (!sub.fut.valid())
     return;
 
   // The API/MCP contract is "cleared when this returns": a client that reads
@@ -443,7 +443,7 @@ void FilterProcessor::clear_glitch_filter() {
   // submission": the future completes only after the parked clear task has
   // actually restored the data, instead of the old behaviour of returning
   // immediately with the samples still filtered.
-  if (fut.wait_for(std::chrono::seconds(kClearTaskWaitSeconds)) !=
+  if (sub.fut.wait_for(std::chrono::seconds(kClearTaskWaitSeconds)) !=
       std::future_status::ready) {
     pxv_warn("FilterProcessor::clear_glitch_filter: undo still running after "
              "%d s; returning before it completes", kClearTaskWaitSeconds);
@@ -458,13 +458,13 @@ bool FilterProcessor::request_clear_glitch_filter() {
   //
   // The return value tells the View whether the request was parked behind a
   // running pass, so it can show "will run when the current pass finishes"
-  // instead of a premature "cleared" toast.
-  const bool was_running = _glitch_filter_running.load();
-  auto fut = submit_clear_glitch_filter();
-  return was_running && fut.valid();
+  // instead of a premature "cleared" toast. It comes from the submission
+  // itself (no second read of the running flag — that could race with a pass
+  // finishing in between and report the wrong thing).
+  return submit_clear_glitch_filter().queued;
 }
 
-std::future<void> FilterProcessor::submit_clear_glitch_filter() {
+FilterProcessor::ClearSubmission FilterProcessor::submit_clear_glitch_filter() {
   // These checks run on the caller's (possibly GUI) thread, so they must stay
   // cheap and must NOT take _edit_mutex. The original version acquired the
   // edit lock first and only then tested whether a pass was in flight, so
@@ -472,36 +472,37 @@ std::future<void> FilterProcessor::submit_clear_glitch_filter() {
   // entire pass and *then* discovered it had nothing to do.
   std::lock_guard<std::mutex> launch_lk(_glitch_launch_mutex);
 
-  // A clear during a running pass is QUEUED, not dropped: the pool task parks
-  // on _edit_mutex and runs the undo right after the pass finishes. Previously
-  // the request was silently discarded here and the user had to click again —
-  // and the sync API/MCP variant even returned with the data still filtered.
-  if (_glitch_filter_running.load()) {
-    // The latest instruction wins: drop a queued apply, otherwise the pass
+  const bool running = _glitch_filter_running.load();
+  if (running) {
+    // A clear during a running pass is QUEUED, not dropped: the pool task
+    // parks on _edit_mutex and runs the undo right after the pass finishes.
+    // Previously the request was silently discarded here and the user had to
+    // click again — and the sync API/MCP variant even returned with the data
+    // still filtered.
+    //
+    // Dropping a queued apply belongs to THIS branch only: otherwise the pass
     // loop would re-apply the filter immediately before our queued clear runs.
-    {
-      std::lock_guard<std::mutex> lk(_pending_mutex);
-      _has_pending_glitch.store(false);
-      _pending_glitch_thresholds.clear();
-      _pending_glitch_modes.clear();
-    }
-    const uint64_t seq =
-        _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-    auto self = this;
-    return _filter_pool.submit([self, seq]() {
-      self->clear_glitch_filter_task(seq);
-    });
+    std::lock_guard<std::mutex> lk(_pending_mutex);
+    _has_pending_glitch.store(false);
+    _pending_glitch_thresholds.clear();
+    _pending_glitch_modes.clear();
+  } else {
+    // Nothing in flight: only a genuinely applied filter is worth an undo.
+    // Read under the filter-state lock — that lock is the documented owner of
+    // this flag, and a worker may be flipping it right now.
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    if (!_state->view_data()->_glitch_filter_active)
+      return {};
   }
 
-  if (!_state->view_data()->_glitch_filter_active)
-    return {};
-
   const uint64_t seq =
-      _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+      _glitch_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
   auto self = this;
-  return _filter_pool.submit([self, seq]() {
-    self->clear_glitch_filter_task(seq);
-  });
+  return ClearSubmission{
+      _filter_pool.submit([self, seq]() {
+        self->clear_glitch_filter_task(seq);
+      }),
+      running};
 }
 
 void FilterProcessor::clear_glitch_filter_task(uint64_t intent_seq) {
@@ -513,13 +514,15 @@ void FilterProcessor::clear_glitch_filter_task(uint64_t intent_seq) {
   // where it waits for the pass to finish.
   std::lock_guard<std::timed_mutex> edit_lk(_edit_mutex);
 
-  // Latest-writer-wins: if another apply/clear intent was submitted after
-  // this clear was queued, this clear is stale — running it would undo the
-  // user's newer instruction. The newer intent produces the final state on
-  // its own (a queued apply is serviced by the pass; a newer clear queued its
-  // own task).
-  if (_edit_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
-    pxv_info("FilterProcessor: queued clear superseded by a newer apply/clear "
+  // Latest-writer-wins, per feature: if a newer GLITCH-FILTER intent (an apply
+  // or another clear) was submitted after this clear was queued, this clear is
+  // stale — running it would undo the user's newer instruction. The newer
+  // intent produces the final state on its own (a queued apply is serviced by
+  // the pass; a newer clear queued its own task). An unrelated signal-INVERT
+  // submission does not invalidate this clear: the features are orthogonal and
+  // the invert pass would otherwise re-apply the very filter being cleared.
+  if (_glitch_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
+    pxv_info("FilterProcessor: queued clear superseded by a newer glitch-filter "
              "intent; skipping");
     return;
   }
@@ -531,8 +534,13 @@ void FilterProcessor::clear_glitch_filter_locked() {
   // Re-check under the lock: the state may have changed between submission and
   // execution (a pass that finished meanwhile may have re-applied, or an
   // earlier queued clear already did the work). The clear is idempotent.
-  if (!_state->view_data()->_glitch_filter_active)
-    return;
+  // Read under the filter-state lock (its documented owner): the submission
+  // path may flip this flag concurrently on another thread.
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    if (!_state->view_data()->_glitch_filter_active)
+      return;
+  }
 
   auto *logic = _state->view_data()->get_logic();
   bool revert_ok = true;
@@ -603,6 +611,29 @@ bool FilterProcessor::is_glitch_filter_active() {
   return _state->view_data()->_glitch_filter_active;
 }
 
+void FilterProcessor::auto_apply_saved_filter() {
+  // The enabled flag is atomic: no lock needed, and it lets the common
+  // "auto-apply off" case exit before touching anything else.
+  if (!_state->view_data()->_glitch_filter_auto_apply)
+    return;
+
+  // Copy the configuration out under its documented lock, then submit after
+  // releasing it — set_glitch_filter() takes the same non-recursive lock.
+  std::map<int, uint32_t> th;
+  std::map<int, GlitchFilterMode> md;
+  {
+    std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    th = _state->view_data()->_glitch_filter_thresholds;
+    md = _state->view_data()->_glitch_filter_modes;
+  }
+
+  auto *logic = _state->view_data()->get_logic();
+  if (th.empty() || !logic || logic->empty())
+    return;   // nothing configured, or no data to filter yet
+
+  set_glitch_filter(th, md);
+}
+
 void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
   // H2 fix: lock the launch mutex to prevent TOCTOU race on the launch path.
   std::lock_guard<std::mutex> launch_lk(_signal_invert_launch_mutex);
@@ -625,7 +656,7 @@ void FilterProcessor::set_signal_invert(const std::vector<bool> &channels) {
     return;
 
   _signal_invert_running = true;
-  _edit_intent_seq.fetch_add(1, std::memory_order_relaxed);
+  _invert_intent_seq.fetch_add(1, std::memory_order_relaxed);
   _event_bus->broadcast_async<interface::SignalInvertStarted>({});
 
   // Gap 1: submit to ThreadPool.
@@ -691,7 +722,7 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
                                    [this]() { notify_batch_committed(); });
   }
 
-  if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
+  if (logic->edit_pass_aborted()) {
     pxv_err("FilterProcessor::signal_invert_task: pass failed "
             "(edit_pass_failed=%d, edit_log_overflow=%d); rolling back",
             (int)logic->edit_pass_failed(), (int)logic->edit_log_overflowed());
@@ -725,10 +756,10 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
       // Only the APPLIED state is cleared. `_glitch_filter_thresholds/_modes`
       // are deliberately KEPT: they are the user's filter CONFIGURATION, not
       // applied state — the convention the rest of the session already relies
-      // on (SigSession::clear_glitch_filter_state_for_capture and
-      // restore_glitch_filter_config both clear only `_active` and keep the
-      // config so the auto-apply path can re-apply it). Clearing them here
-      // would reset the filter panel's sliders after a transient OOM.
+      // on (SessionStateContext::clear_glitch_filter_state_for_capture and
+      // SigSession::restore_glitch_filter_config both clear only `_active` and
+      // keep the config so the auto-apply path can re-apply it). Clearing them
+      // here would reset the filter panel's sliders after a transient OOM.
       // `_signal_invert_channels` has no such config role (there is no invert
       // auto-apply), so it goes with the applied state.
       std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
@@ -761,13 +792,13 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
 }
 
 void FilterProcessor::clear_signal_invert() {
-  auto fut = submit_clear_signal_invert();
-  if (!fut.valid())
+  auto sub = submit_clear_signal_invert();
+  if (!sub.fut.valid())
     return;
 
   // Same "cleared means cleared" contract as clear_glitch_filter(): the API/MCP
   // caller waits (on its own thread), the GUI does not.
-  if (fut.wait_for(std::chrono::seconds(kClearTaskWaitSeconds)) !=
+  if (sub.fut.wait_for(std::chrono::seconds(kClearTaskWaitSeconds)) !=
       std::future_status::ready) {
     pxv_warn("FilterProcessor::clear_signal_invert: undo still running after "
              "%d s; returning before it completes", kClearTaskWaitSeconds);
@@ -776,18 +807,19 @@ void FilterProcessor::clear_signal_invert() {
 
 bool FilterProcessor::request_clear_signal_invert() {
   // Fire and forget for the GUI thread. See request_clear_glitch_filter().
-  // Returns true when the request was parked behind a running invert pass.
-  const bool was_running = _signal_invert_running.load();
-  auto fut = submit_clear_signal_invert();
-  return was_running && fut.valid();
+  // `queued` comes from the submission itself (single read of the running flag).
+  return submit_clear_signal_invert().queued;
 }
 
-std::future<void> FilterProcessor::submit_clear_signal_invert() {
+FilterProcessor::ClearSubmission FilterProcessor::submit_clear_signal_invert() {
   // Same cheap-checks-on-caller-thread ordering as submit_clear_glitch_filter().
   // A clear during a running invert pass is QUEUED (pool task parks on
-  // _edit_mutex), never silently dropped.
+  // _edit_mutex), never silently dropped. Unlike the glitch variant there is
+  // no pending-apply queue to drop here: invert submissions are never parked,
+  // so a running pass can only be superseded by a whole new invert task.
   std::lock_guard<std::mutex> launch_lk(_signal_invert_launch_mutex);
 
+  const bool running = _signal_invert_running.load();
   {
     std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
     if (!_state->view_data()->_signal_invert_active)
@@ -795,11 +827,13 @@ std::future<void> FilterProcessor::submit_clear_signal_invert() {
   }
 
   const uint64_t seq =
-      _edit_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+      _invert_intent_seq.fetch_add(1, std::memory_order_relaxed) + 1;
   auto self = this;
-  return _filter_pool.submit([self, seq]() {
-    self->clear_signal_invert_task(seq);
-  });
+  return ClearSubmission{
+      _filter_pool.submit([self, seq]() {
+        self->clear_signal_invert_task(seq);
+      }),
+      running};
 }
 
 void FilterProcessor::clear_signal_invert_task(uint64_t intent_seq) {
@@ -807,10 +841,12 @@ void FilterProcessor::clear_signal_invert_task(uint64_t intent_seq) {
   // here and wrong on the GUI thread.
   std::lock_guard<std::timed_mutex> edit_lk(_edit_mutex);
 
-  // Latest-writer-wins, see clear_glitch_filter_task().
-  if (_edit_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
+  // Latest-writer-wins, per feature: only a newer INVERT intent invalidates
+  // this clear (a glitch-filter submission is unrelated and must not cancel
+  // the invert the user asked to clear). See clear_glitch_filter_task().
+  if (_invert_intent_seq.load(std::memory_order_relaxed) != intent_seq) {
     pxv_info("FilterProcessor: queued invert-clear superseded by a newer "
-             "edit intent; skipping");
+             "signal-invert intent; skipping");
     return;
   }
 
@@ -847,7 +883,7 @@ void FilterProcessor::clear_signal_invert_locked() {
                                        [this]() { notify_batch_committed(); });
       }
 
-      if (logic->edit_pass_failed() || logic->edit_log_overflowed()) {
+      if (logic->edit_pass_aborted()) {
         pxv_err("FilterProcessor::clear_signal_invert: re-filter failed; "
                 "rolling back");
         if (_coord) {
@@ -877,9 +913,9 @@ void FilterProcessor::clear_signal_invert_locked() {
           //
           // Clear the APPLIED flag only; keep the user's threshold/mode
           // CONFIG — same convention as signal_invert_task() and as
-          // SigSession::clear_glitch_filter_state_for_capture (config is kept
-          // for the auto-apply path; only `_active` describes whether it is
-          // applied to the current data).
+          // SessionStateContext::clear_glitch_filter_state_for_capture (config
+          // is kept for the auto-apply path; only `_active` describes whether
+          // it is applied to the current data).
           std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
           _state->view_data()->_glitch_filter_active = false;
         }

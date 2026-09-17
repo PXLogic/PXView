@@ -330,8 +330,8 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
     glitchObj["active"] = _wnd->session()->is_glitch_filter_active();
     QJsonArray thrArray;
     QJsonArray modeArray;
-    const auto &thresholds = _wnd->session()->glitch_filter_thresholds();
-    const auto &modes = _wnd->session()->glitch_filter_modes();
+    const auto thresholds = _wnd->session()->glitch_filter_thresholds();
+    const auto modes = _wnd->session()->glitch_filter_modes();
     for (const auto &kv : thresholds) {
       QJsonObject entry;
       entry["ch"] = kv.first;

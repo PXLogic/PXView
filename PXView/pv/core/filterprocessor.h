@@ -74,6 +74,18 @@ public:
 
   bool is_glitch_filter_active();
 
+  /// Re-apply the saved glitch-filter configuration when the user enabled
+  /// auto-apply, and do nothing otherwise.
+  ///
+  /// Single implementation for the two capture-completion paths (RevEndPacket
+  /// handled by SigSession, MSO handled by DataFeedParser) — they used to each
+  /// spell out the same five conditions, and both had to get the lock
+  /// discipline right by hand: the configuration is COPIED under the
+  /// filter-state lock (its documented owner; one caller runs on the data-feed
+  /// thread) and the submission happens AFTER the lock is released, because
+  /// set_glitch_filter() takes that same non-recursive lock.
+  void auto_apply_saved_filter();
+
   void set_signal_invert(const std::vector<bool> &channels);
 
   /// Synchronous clear of the signal invert. See clear_glitch_filter() for why
@@ -112,29 +124,37 @@ private:
                           const std::map<int, GlitchFilterMode> filter_modes);
   void signal_invert_task(const std::vector<bool> channels);
 
-  /// Submit the undo work onto _filter_pool and hand back its future. An
-  /// INVALID future means the request was skipped because there is nothing to
-  /// clear. A VALID future means the clear is queued as a pool task: when a
-  /// pass is running, the task parks on _edit_mutex and runs the undo after
-  /// the pass finishes — the request is never silently dropped any more, and
-  /// the sync API/MCP variant now genuinely waits for the data to be restored
-  /// even when a pass is in flight (previously an in-flight pass made it
-  /// return immediately with the data still filtered).
-  /// Both clear paths (sync and async) go through these, so the decision logic
-  /// exists once.
-  std::future<void> submit_clear_glitch_filter();
-  std::future<void> submit_clear_signal_invert();
+  /// One clear submission's outcome. `fut` is INVALID when the request was
+  /// skipped because there is nothing to clear; a VALID future means the clear
+  /// is a pool task that runs the undo — immediately when `queued` is false,
+  /// or parked on _edit_mutex behind a running pass when `queued` is true
+  /// (the request is never silently dropped, and the sync API/MCP variant
+  /// genuinely waits for the data to be restored even when a pass is in
+  /// flight — previously an in-flight pass made it return immediately with the
+  /// data still filtered). Reporting `queued` from here, rather than letting
+  /// the caller re-read the running flag, is what keeps the answer exact and
+  /// the flag read single.
+  struct ClearSubmission {
+    std::future<void> fut;
+    bool queued = false;
+  };
+
+  /// Submit the undo work onto _filter_pool. Both clear paths (sync and async)
+  /// go through these, so the decision logic exists once.
+  ClearSubmission submit_clear_glitch_filter();
+  ClearSubmission submit_clear_signal_invert();
 
   /// Worker-side bodies of the two clears. Called with _edit_mutex ALREADY
   /// HELD (by the clear task or by a pass servicing a queued clear), so they
-  /// must not take it themselves. They re-check the active flag under that
-  /// lock, because the state may have changed between submission and
-  /// execution.
+  /// must not take it themselves. They re-check the active flag under the
+  /// filter-state lock, because the state may have changed between submission
+  /// and execution.
   void clear_glitch_filter_locked();
   void clear_signal_invert_locked();
 
   /// Worker-side task wrappers: take _edit_mutex, honour the latest-writer
-  /// intent check (see _edit_intent_seq), then call the *_locked() body.
+  /// intent check against their OWN feature's counter (see the two *_intent_seq
+  /// members), then call the *_locked() body.
   void clear_glitch_filter_task(uint64_t intent_seq);
   void clear_signal_invert_task(uint64_t intent_seq);
 
@@ -207,16 +227,25 @@ private:
   // H2 fix: same TOCTOU protection for signal invert launch path
   std::mutex _signal_invert_launch_mutex;
 
-  // Latest-writer-wins sequence for edit intents. Every accepted submission
-  // (set_glitch_filter, set_signal_invert, submit_clear_*) bumps it; a queued
-  // clear task captures its own value at submission and, once it finally gets
-  // _edit_mutex, skips its body if the counter has moved on. That preserves
-  // the pre-queue semantics of "a clear submitted while a pass runs is
-  // superseded by a LATER apply" while still queueing the clear when the
-  // clear itself is the latest instruction. Without the check, an apply
-  // queued right after a clear would be applied by the pass and then
-  // immediately undone by the stale clear.
-  std::atomic<uint64_t> _edit_intent_seq{0};
+  // Latest-writer-wins sequences, ONE PER FEATURE. Every accepted submission of
+  // a feature (glitch: set_glitch_filter / submit_clear_glitch_filter; invert:
+  // set_signal_invert / submit_clear_signal_invert) bumps that feature's
+  // counter; a queued clear captures its own value at submission and, once it
+  // finally gets _edit_mutex, skips its body if its counter has moved on.
+  // This preserves "a clear submitted while a pass runs is superseded by a
+  // LATER apply" (otherwise the newer apply would be undone by the stale
+  // clear) while still queueing the clear when the clear itself is the latest
+  // instruction.
+  //
+  // Why per feature and not one shared counter: a queued clear expresses an
+  // intent to change ITS OWN feature's state, and the two features are
+  // orthogonal (each pass re-derives "capture -> invert -> filter" from the
+  // flags). With a shared counter, an unrelated invert submitted while a
+  // glitch-filter pass ran would invalidate a queued glitch clear — and the
+  // invert pass, seeing the filter still flagged active, would re-apply it,
+  // silently discarding the clear the user was already told would happen.
+  std::atomic<uint64_t> _glitch_intent_seq{0};
+  std::atomic<uint64_t> _invert_intent_seq{0};
 
   // Serializes every writer of the live snapshot's derived state: the
   // glitch-filter task, the signal-invert task, and the two clear paths.

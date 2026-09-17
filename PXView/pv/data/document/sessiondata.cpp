@@ -61,15 +61,22 @@ void SessionData::clear() {
     _dso->set_samplerate(sr);
   }
   _trig_pos = 0;
-  _glitch_filter_active = false;
   // 架构修复：clear() 不清除 thresholds/modes/auto_apply。
   // 这些是用户配置（滤波面板滑块位置），不是数据。
   // 采集开始时 clear() 被调用，如果清除 thresholds 会导致：
   //   1. 面板重新打开后滑块位置丢失（回退到推荐阈值）
   //   2. auto-apply 条件 !thresholds.empty() 不满足，采集后不自动滤波
   // 数据相关的清除由 clear_glitch_filter_state_for_capture() 处理（只清 active 标志）
-  _signal_invert_active = false;
-  _signal_invert_channels.clear();
+  //
+  // 两个"已应用"标志在 filter-state 锁内复位：该锁是它们的文档化归属，
+  // 而 FilterProcessor 的 worker 可能仍在翻转同一标志（此处的快照复位本身
+  // 由采集边界的 wait_idle 前置保证，但那不覆盖标志读写的串行性）。
+  {
+    std::lock_guard<std::mutex> flk(_filter_state_mutex);
+    _glitch_filter_active = false;
+    _signal_invert_active = false;
+    _signal_invert_channels.clear();
+  }
 }
 
 } // namespace pv

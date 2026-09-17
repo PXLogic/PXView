@@ -33,6 +33,7 @@
 #include "pv/core/eventbus.h"
 #include "pv/interface/events.h"
 #include "pv/data/document/sessiondata.h"
+#include "pv/data/model/signalmodel.h"
 #include "pv/base/pxvdef.h"        // GlitchFilterMode 完整定义
 
 // ---- 链接桩（同 test_decode_task_manager：pxview-config 的 QColor 主题助手
@@ -263,6 +264,17 @@ void feed_logic(pv::SessionData &vd, size_t n)
     logic->capture_ended();
 }
 
+// apply_signal_invert 按 SignalModel 列表决定要翻转哪些通道（列表为空时
+// 一个通道都不翻），因此数据级断言必须先登记一个 LOGIC 模型。
+void add_logic_channel(StubSession &st, int index)
+{
+    auto m = std::make_shared<pv::data::SignalModel>();
+    m->set_index(index);
+    m->set_type(SR_CHANNEL_LOGIC);
+    m->set_enabled(true, false);
+    st._signal_models.push_back(m);
+}
+
 struct EventCounters {
     std::atomic<int> started{0};
     std::atomic<int> completed{0};
@@ -291,6 +303,8 @@ private slots:
     void test_clear_without_active_is_noop();
     // 趟完成后同步清除：等待真实还原后才返回
     void test_sync_clear_waits_for_restore();
+    // C1：滤波趟运行中"先清除后取反"——两个意图都必须兑现（按特性分计数器）
+    void test_clear_queued_then_invert_honours_both_intents();
 
 private:
     // 共用装配：订阅事件计数。返回值生命周期须覆盖整个用例。
@@ -437,6 +451,68 @@ void TestFilterProcessor::test_sync_clear_waits_for_restore()
 
     h->disp->drain();
     QCOMPARE(h->events.cleared.load(), 1);
+}
+
+void TestFilterProcessor::test_clear_queued_then_invert_honours_both_intents()
+{
+    // C1 回归：意图序号必须按特性分开。共用一把计数器时，紧跟"排队清除"之后
+    // 提交的取反会把序号顶掉 ⇒ 排队的清除被判过期跳过；而取反任务发现
+    // _glitch_filter_active 仍为真，会按 flag **重新应用滤波** ——
+    // 于是用户已被 toast 告知"完成后将自动清除"的那次清除被静默丢弃。
+    //
+    // 两种任务执行顺序（清除先 / 取反先）的最终状态都必须是
+    // "已取反 + 未滤波"，因此本用例对调度顺序不敏感。
+    auto h = make_harness(4000000);
+    add_logic_channel(h->state, 0);
+
+    std::map<int, uint32_t> th;
+    th[0] = 2;
+    std::map<int, GlitchFilterMode> md;
+    md[0] = GlitchFilterMode::Both;
+    h->processor->set_glitch_filter(th, md);
+
+    // 滤波趟运行中提交清除 → 排队（不是立即执行）
+    QVERIFY2(h->processor->request_clear_glitch_filter(),
+             "a clear submitted while the pass runs must be queued");
+
+    // 紧接着提交一个**无关特性**的取反意图
+    std::vector<bool> chans(1, true);
+    h->processor->set_signal_invert(chans);
+
+    // 两个意图都落地：GlitchFilterCleared 只在清除成功尾部广播；
+    // 取反的 active 由取反任务末尾置真且此后无人翻转（单调）。
+    for (int i = 0; i < 3000 && (h->events.cleared.load() < 1 ||
+                                 !h->processor->is_signal_invert_active());
+         ++i) {
+        h->disp->drain();
+        QTest::qWait(10);
+    }
+    h->disp->drain();
+
+    QCOMPARE(h->events.cleared.load(), 1);
+    QVERIFY2(h->processor->is_signal_invert_active(),
+             "the invert intent must be applied");
+    QVERIFY2(!h->processor->is_glitch_filter_active(),
+             "the queued clear must NOT be cancelled by an unrelated invert "
+             "submission (per-feature intent counters, gap-audit C1)");
+    // 显式清除是**唯一**会丢掉用户配置的路径（用户明确要求移除滤波，配置
+    // 随之作废 ⇒ 下次采集的 auto-apply 条件 !thresholds.empty() 不成立，
+    // 不会背着用户把滤波加回来）；OOM 回滚与采集起点都保留配置。这里把该
+    // 区分钉住，防止日后把"清除"改成保留配置而让用户被意外自动滤波。
+    {
+        std::lock_guard<std::mutex> flk(h->state._view_data._filter_state_mutex);
+        QVERIFY(h->state._view_data._glitch_filter_thresholds.empty());
+    }
+
+    // 数据级判别 —— 采样 20 是采集里的 1 采样窄高脉冲：
+    //   清除生效 ⇒ 数据 = 取反(采集原始) ⇒ 20 处为低
+    //   清除被丢弃 ⇒ 数据 = 滤波(取反(采集原始)) ⇒ 20 处的低凹会被抹平为高
+    auto *logic = h->state._view_data.get_logic();
+    QVERIFY2(!logic->get_sample(20, 0),
+             "sample 20 must be the INVERTED raw pulse (low); a re-applied "
+             "filter would have flattened that one-sample dip back to high");
+    QVERIFY(logic->get_sample(21, 0));   // 采集低 → 取反后高
+    QVERIFY(!logic->get_sample(0, 0));   // 采集高 → 取反后低
 }
 
 QTEST_GUILESS_MAIN(TestFilterProcessor)
