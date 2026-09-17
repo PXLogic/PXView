@@ -85,7 +85,7 @@ std::vector<api::MeasurementValue> DataSource::get_measurements(
 // state via SessionStateContext::cursor_registry(). SessionDocument /
 // SessionSnapshot stubs inherit these no-ops (cursor state lives in the
 // live session only, not in saved documents/snapshots).
-std::vector<core::CursorEntry> DataSource::get_cursors() const { return {}; }
+std::vector<data::CursorEntry> DataSource::get_cursors() const { return {}; }
 int  DataSource::add_cursor(uint64_t sample_position) { (void)sample_position; return -1; }
 bool DataSource::remove_cursor(int index) { (void)index; return false; }
 bool DataSource::set_cursor_position(int index, uint64_t sample_position) {

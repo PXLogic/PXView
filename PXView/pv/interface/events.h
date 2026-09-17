@@ -59,7 +59,16 @@
 #include <QString>
 #include <vector>
 
-#include "pv/data/triggerconfig.h"  // for pv::data::TriggerConfig (complete type)
+// NOTE: no pv/ headers are included here, by design. This is the lowest contract
+// layer: everything depends on it and it depends on nothing but Qt6::Core/STL.
+// Types owned by higher layers are either forward-declared (see the block below)
+// or absent from the payloads altogether. The pv/data/triggerconfig.h include
+// that used to sit here was a leftover: TriggerConfigChanged carried a
+// `const data::TriggerConfig *` back then, R3 made the event payload-free (see
+// its definition below), and the include survived the removal — silently
+// becoming the only interface -> data edge in the include graph (found by an
+// include-graph scan during the gap audit). Deliberately spelled without an
+// `#include` token so dependency scanners do not count this comment as an edge.
 
 // The Windows SDK (shobjidl.h / objbase.h) defines `interface` as a
 // preprocessor macro for COM interface declarations. This conflicts with the

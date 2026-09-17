@@ -25,8 +25,6 @@
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/model/signalmodel.h"
 #include "pv/data/isignal_model_source.h"
-#include "pv/view/signal/dsosignal.h"
-#include "pv/core/langresource.h"
 
 
 #define PI 3.1415

@@ -286,7 +286,7 @@ public:
   // through these so headless MCP clients see real cursor state without
   // a View binding. add_cursor returns the positional index of the new
   // entry, or -1 on failure.
-  std::vector<core::CursorEntry> get_cursors() const override;
+  std::vector<data::CursorEntry> get_cursors() const override;
   int  add_cursor(uint64_t sample_position) override;
   bool remove_cursor(int index) override;
   bool set_cursor_position(int index, uint64_t sample_position) override;

@@ -58,6 +58,18 @@ void FilterProcessor::stop() {
     std::lock_guard<std::mutex> lk(_signal_invert_launch_mutex);
     _signal_invert_running = false;
   }
+  // Drop a queued-but-unserviced apply request as well. The pool is about to be
+  // shut down, so nothing would ever service it; leaving _has_pending_glitch
+  // set would make a hypothetical in-process restart service a STALE request in
+  // its very first pass. (Unreachable today — shutdown() kills the pool and
+  // SigSession::Close() is terminal — but the cleanup is one line and keeps the
+  // stopped state actually free of pending work.)
+  {
+    std::lock_guard<std::mutex> lk(_pending_mutex);
+    _has_pending_glitch.store(false);
+    _pending_glitch_thresholds.clear();
+    _pending_glitch_modes.clear();
+  }
   _filter_pool.shutdown();
 }
 
@@ -373,6 +385,14 @@ void FilterProcessor::glitch_filter_task(
   // the main thread (View layer) may concurrently read these for rendering.
   {
     std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+    // INVARIANT: a pass only ever runs with a BLOCK of real work, so claiming
+    // "applied" here is honest. set_glitch_filter() rejects an empty or
+    // all-zero threshold set before starting anything (its has_filter scan),
+    // and the pending loop below breaks on an empty queued set — so a request
+    // that would filter nothing never reaches this tail. (A non-empty set that
+    // names only absent channels still lands here and reports as applied,
+    // exactly like a pass that found no glitches to remove: the configuration
+    // is in effect, which is what the badge means.)
     _state->view_data()->_glitch_filter_active = true;
     _state->view_data()->_glitch_filter_thresholds = thresholds;
     _state->view_data()->_glitch_filter_modes = filter_modes;
@@ -415,6 +435,7 @@ void FilterProcessor::glitch_filter_task(
 
     {
       std::lock_guard<std::mutex> flk(_state->view_data()->_filter_state_mutex);
+      // Non-empty by construction (see the invariant note in the main tail).
       _state->view_data()->_glitch_filter_active = true;
       _state->view_data()->_glitch_filter_thresholds = pend_th;
       _state->view_data()->_glitch_filter_modes = pend_md;

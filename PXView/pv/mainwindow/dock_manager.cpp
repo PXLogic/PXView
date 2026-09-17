@@ -54,7 +54,7 @@
 #include "pv/toolbars/trigbar.h"
 #include "pv/toolbars/filebar.h"
 #include "pv/core/langresource.h"
-#include "pv/ui/string_ids.h"
+#include "pv/base/string_ids.h"
 #include "pv/view/view.h"
 #include "pv/widgets/slidingdrawer.h"
 #include "pv/widgets/sidebar.h"

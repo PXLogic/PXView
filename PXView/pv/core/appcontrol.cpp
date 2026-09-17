@@ -33,6 +33,9 @@
 #include <string>
 #include <cstdio>
 #include <cassert>
+// Needed for the COMPLETE SigSession definition: this file calls methods on
+// session() pointers, which the compiler must see inline. (It never names the
+// type, so a name-based grep cannot tell that this include is live.)
 #include "pv/session/sigsession.h"
 #include "pv/base/pxvdef.h"
 #include "pv/config/appconfig.h"

@@ -5,6 +5,8 @@
 #include "pv/data/stack/decoderstack.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/interface/events.h"   // CaptureOwnerChanged / ActiveDocumentChanged
+// Complete SigSession definition (methods are called on session() pointers).
 #include "pv/session/sigsession.h"
 
 #include <algorithm>

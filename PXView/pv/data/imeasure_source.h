@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "pv/api/types.h"  // api::MeasurementValue
-#include "pv/core/cursorregistry.h"  // core::CursorEntry
+#include "pv/data/cursor_types.h"   // data::CursorEntry (get_cursors return type)
 
 namespace pv {
 namespace data {
@@ -18,7 +18,7 @@ public:
     virtual std::vector<api::MeasurementValue> get_measurements(
         int channel_index = -1,
         int view_rect_height = 0) = 0;
-    virtual std::vector<core::CursorEntry> get_cursors() const = 0;
+    virtual std::vector<data::CursorEntry> get_cursors() const = 0;
     virtual int add_cursor(uint64_t sample_position) = 0;
     virtual bool remove_cursor(int index) = 0;
     virtual bool set_cursor_position(int index, uint64_t sample_position) = 0;

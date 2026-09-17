@@ -22,7 +22,7 @@
 #include "pv/ui/uimanager.h"
 #include "pv/ui/msgbox.h"
 #include "pv/core/langresource.h"
-#include "pv/ui/string_ids.h"
+#include "pv/base/string_ids.h"
 #include "pv/view/view.h"
 #include "pv/dock/protocoldock.h"
 #include "pv/dock/triggerdock.h"

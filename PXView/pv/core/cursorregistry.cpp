@@ -27,7 +27,7 @@ namespace core {
 
 int CursorRegistry::add_cursor(uint64_t sample_position)
 {
-    CursorEntry e;
+    data::CursorEntry e;
     e.sample_position = sample_position;
     e.visible = true;
     _cursors.push_back(e);
@@ -42,12 +42,12 @@ bool CursorRegistry::remove_cursor(int index)
     return true;
 }
 
-std::vector<CursorEntry> CursorRegistry::get_cursors() const
+std::vector<data::CursorEntry> CursorRegistry::get_cursors() const
 {
-    std::vector<CursorEntry> out;
+    std::vector<data::CursorEntry> out;
     out.reserve(_cursors.size());
     for (std::size_t i = 0; i < _cursors.size(); ++i) {
-        CursorEntry e = _cursors[i];
+        data::CursorEntry e = _cursors[i];
         e.index = static_cast<int>(i);
         out.push_back(e);
     }

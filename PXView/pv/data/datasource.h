@@ -30,7 +30,7 @@
 #include <list>
 
 #include "pv/api/types.h"  // api::MeasurementValue (for get_measurements return type)
-#include "pv/core/cursorregistry.h"  // core::CursorEntry (for get_cursors return type)
+#include "pv/data/cursor_types.h"   // data::CursorEntry (get_cursors return type)
 
 // Spec v2 Task 8: DataSource now inherits from 5 fine-grained interfaces
 // (IDataSource, ISignalSource, IDecoderHost, ICaptureControl, IMeasureSource).
@@ -227,7 +227,7 @@ public:
     //      the positional index of the new entry, or -1 on failure. ---
     //      Non-const mutators match the pattern of start_capture /
     //      switch_work_mode / etc. get_cursors is const (reads only).
-    virtual std::vector<core::CursorEntry> get_cursors() const;
+    virtual std::vector<data::CursorEntry> get_cursors() const;
     virtual int add_cursor(uint64_t sample_position);
     virtual bool remove_cursor(int index);
     virtual bool set_cursor_position(int index, uint64_t sample_position);

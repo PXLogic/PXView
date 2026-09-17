@@ -27,47 +27,17 @@
 #include <cstdint>
 #include <vector>
 
+#include "pv/data/cursor_types.h"
+
 namespace pv {
 namespace core {
 
 /**
- * CursorEntry — pure-data description of one measurement cursor.
- *
- * Introduced by Task C2 of plan-core-view-split-and-mcp-coverage. The
- * cursor *position state* (which cursors exist and where each one sits
- * in the sample stream) previously lived only in the View layer
- * (view::Cursor / View::_logic_cursors / View::_dso_cursors). MCP
- * clients running headless could not enumerate or mutate cursors
- * because no View was instantiated.
- *
- * CursorEntry is the Core-layer mirror of that state. It holds only the
- * fields required for MCP/API consumption — the sample position and a
- * visibility flag. Visual properties (colour, label text, QPainter
- * geometry) remain on view::Cursor, which is now a pure rendering
- * object that reads its position from CursorEntry via the DataSource
- * interface.
- *
- * The `index` field is the positional index (0-based) of the entry in
- * the CursorRegistry vector. It is recomputed by CursorRegistry::
- * get_cursors() on each call so it stays consistent after removals
- * (which shift subsequent entries down). This matches the positional
- * semantics of the existing MCP API (SessionService::remove_cursor(int
- * index)) and the View layer (ViewCursors::get_cursor_by_index).
- */
-struct CursorEntry
-{
-    /// Positional index (0-based) within the registry vector. Filled in
-    /// by CursorRegistry::get_cursors(); ignored on input to
-    /// add_cursor / set_cursor_position.
-    int      index = 0;
-
-    /// Sample-stream position (sample index) of this cursor.
-    uint64_t sample_position = 0;
-
-    /// Whether the cursor is visible. The View layer honours this when
-    /// painting; MCP clients treat it as metadata.
-    bool     visible = true;
-};
+ * CursorEntry (the pure-data value handed out through the DataSource
+ * interface, and the Core-layer mirror of measurement cursor state) now
+ * lives in pv/data/cursor_types.h - see that file for the rationale.
+ * It moved out of this header so the DATA layer no longer includes a CORE
+ * header just to name a return type.
 
 /**
  * CursorRegistry — Core-layer store of measurement cursor positions.
@@ -111,7 +81,7 @@ public:
     /// Return a snapshot of all cursors, with each entry's `index`
     /// field set to its current positional index. The returned vector
     /// is a copy; callers may iterate without holding any lock.
-    std::vector<CursorEntry> get_cursors() const;
+    std::vector<data::CursorEntry> get_cursors() const;
 
     /// Update the sample position of the cursor at positional @param
     /// index. Returns true if the index was valid; false otherwise.
@@ -124,7 +94,7 @@ public:
     std::size_t size() const;
 
 private:
-    std::vector<CursorEntry> _cursors;
+    std::vector<data::CursorEntry> _cursors;
 };
 
 } // namespace core

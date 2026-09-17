@@ -32,7 +32,7 @@
  * view::Cursor remains a pure rendering object — it holds the QPainter
  * geometry, label text, colour (via Ruler::GetColorByCursorOrder), and
  * the close-button hit-test. Its sample position is inherited from
- * TimeMarker::_index, which is kept in sync with the Core CursorEntry
+ * TimeMarker::_index, which is kept in sync with the data-layer CursorEntry
  * via ViewCursors::sync_cursor_position_to_core() on drag-release, and
  * via ViewCursors::sync_cursors_from_core() on data-source binding
  * (covers the headless -> GUI transition where MCP added cursors before

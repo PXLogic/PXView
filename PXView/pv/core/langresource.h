@@ -28,7 +28,7 @@
 #include <memory>
 #include <QString>
 #include <string>
-#include "pv/ui/string_ids.h"
+#include "pv/base/string_ids.h"
 #include <mutex>
 
 struct lang_key_item

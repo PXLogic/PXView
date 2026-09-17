@@ -3,7 +3,10 @@
 #include "pv/core/documentregistry.h"
 #include "pv/core/eventbus.h"
 #include "pv/core/sessionstatecontext.h"
-#include "pv/session/sigsession.h"  // SessionData full definition
+// SessionData full definition (was pulled in via pv/session/sigsession.h, which
+// dragged the whole session facade — and a core->session back edge — into a
+// file that never names SigSession).
+#include "pv/data/document/sessiondata.h"
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/data/model/signalmodel.h"

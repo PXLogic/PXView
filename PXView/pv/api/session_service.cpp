@@ -3569,7 +3569,7 @@ std::vector<CursorInfo> SessionService::get_cursors() const {
     // _session is a non-const pointer member, so calling the non-const
     // SigSession::get_cursors() from this const method is legal (the
     // pointed-to SigSession is not const-qualified; get_cursors is const
-    // anyway). The Core CursorEntry is converted to the API CursorInfo
+    // anyway). The data-layer CursorEntry is converted to the API CursorInfo
     // type here at the SessionService boundary (sample_position -> time_sec
     // via cur_snap_samplerate).
     if (!_session)

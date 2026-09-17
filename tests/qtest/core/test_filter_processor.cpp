@@ -305,6 +305,10 @@ private slots:
     void test_sync_clear_waits_for_restore();
     // C1：滤波趟运行中"先清除后取反"——两个意图都必须兑现（按特性分计数器）
     void test_clear_queued_then_invert_honours_both_intents();
+    // 采集完成后的 auto-apply（两条采集完成路径共用的单一实现）四条件
+    void test_auto_apply_saved_filter_conditions();
+    // 空/全零阈值提交是无操作：不起趟、不改动已有滤波状态（守卫语义）
+    void test_empty_or_zero_thresholds_are_a_noop();
 
 private:
     // 共用装配：订阅事件计数。返回值生命周期须覆盖整个用例。
@@ -513,6 +517,112 @@ void TestFilterProcessor::test_clear_queued_then_invert_honours_both_intents()
              "filter would have flattened that one-sample dip back to high");
     QVERIFY(logic->get_sample(21, 0));   // 采集低 → 取反后高
     QVERIFY(!logic->get_sample(0, 0));   // 采集高 → 取反后低
+}
+
+void TestFilterProcessor::test_auto_apply_saved_filter_conditions()
+{
+    // auto_apply_saved_filter() 是两条采集完成路径（SigSession 的 RevEndPacket
+    // 与 DataFeedParser 的 MSO 分支）收敛出的单一实现；抽取前的两份内联代码
+    // 同样零覆盖，这里把三个守卫条件与成功路径都钉住：
+    //   (a) auto-apply 关闭            → 不起趟（即使用户配置还在）
+    //   (b) 阈值为空（从未配置/已清除）→ 不起趟
+    //   (c) 无数据（刚 clear、包还没到）→ 不起趟
+    //   (d) 三个条件齐备               → 起一趟并成功完成
+    // 负例用"同步提交 + 短等待"判定：决策发生在调用线程内，若守卫漏放行，
+    // Started 事件会在毫秒级出现（趟本身要跑 1-2 s）。
+    auto h = make_harness(4000000);
+
+    std::map<int, uint32_t> th;
+    th[0] = 2;
+    std::map<int, GlitchFilterMode> md;
+    md[0] = GlitchFilterMode::Both;
+
+    // (a) auto-apply 关闭（阈值先不设，避免与 (b) 混淆）
+    h->processor->auto_apply_saved_filter();
+    h->disp->drain();
+    QTest::qWait(120);
+    h->disp->drain();
+    QVERIFY(!h->processor->is_glitch_filter_active());
+    QCOMPARE(h->events.started.load(), 0);
+
+    // (b) 开启但阈值为空
+    h->state._view_data._glitch_filter_auto_apply = true;
+    h->processor->auto_apply_saved_filter();
+    h->disp->drain();
+    QTest::qWait(120);
+    h->disp->drain();
+    QVERIFY(!h->processor->is_glitch_filter_active());
+    QCOMPARE(h->events.started.load(), 0);
+
+    // (c) 配置齐备但无数据：clear() 会换成空快照（新采集的包尚未到达）
+    h->state._view_data.clear();
+    h->state._view_data._glitch_filter_auto_apply = true;
+    {
+        std::lock_guard<std::mutex> flk(h->state._view_data._filter_state_mutex);
+        h->state._view_data._glitch_filter_thresholds = th;
+        h->state._view_data._glitch_filter_modes = md;
+    }
+    QVERIFY(h->state._view_data.get_logic()->empty());
+    h->processor->auto_apply_saved_filter();
+    h->disp->drain();
+    QTest::qWait(120);
+    h->disp->drain();
+    QVERIFY(!h->processor->is_glitch_filter_active());
+    QCOMPARE(h->events.started.load(), 0);
+
+    // (d) 条件齐备 → 起趟并完成（active 由成功后置真，单调）
+    feed_logic(h->state._view_data, 4000000);
+    h->processor->auto_apply_saved_filter();
+    for (int i = 0; i < 1500 && !h->processor->is_glitch_filter_active(); ++i) {
+        h->disp->drain();
+        QTest::qWait(10);
+    }
+    h->disp->drain();
+    QVERIFY2(h->processor->is_glitch_filter_active(),
+             "auto-apply with a saved config and data present must filter");
+    QVERIFY(h->events.started.load() >= 1);
+    QVERIFY(h->events.completed.load() >= 1);
+}
+
+void TestFilterProcessor::test_empty_or_zero_thresholds_are_a_noop()
+{
+    // set_glitch_filter() 开头有内容守卫：阈值集合为空、或没有任何通道的阈值
+    // >0，都在起趟之前直接返回（排队路径则由 pend_th.empty() break 掉）。
+    // 于是"趟末无条件置 active=true"是诚实的——它会宣称已滤波，但只有真有
+    // 活干时才可能跑到那里。这个用例钉住该守卫：这类提交既不起趟，也不把
+    // 已有滤波清掉（清滤波要走专用 clear 接口）。
+    auto h = make_harness(4000000);
+
+    std::map<int, uint32_t> th;
+    th[0] = 2;
+    std::map<int, GlitchFilterMode> md;
+    md[0] = GlitchFilterMode::Both;
+
+    // 先真滤一次。注意等待的是 Completed 事件而不是 active：active 在趟内
+    // 就被置真（成功尾部），而 Completed 由 EventBus 异步派发，等 active
+    // 会读到 completed==0（本用例最初的写法就踩了这个坑）。
+    h->processor->set_glitch_filter(th, md);
+    for (int i = 0; i < 1500 && h->events.completed.load() < 1; ++i) {
+        h->disp->drain();
+        QTest::qWait(10);
+    }
+    QVERIFY(h->processor->is_glitch_filter_active());
+    const int passes_after_real = h->events.completed.load();
+    QVERIFY(passes_after_real >= 1);
+
+    // 空集合 / 全零阈值：都不得起趟
+    h->processor->set_glitch_filter({}, {});
+    std::map<int, uint32_t> zero;
+    zero[0] = 0;
+    h->processor->set_glitch_filter(zero, md);
+    h->disp->drain();
+    QTest::qWait(200);
+    h->disp->drain();
+
+    QCOMPARE(h->events.completed.load(), passes_after_real);
+    QCOMPARE(h->events.started.load(), passes_after_real);
+    QVERIFY2(h->processor->is_glitch_filter_active(),
+             "a no-op submission must leave the existing filter untouched");
 }
 
 QTEST_GUILESS_MAIN(TestFilterProcessor)

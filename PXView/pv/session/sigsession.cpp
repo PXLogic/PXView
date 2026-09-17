@@ -75,7 +75,6 @@
 #include "pv/base/log.h"
 #include "pv/base/perflog.h"
 #include "pv/core/langresource.h"
-#include "pv/ui/msgbox.h"
 #include "pv/utility/path.h"
 
 // Upstream libsigrok 0.6.0 is now the sole libsigrok (fork + bridge removed).
@@ -3489,7 +3488,7 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
 // methods via the DataSource interface, and the MCP API (SessionService::
 // add_cursor / remove_cursor / get_cursors) does the same so headless mode
 // returns real data. add_cursor returns the positional index of the new entry.
-std::vector<core::CursorEntry> SigSession::get_cursors() const {
+std::vector<data::CursorEntry> SigSession::get_cursors() const {
   return _state->cursor_registry().get_cursors();
 }
 

@@ -6,8 +6,9 @@
 
 #include <QtTest>
 #include "pv/core/cursorregistry.h"
+#include "pv/data/cursor_types.h"
 
-using pv::core::CursorEntry;
+using pv::data::CursorEntry;
 using pv::core::CursorRegistry;
 
 class TestCursorRegistry : public QObject {
