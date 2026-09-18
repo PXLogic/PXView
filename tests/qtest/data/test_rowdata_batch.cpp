@@ -200,8 +200,9 @@ void TestRowDataBatch::RandomizedBatchMatchesPerAnnotation() {
         QCOMPARE((qulonglong)aA.end_sample(), (qulonglong)aB.end_sample());
         QCOMPARE(aA.format(), aB.format());
         QCOMPARE(aA.type(), aB.type());
-        const auto &ta = aA.annotations();
-        const auto &tb = aB.annotations();
+        // Plan D: 显示格式改为视图参数传入（0 = DecoderDataFormat::hex）。
+        const auto &ta = aA.annotations(0);
+        const auto &tb = aB.annotations(0);
         QCOMPARE(ta.size(), tb.size());
         for (size_t t = 0; t < ta.size(); t++)
             QCOMPARE(ta[t], tb[t]);
@@ -246,9 +247,9 @@ void TestRowDataBatch::BothPathsInternIdentically() {
     QVERIFY(rowB.emplace_annotations(ptrs, &statusB));
 
     // 三条不同文本 → 每个 status 的资源表应恰好 3 个条目（intern 生效）。
-    QCOMPARE(statusA.m_resTable.GetCount(), 3);
-    QCOMPARE(statusB.m_resTable.GetCount(), 3);
-    QCOMPARE(statusA.m_resTable.GetCount(), statusB.m_resTable.GetCount());
+    QCOMPARE(statusA.m_resTable.count(), (size_t)3);
+    QCOMPARE(statusB.m_resTable.count(), (size_t)3);
+    QCOMPARE(statusA.m_resTable.count(), statusB.m_resTable.count());
 }
 
 // 快照（渲染路径读取的不可变视图）与 live deque 数据一致。

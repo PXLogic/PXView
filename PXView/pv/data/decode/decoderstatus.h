@@ -22,8 +22,19 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "pv/data/decode/annotationrestable.h"
 
+// 解码器状态。Plan D 之后它不再承载"注解文本"（那部分已下沉到
+// AnnotationText），只剩两件跨线程共享的标量 + 一个解码线程私有的去重表：
+//
+//   m_bNumeric  解码线程写（出现过数值）/ GUI 读（是否启用进制选择器）
+//   m_format    GUI 写（用户切换进制）/ 渲染与导出线程读
+//   m_resTable  只允许解码线程访问（见 AnnotationResTable 的线程契约）
+//
+// 这两个标量原本是裸 bool/int，属于 scan_cross_thread_flags 会报的跨线程
+// 非原子标志，改为原子量。
 class DecoderStatus
 {
 public:
@@ -32,8 +43,8 @@ public:
     void clear();  
 
 public:
-    bool    m_bNumeric; //when decoder get any numerical data,it will be set
-    int     m_format; //protocol format code
+    std::atomic<bool>   m_bNumeric; //when decoder get any numerical data,it will be set
+    std::atomic<int>    m_format;   //protocol format code (DecoderDataFormat)
     void    *sdr_decoder_handle;
     AnnotationResTable  m_resTable; 
 };

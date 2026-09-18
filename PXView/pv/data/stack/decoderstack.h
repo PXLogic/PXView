@@ -232,6 +232,14 @@ public:
         return _decoder_status.get();
     }
 
+    // 本协议栈当前的显示格式（DecoderDataFormat 取值）。
+    // 供渲染 / 导出路径把格式作为**视图参数**传给 Annotation::annotations()，
+    // 从而让注解文本对象不必回写任何可变状态。m_format 由 GUI 线程写、
+    // 渲染与导出线程读，已是原子量。
+    inline int protocol_format() const {
+        return _decoder_status ? _decoder_status->m_format.load(std::memory_order_relaxed) : 0;
+    }
+
     // Cross-thread: written by the main / device thread (session_service,
     // DecodeTaskManager, CaptureManager) and read by the decode worker
     // (do_decode_work()'s wait predicate and end-check). Predicate state of

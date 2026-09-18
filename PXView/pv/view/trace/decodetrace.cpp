@@ -1114,9 +1114,12 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                         (std::strcmp(definition->id, "tdm_audio_fast") == 0 ||
                          std::strcmp(definition->id, "tdm_audio_c") == 0);
     }
-    if (tdm_audio_value && !a.annotations().empty() && end - start > 2.0) {
+    // Plan D: 显示格式是视图参数，从协议栈取（原子读），不再由注解文本对象
+    // 自己从解码器状态里读并回写缓存。
+    const int ann_fmt = _decoder_stack->protocol_format();
+    if (tdm_audio_value && !a.annotations(ann_fmt).empty() && end - start > 2.0) {
       const QFontMetrics fm(theme_font_decoder());
-      const int text_width = fm.horizontalAdvance(a.annotations().front());
+      const int text_width = fm.horizontalAdvance(a.annotations(ann_fmt).front());
       const double wanted = std::min(160.0, std::max(48.0, text_width + 24.0));
       if (visual_end - visual_start < wanted) {
         const double center = (visual_start + visual_end) * 0.5;
@@ -1197,8 +1200,9 @@ void DecodeTrace::draw_instant(const pv::data::decode::Annotation &a,
                                double min_annWidth) {
   (void)outline;
 
+  const int ann_fmt = _decoder_stack->protocol_format();
   const QString text =
-      a.annotations().empty() ? QString() : a.annotations().back();
+      a.annotations(ann_fmt).empty() ? QString() : a.annotations(ann_fmt).back();
   //	const double w = min((double)p.boundingRect(QRectF(), 0, text).width(),
   //		0.0) + h;
   const double w = min(min_annWidth, (double)h);
@@ -1223,8 +1227,8 @@ void DecodeTrace::draw_instant(const pv::data::decode::Annotation &a,
 
 QString DecodeTrace::best_annotation_text(
     const pv::data::decode::Annotation &a, double rect_width,
-    const QFontMetrics &fm) {
-  const std::vector<QString> &ann_list = a.annotations();
+    const QFontMetrics &fm, int fmt) {
+  const std::vector<QString> &ann_list = a.annotations(fmt);
   if (ann_list.empty())
     return QString();
 
@@ -1271,7 +1275,8 @@ void DecodeTrace::draw_range(const pv::data::decode::Annotation &a, QPainter &p,
     return;
   }
 
-  const std::vector<QString> &annotations = a.annotations();
+  const std::vector<QString> &annotations =
+      a.annotations(_decoder_stack->protocol_format());
 
   double cap_width = min((end - start) / 4, EndCapWidth);
 
@@ -1299,7 +1304,8 @@ void DecodeTrace::draw_range(const pv::data::decode::Annotation &a, QPainter &p,
   // computation is a View-layer concern (uses QFontMetrics); the Core
   // Annotation class is now a pure data class.
   const QString best_annotation =
-      best_annotation_text(a, rect.width(), p.fontMetrics());
+      best_annotation_text(a, rect.width(), p.fontMetrics(),
+                           _decoder_stack->protocol_format());
 
   const QString elided =
       p.fontMetrics().elidedText(best_annotation, Qt::ElideRight, rect.width());

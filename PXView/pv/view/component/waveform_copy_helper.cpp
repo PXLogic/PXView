@@ -284,7 +284,8 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
                 continue;
 
             double ts = (double)ann->start_sample() / sample_rate;
-            QString text = pick_annotation_text(ann->annotations());
+            QString text =
+                pick_annotation_text(ann->annotations(stack->protocol_format()));
 
             if (text.isEmpty())
                 result += format_time_seconds(ts) + ",\n";

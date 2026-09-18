@@ -475,7 +475,8 @@ const Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);
 const Annotation *ann = annotations_arr[i].at(row_inf_arr[i].read_index);
 
     if (ann->start_sample() == sample_index){
-                const auto &ann_texts = ann->annotations();
+                const auto &ann_texts =
+                    ann->annotations(row_inf_arr[i].stack->protocol_format());
                 // An annotation always carries at least one string, but a row
                 // from a different stack may not — never index blindly.
                 ann_row_str.append(ann_texts.empty() ? QString() : ann_texts.at(0));

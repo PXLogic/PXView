@@ -195,9 +195,11 @@ private:
   // rect width using the supplied font metrics. Moved here from
   // pv::data::decode::Annotation so the Core Annotation class stays a pure
   // data class free of QFont/QFontMetrics dependencies.
+  // fmt: 显示格式（DecoderDataFormat）。静态成员拿不到 _decoder_stack，
+  // 由调用方传入（Plan D：格式是视图参数）。
   static QString best_annotation_text(
       const pv::data::decode::Annotation &a, double rect_width,
-      const QFontMetrics &fm);
+      const QFontMetrics &fm, int fmt);
 
 signals:
   void decoded_progress(int progress);

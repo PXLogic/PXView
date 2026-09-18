@@ -24,13 +24,15 @@
 
 DecoderStatus::DecoderStatus()
 {
-        m_bNumeric = false;
-        m_format = 0;
+        m_bNumeric.store(false, std::memory_order_relaxed);
+        m_format.store(0, std::memory_order_relaxed);
         sdr_decoder_handle = nullptr;
 }
 
 void DecoderStatus::clear()
 {
+        // 只清去重表（表里只有 weak_ptr，已发布快照持有的文本不受影响），
+        // m_format 是用户的视图设置，不随解码轮次重置（与旧行为一致）。
         m_resTable.reset();
-        m_bNumeric = false;
+        m_bNumeric.store(false, std::memory_order_relaxed);
 } 

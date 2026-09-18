@@ -400,8 +400,9 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
                 if (cm.first == row_stack) {
                     pv::data::decode::Annotation ann;
                     if (s->list_annotation(&ann, cm.second, row_in_stack)) {
-                        if (!ann.annotations().empty())
-                            return ann.annotations().at(0);
+                        const auto &texts = ann.annotations(s->protocol_format());
+                        if (!texts.empty())
+                            return texts.at(0);
                     }
                 }
             }
@@ -437,8 +438,10 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
             int ann_col = index.column() - PRESET_COLUMN_COUNT;
             pv::data::decode::Annotation ann;
             if (_decoder_stack->list_annotation(&ann, ann_col, query_row)) {
-                if (!ann.annotations().empty())
-                    return ann.annotations().at(0);
+                const auto &texts =
+                    ann.annotations(_decoder_stack->protocol_format());
+                if (!texts.empty())
+                    return texts.at(0);
             }
         }
     }

@@ -773,7 +773,7 @@ void ProtocolDock::rebuild_protocol_layers() {
 
       static const char *formatNames[] = {"hex", "dec", "oct", "bin",
                                           "ascii"};
-      int fmt = dstatus ? dstatus->m_format : -1;
+      int fmt = dstatus ? dstatus->m_format.load() : -1;
       if (fmt >= 0 && fmt <= 4) {
         layer->SetProtocolFormat(formatNames[fmt]);
       }

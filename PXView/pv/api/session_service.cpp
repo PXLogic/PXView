@@ -3529,7 +3529,7 @@ Result<std::vector<DecoderAnnotation>> SessionService::get_decoder_annotations(
             da.end_sample = ann.end_sample();
             da.ann_class = ann.type();
 
-            const auto &texts = ann.annotations();
+            const auto &texts = ann.annotations(decoder_stack->protocol_format());
             da.texts.reserve(texts.size());
             for (const auto &text : texts)
                 da.texts.push_back(text.toStdString());
@@ -4229,7 +4229,7 @@ Result<void> SessionService::export_decoder_table(
                 }
 
                 // Format annotation text with radix
-                const auto &texts = ann.annotations();
+                const auto &texts = ann.annotations(decoder_stack->protocol_format());
                 QString text;
                 if (!texts.empty()) {
                     text = texts[0];
