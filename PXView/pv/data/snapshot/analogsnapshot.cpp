@@ -23,6 +23,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <new>
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
@@ -46,9 +47,10 @@ const uint64_t AnalogSnapshot::EnvelopeDataUnit = 64*1024;	// bytes
 AnalogSnapshot::AnalogSnapshot() :
     Snapshot(sizeof(uint16_t), 1, 1)
 {
-	memset(_envelope_levels, 0, sizeof(_envelope_levels));
     _unit_pitch = 0;
-    _data  = nullptr; 
+    // NOTE: no memset of _envelope_levels — its Envelope members now own
+    // std::vector storage, so byte-wise zeroing would be undefined behaviour.
+    // Default construction already zero-initialises them.
 }
 
 AnalogSnapshot::~AnalogSnapshot()
@@ -66,13 +68,21 @@ AnalogSnapshot::~AnalogSnapshot()
 
 void AnalogSnapshot::free_envelop()
 {
-    for (unsigned int i = 0; i < _channel_num; i++) {
-        for(auto &e : _envelope_levels[i]) {
-            if (e.samples)
-                free(e.samples);
+    // Same reach as the memset() this replaces: the whole fixed array, not just
+    // the levels the current _channel_num uses.
+    for (auto &row : _envelope_levels) {
+        for (auto &e : row) {
+            // clear() + shrink_to_fit(): a cleared vector keeps its capacity, so
+            // without the shrink a smaller capture would still hold the previous
+            // capture's envelope buffers (the old code freed them outright).
+            e.samples.clear();
+            e.samples.shrink_to_fit();
+            e.length = 0;
+            e.ring_length = 0;
+            e.count = 0;
+            e.data_length = 0;
         }
     }
-    memset(_envelope_levels, 0, sizeof(_envelope_levels));
 }
 
 void AnalogSnapshot::init()
@@ -125,10 +135,7 @@ void AnalogSnapshot::free_data()
 {
     Snapshot::free_data();
 
-    if (_data != nullptr){
-        free(_data);
-        _data = nullptr;
-    }
+    _data.reset();
 }
 
 void AnalogSnapshot::clear()
@@ -186,30 +193,31 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
     if (size != _capacity) {
         free_data();
         _total_sample_count = total_sample_count;
-        _data = malloc(size);
+        free_envelop();
+
+        // nothrow: an out-of-memory capture must report _memory_failed (the
+        // existing contract) rather than throwing std::bad_alloc out of the
+        // libsigrok data-feed callback.
+        _data.reset(new (std::nothrow) uint8_t[static_cast<size_t>(size)]);
 
         if (_data) {
-            free_envelop();
+            try {
+                for (unsigned int i = 0; i < _channel_num; i++) {
+                    uint64_t envelop_count = _total_sample_count / EnvelopeScaleFactor;
+                    for (unsigned int level = 0; level < ScaleStepCount; level++) {
+                        _envelope_levels[i][level].count = envelop_count;
 
-            for (unsigned int i = 0; i < _channel_num; i++) {
-                uint64_t envelop_count = _total_sample_count / EnvelopeScaleFactor;
-                for (unsigned int level = 0; level < ScaleStepCount; level++) {
-                    _envelope_levels[i][level].count = envelop_count;
+                        if (envelop_count == 0)
+                            break;
 
-                    if (envelop_count == 0)
-                        break;
+                        _envelope_levels[i][level].samples.resize(
+                            static_cast<size_t>(envelop_count));
 
-                    _envelope_levels[i][level].samples = reinterpret_cast<EnvelopeSample*>(malloc(envelop_count * sizeof(EnvelopeSample)));
-                    
-                    if (!_envelope_levels[i][level].samples) {
-                        isOk = false;
-                        break;
+                        envelop_count = envelop_count / EnvelopeScaleFactor;
                     }
-
-                    envelop_count = envelop_count / EnvelopeScaleFactor;
                 }
-                if (!isOk)
-                    break;
+            } catch (const std::bad_alloc &) {
+                isOk = false;
             }
         }
         else {
@@ -399,7 +407,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
             if (ch_ring >= _total_sample_count) {
                 ch_ring = 0;
             }
-            uint8_t *dst = reinterpret_cast<uint8_t*>(_data) + ch_ring * dst_stride + order * _unit_bytes;
+            uint8_t *dst = _data.get() + ch_ring * dst_stride + order * _unit_bytes;
             memcpy(dst, src_ch + i * src_stride, _unit_bytes);
             ch_ring++;
         }
@@ -453,14 +461,14 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             _sample_count = _total_sample_count;
 
         if (_ring_sample_count + samples >= _total_sample_count) {
-            memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
+            memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
                 data, (_total_sample_count - _ring_sample_count) * bytes_per_sample);
             data = reinterpret_cast<uint8_t*>(data) + (_total_sample_count - _ring_sample_count) * bytes_per_sample;
             _ring_sample_count = (samples + _ring_sample_count - _total_sample_count) % _total_sample_count;
-            memcpy(reinterpret_cast<uint8_t*>(_data),
+            memcpy(_data.get(),
                 data, _ring_sample_count * bytes_per_sample);
         } else {
-            memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
+            memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
                 data, samples * bytes_per_sample);
             _ring_sample_count += samples;
         }
@@ -470,7 +478,7 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             if (_unit_pitch == 0) {
                 if (_sample_count < _total_sample_count)
                     _sample_count++;
-                memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
+                memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
                     data, bytes_per_sample);
                 data = reinterpret_cast<uint8_t*>(data) + bytes_per_sample*pitch;
                 _ring_sample_count = (_ring_sample_count + 1) % _total_sample_count;
@@ -489,7 +497,7 @@ const uint8_t* AnalogSnapshot::get_samples(int64_t start_sample)
 		return nullptr;
 	}
 
-    return reinterpret_cast<uint8_t*>(_data) + start_sample * _unit_bytes * _channel_num;
+    return _data.get() + start_sample * _unit_bytes * _channel_num;
 }
 
 void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
@@ -517,7 +525,7 @@ void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
     s.scale = (1 << scale_power);
     s.length = (count >> scale_power);
     s.samples_num = _envelope_levels[probe_index][min_level].length;
-    s.samples = _envelope_levels[probe_index][min_level].samples;
+    s.samples = _envelope_levels[probe_index][min_level].samples.data();
 
     // 调试日志：记录 envelope level 选择
     static int s_env_section_cnt = 0;
@@ -543,7 +551,7 @@ void AnalogSnapshot::reallocate_envelope(Envelope &e)
 
 void AnalogSnapshot::append_payload_to_envelope_levels()
 {
-    if (_data == nullptr) return;
+    if (!_data) return;
 
     // 兼容旧路径（全通道 interleaved）：
     //   若 _per_ch_ring_offset 为空（未走 append_data_partial 路径），
@@ -599,13 +607,13 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
                      _unit_bytes, _ch_index.size());
         }
 
-        dest_ptr = e0.samples + prev_length;
+        dest_ptr = e0.samples.data() + prev_length;
 
         // 线性遍历原始数据：从 prev_length*ESF 到 e0.length*ESF
         // （数据在非 loop 模式下线性写入 _data，无需环形回绕）
         const uint64_t start_sample = prev_length * EnvelopeScaleFactor;
         const uint64_t end_sample = e0.length * EnvelopeScaleFactor;
-        uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_data) +
+        uint8_t *src_ptr = _data.get() +
                     (start_sample * _channel_num + i) * _unit_bytes;
 
         // 调试日志：记录前 2 个 envelope 样本的详细读取值
@@ -626,7 +634,7 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
 
                 // 调试日志：记录前 2 个 envelope 样本读取的 16 个 float 值
                 if (dbg_env_detail && (j == start_sample || j == start_sample + EnvelopeScaleFactor)) {
-                    uint8_t *dbg_ptr = reinterpret_cast<uint8_t*>(_data) +
+                    uint8_t *dbg_ptr = _data.get() +
                         (j * _channel_num + i) * _unit_bytes;
                     pxv_info("ENV_READ ch=%d env_idx=%llu src_offset=%llu "
                              "v[0]=%.4f v[1]=%.4f v[5]=%.4f v[10]=%.4f v[15]=%.4f "
@@ -690,10 +698,10 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
             // 线性子采样：从 el.samples[prev_length*ESF] 开始读 ESF 个样本，
             // 降采样为 1 个样本写入 e.samples[prev_length]
             const EnvelopeSample *src_ptr =
-                el.samples + prev_length * EnvelopeScaleFactor;
-            const EnvelopeSample *const end_dest_ptr = e.samples + e.length;
+                el.samples.data() + prev_length * EnvelopeScaleFactor;
+            const EnvelopeSample *const end_dest_ptr = e.samples.data() + e.length;
 
-            for (dest_ptr = e.samples + prev_length;
+            for (dest_ptr = e.samples.data() + prev_length;
                  dest_ptr < end_dest_ptr; dest_ptr++) {
                 const EnvelopeSample *const end_src_ptr =
                     src_ptr + EnvelopeScaleFactor;
@@ -727,14 +735,14 @@ SampleSpan AnalogSnapshot::span(uint32_t channel, uint64_t start,
     SampleSpan s;
     s.channel = channel;
     if (count == 0) return s;
-    if (_data == nullptr) return s;
+    if (!_data) return s;
     if (start >= _sample_count) return s;
 
     const int order = get_ch_order(static_cast<int>(channel));
     if (order < 0 || static_cast<unsigned int>(order) >= _channel_num) return s;
 
     const uint64_t stride = static_cast<uint64_t>(_unit_bytes) * _channel_num;
-    const uint8_t *const group = reinterpret_cast<const uint8_t*>(_data) + start * stride;
+    const uint8_t *const group = _data.get() + start * stride;
     s.group_base = group;
     s.data = group + static_cast<uint64_t>(order) * _unit_bytes;
     s.start_sample = start;
@@ -799,7 +807,7 @@ uint64_t AnalogSnapshot::get_block_size(int block_index)
 
 void* AnalogSnapshot::get_data()
 {
-    return _data;
+    return _data.get();
 }
 
 bool AnalogSnapshot::has_enabled_channel(int index)

@@ -21,16 +21,25 @@
  */
 
 #include "pv/base/ZipMaker.h" 
+
 #include <cassert>
-#include <cstdlib>
-#include <cstring>
-#include <sys/stat.h>
-#include <time.h>
-  
+#include <ctime>
+#include <fstream>
+#include <new>
+#include <string>
+#include <vector>
+
+// The single-entry size cap both minizip APIs share: zipWriteInFileInZip()
+// and unzReadCurrentFile() take an unsigned int length, so an entry can never
+// be larger than 4 GiB no matter which side asks. Expressed once so both sides
+// agree on what "too large" means.
+namespace {
+constexpr size_t kMaxZipEntryBytes = 0xFFFFFFFFull;
+}
+
 ZipMaker::ZipMaker() :
     m_zDoc(nullptr)
 {
-    m_error[0] = 0; 
     m_opt_compress_level = Z_BEST_SPEED;
     m_zi = nullptr;
 }
@@ -50,7 +59,7 @@ bool ZipMaker::CreateNew(const char *fileName, bool bAppend)
  
      m_zDoc = zipOpen64(fileName, bAppend); 
      if (m_zDoc == nullptr) {
-        strcpy(m_error, "zipOpen64 error");
+        m_error = "zipOpen64 error";
     } 
 
 //make zip inner file time 
@@ -100,11 +109,8 @@ bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, size_t b
     assert(innerFile);
     assert(m_zDoc);
 
-    // zipWriteInFileInZip() below takes an unsigned int length, so a single
-    // entry is capped at 4 GiB. Fail loudly rather than letting the narrowing
-    // conversion silently truncate the entry and corrupt the archive.
-    if (buferSize > static_cast<size_t>(0xFFFFFFFFu)) {
-        strcpy(m_error, "entry exceeds 4GiB zip limit");
+    if (buferSize > kMaxZipEntryBytes) {
+        m_error = "entry exceeds 4GiB zip limit";
         return false;
     }
 
@@ -132,67 +138,55 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
         return false;
     assert(localFile);
 
-    struct stat st;
-    FILE *fp;
-    char *data = nullptr;
-    long long size = 0;
-
-    fp = fopen(localFile, "rb");
-    if (fp == nullptr) {
-        strcpy(m_error, "fopen error");        
+    std::ifstream in(localFile, std::ios::binary);
+    if (!in) {
+        m_error = "open file error";
         return false;
     }
 
-    if (fstat(fileno(fp), &st) < 0) {
-        strcpy(m_error, "fstat error");    
-        fclose(fp);
-        return false;
-    } 
-
-    data = reinterpret_cast<char*>(malloc((size_t)st.st_size));
-    if (data == nullptr) {
-        strcpy(m_error, "can't malloc buffer");
-        fclose(fp);
+    // Size the buffer from the stream itself: seekg(end) + tellg() replaces the
+    // old fstat() call and works with no POSIX header involved.
+    in.seekg(0, std::ios::end);
+    const std::streamoff end_pos = in.tellg();
+    if (!in || end_pos < 0) {
+        m_error = "seek file error";
         return false;
     }
 
-    if (fread(data, 1, static_cast<size_t>(st.st_size), fp) < static_cast<size_t>(st.st_size)) {
-        strcpy(m_error, "fread error");
-        free(data);
-        fclose(fp);
+    const size_t size = static_cast<size_t>(end_pos);
+    if (size > kMaxZipEntryBytes) {
+        m_error = "file exceeds 4GiB zip limit";
         return false;
     }
 
-    fclose(fp);
-    size = static_cast<size_t>(st.st_size);
+    std::vector<char> data;
+    try {
+        data.resize(size);
+    } catch (const std::bad_alloc &) {
+        m_error = "can't allocate read buffer";
+        return false;
+    }
 
-    bool ret = AddFromBuffer(innerFile, data, size);
-    free(data);
-    return ret;
+    if (size > 0) {
+        in.seekg(0, std::ios::beg);
+        in.read(data.data(), static_cast<std::streamsize>(size));
+        if (in.gcount() != static_cast<std::streamsize>(size)) {
+            m_error = "read file error";
+            return false;
+        }
+    }
+
+    // A zero-length vector has no data() to hand out, and AddFromBuffer()
+    // rejects a null buffer — pass a valid empty address instead.
+    return AddFromBuffer(innerFile, size ? data.data() : "", size);
 }
 
-const char *ZipMaker::GetError()
+const char *ZipMaker::GetError() const
 {
-    if (m_error[0])
-        return m_error;
-    return nullptr;
+    return m_error.empty() ? nullptr : m_error.c_str();
 }
 
 //-----------------ZipReader
-
-ZipInnerFileData::ZipInnerFileData(char *data, int size)
-{
-    _data = data;
-    _size = size;
-}
-
-ZipInnerFileData::~ZipInnerFileData()
-{
-    if (_data != nullptr){
-        free(_data);
-        _data = nullptr;
-    }
-}
 
 ZipReader::ZipReader(const char *filePath)
 {
@@ -215,7 +209,6 @@ void ZipReader::Close()
 
 std::unique_ptr<ZipInnerFileData> ZipReader::GetInnterFileData(const char *innerFile)
 {
-    char *metafile = nullptr;
     char szFilePath[15];
     unz_file_info64 fileInfo;
    
@@ -239,20 +232,30 @@ std::unique_ptr<ZipInnerFileData> ZipReader::GetInnterFileData(const char *inner
         return nullptr;
     }
 
-    metafile = reinterpret_cast<char*>(malloc(fileInfo.uncompressed_size));
-    if (fileInfo.uncompressed_size > 0 && metafile)
-    {
-        // unzReadCurrentFile() takes an unsigned int length; the 4 GiB entry
-        // cap is inherent to this minizip API (same limit as AddFromBuffer).
-        unzReadCurrentFile(m_archive, metafile, static_cast<unsigned int>(fileInfo.uncompressed_size));
+    // Every failure from here on must still close the current file: the old
+    // code only did that on the success path (and left it open when the read
+    // buffer could not be allocated).
+    if (fileInfo.uncompressed_size == 0 ||
+        fileInfo.uncompressed_size > kMaxZipEntryBytes) {
         unzCloseCurrentFile(m_archive);
+        return nullptr;
+    }
 
-         return std::make_unique<ZipInnerFileData>(metafile, static_cast<int>(fileInfo.uncompressed_size));
-    } 
+    const size_t size = static_cast<size_t>(fileInfo.uncompressed_size);
+    std::vector<char> metafile;
+    try {
+        metafile.resize(size);
+    } catch (const std::bad_alloc &) {
+        unzCloseCurrentFile(m_archive);
+        return nullptr;
+    }
 
-    // Buffer allocated but unusable (zero-length entry, or malloc failed).
-    // free() here so the caller — who receives nullptr and owns nothing —
-    // cannot leak it. free(nullptr) is a no-op.
-    free(metafile);
-    return nullptr;
+    if (unzReadCurrentFile(m_archive, metafile.data(),
+                           static_cast<unsigned int>(size)) < 0) {
+        unzCloseCurrentFile(m_archive);
+        return nullptr;
+    }
+
+    unzCloseCurrentFile(m_archive);
+    return std::make_unique<ZipInnerFileData>(std::move(metafile));
 }

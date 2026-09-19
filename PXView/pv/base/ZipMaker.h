@@ -20,14 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-//test git 2
-
 #pragma once 
 
 #include <minizip/zip.h>
 #include <minizip/unzip.h>
 
 #include <memory>
+#include <string>
+#include <vector>
  
 
 class ZipMaker
@@ -52,8 +52,8 @@ public:
     //add a inner file from local file
     bool AddFromFile(const char *localFile, const char *innerFile);
 
-    //get the last error
-    const char *GetError();
+    //get the last error, nullptr when there is none
+    const char *GetError() const;
 
 public:
     int m_opt_compress_level;
@@ -61,27 +61,31 @@ public:
 private:
     zipFile         m_zDoc; //zip file handle
     std::unique_ptr<zip_fileinfo> m_zi; //life must as m_zDoc; 
-    char     m_error[500];
+    std::string     m_error;
 };
 
 
 //------------------ZipReader
+
+/// Contents of one zip entry. Owns its bytes (std::vector), so it can be
+/// handed around as a unique_ptr without any release function.
 class ZipInnerFileData
 {
 public:
-    ZipInnerFileData(char *data, int size);
-    ~ZipInnerFileData();
+    explicit ZipInnerFileData(std::vector<char> data)
+        : _data(std::move(data))
+    {
+    }
 
     inline char *data(){
-        return _data;
+        return _data.data();
     }
     inline int size(){
-        return _size;
+        return static_cast<int>(_data.size());
     }
 
 private:
-    char *_data;
-    int  _size;
+    std::vector<char> _data;
 };
 
 class ZipReader{
@@ -90,7 +94,7 @@ public:
     ~ZipReader();
     void Close();
 
-    inline bool HaveArchive(){
+    inline bool HaveArchive() const {
         return m_archive != nullptr;
     }
 

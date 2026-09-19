@@ -25,6 +25,7 @@
 #define PXVIEW_PV_DATA_DSOSNAPSHOT_H
 
 #include <utility>
+#include <memory>
 #include <vector>
 
 #include <libsigrok/libsigrok.h>
@@ -58,9 +59,12 @@ public:
 private:
 	struct Envelope
 	{
-		uint64_t length;
-		uint64_t data_length;
-		EnvelopeSample *samples;
+		uint64_t length = 0;
+		uint64_t data_length = 0;
+        // Owns its storage (was a malloc'd pointer freed by free_envelop()).
+        // get_envelope_section() still hands a raw pointer to the View through
+        // EnvelopeSection::samples = samples.data().
+		std::vector<EnvelopeSample> samples;
 	};
 
 private:
@@ -181,7 +185,9 @@ private:
     bool    _envelope_en;
     bool    _envelope_done;
     bool    _instant; 
-    std::vector<uint8_t*>   _ch_data;
+    // One sample plane per enabled DSO channel. unique_ptr owns the buffer that
+    // used to be malloc'd and freed by hand in free_data().
+    std::vector<std::unique_ptr<uint8_t[]>> _ch_data;
     float   _threshold;
     uint64_t _measure_voltage_factor1;
     uint64_t _measure_voltage_factor2;

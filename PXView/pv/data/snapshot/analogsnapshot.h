@@ -30,6 +30,7 @@
 #include "pv/data/snapshot/snapshot.h"
 
 #include <utility>
+#include <memory>
 #include <vector>
 
 namespace AnalogSnapshotTest {
@@ -63,13 +64,14 @@ public:
 private:
 	struct Envelope
 	{
-		uint64_t length;
-        uint64_t ring_length;
-        uint64_t count;
-		uint64_t data_length;
-		EnvelopeSample *samples;
-        uint8_t *max;
-        uint8_t *min;
+		uint64_t length = 0;
+        uint64_t ring_length = 0;
+        uint64_t count = 0;
+		uint64_t data_length = 0;
+        // Owns its storage (was a malloc'd pointer freed by free_envelop()).
+        // get_envelope_section() still hands raw pointers to the View through
+        // EnvelopeSection::samples = samples.data(), so the View is unaffected.
+		std::vector<EnvelopeSample> samples;
 	};
 
 private:
@@ -139,7 +141,11 @@ private:
     void update_float_range(const float *data, uint64_t count);
 
 private:
-    void *_data;
+    // Interleaved sample store: [s0_ch0][s0_ch1]...[s0_chN][s1_ch0]...
+    // unique_ptr<T[]> instead of malloc/free — same raw pointer handed out by
+    // get_samples() / get_data() / span(), same "no zeroing of a multi-hundred-MB
+    // buffer" cost profile (vector::resize() would zero it).
+    std::unique_ptr<uint8_t[]> _data;
     struct Envelope _envelope_levels[DS_MAX_ANALOG_PROBES_NUM][ScaleStepCount];
 	friend class AnalogSnapshotTest::Basic;
     friend class SessionSnapshot;

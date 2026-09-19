@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <new>
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
@@ -61,7 +62,9 @@ DsoSnapshot::DsoSnapshot() :
     _ref_max = 0;
     _data_out_off_range = false;
 
-	memset(_envelope_levels, 0, sizeof(_envelope_levels));
+    // NOTE: no memset of _envelope_levels — its Envelope members now own
+    // std::vector storage, so byte-wise zeroing would be undefined behaviour.
+    // Default construction already zero-initialises them.
 }
 
 DsoSnapshot::~DsoSnapshot()
@@ -79,13 +82,16 @@ DsoSnapshot::~DsoSnapshot()
 
 void DsoSnapshot::free_envelop()
 {
-    for (unsigned int i = 0; i < _channel_num; i++) {
-        for(auto &e : _envelope_levels[i]) {
-            if (e.samples)
-                free(e.samples);
+    // Same reach as the memset() this replaces: the whole fixed array, not just
+    // the levels the current _channel_num uses.
+    for (auto &row : _envelope_levels) {
+        for (auto &e : row) {
+            e.samples.clear();
+            e.samples.shrink_to_fit();
+            e.length = 0;
+            e.data_length = 0;
         }
     }
-    memset(_envelope_levels, 0, sizeof(_envelope_levels));
 }
 
 void DsoSnapshot::init()
@@ -123,12 +129,6 @@ void DsoSnapshot::clear()
 void DsoSnapshot::free_data()
 {
     Snapshot::free_data();
-
-    for (int i=0; i<static_cast<int>(_ch_data.size()); i++)
-    {
-        void *p = _ch_data[i];
-        free(p);
-    }
 
     _ch_data.clear();
 }
@@ -182,13 +182,17 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
 
             if (probe->type == SR_CHANNEL_DSO && (probe->enabled || isFile)) {
                 
-                uint8_t *chan_buffer = reinterpret_cast<uint8_t*>(malloc(total_sample_count + 1));
-                if (chan_buffer == nullptr){
+                // nothrow: an out-of-memory capture must report _memory_failed
+                // (the existing contract) instead of throwing std::bad_alloc
+                // out of the libsigrok data-feed callback.
+                std::unique_ptr<uint8_t[]> chan_buffer(
+                    new (std::nothrow) uint8_t[static_cast<size_t>(total_sample_count) + 1]);
+                if (!chan_buffer){
                     isOk = false;
                     pxv_err("DsoSnapshot::first_payload, Malloc memory failed!");
                     break;
                 }
-                _ch_data.push_back(chan_buffer);
+                _ch_data.push_back(std::move(chan_buffer));
                 _ch_index.push_back(static_cast<uint16_t>(probe->index));
             }
         }
@@ -196,27 +200,25 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
         if (isOk) {
             free_envelop();
 
-            for (unsigned int i = 0; i < _channel_num; i++) {
-                uint64_t envelop_count = _total_sample_count / EnvelopeScaleFactor;
+            try {
+                for (unsigned int i = 0; i < _channel_num; i++) {
+                    uint64_t envelop_count = _total_sample_count / EnvelopeScaleFactor;
 
-                for (unsigned int level = 0; level < ScaleStepCount; level++) {
-                    
-                    envelop_count = ((envelop_count + EnvelopeDataUnit - 1) / EnvelopeDataUnit) 
-                                        * EnvelopeDataUnit;
+                    for (unsigned int level = 0; level < ScaleStepCount; level++) {
 
-                    uint64_t buffer_len = envelop_count * sizeof(EnvelopeSample);
-                    _envelope_levels[i][level].samples = reinterpret_cast<EnvelopeSample*>(malloc(buffer_len));
-                    
-                    if (_envelope_levels[i][level].samples == nullptr) {
-                        pxv_err("DsoSnapshot::first_payload, malloc failed!");
-                        isOk = false;
-                        break;
+                        envelop_count = ((envelop_count + EnvelopeDataUnit - 1) / EnvelopeDataUnit)
+                                            * EnvelopeDataUnit;
+
+                        _envelope_levels[i][level].samples.resize(
+                            static_cast<size_t>(envelop_count));
+                        _envelope_levels[i][level].data_length = envelop_count;
+
+                        envelop_count = envelop_count / EnvelopeScaleFactor;
                     }
-                    
-                    envelop_count = envelop_count / EnvelopeScaleFactor;
                 }
-                if (!isOk)
-                    break;
+            } catch (const std::bad_alloc &) {
+                pxv_err("DsoSnapshot::first_payload, envelope allocation failed!");
+                isOk = false;
             }
         }
     }
@@ -267,7 +269,7 @@ void DsoSnapshot::append_data(void *data, uint64_t samples, bool instant)
     for (unsigned int ch = 0; ch < _channel_num; ch++)
     {
         uint8_t *src = reinterpret_cast<uint8_t*>(data) + ch;
-        uint8_t *dest = _ch_data[ch];
+        uint8_t *dest = _ch_data[ch].get();
 
         if (instant){
             dest += old_sample_count;
@@ -322,16 +324,16 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
         return nullptr;
     }
 
-    /* AGENTS.md: assert() is a no-op in Release. If _ch_data[order] has
+    /* AGENTS.md: assert() is a no-op in Release. If _ch_data[order].get() has
      * not been allocated yet (channel data not populated), return nullptr
      * so callers can check for nullptr instead of dereferencing a wild pointer
      * (nullptr + start_sample). */
     if (!_ch_data[order]) {
-        pxv_warn("DsoSnapshot::get_samples: _ch_data[%d] is nullptr", order);
+        pxv_warn("DsoSnapshot::get_samples: _ch_data[%d].get() is nullptr", order);
         return nullptr;
     }
 
-    return reinterpret_cast<uint8_t*>(_ch_data[order]) + start_sample;
+    return _ch_data[order].get() + start_sample;
 }
 
 void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
@@ -374,7 +376,7 @@ void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
     else
         s.length = end - start;
 
-    s.samples = _envelope_levels[order][min_level].samples + start;
+    s.samples = _envelope_levels[order][min_level].samples.data() + start;
 }
 
 void DsoSnapshot::reallocate_envelope(Envelope &e)
@@ -384,6 +386,18 @@ void DsoSnapshot::reallocate_envelope(Envelope &e)
     if (new_data_length > e.data_length)
 	{
 		e.data_length = new_data_length;
+        // Grow the storage to match. The old code only bumped data_length and
+        // relied on first_payload()'s rounding to cover every length it would
+        // ever see — a level that outgrew its allocation became a silent heap
+        // overflow instead of an error.
+        try {
+            if (e.samples.size() < e.data_length)
+                e.samples.resize(static_cast<size_t>(e.data_length));
+        } catch (const std::bad_alloc &) {
+            pxv_err("DsoSnapshot::reallocate_envelope: out of memory, clamping level length");
+            e.length = e.samples.size();
+            e.data_length = e.samples.size();
+        }
 	}
 }
 
@@ -412,13 +426,13 @@ void DsoSnapshot::append_payload_to_envelope_levels(bool header)
         // Expand the data buffer to fit the new samples
         reallocate_envelope(e0);
 
-        assert(e0.samples);
+        assert(!e0.samples.empty());
 
-        dest_ptr = e0.samples + prev_length;
+        dest_ptr = e0.samples.data() + prev_length;
 
         // Iterate through the samples to populate the first level mipmap
-        const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[i]) + e0.length * EnvelopeScaleFactor;
-        const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[i]) + prev_length * EnvelopeScaleFactor;
+        const uint8_t *const stop_src_ptr = _ch_data[i].get() + e0.length * EnvelopeScaleFactor;
+        const uint8_t *src_ptr = _ch_data[i].get() + prev_length * EnvelopeScaleFactor;
 
         for (; src_ptr < stop_src_ptr; src_ptr += EnvelopeScaleFactor)
         {
@@ -462,10 +476,10 @@ void DsoSnapshot::append_payload_to_envelope_levels(bool header)
 
             // Subsample the level lower level
             const EnvelopeSample *src_ptr =
-                el.samples + prev_length * EnvelopeScaleFactor;
-            const EnvelopeSample *const end_dest_ptr = e.samples + e.length;
+                el.samples.data() + prev_length * EnvelopeScaleFactor;
+            const EnvelopeSample *const end_dest_ptr = e.samples.data() + e.length;
 
-            for (dest_ptr = e.samples + prev_length;
+            for (dest_ptr = e.samples.data() + prev_length;
                 dest_ptr < end_dest_ptr; dest_ptr++)
             {
                 const EnvelopeSample *const end_src_ptr =
@@ -496,8 +510,8 @@ double DsoSnapshot::cal_vrms(double zero_off, int index)
     double tmp;
 
     // Iterate through the samples to populate the first level mipmap
-    const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]) + _sample_count;
-    const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]);
+    const uint8_t *const stop_src_ptr = _ch_data[index].get() + _sample_count;
+    const uint8_t *src_ptr = _ch_data[index].get();
 
     for (;src_ptr < stop_src_ptr; src_ptr += VrmsScaleFactor)
     {
@@ -527,8 +541,8 @@ double DsoSnapshot::cal_vmean(int index)
     double vmean = 0;
 
     // Iterate through the samples to populate the first level mipmap
-    const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]) + _sample_count;
-    const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]);
+    const uint8_t *const stop_src_ptr = _ch_data[index].get() + _sample_count;
+    const uint8_t *src_ptr = _ch_data[index].get();
 
     for (; src_ptr < stop_src_ptr; src_ptr += VrmsScaleFactor)
     {
@@ -583,7 +597,7 @@ bool DsoSnapshot::get_max_min_value(uint8_t &maxv, uint8_t &minv, int chan_index
         return false;
     }
 
-    uint8_t *p = _ch_data[chan_index];
+    uint8_t *p = _ch_data[chan_index].get();
     maxv = *p;
     minv = *p;
 
@@ -616,7 +630,7 @@ SampleSpan DsoSnapshot::span(uint32_t channel, uint64_t start,
     if (order < 0 || static_cast<unsigned int>(order) >= _ch_data.size()) return s;
     if (_ch_data[order] == nullptr) return s;
 
-    s.data = reinterpret_cast<const uint8_t*>(_ch_data[order]) + start;
+    s.data = _ch_data[order].get() + start;
     // DSO 是"按通道平面"布局：data 本身已在通道起点，整块基址与 data 相同。
     s.group_base = s.data;
     s.start_sample = start;
