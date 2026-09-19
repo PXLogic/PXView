@@ -103,7 +103,7 @@ private:
     static const uint64_t MaxChunkSize = 1024 * 16;
 
 public:
-    enum decode_state {
+    enum class decode_state {
         Stopped,
         Running
     };
@@ -201,7 +201,7 @@ public:
     void init();
 
     inline bool IsRunning(){
-        return _decode_state.load(std::memory_order_acquire) == Running;
+        return _decode_state.load(std::memory_order_acquire) == decode_state::Running;
     }
  
 	void begin_decode_work();

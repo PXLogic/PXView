@@ -359,7 +359,7 @@ bool TriggerDock::commit_trigger() {
     // Task 8.4: mirror simple-mode state into Core TriggerConfig.
     // sync_trigger_to_libsigrok() in start_capture will push it to ds_trigger_*.
     data::TriggerConfig cfg;
-    cfg.set_mode(data::TriggerConfig::Simple);
+    cfg.set_mode(data::TriggerConfig::Mode::Simple);
     cfg.set_trigger_pos(_position_slider->value());
     _session->set_trigger_config(cfg);
     return false;
@@ -373,9 +373,9 @@ bool TriggerDock::commit_trigger() {
     cfg.set_adv_enabled(true);
     cfg.set_adv_tab_index(_adv_tabWidget->currentIndex());
     if (_adv_tabWidget->currentIndex() == 0)
-      cfg.set_mode(data::TriggerConfig::Adv);
+      cfg.set_mode(data::TriggerConfig::Mode::Adv);
     else
-      cfg.set_mode(data::TriggerConfig::Serial);
+      cfg.set_mode(data::TriggerConfig::Mode::Serial);
     const int stage_n = stages_comboBox->currentText().toInt();
     cfg.set_stage_count(stage_n);
     if (_adv_tabWidget->currentIndex() == 1) {
@@ -523,7 +523,7 @@ QJsonObject TriggerDock::get_session() {
   // 1=edge/comp)
   QString start_lower, start_ext32, stop_lower, stop_ext32, edge_lower,
       edge_ext32;
-  if (cfg.mode() == data::TriggerConfig::Serial && cfg.stages().size() >= 2) {
+  if (cfg.mode() == data::TriggerConfig::Mode::Serial && cfg.stages().size() >= 2) {
     split_trigger_value(cfg.stages()[0].value0, start_ext32, start_lower);
     split_trigger_value(cfg.stages()[0].value1, stop_ext32, stop_lower);
     split_trigger_value(cfg.stages()[1].value0, edge_ext32, edge_lower);
@@ -575,18 +575,18 @@ void TriggerDock::set_session(QJsonObject ses) {
   cfg.set_trigger_pos(ses.value("triggerPos").toInt(1));
   cfg.set_stage_count(stage_count);
   if (!adv_mode)
-    cfg.set_mode(data::TriggerConfig::Simple);
+    cfg.set_mode(data::TriggerConfig::Mode::Simple);
   else if (tab == 1)
-    cfg.set_mode(data::TriggerConfig::Serial);
+    cfg.set_mode(data::TriggerConfig::Mode::Serial);
   else
-    cfg.set_mode(data::TriggerConfig::Adv);
+    cfg.set_mode(data::TriggerConfig::Mode::Adv);
   cfg.set_serial_data_channel(ses.value("serialTriggerChannel").toInt(0));
   cfg.set_serial_bits(ses.value("serialTriggerBits").toInt(0) +
                       1); // index -> count
   cfg.set_serial_value(ses.value("serialTriggerData").toString());
 
   std::vector<data::TriggerConfig::Stage> stages;
-  if (cfg.mode() == data::TriggerConfig::Adv) {
+  if (cfg.mode() == data::TriggerConfig::Mode::Adv) {
     for (int i = 0; i < stage_count; i++) {
       data::TriggerConfig::Stage st;
       const QString v0_low =
@@ -614,7 +614,7 @@ void TriggerDock::set_session(QJsonObject ses) {
       st.count1 = 0;
       stages.push_back(st);
     }
-  } else if (cfg.mode() == data::TriggerConfig::Serial) {
+  } else if (cfg.mode() == data::TriggerConfig::Mode::Serial) {
     // SERIAL stages: 0=start/stop, 1=edge/comp, 2=channel, 3=data
     const QString start_low = ses.value("serialTriggerStart").toString();
     const QString stop_low = ses.value("serialTriggerStop").toString();
@@ -703,7 +703,7 @@ void TriggerDock::refresh_ui_from_core() {
     QString v0_low, v1_low, v0_ext, v1_ext;
     int inv0 = 0, inv1 = 0, logic_index = 0, count0 = 1;
     bool conti = false;
-    if (tcfg.mode() == data::TriggerConfig::Adv &&
+    if (tcfg.mode() == data::TriggerConfig::Mode::Adv &&
         i < static_cast<int>(tcfg.stages().size())) {
       const auto &s = tcfg.stages()[i];
       split_trigger_value(s.value0, v0_ext, v0_low);
@@ -740,7 +740,7 @@ void TriggerDock::refresh_ui_from_core() {
   // Serial UI: SERIAL mode reads from Core stages; otherwise defaults。
   QString s_start_low, s_stop_low, s_edge_low, s_start_ext, s_stop_ext,
       s_edge_ext;
-  if (tcfg.mode() == data::TriggerConfig::Serial && tcfg.stages().size() >= 2) {
+  if (tcfg.mode() == data::TriggerConfig::Mode::Serial && tcfg.stages().size() >= 2) {
     split_trigger_value(tcfg.stages()[0].value0, s_start_ext, s_start_low);
     split_trigger_value(tcfg.stages()[0].value1, s_stop_ext, s_stop_low);
     split_trigger_value(tcfg.stages()[1].value0, s_edge_ext, s_edge_low);

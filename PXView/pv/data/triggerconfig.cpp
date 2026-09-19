@@ -118,7 +118,7 @@ TriggerConfig TriggerConfig::from_json(const QJsonObject &obj)
 
     if (obj.contains("mode")) {
         cfg._mode = static_cast<Mode>(
-            obj.value("mode").toInt(static_cast<int>(Simple)));
+            obj.value("mode").toInt(static_cast<int>(Mode::Simple)));
     }
     if (obj.contains("trigger_pos")) {
         cfg._trigger_pos = obj.value("trigger_pos").toInt(0);

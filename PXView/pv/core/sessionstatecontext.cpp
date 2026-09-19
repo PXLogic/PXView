@@ -395,7 +395,7 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
   // Only Simple trigger mode uses the upstream sr_trigger API. Adv/Serial
   // trigger is pushed via SR_CONF_TRIGGER_ADV_* keys above; the driver reads
   // them at acquisition start (pxlogic set_trigger / demo receive_data).
-  if (cfg.mode() != data::TriggerConfig::Simple) {
+  if (cfg.mode() != data::TriggerConfig::Mode::Simple) {
     pxv_info("sync_trigger_to_libsigrok: Adv/Serial trigger synced via SR_CONF keys");
     return;
   }

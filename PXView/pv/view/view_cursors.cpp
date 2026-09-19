@@ -99,7 +99,7 @@ void ViewCursors::set_trig_cursor_posistion(uint64_t trig_pos) {
   // (Simple mode), or if trigger_config mode is Adv/Serial (always enabled).
   bool trigger_enabled = false;
   const auto &trig_cfg = _view->data_source()->trigger_config();
-  if (trig_cfg.mode() != pv::data::TriggerConfig::Simple) {
+  if (trig_cfg.mode() != pv::data::TriggerConfig::Mode::Simple) {
     trigger_enabled = true;
   } else {
     for (const auto &m : _view->data_source()->get_signal_models_snapshot()) {

@@ -58,16 +58,16 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
     _math_group = new QGroupBox(this);
     QHBoxLayout *type_layout = new QHBoxLayout();
     QRadioButton *add_radio = new QRadioButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_ADD), "Add"), _math_group);
-    add_radio->setProperty("type", data::MathStack::MATH_ADD);
+    add_radio->setProperty("type", static_cast<int>(data::MathStack::MathType::MATH_ADD));
     type_layout->addWidget(add_radio);
     QRadioButton *sub_radio = new QRadioButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SUBSTRACT), "Substract"), _math_group);
-    sub_radio->setProperty("type", data::MathStack::MATH_SUB);
+    sub_radio->setProperty("type", static_cast<int>(data::MathStack::MathType::MATH_SUB));
     type_layout->addWidget(sub_radio);
     QRadioButton *mul_radio = new QRadioButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_MULTIPLY), "Multiply"), _math_group);
-    mul_radio->setProperty("type", data::MathStack::MATH_MUL);
+    mul_radio->setProperty("type", static_cast<int>(data::MathStack::MathType::MATH_MUL));
     type_layout->addWidget(mul_radio);
     QRadioButton *div_radio = new QRadioButton(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DIVIDE), "Divide"), _math_group);
-    div_radio->setProperty("type", data::MathStack::MATH_DIV);
+    div_radio->setProperty("type", static_cast<int>(data::MathStack::MathType::MATH_DIV));
     type_layout->addWidget(div_radio);
     _math_radio.append(add_radio);
     _math_radio.append(sub_radio);
@@ -120,7 +120,7 @@ MathOptions::MathOptions(SigSession *session, QWidget *parent) :
         }
         for (QVector<QRadioButton *>::const_iterator i = _math_radio.begin();
             i != _math_radio.end(); i++) {
-            if ((*i)->property("type").toInt() == math->get_type()) {
+            if ((*i)->property("type").toInt() == static_cast<int>(math->get_type())) {
                 (*i)->setChecked(true);
                 break;
             }
@@ -186,7 +186,7 @@ void MathOptions::Apply()
 {
     int src1 = -1;
     int src2 = -1;
-    data::MathStack::MathType type = data::MathStack::MATH_ADD;
+    data::MathStack::MathType type = data::MathStack::MathType::MATH_ADD;
     for (QVector<QRadioButton *>::const_iterator i = _src1_radio.begin();
         i != _src1_radio.end(); i++) {
         if ((*i)->isChecked()) {

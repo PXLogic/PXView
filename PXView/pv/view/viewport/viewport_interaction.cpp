@@ -1068,10 +1068,10 @@ return;
         _viewport->view().is_logic_rendering_mode() &&
         _viewport->view().session().is_stopped_status()) {
       if (event->key() == Qt::Key_Left) {
-        navigate_to_edge(EdgeNavButton::Previous);
+        navigate_to_edge(EdgeNavButton::Direction::Previous);
         return;
       } else if (event->key() == Qt::Key_Right) {
-        navigate_to_edge(EdgeNavButton::Next);
+        navigate_to_edge(EdgeNavButton::Direction::Next);
         return;
       }
     }
@@ -1190,7 +1190,7 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
   // Start searching from the viewport edge (consistent with Logic 2:
   // next edge searches from right edge, previous edge searches from left edge)
   uint64_t searchIdx;
-  if (dir == EdgeNavButton::Next) {
+  if (dir == EdgeNavButton::Direction::Next) {
     searchIdx = _viewport->view().pixel2index(_viewport->view().get_view_width());
   } else {
     searchIdx = _viewport->view().pixel2index(0);
@@ -1202,7 +1202,7 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
   bool sample = snapshot->get_sample(searchIdx, sig_index);
   bool found = false;
 
-  if (dir == EdgeNavButton::Next) {
+  if (dir == EdgeNavButton::Direction::Next) {
     found = snapshot->get_nxt_edge(searchIdx, sample, end, 1, sig_index);
   } else {
     found = snapshot->get_pre_edge(searchIdx, sample, 1, sig_index);
@@ -1222,7 +1222,7 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
   double scale = _viewport->view().scale();
 
   int64_t newOffset;
-  if (dir == EdgeNavButton::Next) {
+  if (dir == EdgeNavButton::Direction::Next) {
     // Place edge at left 25%
     newOffset = static_cast<int64_t>((time / scale - viewWidth * 0.25));
   } else {

@@ -125,12 +125,12 @@ void ViewGlitchFilter::on_clear_glitch_filter_requested(bool all_channels) {
   if (queued) {
     pv::ui::Toast::show(_view,
                         View::tr("滤波处理中，完成后将自动清除"),
-                        pv::ui::Toast::Info);
+                        pv::ui::Toast::Level::Info);
   } else if (was_active) {
     pv::ui::Toast::show(_view,
                         all_channels ? View::tr("已清除所有通道滤波")
                                      : View::tr("已清除通道滤波"),
-                        pv::ui::Toast::Info);
+                        pv::ui::Toast::Level::Info);
   }
 }
 
@@ -153,7 +153,7 @@ void ViewGlitchFilter::on_toggle_invert_requested(
     pv::ui::Toast::show(_view,
                         queued ? View::tr("取反撤销处理中，完成后将自动清除")
                                : View::tr("已清除信号取反"),
-                        pv::ui::Toast::Info);
+                        pv::ui::Toast::Level::Info);
     if (_view->get_time_view())
       _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
     return;
@@ -174,7 +174,7 @@ void ViewGlitchFilter::on_toggle_invert_requested(
   sess.set_signal_invert(channels);
   pv::ui::Toast::show(_view,
                       View::tr("已对通道 %1 取反").arg(sig->get_name()),
-                      pv::ui::Toast::Info);
+                      pv::ui::Toast::Level::Info);
   if (_view->get_time_view())
     _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
 }
@@ -255,13 +255,13 @@ void ViewGlitchFilter::on_glitch_apply_requested(
     pv::ui::Toast::show(
         _view,
         View::tr("已对所有逻辑通道应用滤波 (阈值 %1)").arg(threshold),
-        pv::ui::Toast::Info);
+        pv::ui::Toast::Level::Info);
   } else {
     pv::ui::Toast::show(_view,
                         View::tr("已对通道 %1 应用滤波 (阈值 %2)")
                             .arg(sig->get_name())
                             .arg(threshold),
-                        pv::ui::Toast::Info);
+                        pv::ui::Toast::Level::Info);
   }
 }
 
@@ -326,7 +326,7 @@ void ViewGlitchFilter::on_apply_batch_requested(
                .arg(static_cast<int>(sigs.size()))
                .arg(threshold);
   }
-  pv::ui::Toast::show(_view, desc, pv::ui::Toast::Info);
+  pv::ui::Toast::show(_view, desc, pv::ui::Toast::Level::Info);
 }
 
 void ViewGlitchFilter::on_preview_batch_changed(
@@ -390,7 +390,7 @@ void ViewGlitchFilter::undo_filter() {
   _preview_ranges.clear();
   if (_view->get_time_view())
     _view->get_time_view()->update(UpdateEventType::UPDATE_EV_GENERIC);
-  pv::ui::Toast::show(_view, View::tr("已撤销滤波"), pv::ui::Toast::Info);
+  pv::ui::Toast::show(_view, View::tr("已撤销滤波"), pv::ui::Toast::Level::Info);
 }
 
 void ViewGlitchFilter::on_glitch_filter_completed() {

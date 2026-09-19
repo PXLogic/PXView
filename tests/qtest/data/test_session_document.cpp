@@ -557,7 +557,7 @@ void TestSessionDocument::TriggerConfigRoundTrip() {
     MockDeviceConfigPort port;
     SessionDocument doc(&port);
     TriggerConfig cfg;
-    cfg.set_mode(TriggerConfig::Adv);
+    cfg.set_mode(TriggerConfig::Mode::Adv);
     cfg.set_adv_enabled(true);
     cfg.set_stage_count(2);
     cfg.set_trigger_pos(77);
@@ -567,7 +567,7 @@ void TestSessionDocument::TriggerConfigRoundTrip() {
     };
     cfg.set_stages(stages);
     doc.set_trigger_config(cfg);
-    QCOMPARE(doc.trigger_config().mode(), TriggerConfig::Adv);
+    QCOMPARE(doc.trigger_config().mode(), TriggerConfig::Mode::Adv);
     QVERIFY(doc.trigger_config().adv_enabled());
     QCOMPARE(doc.trigger_config().trigger_pos(), 77);
     QCOMPARE(doc.trigger_config().stages().size(), std::size_t(2));
@@ -591,7 +591,7 @@ void TestSessionDocument::SignalConfigJsonRoundTrip() {
 
     // Seed trigger config so the merged round trip covers both halves.
     TriggerConfig tc;
-    tc.set_mode(TriggerConfig::Serial);
+    tc.set_mode(TriggerConfig::Mode::Serial);
     tc.set_trigger_pos(321);
     doc.set_trigger_config(tc);
 
@@ -608,7 +608,7 @@ void TestSessionDocument::SignalConfigJsonRoundTrip() {
              std::size_t(1));
     QCOMPARE(doc.signal_config_store()->get_signal_config().channels[0].index, 3);
     QVERIFY(doc.signal_config_store()->has_signal_config());
-    QCOMPARE(doc.trigger_config().mode(), TriggerConfig::Serial);
+    QCOMPARE(doc.trigger_config().mode(), TriggerConfig::Mode::Serial);
     QCOMPARE(doc.trigger_config().trigger_pos(), 321);
 }
 

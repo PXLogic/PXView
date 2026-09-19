@@ -293,14 +293,14 @@ this, &Viewport::configure_analog_measurement);
           &Viewport::applyDragFrame);
 
   // Edge navigation buttons
-  _prev_edge_btn = new EdgeNavButton(EdgeNavButton::Previous, this);
-  _next_edge_btn = new EdgeNavButton(EdgeNavButton::Next, this);
+  _prev_edge_btn = new EdgeNavButton(EdgeNavButton::Direction::Previous, this);
+  _next_edge_btn = new EdgeNavButton(EdgeNavButton::Direction::Next, this);
   _prev_edge_btn->hide();
   _next_edge_btn->hide();
   connect(_prev_edge_btn, &EdgeNavButton::clicked, this,
-          [this]() { _interaction->navigate_to_edge(EdgeNavButton::Previous); });
+          [this]() { _interaction->navigate_to_edge(EdgeNavButton::Direction::Previous); });
   connect(_next_edge_btn, &EdgeNavButton::clicked, this,
-          [this]() { _interaction->navigate_to_edge(EdgeNavButton::Next); });
+          [this]() { _interaction->navigate_to_edge(EdgeNavButton::Direction::Next); });
 
   // Construct delegates (Phase F1/F2/F3). They hold a non-owning back-pointer
   // and access Viewport's private state through friend access.

@@ -51,7 +51,7 @@ class SigSession;
 class TabContext
 {
 public:
-    enum State {
+    enum class State {
         LIVE,
         HISTORICAL
     };
@@ -78,7 +78,7 @@ public:
     inline QString title() const { return _title; }
     inline QString file_path() const { return _file_path; }
     inline State state() const { return _state; }
-    inline bool is_live() const { return _state == LIVE; }
+    inline bool is_live() const { return _state == State::LIVE; }
     bool has_data();
     inline QDateTime timestamp() const { return _timestamp; }
 

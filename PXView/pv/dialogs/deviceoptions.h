@@ -58,10 +58,10 @@ class ChannelLabel : public QWidget
 Q_OBJECT
 
 public:
-    enum ChannelType { Logic, Analog };
+    enum class ChannelType { Logic, Analog };
 
     ChannelLabel(IChannelCheck *check, QWidget *parent, int chanIndex,
-                 ChannelType type = Logic);
+                 ChannelType type = ChannelType::Logic);
 
     inline QCheckBox* getCheckBox(){
         return _box;

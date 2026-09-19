@@ -36,7 +36,7 @@ class TriggerConfig
 {
 public:
     // 触发模式：0=SIMPLE, 1=ADV, 2=SERIAL（对应 libsigrok 的 SIMPLE_TRIGGER/ADV_TRIGGER/SERIAL_TRIGGER 宏，但 Core 层不 include libsigrok 的 trigger 头，用 int 存储）
-    enum Mode { Simple = 0, Adv = 1, Serial = 2 };
+    enum class Mode { Simple = 0, Adv = 1, Serial = 2 };
 
     struct Stage
     {
@@ -84,7 +84,7 @@ public:
     static TriggerConfig from_json(const QJsonObject& obj);
 
 private:
-    Mode                 _mode = Simple;
+    Mode                 _mode = Mode::Simple;
     int                  _trigger_pos = 0;
     int                  _stage_count = 0;
     std::vector<Stage>   _stages;

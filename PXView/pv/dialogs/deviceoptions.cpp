@@ -81,7 +81,7 @@ void ChannelLabel::paintEvent(QPaintEvent *event) {
   p.setRenderHint(QPainter::Antialiasing);
 
   QColor color;
-  if (_type == Analog) {
+  if (_type == ChannelType::Analog) {
     static const char *analog_tokens[4] = {
         "@signal-orange", "@signal-green", "@signal-red", "@signal-blue"};
     color = AppConfig::Instance().GetThemeColor(analog_tokens[_index % 4]);
@@ -299,7 +299,7 @@ void DeviceOptions::accept() {
     QString strMsg(
         L_S(STR_PAGE_MSG, S_ID(IDS_MSG_ALL_CHANNEL_DISABLE),
             "All channel disabled! Please enable at least one channel."));
-    pv::ui::Toast::show(this, strMsg, pv::ui::Toast::Warning);
+    pv::ui::Toast::show(this, strMsg, pv::ui::Toast::Level::Warning);
   }
 }
 

@@ -23,8 +23,8 @@ class Toast : public QWidget
 {
     Q_OBJECT
 public:
-    enum Level { Info, Warning, Error };
-    static void show(QWidget *parent, const QString &text, Level level = Info);
+    enum class Level { Info, Warning, Error };
+    static void show(QWidget *parent, const QString &text, Level level = Level::Info);
     void updateContent(const QString &text, Level level);
 
 protected:

@@ -19,6 +19,7 @@ FPGA/IC吹水群：377248676
     *通道最大数宏改 constexpr：#define CHANNEL_MAX_COUNT 64 改为 kChannelMaxCount 常量（inline constexpr uint16_t），消除泄漏到所有包含该头文件的 TU 的宏，可用于数组边界与模板实参（logicsnapshot.h、logicsnapshot.cpp、logicsnapshot_glitch_filter.cpp、logicsnapshot_pattern_search.cpp）
     *新增 GSList 遍历收敛工具：pv/base/gslist_helpers.h 提供 for_each_gslist<T>/count_gslist/gslist_to_vector，替换手写 `for (GSList *l = list; l; l = l->next)` 指针算术；api/session_service.cpp 的通道枚举、按索引查找、解码器枚举与按 id 容错查找循环改用 for_each_gslist<sr_channel>/<srd_decoder>，libsigrok 仍拥有链表，工具不释放；对外 API 签名不变（gslist_helpers.h、session_service.cpp）
     *定长字符缓冲改 std::string：deviceagent 的 name_buf/type_buf、sigsession 的 name_buf 由 char[N]+snprintf/memcpy 改为 std::string，消除固定缓冲越界/截断风险（deviceagent.cpp、sigsession.cpp）
+    *未限定 enum 改 enum class（类型安全）：Toast::Level、EdgeNavButton::Direction、decoderstack::decode_state、mathstack::math_state/MathType、spectrumstack::spectrum_state、TriggerConfig::Mode、TabContext::State、ChannelLabel::ChannelType 改为 enum class，调用点补 Xxx:: 限定（如 Toast::Info→Toast::Level::Info；MathType 经 QVariant setProperty/比较处显式 static_cast<int>）；View_type 与 UpdateEventType 因被广泛用于 int 上下文（view type 计入 int、update() 接收 int）保留未限定，避免大量显式转换（toast.h、edge_nav_button.h/.cpp、decoderstack.h/.cpp、mathstack.h/.cpp、spectrumstack.h/.cpp、triggerconfig.h/.cpp、tabcontext.h/.cpp、deviceoptions.h/.cpp、deviceoptionsdock.cpp、mathoptions.cpp、test_trigger_config.cpp、test_session_document.cpp）
 
 
     【问题修复】

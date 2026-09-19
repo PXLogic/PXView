@@ -105,7 +105,7 @@ MathStack::MathStack(pv::data::ISignalModelSource *source,
     _type(type),
     _sample_num(0),
     _total_sample_num(0),
-    _math_state(Init),
+    _math_state(math_state::Init),
     _envelope_en(false),
     _envelope_done(false)
 {
@@ -224,14 +224,14 @@ uint64_t MathStack::default_vDialValue()
     const double d2 = static_cast<double>(dial2_value);
 
     switch(_type) {
-    case MATH_ADD:
-    case MATH_SUB:
+    case MathType::MATH_ADD:
+    case MathType::MATH_SUB:
         value = v1 > v2 ? dial1_value : dial2_value;
         break;
-    case MATH_MUL:
+    case MathType::MATH_MUL:
         value = static_cast<uint64_t>(d1 * d2 / 1000.0);
         break;
-    case MATH_DIV:
+    case MathType::MATH_DIV:
         value = static_cast<uint64_t>(d1 * 1000.0 / d2);
         break;
     }
@@ -278,14 +278,14 @@ uint64_t MathStack::default_factor()
     const uint64_t v2 = dial2_value * f2;
 
     switch(_type) {
-    case MATH_ADD:
-    case MATH_SUB:
+    case MathType::MATH_ADD:
+    case MathType::MATH_SUB:
         value = v1 > v2 ? f1 : f2;
         break;
-    case MATH_MUL:
+    case MathType::MATH_MUL:
         value = f1 * f2;
         break;
-    case MATH_DIV:
+    case MathType::MATH_DIV:
         value = f1 / f2;
         break;
     }
@@ -321,8 +321,8 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
     const double d2_min = static_cast<double>(dial2_min), d2_max = static_cast<double>(dial2_max);
 
     switch(_type) {
-    case MATH_ADD:
-    case MATH_SUB:
+    case MathType::MATH_ADD:
+    case MathType::MATH_SUB:
         for (int i = 0; i < vDialValueCount; i++) {
             if (vDialValue[i] < min(dial1_min, dial2_min))
                 continue;
@@ -333,7 +333,7 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
         for(int i = 0; i < vDialUnitCount; i++)
             vUnit.append(vDialAddUnit[i]);
         break;
-    case MATH_MUL:
+    case MathType::MATH_MUL:
         for (int i = 0; i < vDialValueCount; i++) {
             const double dial_value = static_cast<double>(vDialValue[i]);
             if (dial_value < d1_min * d2_min / 1000.0)
@@ -345,7 +345,7 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
         for(int i = 0; i < vDialUnitCount; i++)
             vUnit.append(vDialMulUnit[i]);
         break;
-    case MATH_DIV:
+    case MathType::MATH_DIV:
         for (int i = 0; i < vDialValueCount; i++) {
             const double dial_value = static_cast<double>(vDialValue[i]);
             if (dial_value < min(d1_min * 1000.0 / d2_max, d2_min * 1000.0 / d1_max))
@@ -368,14 +368,14 @@ QString MathStack::get_unit(int level)
 
     QString unit;
     switch(_type) {
-    case MATH_ADD:
-    case MATH_SUB:
+    case MathType::MATH_ADD:
+    case MathType::MATH_SUB:
         unit = vDialAddUnit[level];
         break;
-    case MATH_MUL:
+    case MathType::MATH_MUL:
         unit = vDialMulUnit[level];
         break;
-    case MATH_DIV:
+    case MathType::MATH_DIV:
         unit = vDialDivUnit[level];
         break;
     }
@@ -387,15 +387,15 @@ double MathStack::get_math_scale()
 {
     double scale = 0;
     switch(_type) {
-    case MATH_ADD:
-    case MATH_SUB:
+    case MathType::MATH_ADD:
+    case MathType::MATH_SUB:
         scale = 1.0 / DS_CONF_DSO_VDIVS;
         break;
-    case MATH_MUL:
+    case MathType::MATH_MUL:
         //scale = 1.0 / (DS_CONF_DSO_VDIVS * DS_CONF_DSO_VDIVS);
         scale = 1.0 / DS_CONF_DSO_VDIVS;
         break;
-    case MATH_DIV:
+    case MathType::MATH_DIV:
         scale = 1.0 / DS_CONF_DSO_VDIVS;
         break;
     }
@@ -450,7 +450,7 @@ void MathStack::calc_math(uint64_t mathFactor)
 
     std::lock_guard<std::mutex> lock(_mutex);
 
-    _math_state = Running;
+    _math_state = math_state::Running;
 
     data::SignalModel *m1 = lookup_dso_model(_source, _ch1_index);
     data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
@@ -503,7 +503,7 @@ void MathStack::calc_math(uint64_t mathFactor)
         pxv_warn("MathStack: span invalid (ch %d valid=%d, ch %d valid=%d) — "
                  "aborting math computation",
                  index1, static_cast<int>(span1.valid()), index2, static_cast<int>(span2.valid()));
-        _math_state = Stopped;
+        _math_state = math_state::Stopped;
         return;
     }
     const uint8_t* value_buffer1 = span1.data;
@@ -516,16 +516,16 @@ void MathStack::calc_math(uint64_t mathFactor)
 
         switch(_type)
         {
-            case MATH_ADD:
+            case MathType::MATH_ADD:
                 _math[sample] = ((delta1 - scale1 * value1) + (delta2 - scale2 * value2)) / math_factor;
                 break;
-            case MATH_SUB:
+            case MathType::MATH_SUB:
                 _math[sample] = ((delta1 - scale1 * value1) - (delta2 - scale2 * value2)) / math_factor;
                 break;
-            case MATH_MUL:
+            case MathType::MATH_MUL:
                 _math[sample] = (delta1 - scale1 * value1) * (delta2 - scale2 * value2) / math_factor;
                 break;
-            case MATH_DIV:
+            case MathType::MATH_DIV:
                 _math[sample] = (delta1 - scale1 * value1) / (delta2 - scale2 * value2) / math_factor;
                 break;
         }
@@ -535,7 +535,7 @@ void MathStack::calc_math(uint64_t mathFactor)
         append_to_envelope_level(true);
 
     // stop
-    _math_state = Stopped;
+    _math_state = math_state::Stopped;
 }
 
 void MathStack::reallocate_envelope(Envelope &e)

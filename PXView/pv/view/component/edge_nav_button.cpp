@@ -80,7 +80,7 @@ void EdgeNavButton::paintEvent(QPaintEvent *event) {
   const int ah = 6; // arrow half-height
 
   QPainterPath arrow;
-  if (_dir == Previous) {
+  if (_dir == Direction::Previous) {
     // Left-pointing triangle
     arrow.moveTo(cx - aw + 1, cy);
     arrow.lineTo(cx + aw - 1, cy - ah);

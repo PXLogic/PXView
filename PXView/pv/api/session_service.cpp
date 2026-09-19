@@ -1148,7 +1148,7 @@ Result<int> SessionService::configure_and_start(
     // Step 2b: Configure logic trigger if specified.
     if (trigger_channel_index >= 0) {
         pv::data::TriggerConfig cfg;
-        cfg.set_mode(pv::data::TriggerConfig::Simple);
+        cfg.set_mode(pv::data::TriggerConfig::Mode::Simple);
         if (after_trigger_seconds > 0.0) {
             uint64_t rate = (digital_sample_rate > 0) ? digital_sample_rate : _device->get_sample_rate();
             uint64_t sample_limit = _device->get_sample_limit();
@@ -1693,7 +1693,7 @@ LogicTriggerConfig SessionService::get_logic_trigger_config() const {
         QJsonObject root;
         if (_session) {
             const auto& tcfg = _session->trigger_config();
-            root["enabled"] = (tcfg.mode() != data::TriggerConfig::Simple ||
+            root["enabled"] = (tcfg.mode() != data::TriggerConfig::Mode::Simple ||
                                tcfg.stage_count() > 0) ? 1 : 0;
             root["position"] = static_cast<int>(tcfg.trigger_pos());
             root["trigger_config"] = tcfg.to_json();

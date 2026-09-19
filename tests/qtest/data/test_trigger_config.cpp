@@ -43,7 +43,7 @@ private slots:
 
 void TestTriggerConfig::DefaultModeIsSimple() {
     TriggerConfig tc;
-    QCOMPARE(tc.mode(), TriggerConfig::Simple);
+    QCOMPARE(tc.mode(), TriggerConfig::Mode::Simple);
 }
 void TestTriggerConfig::DefaultTriggerPosIsZero() {
     TriggerConfig tc;
@@ -79,13 +79,13 @@ void TestTriggerConfig::DefaultSerialValueIsEmpty() {
 }
 void TestTriggerConfig::SetModeToAdv() {
     TriggerConfig tc;
-    tc.set_mode(TriggerConfig::Adv);
-    QCOMPARE(tc.mode(), TriggerConfig::Adv);
+    tc.set_mode(TriggerConfig::Mode::Adv);
+    QCOMPARE(tc.mode(), TriggerConfig::Mode::Adv);
 }
 void TestTriggerConfig::SetModeToSerial() {
     TriggerConfig tc;
-    tc.set_mode(TriggerConfig::Serial);
-    QCOMPARE(tc.mode(), TriggerConfig::Serial);
+    tc.set_mode(TriggerConfig::Mode::Serial);
+    QCOMPARE(tc.mode(), TriggerConfig::Mode::Serial);
 }
 void TestTriggerConfig::SetTriggerPos() {
     TriggerConfig tc;
@@ -138,15 +138,15 @@ void TestTriggerConfig::SetSerialValue() {
 void TestTriggerConfig::JsonRoundTripSimpleMode() {
     TriggerConfig tc;
     tc.set_trigger_pos(100);
-    tc.set_mode(TriggerConfig::Simple);
+    tc.set_mode(TriggerConfig::Mode::Simple);
     auto json = tc.to_json();
     auto tc2 = TriggerConfig::from_json(json);
     QCOMPARE(tc2.trigger_pos(), 100);
-    QCOMPARE(tc2.mode(), TriggerConfig::Simple);
+    QCOMPARE(tc2.mode(), TriggerConfig::Mode::Simple);
 }
 void TestTriggerConfig::JsonRoundTripAdvMode() {
     TriggerConfig tc;
-    tc.set_mode(TriggerConfig::Adv);
+    tc.set_mode(TriggerConfig::Mode::Adv);
     tc.set_adv_enabled(true);
     tc.set_stage_count(2);
     std::vector<TriggerConfig::Stage> stages = {
@@ -156,7 +156,7 @@ void TestTriggerConfig::JsonRoundTripAdvMode() {
     tc.set_stages(stages);
     auto json = tc.to_json();
     auto tc2 = TriggerConfig::from_json(json);
-    QCOMPARE(tc2.mode(), TriggerConfig::Adv);
+    QCOMPARE(tc2.mode(), TriggerConfig::Mode::Adv);
     QVERIFY(tc2.adv_enabled());
     QCOMPARE(tc2.stages().size(), 2u);
     QCOMPARE(tc2.stages()[0].value0, QStringLiteral("1 0"));
@@ -164,7 +164,7 @@ void TestTriggerConfig::JsonRoundTripAdvMode() {
 }
 void TestTriggerConfig::FromJsonStaticFactory() {
     QJsonObject obj;
-    obj["mode"] = static_cast<int>(TriggerConfig::Serial);
+    obj["mode"] = static_cast<int>(TriggerConfig::Mode::Serial);
     obj["trigger_pos"] = 50;
     obj["adv_enabled"] = true;
     obj["adv_tab_index"] = 1;
@@ -177,13 +177,13 @@ void TestTriggerConfig::FromJsonStaticFactory() {
 }
 void TestTriggerConfig::CopyConstructor() {
     TriggerConfig tc;
-    tc.set_mode(TriggerConfig::Adv);
+    tc.set_mode(TriggerConfig::Mode::Adv);
     tc.set_trigger_pos(77);
     tc.set_stage_count(1);
     std::vector<TriggerConfig::Stage> stages = {{QStringLiteral("1"), QStringLiteral("0"), 0, 0, 0, 0, 0}};
     tc.set_stages(stages);
     TriggerConfig tc2(tc);
-    QCOMPARE(tc2.mode(), TriggerConfig::Adv);
+    QCOMPARE(tc2.mode(), TriggerConfig::Mode::Adv);
     QCOMPARE(tc2.trigger_pos(), 77);
     QCOMPARE(tc2.stages().size(), 1u);
     QCOMPARE(tc2.stages()[0].value0, QStringLiteral("1"));

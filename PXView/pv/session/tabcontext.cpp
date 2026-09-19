@@ -45,7 +45,7 @@ TabContext::TabContext(view::View *view, SigSession *session, data::SessionDocum
     _doc_registry(registry),
     _title(QString("Session %1").arg(_next_session_id)),
     _file_path(""),
-    _state(LIVE),
+    _state(State::LIVE),
     _timestamp(QDateTime::currentDateTime())
 {
     _next_session_id++;
@@ -102,7 +102,7 @@ void TabContext::rebind_document(std::shared_ptr<data::SessionDocument> doc,
 
 void TabContext::make_live()
 {
-    _state = LIVE;
+    _state = State::LIVE;
 }
 
 bool TabContext::has_data()
@@ -122,7 +122,7 @@ void TabContext::activate()
     restore_device_for_this_tab();   // 1) 恢复本 tab 表达的设备（含借用）
     claim_active_document();         // 2) 认领 active document（所有权）+
                                      //    渲染文档（借用时=借用文档）
-    _state = LIVE;
+    _state = State::LIVE;
     apply_device_intent();           // 3) 应用设备意图（配置→模型→布局）
     restore_view_data();             // 4) 数据绑定裁决
     finalize_view();                 // 5) 视图收尾
@@ -361,7 +361,7 @@ void TabContext::deactivate()
     // 数据模型重构步骤7：deactivate 归档已删除。数据落 doc 由
     // on_rev_end_packet 的拷贝路径唯一负责（数据代 Frozen → owner doc），
     // 归档曾是"空白 tab 继承别的采集代"（时有时无的数据）的来源。
-    _state = HISTORICAL;
+    _state = State::HISTORICAL;
 }
 
 // --- 渲染借用（数据模型重构步骤6）---

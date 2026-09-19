@@ -51,7 +51,7 @@ class SpectrumStack : public QObject, public SignalData
     Q_OBJECT
 
 public:
-    enum spectrum_state {
+    enum class spectrum_state {
         Init,
         Stopped,
         Running

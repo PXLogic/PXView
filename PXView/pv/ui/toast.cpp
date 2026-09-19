@@ -96,14 +96,14 @@ void Toast::updateContent(const QString &text, Level level)
 {
     _textLabel->setText(text);
     
-    if (level == Warning) {
+    if (level == Level::Warning) {
         QIcon warnIcon = IconCache::Instance().icon(":/icons/status-warning.svg");
         if (!warnIcon.isNull()) {
             _iconLabel->setPixmap(warnIcon.pixmap(24, 24));
         } else {
             _iconLabel->setText("⚠️");
         }
-    } else if (level == Error) {
+    } else if (level == Level::Error) {
         _iconLabel->clear();
         _iconLabel->setText("❌");
     } else {

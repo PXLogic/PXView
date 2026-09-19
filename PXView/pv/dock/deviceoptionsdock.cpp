@@ -301,7 +301,7 @@ void DeviceOptionsDock::commit_channels() {
     QString strMsg(
         L_S(STR_PAGE_MSG, S_ID(IDS_MSG_ALL_CHANNEL_DISABLE),
             "All channel disabled! Please enable at least one channel."));
-    pv::ui::Toast::show(this, strMsg, pv::ui::Toast::Warning);
+    pv::ui::Toast::show(this, strMsg, pv::ui::Toast::Level::Warning);
   }
 }
 
@@ -507,7 +507,7 @@ int contentHeight = 0;
   int channel_columns = 8;
   int channel_line_height = 0;
 
-  // --- Digital (Logic) channel group ---
+  // --- Digital (ChannelType::Logic) channel group ---
   QWidget *digital_group = new QWidget();
   QVBoxLayout *digital_lay = new QVBoxLayout(digital_group);
   digital_lay->setContentsMargins(0, 0, 0, 0);
@@ -527,14 +527,14 @@ int contentHeight = 0;
   digital_grid->setSpacing(3);
   digital_lay->addWidget(digital_grid_widget);
 
-  // --- Analog channel group ---
+  // --- ChannelType::Analog channel group ---
   QWidget *analog_group = new QWidget();
   QVBoxLayout *analog_lay = new QVBoxLayout(analog_group);
   analog_lay->setContentsMargins(0, 0, 0, 0);
   analog_lay->setSpacing(4);
 
   QLabel *analog_title = new QLabel(
-      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_ANALOG_CHANNEL), "Analog Channel"),
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_ANALOG_CHANNEL), "ChannelType::Analog Channel"),
       analog_group);
   analog_title->setObjectName("dock_section_title");
   analog_title->setFont(dock_font_section_title());
@@ -574,7 +574,7 @@ int contentHeight = 0;
     // building signal models for these modes. Keep a ChannelLabel alive
     // (parented to this dock, hidden) so _probes_checkBox_list stays
     // aligned 1:1 with get_channels() for commit_channels(), but do NOT
-    // add it to any visible grid — otherwise O0/O1 show up in the Analog
+    // add it to any visible grid — otherwise O0/O1 show up in the ChannelType::Analog
     // Channel group (demo device, indices 13/14).
     int cur_mode = _device_agent->get_work_mode();
     const int probe_type = channel_type(probe);
@@ -584,7 +584,7 @@ int contentHeight = 0;
                       probe_type == SR_CHANNEL_DSO);
     ChannelLabel *ch_item = new ChannelLabel(
         this, nullptr, probe->index,
-        is_analog ? ChannelLabel::Analog : ChannelLabel::Logic);
+        is_analog ? ChannelLabel::ChannelType::Analog : ChannelLabel::ChannelType::Logic);
 
     if (is_dso_hidden) {
       ch_item->setVisible(false);
@@ -1107,7 +1107,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     // ANALOG mode: only show ANALOG channels (skip LOGIC/DSO channels that
     // the demo device still exposes in its channel list but are disabled
     // in this mode). Without this filter, ProbeOptions was created for
-    // LOGIC channels (D0-D7) whose cg is the "Logic" group — VDIV/COUPLING
+    // LOGIC channels (D0-D7) whose cg is the "ChannelType::Logic" group — VDIV/COUPLING
     // are not in that group's devopts, so every _getter() returned nullptr.
     if (channel_type(probe) != SR_CHANNEL_ANALOG) {
       pxv_info("DeviceOptionsDock::analog_probes: skipping non-analog channel "

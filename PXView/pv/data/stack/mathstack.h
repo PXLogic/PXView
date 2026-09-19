@@ -45,13 +45,13 @@ class MathStack : public QObject, public SignalData
     Q_OBJECT
 
 public:
-    enum math_state {
+    enum class math_state {
         Init,
         Stopped,
         Running
     };
 
-    enum MathType {
+    enum class MathType {
         MATH_ADD,
         MATH_SUB,
         MATH_MUL,

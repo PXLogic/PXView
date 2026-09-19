@@ -39,7 +39,7 @@ SpectrumStack::SpectrumStack(pv::data::ISignalModelSource *source, int index) :
     _index(index),
     _dc_ignore(true),
     _sample_interval(1),
-    _spectrum_state(Init),
+    _spectrum_state(spectrum_state::Init),
     _fft_plan(nullptr)
 {
 
@@ -117,7 +117,7 @@ void SpectrumStack::set_sample_interval(int interval)
 const std::vector<double> SpectrumStack::get_fft_spectrum()
 {
     std::lock_guard<std::mutex> lk(_fft_mutex);
-    if (_spectrum_state == Stopped)
+    if (_spectrum_state == spectrum_state::Stopped)
         return _power_spectrum;
     return {};
 }
@@ -126,7 +126,7 @@ double SpectrumStack::get_fft_spectrum(uint64_t index)
 {
     std::lock_guard<std::mutex> lk(_fft_mutex);
     double ret = -1;
-    if (_spectrum_state == Stopped && index < _power_spectrum.size())
+    if (_spectrum_state == spectrum_state::Stopped && index < _power_spectrum.size())
         ret = _power_spectrum[index];
 
     return ret;
@@ -134,7 +134,7 @@ double SpectrumStack::get_fft_spectrum(uint64_t index)
 
 void SpectrumStack::calc_fft()
 {
-    _spectrum_state = Running;
+    _spectrum_state = spectrum_state::Running;
     // Get the dso data
     pv::data::DsoSnapshot *data = nullptr;
     std::shared_ptr<pv::data::DsoSnapshot> data_snap;
@@ -199,7 +199,7 @@ void SpectrumStack::calc_fft()
       if (_sample_num % 2 == 0) /* N is even */
            _power_spectrum[_sample_num/2] = abs(_xk[_sample_num/2])/wsum;  /* Nyquist freq. */
 
-      _spectrum_state = Stopped;
+      _spectrum_state = spectrum_state::Stopped;
     }
     // 计算完成 (在 worker 线程触发 → queued 到 GUI 线程刷新频谱 trace)
     emit fft_updated();

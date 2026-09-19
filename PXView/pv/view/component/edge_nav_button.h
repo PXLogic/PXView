@@ -33,7 +33,7 @@ class EdgeNavButton : public QWidget {
   Q_OBJECT
 
 public:
-  enum Direction { Previous, Next };
+  enum class Direction { Previous, Next };
 
   explicit EdgeNavButton(Direction dir, QWidget *parent = nullptr);
 

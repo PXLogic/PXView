@@ -90,7 +90,7 @@ DecoderStack::DecoderStack(pv::data::ISessionHost *host,
   assert(decoder_status);
 
   _sample_count.store(0);
-  _decode_state.store(Stopped);
+  _decode_state.store(decode_state::Stopped);
   _options_changed = false;
   _no_memory = false;
   _mark_index = -1;
@@ -662,18 +662,18 @@ void DecoderStack::stop_decode_work() {
       _stask_stauts->_bStop = true;
     }
   }
-  _decode_state.store(Stopped, std::memory_order_release);
+  _decode_state.store(decode_state::Stopped, std::memory_order_release);
   // P0-1 fix: wake up the decode thread if it's waiting on the condition variable
   _data_cond.notify_all();
 }
 
 void DecoderStack::begin_decode_work() {
-  if (_decode_state.load(std::memory_order_acquire) != Stopped)
+  if (_decode_state.load(std::memory_order_acquire) != decode_state::Stopped)
     return;
 set_error_message("");
-_decode_state.store(Running, std::memory_order_release);
+_decode_state.store(decode_state::Running, std::memory_order_release);
   do_decode_work();
-  _decode_state.store(Stopped, std::memory_order_release);
+  _decode_state.store(decode_state::Stopped, std::memory_order_release);
 }
 
 bool DecoderStack::check_required_probes() {
