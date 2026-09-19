@@ -528,7 +528,7 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
   // Determine fallback device: last scanned device that is NOT an input-module
   // device with empty channels. Input-module devices (VCD, CSV, binary) may
   // have been left in _file_sdi from a previous import that was released.
-  // Their sdi may have NULL channels (e.g., VCD whose header was never parsed,
+  // Their sdi may have nullptr channels (e.g., VCD whose header was never parsed,
   // or the sdi was freed and recreated). Selecting such a device causes
   // init_signals() to see channel_count=0, leaving the UI in a broken state.
   ds_device_handle dev_handle = 0;

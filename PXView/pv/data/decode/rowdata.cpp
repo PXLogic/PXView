@@ -438,7 +438,7 @@ bool RowData::emplace_annotation(const srd_proto_data *pdata, DecoderStatus *sta
 }
 
 // 方案 E: 批量落库。items 属于同一行（调用方已按行分组），内部只获取一次
-// _visitor_mutex，为每个 item 在栈上构造 srd_proto_data 视图（pdo 置 NULL）
+// _visitor_mutex，为每个 item 在栈上构造 srd_proto_data 视图（pdo 置 nullptr）
 // 后逐个 emplace，最终 _annotations 序列与逐注解路径完全一致。
 bool RowData::emplace_annotations(
     const std::vector<const srd_ann_item *> &items, DecoderStatus *status) {

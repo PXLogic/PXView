@@ -1095,7 +1095,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // stores it in op->filename.  The params hash table is ONLY for module
     // options declared via sr_output_module.options().  Putting 'filename' or
     // 'type' in the hash table causes sr_output_new() to reject them as
-    // unknown options and return NULL — which previously caused a silent
+    // unknown options and return nullptr — which previously caused a silent
     // failure (no file created, no error reported).
     GHashTable *params = g_hash_table_new(g_str_hash, g_str_equal);
 

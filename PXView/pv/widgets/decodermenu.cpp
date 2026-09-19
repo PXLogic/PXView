@@ -32,11 +32,13 @@ namespace widgets {
 DecoderMenu::DecoderMenu(QWidget *parent, bool first_level_decoder) :
 	QMenu(parent)
 {
-	GSList *l = g_slist_sort(g_slist_copy(
-		reinterpret_cast<GSList*>(srd_decoder_list())), decoder_name_cmp);
+	// g_slist_sort() relinks nodes in place, so it needs a MUTABLE copy of the
+	// library-owned registry list; const_cast marks that write access here.
+	GSList *l = g_slist_sort(g_slist_copy(const_cast<GSList *>(srd_decoder_list())),
+	                                     decoder_name_cmp);
 	for(; l; l = l->next)
 	{
-		const srd_decoder *const d = reinterpret_cast<srd_decoder*>(l->data);
+		const srd_decoder *const d = static_cast<const srd_decoder *>(l->data);
 		assert(d);
 		const bool have_probes = (d->channels || d->opt_channels) != 0;
 		if (first_level_decoder == have_probes) {
@@ -56,15 +58,16 @@ int DecoderMenu::decoder_name_cmp(const void *a, const void *b)
 	// decoder names like "I2C", "JTAG", "SPI", "UART" appear in a
 	// natural order instead of raw ASCII order.
 	return pv::base::strnatcasecmp(
-		(reinterpret_cast<const srd_decoder*>(a))->name,
-		(reinterpret_cast<const srd_decoder*>(b))->name);
+		static_cast<const srd_decoder *>(a)->name,
+		static_cast<const srd_decoder *>(b)->name);
 }
 
 void DecoderMenu::on_action(QObject *action)
 {
 	assert(action);
+	auto *const act = qobject_cast<QAction *>(action);
 	srd_decoder *const dec =
-		reinterpret_cast<srd_decoder*>(((QAction*)action))->data().value<void*>();
+		act ? reinterpret_cast<srd_decoder *>(act->data().value<void *>()) : nullptr;
 	assert(dec);
 
     selected();

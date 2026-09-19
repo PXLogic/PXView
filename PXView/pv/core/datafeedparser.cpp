@@ -85,7 +85,7 @@ void DataFeedParser::feed_in_trigger() {
 }
 
 void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
-  // P2: a non-zero length with a NULL data pointer would make the underlying
+  // P2: a non-zero length with a nullptr data pointer would make the underlying
   // LogicSnapshot memcpy into/append from an invalid address → segfault.
   if (o.length > 0 && o.data == nullptr) {
     pxv_err("feed_in_logic: length=%llu but data is NULL",
@@ -143,7 +143,7 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     //
     // After clear_all_decode_task():
     //   - Decode worker threads are joined (finished)
-    //   - di->inbuf is NULL (set by decoder after processing)
+    //   - di->inbuf is nullptr (set by decoder after processing)
     //   - di_thread is blocked on got_new_samples_cond (not reading)
     //   - Snapshot is safe to modify
     //
@@ -225,7 +225,7 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
 }
 
 void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
-  // P2: guard against NULL data with non-zero sample count (memcpy would crash).
+  // P2: guard against nullptr data with non-zero sample count (memcpy would crash).
   if (o.num_samples > 0 && o.data == nullptr) {
     pxv_err("feed_in_analog: num_samples=%llu but data is NULL",
             (unsigned long long)o.num_samples);
@@ -279,7 +279,7 @@ void DataFeedParser::feed_in_analog(const sr_datafeed_analog &o) {
 
 void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
   // Hot-path debug logging removed for performance — was printing 40+ lines/sec
-  // P2: guard against NULL data with non-zero sample count (memcpy would crash).
+  // P2: guard against nullptr data with non-zero sample count (memcpy would crash).
   if (o.num_samples > 0 && o.data == nullptr) {
     pxv_err("feed_in_dso: num_samples=%llu but data is NULL",
             (unsigned long long)o.num_samples);
@@ -406,7 +406,7 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
     break;
 
   case SR_DF_META:
-    // P2: assert() is compiled out in Release builds — a NULL payload would
+    // P2: assert() is compiled out in Release builds — a nullptr payload would
     // dereference and segfault. Guard with a hard early-return instead.
     if (!packet->payload) {
       pxv_err("SR_DF_META packet with NULL payload");

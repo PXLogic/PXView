@@ -920,7 +920,7 @@ if (cur_ch_num > vld_ch_num) {
   } else if (_device_agent->get_work_mode() == ANALOG) {
     if (sc != nullptr) {
       QGridLayout *const layout =
-          reinterpret_cast<QGridLayout*>(sc->property("Layout").value)<void *>();
+          reinterpret_cast<QGridLayout*>(sc->property("Layout").value<void *>());
       int i = layout->count();
 
       int ck_index = -1;
@@ -1795,8 +1795,8 @@ QJsonObject DeviceOptionsDock::get_session() {
             QComboBox *combo = qobject_cast<QComboBox *>(w);
             if (combo && combo->currentIndex() >= 0) {
               GVariant *gvar =
-                  reinterpret_cast<GVariant*>(combo->itemData(combo->currentIndex()))
-                      .value<void *>();
+                  reinterpret_cast<GVariant*>(
+                      combo->itemData(combo->currentIndex()).value<void *>());
               if (gvar && g_variant_is_of_type(gvar, G_VARIANT_TYPE("t"))) {
                 uint64_t vdiv = g_variant_get_uint64(gvar);
                 ch_obj["vdiv"] = (qint64)vdiv;
@@ -1807,8 +1807,8 @@ QJsonObject DeviceOptionsDock::get_session() {
             QComboBox *combo = qobject_cast<QComboBox *>(w);
             if (combo && combo->currentIndex() >= 0) {
               GVariant *gvar =
-                  reinterpret_cast<GVariant*>(combo->itemData(combo->currentIndex()))
-                      .value<void *>();
+                  reinterpret_cast<GVariant*>(
+                      combo->itemData(combo->currentIndex()).value<void *>());
               if (gvar && g_variant_is_of_type(gvar, G_VARIANT_TYPE("i"))) {
                 int coupling = g_variant_get_int32(gvar);
                 ch_obj["coupling"] = coupling;

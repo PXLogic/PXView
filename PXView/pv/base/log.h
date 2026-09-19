@@ -43,11 +43,11 @@ void pxv_set_log_file_enable(bool flag);
 QString get_pxv_log_path();
 
 #define LOG_PREFIX ""
-#define pxv_err(fmt, args...) xlog_err(pxv_log, LOG_PREFIX fmt, ## args)
-#define pxv_warn(fmt, args...) xlog_warn(pxv_log, LOG_PREFIX fmt, ## args)
-#define pxv_info(fmt, args...) xlog_info(pxv_log, LOG_PREFIX fmt, ## args)
-#define pxv_dbg(fmt, args...) xlog_dbg(pxv_log, LOG_PREFIX fmt, ## args)
-#define pxv_detail(fmt, args...) xlog_detail(pxv_log, LOG_PREFIX fmt, ## args)
+#define pxv_err(fmt, ...) xlog_err(pxv_log, LOG_PREFIX fmt, ## __VA_ARGS__)
+#define pxv_warn(fmt, ...) xlog_warn(pxv_log, LOG_PREFIX fmt, ## __VA_ARGS__)
+#define pxv_info(fmt, ...) xlog_info(pxv_log, LOG_PREFIX fmt, ## __VA_ARGS__)
+#define pxv_dbg(fmt, ...) xlog_dbg(pxv_log, LOG_PREFIX fmt, ## __VA_ARGS__)
+#define pxv_detail(fmt, ...) xlog_detail(pxv_log, LOG_PREFIX fmt, ## __VA_ARGS__)
 
 // ============================================================================
 // pxv_assert: 不弹 Windows 模态对话框的 assert 替代。
@@ -71,19 +71,19 @@ QString get_pxv_log_path();
 // ============================================================================
 
 #ifdef NDEBUG
-  #define pxv_assert(cond, fmt, args...) \
-    do { if (!(cond)) { pxv_err(fmt, ## args); } } while (0)
+  #define pxv_assert(cond, fmt, ...) \
+    do { if (!(cond)) { pxv_err(fmt, ## __VA_ARGS__); } } while (0)
 #else
   #ifdef _WIN32
     extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
-    #define pxv_assert(cond, fmt, args...) \
-      do { if (!(cond)) { pxv_err(fmt, ## args); \
+    #define pxv_assert(cond, fmt, ...) \
+      do { if (!(cond)) { pxv_err(fmt, ## __VA_ARGS__); \
            if (IsDebuggerPresent()) { __debugbreak(); } \
            else { abort(); } \
       } } while (0)
   #else
-    #define pxv_assert(cond, fmt, args...) \
-      do { if (!(cond)) { pxv_err(fmt, ## args); abort(); } } while (0)
+    #define pxv_assert(cond, fmt, ...) \
+      do { if (!(cond)) { pxv_err(fmt, ## __VA_ARGS__); abort(); } } while (0)
   #endif
 #endif
 

@@ -161,7 +161,7 @@ public:
 
     inline bool is_file() const { return _dev_type == DEV_TYPE_FILELOG; }
     /* Input module devices (VCD, CSV, binary, Saleae, etc.) have no driver
-     * (sdi->driver == NULL). Data is fed directly via sr_input_send() in
+     * (sdi->driver == nullptr). Data is fed directly via sr_input_send() in
      * import_file(), so start_capture() must NOT be called for them — it
      * would clear the already-loaded data and crash in sr_session_start(). */
     inline bool is_input_module() const { return _driver_name == "input-module"; }

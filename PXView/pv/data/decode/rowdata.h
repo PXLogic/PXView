@@ -182,7 +182,7 @@ public:
   bool emplace_annotation(const srd_proto_data *pdata, DecoderStatus *status);
 
   // 方案 E: 批量落库。items 为同一行的注解；内部一次获取 _visitor_mutex，
-  // 遍历 items 在栈上构造 srd_proto_data 视图（pdo 置 NULL）后逐个落库，
+  // 遍历 items 在栈上构造 srd_proto_data 视图（pdo 置 nullptr）后逐个落库，
   // 与 emplace_annotation 产生完全一致的最终数据。bad_alloc 返回 false。
   bool emplace_annotations(const std::vector<const srd_ann_item *> &items,
                            DecoderStatus *status);

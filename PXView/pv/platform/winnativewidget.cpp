@@ -732,7 +732,7 @@ void WinNativeWidget::SetBorderColor(QColor color)
         {
             const DWORD DWMWINDOWATTRIBUTE_DWMWA_BORDER_COLOR = 34;
             COLORREF COLOR = RGB(color.red(), color.green(), color.blue());
-            using tDwmSetWindowAttribute = HRESULTreinterpret_cast<WINAPI*>((HWND, DWORD, LPCVOID, DWORD));
+            using tDwmSetWindowAttribute = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
             tDwmSetWindowAttribute pDwmSetWindowAttribute =
                 tDwmSetWindowAttribute(QLibrary::resolve("dwmapi", "DwmSetWindowAttribute"));
             if (pDwmSetWindowAttribute){
@@ -784,7 +784,7 @@ bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_versio
     *minor_version = 0;
     *build_number = 0;
 
-    using tRtlGetVersion = NTSTATUSreinterpret_cast<WINAPI*>((LPOSVERSIONINFOEXW));
+    using tRtlGetVersion = NTSTATUS(WINAPI *)(LPOSVERSIONINFOEXW);
     tRtlGetVersion pRtlGetVersion = tRtlGetVersion(QLibrary::resolve("ntdll", "RtlGetVersion"));
 
     if (pRtlGetVersion)

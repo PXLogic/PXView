@@ -245,7 +245,7 @@ QJsonArray ViewStatus::get_session()
             QJsonObject m_obj;
             m_obj["site"] = i;
             m_obj["index"] = index;
-            m_obj["type"] = static_cast<int>(std::get)<2>(_mrects[i]);
+            m_obj["type"] = static_cast<int>(std::get<2>(_mrects[i]));
             measureVar.append(m_obj);
         }
     }

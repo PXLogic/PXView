@@ -719,7 +719,7 @@ if (cur_ch_num > vld_ch_num) {
   } else if (_device_agent->get_work_mode() == ANALOG) {
     if (sc != nullptr) {
       QGridLayout *const layout =
-          reinterpret_cast<QGridLayout*>(sc->property("Layout").value)<void *>();
+          reinterpret_cast<QGridLayout*>(sc->property("Layout").value<void *>());
       int i = layout->count();
 
       int ck_index = -1;
