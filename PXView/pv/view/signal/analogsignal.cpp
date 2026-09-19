@@ -92,13 +92,13 @@ AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
 
   ret = _data_source->device()->get_config_uint32(SR_CONF_REF_MIN, ui32);
   if (ret)
-    _ref_min = (double)ui32;
+    _ref_min = static_cast<double>(ui32);
   else
     _ref_min = 1;
 
   ret = _data_source->device()->get_config_uint32(SR_CONF_REF_MAX, ui32);
   if (ret)
-    _ref_max = (double)ui32;
+    _ref_max = static_cast<double>(ui32);
   else
     _ref_max = ((1 << _bits) - 1);
 
@@ -111,7 +111,7 @@ AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
   // 正确做法：使用 _model->zero_offset()（ADC 值），它是 SignalModel 中独立
   // 于 UI 布局的字段；fallback 到设备 SR_CONF_PROBE_OFFSET。
   if (_model) {
-    _zero_offset = (int)_model->zero_offset();
+    _zero_offset = static_cast<int>(_model->zero_offset());
   } else {
     ret = _data_source->device()->get_config_uint16(SR_CONF_PROBE_OFFSET,
                                                     _zero_offset, nullptr, nullptr);
@@ -179,7 +179,7 @@ int AnalogSignal::commit_settings() {
   _model->set_coupling(_model ? _model->coupling() : 0);
 
   // -- offset
-  _model->set_probe_offset(_model ? (uint16_t)_model->vertical_offset() : 0,
+  _model->set_probe_offset(_model ? static_cast<uint16_t>(_model->vertical_offset()) : 0,
                            probe);
 
   // -- trig_value
@@ -250,7 +250,7 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
     return pt;
 
   const uint64_t ring_index =
-      (uint64_t)(_data->get_ring_start() + floor(index)) %
+      static_cast<uint64_t>((_data->get_ring_start() + floor(index))) %
       _data->get_sample_count();
   const uint8_t unit_bytes = _data->get_unit_bytes();
   const bool is_float = _data->is_float();
@@ -262,7 +262,7 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
   // ring_index 由上方取模保证 < get_sample_count()，故 contiguous_samples >= 1。
   // 注意：span() 收的是**通道索引**（内部再映射到 order），不是 order。
   const pv::data::SampleSpan sp =
-      _data->span((uint32_t)get_index(), ring_index, 1);
+      _data->span(static_cast<uint32_t>(get_index()), ring_index, 1);
   if (!sp.valid())
     return pt;
 
@@ -273,7 +273,7 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
   const float x = (index / samples_per_pixel - pixels_offset);
 
   float y;
-  value = (float)sp.analog_value_at(ring_index, is_float);
+  value = static_cast<float>(sp.analog_value_at(ring_index, is_float));
   if (is_float && unit_bytes == sizeof(float)) {
     y = min(max(top, get_zero_vpos() - value * _float_scale), bottom);
   } else {
@@ -288,11 +288,11 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
  * Probe options
  **/
 uint64_t AnalogSignal::get_vdiv() {
-  return _model ? (uint64_t)_model->vdiv_mv() : 0;
+  return _model ? static_cast<uint64_t>(_model->vdiv_mv()) : 0;
 }
 
 uint8_t AnalogSignal::get_acCoupling() {
-  return _model ? (uint8_t)_model->coupling() : 0;
+  return _model ? static_cast<uint8_t>(_model->coupling()) : 0;
 }
 
 bool AnalogSignal::get_mapDefault() {
@@ -339,7 +339,7 @@ double AnalogSignal::get_mapMax() {
 }
 
 uint64_t AnalogSignal::get_factor() {
-  return _model ? (uint64_t)_model->vfactor() : 1;
+  return _model ? static_cast<uint64_t>(_model->vfactor()) : 1;
 }
 
 int AnalogSignal::ratio2value(double ratio) {
@@ -385,10 +385,10 @@ void AnalogSignal::set_zero_ratio(double ratio) {
     // "if changed" guard), preserving the original unconditional
     // set_config_uint16 semantics. set_zero_offset below pushes it again when
     // the model field actually changes (same double-push as before).
-    model->set_probe_offset((uint16_t)_zero_offset, probe);
+    model->set_probe_offset(static_cast<uint16_t>(_zero_offset), probe);
     // Task 7.3: 写回 Core SignalModel。不广播：本方法亦被 mainwindow JSON
     // 恢复路径 (mainwindow.cpp restore_session) 调用，广播会触发 rebuild 循环。
-    model->set_zero_offset((double)_zero_offset);
+    model->set_zero_offset(static_cast<double>(_zero_offset));
   } else {
     _data_source->device()->set_config_uint16(SR_CONF_PROBE_OFFSET,
                                               _zero_offset, probe, nullptr);
@@ -405,7 +405,7 @@ double AnalogSignal::get_zero_ratio() {
   // [_ref_min, _ref_max]），此时返回对应 ratio。
   // 注意：采集前 _data 可能为 nullptr 或 not is_float，但 _zero_offset=0 仍然
   // 不在 [_ref_min, _ref_max] 范围内，统一返回 0.5 使初始化时游标也居中。
-  if (_zero_offset >= (int)_ref_min && _zero_offset <= (int)_ref_max) {
+  if (_zero_offset >= static_cast<int>(_ref_min) && _zero_offset <= static_cast<int>(_ref_max)) {
     double r = (_zero_offset - _ref_min) / (_ref_max - _ref_min);
     return r;
   }
@@ -524,7 +524,7 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
 
   uint64_t start_index;
   const double index_offset = pixels_offset * samples_per_pixel;
-  start_index = (uint64_t)(ring_start + floor(index_offset)) % cur_sample_count;
+  start_index = static_cast<uint64_t>((ring_start + floor(index_offset))) % cur_sample_count;
 
   int64_t show_length = min(floor(cur_sample_count - floor(index_offset)),
                             ceil(width * samples_per_pixel + 1));
@@ -643,9 +643,9 @@ QString AnalogSignal::get_voltage(double v, int p, bool scaled) {
   const QString mapUnit = get_mapUnit();
 
   if (scaled)
-    v = v / (double)get_totalHeight() * mapRange;
+    v = v / static_cast<double>(get_totalHeight()) * mapRange;
   else
-    v = v * _scale / (double)get_totalHeight() * mapRange;
+    v = v * _scale / static_cast<double>(get_totalHeight()) * mapRange;
 
   return abs(v) >= 1000 ? QString::number(v / 1000.0, 'f', p) + mapUnit
                         : QString::number(v, 'f', p) + "m" + mapUnit;

@@ -187,7 +187,7 @@ private:
   void mouseReleaseEvent(QMouseEvent *event) override;
   void mouseDoubleClickEvent(QMouseEvent *event) override;
   void wheelEvent(QWheelEvent *event) override;
-  void leaveEvent(QEvent *) override;
+  void leaveEventreinterpret_cast<QEvent*>(override);
   void resizeEvent(QResizeEvent *e) override;
   void keyPressEvent(QKeyEvent *event) override;
   bool gestureEvent(QNativeGestureEvent *event);

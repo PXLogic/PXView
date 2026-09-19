@@ -81,18 +81,18 @@ void DsoSignal::paint_prepare() {
 
       ret = _data_source->device()->get_config_byte(SR_CONF_TRIGGER_SLOPE, v);
       if (ret) {
-        slope = (uint8_t)v;
+        slope = static_cast<uint8_t>(v);
       }
 
       int64_t trig_index = _view->get_trig_cursor()->index();
-      if (trig_index >= (int64_t)_data->get_sample_count())
+      if (trig_index >= static_cast<int64_t>(_data->get_sample_count()))
         return;
 
       // P1-c（统一读取抽象）：DSO 平面布局，span.data 与旧
       // get_samples(0, 0, ch) 的基指针等价；contiguous_samples == 样本总数，
       // 而上方已保证 trig_index < get_sample_count()，故 i0/i1 均在界内。
       const pv::data::SampleSpan trig_span =
-          _data->span((uint32_t)get_index(), 0, _data->get_sample_count());
+          _data->span(static_cast<uint32_t>(get_index()), 0, _data->get_sample_count());
       if (!trig_span.valid())
         return;
       const uint8_t *const trig_samples = trig_span.data;
@@ -252,16 +252,16 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     }
 
     const int64_t last_sample =
-        max((int64_t)(_data->get_sample_count() - 1), (int64_t)0);
+        max(static_cast<int64_t>((_data->get_sample_count() - 1)), static_cast<int64_t>(0));
     const double samples_per_pixel = samplerate * scale;
     const double start =
         static_cast<double>(offset) * samples_per_pixel - ctx.trig_hoff;
     const double end = start + samples_per_pixel * width;
 
     const int64_t start_sample =
-        min(max((int64_t)floor(start), (int64_t)0), last_sample);
+        min(max(static_cast<int64_t>(floor(start)), static_cast<int64_t>(0)), last_sample);
     const int64_t end_sample =
-        min(max((int64_t)ceil(end) + 1, (int64_t)0), last_sample);
+        min(max(static_cast<int64_t>(ceil(end)) + 1, static_cast<int64_t>(0)), last_sample);
 
     QElapsedTimer dso_ft;
     dso_ft.start();

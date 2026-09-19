@@ -435,7 +435,7 @@ bool SubMainFrame::IsNormalsized()
 bool SubMainFrame::eventFilter(QObject *object, QEvent *event)
 {
     const QEvent::Type type = event->type();
-    const QMouseEvent *const mouse_event = (QMouseEvent*)event;
+    const QMouseEvent *const mouse_event = reinterpret_cast<QMouseEvent*>(event);
 
 #ifdef _WIN32
     if (_parentNativeWidget != nullptr){

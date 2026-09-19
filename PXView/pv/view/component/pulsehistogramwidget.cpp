@@ -147,7 +147,7 @@ void PulseHistogramWidget::paintEvent(QPaintEvent* /*event*/)
     double barW = (barsArea.width() - (nBars - 1) * gap) / nBars;
     if (barW < 1.0) {
         gap = 0;
-        barW = barsArea.width() / (double)nBars;
+        barW = barsArea.width() / static_cast<double>(nBars);
         if (barW < 0.5) barW = 0.5;  // 极端情况:细线条
     }
 
@@ -155,7 +155,7 @@ void PulseHistogramWidget::paintEvent(QPaintEvent* /*event*/)
     int maxCount = 1;
     if (_has_data) {
         for (const auto& kv : _hist.width_counts) {
-            if (kv.first >= 1 && kv.first <= (uint32_t)nBars && kv.second > maxCount)
+            if (kv.first >= 1 && kv.first <= static_cast<uint32_t>(nBars) && kv.second > maxCount)
                 maxCount = kv.second;
         }
     }
@@ -174,19 +174,19 @@ void PulseHistogramWidget::paintEvent(QPaintEvent* /*event*/)
         int w = i + 1;
         int count = 0;
         if (_has_data) {
-            auto it = _hist.width_counts.find((uint32_t)w);
+            auto it = _hist.width_counts.find(static_cast<uint32_t>(w));
             if (it != _hist.width_counts.end())
                 count = it->second;
         }
         // 对齐 HTML .histogram-bar { min-height: 2px }:
         // count=0 也画 2px 高的小矩形,让用户看到所有宽度位置都有"槽位"
-        double h = (count > 0) ? (double)count / maxCount * barsArea.height() : 2.0;
+        double h = (count > 0) ? static_cast<double>(count) / maxCount * barsArea.height() : 2.0;
         h = std::max(h, 2.0);  // min-height 2px
 
         double x = barsArea.left() + i * (barW + gap);
         double y = barsArea.bottom() - h;
 
-        QColor c = (_filter_threshold > 0 && w <= (int)_filter_threshold)
+        QColor c = (_filter_threshold > 0 && w <= static_cast<int>(_filter_threshold))
                        ? kFilterColor
                        : barColor;
         p.setBrush(c);
@@ -197,10 +197,10 @@ void PulseHistogramWidget::paintEvent(QPaintEvent* /*event*/)
     QFont lblFont("Segoe UI", 7);
     QFontMetrics fm(lblFont);
 
-    bool has_rec = (_recommended_threshold >= 1 && _recommended_threshold <= (uint32_t)nBars);
-    bool has_cur = (_current_threshold >= 1 && _current_threshold <= (uint32_t)nBars);
-    double recX = has_rec ? thresholdX((int)_recommended_threshold) : 0;
-    double curX = has_cur ? thresholdX((int)_current_threshold) : 0;
+    bool has_rec = (_recommended_threshold >= 1 && _recommended_threshold <= static_cast<uint32_t>(nBars));
+    bool has_cur = (_current_threshold >= 1 && _current_threshold <= static_cast<uint32_t>(nBars));
+    double recX = has_rec ? thresholdX(static_cast<int>(_recommended_threshold)) : 0;
+    double curX = has_cur ? thresholdX(static_cast<int>(_current_threshold)) : 0;
     QString recLabel = QString::fromUtf8(L_S(STR_PAGE_SIGNAL_PROC, "IDS_GLITCH_POPUP_RECOMMENDED", "Rec"));
     QString curLabel = QString::fromUtf8(L_S(STR_PAGE_SIGNAL_PROC, "IDS_GLITCH_POPUP_CURRENT", "Cur"));
     int recTextW = fm.horizontalAdvance(recLabel) + 8;

@@ -80,7 +80,7 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
 
     min_period = cur_period_scale * abs_min_period;
 
-    const int order = (int)floorf(log10f(scale_width));
+    const int order = static_cast<int>(floorf(log10f(scale_width)));
     int prefix_val = (order - kFirstSIPrefixPower) / 3;
     if (prefix_val < 0) prefix_val = 0;
     if (prefix_val >= kSIPrefixCount) prefix_val = kSIPrefixCount - 1;
@@ -110,7 +110,7 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
     p.setPen(fore_color);
 
     const double minor_tick_period = tick_period / kMinPeriodScale;
-    const int minor_order = (int)floorf(log10f(minor_tick_period));
+    const int minor_order = static_cast<int>(floorf(log10f(minor_tick_period)));
     int minor_prefix_val = (minor_order - kFirstSIPrefixPower) / 3;
     if (minor_prefix_val < 0) minor_prefix_val = 0;
     if (minor_prefix_val >= kSIPrefixCount) minor_prefix_val = kSIPrefixCount - 1;
@@ -122,8 +122,8 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
         floor(offset * scale / minor_tick_period + 1);
     const double t0 = first_major_division * tick_period;
 
-    int division = (int)round(first_minor_division -
-        first_major_division * kMinPeriodScale) - 1;
+    int division = static_cast<int>(round(first_minor_division -
+        first_major_division * kMinPeriodScale)) - 1;
 
     const int major_tick_y1 = text_height + ValueMargin * 3;
     const int tick_y2 = rect.height();
@@ -154,7 +154,7 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
             continue;
         }
 
-        x = (int)x_double;
+        x = static_cast<int>(x_double);
 
         if (division % kMinPeriodScale == 0)
         {
@@ -242,7 +242,7 @@ void paint_osc_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
     }
     min_period = ds->device()->get_time_base() * std::pow(10.0, -9.0);
 
-    const int order = (int)floorf(log10f(scale_width));
+    const int order = static_cast<int>(floorf(log10f(scale_width)));
     //const double order_decimal = pow(10, order);
     int prefix_val = (order - kFirstSIPrefixPower) / 3;
     if (prefix_val < 0) prefix_val = 0;
@@ -270,7 +270,7 @@ void paint_osc_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
     p.setPen(fore_color);
 
     const double minor_tick_period = tick_period / kMinPeriodScale;
-    const int minor_order = (int)floorf(log10f(minor_tick_period));
+    const int minor_order = static_cast<int>(floorf(log10f(minor_tick_period)));
     //const double minor_order_decimal = pow(10, minor_order);
     int minor_prefix_val = (minor_order - kFirstSIPrefixPower) / 3;
     if (minor_prefix_val < 0) minor_prefix_val = 0;
@@ -283,8 +283,8 @@ void paint_osc_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
         floor(offset * scale / minor_tick_period + 1);
     const double t0 = first_major_division * tick_period;
 
-    int division = (int)round(first_minor_division -
-        first_major_division * kMinPeriodScale) - 1;
+    int division = static_cast<int>(round(first_minor_division -
+        first_major_division * kMinPeriodScale)) - 1;
 
     const int major_tick_y1 = text_height + ValueMargin * 3;
     const int tick_y2 = rect.height();
@@ -315,7 +315,7 @@ void paint_osc_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
             continue;
         }
 
-        x = (int)x_double;
+        x = static_cast<int>(x_double);
 
         if (division % kMinPeriodScale == 0)
         {

@@ -50,7 +50,7 @@ XCursor::XCursor(IRenderView &view, int order, double value0, double value1) :
     
     for(auto &s : _view.get_own_signals()) {        
         if (s->signal_type() == SR_CHANNEL_DSO){
-            DsoSignal *dsoSig = (DsoSignal*)s.get();
+            DsoSignal *dsoSig = reinterpret_cast<DsoSignal*>(s.get());
             if (dsoSig->enabled()) {
                 _dsoSig = dsoSig;
                 break;

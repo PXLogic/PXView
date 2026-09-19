@@ -457,13 +457,13 @@ bool TriggerDock::commit_trigger() {
     for (int i = 0; i < stage_n; i++) {
       const char logic = (_contiguous_checkbox_list.at(i)->isChecked() << 1) +
                          _logic_comboBox_list.at(i)->currentIndex();
-      if (i < (int)stages.size())
+      if (i < static_cast<int>(stages.size()))
         stages[i].logic = logic;
     }
 
     // trigger inv update
     for (int i = 0; i < stage_n; i++) {
-      if (i < (int)stages.size()) {
+      if (i < static_cast<int>(stages.size())) {
         stages[i].inv0 = _inv0_comboBox_list.at(i)->currentIndex();
         stages[i].inv1 = _inv1_comboBox_list.at(i)->currentIndex();
       }
@@ -472,17 +472,17 @@ bool TriggerDock::commit_trigger() {
     // trigger count update
     if (_adv_tabWidget->currentIndex() == 0) {
       for (int i = 0; i < stage_n; i++) {
-        if (i < (int)stages.size()) {
+        if (i < static_cast<int>(stages.size())) {
           stages[i].count0 = _count_spinBox_list.at(i)->value();
           stages[i].count1 = 0;
         }
       }
     } else if (_adv_tabWidget->currentIndex() == 1) {
-      if (1 < (int)stages.size()) {
+      if (1 < static_cast<int>(stages.size())) {
         stages[1].count0 = 1;
         stages[1].count1 = 0;
       }
-      if (3 < (int)stages.size()) {
+      if (3 < static_cast<int>(stages.size())) {
         stages[3].count0 = _serial_bits_comboBox->currentText().toInt() - 1;
         stages[3].count1 = 0;
       }
@@ -538,7 +538,7 @@ QJsonObject TriggerDock::get_session() {
   }
 
   // Per-stage data from Core
-  for (int i = 0; i < (int)cfg.stages().size(); i++) {
+  for (int i = 0; i < static_cast<int>(cfg.stages().size()); i++) {
     const auto &s = cfg.stages()[i];
     QString v0_ext, v0_low, v1_ext, v1_low;
     split_trigger_value(s.value0, v0_ext, v0_low);
@@ -704,7 +704,7 @@ void TriggerDock::refresh_ui_from_core() {
     int inv0 = 0, inv1 = 0, logic_index = 0, count0 = 1;
     bool conti = false;
     if (tcfg.mode() == data::TriggerConfig::Adv &&
-        i < (int)tcfg.stages().size()) {
+        i < static_cast<int>(tcfg.stages().size())) {
       const auto &s = tcfg.stages()[i];
       split_trigger_value(s.value0, v0_ext, v0_low);
       split_trigger_value(s.value1, v1_ext, v1_low);
@@ -1248,10 +1248,10 @@ void TriggerDock::setup_adv_tab() {
           &TriggerDock::on_serial_hex_changed);
 
   _adv_tabWidget->addTab(
-      (QWidget *)_stage_tabWidget,
+      reinterpret_cast<QWidget*>(_stage_tabWidget),
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_STAGE_TRIGGER), "Stage Trigger"));
   _adv_tabWidget->addTab(
-      (QWidget *)_serial_groupBox,
+      reinterpret_cast<QWidget*>(_serial_groupBox),
       L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SERIAL_TRIGGER), "Serial Trigger"));
 
   UpdateFont();

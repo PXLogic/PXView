@@ -198,14 +198,14 @@ void* MmapAllocator::get_block_data(int channel, uint64_t block_index, uint64_t 
     if (max_blocks_per_channel == 0) return nullptr;
     uint64_t wrapped_block_index = block_index % max_blocks_per_channel;
     
-    uint64_t global_offset = ((uint64_t)channel * max_blocks_per_channel + wrapped_block_index) * block_size;
+    uint64_t global_offset = (static_cast<uint64_t>(channel) * max_blocks_per_channel + wrapped_block_index) * block_size;
     if (global_offset + block_size > _total_bytes) {
         pxv_err("MmapAllocator: Out of bounds access! offset %llu > total %llu", 
                 (unsigned long long)(global_offset + block_size), (unsigned long long)_total_bytes);
         return nullptr;
     }
     
-    void *ptr = (uint8_t*)_base_ptr + global_offset;
+    void *ptr = reinterpret_cast<uint8_t*>(_base_ptr) + global_offset;
 
 #ifdef _WIN32
     // For SEC_RESERVE mappings (anonymous / page-file-backed), pages are
@@ -270,7 +270,7 @@ bool MmapAllocator::decommit_block(void* ptr, uint64_t size) {
 bool MmapAllocator::block_absolute_slot(void* ptr, uint64_t block_size, uint64_t& slot) const {
     if (!ptr || !_base_ptr || block_size == 0) return false;
     if (!is_mmap_address(ptr)) return false;
-    slot = (uint64_t)((uint8_t*)ptr - (uint8_t*)_base_ptr) / block_size;
+    slot = static_cast<uint64_t>(((uint8_t*)ptr - (uint8_t*)_base_ptr)) / block_size;
     return true;
 }
 
@@ -365,7 +365,7 @@ void MmapAllocator::prefault_worker() {
 
         // Prefault all channels' blocks for this block_seq
         for (int ch = 0; ch < _channel_num; ch++) {
-            uint64_t byte_offset = ((uint64_t)ch * _max_blocks_per_channel + block_seq) * _block_size;
+            uint64_t byte_offset = (static_cast<uint64_t>(ch) * _max_blocks_per_channel + block_seq) * _block_size;
             if (byte_offset + _block_size > _total_bytes) break;
 
             // PulseView-style defensive programming: wrap the page-fault
@@ -380,13 +380,13 @@ void MmapAllocator::prefault_worker() {
             // For SEC_RESERVE anonymous mappings, commit the block before
             // touching any page. For disk-file-backed mappings, pages are
             // already committed — VirtualAlloc(MEM_COMMIT) is a no-op.
-            VirtualAlloc((uint8_t*)_base_ptr + byte_offset, _block_size,
+            VirtualAlloc(reinterpret_cast<uint8_t*>(_base_ptr) + byte_offset, _block_size,
                          MEM_COMMIT, PAGE_READWRITE);
 #endif
 
             // Touch each page in the block to trigger the page fault
             for (uint64_t off = 0; off < _block_size; off += PREFAULT_PAGE_SIZE) {
-                *(volatile uint8_t*)((uint8_t*)_base_ptr + byte_offset + off) = 0;
+                *(volatile uint8_t*)(reinterpret_cast<uint8_t*>(_base_ptr) + byte_offset + off) = 0;
             }
             } catch (...) {
                 // mmap mapping may have been revoked or the system is out
@@ -412,7 +412,7 @@ prefault_done:
 
 void MmapAllocator::decommit_block_seq_all_channels(uint64_t block_seq) {
     for (int ch = 0; ch < _channel_num; ch++) {
-        uint64_t byte_offset = ((uint64_t)ch * _max_blocks_per_channel + block_seq) * _block_size;
+        uint64_t byte_offset = (static_cast<uint64_t>(ch) * _max_blocks_per_channel + block_seq) * _block_size;
         if (byte_offset + _block_size > _total_bytes) break;
         decommit_range(byte_offset, byte_offset + _block_size);
     }
@@ -457,7 +457,7 @@ void MmapAllocator::wait_prefault_initial_blocks(uint64_t block_count) {
     pxv_info("MmapAllocator: wait_prefault_initial_blocks(%llu) done in %lldms, "
              "prefaulted %llu blocks",
              (unsigned long long)block_count,
-             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
+             static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()),
              (unsigned long long)_prefault_block_seq.load());
 }
 
@@ -477,7 +477,7 @@ void MmapAllocator::decommit_range(uint64_t start_bytes, uint64_t end_bytes) {
     uint64_t end = end_bytes & ~(PREFAULT_PAGE_SIZE - 1);
 
     for (uint64_t off = start; off < end; off += PREFAULT_PAGE_SIZE) {
-        void* page = (uint8_t*)_base_ptr + off;
+        void* page = reinterpret_cast<uint8_t*>(_base_ptr) + off;
 #ifdef _WIN32
         if (_hFile == INVALID_HANDLE_VALUE && _hMap) {
             // SEC_RESERVE anonymous mapping: do NOT call VirtualFree(MEM_DECOMMIT)

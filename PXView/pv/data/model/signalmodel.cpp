@@ -156,7 +156,7 @@ void SignalModel::set_vfactor(double vfactor) {
             IDeviceConfigPort *device = _device_port;
             if (device && device->have_instance()) {
                 device->set_config_uint64(SR_CONF_PROBE_FACTOR,
-                                          (uint64_t)vfactor, _sr_channel, nullptr);
+                                          static_cast<uint64_t>(vfactor), _sr_channel, nullptr);
             }
         }
         emit appearance_changed();
@@ -204,7 +204,7 @@ void SignalModel::set_probe_offset(uint16_t offset, struct sr_channel *probe) {
     if (ch && _device_port) {
         IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
-            device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
+            device->set_config_uint16(SR_CONF_PROBE_OFFSET, static_cast<int>(offset),
                                       ch, nullptr);
         }
     }
@@ -256,7 +256,7 @@ void SignalModel::set_trigger_value(double value, struct sr_channel *probe) {
     if (ch && _device_port) {
         IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
-            device->set_config_int32(SR_CONF_TRIGGER_VALUE, (int)value, ch, nullptr);
+            device->set_config_int32(SR_CONF_TRIGGER_VALUE, static_cast<int>(value), ch, nullptr);
         }
     }
 }
@@ -287,7 +287,7 @@ void SignalModel::set_zero_offset(double offset) {
     if (_sr_channel && _device_port) {
         IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
-            device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)offset,
+            device->set_config_uint16(SR_CONF_PROBE_OFFSET, static_cast<int>(offset),
                                       _sr_channel, nullptr);
         }
     }
@@ -301,7 +301,7 @@ void SignalModel::set_hw_offset(double offset) {
     if (_sr_channel && _device_port) {
         IDeviceConfigPort *device = _device_port;
         if (device && device->have_instance()) {
-            device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, (int)offset,
+            device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, static_cast<int>(offset),
                                       _sr_channel, nullptr);
         }
     }
@@ -348,11 +348,11 @@ void SignalModel::commit_to_device()
     if (device == nullptr || !device->have_instance()) return;
 
     device->set_config_bool(SR_CONF_PROBE_EN, _enabled, _sr_channel, nullptr);
-    device->set_config_uint64(SR_CONF_PROBE_FACTOR, (uint64_t)_vfactor,
+    device->set_config_uint64(SR_CONF_PROBE_FACTOR, static_cast<uint64_t>(_vfactor),
                               _sr_channel, nullptr);
-    device->set_config_uint16(SR_CONF_PROBE_OFFSET, (int)_zero_offset,
+    device->set_config_uint16(SR_CONF_PROBE_OFFSET, static_cast<int>(_zero_offset),
                               _sr_channel, nullptr);
-    device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, (int)_hw_offset,
+    device->set_config_uint16(SR_CONF_PROBE_HW_OFFSET, static_cast<int>(_hw_offset),
                               _sr_channel, nullptr);
     device->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT, _map_default,
                             _sr_channel, nullptr);

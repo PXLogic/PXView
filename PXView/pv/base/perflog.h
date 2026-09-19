@@ -77,7 +77,7 @@ struct Agg {
   double avg()   const { return calls ? total_ms / calls : 0; }
   double avg1()  const { return calls ? aux1_ms / calls : 0; }
   double avg2()  const { return calls ? aux2_ms / calls : 0; }
-  double avg_u() const { return calls ? (double)sum_u64 / calls : 0; }
+  double avg_u() const { return calls ? static_cast<double>(sum_u64) / calls : 0; }
 };
 
 // ---- global aggregates (inline, diagnostic-only; relaxed races OK) ----
@@ -264,8 +264,8 @@ inline void flush() {
   if (since_s < 2.0 && g_window_paint_calls < 120)
     return;
   g_perf_last_flush = now;
-  const double paint_rate  = since_s > 0 ? (double)g_window_paint_calls / since_s : 0;
-  const double publish_rate = since_s > 0 ? (double)g_window_publish_calls / since_s : 0;
+  const double paint_rate  = since_s > 0 ? static_cast<double>(g_window_paint_calls) / since_s : 0;
+  const double publish_rate = since_s > 0 ? static_cast<double>(g_window_publish_calls) / since_s : 0;
 
   QString path = QDir::temp().filePath("pxv_decode_perf.log");
   // Truncate the log on the FIRST flush of this process (each PXView launch
@@ -292,11 +292,11 @@ inline void flush() {
           g_frame_mid.min_ms, g_frame_mid.avg(), paint_rate);
 
   // Average per-frame composition (dense vs mid rows, annotations drawn).
-  const double fpc = g_window_paint_calls ? (double)g_window_paint_calls : 1;
+  const double fpc = g_window_paint_calls ? static_cast<double>(g_window_paint_calls) : 1;
   fprintf(lf,
           "PER_FRAME_AVG   dense_rows=%.2f mid_rows=%.2f ann_in_range=%.1f\n",
-          (double)g_frame_dense_rows / fpc, (double)g_frame_mid_rows / fpc,
-          (double)g_frame_ann_sum / fpc);
+          static_cast<double>(g_frame_dense_rows) / fpc, static_cast<double>(g_frame_mid_rows) / fpc,
+          static_cast<double>(g_frame_ann_sum) / fpc);
 
   // Range-lookup cost (the correctness-fixed get_visible_range).
   fprintf(lf,
@@ -338,7 +338,7 @@ inline void flush() {
           do_rate, g_repaint_decode_only, du_rate, g_repaint_data_updated,
           ud_rate, g_repaint_update_direct, dl_rate, g_repaint_delayed,
           g_repaint_delayed_full, g_repaint_delayed_do, entries_sum,
-          paints_window, (long long)paints_window - (long long)entries_sum);
+          paints_window, static_cast<long long>(paints_window) - static_cast<long long>(entries_sum));
 
   // P3-D4: max main-thread event-loop lag (100ms tick overshoot). 0 means the
   // GUI thread was never blocked; a large value = the freeze duration.
@@ -358,7 +358,7 @@ inline void flush() {
           "BATCH_STATS   batches=%zu total_ann=%llu avg=%.1f max=%zu"
           " approx_malloc_avoided=%llu\n",
           g_batch_flushes, (unsigned long long)g_batch_ann_sum,
-          g_batch_flushes ? (double)g_batch_ann_sum / g_batch_flushes : 0.0,
+          g_batch_flushes ? static_cast<double>(g_batch_ann_sum) / g_batch_flushes : 0.0,
           g_batch_max, (unsigned long long)g_batch_ann_sum);
   g_batch_flushes = 0;
   g_batch_ann_sum = 0;
@@ -370,9 +370,9 @@ inline void flush() {
           "COPY_AUDIT    staging_calls=%llu staging_MB=%.1f"
           " export_calls=%llu export_MB=%.1f\n",
           (unsigned long long)g_copy_staging_calls,
-          (double)g_copy_staging_bytes / (1024.0 * 1024.0),
+          static_cast<double>(g_copy_staging_bytes) / (1024.0 * 1024.0),
           (unsigned long long)g_copy_export_calls,
-          (double)g_copy_export_bytes / (1024.0 * 1024.0));
+          static_cast<double>(g_copy_export_bytes) / (1024.0 * 1024.0));
   g_copy_staging_calls = 0;
   g_copy_staging_bytes = 0;
   g_copy_export_calls  = 0;

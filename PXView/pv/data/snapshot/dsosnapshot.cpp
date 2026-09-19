@@ -124,7 +124,7 @@ void DsoSnapshot::free_data()
 {
     Snapshot::free_data();
 
-    for (int i=0; i<(int)_ch_data.size(); i++)
+    for (int i=0; i<static_cast<int>(_ch_data.size()); i++)
     {
         void *p = _ch_data[i];
         free(p);
@@ -147,7 +147,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
     _is_file = isFile;
 
     for (const GSList *l = channels; l; l = l->next) {
-        sr_channel *const probe = (sr_channel*)l->data;
+        sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
         if (probe->type == SR_CHANNEL_DSO) {
             if (probe->enabled || isFile){
@@ -178,11 +178,11 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
         _channel_num = channel_num; 
 
          for (const GSList *l = channels; l; l = l->next) {
-            sr_channel *const probe = (sr_channel*)l->data;
+            sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
             if (probe->type == SR_CHANNEL_DSO && (probe->enabled || isFile)) {
                 
-                uint8_t *chan_buffer = (uint8_t*)malloc(total_sample_count + 1);
+                uint8_t *chan_buffer = reinterpret_cast<uint8_t*>(malloc(total_sample_count + 1));
                 if (chan_buffer == nullptr){
                     isOk = false;
                     pxv_err("DsoSnapshot::first_payload, Malloc memory failed!");
@@ -205,7 +205,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
                                         * EnvelopeDataUnit;
 
                     uint64_t buffer_len = envelop_count * sizeof(EnvelopeSample);
-                    _envelope_levels[i][level].samples = (EnvelopeSample*)malloc(buffer_len);
+                    _envelope_levels[i][level].samples = reinterpret_cast<EnvelopeSample*>(malloc(buffer_len));
                     
                     if (_envelope_levels[i][level].samples == nullptr) {
                         pxv_err("DsoSnapshot::first_payload, malloc failed!");
@@ -266,7 +266,7 @@ void DsoSnapshot::append_data(void *data, uint64_t samples, bool instant)
      
     for (unsigned int ch = 0; ch < _channel_num; ch++)
     {
-        uint8_t *src = (uint8_t*)data + ch;
+        uint8_t *src = reinterpret_cast<uint8_t*>(data) + ch;
         uint8_t *dest = _ch_data[ch];
 
         if (instant){
@@ -299,19 +299,19 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
     (void)end_sample;
     std::lock_guard<std::recursive_mutex> lock(_mutex);
 
-    if (start_sample < 0 || start_sample >= (int64_t)_sample_count) {
+    if (start_sample < 0 || start_sample >= static_cast<int64_t>(_sample_count)) {
         pxv_warn("DsoSnapshot::get_samples: start_sample %lld out of range (count=%llu)",
-                 (long long)start_sample, (unsigned long long)_sample_count);
+                 static_cast<long long>(start_sample), (unsigned long long)_sample_count);
         return nullptr;
     }
-    if (end_sample < 0 || end_sample >= (int64_t)_sample_count) {
+    if (end_sample < 0 || end_sample >= static_cast<int64_t>(_sample_count)) {
         pxv_warn("DsoSnapshot::get_samples: end_sample %lld out of range (count=%llu)",
-                 (long long)end_sample, (unsigned long long)_sample_count);
+                 static_cast<long long>(end_sample), (unsigned long long)_sample_count);
         return nullptr;
     }
     if (start_sample > end_sample) {
         pxv_warn("DsoSnapshot::get_samples: start %lld > end %lld",
-                 (long long)start_sample, (long long)end_sample);
+                 static_cast<long long>(start_sample), static_cast<long long>(end_sample));
         return nullptr;
     }
 
@@ -331,7 +331,7 @@ const uint8_t *DsoSnapshot::get_samples(int64_t start_sample, int64_t end_sample
         return nullptr;
     }
 
-    return (uint8_t*)_ch_data[order] + start_sample;
+    return reinterpret_cast<uint8_t*>(_ch_data[order]) + start_sample;
 }
 
 void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
@@ -360,8 +360,8 @@ void DsoSnapshot::get_envelope_section(EnvelopeSection &s,
         return;
     }
 
-	const unsigned int min_level = max((int)floorf(logf(min_length) /
-		LogEnvelopeScaleFactor) - 1, 0);
+	const unsigned int min_level = max(static_cast<int>(floorf(logf(min_length) /
+		LogEnvelopeScaleFactor)) - 1, 0);
 	const unsigned int scale_power = (min_level + 1) *
 		EnvelopeScalePower;
 	start >>= scale_power;
@@ -417,8 +417,8 @@ void DsoSnapshot::append_payload_to_envelope_levels(bool header)
         dest_ptr = e0.samples + prev_length;
 
         // Iterate through the samples to populate the first level mipmap
-        const uint8_t *const stop_src_ptr = (uint8_t*)_ch_data[i] + e0.length * EnvelopeScaleFactor;
-        const uint8_t *src_ptr = (uint8_t*)_ch_data[i] + prev_length * EnvelopeScaleFactor;
+        const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[i]) + e0.length * EnvelopeScaleFactor;
+        const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[i]) + prev_length * EnvelopeScaleFactor;
 
         for (; src_ptr < stop_src_ptr; src_ptr += EnvelopeScaleFactor)
         {
@@ -496,8 +496,8 @@ double DsoSnapshot::cal_vrms(double zero_off, int index)
     double tmp;
 
     // Iterate through the samples to populate the first level mipmap
-    const uint8_t *const stop_src_ptr = (uint8_t*)_ch_data[index] + _sample_count;
-    const uint8_t *src_ptr = (uint8_t*)_ch_data[index];
+    const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]) + _sample_count;
+    const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]);
 
     for (;src_ptr < stop_src_ptr; src_ptr += VrmsScaleFactor)
     {
@@ -527,8 +527,8 @@ double DsoSnapshot::cal_vmean(int index)
     double vmean = 0;
 
     // Iterate through the samples to populate the first level mipmap
-    const uint8_t *const stop_src_ptr = (uint8_t*)_ch_data[index] + _sample_count;
-    const uint8_t *src_ptr = (uint8_t*)_ch_data[index];
+    const uint8_t *const stop_src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]) + _sample_count;
+    const uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_ch_data[index]);
 
     for (; src_ptr < stop_src_ptr; src_ptr += VrmsScaleFactor)
     {
@@ -578,7 +578,7 @@ bool DsoSnapshot::get_max_min_value(uint8_t &maxv, uint8_t &minv, int chan_index
         return false;
     }
 
-    if (chan_index < 0 || chan_index >= (int)_ch_data.size()){
+    if (chan_index < 0 || chan_index >= static_cast<int>(_ch_data.size())){
         pxv_err("DsoSnapshot::get_data_range: chan_index %d out of range (size=%zu)", chan_index, _ch_data.size());
         return false;
     }
@@ -612,11 +612,11 @@ SampleSpan DsoSnapshot::span(uint32_t channel, uint64_t start,
     if (count == 0) return s;
     if (start >= _sample_count) return s;
 
-    const int order = get_ch_order((int)channel);
-    if (order < 0 || (unsigned int)order >= _ch_data.size()) return s;
+    const int order = get_ch_order(static_cast<int>(channel));
+    if (order < 0 || static_cast<unsigned int>(order) >= _ch_data.size()) return s;
     if (_ch_data[order] == nullptr) return s;
 
-    s.data = (const uint8_t *)_ch_data[order] + start;
+    s.data = reinterpret_cast<const uint8_t*>(_ch_data[order]) + start;
     // DSO 是"按通道平面"布局：data 本身已在通道起点，整块基址与 data 相同。
     s.group_base = s.data;
     s.start_sample = start;

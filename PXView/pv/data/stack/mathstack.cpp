@@ -170,7 +170,7 @@ void MathStack::realloc(uint64_t num)
         for (unsigned int level = 0; level < ScaleStepCount; level++) {
             envelop_count = ((envelop_count + EnvelopeDataUnit - 1) /
                     EnvelopeDataUnit) * EnvelopeDataUnit;
-            _envelope_level[level].samples = (EnvelopeSample*)malloc(envelop_count * sizeof(EnvelopeSample));
+            _envelope_level[level].samples = reinterpret_cast<EnvelopeSample*>(malloc(envelop_count * sizeof(EnvelopeSample)));
             envelop_count = envelop_count / EnvelopeScaleFactor;
         }
     }
@@ -400,8 +400,8 @@ void MathStack::get_math_envelope_section(EnvelopeSection &s,
         return;
     }
 
-    const unsigned int min_level = max((int)floorf(logf(min_length) /
-        LogEnvelopeScaleFactor) - 1, 0);
+    const unsigned int min_level = max(static_cast<int>(floorf(logf(min_length) /
+        LogEnvelopeScaleFactor)) - 1, 0);
     const unsigned int scale_power = (min_level + 1) *
         EnvelopeScalePower;
     start >>= scale_power;
@@ -476,13 +476,13 @@ void MathStack::calc_math(uint64_t mathFactor)
     // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
     // get_samples(0, 0, ch) 的基指针等价（start_sample == 0，无位打包取整）；
     // _sample_num == get_sample_count()，故 contiguous_samples 恰好覆盖全部样本。
-    const pv::data::SampleSpan span1 = data->span((uint32_t)index1, 0, _sample_num);
-    const pv::data::SampleSpan span2 = data->span((uint32_t)index2, 0, _sample_num);
+    const pv::data::SampleSpan span1 = data->span(static_cast<uint32_t>(index1), 0, _sample_num);
+    const pv::data::SampleSpan span2 = data->span(static_cast<uint32_t>(index2), 0, _sample_num);
     if (!span1.valid() || !span2.valid()) {
         // 旧代码会解引用 nullptr（未定义行为）；显式停止本次计算。
         pxv_warn("MathStack: span invalid (ch %d valid=%d, ch %d valid=%d) — "
                  "aborting math computation",
-                 index1, (int)span1.valid(), index2, (int)span2.valid());
+                 index1, static_cast<int>(span1.valid()), index2, static_cast<int>(span2.valid()));
         _math_state = Stopped;
         return;
     }
@@ -551,9 +551,9 @@ void MathStack::append_to_envelope_level(bool header)
     dest_ptr = e0.samples + prev_length;
 
     // Iterate through the samples to populate the first level mipmap
-    const double *const stop_src_ptr = (double*)_math.data() +
+    const double *const stop_src_ptr = reinterpret_cast<double*>(_math.data()) +
         e0.length * EnvelopeScaleFactor;
-    for (const double *src_ptr = (double*)_math.data() +
+    for (const double *src_ptr = reinterpret_cast<double*>(_math.data()) +
         prev_length * EnvelopeScaleFactor;
         src_ptr < stop_src_ptr; src_ptr += EnvelopeScaleFactor)
     {

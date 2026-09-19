@@ -205,8 +205,8 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
   pxv_info("gen_config_json: querying SR_CONF_DEVICE_SESSIONS, gvar_opts=%p", gvar_opts);
 
   if (gvar_opts != nullptr) {
-    const int *const options = (const int32_t *)g_variant_get_fixed_array(
-        gvar_opts, &num_opts, sizeof(int32_t));
+    const int *const options = reinterpret_cast<const int32_t*>(g_variant_get_fixed_array(
+        gvar_opts, &num_opts, sizeof(int32_t)));
 
     for (unsigned int i = 0; i < num_opts; i++) {
       const struct sr_config_info *const info =
@@ -238,7 +238,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
               QJsonValue::fromVariant(g_variant_get_int32(gvar));
         else if (info->datatype == SR_T_UINT32)
           sessionVar[info->name] =
-              QJsonValue::fromVariant((uint32_t)g_variant_get_uint32(gvar));
+              QJsonValue::fromVariant(static_cast<uint32_t>(g_variant_get_uint32(gvar)));
         else if (info->datatype == SR_T_LIST)
           sessionVar[info->name] =
               QJsonValue::fromVariant(g_variant_get_int16(gvar));
@@ -256,11 +256,11 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
     if (!gvar_opts) {
       pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config section.");
     } else {
-      const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
-          gvar_opts, &num_opts, sizeof(uint32_t));
+      const uint32_t *const options = reinterpret_cast<const uint32_t*>(g_variant_get_fixed_array(
+          gvar_opts, &num_opts, sizeof(uint32_t)));
 
       for (unsigned int i = 0; i < num_opts; i++) {
-        const int key = (int)(options[i] & 0x1fffffff);
+        const int key = static_cast<int>((options[i] & 0x1fffffff));
 
         const struct sr_config_info *const info =
             _wnd->device_agent()->get_config_info(key);
@@ -288,7 +288,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
           else if (info->datatype == SR_T_INT32)
             sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int32(gvar));
           else if (info->datatype == SR_T_UINT32)
-            sessionVar[info->name] = QJsonValue::fromVariant((uint32_t)g_variant_get_uint32(gvar));
+            sessionVar[info->name] = QJsonValue::fromVariant(static_cast<uint32_t>(g_variant_get_uint32(gvar)));
           else if (info->datatype == SR_T_LIST)
             sessionVar[info->name] = QJsonValue::fromVariant(g_variant_get_int16(gvar));
           else {
@@ -335,13 +335,13 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
     for (const auto &kv : thresholds) {
       QJsonObject entry;
       entry["ch"] = kv.first;
-      entry["threshold"] = (int)kv.second;
+      entry["threshold"] = static_cast<int>(kv.second);
       thrArray.append(entry);
     }
     for (const auto &kv : modes) {
       QJsonObject entry;
       entry["ch"] = kv.first;
-      entry["mode"] = (int)kv.second;
+      entry["mode"] = static_cast<int>(kv.second);
       modeArray.append(entry);
     }
     glitchObj["thresholds"] = thrArray;
@@ -498,8 +498,8 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
   gsize num_opts;
 
   if (gvar_opts != nullptr) {
-    const int *const options = (const int32_t *)g_variant_get_fixed_array(
-        gvar_opts, &num_opts, sizeof(int32_t));
+    const int *const options = reinterpret_cast<const int32_t*>(g_variant_get_fixed_array(
+        gvar_opts, &num_opts, sizeof(int32_t)));
 
     for (unsigned int i = 0; i < num_opts; i++) {
       const int key = options[i];
@@ -579,11 +579,11 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
     if (!gvar_opts) {
       pxv_warn("No SR_CONF_DEVICE_OPTIONS available, skipping per-device config load.");
     } else {
-      const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
-          gvar_opts, &num_opts, sizeof(uint32_t));
+      const uint32_t *const options = reinterpret_cast<const uint32_t*>(g_variant_get_fixed_array(
+          gvar_opts, &num_opts, sizeof(uint32_t)));
 
       for (unsigned int i = 0; i < num_opts; i++) {
-        const int key = (int)(options[i] & 0x1fffffff);
+        const int key = static_cast<int>((options[i] & 0x1fffffff));
         if (!(options[i] & SR_CONF_SET))
           continue;
         const struct sr_config_info *info =
@@ -702,7 +702,7 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
       QJsonArray modeArray = glitchObj["modes"].toArray();
       for (const QJsonValue &v : thrArray) {
         QJsonObject e = v.toObject();
-        thresholds[e["ch"].toInt()] = (uint32_t)e["threshold"].toInt();
+        thresholds[e["ch"].toInt()] = static_cast<uint32_t>(e["threshold"].toInt());
       }
       for (const QJsonValue &v : modeArray) {
         QJsonObject e = v.toObject();
@@ -782,7 +782,7 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
             } else if (zv == 0.0) {
               ratio_z = 0.5;
             } else {
-              ratio_z = analogSig->value2ratio((int)zv);
+              ratio_z = analogSig->value2ratio(static_cast<int>(zv));
             }
             analogSig->set_zero_ratio(ratio_z);
             analogSig->commit_settings();
@@ -921,7 +921,7 @@ QJsonDocument MainWindowConfigIO::get_config_json_from_data_file(QString file,
   if (data != nullptr) {
     // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
     // 导致 "session" 入口 JSON 解析失败（解码器等配置无法恢复）。
-    QByteArray qbs = QByteArray(data->data(), (int)data->size());
+    QByteArray qbs = QByteArray(data->data(), static_cast<int>(data->size()));
     sessionDoc = QJsonDocument::fromJson(qbs, &error);
 
     if (error.error != QJsonParseError::NoError) {
@@ -956,7 +956,7 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
   if (data != nullptr) {
     // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
     // 导致 "decoders" 入口 JSON 解析失败（解码器设置无法恢复）。
-    QByteArray qbs = QByteArray(data->data(), (int)data->size());
+    QByteArray qbs = QByteArray(data->data(), static_cast<int>(data->size()));
     QJsonDocument sessionDoc = QJsonDocument::fromJson(qbs, &error);
 
     if (error.error != QJsonParseError::NoError) {

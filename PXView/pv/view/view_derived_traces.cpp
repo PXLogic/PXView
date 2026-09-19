@@ -99,7 +99,7 @@ std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
     std::shared_ptr<pv::data::DecoderStack> stack, int index) {
   auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, index);
   dt->set_view(_view);
-  dt->set_view_index((int)_view->get_own_signals().size() + index);
+  dt->set_view_index(static_cast<int>(_view->get_own_signals().size()) + index);
   if (!stack->stack().empty() && !stack->stack().front()->shown())
     dt->set_visible(false);
   return dt;
@@ -134,7 +134,7 @@ bool ViewDerivedTraces::add_decoder(
   // 2. View directly creates its DecodeTrace wrapper for the new
   //    DecoderStack, using the single creation point to ensure all
   //    fields (_view, _viewport, view_index, visibility) are initialised.
-  int decode_index = (int)_own_decode_traces.size();
+  int decode_index = static_cast<int>(_own_decode_traces.size());
   auto trace = create_decode_trace(out_stack, decode_index);
 
   // 3. If silent is false, show the decoder options dialog. If the user
@@ -242,7 +242,7 @@ void ViewDerivedTraces::remove_decoder(DecodeTrace *trace) {
 }
 
 void ViewDerivedTraces::remove_decoder(int index) {
-  if (index < 0 || index >= (int)_own_decode_traces.size())
+  if (index < 0 || index >= static_cast<int>(_own_decode_traces.size()))
     return;
   remove_decoder(_own_decode_traces[index].get());
 }

@@ -70,7 +70,7 @@ public:
     // Does NOT build a global merged index — O(stacks), instant.
     void setAllStacks(const std::vector<pv::data::DecoderStack *> &stacks);
     inline bool isMultiStackMode() const { return _multi_stack; }
-    inline int stackCount() const { return (int)_all_stacks.size(); }
+    inline int stackCount() const { return static_cast<int>(_all_stacks.size()); }
     // Read-only view of the stacks backing multi-stack (All) mode. Empty when
     // a single stack is selected. Used by the export dialog so it enumerates
     // exactly the same stacks the table shows.

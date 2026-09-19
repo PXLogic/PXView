@@ -56,7 +56,7 @@ void SessionDocument::share_from_logic(std::shared_ptr<LogicSnapshot> src) {
   // without any external pass-through. The document always knows its samplerate
   // (set via set_samplerate before sharing), so the snapshot becomes complete here.
   if (_logic)
-    _logic->set_samplerate((double)_samplerate);
+    _logic->set_samplerate(static_cast<double>(_samplerate));
 }
 
 void SessionDocument::share_from_analog(std::shared_ptr<AnalogSnapshot> src) {

@@ -194,7 +194,7 @@ QPointF DsoMeasure::get_point(uint64_t index, float &value) {
   // get_samples(index, index, ch) 返回的指针严格等价
   // （start_sample == index，无位打包取整）。
   const pv::data::SampleSpan sp =
-      _signal->_data->span((uint32_t)_signal->get_index(), index, 1);
+      _signal->_data->span(static_cast<uint32_t>(_signal->get_index()), index, 1);
   if (!sp.valid())
     return pt;
   value = sp.data[0];
@@ -221,10 +221,10 @@ double DsoMeasure::get_voltage(uint64_t index) {
 
   // P1-c（统一读取抽象）：单样本读取；DSO 平面布局下与旧指针等价。
   const pv::data::SampleSpan sp =
-      _signal->_data->span((uint32_t)_signal->get_index(), index, 1);
+      _signal->_data->span(static_cast<uint32_t>(_signal->get_index()), index, 1);
   if (!sp.valid())
     return 1;
-  const double value = (double)sp.data[0];
+  const double value = static_cast<double>(sp.data[0]);
   const int hw_offset = _signal->get_hw_offset();
   uint64_t k = _signal->_data->get_measure_voltage_factor(_signal->get_index());
   float data_scale = _signal->_data->get_data_scale(_signal->get_index());

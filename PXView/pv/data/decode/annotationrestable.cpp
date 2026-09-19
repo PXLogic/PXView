@@ -37,7 +37,7 @@ const char g_bin_cvt_table[] = "000000010010001101000101011001111000100110101011
 	char *wr = buf + size - 1;
 	*wr = 0; //end flag
 
-	char *rd = (char*)bin + len - 1; //move to last byte
+	char *rd = const_cast<char*>(bin) + len - 1; //move to last byte
 	char tmp[3]; 
 
 	while (rd >= bin && wr > buf)
@@ -82,7 +82,7 @@ const char g_bin_cvt_table[] = "000000010010001101000101011001111000100110101011
 
 long long bin2long_string(const char *bin, int len)
 {
-	char *rd = (char *)bin + len - 1; //move to last byte
+	char *rd = const_cast<char*>(bin) + len - 1; //move to last byte
 	int dex = 0;
 	long long value = 0;
 	long long bv = 0;
@@ -128,13 +128,13 @@ const char *format_to_string(const char *hex_str, int fmt,
 	buf[1] = 0; //set the end flag
 	buf[0] = 0;
 
-	int len = (int)strlen(data);
+	int len = static_cast<int>(strlen(data));
 	 //buffer is not enough
 	if (len > DECODER_MAX_DATA_BLOCK_LEN){
 		return data;
 	}
 
-	char *rd = (char*)data + len - 1; //move to last byte
+	char *rd = const_cast<char*>(data) + len - 1; //move to last byte
 	char c = 0;
 	int dex = 0;
 
@@ -143,13 +143,13 @@ const char *format_to_string(const char *hex_str, int fmt,
 		c = *rd;
 
 		if (c >= '0' && c <= '9'){
-			dex = (int)(c - '0');	 
+			dex = static_cast<int>((c - '0'));	 
 		}
 		else if (c >= 'A' && c <= 'F'){
-			dex = (int)(c - 'A') + 10;
+			dex = static_cast<int>((c - 'A')) + 10;
 		}
 		else if (c >= 'a' && c <= 'f'){
-			dex = (int)(c - 'a') + 10;
+			dex = static_cast<int>((c - 'a')) + 10;
 		}
 		else{
 			pxv_err("is not a hex string");
@@ -157,7 +157,7 @@ const char *format_to_string(const char *hex_str, int fmt,
 			continue;
 		}
 
-		char *ptable = (char*)g_bin_cvt_table + dex * 4;
+		char *ptable = const_cast<char*>(g_bin_cvt_table) + dex * 4;
 
 		if (buf < bin_buf + 4){ //out of buffer
 			break;
@@ -178,7 +178,7 @@ const char *format_to_string(const char *hex_str, int fmt,
 
 	//get oct format
 	if (fmt == DecoderDataFormat::oct){
-		return bin2oct_string(oct_buf, (int)oct_buf_len, buf, len * 4);
+		return bin2oct_string(oct_buf, static_cast<int>(oct_buf_len), buf, len * 4);
 	}
 
 	//64 bit integer
@@ -192,16 +192,16 @@ const char *format_to_string(const char *hex_str, int fmt,
 	//ascii
 	if (fmt == DecoderDataFormat::ascii && len < 30 - 3){
 		if (len == 2){
-			int lv = (int)bin2long_string(buf, len * 4);
+			int lv = static_cast<int>(bin2long_string(buf, len * 4));
 			//can display chars
 			if (lv >= 33 && lv <= 126){
-				snprintf(num_buf, num_buf_len, "%c", (char)lv);
+				snprintf(num_buf, num_buf_len, "%c", static_cast<char>(lv));
 				return num_buf;
 			}
 		}
 		// "[hex]"：num_buf 至少 30 字节，len <= 26 时 len+3 <= 29 不会越界。
 		num_buf[0] = '[';
-		memcpy(num_buf + 1, data, (size_t)len);
+		memcpy(num_buf + 1, data, static_cast<size_t>(len));
 		num_buf[len + 1] = ']';
 		num_buf[len + 2] = 0;
 		return num_buf;
@@ -273,7 +273,7 @@ QString format_numeric_string(const QString &hex, int fmt)
 			                                       bin_buf, sizeof(bin_buf),
 			                                       oct_buf, sizeof(oct_buf),
 			                                       num_buf, sizeof(num_buf));
-			unsigned int sublen = (unsigned int)strlen(sub_str);
+			unsigned int sublen = static_cast<unsigned int>(strlen(sub_str));
 
 			if ((all_wr - all_buf) + sublen > CONVERT_STR_MAX_LEN){
 				printf("convert error,write buffer is full!\n");
@@ -303,7 +303,7 @@ QString format_numeric_string(const QString &hex, int fmt)
 		                                       bin_buf, sizeof(bin_buf),
 		                                       oct_buf, sizeof(oct_buf),
 		                                       num_buf, sizeof(num_buf));
-		unsigned int sublen = (unsigned int)strlen(sub_str);
+		unsigned int sublen = static_cast<unsigned int>(strlen(sub_str));
 
 		if ((all_wr - all_buf) + sublen > CONVERT_STR_MAX_LEN){
 			printf("convert error,write buffer is full!\n");
@@ -429,11 +429,11 @@ int AnnotationResTable::hexToDecimal(char * hex)
 
     while(*p) {
         if(*p >= '0' && *p <= '9')
-            result += (int)pow(b, --len) * (*p - '0');
+            result += static_cast<int>(pow(b, --len)) * (*p - '0');
         else if(*p >= 'a' && *p <= 'f')
-            result += (int)pow(b, --len) * (*p - 'a' + 10);
+            result += static_cast<int>(pow(b, --len)) * (*p - 'a' + 10);
         else if(*p >= 'A' && *p <= 'F')
-            result += (int)pow(b, --len) * (*p - 'A' + 10);
+            result += static_cast<int>(pow(b, --len)) * (*p - 'A' + 10);
 
         p++;
     }

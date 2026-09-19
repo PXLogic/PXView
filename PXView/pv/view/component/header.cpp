@@ -233,8 +233,8 @@ void Header::paintEvent(QPaintEvent *) {
             if ((gt->enabled() || gt->as_dso()) &&
                 gt->get_v_offset() != INT_MAX) {
               if (firstEnabled < 0)
-                firstEnabled = (int)i;
-              lastEnabled = (int)i;
+                firstEnabled = static_cast<int>(i);
+              lastEnabled = static_cast<int>(i);
             }
           }
           if (firstEnabled < 0) {
@@ -251,8 +251,8 @@ void Header::paintEvent(QPaintEvent *) {
             double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 - View::SignalMargin;
             double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 + View::SignalMargin;
             
-            if ((int)i == firstEnabled) tTop -= View::GroupGap * 0.5;
-            if ((int)i == lastEnabled) tBottom += View::GroupGap * 0.5;
+            if (static_cast<int>(i) == firstEnabled) tTop -= View::GroupGap * 0.5;
+            if (static_cast<int>(i) == lastEnabled) tBottom += View::GroupGap * 0.5;
             
             QRectF traceRect(0, tTop, w + View::GroupCardRadius + 1, tBottom - tTop);
             painter.setBrush(_view.get_trace_card_color(gt));
@@ -339,7 +339,7 @@ void Header::mouseDoubleClickEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom =
           enabled_traces[i]->get_v_offset() +
           enabled_traces[i]->get_totalHeight() / 2 + View::SignalMargin;
@@ -404,8 +404,8 @@ void Header::mousePressEvent(QMouseEvent *event) {
   }
   pxv_info("Header::mousePressEvent: passed guard (instant=%d, running=%d, dso=%d, "
            "traces=%d, button=%d, pos=(%d,%d))",
-           instant, is_running, is_dso_mode, (int)traces.size(),
-           (int)event->button(), event->position().toPoint().x(),
+           instant, is_running, is_dso_mode, static_cast<int>(traces.size()),
+           static_cast<int>(event->button()), event->position().toPoint().x(),
            event->position().toPoint().y());
 
   if (_view.is_logic_rendering_mode()) {
@@ -419,7 +419,7 @@ void Header::mousePressEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom =
           enabled_traces[i]->get_v_offset() +
           enabled_traces[i]->get_totalHeight() / 2 + View::SignalMargin;
@@ -587,7 +587,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
       }
       doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
       pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
-               (int)channel_layout.size());
+               static_cast<int>(channel_layout.size()));
     } else {
       pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
                doc, dev,
@@ -639,7 +639,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
 
       int draggedGroupIndex = -1;
       if (draggedTrace) {
-        for (int gi = 0; gi < (int)groups.size(); gi++) {
+        for (int gi = 0; gi < static_cast<int>(groups.size()); gi++) {
           for (auto gt : groups[gi].traces) {
             if (gt == draggedTrace) {
               draggedGroupIndex = gi;
@@ -652,7 +652,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
       }
 
       std::vector<int> groupOrder;
-      for (int i = 0; i < (int)groups.size(); i++)
+      for (int i = 0; i < static_cast<int>(groups.size()); i++)
         groupOrder.push_back(i);
 
       sort(groupOrder.begin(), groupOrder.end(), [&groups](int a, int b) {
@@ -709,7 +709,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
       }
       doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
       pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
-               (int)channel_layout.size());
+               static_cast<int>(channel_layout.size()));
     } else {
       pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
                doc, dev,
@@ -737,8 +737,8 @@ void Header::wheelEvent(QWheelEvent *event) {
   (void)x;
   (void)y;
 
-  x = (int)event->position().x();
-  y = (int)event->position().y();
+  x = static_cast<int>(event->position().x());
+  y = static_cast<int>(event->position().y());
   int anglex = event->angleDelta().x();
   int angley = event->angleDelta().y();
 
@@ -868,7 +868,7 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom =
           enabled_traces[i]->get_v_offset() +
           enabled_traces[i]->get_totalHeight() / 2 + View::SignalMargin;

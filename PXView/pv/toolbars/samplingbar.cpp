@@ -376,7 +376,7 @@ void SamplingBar::bind_context(TabContext *ctx) {
 
     if (ui.dock_sample_limit > 0 && ui.dock_sample_rate > 0) {
       double duration =
-          (double)ui.dock_sample_limit / ui.dock_sample_rate * SR_SEC(1);
+          static_cast<double>(ui.dock_sample_limit) / ui.dock_sample_rate * SR_SEC(1);
       for (int i = 0; i < _sample_count->count(); i++) {
         if (duration >= _sample_count->itemData(i).value<double>()) {
           _sample_count->setCurrentIndex(i);
@@ -416,7 +416,7 @@ void SamplingBar::unbind_context() {
                             : _device_agent->get_sample_rate();
       if (s_rate > 0) {
         ui.dock_sample_limit =
-            ((uint64_t)ceil(duration / SR_SEC(1) * s_rate) + SAMPLES_ALIGN) &
+            (static_cast<uint64_t>(ceil(duration / SR_SEC(1) * s_rate)) + SAMPLES_ALIGN) &
             ~SAMPLES_ALIGN;
       } else {
         ui.dock_sample_limit = _device_agent->get_sample_limit();
@@ -425,7 +425,7 @@ void SamplingBar::unbind_context() {
       ui.dock_sample_limit = _device_agent->get_sample_limit();
     }
 
-    ui.dock_collect_mode = (int)_session->get_collect_mode();
+    ui.dock_collect_mode = static_cast<int>(_session->get_collect_mode());
   }
   _context = nullptr;
   set_readonly(false);
@@ -601,8 +601,8 @@ void SamplingBar::update_sample_rate_selector() {
   // 优先处理离散列表格式（"samplerates"）
   else if ((gvar_list = g_variant_lookup_value(gvar_dict, "samplerates",
                                                G_VARIANT_TYPE("at")))) {
-    elements = (const uint64_t *)g_variant_get_fixed_array(
-        gvar_list, &num_elements, sizeof(uint64_t));
+    elements = reinterpret_cast<const uint64_t*>(g_variant_get_fixed_array(
+        gvar_list, &num_elements, sizeof(uint64_t)));
 
     for (unsigned int i = 0; i < num_elements; i++) {
       char *const s = sr_samplerate_string(elements[i]);
@@ -615,8 +615,8 @@ void SamplingBar::update_sample_rate_selector() {
   // 回退处理 step 格式（"samplerate-steps"）—— demo 等上游驱动使用
   else if ((gvar_list = g_variant_lookup_value(gvar_dict, "samplerate-steps",
                                                G_VARIANT_TYPE("at")))) {
-    elements = (const uint64_t *)g_variant_get_fixed_array(
-        gvar_list, &num_elements, sizeof(uint64_t));
+    elements = reinterpret_cast<const uint64_t*>(g_variant_get_fixed_array(
+        gvar_list, &num_elements, sizeof(uint64_t)));
 
     // step 格式为 [min, max, step]，在应用层按 1-2-5 序列生成离散列表
     if (num_elements >= 2 && elements[0] > 0 && elements[1] > 0) {
@@ -760,7 +760,7 @@ pxv_info("Update sample count list.");
     // lists total capture duration. Using the sw_depth/samplerate formula
     // here yields huge garbage values (5e14 s) and breaks commit_hori_res()
     // which divides by hori_res.
-    duration = (double)max_timebase;
+    duration = static_cast<double>(max_timebase);
   } else if (stream_mode) {
     // Stream mode: data flows continuously via mmap, not limited by hardware
     // FIFO. mmap is backed by either memory (no disk cache) or disk file (with
@@ -781,7 +781,7 @@ pxv_info("Update sample count list.");
     } else {
       _device_agent->get_config_double(SR_CONF_STREAM_MEM_BUFF, buff_gb);
     }
-    uint64_t total_samples = (uint64_t)(buff_gb * SR_GB(1)) * 8 / ch_num;
+    uint64_t total_samples = static_cast<uint64_t>((buff_gb * SR_GB(1))) * 8 / ch_num;
     duration = total_samples / (samplerate * (1.0 / SR_SEC(1)));
   } else if (hw_duration > 0)
     duration = hw_duration;
@@ -836,7 +836,7 @@ pxv_info("Update sample count list.");
 
     if (mode == DSO)
       // DSO: continue down to min_timebase (e.g. 10ns/div).
-      not_last = (duration > (double)min_timebase);
+      not_last = (duration > static_cast<double>(min_timebase));
     else if (mode == ANALOG)
       not_last = (duration >= SR_MS(200)) &&
                  (duration / SR_SEC(1) * samplerate >= SR_KB(1));
@@ -900,14 +900,14 @@ void SamplingBar::update_sample_count_selector_value() {
 
   if (_device_agent->get_work_mode() == DSO) {
     if (_device_agent->get_config_uint64(SR_CONF_TIMEBASE, v)) {
-      duration = (double)v;
+      duration = static_cast<double>(v);
     } else {
       pxv_err("ERROR: config_get SR_CONF_TIMEBASE failed.");
       return;
     }
   } else {
     if (_device_agent->get_config_uint64(SR_CONF_LIMIT_SAMPLES, v)) {
-      duration = (double)v;
+      duration = static_cast<double>(v);
     } else {
       pxv_err("ERROR: config_get SR_CONF_TIMEBASE failed.");
       return;
@@ -1019,9 +1019,9 @@ double SamplingBar::commit_hori_res() {
 
   const int dso_ch_num = _session->get_ch_num(SR_CHANNEL_DSO);
   const uint64_t sample_rate = min(
-      (uint64_t)(sample_limit * SR_SEC(1) / (hori_res * DS_CONF_DSO_HDIVS)),
-      (uint64_t)(max_sample_rate /
-                 (dso_ch_num ? dso_ch_num : 1)));
+      static_cast<uint64_t>((sample_limit * SR_SEC(1) / (hori_res * DS_CONF_DSO_HDIVS))),
+      static_cast<uint64_t>((max_sample_rate /
+                 (dso_ch_num ? dso_ch_num : 1))));
 
   pxv_info("[DEBUG-DSO] commit_hori_res: hori_res=%.9g sample_limit=%llu max_sample_rate=%llu dso_ch_num=%d -> sample_rate=%llu",
            hori_res, (unsigned long long)sample_limit,
@@ -1068,7 +1068,7 @@ double SamplingBar::commit_hori_res() {
   // async event arrives). Matching the SR_CONF_SAMPLERATE check above.
   uint64_t cur_timebase = 0;
   if (_device_agent->get_config_uint64(SR_CONF_TIMEBASE, cur_timebase) &&
-      (uint64_t)hori_res != cur_timebase) {
+      static_cast<uint64_t>(hori_res) != cur_timebase) {
     _device_agent->set_config_uint64(SR_CONF_TIMEBASE, hori_res);
   }
 
@@ -1101,7 +1101,7 @@ void SamplingBar::commit_settings() {
       // Stream 模式的 ring buffer 大小仍由 DeviceAgent::get_sample_limit() 基于
       // _app_stream_mem_buff 计算，与停止条件解耦。
       const uint64_t sample_count =
-          ((uint64_t)ceil(sample_duration / SR_SEC(1) * sample_rate) +
+          (static_cast<uint64_t>(ceil(sample_duration / SR_SEC(1) * sample_rate)) +
            SAMPLES_ALIGN) &
           ~SAMPLES_ALIGN;
       if (sample_count != 0 &&
@@ -1348,7 +1348,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
     // because the resulting pattern != "random".
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
-          (int)_session->get_collect_mode();
+          static_cast<int>(_session->get_collect_mode());
     }
     break;
   case COLLECT_REPEAT:
@@ -1369,7 +1369,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
     // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
-          (int)_session->get_collect_mode();
+          static_cast<int>(_session->get_collect_mode());
     }
     break;
   case COLLECT_LOOP:
@@ -1377,7 +1377,7 @@ void SamplingBar::on_mode_radio_clicked(int id) {
     // Demo: pattern is controlled by DeviceOptionsDock, not capture mode.
     if (_context && _context->view()) {
       _context->view()->dock_ui_state().dock_collect_mode =
-          (int)_session->get_collect_mode();
+          static_cast<int>(_session->get_collect_mode());
     }
     break;
   }

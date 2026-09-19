@@ -124,7 +124,7 @@ private:
 
     void channel_checkbox_clicked(QCheckBox *sc);
 
-    void keyPressEvent(QKeyEvent *) override;
+    void keyPressEventreinterpret_cast<QKeyEvent*>(override);
 
 private:
     //IChannelCheck

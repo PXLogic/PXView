@@ -137,7 +137,7 @@ private:
         void release(uint8_t *slot);
 
         uint64_t slot_bytes() const { return _slot_bytes; }
-        uint32_t capacity() const { return (uint32_t)_storage.size(); }
+        uint32_t capacity() const { return static_cast<uint32_t>(_storage.size()); }
         uint32_t in_use() const { return _in_use; }
         uint32_t peak_in_use() const { return _peak_in_use; }
         uint32_t max_slots() const { return _max_slots; }

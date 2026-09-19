@@ -74,7 +74,7 @@ struct RenderDiagRec {
             pxv_warn("[RenderDiag] get_display_edges slow: %.1fms "
                      "(start=%llu end=%llu width=%u)",
                      ms, (unsigned long long)start,
-                     (unsigned long long)end, (unsigned)width);
+                     (unsigned long long)end, static_cast<unsigned>(width));
         }
         if (calls % 1000 == 0) {
             pxv_info("[RenderDiag] get_display_edges: %llu calls "
@@ -204,7 +204,7 @@ bool LogicSnapshotEdgeScan::get_display_edges_common(
     index = max(static_cast<uint64_t>(ceil((floor(index_d / min_length) + 1) * min_length)),
                 index + 1);
 
-    while (gap > (int64_t)edges.size() && edges.size() < width) {
+    while (gap > static_cast<int64_t>(edges.size()) && edges.size() < width) {
       edges.push_back(pair<bool, bool>(false, last_sample));
     }
 
@@ -291,7 +291,7 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
   }
 
   int order = _host->get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _host->_ch_data.size()) {
+  if (order == -1 || static_cast<unsigned int>(order) >= _host->_ch_data.size()) {
     pxv_warn("LogicSnapshot::get_nxt_edge_self: invalid order for sig_index=%d", sig_index);
     return false;
   }
@@ -299,7 +299,7 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
   // const unsigned int min_level = max((int)floorf(logf(min_length) /
   // logf(Scale)) - 1, 0);
   const unsigned int min_level =
-      max((int)(log2f(static_cast<float>(min_length)) - 1) / (int)LogicSnapshot::ScalePower, 0);
+      max(static_cast<int>((log2f(static_cast<float>(min_length)) - 1)) / static_cast<int>(LogicSnapshot::ScalePower), 0);
   uint64_t root_index = index >> (LogicSnapshot::LeafBlockPower + LogicSnapshot::RootScalePower);
   uint8_t root_pos = (index & LogicSnapshot::RootMask) >> LogicSnapshot::LeafBlockPower;
   bool root_last = (root_index != 0 && root_index - 1 < _host->_ch_data[order].size())
@@ -309,7 +309,7 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
 
   // linear search for the next transition on the root level
   for (uint64_t i = root_index;
-       !edge_hit && (index <= end) && i < (uint64_t)_host->_ch_data[order].size();
+       !edge_hit && (index <= end) && i < static_cast<uint64_t>(_host->_ch_data[order].size());
        i++) {
     uint64_t cur_mask = (~0ULL << root_pos);
 
@@ -343,8 +343,8 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
         }
       }
 
-      uint8_t inner_tog_pos = _host->bsf_folded(inner_tog);
-      uint8_t lbp_tog_pos = _host->bsf_folded(lbp_tog);
+      uint8_t inner_tog_pos = _host->lsb_index(inner_tog);
+      uint8_t lbp_tog_pos = _host->lsb_index(lbp_tog);
 
       if (inner_tog != 0) {
         if (lbp_tog != 0) {
@@ -362,7 +362,7 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
           if (ptr != nullptr && min_level < LogicSnapshot::ScaleLevel) {
             uint64_t block_end = min(index | LogicSnapshot::LeafMask, end);
             edge_hit =
-                block_nxt_edge((uint64_t *)ptr, index, block_end, last_sample, min_level);
+                block_nxt_edge(reinterpret_cast<uint64_t*>(ptr), index, block_end, last_sample, min_level);
           } else if (ptr != nullptr) {
             edge_hit = true;
           } else {
@@ -462,16 +462,16 @@ bool LogicSnapshotEdgeScan::get_pre_edge_self(uint64_t &index, bool last_sample,
   }
 
   int order = _host->get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _host->_ch_data.size()) {
+  if (order == -1 || static_cast<unsigned int>(order) >= _host->_ch_data.size()) {
     pxv_warn("LogicSnapshot::get_pre_edge_self: invalid order for sig_index=%d", sig_index);
     return false;
   }
   // logf(Scale)) - 1, 1);
   const unsigned int min_level =
-      max((int)(log2f(static_cast<float>(min_length)) - 1) / (int)LogicSnapshot::ScalePower, 0);
+      max(static_cast<int>((log2f(static_cast<float>(min_length)) - 1)) / static_cast<int>(LogicSnapshot::ScalePower), 0);
   int root_index = static_cast<int>(index >> (LogicSnapshot::LeafBlockPower + LogicSnapshot::RootScalePower));
   uint8_t root_pos = (index & LogicSnapshot::RootMask) >> LogicSnapshot::LeafBlockPower;
-  if ((unsigned int)root_index >= _host->_ch_data[order].size()) {
+  if (static_cast<unsigned int>(root_index) >= _host->_ch_data[order].size()) {
     pxv_warn("LogicSnapshot::get_pre_edge_self: root_index=%llu out of range (size=%zu)",
              (unsigned long long)root_index, _host->_ch_data[order].size());
     return false;
@@ -486,11 +486,11 @@ bool LogicSnapshotEdgeScan::get_pre_edge_self(uint64_t &index, bool last_sample,
     do {
       uint64_t inner_tog = _host->_ch_data[order][i].tog & cur_mask;
       uint64_t lbp_tog = (_host->_ch_data[order][i].last & cur_mask) ^
-                         ((((uint64_t)root_first << (LogicSnapshot::RootScale - 1)) +
+                         (((static_cast<uint64_t>(root_first) << (LogicSnapshot::RootScale - 1)) +
                            (_host->_ch_data[order][i].first >> 1)) &
                           cur_mask);
-      uint8_t inner_tog_pos = _host->bsr64(inner_tog);
-      uint8_t lbp_tog_pos = _host->bsr64(lbp_tog);
+      uint8_t inner_tog_pos = _host->msb_index(inner_tog);
+      uint8_t lbp_tog_pos = _host->msb_index(lbp_tog);
 
       if (inner_tog != 0) {
         if (lbp_tog != 0) {
@@ -507,7 +507,7 @@ bool LogicSnapshotEdgeScan::get_pre_edge_self(uint64_t &index, bool last_sample,
           index = min(blk_end, index);
           if (ptr != nullptr && min_level < LogicSnapshot::ScaleLevel) {
             edge_hit =
-                block_pre_edge((uint64_t *)ptr, index, last_sample, min_level, sig_index);
+                block_pre_edge(reinterpret_cast<uint64_t*>(ptr), index, last_sample, min_level, sig_index);
           } else {
             edge_hit = true;
           }
@@ -575,7 +575,7 @@ bool LogicSnapshotEdgeScan::lbp_nxt_edge(uint64_t &index, uint64_t root_index,
     lbp_tog_pos++;
     lbp_tog &= (~0ULL << lbp_tog_pos);
     if ((lbp_tog_pos < LogicSnapshot::Scale) && (lbp_tog != 0)) {
-      lbp_tog_pos = _host->bsf_folded(lbp_tog);
+      lbp_tog_pos = _host->lsb_index(lbp_tog);
     } else {
       break;
     }
@@ -608,7 +608,7 @@ bool LogicSnapshotEdgeScan::block_nxt_edge(uint64_t *lbp, uint64_t &index,
         last_sample ? *(lbp + offset) | mask : *(lbp + offset) & mask;
     if (sample ^ last) {
       index =
-          (index & ~LogicSnapshot::LevelMask[0]) + _host->bsf_folded(last_sample ? ~sample : sample);
+          (index & ~LogicSnapshot::LevelMask[0]) + _host->lsb_index(last_sample ? ~sample : sample);
       fast_forward = false;
     } else {
       index = ((index >> LogicSnapshot::ScalePower) + 1) << LogicSnapshot::ScalePower;
@@ -640,7 +640,7 @@ bool LogicSnapshotEdgeScan::block_nxt_edge(uint64_t *lbp, uint64_t &index,
       // Check if there was a change in this block
       if (sample) {
         index = (index & (~0ULL << (level + 1) * LogicSnapshot::ScalePower)) +
-                (_host->bsf_folded(sample) << level * LogicSnapshot::ScalePower);
+                (_host->lsb_index(sample) << level * LogicSnapshot::ScalePower);
         break;
       } else {
         index = ((index >> (level + 1) * LogicSnapshot::ScalePower) + 1)
@@ -668,7 +668,7 @@ bool LogicSnapshotEdgeScan::block_nxt_edge(uint64_t *lbp, uint64_t &index,
       // Update the low level position of the change in this block
       if (level == 0 ? sample ^ last : sample) {
         index = (index & (~0ULL << (level + 1) * LogicSnapshot::ScalePower)) +
-                (_host->bsf_folded(level == 0 ? sample ^ last : sample)
+                (_host->lsb_index(level == 0 ? sample ^ last : sample)
                  << level * LogicSnapshot::ScalePower);
         if (level == min_level)
           break;
@@ -719,7 +719,7 @@ bool LogicSnapshotEdgeScan::lbp_pre_edge(uint64_t &index, uint64_t root_index,
     if (lbp_tog_pos > 0) {
       lbp_tog_pos--;
       lbp_tog &= (~0ULL >> (LogicSnapshot::Scale - lbp_tog_pos - 1));
-      lbp_tog_pos = (lbp_tog != 0) ? _host->bsr64(lbp_tog) : 0;
+      lbp_tog_pos = (lbp_tog != 0) ? _host->msb_index(lbp_tog) : 0;
     } else {
       lbp_tog = 0;
     }
@@ -766,7 +766,7 @@ bool LogicSnapshotEdgeScan::block_pre_edge(uint64_t *lbp, uint64_t &index,
         last_sample ? *(lbp + offset) | mask : *(lbp + offset) & mask;
     if (sample ^ last) {
       index =
-          (index & ~LogicSnapshot::LevelMask[0]) + _host->bsr64(last_sample ? ~sample : sample) + 1;
+          (index & ~LogicSnapshot::LevelMask[0]) + _host->msb_index(last_sample ? ~sample : sample) + 1;
       return true;
     } else {
       index &= ~LogicSnapshot::LevelMask[0];
@@ -810,7 +810,7 @@ bool LogicSnapshotEdgeScan::block_pre_edge(uint64_t *lbp, uint64_t &index,
       // Check if there was a change in this block
       if (sample) {
         index = (index & (~0ULL << (level + 1) * LogicSnapshot::ScalePower)) +
-                (_host->bsr64(sample) << level * LogicSnapshot::ScalePower) +
+                (_host->msb_index(sample) << level * LogicSnapshot::ScalePower) +
                 ~(~0ULL << level * LogicSnapshot::ScalePower);
         break;
       } else {
@@ -846,7 +846,7 @@ bool LogicSnapshotEdgeScan::block_pre_edge(uint64_t *lbp, uint64_t &index,
       if (level == 0 ? sample ^ last : sample) {
         index =
             (index & (~0ULL << (level + 1) * LogicSnapshot::ScalePower)) +
-            (_host->bsr64(level == 0 ? sample ^ last : sample) << level * LogicSnapshot::ScalePower) +
+            (_host->msb_index(level == 0 ? sample ^ last : sample) << level * LogicSnapshot::ScalePower) +
             ~(~0ULL << level * LogicSnapshot::ScalePower);
         if (level == min_level) {
           index++;

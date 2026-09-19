@@ -335,7 +335,7 @@ int Viewport::get_total_height() {
       for (const auto &group : groups) {
         for (auto gt : group.traces) {
           grouped_traces.push_back(gt);
-          h += (int)(gt->get_totalHeight()) + 2 * View::SignalMargin;
+          h += static_cast<int>((gt->get_totalHeight())) + 2 * View::SignalMargin;
         }
         h += View::GroupGap + 5;
       }
@@ -349,7 +349,7 @@ int Viewport::get_total_height() {
           }
         }
         if (!in_group) {
-          h += (int)(t->get_totalHeight()) + 2 * View::SignalMargin;
+          h += static_cast<int>((t->get_totalHeight())) + 2 * View::SignalMargin;
         }
       }
       return h;
@@ -357,7 +357,7 @@ int Viewport::get_total_height() {
   }
 
   for (auto t : traces) {
-    h += (int)(t->get_totalHeight()) + 2 * View::SignalMargin;
+    h += static_cast<int>((t->get_totalHeight())) + 2 * View::SignalMargin;
   }
 
   return h;
@@ -1116,15 +1116,15 @@ void Viewport::export_decoder_audio_wav() {
     const auto &samples = sample_view.samples();
     uint64_t span = samples.back().start_sample - samples.front().start_sample;
     if (span > 0) {
-      double interval = (double)span / (double)(samples.size() - 1);
+      double interval = static_cast<double>(span) / static_cast<double>((samples.size() - 1));
       if (interval >= 1.0 && logic_rate > 0) {
-        derived_rate = (uint32_t)((double)logic_rate / interval);
+        derived_rate = static_cast<uint32_t>(((double)logic_rate / interval));
         break;
       }
     }
   }
   if (derived_rate == 0 && logic_rate > 0 && logic_rate <= UINT32_MAX)
-    derived_rate = (uint32_t)logic_rate;
+    derived_rate = static_cast<uint32_t>(logic_rate);
   if (derived_rate == 0)
     derived_rate = 48000;
 
@@ -1140,7 +1140,7 @@ void Viewport::export_decoder_audio_wav() {
   for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
     rate_combo->addItem(QString("%1 Hz").arg(presets[i]), presets[i]);
     if (presets[i] == derived_rate) {
-      default_idx = (int)i;
+      default_idx = static_cast<int>(i);
       found_preset = true;
     }
   }
@@ -1228,7 +1228,7 @@ void Viewport::export_decoder_audio_wav() {
       const int default_gain = std::max(1, 100 / sources_per_side);
       gain->setValue(output == default_output ? default_gain : 0);
       wav_matrix->setCellWidget(row, output + 1, gain);
-      gains[(size_t)output] = gain;
+      gains[static_cast<size_t>(output)] = gain;
     }
     wav_matrix->setCellWidget(row, 0, on);
     wav_mix_on.push_back(on);
@@ -1279,9 +1279,9 @@ void Viewport::export_decoder_audio_wav() {
       row.channel = wav_mix_ch[i];
       bool routed = false;
       for (int output = 0; output < cfg.output_channels; ++output) {
-        row.outputs[(size_t)output] =
-            wav_mix_gains[i][(size_t)output]->value() / 100.0f;
-        routed = routed || row.outputs[(size_t)output] > 0.0f;
+        row.outputs[static_cast<size_t>(output)] =
+            wav_mix_gains[i][static_cast<size_t>(output)]->value() / 100.0f;
+        routed = routed || row.outputs[static_cast<size_t>(output)] > 0.0f;
       }
       row.enabled = routed;
       if (routed) cfg.mix.push_back(row);
@@ -1349,15 +1349,15 @@ void Viewport::play_decoder_audio() {
     const auto &samples = sample_view.samples();
     uint64_t span = samples.back().start_sample - samples.front().start_sample;
     if (span > 0) {
-      double interval = (double)span / (double)(samples.size() - 1);
+      double interval = static_cast<double>(span) / static_cast<double>((samples.size() - 1));
       if (interval >= 1.0 && logic_rate > 0) {
-        derived_rate = (uint32_t)((double)logic_rate / interval);
+        derived_rate = static_cast<uint32_t>(((double)logic_rate / interval));
         break;
       }
     }
   }
   if (derived_rate == 0 && logic_rate > 0 && logic_rate <= UINT32_MAX)
-    derived_rate = (uint32_t)logic_rate;
+    derived_rate = static_cast<uint32_t>(logic_rate);
   if (derived_rate == 0)
     derived_rate = 48000;
 
@@ -1377,10 +1377,10 @@ void Viewport::play_decoder_audio() {
                                 .arg(devices[i].name)
                                 .arg(devices[i].max_channels);
       device_combo->addItem(label, devices[i].id);
-      device_combo->setItemData((int)i, devices[i].max_channels,
+      device_combo->setItemData(static_cast<int>(i), devices[i].max_channels,
                                 Qt::UserRole + 1);
       if (devices[i].id == saved_cfg.device_id)
-        saved_idx = (int)i;
+        saved_idx = static_cast<int>(i);
     }
     device_combo->setCurrentIndex(saved_idx);
   }
@@ -1396,7 +1396,7 @@ void Viewport::play_decoder_audio() {
   for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
     rate_combo->addItem(QString("%1 Hz").arg(presets[i]), presets[i]);
     if (presets[i] == default_rate) {
-      default_idx = (int)i;
+      default_idx = static_cast<int>(i);
       found_preset = true;
     }
   }
@@ -1498,16 +1498,16 @@ void Viewport::play_decoder_audio() {
     auto *on = new QCheckBox(matrix);
     std::array<QSpinBox *, 8> gains{};
     for (int output = 0; output < 8; ++output) {
-      gains[(size_t)output] = new QSpinBox(matrix);
-      gains[(size_t)output]->setRange(0, 100);
-      gains[(size_t)output]->setSuffix("%");
+      gains[static_cast<size_t>(output)] = new QSpinBox(matrix);
+      gains[static_cast<size_t>(output)]->setRange(0, 100);
+      gains[static_cast<size_t>(output)]->setSuffix("%");
     }
 
     if (saved_row) {
       on->setChecked(saved_row->enabled);
       for (int output = 0; output < 8; ++output) {
-        gains[(size_t)output]->setValue(
-            (int)(saved_row->outputs[(size_t)output] * 100.0f));
+        gains[static_cast<size_t>(output)]->setValue(
+            static_cast<int>((saved_row->outputs[(size_t)output] * 100.0f)));
       }
     } else {
       const int initial_outputs = qBound(1, ch_mode_combo->currentData().toInt(), 8);
@@ -1517,13 +1517,13 @@ void Viewport::play_decoder_audio() {
       const int default_output = ch >= 0 ? (ch % initial_outputs) : 0;
       on->setChecked(ad->visible());
       for (int output = 0; output < 8; ++output)
-        gains[(size_t)output]->setValue(
+        gains[static_cast<size_t>(output)]->setValue(
             output == default_output ? default_gain : 0);
     }
 
     matrix->setCellWidget(row, 0, on);
     for (int output = 0; output < 8; ++output)
-      matrix->setCellWidget(row, output + 1, gains[(size_t)output]);
+      matrix->setCellWidget(row, output + 1, gains[static_cast<size_t>(output)]);
 
     mix_on.push_back(on);
     mix_gains.push_back(gains);
@@ -1573,9 +1573,9 @@ void Viewport::play_decoder_audio() {
     row.channel = mix_ch[i];
     bool routed = false;
     for (int output = 0; output < output_channels; ++output) {
-      row.outputs[(size_t)output] =
-          mix_gains[i][(size_t)output]->value() / 100.0f;
-      routed = routed || row.outputs[(size_t)output] > 0.0f;
+      row.outputs[static_cast<size_t>(output)] =
+          mix_gains[i][static_cast<size_t>(output)]->value() / 100.0f;
+      routed = routed || row.outputs[static_cast<size_t>(output)] > 0.0f;
     }
     row.enabled = routed;
     if (routed)
@@ -1599,7 +1599,7 @@ void Viewport::play_decoder_audio() {
 
   pxv_info("Decoder audio playback started: %u Hz, %d bit, mode=%d, "
            "mix=%d row(s), repeat=%d",
-           cfg.sample_rate, cfg.bits, cfg.channels, (int)cfg.mix.size(),
+           cfg.sample_rate, cfg.bits, cfg.channels, static_cast<int>(cfg.mix.size()),
            cfg.repeat ? 1 : 0);
 }
 

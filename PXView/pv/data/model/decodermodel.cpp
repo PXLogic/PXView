@@ -125,7 +125,7 @@ void DecoderModel::buildColumnMap()
 {
     _column_map.clear();
     _column_headers.clear();
-    for (int si = 0; si < (int)_all_stacks.size(); si++) {
+    for (int si = 0; si < static_cast<int>(_all_stacks.size()); si++) {
         auto *s = _all_stacks[si];
         if (!s)
             continue;
@@ -147,7 +147,7 @@ void DecoderModel::buildVisibleMerged(uint64_t start_sample,
                                        uint64_t end_sample)
 {
     _visible_merged.clear();
-    for (int si = 0; si < (int)_all_stacks.size(); si++) {
+    for (int si = 0; si < static_cast<int>(_all_stacks.size()); si++) {
         auto *s = _all_stacks[si];
         if (!s)
             continue;
@@ -189,9 +189,9 @@ void DecoderModel::mapRowToStack(int model_row,
     if (_multi_stack) {
         if (!_visible_merged.empty()) {
             // Visible range mode: direct lookup in merged list.
-            if (model_row >= 0 && model_row < (int)_visible_merged.size()) {
+            if (model_row >= 0 && model_row < static_cast<int>(_visible_merged.size())) {
                 const auto &e = _visible_merged[model_row];
-                if (e.stack_idx >= 0 && e.stack_idx < (int)_all_stacks.size()) {
+                if (e.stack_idx >= 0 && e.stack_idx < static_cast<int>(_all_stacks.size())) {
                     stack = _all_stacks[e.stack_idx];
                     row_in_stack = e.row_in_stack;
                     return;
@@ -202,9 +202,9 @@ void DecoderModel::mapRowToStack(int model_row,
         } else {
             // Full list mode: sequential mapping via prefix sums.
             for (size_t i = 0; i + 1 < _stack_row_offsets.size(); i++) {
-                if ((uint64_t)model_row < _stack_row_offsets[i + 1]) {
+                if (static_cast<uint64_t>(model_row) < _stack_row_offsets[i + 1]) {
                     stack = (i < _all_stacks.size()) ? _all_stacks[i] : nullptr;
-                    row_in_stack = (uint64_t)model_row - _stack_row_offsets[i];
+                    row_in_stack = static_cast<uint64_t>(model_row) - _stack_row_offsets[i];
                     return;
                 }
             }
@@ -214,7 +214,7 @@ void DecoderModel::mapRowToStack(int model_row,
     } else {
         uint64_t query_row = model_row;
         if (_visible_start_row >= 0)
-            query_row = (uint64_t)(_visible_start_row + model_row);
+            query_row = static_cast<uint64_t>((_visible_start_row + model_row));
         stack = _decoder_stack;
         row_in_stack = query_row;
     }
@@ -240,7 +240,7 @@ void DecoderModel::set_visible_range_by_samples(uint64_t start_sample,
     buildVisibleMerged(start_sample, end_sample);
     // Use sentinel values to indicate "visible merged mode".
     _visible_start_row = 0;
-    _visible_end_row = (int64_t)_visible_merged.size();
+    _visible_end_row = static_cast<int64_t>(_visible_merged.size());
     endResetModel();
 }
 
@@ -264,23 +264,23 @@ int DecoderModel::findRowBySample(uint64_t sample) const
             [](const MergedEntry &e, uint64_t v) {
                 return e.start_sample < v;
             });
-        int idx = (int)std::distance(_visible_merged.begin(), it);
-        if (idx > 0 && idx <= (int)_visible_merged.size()) {
+        int idx = static_cast<int>(std::distance(_visible_merged.begin(), it));
+        if (idx > 0 && idx <= static_cast<int>(_visible_merged.size())) {
             uint64_t prev_dist = sample - _visible_merged[idx - 1].start_sample;
-            uint64_t curr_dist = (idx < (int)_visible_merged.size())
+            uint64_t curr_dist = (idx < static_cast<int>(_visible_merged.size()))
                 ? (_visible_merged[idx].start_sample - sample)
-                : ~(uint64_t)0;
+                : ~static_cast<uint64_t>(0);
             if (prev_dist <= curr_dist)
                 idx--;
         }
-        if (idx >= (int)_visible_merged.size())
-            idx = (int)_visible_merged.size() - 1;
+        if (idx >= static_cast<int>(_visible_merged.size()))
+            idx = static_cast<int>(_visible_merged.size()) - 1;
         return idx;
     }
     // Full list mode: search each stack, pick closest.
     // (Returns sequential row, not time-sorted.)
     int best_row = -1;
-    uint64_t best_dist = ~(uint64_t)0;
+    uint64_t best_dist = ~static_cast<uint64_t>(0);
     for (size_t si = 0; si < _all_stacks.size(); si++) {
         auto *s = _all_stacks[si];
         if (!s)
@@ -301,7 +301,7 @@ int DecoderModel::findRowBySample(uint64_t sample) const
                 ? (ann_center - sample) : (sample - ann_center);
             if (dist < best_dist) {
                 best_dist = dist;
-                best_row = (int)(_stack_row_offsets[si] + ann_idx);
+                best_row = static_cast<int>((_stack_row_offsets[si] + ann_idx));
             }
         }
     }
@@ -312,20 +312,20 @@ int DecoderModel::rowCount(const QModelIndex & /* parent */) const
 {
     if (_multi_stack) {
         if (!_visible_merged.empty())
-            return (int)_visible_merged.size();
+            return static_cast<int>(_visible_merged.size());
         if (_stack_row_offsets.empty())
             return 100;
-        return (int)_stack_row_offsets.back();
+        return static_cast<int>(_stack_row_offsets.back());
     }
     if (!_decoder_stack)
         return 100;
     if (_visible_start_row >= 0) {
         const uint64_t full = _decoder_stack->list_annotation_size();
         int64_t end = _visible_end_row;
-        if (end > (int64_t)full)
-            end = (int64_t)full;
+        if (end > static_cast<int64_t>(full))
+            end = static_cast<int64_t>(full);
         int64_t count = end - _visible_start_row;
-        return count > 0 ? (int)count : 0;
+        return count > 0 ? static_cast<int>(count) : 0;
     }
     return static_cast<int>(_decoder_stack->list_annotation_size());
 }
@@ -333,7 +333,7 @@ int DecoderModel::rowCount(const QModelIndex & /* parent */) const
 int DecoderModel::columnCount(const QModelIndex & /* parent */) const
 {
     if (_multi_stack)
-        return PRESET_COLUMN_COUNT + (int)_column_map.size();
+        return PRESET_COLUMN_COUNT + static_cast<int>(_column_map.size());
     if (_decoder_stack)
         return _decoder_stack->list_rows_size() + PRESET_COLUMN_COUNT;
     else
@@ -365,7 +365,7 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
                 if (s->list_annotation(&ann, 0, row_in_stack)) {
                     uint64_t sr = s->sample_rate();
                     if (sr > 0)
-                        return QString::number((double)ann.start_sample() / (double)sr, 'f', 6) + "s";
+                        return QString::number(static_cast<double>(ann.start_sample()) / static_cast<double>(sr), 'f', 6) + "s";
                     return QString::number(ann.start_sample());
                 }
                 return QVariant();
@@ -375,24 +375,24 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
                 if (s->list_annotation(&ann, 0, row_in_stack)) {
                     uint64_t sr = s->sample_rate();
                     if (sr > 0)
-                        return formatDuration((double)(ann.end_sample() - ann.start_sample()) / (double)sr);
+                        return formatDuration(static_cast<double>((ann.end_sample() - ann.start_sample())) / static_cast<double>(sr));
                     return QString::number(ann.end_sample() - ann.start_sample());
                 }
                 return QVariant();
             }
             // Data columns: only show data if row's stack matches column's stack.
             int data_col = index.column() - PRESET_COLUMN_COUNT;
-            if (data_col >= 0 && data_col < (int)_column_map.size()) {
+            if (data_col >= 0 && data_col < static_cast<int>(_column_map.size())) {
                 const auto &cm = _column_map[data_col];
                 // Get the stack_idx for this row.
                 int row_stack = -1;
                 if (!_visible_merged.empty()) {
-                    if (idx >= 0 && idx < (int64_t)_visible_merged.size())
+                    if (idx >= 0 && idx < static_cast<int64_t>(_visible_merged.size()))
                         row_stack = _visible_merged[idx].stack_idx;
                 } else {
                     for (size_t i = 0; i + 1 < _stack_row_offsets.size(); i++) {
-                        if ((uint64_t)index.row() < _stack_row_offsets[i + 1]) {
-                            row_stack = (int)i;
+                        if (static_cast<uint64_t>(index.row()) < _stack_row_offsets[i + 1]) {
+                            row_stack = static_cast<int>(i);
                             break;
                         }
                     }
@@ -413,14 +413,14 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
         if (_decoder_stack) {
             uint64_t query_row = index.row();
             if (_visible_start_row >= 0)
-                query_row = (uint64_t)(_visible_start_row + index.row());
+                query_row = static_cast<uint64_t>((_visible_start_row + index.row()));
 
             if (index.column() == START_COLUMN_INDEX) {
                 pv::data::decode::Annotation ann;
                 if (_decoder_stack->list_annotation(&ann, 0, query_row)) {
                     uint64_t sr = _decoder_stack->sample_rate();
                     if (sr > 0)
-                        return QString::number((double)ann.start_sample() / (double)sr, 'f', 6) + "s";
+                        return QString::number(static_cast<double>(ann.start_sample()) / static_cast<double>(sr), 'f', 6) + "s";
                     return QString::number(ann.start_sample());
                 }
                 return QVariant();
@@ -430,7 +430,7 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
                 if (_decoder_stack->list_annotation(&ann, 0, query_row)) {
                     uint64_t sr = _decoder_stack->sample_rate();
                     if (sr > 0)
-                        return formatDuration((double)(ann.end_sample() - ann.start_sample()) / (double)sr);
+                        return formatDuration(static_cast<double>((ann.end_sample() - ann.start_sample())) / static_cast<double>(sr));
                     return QString::number(ann.end_sample() - ann.start_sample());
                 }
                 return QVariant();
@@ -457,7 +457,7 @@ QVariant DecoderModel::headerData(int section,
 
     if (orientation == Qt::Vertical) {
         if (_visible_start_row >= 0)
-            return qlonglong((int64_t)section + _visible_start_row);
+            return qlonglong(static_cast<int64_t>(section) + _visible_start_row);
         return section;
     }
 
@@ -468,7 +468,7 @@ QVariant DecoderModel::headerData(int section,
 
     if (_multi_stack) {
         int data_col = section - PRESET_COLUMN_COUNT;
-        if (data_col >= 0 && data_col < (int)_column_headers.size())
+        if (data_col >= 0 && data_col < static_cast<int>(_column_headers.size()))
             return _column_headers[data_col];
         return QVariant();
     }

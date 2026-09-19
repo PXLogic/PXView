@@ -191,7 +191,7 @@ std::shared_ptr<data::SignalModel>
 DeviceOptionsDock::model_for_probe(const sr_channel *probe) {
   if (probe == nullptr || _session == nullptr)
     return nullptr;
-  return _session->get_signal_by_index((int)probe->index);
+  return _session->get_signal_by_index(static_cast<int>(probe->index));
 }
 
 bool DeviceOptionsDock::channel_enabled(const sr_channel *probe) {
@@ -203,7 +203,7 @@ bool DeviceOptionsDock::channel_enabled(const sr_channel *probe) {
 int DeviceOptionsDock::channel_type(const sr_channel *probe) {
   if (auto m = model_for_probe(probe))
     return m->type();
-  return probe != nullptr ? probe->type : (int)SR_CHANNEL_LOGIC;
+  return probe != nullptr ? probe->type : static_cast<int>(SR_CHANNEL_LOGIC);
 }
 
 QString DeviceOptionsDock::channel_name(const sr_channel *probe) {
@@ -236,7 +236,7 @@ void DeviceOptionsDock::commit_channels() {
   if (mode == LOGIC || mode == ANALOG || mode == MSO) {
     int index = 0;
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
       if (!probe) {
         pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in channel loop, skipping");
         continue;
@@ -254,11 +254,11 @@ void DeviceOptionsDock::commit_channels() {
       if (mode == ANALOG && channel_type(probe) != SR_CHANNEL_ANALOG) {
         continue;
       }
-      if (index >= (int)_probes_checkBox_list.size()) {
+      if (index >= static_cast<int>(_probes_checkBox_list.size())) {
         const QString ch_name = channel_name(probe);
         pxv_warn("commit_channels: index %d >= _probes_checkBox_list size %d "
                  "(mode=%d, ch[%d] '%s' type=%d) — list out of sync, skipping",
-                 index, (int)_probes_checkBox_list.size(), mode,
+                 index, static_cast<int>(_probes_checkBox_list.size()), mode,
                  probe->index,
                  qPrintable(ch_name.isEmpty() ? QString("(nullptr)") : ch_name),
                  channel_type(probe));
@@ -556,7 +556,7 @@ int contentHeight = 0;
   row2++;
 
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
     if (channel_enabled(probe))
       cur_ch_num++;
@@ -854,7 +854,7 @@ void DeviceOptionsDock::analog_channel_check() {
   QCheckBox *sc = dynamic_cast<QCheckBox *>(sender());
   if (sc != nullptr) {
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
       if (sc->property("index").toInt() == probe->index) {
         _device_agent->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT,
@@ -920,7 +920,7 @@ if (cur_ch_num > vld_ch_num) {
   } else if (_device_agent->get_work_mode() == ANALOG) {
     if (sc != nullptr) {
       QGridLayout *const layout =
-          (QGridLayout *)sc->property("Layout").value<void *>();
+          reinterpret_cast<QGridLayout*>(sc->property("Layout").value)<void *>();
       int i = layout->count();
 
       int ck_index = -1;
@@ -980,7 +980,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
   int ch_dex = 0;
 
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe) {
       pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in dso channel loop, skipping");
       continue;
@@ -999,7 +999,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
     probe_widget->setLayout(probe_layout);
 
     bool ch_enabled = channel_enabled(probe);
-    if (ch_dex < (int)_lst_probe_enabled_status.size()) {
+    if (ch_dex < static_cast<int>(_lst_probe_enabled_status.size())) {
       ch_enabled = _lst_probe_enabled_status[ch_dex];
     }
 
@@ -1007,7 +1007,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
 
     QCheckBox *probe_checkBox = new QCheckBox(_container_panel);
     probe_checkBox->setObjectName("dock_content");
-    QVariant vlayout = QVariant::fromValue((void *)probe_layout);
+    QVariant vlayout = QVariant::fromValue(reinterpret_cast<void*>(probe_layout));
     probe_checkBox->setProperty("Layout", vlayout);
     probe_checkBox->setProperty("Enable", true);
     probe_checkBox->setChecked(ch_enabled);
@@ -1097,7 +1097,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
   int ch_dex = 0;
 
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe) {
       pxv_warn("%s", "DeviceOptionsDock: probe is nullptr in dso channel loop, skipping");
       continue;
@@ -1126,7 +1126,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
     probe_widget->setLayout(probe_layout);
 
     bool ch_enabled = channel_enabled(probe);
-    if (ch_dex < (int)_lst_probe_enabled_status.size()) {
+    if (ch_dex < static_cast<int>(_lst_probe_enabled_status.size())) {
       ch_enabled = _lst_probe_enabled_status[ch_dex];
     }
 
@@ -1134,7 +1134,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
 
     QCheckBox *probe_checkBox = new QCheckBox(_container_panel);
     probe_checkBox->setObjectName("dock_content");
-    QVariant vlayout = QVariant::fromValue((void *)probe_layout);
+    QVariant vlayout = QVariant::fromValue(reinterpret_cast<void*>(probe_layout));
     probe_checkBox->setProperty("Layout", vlayout);
     probe_checkBox->setProperty("Enable", true);
     probe_checkBox->setChecked(ch_enabled);
@@ -1774,18 +1774,18 @@ QJsonObject DeviceOptionsDock::get_session() {
   QJsonArray ch_array;
   int idx = 0;
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     QJsonObject ch_obj;
-    ch_obj["index"] = (int)probe->index;
+    ch_obj["index"] = static_cast<int>(probe->index);
 
-    if (idx < (int)_probes_checkBox_list.size()) {
+    if (idx < static_cast<int>(_probes_checkBox_list.size())) {
       ch_obj["enabled"] = _probes_checkBox_list[idx]->isChecked();
     } else {
       ch_obj["enabled"] = channel_enabled(probe);
     }
 
     if (mode == ANALOG || mode == DSO) {
-      if (idx < (int)_probe_options_binding_list.size()) {
+      if (idx < static_cast<int>(_probe_options_binding_list.size())) {
         auto *binding = _probe_options_binding_list[idx];
         const auto &properties = binding->properties();
 
@@ -1795,7 +1795,7 @@ QJsonObject DeviceOptionsDock::get_session() {
             QComboBox *combo = qobject_cast<QComboBox *>(w);
             if (combo && combo->currentIndex() >= 0) {
               GVariant *gvar =
-                  (GVariant *)combo->itemData(combo->currentIndex())
+                  reinterpret_cast<GVariant*>(combo->itemData(combo->currentIndex()))
                       .value<void *>();
               if (gvar && g_variant_is_of_type(gvar, G_VARIANT_TYPE("t"))) {
                 uint64_t vdiv = g_variant_get_uint64(gvar);
@@ -1807,7 +1807,7 @@ QJsonObject DeviceOptionsDock::get_session() {
             QComboBox *combo = qobject_cast<QComboBox *>(w);
             if (combo && combo->currentIndex() >= 0) {
               GVariant *gvar =
-                  (GVariant *)combo->itemData(combo->currentIndex())
+                  reinterpret_cast<GVariant*>(combo->itemData(combo->currentIndex()))
                       .value<void *>();
               if (gvar && g_variant_is_of_type(gvar, G_VARIANT_TYPE("i"))) {
                 int coupling = g_variant_get_int32(gvar);
@@ -1894,7 +1894,7 @@ void DeviceOptionsDock::set_session(QJsonObject &obj) {
     QJsonArray ch_array = obj["channels"].toArray();
     int idx = 0;
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
       if (idx < ch_array.size()) {
         QJsonObject ch_obj = ch_array[idx].toObject();
         const bool restored_enabled = ch_obj["enabled"].toBool();
@@ -1902,7 +1902,7 @@ void DeviceOptionsDock::set_session(QJsonObject &obj) {
         // the dock panels are being rebuilt; the caller refreshes the View
         // afterwards. One relayout beats N.
         set_channel_enabled(probe, restored_enabled, false);
-        if (idx < (int)_probes_checkBox_list.size()) {
+        if (idx < static_cast<int>(_probes_checkBox_list.size())) {
           _probes_checkBox_list[idx]->setChecked(channel_enabled(probe));
         }
 

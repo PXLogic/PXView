@@ -124,7 +124,7 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom = enabled_traces[i]->get_v_offset() +
                         enabled_traces[i]->get_totalHeight() / 2 +
                         View::SignalMargin;
@@ -194,7 +194,7 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
 
     for (auto &s : _viewport->view().get_own_signals()) {
       if (s->signal_type() == SR_CHANNEL_DSO && s->enabled()) {
-        DsoSignal *dsoSig = (DsoSignal *)s.get();
+        DsoSignal *dsoSig = reinterpret_cast<DsoSignal*>(s.get());
         QRectF trigRect = dsoSig->get_trig_rect(0, _viewport->view().get_view_width());
         if (trigRect.contains(clickPos)) {
           _viewport->drag_sig() = s.get();
@@ -345,7 +345,7 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom = enabled_traces[i]->get_v_offset() +
                         enabled_traces[i]->get_totalHeight() / 2 +
                         View::SignalMargin;
@@ -430,7 +430,7 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
       int clickX = _viewport->mouse_down_point().x();
       int moveLong = ABS_VAL(curX - clickX);
       int maxWidth = _viewport->geometry().width();
-      float mvk = (float)moveLong / (float)maxWidth;
+      float mvk = static_cast<float>(moveLong) / static_cast<float>(maxWidth);
 
       if (quickScroll) {
         quickScroll = false;
@@ -787,7 +787,7 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
       if (t->enabled())
         enabled_traces.push_back(t);
 
-    for (int i = 0; i < (int)enabled_traces.size() - 1; i++) {
+    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
       int traceBottom = enabled_traces[i]->get_v_offset() +
                         enabled_traces[i]->get_totalHeight() / 2 +
                         View::SignalMargin;
@@ -1093,7 +1093,7 @@ LogicSignal *ViewportInteraction::get_hovered_logic_signal(const QPoint &pos) {
       int sigY = s->get_v_offset();
       int halfH = s->get_totalHeight() / 2 + View::SignalMargin;
       if (abs(mouseY - sigY) < halfH) {
-        return (LogicSignal *)s.get();
+        return reinterpret_cast<LogicSignal*>(s.get());
       }
     }
   }
@@ -1224,10 +1224,10 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
   int64_t newOffset;
   if (dir == EdgeNavButton::Next) {
     // Place edge at left 25%
-    newOffset = (int64_t)(time / scale - viewWidth * 0.25);
+    newOffset = static_cast<int64_t>((time / scale - viewWidth * 0.25));
   } else {
     // Place edge at right 25%
-    newOffset = (int64_t)(time / scale - viewWidth * 0.75);
+    newOffset = static_cast<int64_t>((time / scale - viewWidth * 0.75));
   }
 
   _viewport->view().set_scale_offset(scale, newOffset);

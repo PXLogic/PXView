@@ -225,17 +225,17 @@ inline constexpr int SR_AC_COUPLING  = 2;
 
 // --- SI unit multipliers ---
 
-#define SR_Kn(x)  ((uint64_t)(x) * 1000ULL)
-#define SR_KB(x)  ((uint64_t)(x) * 1000ULL)
-#define SR_Mn(x)  ((uint64_t)(x) * 1000000ULL)
-#define SR_GB(x)  ((uint64_t)(x) * 1000000000ULL)
+#define SR_Kn(x)  (static_cast<uint64_t>((x)) * 1000ULL)
+#define SR_KB(x)  (static_cast<uint64_t>((x)) * 1000ULL)
+#define SR_Mn(x)  (static_cast<uint64_t>((x)) * 1000000ULL)
+#define SR_GB(x)  (static_cast<uint64_t>((x)) * 1000000000ULL)
 
 // --- Time unit macros (duration in nanoseconds) ---
 
-#define SR_SEC(x)  ((uint64_t)(x) * 1000000000ULL)
-#define SR_MIN(x)  ((uint64_t)(x) * 60ULL * 1000000000ULL)
-#define SR_HOUR(x) ((uint64_t)(x) * 3600ULL * 1000000000ULL)
-#define SR_DAY(x)  ((uint64_t)(x) * 86400ULL * 1000000000ULL)
+#define SR_SEC(x)  (static_cast<uint64_t>((x)) * 1000000000ULL)
+#define SR_MIN(x)  (static_cast<uint64_t>((x)) * 60ULL * 1000000000ULL)
+#define SR_HOUR(x) (static_cast<uint64_t>((x)) * 3600ULL * 1000000000ULL)
+#define SR_DAY(x)  (static_cast<uint64_t>((x)) * 86400ULL * 1000000000ULL)
 
 // --- Time string formatter ---
 // Stub implementation in deviceagent.cpp formats duration (nanoseconds)

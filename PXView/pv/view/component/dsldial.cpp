@@ -34,7 +34,7 @@ dslDial::dslDial(const uint64_t div, const uint64_t step,
 {
     assert(div > 0);
     assert(step > 0);
-    assert((uint64_t)value.count() == div);
+    assert(static_cast<uint64_t>(value.count()) == div);
     assert(unit.count() > 0);
     _is_math = isMath;
 
@@ -96,7 +96,7 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
 
     if ((qsizetype)displayIndex >= _unit.count()) {
         pxv_warn("DslDial: displayIndex %d out of range (count=%lld), clamping",
-                 displayIndex, (long long)_unit.count());
+                 displayIndex, static_cast<long long>(_unit.count()));
         displayIndex = _unit.count() - 1;
     }
    
@@ -170,9 +170,9 @@ uint64_t dslDial::get_max()
 
 uint64_t dslDial::get_value()
 {    
-    if (_sel >= (uint64_t)_value.count()){
+    if (_sel >= static_cast<uint64_t>(_value.count())){
         pxv_warn("dslDial::get_value: _sel %llu >= count %lld, returning 0",
-                 (unsigned long long)_sel, (long long)_value.count());
+                 (unsigned long long)_sel, static_cast<long long>(_value.count()));
         return 0;
     }
 

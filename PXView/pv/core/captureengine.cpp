@@ -26,7 +26,7 @@ bool CaptureEngine::submit(const CaptureIntent &intent)
         // 既有 GUI 同步语义完全一致。
         pxv_warn("CaptureEngine: SerialQueue policy not enabled yet; "
                  "executing inline (submit owner=%p instant=%d)",
-                 (void *)intent.owner, (int)intent.instant);
+                 reinterpret_cast<void*>(intent.owner), static_cast<int>(intent.instant));
         return _mgr.start_capture(intent.instant, intent.owner);
     }
     return false;

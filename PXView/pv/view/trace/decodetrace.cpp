@@ -398,9 +398,9 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   const double samples_per_pixel = samplerate * scale;
 
   uint64_t start_sample =
-      (uint64_t)max((left + pixels_offset) * samples_per_pixel, 0.0);
+      static_cast<uint64_t>(max((left + pixels_offset) * samples_per_pixel, 0.0));
   uint64_t end_sample =
-      (uint64_t)max((right + pixels_offset) * samples_per_pixel, 0.0);
+      static_cast<uint64_t>(max((right + pixels_offset) * samples_per_pixel, 0.0));
 
   for (auto &up : _decoder_stack->stack()) {
     auto dec = up.get();
@@ -424,7 +424,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
   uint32_t _color_sig = 0;
   for (int c = 0; c < 16; c++) {
     const QColor _col = getAnnColor(c);
-    _color_sig = _color_sig * 33u + (uint32_t)_col.rgba();
+    _color_sig = _color_sig * 33u + static_cast<uint32_t>(_col.rgba());
   }
 
   // Iterate through the rows
@@ -484,8 +484,8 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           // there is what saturated the GUI thread; colour blocks keep the
           // per-frame cost bounded until decoding completes.
           const uint64_t row_frontier = srow.data->get_max_sample();
-          const uint64_t screen_samples = (uint64_t)std::max(
-              1.0, (double)(right - left) * samples_per_pixel);
+          const uint64_t screen_samples = static_cast<uint64_t>(std::max(
+              1.0, (double)(right - left) * samples_per_pixel));
           const bool near_frontier =
               decoding && (row_frontier >= start_sample) &&
               (row_frontier <= end_sample + screen_samples);
@@ -544,12 +544,12 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                       cache.left == left && cache.right == right &&
                       cache.height == annotation_height &&
                       cache.color_sig == _color_sig &&
-                      (int)cache.col_valid.size() == vis_width;
+                      static_cast<int>(cache.col_valid.size()) == vis_width;
                   if (cache_hit) {
                     for (int i = 0; i < vis_width; i++) {
                       if (!cache.col_valid[i])
                         continue;
-                      p.fillRect(QRectF((double)(left + i),
+                      p.fillRect(QRectF(static_cast<double>((left + i)),
                                         y - annotation_height * 0.5, 1.0,
                                         annotation_height),
                                  dense_colors[cache.col_color[i]]);
@@ -573,18 +573,18 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                                            pixels_offset;
                           if (x < left - DrawPadding || x > right + DrawPadding)
                             return;
-                          const int col = (int)x;
+                          const int col = static_cast<int>(x);
                           if (col >= left && col < left + vis_width) {
                             col_valid[col - left] = 1;
                             col_color[col - left] =
-                                (uint8_t)((a.type() % MaxAnnType) % 16);
+                                static_cast<uint8_t>(((a.type() % MaxAnnType) % 16));
                           }
                         });
 
                     for (int i = 0; i < vis_width; i++) {
                       if (!col_valid[i])
                         continue;
-                      p.fillRect(QRectF((double)(left + i),
+                      p.fillRect(QRectF(static_cast<double>((left + i)),
                                         y - annotation_height * 0.5, 1.0,
                                         annotation_height),
                                  dense_colors[col_color[i]]);
@@ -621,7 +621,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                   // fragment into a per-column colour bucket keeps the draw
                   // cost at O(screen width) instead of O(N) fillRect calls.
                   const size_t dense_threshold =
-                      (size_t)std::max(8, vis_width) * 4;
+                      static_cast<size_t>(std::max(8, vis_width)) * 4;
                   const bool dense = (end_idx - start_idx) > dense_threshold;
 
                   std::vector<uint8_t> col_valid;
@@ -669,11 +669,11 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                             // Bucket by pixel column; last writer wins,
                             // matching the previous per-annotation
                             // overpaint behaviour.
-                            const int col = (int)x;
+                            const int col = static_cast<int>(x);
                             if (col >= left && col < left + vis_width) {
                               col_valid[col - left] = 1;
                               col_color[col - left] =
-                                  (uint8_t)((a.type() % MaxAnnType) % 16);
+                                  static_cast<uint8_t>(((a.type() % MaxAnnType) % 16));
                             }
                           } else {
                             const size_t colour =
@@ -698,7 +698,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                     for (int i = 0; i < vis_width; i++) {
                       if (!col_valid[i])
                         continue;
-                      p.fillRect(QRectF((double)(left + i),
+                      p.fillRect(QRectF(static_cast<double>((left + i)),
                                         y - annotation_height * 0.5, 1.0,
                                         annotation_height),
                                  dense_colors[col_color[i]]);
@@ -803,9 +803,9 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
               static long fcount = 0;
               fcount++;
               const uint64_t winL =
-                  (uint64_t)max((left + pixels_offset) * samples_per_pixel, 0.0);
+                  static_cast<uint64_t>(max((left + pixels_offset) * samples_per_pixel, 0.0));
               const uint64_t winR =
-                  (uint64_t)max((right + pixels_offset) * samples_per_pixel, 0.0);
+                  static_cast<uint64_t>(max((right + pixels_offset) * samples_per_pixel, 0.0));
               int true_hits = 0;
               row_data->for_each_index(0, row_data->get_annotation_size(),
                   [&](const Annotation &a, size_t) {
@@ -925,16 +925,16 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
 
         auto value_to_y = [&](float value) -> double {
           const float display_value = is_auto ? (value - value_center) : value;
-          return (double)(mid_y - display_value * scale_factor);
+          return static_cast<double>((mid_y - display_value * scale_factor));
         };
 
         auto flush_col = [&](int px) {
           if (!col_has || px < left || px > right)
             return;
-          line_points.emplace_back((double)px, value_to_y(col_last));
+          line_points.emplace_back(static_cast<double>(px), value_to_y(col_last));
           if (col_max > col_min) {
-            envelope_points.emplace_back((double)px, value_to_y(col_min));
-            envelope_points.emplace_back((double)px, value_to_y(col_max));
+            envelope_points.emplace_back(static_cast<double>(px), value_to_y(col_min));
+            envelope_points.emplace_back(static_cast<double>(px), value_to_y(col_max));
           }
           col_has = false;
         };
@@ -1054,9 +1054,9 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
                                   size_t base_colour, double min_annWidth,
                                   QColor fore, QColor back) {
   const double start =
-      max(a.start_sample() / samples_per_pixel - pixels_offset, (double)left);
+      max(a.start_sample() / samples_per_pixel - pixels_offset, static_cast<double>(left));
   const double end =
-      min(a.end_sample() / samples_per_pixel - pixels_offset, (double)right);
+      min(a.end_sample() / samples_per_pixel - pixels_offset, static_cast<double>(right));
 
   const size_t colour = ((base_colour + a.type()) % MaxAnnType) % 16;
   const QColor fill = getAnnColor(colour);
@@ -1081,7 +1081,7 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
   // hidden. (Out-of-clip culling above is retained.)
 
   if (_decoder_stack->get_mark_index() ==
-      (int64_t)(a.start_sample() + a.end_sample()) / 2) {
+      static_cast<int64_t>((a.start_sample() + a.end_sample())) / 2) {
     p.setPen(_view->theme_blue());
     int xpos = (start + end) / 2;
     int ypos = get_y() + _totalHeight * 0.5 + 1;
@@ -1149,7 +1149,7 @@ void DecodeTrace::draw_annotation(const pv::data::decode::Annotation &a,
               a.end_sample() / samples_per_pixel - pixels_offset;
           int mark_end_int = (mark_end > 20000.0 || mark_end < -20000.0)
                                  ? start
-                                 : (int)mark_end;
+                                 : static_cast<int>(mark_end);
 
           if (_view) {
 for (auto &s : _view->get_own_signals()) {
@@ -1205,7 +1205,7 @@ void DecodeTrace::draw_instant(const pv::data::decode::Annotation &a,
       a.annotations(ann_fmt).empty() ? QString() : a.annotations(ann_fmt).back();
   //	const double w = min((double)p.boundingRect(QRectF(), 0, text).width(),
   //		0.0) + h;
-  const double w = min(min_annWidth, (double)h);
+  const double w = min(min_annWidth, static_cast<double>(h));
   const QRectF rect(x - w / 2, y - h * 0.5, w, h);
 
   // p.setPen(outline);

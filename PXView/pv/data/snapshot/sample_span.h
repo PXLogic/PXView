@@ -124,19 +124,19 @@ struct SampleSpan {
     uint64_t bytes() const {
         if (contiguous_samples == 0) return 0;
         if (bits_per_sample == 1) return (contiguous_samples + 7) / 8;
-        return (contiguous_samples - 1) * (uint64_t)stride + unit_bytes;
+        return (contiguous_samples - 1) * static_cast<uint64_t>(stride) + unit_bytes;
     }
 
     // 样本 s 相对 data 的字节偏移。
     // 前提：s ∈ [start_sample, end_sample())。
     uint64_t byte_offset_of(uint64_t s) const {
         const uint64_t rel = s - start_sample;
-        return is_bit_packed() ? rel / 8 : rel * (uint64_t)stride;
+        return is_bit_packed() ? rel / 8 : rel * static_cast<uint64_t>(stride);
     }
 
     // 位打包时样本 s 在对应字节内的位掩码。
     uint8_t bit_mask_of(uint64_t s) const {
-        return (uint8_t)(1u << ((s - start_sample) % 8));
+        return static_cast<uint8_t>((1u << ((s - start_sample) % 8)));
     }
 
     // 位打包时取样本 s 的电平。常量块直接返回 constant_bit。
@@ -169,12 +169,12 @@ struct SampleSpan {
         if (is_float && unit_bytes == sizeof(float)) {
             float f;
             std::memcpy(&f, p, sizeof(float));
-            return (double)f;
+            return static_cast<double>(f);
         }
         uint64_t iv = 0;
         for (uint32_t b = 0; b < unit_bytes; b++)
-            iv |= ((uint64_t)p[b]) << (b * 8);
-        return (double)iv;
+            iv |= (static_cast<uint64_t>(p[b])) << (b * 8);
+        return static_cast<double>(iv);
     }
 };
 

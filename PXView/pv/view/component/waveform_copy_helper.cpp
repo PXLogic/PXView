@@ -74,7 +74,7 @@ QString WaveformCopyHelper::format_signal(LogicSignal *signal, uint64_t start, u
     if (!snapshot)
         return QString();
 
-    double sample_rate = (double)snapshot->samplerate();
+    double sample_rate = static_cast<double>(snapshot->samplerate());
     if (sample_rate <= 0)
         return QString();
 
@@ -117,8 +117,8 @@ QString WaveformCopyHelper::format_signal(LogicSignal *signal, uint64_t start, u
         else
             segment_end = current;
 
-        double t_start = (double)segment_start / sample_rate;
-        double duration = (double)(segment_end - segment_start) / sample_rate;
+        double t_start = static_cast<double>(segment_start) / sample_rate;
+        double duration = static_cast<double>((segment_end - segment_start)) / sample_rate;
 
         result += format_time_seconds(t_start) + ", " +
                   (level ? high_label : low_label) + ", " +
@@ -146,7 +146,7 @@ QString WaveformCopyHelper::format_signals(const std::vector<LogicSignal*> &sigs
         if (s && s->data()) {
             if (!any_snapshot)
                 any_snapshot = s->data();
-            sample_rate = (double)s->data()->samplerate();
+            sample_rate = static_cast<double>(s->data()->samplerate());
             if (sample_rate > 0)
                 break;
         }
@@ -178,7 +178,7 @@ QString WaveformCopyHelper::format_signals(const std::vector<LogicSignal*> &sigs
         if (!snapshot)
             continue;
 
-        double sr = (double)snapshot->samplerate();
+        double sr = static_cast<double>(snapshot->samplerate());
         if (sr <= 0)
             continue;
 
@@ -202,8 +202,8 @@ QString WaveformCopyHelper::format_signals(const std::vector<LogicSignal*> &sigs
             else
                 segment_end = current;
 
-            double t_start = (double)segment_start / sr;
-            double duration = (double)(segment_end - segment_start) / sr;
+            double t_start = static_cast<double>(segment_start) / sr;
+            double duration = static_cast<double>((segment_end - segment_start)) / sr;
 
             result += format_time_seconds(t_start) + ", " +
                       name + ", " +
@@ -229,7 +229,7 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
     if (!stack)
         return QString();
 
-    double sample_rate = (double)stack->sample_rate();
+    double sample_rate = static_cast<double>(stack->sample_rate());
     if (sample_rate <= 0)
         return QString();
 
@@ -283,7 +283,7 @@ QString WaveformCopyHelper::format_decoder_annotations(DecodeTrace *dt, uint64_t
             if (!ann)
                 continue;
 
-            double ts = (double)ann->start_sample() / sample_rate;
+            double ts = static_cast<double>(ann->start_sample()) / sample_rate;
             QString text =
                 pick_annotation_text(ann->annotations(stack->protocol_format()));
 
@@ -604,7 +604,7 @@ bool WaveformCopyHelper::export_decoder_audio_wav(DecodeTrace *dt,
     if (!cfg.mix.empty())
         numChannels = std::max(1, std::min(cfg.output_channels, 8));
     else
-        numChannels = std::max(1, std::min((int)cfg.channel_indices.size(), 8));
+        numChannels = std::max(1, std::min(static_cast<int>(cfg.channel_indices.size()), 8));
 
     const int bitsPerSample = cfg.bits;
     const int blockAlign = numChannels * (bitsPerSample / 8);
@@ -651,7 +651,7 @@ bool WaveformCopyHelper::export_decoder_audio_wav(DecodeTrace *dt,
                     for (const auto &ad : analog_data) {
                         if (ad && ad->channel() == row.channel) {
                             mixed += ad->get_value_at(static_cast<uint64_t>(i))
-                                     * row.outputs[(size_t)out];
+                                     * row.outputs[static_cast<size_t>(out)];
                             break;
                         }
                     }
@@ -664,8 +664,8 @@ bool WaveformCopyHelper::export_decoder_audio_wav(DecodeTrace *dt,
         for (size_t i = 0; i < totalSamples; ++i) {
             for (int c = 0; c < numChannels; ++c) {
                 float val = 0.0f;
-                if ((size_t)c < cfg.channel_indices.size()) {
-                    int ch_idx = cfg.channel_indices[(size_t)c];
+                if (static_cast<size_t>(c) < cfg.channel_indices.size()) {
+                    int ch_idx = cfg.channel_indices[static_cast<size_t>(c)];
                     for (const auto &ad : analog_data) {
                         if (ad && ad->channel() == ch_idx) {
                             val = ad->get_value_at(static_cast<uint64_t>(i));

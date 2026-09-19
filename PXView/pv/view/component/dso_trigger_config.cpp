@@ -45,10 +45,10 @@ double DsoTriggerConfig::get_trig_vrate() {
      * value2ratio() which clamps to [0,1] and prevents the cursor
      * from going above 0V (positive voltage area). */
     const double mid = _signal->ratio2value(0.5);
-    const double range = (double)_signal->_ref_max - (double)_signal->_ref_min;
+    const double range = static_cast<double>(_signal->_ref_max) - static_cast<double>(_signal->_ref_min);
     if (range <= 0)
       return _signal->get_zero_ratio();
-    const double delta_ratio = ((double)_signal->_trig_value - mid) / range;
+    const double delta_ratio = (static_cast<double>(_signal->_trig_value) - mid) / range;
     return delta_ratio + _signal->get_zero_ratio();
   } else {
     return _signal->value2ratio(_signal->_trig_value);
@@ -87,7 +87,7 @@ void DsoTriggerConfig::set_trig_ratio(double ratio, bool delta_change) {
   // Task 7.2: 写回 Core SignalModel。不广播：本方法亦被 mainwindow JSON
   // 恢复路径 (mainwindow.cpp restore_session) 调用，广播会触发 rebuild 循环。
   if (model) {
-    model->set_trig_value((double)_signal->_trig_value);
+    model->set_trig_value(static_cast<double>(_signal->_trig_value));
   }
   /* Send the trigger level to the driver immediately so that real-time
    * trigger detection (e.g. demo_send_dso_packet) uses the updated
@@ -100,7 +100,7 @@ void DsoTriggerConfig::set_trig_ratio(double ratio, bool delta_change) {
       DeviceAgent *device = _signal->_data_source->device();
       if (device && device->have_instance()) {
         device->set_config_int32(SR_CONF_TRIGGER_VALUE,
-                                 (int)_signal->_trig_value, probe, nullptr);
+                                 static_cast<int>(_signal->_trig_value), probe, nullptr);
       }
     }
   }

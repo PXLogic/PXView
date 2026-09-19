@@ -260,9 +260,9 @@ void SearchPatternInput::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         int cellTop = kPadding + kLabelHeight;
-        int y = (int)event->position().y();
+        int y = static_cast<int>(event->position().y());
         if (y >= cellTop && y < cellTop + kCellHeight) {
-            _cursor_pos = charIndexAt((int)event->position().x());
+            _cursor_pos = charIndexAt(static_cast<int>(event->position().x()));
         }
         _has_focus = true;
         setFocus(Qt::MouseFocusReason);

@@ -17,7 +17,10 @@ SessionManager::SessionManager()
 SessionManager* SessionManager::instance()
 {
     if (!_instance)
-        _instance = std::make_unique<SessionManager>();
+            // NOTE: deliberately NOT std::make_unique — SessionManager's constructor is
+    // private, and make_unique is a free function template, so it has no access
+    // even when called from inside the class.
+    _instance = std::unique_ptr<SessionManager>(new SessionManager());
     return _instance.get();
 }
 
@@ -99,12 +102,12 @@ TabContext* SessionManager::get_active_context()
 
 int SessionManager::context_count()
 {
-    return (int)_contexts.size();
+    return static_cast<int>(_contexts.size());
 }
 
 TabContext* SessionManager::context_at(int index)
 {
-    if (index >= 0 && index < (int)_contexts.size())
+    if (index >= 0 && index < static_cast<int>(_contexts.size()))
         return _contexts[index].get();
     return nullptr;
 }
@@ -119,7 +122,7 @@ void SessionManager::remove_from_main_list(TabContext *ctx)
 
 void SessionManager::move_context(int from, int to)
 {
-    if (from < 0 || from >= (int)_contexts.size() || to < 0 || to >= (int)_contexts.size())
+    if (from < 0 || from >= static_cast<int>(_contexts.size()) || to < 0 || to >= static_cast<int>(_contexts.size()))
         return;
     if (from == to)
         return;

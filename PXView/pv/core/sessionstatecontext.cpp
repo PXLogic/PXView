@@ -159,7 +159,7 @@ SessionStateContext::decode_traces(data::SessionDocument *doc) {
 std::shared_ptr<data::DecoderStack>
 SessionStateContext::get_decoder_trace(int index, data::SessionDocument *doc) {
   auto &traces = decode_traces(doc);
-  if (index >= 0 && index < (int)traces.size()) {
+  if (index >= 0 && index < static_cast<int>(traces.size())) {
     return traces[index];
   }
   pxv_warn("SessionStateContext::get_decoder_trace_by_index: index out of range");
@@ -296,11 +296,11 @@ _buffers->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplera
         // 三者都是 core::convert_voltage() 的输入，一起冻结在快照上，使
         // 读取路径（MCP get_samples / export_binary）能就地算出物理量。
         _buffers->capture_data()->get_dso()->set_measure_voltage_factor(
-            (uint64_t)m->vdiv_mv(), m->index());
+            static_cast<uint64_t>(m->vdiv_mv()), m->index());
         _buffers->capture_data()->get_dso()->set_measure_probe_factor(
-            (uint64_t)m->vfactor(), m->index());
+            static_cast<uint64_t>(m->vfactor()), m->index());
         _buffers->capture_data()->get_dso()->set_data_scale(
-            (float)core::kAdcScale, m->index());
+            static_cast<float>(core::kAdcScale), m->index());
       }
     }
   }
@@ -364,7 +364,7 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
   const int trig_pos = cfg.trigger_pos();
   if (trig_pos >= 0 && trig_pos <= 100) {
     if (!_device_agent.set_config_uint64(SR_CONF_CAPTURE_RATIO,
-                                         (uint64_t)trig_pos)) {
+                                         static_cast<uint64_t>(trig_pos))) {
       pxv_warn("sync_trigger_to_libsigrok: set SR_CONF_CAPTURE_RATIO=%d failed",
                trig_pos);
     } else {
@@ -378,17 +378,17 @@ void SessionStateContext::sync_trigger_to_libsigrok(bool disable_trigger) {
   // The old fork used ds_trigger_* C API for this; upstream libsigrok
   // has no equivalent, so these PXView-local keys bridge the gap.
   _device_agent.set_config_byte(SR_CONF_TRIGGER_ADV_MODE,
-                                (uint8_t)cfg.mode());
+                                static_cast<uint8_t>(cfg.mode()));
   _device_agent.set_config_bool(SR_CONF_TRIGGER_ADV_ENABLE,
                                 cfg.adv_enabled());
   _device_agent.set_config_byte(SR_CONF_TRIGGER_ADV_STAGES,
-                                (uint8_t)cfg.stage_count());
+                                static_cast<uint8_t>(cfg.stage_count()));
   {
     QJsonDocument doc(cfg.to_json());
     std::string json_str = doc.toJson(QJsonDocument::Compact).toStdString();
     _device_agent.set_config_string(SR_CONF_TRIGGER_ADV_CONFIG, json_str.c_str());
     pxv_info("sync_trigger_to_libsigrok: adv trigger synced (mode=%d, enable=%d, stages=%d, config_len=%zu)",
-             (int)cfg.mode(), (int)cfg.adv_enabled(), cfg.stage_count(),
+             static_cast<int>(cfg.mode()), static_cast<int>(cfg.adv_enabled()), cfg.stage_count(),
              json_str.size());
   }
 

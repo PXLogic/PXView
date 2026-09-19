@@ -162,7 +162,7 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
     _channel_num = 0; // The enabled and disabled channels count.
 
     for (const GSList *l = channels; l; l = l->next) {
-        sr_channel *const probe = (sr_channel*)l->data;
+        sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
         // TODO: data of disabled channels should not be captured.
         if (probe->type == SR_CHANNEL_ANALOG) {
@@ -199,7 +199,7 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
                     if (envelop_count == 0)
                         break;
 
-                    _envelope_levels[i][level].samples = (EnvelopeSample*)malloc(envelop_count * sizeof(EnvelopeSample));
+                    _envelope_levels[i][level].samples = reinterpret_cast<EnvelopeSample*>(malloc(envelop_count * sizeof(EnvelopeSample)));
                     
                     if (!_envelope_levels[i][level].samples) {
                         isOk = false;
@@ -222,7 +222,7 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
         _enabled_channel_indexs.clear();
 
         for (const GSList *l = channels; l; l = l->next) {
-            sr_channel *const probe = (sr_channel*)l->data;
+            sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
             // TODO: get the enabled channel index.
             if (probe->type == SR_CHANNEL_ANALOG) {
@@ -330,7 +330,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
     std::vector<int> pkt_orders;
     pkt_orders.reserve(pkt_channels);
     for (GSList *l = analog.meaning->channels; l; l = l->next) {
-        sr_channel *ch = (sr_channel*)l->data;
+        sr_channel *ch = reinterpret_cast<sr_channel*>(l->data);
         if (!ch) {
             pkt_orders.push_back(-1);
             continue;
@@ -342,7 +342,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
         pkt_orders.push_back(order);
     }
 
-    const uint8_t *src = (const uint8_t*)analog.data;
+    const uint8_t *src = reinterpret_cast<const uint8_t*>(analog.data);
     const uint32_t src_stride = pkt_channels * _unit_bytes;
     const uint32_t dst_stride = _channel_num * _unit_bytes;
     const uint64_t samples = analog.num_samples;
@@ -357,7 +357,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
     // float 数据范围跟踪（参考 PulseView AnalogSegment::min_value_/max_value_）
     if (_is_float && src) {
         for (uint32_t pc = 0; pc < pkt_channels; pc++) {
-            const float *src_float = (const float*)(src + pc * _unit_bytes);
+            const float *src_float = reinterpret_cast<const float*>((src + pc * _unit_bytes));
             for (uint64_t i = 0; i < samples; i++) {
                 float v = src_float[i * pkt_channels];
                 if (!_float_range_valid) {
@@ -376,15 +376,15 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
     bool dbg_pkt = (s_pkt_log_cnt++ < 40);
     for (uint32_t pc = 0; pc < pkt_channels; pc++) {
         int order = pkt_orders[pc];
-        if (order < 0 || order >= (int)_channel_num) continue;
-        if (order >= (int)_per_ch_ring_offset.size()) continue;
+        if (order < 0 || order >= static_cast<int>(_channel_num)) continue;
+        if (order >= static_cast<int>(_per_ch_ring_offset.size())) continue;
 
         uint64_t ch_ring = _per_ch_ring_offset[order];
         const uint8_t *src_ch = src + pc * _unit_bytes;
 
         // 调试日志：记录前几个样本值，验证数据正确性
         if (dbg_pkt && _is_float && samples > 0) {
-            const float *fv = (const float*)(src_ch);
+            const float *fv = reinterpret_cast<const float*>((src_ch));
             pxv_info("ANALOG_WRITE ch_order=%d samples=%llu ch_ring_before=%llu "
                      "total=%llu v[0]=%.4f v[1]=%.4f v[2]=%.4f v[last]=%.4f",
                      order, (unsigned long long)samples,
@@ -399,7 +399,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
             if (ch_ring >= _total_sample_count) {
                 ch_ring = 0;
             }
-            uint8_t *dst = (uint8_t*)_data + ch_ring * dst_stride + order * _unit_bytes;
+            uint8_t *dst = reinterpret_cast<uint8_t*>(_data) + ch_ring * dst_stride + order * _unit_bytes;
             memcpy(dst, src_ch + i * src_stride, _unit_bytes);
             ch_ring++;
         }
@@ -441,8 +441,8 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
     // float 数据范围跟踪（参考 PulseView AnalogSegment::min_value_/max_value_）
     // 全通道 interleaved 路径：data 格式 [s0_ch0][s0_ch1]...[s1_ch0]...
     if (_is_float && data && samples > 0) {
-        const float *fdata = (const float*)data;
-        const uint32_t total_floats = (uint32_t)(samples * _channel_num);
+        const float *fdata = reinterpret_cast<const float*>(data);
+        const uint32_t total_floats = static_cast<uint32_t>((samples * _channel_num));
         update_float_range(fdata, total_floats);
     }
 
@@ -453,14 +453,14 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             _sample_count = _total_sample_count;
 
         if (_ring_sample_count + samples >= _total_sample_count) {
-            memcpy((uint8_t*)_data + _ring_sample_count * bytes_per_sample,
+            memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
                 data, (_total_sample_count - _ring_sample_count) * bytes_per_sample);
-            data = (uint8_t*)data + (_total_sample_count - _ring_sample_count) * bytes_per_sample;
+            data = reinterpret_cast<uint8_t*>(data) + (_total_sample_count - _ring_sample_count) * bytes_per_sample;
             _ring_sample_count = (samples + _ring_sample_count - _total_sample_count) % _total_sample_count;
-            memcpy((uint8_t*)_data,
+            memcpy(reinterpret_cast<uint8_t*>(_data),
                 data, _ring_sample_count * bytes_per_sample);
         } else {
-            memcpy((uint8_t*)_data + _ring_sample_count * bytes_per_sample,
+            memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
                 data, samples * bytes_per_sample);
             _ring_sample_count += samples;
         }
@@ -470,9 +470,9 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             if (_unit_pitch == 0) {
                 if (_sample_count < _total_sample_count)
                     _sample_count++;
-                memcpy((uint8_t*)_data + _ring_sample_count * bytes_per_sample,
+                memcpy(reinterpret_cast<uint8_t*>(_data) + _ring_sample_count * bytes_per_sample,
                     data, bytes_per_sample);
-                data = (uint8_t*)data + bytes_per_sample*pitch;
+                data = reinterpret_cast<uint8_t*>(data) + bytes_per_sample*pitch;
                 _ring_sample_count = (_ring_sample_count + 1) % _total_sample_count;
                 _unit_pitch = pitch;
             }
@@ -483,13 +483,13 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
 
 const uint8_t* AnalogSnapshot::get_samples(int64_t start_sample)
 {
-	if (start_sample < 0 || start_sample >= (int64_t)get_sample_count()) {
+	if (start_sample < 0 || start_sample >= static_cast<int64_t>(get_sample_count())) {
 		pxv_warn("AnalogSnapshot::get_samples: start_sample %lld out of range (count=%llu)",
-		         (long long)start_sample, (unsigned long long)get_sample_count());
+		         static_cast<long long>(start_sample), (unsigned long long)get_sample_count());
 		return nullptr;
 	}
 
-    return (uint8_t*)_data + start_sample * _unit_bytes * _channel_num;
+    return reinterpret_cast<uint8_t*>(_data) + start_sample * _unit_bytes * _channel_num;
 }
 
 void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
@@ -497,7 +497,7 @@ void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
 {
     if (count < 0) {
         pxv_warn("AnalogSnapshot::get_envelope_section: negative count %lld, aborting",
-                 (long long)count);
+                 static_cast<long long>(count));
         s.length = 0;
         return;
     }
@@ -508,8 +508,8 @@ void AnalogSnapshot::get_envelope_section(EnvelopeSection &s,
         return;
     }
 
-    const unsigned int min_level = max((int)floorf(logf(min_length) /
-            LogEnvelopeScaleFactor) - 1, 0);
+    const unsigned int min_level = max(static_cast<int>(floorf(logf(min_length) /
+            LogEnvelopeScaleFactor)) - 1, 0);
     const unsigned int scale_power = (min_level + 1) * EnvelopeScalePower;
 	start >>= scale_power;
 
@@ -554,7 +554,7 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
     }
 
     int i;
-    for (i = 0; i < (int)_channel_num; i++) {
+    for (i = 0; i < static_cast<int>(_channel_num); i++) {
         Envelope &e0 = _envelope_levels[i][0];
         uint64_t prev_length;
         EnvelopeSample *dest_ptr;
@@ -605,7 +605,7 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
         // （数据在非 loop 模式下线性写入 _data，无需环形回绕）
         const uint64_t start_sample = prev_length * EnvelopeScaleFactor;
         const uint64_t end_sample = e0.length * EnvelopeScaleFactor;
-        uint8_t *src_ptr = (uint8_t*)_data +
+        uint8_t *src_ptr = reinterpret_cast<uint8_t*>(_data) +
                     (start_sample * _channel_num + i) * _unit_bytes;
 
         // 调试日志：记录前 2 个 envelope 样本的详细读取值
@@ -626,27 +626,27 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
 
                 // 调试日志：记录前 2 个 envelope 样本读取的 16 个 float 值
                 if (dbg_env_detail && (j == start_sample || j == start_sample + EnvelopeScaleFactor)) {
-                    uint8_t *dbg_ptr = (uint8_t*)_data +
+                    uint8_t *dbg_ptr = reinterpret_cast<uint8_t*>(_data) +
                         (j * _channel_num + i) * _unit_bytes;
                     pxv_info("ENV_READ ch=%d env_idx=%llu src_offset=%llu "
                              "v[0]=%.4f v[1]=%.4f v[5]=%.4f v[10]=%.4f v[15]=%.4f "
                              "min=%.4f max=%.4f",
                              i, (unsigned long long)(j / EnvelopeScaleFactor),
                              (unsigned long long)((j * _channel_num + i) * _unit_bytes),
-                             *(float*)dbg_ptr,
-                             *(float*)(dbg_ptr + _channel_num * _unit_bytes),
-                             *(float*)(dbg_ptr + 5 * _channel_num * _unit_bytes),
-                             *(float*)(dbg_ptr + 10 * _channel_num * _unit_bytes),
-                             *(float*)(dbg_ptr + 15 * _channel_num * _unit_bytes),
+                             *reinterpret_cast<float*>(dbg_ptr),
+                             *reinterpret_cast<float*>((dbg_ptr + _channel_num * _unit_bytes)),
+                             *reinterpret_cast<float*>((dbg_ptr + 5 * _channel_num * _unit_bytes)),
+                             *reinterpret_cast<float*>((dbg_ptr + 10 * _channel_num * _unit_bytes)),
+                             *reinterpret_cast<float*>((dbg_ptr + 15 * _channel_num * _unit_bytes)),
                              sub_sample.min, sub_sample.max);
                 }
             } else {
-                sub_sample.min = (float)(*src_ptr);
+                sub_sample.min = static_cast<float>((*src_ptr));
                 sub_sample.max = sub_sample.min;
                 src_ptr += _channel_num * _unit_bytes;
                 for (int k = 1; k < EnvelopeScaleFactor; k++) {
-                    sub_sample.min = min(sub_sample.min, (float)(*src_ptr));
-                    sub_sample.max = max(sub_sample.max, (float)(*src_ptr));
+                    sub_sample.min = min(sub_sample.min, static_cast<float>((*src_ptr)));
+                    sub_sample.max = max(sub_sample.max, static_cast<float>((*src_ptr)));
                     src_ptr += _channel_num * _unit_bytes;
                 }
             }
@@ -730,18 +730,18 @@ SampleSpan AnalogSnapshot::span(uint32_t channel, uint64_t start,
     if (_data == nullptr) return s;
     if (start >= _sample_count) return s;
 
-    const int order = get_ch_order((int)channel);
-    if (order < 0 || (unsigned int)order >= _channel_num) return s;
+    const int order = get_ch_order(static_cast<int>(channel));
+    if (order < 0 || static_cast<unsigned int>(order) >= _channel_num) return s;
 
-    const uint64_t stride = (uint64_t)_unit_bytes * _channel_num;
-    const uint8_t *const group = (const uint8_t *)_data + start * stride;
+    const uint64_t stride = static_cast<uint64_t>(_unit_bytes) * _channel_num;
+    const uint8_t *const group = reinterpret_cast<const uint8_t*>(_data) + start * stride;
     s.group_base = group;
-    s.data = group + (uint64_t)order * _unit_bytes;
+    s.data = group + static_cast<uint64_t>(order) * _unit_bytes;
     s.start_sample = start;
     s.contiguous_samples = _sample_count - start;
     s.unit_bytes = _unit_bytes;
-    s.stride = (uint32_t)stride;
-    s.bits_per_sample = (uint8_t)(_unit_bytes * 8);
+    s.stride = static_cast<uint32_t>(stride);
+    s.bits_per_sample = static_cast<uint8_t>((_unit_bytes * 8));
     return s;
 }
 

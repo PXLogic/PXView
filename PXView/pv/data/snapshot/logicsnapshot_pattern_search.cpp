@@ -66,8 +66,8 @@ bool LogicSnapshotPatternSearch::pattern_search(int64_t start, int64_t end,
     // Clamp the search window to the committed range.
     if (start < 0)
       start = 0;
-    if (end >= (int64_t)sample_count)
-      end = (int64_t)sample_count - 1;
+    if (end >= static_cast<int64_t>(sample_count))
+      end = static_cast<int64_t>(sample_count) - 1;
     // Exclude an in-flight edit batch. `pattern` is read-only in
     // pattern_search_self, and `index` is advanced by reference, so a retry
     // just has to put the search cursor back.
@@ -135,7 +135,7 @@ bool LogicSnapshotPatternSearch::pattern_search_self(int64_t start, int64_t end,
   // get first edge values
   if (bEdgeFlag) {
     for (int i = 0; i < count; i++) {
-      lstValues[i] = (char)_host->get_sample_self(index, chanIndexs[i]);
+      lstValues[i] = static_cast<char>(_host->get_sample_self(index, chanIndexs[i]));
     }
     index += step;
   }
@@ -151,7 +151,7 @@ bool LogicSnapshotPatternSearch::pattern_search_self(int64_t start, int64_t end,
     macthed = 0;
 
     for (int i = 0; i < count; i++) {
-      val = (char)_host->get_sample_self(index, chanIndexs[i]);
+      val = static_cast<char>(_host->get_sample_self(index, chanIndexs[i]));
 
       if (flagList[i] == '0') {
         macthed += !val;

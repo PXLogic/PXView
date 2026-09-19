@@ -61,7 +61,7 @@ struct ViewContext
     inline double index2pixel(uint64_t index, bool has_hoff = false) const
     {
         const double spp = samplerate * scale;
-        double px = (double)index / spp - (double)offset;
+        double px = static_cast<double>(index) / spp - static_cast<double>(offset);
         if (has_hoff)
             px += trig_hoff / spp;
         return px;
@@ -72,24 +72,24 @@ struct ViewContext
     inline uint64_t pixel2index(double pixel) const
     {
         const double spp = samplerate * scale;
-        const double idx = (pixel + (double)offset) * spp - trig_hoff;
+        const double idx = (pixel + static_cast<double>(offset)) * spp - trig_hoff;
         if (idx < 0)
             return 0;
-        return (uint64_t)std::round(idx);
+        return static_cast<uint64_t>(std::round(idx));
     }
 
     /// 1.5.8 measure: 隐式 floor, 无 round
     /// idx = (uint64_t)(samplerate * scale * (offset + pixel))
     inline uint64_t measure_pixel2index(double pixel) const
     {
-        const double pos = samplerate * scale * ((double)offset + pixel);
-        return (uint64_t)pos;
+        const double pos = samplerate * scale * (static_cast<double>(offset) + pixel);
+        return static_cast<uint64_t>(pos);
     }
 
     /// 1.5.8 edge/is_by_edge: 浮点 pos (不截断)
     inline double edge_pos(double pixel) const
     {
-        return samplerate * scale * ((double)offset + pixel);
+        return samplerate * scale * (static_cast<double>(offset) + pixel);
     }
 
     /// 公式B: waveform column — RLE get_display_edges 使用
@@ -97,8 +97,8 @@ struct ViewContext
     inline double waveform_col(uint64_t index) const
     {
         const double spp = samplerate * scale;
-        const double float_start = (double)offset * spp;
-        return std::floor((double)((int64_t)index - float_start) / spp);
+        const double float_start = static_cast<double>(offset) * spp;
+        return std::floor(static_cast<double>(((int64_t)index - float_start)) / spp);
     }
 
     /// 跳变样本的精确像素位置(公式A 浮点,不截断)。
@@ -114,9 +114,9 @@ struct ViewContext
     inline void sample_col_range(double x, uint64_t &s0, uint64_t &s1) const
     {
         const double spp = samplerate * scale;
-        const double float_start = (double)offset * spp;
-        s0 = (uint64_t)(float_start + x * spp);
-        s1 = (uint64_t)(float_start + (x + 1) * spp);
+        const double float_start = static_cast<double>(offset) * spp;
+        s0 = static_cast<uint64_t>((float_start + x * spp));
+        s1 = static_cast<uint64_t>((float_start + (x + 1) * spp));
         if (s1 <= s0)
             s1 = s0 + 1;
     }

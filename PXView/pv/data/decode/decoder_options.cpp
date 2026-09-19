@@ -111,7 +111,7 @@ GVariant *get_decoder_option_value(Decoder *dec, const char *id)
 		for (GSList *l = dec->decoder()->options; l; l = l->next)
 		{
 			const srd_decoder_option *const opt =
-				(srd_decoder_option*)l->data;
+				reinterpret_cast<srd_decoder_option*>(l->data);
 			if (strcmp(opt->id, id) == 0) {
 				val = opt->def;
 				break;

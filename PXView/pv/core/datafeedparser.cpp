@@ -35,7 +35,7 @@ void DataFeedParser::feed_in_meta(const sr_dev_inst *sdi,
   (void)sdi;
 
   for (const GSList *l = meta.config; l; l = l->next) {
-    const sr_config *const src = (const sr_config *)l->data;
+    const sr_config *const src = reinterpret_cast<const sr_config*>(l->data);
     switch (src->key) {
     case SR_CONF_SAMPLERATE:
       /// @todo handle samplerate changes
@@ -342,7 +342,7 @@ void DataFeedParser::feed_in_dso(const sr_datafeed_dso &o) {
     // replacement for the fork ds_trigger_pos.real_pos field that the
     // original DSView used in its feed_in_trigger DSO else-branch.
     uint64_t abs_trig_pos = pre_sample_count +
-                            (o.trig_offset > 0 ? (uint64_t)o.trig_offset : 0);
+                            (o.trig_offset > 0 ? static_cast<uint64_t>(o.trig_offset) : 0);
     cd->_trig_pos = abs_trig_pos;
 
     // Update trig position for current view (DSO mode has
@@ -412,7 +412,7 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       pxv_err("SR_DF_META packet with NULL payload");
       break;
     }
-    feed_in_meta(sdi, *(const sr_datafeed_meta *)packet->payload);
+    feed_in_meta(sdi, *reinterpret_cast<const sr_datafeed_meta*>(packet->payload));
     break;
 
   case SR_DF_TRIGGER:
@@ -426,7 +426,7 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       pxv_err("SR_DF_LOGIC packet with NULL payload");
       break;
     }
-    feed_in_logic(*(const sr_datafeed_logic *)packet->payload);
+    feed_in_logic(*reinterpret_cast<const sr_datafeed_logic*>(packet->payload));
     break;
 
   case SR_DF_ANALOG:
@@ -434,7 +434,7 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       pxv_err("SR_DF_ANALOG packet with NULL payload");
       break;
     }
-    feed_in_analog(*(const sr_datafeed_analog *)packet->payload);
+    feed_in_analog(*reinterpret_cast<const sr_datafeed_analog*>(packet->payload));
     break;
 
   case SR_DF_DSO:
@@ -442,7 +442,7 @@ void DataFeedParser::data_feed_in(const struct sr_dev_inst *sdi,
       pxv_err("SR_DF_DSO packet with NULL payload");
       break;
     }
-    feed_in_dso(*(const sr_datafeed_dso *)packet->payload);
+    feed_in_dso(*reinterpret_cast<const sr_datafeed_dso*>(packet->payload));
     break;
 
   case SR_DF_END: {

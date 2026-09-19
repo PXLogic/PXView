@@ -161,7 +161,7 @@ DecoderOptions::DecoderOptions(std::shared_ptr<pv::data::DecoderStack> decoder_s
 	for (GSList *l = dec->options; l; l = l->next)
 	{ 
 		const srd_decoder_option *const opt =
-			(srd_decoder_option*)l->data;
+			reinterpret_cast<srd_decoder_option*>(l->data);
 
 		const bool is_tdm_fast = dec->id &&
 		    std::strcmp(dec->id, "tdm_audio_fast") == 0;
@@ -232,7 +232,7 @@ Property* DecoderOptions::bind_enum(
 {
     std::vector<std::pair<GVarPtr, QString> > values;
 	for (GSList *l = option->values; l; l = l->next) {
-		GVariant *const var = (GVariant*)l->data;
+		GVariant *const var = reinterpret_cast<GVariant*>(l->data);
 		if (!var) {
 			pxv_warn("%s", "DecoderOptions::bind_enum: var is nullptr, skipping");
 			continue;

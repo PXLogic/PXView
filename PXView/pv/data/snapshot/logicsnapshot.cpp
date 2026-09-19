@@ -87,7 +87,7 @@ struct PathDiagWindow {
         if (count % 50 == 0) {
             const double avg = sum_ms / 50.0;
             const double mbps = avg > 0
-                ? (double)payload_bytes / 1e6 / (avg / 1000.0) : 0.0;
+                ? static_cast<double>(payload_bytes) / 1e6 / (avg / 1000.0) : 0.0;
             pxv_info("[PathDiag] win#%llu (50 payloads): avg=%.2fms (%.0f MB/s) "
                      "max=%.1fms @#%llu | lockwait avg=%.2f max=%.2f | "
                      "write avg=%.2f max=%.2f | meta avg=%.2f max=%.2f",
@@ -114,9 +114,9 @@ const uint64_t LogicSnapshot::LevelMask[LogicSnapshot::ScaleLevel] = {
 };
 const uint64_t LogicSnapshot::LevelOffset[LogicSnapshot::ScaleLevel] = {
     0,
-    (uint64_t)pow(Scale, 3),
-    (uint64_t)pow(Scale, 3) + (uint64_t)pow(Scale, 2),
-    (uint64_t)pow(Scale, 3) + (uint64_t)pow(Scale, 2) + (uint64_t)pow(Scale, 1),
+    static_cast<uint64_t>(pow(Scale, 3)),
+    static_cast<uint64_t>(pow(Scale, 3)) + static_cast<uint64_t>(pow(Scale, 2)),
+    static_cast<uint64_t>(pow(Scale, 3)) + static_cast<uint64_t>(pow(Scale, 2)) + static_cast<uint64_t>(pow(Scale, 1)),
 };
 
 LogicSnapshot::LogicSnapshot() : Snapshot(1, 0, 0) {
@@ -206,7 +206,7 @@ void LogicSnapshot::free_data() {
   // because after reset() the allocator is null and the mmap region is unmapped.
   for (auto &iter : _ch_data) {
     for (auto &rn : iter) {
-      for (int k = 0; k < (int)Scale; k++) {
+      for (int k = 0; k < static_cast<int>(Scale); k++) {
         if (rn.lbp[k] != nullptr) {
           // If the pointer is NOT in the mmap region, it came from
           // LeafBlockPool — return it.
@@ -235,7 +235,7 @@ void LogicSnapshot::free_data() {
   if (_mmap_alloc && _mmap_alloc.use_count() > 1) {
     pxv_info("LogicSnapshot::free_data: mmap region handed off to %ld external "
              "reader(s) — mapping stays alive until they release",
-             (long)(_mmap_alloc.use_count() - 1));
+             static_cast<long>((_mmap_alloc.use_count() - 1)));
   }
   _mmap_alloc.reset();
   _mmap_geom_channel_num = 0;
@@ -371,7 +371,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
   _free_block_list.clear();
 
   for (const GSList *l = channels; l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (probe->type == SR_CHANNEL_LOGIC && probe->enabled) {
       channel_num++;
       if (!channel_changed) {
@@ -411,7 +411,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     _disk_cache_writer->drain_and_join();
     auto _drain_t1 = std::chrono::steady_clock::now();
     pxv_info("first_payload TIMING: drain_and_join=%lldms",
-      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_drain_t1 - _drain_t0).count());
+      static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(_drain_t1 - _drain_t0).count()));
 
     auto _free_t0 = std::chrono::steady_clock::now();
     // [OOM fix / capture boundary] The previous capture's decode thread may
@@ -423,7 +423,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     free_data();
     auto _free_t1 = std::chrono::steady_clock::now();
     pxv_info("first_payload TIMING: free_data=%lldms",
-      (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_free_t1 - _free_t0).count());
+      static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(_free_t1 - _free_t0).count()));
 
     _ch_index.clear();
 
@@ -437,7 +437,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     }
 
     for (const GSList *l = channels; l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
       if (probe->type == SR_CHANNEL_LOGIC && probe->enabled) {
         std::vector<struct RootNode> root_vector;
@@ -571,7 +571,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 
     const bool geom_match =
         _mmap_alloc &&
-        _mmap_geom_channel_num == (uint64_t)_channel_num &&
+        _mmap_geom_channel_num == static_cast<uint64_t>(_channel_num) &&
         _mmap_geom_max_blocks == want_blocks;
 
     _max_blocks_per_channel = want_blocks;
@@ -592,7 +592,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
                  (unsigned long long)_mmap_geom_channel_num, _channel_num,
                  (unsigned long long)_mmap_geom_max_blocks,
                  (unsigned long long)want_blocks,
-                 (long)(_mmap_alloc.use_count() - 1));
+                 static_cast<long>((_mmap_alloc.use_count() - 1)));
       }
 
       _mmap_alloc = std::make_shared<MmapAllocator>();
@@ -607,8 +607,8 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
                                             LeafBlockSpace, _max_blocks_per_channel, _channel_num);
       auto _mmap_t1 = std::chrono::steady_clock::now();
       pxv_info("first_payload TIMING: MmapAllocator::configure=%lldms (total_bytes=%llu, ok=%d)",
-        (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_mmap_t1 - _mmap_t0).count(),
-        (unsigned long long)total_bytes, (int)mmap_ok);
+        static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(_mmap_t1 - _mmap_t0).count()),
+        (unsigned long long)total_bytes, static_cast<int>(mmap_ok));
       if (!mmap_ok) {
           pxv_err("LogicSnapshot::first_payload: MmapAllocator configure failed! "
                  "Falling back to LeafBlockPool in-memory allocation.");
@@ -632,7 +632,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
           _mmap_alloc->wait_prefault_initial_blocks(4);
           auto _pf_t1 = std::chrono::steady_clock::now();
           pxv_info("first_payload TIMING: wait_prefault_initial_blocks(4)=%lldms",
-            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count());
+            static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count()));
       }
     } else {
 // Reusing existing MmapAllocator (geometry unchanged).
@@ -660,7 +660,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 // 因此**不引入世代化**。这里只保留可观测性：若复用时仍有上一代读者钉住本
 // region（use_count() > 1），记录一次告警，便于事后评估实际发生频率。
 // 进程内只告警一次，避免 repeat 模式下刷屏。
-const long external_readers = (long)(_mmap_alloc.use_count() - 1);
+const long external_readers = static_cast<long>((_mmap_alloc.use_count() - 1));
 _mmap_alloc->stop_prefault();
 if (external_readers > 0) {
   static std::atomic<bool> risk44_warned{false};
@@ -690,7 +690,7 @@ pxv_info("first_payload: reusing existing MmapAllocator (geometry unchanged, pre
 
   auto _fp_t1 = std::chrono::steady_clock::now();
   pxv_info("first_payload TIMING: total=%lldms (samplerate will be logged by caller)",
-    (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_fp_t1 - _fp_t0).count());
+    static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(_fp_t1 - _fp_t0).count()));
 }
 
 void LogicSnapshot::append_payload(const sr_datafeed_logic &logic) {
@@ -703,7 +703,7 @@ void LogicSnapshot::append_payload(const sr_datafeed_logic &logic) {
   //     to the async worker which calls append_payload_impl.
   // The async worker preserves format and does the actual chunk-tree write
   // under _mutex, with 256MB backpressure between feed thread and disk write.
-  _disk_cache_writer->enqueue((const uint8_t *)logic.data, logic.length,
+  _disk_cache_writer->enqueue(reinterpret_cast<const uint8_t*>(logic.data), logic.length,
                               logic.format);
 }
 
@@ -795,7 +795,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
           std::chrono::steady_clock::now() - t0).count();
       w.add(++seq, bytes, total, lw, wr);
     }
-  } pd_fin{pd_win, pd_seq, (uint64_t)logic.length, pd_entry, pd_lockwait_ms, pd_write_ms};
+  } pd_fin{pd_win, pd_seq, static_cast<uint64_t>(logic.length), pd_entry, pd_lockwait_ms, pd_write_ms};
 
   // Segmented locking: metadata ops (allocate_block, _sample_count/
   // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
@@ -858,7 +858,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   uint64_t index1 = (align_sample_count / LeafBlockSamples) % RootScale;
   // Derive _byte_fraction from the persisted ring position (robust against
   // loop-mode state transitions).
-  _byte_fraction = (uint8_t)(offset % 8);
+  _byte_fraction = static_cast<uint8_t>((offset % 8));
 
   if (index0 >= _ch_data[0].size()) {
     pxv_err("append_payload_impl: index0 %llu out of range %zu",
@@ -901,7 +901,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   auto advance_leaf_block = [&]() -> bool {
     if (offset != LeafBlockSamples) return true;
     for (unsigned int ch = 0; ch < _channel_num; ch++)
-      calc_mipmap(ch, (uint8_t)index0, (uint8_t)index1, LeafBlockSamples, true);
+      calc_mipmap(ch, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1), LeafBlockSamples, true);
     align_sample_count += LeafBlockSamples;
     index0 = align_sample_count / LeafBlockSamples / RootScale;
     index1 = (align_sample_count / LeafBlockSamples) % RootScale;
@@ -1087,7 +1087,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   // _last_calc_count is saved (isEnd=false) for continuation on the next call.
   if (offset > 0 && offset < LeafBlockSamples) {
     for (unsigned int ch = 0; ch < _channel_num; ch++)
-      calc_mipmap(ch, (uint8_t)index0, (uint8_t)index1, offset, false);
+      calc_mipmap(ch, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1), offset, false);
   }
 
   // Finalize position
@@ -1147,10 +1147,10 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // (64 samples per channel × 8 bytes per 64 samples / 8 samples per byte).
   // The async worker already truncates length to a multiple of chunk_size,
   // but assert defensively.
-  const uint64_t chunk_size = (uint64_t)_channel_num * 8;
+  const uint64_t chunk_size = static_cast<uint64_t>(_channel_num) * 8;
   if (logic.length < chunk_size) return;
 
-  uint8_t *data_src_ptr = (uint8_t *)logic.data;
+  uint8_t *data_src_ptr = reinterpret_cast<uint8_t*>(logic.data);
   uint64_t len = logic.length;
   uint64_t index0 = 0;
   uint64_t index1 = 0;
@@ -1175,7 +1175,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
           std::chrono::steady_clock::now() - t0).count();
       w.add(++seq, bytes, total, lw, wr);
     }
-  } pd_fin{pd_win, pd_seq, (uint64_t)logic.length, pd_entry, pd_lockwait_ms, pd_write_ms};
+  } pd_fin{pd_win, pd_seq, static_cast<uint64_t>(logic.length), pd_entry, pd_lockwait_ms, pd_write_ms};
 
   // Segmented locking: metadata ops (allocate_block, _sample_count/
   // _ring_sample_count updates, calc_mipmap, loop housekeeping) hold _mutex;
@@ -1249,7 +1249,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
       // `_ch_fraction`/`_byte_fraction` — so the main-path invariants hold.
       pxv_warn("append_cross_payload: _dest_ptr nullptr during bit-align, "
                "resetting residue (ch_fraction=%u byte_fraction=%u)",
-               (unsigned)_ch_fraction, (unsigned)_byte_fraction);
+               static_cast<unsigned>(_ch_fraction), static_cast<unsigned>(_byte_fraction));
       _dest_ptr = nullptr;
       _ch_fraction = 0;
       _byte_fraction = 0;
@@ -1284,7 +1284,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         _dest_ptr = nullptr;
         return;
       }
-      lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
+      lbp = allocate_block(_ch_fraction, static_cast<uint16_t>(index0), static_cast<uint16_t>(index1));
       if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (bit-align)");
         _ring_sample_count -= _loop_offset;
@@ -1292,14 +1292,14 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         return;
       }
 
-      _dest_ptr = (uint8_t *)lbp + offset;
+      _dest_ptr = reinterpret_cast<uint8_t*>(lbp) + offset;
 
       // Completed one channel's 64-sample chunk → advance ring count
       if (_ch_fraction == 0) {
         _ring_sample_count += Scale;
 
         if (_ring_sample_count % LeafBlockSamples == 0) {
-          calc_mipmap(_channel_num - 1, (uint8_t)index0, (uint8_t)index1,
+          calc_mipmap(_channel_num - 1, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1),
                       LeafBlockSamples, true);
         }
         break;
@@ -1325,7 +1325,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     pxv_warn("append_cross_payload: _ring_sample_count=%llu not %d-aligned "
              "(mixed SPLIT/CROSS capture after soft trigger); re-anchoring, "
              "dropping %llu partial samples",
-             (unsigned long long)_ring_sample_count, (int)Scale,
+             (unsigned long long)_ring_sample_count, static_cast<int>(Scale),
              (unsigned long long)rem);
     _ring_sample_count -= rem;
   }
@@ -1335,7 +1335,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // chunk_size already declared above (line ~1067) — reuse it.
   // Shared across the blocked-transpose fast path and the per-channel
   // fallback below; consumed by the shared tail/finalize section.
-  void *end_read_ptr = (uint8_t *)data_src_ptr + len;
+  void *end_read_ptr = reinterpret_cast<uint8_t*>(data_src_ptr) + len;
   uint16_t last_chan = _ch_fraction;
 
   // C1 (P9-on-raw): blocked-transpose main phase. The original loop performed
@@ -1372,10 +1372,10 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
         _dest_ptr = nullptr;
         return;
       }
-      dst[c] = (uint64_t *)blk + blk_off / Scale;
+      dst[c] = reinterpret_cast<uint64_t*>(blk) + blk_off / Scale;
     }
 
-    const uint64_t *src = (const uint64_t *)data_src_ptr;
+    const uint64_t *src = reinterpret_cast<const uint64_t*>(data_src_ptr);
     uint64_t full_chunks = len / chunk_size;
     uint64_t processed = 0;  // samples per channel consumed this payload
 
@@ -1431,7 +1431,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
             pxv_err("append_cross_payload: alloc failed (blocked adv)");
             break;
           }
-          dst[c] = (uint64_t *)blk;
+          dst[c] = reinterpret_cast<uint64_t*>(blk);
         }
       }
     }
@@ -1453,19 +1453,19 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     // rendering shows all-LOW until capture_ended() finalizes the tail block.
     if (offset > 0 && offset < LeafBlockSamples) {
       for (unsigned int c = 0; c < _channel_num; c++)
-        calc_mipmap(c, (uint8_t)index0, (uint8_t)index1, offset, false);
+        calc_mipmap(c, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1), offset, false);
     }
   } else {
   // ---- Original per-channel strided loop (fallback: non-chunk-aligned
   //      payload, or pending partial u64 from a previous call) ----
-  uint64_t *read_ptr = (uint64_t *)data_src_ptr;
-  void *end_read_ptr = (uint8_t *)data_src_ptr + len;
+  uint64_t *read_ptr = reinterpret_cast<uint64_t*>(data_src_ptr);
+  void *end_read_ptr = reinterpret_cast<uint8_t*>(data_src_ptr) + len;
 
   uint64_t filled_sample = align_sample_count % LeafBlockSamples;
   uint64_t old_filled_sample = filled_sample;
   uint64_t *chans_read_addr[CHANNEL_MAX_COUNT];
   for (unsigned int i = 0; i < _channel_num; i++) {
-    chans_read_addr[i] = (uint64_t *)data_src_ptr + i;
+    chans_read_addr[i] = reinterpret_cast<uint64_t*>(data_src_ptr) + i;
   }
 
   uint16_t fill_chan = _ch_fraction;
@@ -1481,7 +1481,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     _dest_ptr = nullptr;
     return;
   }
-  lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+  lbp = allocate_block(fill_chan, static_cast<uint16_t>(index0), static_cast<uint16_t>(index1));
   if (lbp == nullptr) {
     pxv_err("append_cross_payload: alloc failed (main)");
     _ring_sample_count = align_sample_count - _loop_offset;
@@ -1489,7 +1489,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     return;
   }
 
-  uint64_t *write_ptr = (uint64_t *)lbp + offset / Scale;
+  uint64_t *write_ptr = reinterpret_cast<uint64_t*>(lbp) + offset / Scale;
 
   while (len >= 8) {
     lock.unlock();
@@ -1513,7 +1513,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
     if (filled_sample == LeafBlockSamples) {
       // Completed one leaf block for fill_chan → calc mipmap
-      calc_mipmap(fill_chan, (uint8_t)index0, (uint8_t)index1,
+      calc_mipmap(fill_chan, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1),
                   LeafBlockSamples, true);
 
       chans_read_addr[fill_chan] = read_ptr;
@@ -1533,17 +1533,17 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
                 (unsigned long long)index0);
         break;
       }
-      lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+      lbp = allocate_block(fill_chan, static_cast<uint16_t>(index0), static_cast<uint16_t>(index1));
       if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (advance)");
         break;
       }
 
-      write_ptr = (uint64_t *)lbp + offset / Scale;
+      write_ptr = reinterpret_cast<uint64_t*>(lbp) + offset / Scale;
       read_ptr = chans_read_addr[fill_chan];
     } else if (read_ptr >= end_read_ptr) {
       // Reached end of input mid-channel → calc partial mipmap
-      calc_mipmap(fill_chan, (uint8_t)index0, (uint8_t)index1,
+      calc_mipmap(fill_chan, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1),
                   filled_sample, false);
 
       fill_chan = static_cast<uint16_t>((fill_chan + 1) % _channel_num);
@@ -1562,13 +1562,13 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
                 (unsigned long long)index0);
         break;
       }
-      lbp = allocate_block(fill_chan, (uint16_t)index0, (uint16_t)index1);
+      lbp = allocate_block(fill_chan, static_cast<uint16_t>(index0), static_cast<uint16_t>(index1));
       if (lbp == nullptr) {
         pxv_err("append_cross_payload: alloc failed (end)");
         break;
       }
 
-      write_ptr = (uint64_t *)lbp + offset / Scale;
+      write_ptr = reinterpret_cast<uint64_t*>(lbp) + offset / Scale;
       read_ptr = chans_read_addr[fill_chan];
     }
   }
@@ -1602,14 +1602,14 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     _dest_ptr = nullptr;
     return;
   }
-  lbp = allocate_block(_ch_fraction, (uint16_t)index0, (uint16_t)index1);
+  lbp = allocate_block(_ch_fraction, static_cast<uint16_t>(index0), static_cast<uint16_t>(index1));
   if (lbp == nullptr) {
     pxv_err("append_cross_payload: alloc failed (finalize)");
     _dest_ptr = nullptr;
     return;
   }
 
-  _dest_ptr = (uint8_t *)lbp + offset / 8;
+  _dest_ptr = reinterpret_cast<uint8_t*>(lbp) + offset / 8;
 
   // ---- Tail phase: residual bytes (len < 8) ----
   if (len > 0) {
@@ -1618,8 +1618,8 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
               "dropping %llu residual bytes", (unsigned long long)len);
       return;
     }
-    uint8_t *src_ptr = (uint8_t *)end_read_ptr - len;
-    _byte_fraction += (uint8_t)len;
+    uint8_t *src_ptr = reinterpret_cast<uint8_t*>(end_read_ptr) - len;
+    _byte_fraction += static_cast<uint8_t>(len);
 
     // mmap data write — release _mutex during page faults
     lock.unlock();
@@ -1666,13 +1666,13 @@ void LogicSnapshot::capture_ended() {
            (unsigned long long)_total_sample_count,
            (unsigned long long)_sample_count,
            (unsigned long long)_loop_offset,
-           (unsigned)_channel_num, _ch_data.size(),
+           static_cast<unsigned>(_channel_num), _ch_data.size(),
            (unsigned long long)index0, (unsigned long long)index1,
            (unsigned long long)offset);
 
   if (offset > 0) {
     for (unsigned int chan = 0; chan < _channel_num; chan++) {
-      uint8_t *lbp = (uint8_t *)_ch_data[chan][index0].lbp[index1];
+      uint8_t *lbp = reinterpret_cast<uint8_t*>(_ch_data[chan][index0].lbp[index1]);
 
       if (lbp == nullptr) {
         // Tolerate nullptr leaf block at capture_ended: the async writer may not
@@ -1703,10 +1703,10 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
 
   if (lbp == nullptr)
     return;
-  void *level1_ptr = (uint8_t *)lbp + LeafBlockSamples / 8;
-  void *level2_ptr = (uint8_t *)level1_ptr + LeafBlockSamples / Scale / 8;
+  void *level1_ptr = reinterpret_cast<uint8_t*>(lbp) + LeafBlockSamples / 8;
+  void *level2_ptr = reinterpret_cast<uint8_t*>(level1_ptr) + LeafBlockSamples / Scale / 8;
   void *level3_ptr =
-      (uint8_t *)level2_ptr + LeafBlockSamples / Scale / Scale / 8;
+      reinterpret_cast<uint8_t*>(level2_ptr) + LeafBlockSamples / Scale / Scale / 8;
 
   // ROOT-CAUSE FIX for D7 false-edge bug (160-210us spurious low pulses):
   // The original level-1 loop processed every u64 with index < samples/Scale
@@ -1729,8 +1729,8 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
       partial_bits ? ((1ULL << partial_bits) - 1) : 0ULL;
 
   // level 1
-  uint64_t *src_ptr = (uint64_t *)lbp;
-  uint64_t *dest_ptr = (uint64_t *)level1_ptr;
+  uint64_t *src_ptr = reinterpret_cast<uint64_t*>(lbp);
+  uint64_t *dest_ptr = reinterpret_cast<uint64_t*>(level1_ptr);
   uint8_t offset = 0;
   uint64_t i = 0;
   uint64_t last_count = _last_calc_count[order];
@@ -1779,8 +1779,8 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   }
 
   // level 2
-  src_ptr = (uint64_t *)level1_ptr;
-  dest_ptr = (uint64_t *)level2_ptr;
+  src_ptr = reinterpret_cast<uint64_t*>(level1_ptr);
+  dest_ptr = reinterpret_cast<uint64_t*>(level2_ptr);
   offset = 0;
   i = 0;
 
@@ -1805,8 +1805,8 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   }
 
   // level 3
-  src_ptr = (uint64_t *)level2_ptr;
-  dest_ptr = (uint64_t *)level3_ptr;
+  src_ptr = reinterpret_cast<uint64_t*>(level2_ptr);
+  dest_ptr = reinterpret_cast<uint64_t*>(level3_ptr);
 
   for (i = 0; i < Scale; i++) {
     if (*src_ptr)
@@ -1814,7 +1814,7 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
     src_ptr++;
   }
 
-  if ((*((uint64_t *)lbp) & LSB) != 0)
+  if ((*(reinterpret_cast<uint64_t*>(lbp)) & LSB) != 0)
     _ch_data[order][index0].first |= 1ULL << index1;
 
   // ROOT-CAUSE FIX: the original code checked a fixed u64 position
@@ -1827,10 +1827,10 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
   if (samples > 0) {
     bool last_sample_value;
     if (partial_bits > 0) {
-      const uint64_t tail_u64 = *((uint64_t *)lbp + full_u64_count);
+      const uint64_t tail_u64 = *(reinterpret_cast<uint64_t*>(lbp) + full_u64_count);
       last_sample_value = (tail_u64 & (1ULL << (partial_bits - 1))) != 0;
     } else {
-      const uint64_t last_full_u64 = *((uint64_t *)lbp + full_u64_count - 1);
+      const uint64_t last_full_u64 = *(reinterpret_cast<uint64_t*>(lbp) + full_u64_count - 1);
       last_sample_value = (last_full_u64 & MSB) != 0;
     }
     if (last_sample_value)
@@ -1839,7 +1839,7 @@ void LogicSnapshot::calc_mipmap(unsigned int order, uint8_t index0,
       _ch_data[order][index0].last &= ~(1ULL << index1);
   }
 
-  if (*((uint64_t *)level3_ptr) != 0) {
+  if (*(reinterpret_cast<uint64_t*>(level3_ptr)) != 0) {
     _ch_data[order][index0].tog |= 1ULL << index1;
   } else if (isEnd && _able_free) {
     // Only free (decommit) constant-value leaf blocks when _able_free is
@@ -1914,13 +1914,13 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
   // permanently corrupting _ring_sample_count. Removed.
 
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+  if (order == -1 || static_cast<unsigned int>(order) >= _ch_data.size()) {
     static int s_warn_cnt = 0;
     if (s_warn_cnt++ < 20) {
       pxv_warn("LogicSnapshot::get_samples nullptr: sig_index=%d order=%d "
                "ch_data_size=%zu ch_index_size=%zu _loop_offset=%lld",
                sig_index, order, _ch_data.size(), _ch_index.size(),
-               (long long)_loop_offset);
+               static_cast<long long>(_loop_offset));
     }
     return nullptr;
   }
@@ -1979,7 +1979,7 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
     _cur_ref_block_indexs[order].lbp_index = index1;
   }
 
-  return (uint8_t *)ptr + offset;
+  return reinterpret_cast<uint8_t*>(ptr) + offset;
 }
 
 // P1-B: Segment data iterator protocol implementation.
@@ -2005,7 +2005,7 @@ LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
     _ring_published.load(std::memory_order_acquire);
     it->current_sample = start;
     it->ch_order = get_ch_order(sig_index);
-    if (it->ch_order < 0 || (unsigned int)it->ch_order >= _ch_data.size()) {
+    if (it->ch_order < 0 || static_cast<unsigned int>(it->ch_order) >= _ch_data.size()) {
       it->exhausted = true;
       it->chunk_data = nullptr;
       it->chunk_remaining = 0;
@@ -2017,7 +2017,7 @@ LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
     if (it->root_index < _ch_data[it->ch_order].size()) {
       void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
       if (ptr) {
-        it->chunk_data = (const uint8_t*)ptr;
+        it->chunk_data = reinterpret_cast<const uint8_t*>(ptr);
         uint64_t leaf_bytes = LeafBlockSamples / 8;
         it->chunk_remaining = leaf_bytes - it->byte_offset;
       } else {
@@ -2038,7 +2038,7 @@ LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
   it->current_sample = start + _loop_offset;
   it->ch_order = get_ch_order(sig_index);
 
-  if (it->ch_order < 0 || (unsigned int)it->ch_order >= _ch_data.size()) {
+  if (it->ch_order < 0 || static_cast<unsigned int>(it->ch_order) >= _ch_data.size()) {
     it->exhausted = true;
     it->chunk_data = nullptr;
     it->chunk_remaining = 0;
@@ -2054,7 +2054,7 @@ LogicSnapshot::begin_sample_iteration(uint64_t start, int sig_index) {
   if (it->root_index < _ch_data[it->ch_order].size()) {
     void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
     if (ptr) {
-      it->chunk_data = (const uint8_t*)ptr;
+      it->chunk_data = reinterpret_cast<const uint8_t*>(ptr);
       uint64_t leaf_bytes = LeafBlockSamples / 8;
       it->chunk_remaining = leaf_bytes - it->byte_offset;
     } else {
@@ -2085,11 +2085,11 @@ void LogicSnapshot::continue_sample_iteration(SegmentDataIterator* it,
       it->root_index = new_root;
       it->lbp_index = new_lbp;
       it->byte_offset = new_off;
-      if ((unsigned int)it->ch_order < _ch_data.size() &&
+      if (static_cast<unsigned int>(it->ch_order) < _ch_data.size() &&
           it->root_index < _ch_data[it->ch_order].size()) {
         void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
         if (ptr) {
-          it->chunk_data = (const uint8_t*)ptr;
+          it->chunk_data = reinterpret_cast<const uint8_t*>(ptr);
           uint64_t leaf_bytes = LeafBlockSamples / 8;
           it->chunk_remaining = leaf_bytes - it->byte_offset;
         } else {
@@ -2130,11 +2130,11 @@ void LogicSnapshot::continue_sample_iteration(SegmentDataIterator* it,
     it->lbp_index = new_lbp;
     it->byte_offset = new_off;
 
-    if ((unsigned int)it->ch_order < _ch_data.size() &&
+    if (static_cast<unsigned int>(it->ch_order) < _ch_data.size() &&
         it->root_index < _ch_data[it->ch_order].size()) {
       void *ptr = _ch_data[it->ch_order][it->root_index].lbp[it->lbp_index];
       if (ptr) {
-        it->chunk_data = (const uint8_t*)ptr;
+        it->chunk_data = reinterpret_cast<const uint8_t*>(ptr);
         uint64_t leaf_bytes = LeafBlockSamples / 8;
         it->chunk_remaining = leaf_bytes - it->byte_offset;
       } else {
@@ -2188,7 +2188,7 @@ bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {
       return false;
     return consistent_read([&]() -> bool {
       int order = get_ch_order(sig_index);
-      if (order == -1 || (unsigned int)order >= _ch_data.size())
+      if (order == -1 || static_cast<unsigned int>(order) >= _ch_data.size())
         return false;
       uint64_t index0 = index >> (LeafBlockPower + RootScalePower);
       if (index0 >= _ch_data[order].size())
@@ -2198,7 +2198,7 @@ bool LogicSnapshot::get_sample(uint64_t index, int sig_index) {
       uint64_t root_pos_mask = 1ULL << index1;
       if ((rn.tog & root_pos_mask) == 0)
         return (rn.first & root_pos_mask) != 0;
-      const uint64_t *ptr = (const uint64_t *)rn.lbp[index1];
+      const uint64_t *ptr = reinterpret_cast<const uint64_t*>(rn.lbp[index1]);
       if (ptr == nullptr)
         return (rn.first & root_pos_mask) != 0;
       uint64_t u64_idx = (index & LeafMask) >> ScalePower;
@@ -2223,7 +2223,7 @@ bool LogicSnapshot::get_sample_unlock(uint64_t index, int sig_index) {
 
 bool LogicSnapshot::get_sample_self(uint64_t index, int sig_index) {
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+  if (order == -1 || static_cast<unsigned int>(order) >= _ch_data.size()) {
     pxv_warn("LogicSnapshot::get_sample_self: invalid order for sig_index=%d", sig_index);
     return false;
   }
@@ -2253,7 +2253,7 @@ bool LogicSnapshot::get_sample_self(uint64_t index, int sig_index) {
     return (_ch_data[order][index0].first & root_pos_mask) != 0;
 
   uint64_t u64_idx = (index & LeafMask) >> ScalePower;
-  uint64_t *u64_ptr = (uint64_t *)ptr;
+  uint64_t *u64_ptr = reinterpret_cast<uint64_t*>(ptr);
   return u64_ptr[u64_idx] & index_mask;
 }
 
@@ -2280,19 +2280,19 @@ bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
                                              uint64_t end, bool expected_level,
                                              uint64_t &out_pos) {
   // P5 diff 扫描: 直接扫 raw 块字节, 不做 mipmap 树遍历.
-  // 逐 u64 与 expected_level 求差分 (v ^ (expected ? ~0 : 0)), 用 bsf_folded
-  // (ctz) 定位第一个差异位. 未实例化块 (nullptr) 由 first/last 常量值判定.
+  // 逐 u64 与 expected_level 求差分 (v ^ (expected ? ~0 : 0)), 用 lsb_index
+  // (std::countr_zero) 定位第一个差异位. 未实例化块 (nullptr) 由 first/last 常量值判定.
   // 调用方持有 _mutex (filter 在 apply_glitch_filter 内调用).
   if (start > end)
     return false;
-  if ((unsigned int)order >= _ch_data.size())
+  if (static_cast<unsigned int>(order) >= _ch_data.size())
     return false;
 
   uint64_t idx0 = start / (LeafBlockSamples * RootScale);
   uint64_t idx1 = (start / LeafBlockSamples) % RootScale;
   uint64_t pos = start;
 
-  while (pos <= end && idx0 < (uint64_t)_ch_data[order].size()) {
+  while (pos <= end && idx0 < static_cast<uint64_t>(_ch_data[order].size())) {
     void *lbp = _ch_data[order][idx0].lbp[idx1];
     const uint64_t blk_start = (idx0 * RootScale + idx1) * LeafBlockSamples;
     if (lbp == nullptr) {
@@ -2312,7 +2312,7 @@ bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
       continue;
     }
 
-    const uint64_t *u64s = (const uint64_t *)lbp;
+    const uint64_t *u64s = reinterpret_cast<const uint64_t*>(lbp);
     uint64_t local = pos - blk_start;
     while (local < LeafBlockSamples && pos <= end) {
       const uint64_t u64_idx = local >> ScalePower;   // /64
@@ -2322,7 +2322,7 @@ bool LogicSnapshot::find_first_different_raw(int order, uint64_t start,
       const uint64_t t = diff & (~0ULL << bit_in_u64);
       if (t != 0) {
         const uint64_t found = blk_start + (u64_idx << ScalePower) +
-                               bsf_folded(t);
+                               lsb_index(t);
         if (found > end)
           return false;
         out_pos = found;
@@ -2385,9 +2385,9 @@ uint64_t LogicSnapshot::get_block_size(int block_index) {
       return LeafBlockSamples / 8;
     } else if (block_index == 0) {
       samples =
-          min(_ring_sample_count + (_loop_offset % (uint64_t)LeafBlockSamples),
-              (uint64_t)LeafBlockSamples) -
-          (_loop_offset % (uint64_t)LeafBlockSamples);
+          min(_ring_sample_count + (_loop_offset % static_cast<uint64_t>(LeafBlockSamples)),
+              static_cast<uint64_t>(LeafBlockSamples)) -
+          (_loop_offset % static_cast<uint64_t>(LeafBlockSamples));
       return samples / 8;
     } else {
       samples = (_ring_sample_count + _loop_offset) -
@@ -2419,7 +2419,7 @@ uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
   }
 
   int order = get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _ch_data.size()) {
+  if (order == -1 || static_cast<unsigned int>(order) >= _ch_data.size()) {
     sample = 0;
     return nullptr;
   }
@@ -2433,7 +2433,7 @@ uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
     sample = 0;
     return nullptr;
   }
-  uint8_t *lbp = (uint8_t *)_ch_data[order][index].lbp[pos];
+  uint8_t *lbp = reinterpret_cast<uint8_t*>(_ch_data[order][index].lbp[pos]);
 
   if (lbp == nullptr) {
     sample = (_ch_data[order][index].first & 1ULL << pos) != 0;
@@ -2466,8 +2466,8 @@ SampleSpan LogicSnapshot::span(uint32_t channel, uint64_t start,
   // 只读视图"定位一致，调用方需要强一致时应持锁后再调。
   if (start >= committed_sample_count()) return s;
 
-  const int order = get_ch_order((int)channel);
-  if (order < 0 || (unsigned int)order >= _ch_data.size()) return s;
+  const int order = get_ch_order(static_cast<int>(channel));
+  if (order < 0 || static_cast<unsigned int>(order) >= _ch_data.size()) return s;
 
   const uint64_t idx = _is_loop ? (start + _loop_offset) : start;
   const uint64_t index0 = idx >> (LeafBlockPower + RootScalePower);
@@ -2489,7 +2489,7 @@ SampleSpan LogicSnapshot::span(uint32_t channel, uint64_t start,
     s.is_constant = true;
     s.constant_bit = (_ch_data[order][index0].first & (1ULL << index1)) != 0;
   } else {
-    s.data = (const uint8_t *)blk + byte_off;
+    s.data = reinterpret_cast<const uint8_t*>(blk) + byte_off;
   }
 
   s.start_sample = idx - (idx & 7ULL);
@@ -2521,7 +2521,7 @@ void LogicSnapshot::move_first_node_to_last() {
     struct RootNode rn = _ch_data[i][0];
     _ch_data[i].erase(_ch_data[i].begin());
 
-    for (int x = 0; x < (int)Scale; x++) {
+    for (int x = 0; x < static_cast<int>(Scale); x++) {
       if (rn.lbp[x] != nullptr) {
         push_to_free_list(rn.lbp[x]);
         rn.lbp[x] = nullptr;
@@ -2624,13 +2624,13 @@ void LogicSnapshot::free_head_blocks(int count) {
 
   // Guard: count must be valid. Stale state during file loading
   // could violate these invariants. Original asserts crash via MSVC dialog.
-  if (count <= 0 || count >= (int)Scale) {
+  if (count <= 0 || count >= static_cast<int>(Scale)) {
     pxv_warn("LogicSnapshot::free_head_blocks: count=%d invalid (Scale=%d), skipping",
-             count, (int)Scale);
+             count, static_cast<int>(Scale));
     return;
   }
 
-  for (int i = 0; i < (int)_channel_num; i++) {
+  for (int i = 0; i < static_cast<int>(_channel_num); i++) {
     for (int j = _lst_free_block_index; j < count; j++) {
       if (_ch_data[i][0].lbp[j] != nullptr) {
         push_to_free_list(_ch_data[i][0].lbp[j]);
@@ -2673,8 +2673,8 @@ void LogicSnapshot::free_unused_memory() {
     int free_count = static_cast<int>(_loop_offset / LeafBlockSamples);
     if (free_count > _lst_free_block_index) {
       // Cap to Scale (root node capacity) to match free_head_blocks assert.
-      if (free_count >= (int)Scale)
-        free_count = (int)Scale - 1;
+      if (free_count >= static_cast<int>(Scale))
+        free_count = static_cast<int>(Scale) - 1;
       if (free_count > 0) {
         free_head_blocks(free_count);
         pxv_info("LogicSnapshot::free_unused_memory: freed %d head blocks",

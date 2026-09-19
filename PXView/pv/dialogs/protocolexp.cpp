@@ -94,7 +94,7 @@ ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session, pv::view::Decoder
                 continue;
 
             const QString prefix =
-                pv::view::DecoderModel::stackDisplayName(stack, (int)si);
+                pv::view::DecoderModel::stackDisplayName(stack, static_cast<int>(si));
             auto rows = stack->get_rows_lshow();
             int row_index = 0; // visible decode-row index inside this stack
 
@@ -115,7 +115,7 @@ ProtocolExp::ProtocolExp(QWidget *parent, SigSession *session, pv::view::Decoder
                 _row_label_list.push_back(row_label);
                 _row_sel_list.push_back(row_sel);
                 _flayout->addRow(row_label, row_sel);
-                row_sel->setProperty("stack", (int)si);
+                row_sel->setProperty("stack", static_cast<int>(si));
                 row_sel->setProperty("rowindex", row_index);
                 row_sel->setProperty("title", title);
                 row_index++;
@@ -329,7 +329,7 @@ void ProtocolExp::save_proc()
                 continue;
 
             for (int i=0; i<row_num; i++) {
-                if (row_inf_arr[i].stack_index == (int)si &&
+                if (row_inf_arr[i].stack_index == static_cast<int>(si) &&
                     row_inf_arr[i].row_index == fd_row_dex) {
                     row_inf_arr[i].row = &(*it).first;
                     row_inf_arr[i].stack = stacks[si];
@@ -366,7 +366,7 @@ void ProtocolExp::save_proc()
         const uint64_t end_sample = row_inf_arr[i].stack->sample_count();
         row_inf_arr[i].stack->get_annotation_subset(annotations_arr[i], *row_inf_arr[i].row,
                                          0, end_sample > 0 ? end_sample - 1 : 0);
-        total_ann_count += (uint64_t)annotations_arr[i].size();
+        total_ann_count += static_cast<uint64_t>(annotations_arr[i].size());
         sort(annotations_arr[i].begin(), annotations_arr[i].end(), compare_ann_index);  
         row_inf_arr[i].read_index = 0;
     }

@@ -29,7 +29,7 @@ bool WinTaskbarProgress::initTaskbarList3()
     }
 
     HRESULT hr = CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER,
-                                  IID_ITaskbarList3, (void**)&_taskbarList3);
+                                  IID_ITaskbarList3, reinterpret_cast<void**>(&_taskbarList3));
     if (FAILED(hr)) {
         _taskbarList3 = nullptr;
         return false;

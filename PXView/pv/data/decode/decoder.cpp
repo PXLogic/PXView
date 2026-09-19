@@ -24,7 +24,7 @@ Decoder::~Decoder()
 }
   
 void Decoder::set_probes(std::map<const srd_channel *, int> probes) {
-  pxv_info("Decoder::set_probes called with map size: %d", (int)probes.size());
+  pxv_info("Decoder::set_probes called with map size: %d", static_cast<int>(probes.size()));
   for(auto it = probes.begin(); it != probes.end(); it++) {
      pxv_info("Decoder::set_probes probe '%s' -> %d", (*it).first->id, (*it).second);
   }
@@ -102,17 +102,17 @@ bool Decoder::have_required_probes()
 	pxv_info("decoder:%p", this);
 
 	for (GSList *l = _decoder->channels; l; l = l->next) {
-		const srd_channel *const pdch = (const srd_channel*)l->data;
-		pxv_info("base decoder:%p", (void*)pdch);
+		const srd_channel *const pdch = static_cast<const srd_channel*>(l->data);
+		pxv_info("base decoder:%p", static_cast<const void*>(pdch));
 	}
 
 	for (auto it = _probes.begin(); it != _probes.end(); ++it){
-		const srd_channel *const pdch = (const srd_channel*)(*it).first;
-		pxv_info("got decoder:%p", (void*)pdch);
+		const srd_channel *const pdch = (*it).first;
+		pxv_info("got decoder:%p", static_cast<const void*>(pdch));
 	}
 
 	for (GSList *l = _decoder->channels; l; l = l->next) {
-		const srd_channel *const pdch = (const srd_channel*)l->data;
+		const srd_channel *const pdch = static_cast<const srd_channel*>(l->data);
 		assert(pdch);
 		if (_probes.find(pdch) == _probes.end())
 			return false;
@@ -130,8 +130,8 @@ srd_decoder_inst* Decoder::create_decoder_inst(srd_session *session)
 	{
 		GVariant *const value = (*i).second;
 		g_variant_ref(value);
-		g_hash_table_replace(opt_hash, (void*)g_strdup(
-			(*i).first.c_str()), value);
+		g_hash_table_replace(opt_hash, reinterpret_cast<void*>(g_strdup(
+			(*i).first.c_str())), value);
 	}
 
 	srd_decoder_inst *const decoder_inst = srd_inst_new(

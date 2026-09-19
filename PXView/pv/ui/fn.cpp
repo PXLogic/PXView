@@ -45,7 +45,7 @@
 namespace ui {
 
 void set_font_param(QFont &font, struct FontParam &param) {
-  font.setPixelSize(param.size >= 12.0f ? (int)param.size : dock_font_content().pixelSize());
+  font.setPixelSize(param.size >= 12.0f ? static_cast<int>(param.size) : dock_font_content().pixelSize());
 
   if (param.name != "") {
     font.setFamily(param.name);

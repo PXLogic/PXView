@@ -54,8 +54,8 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
     bool has_probe_configs = false;
     if (gvar_devopts) {
         gsize num_devopts;
-        const uint32_t *devopts = (const uint32_t *)g_variant_get_fixed_array(
-            gvar_devopts, &num_devopts, sizeof(uint32_t));
+        const uint32_t *devopts = reinterpret_cast<const uint32_t*>(g_variant_get_fixed_array(
+            gvar_devopts, &num_devopts, sizeof(uint32_t)));
         for (gsize i = 0; i < num_devopts; i++) {
             if ((devopts[i] & 0x1fffffff) == SR_CONF_PROBE_CONFIGS) {
                 has_probe_configs = true;
@@ -74,8 +74,8 @@ ProbeOptions::ProbeOptions(SigSession *session, struct sr_channel *probe) :
     }
 
 	gsize num_opts;
-	const int *const options = (const int32_t *)g_variant_get_fixed_array(
-		gvar_opts, &num_opts, sizeof(int32_t));
+	const int *const options = reinterpret_cast<const int32_t*>(g_variant_get_fixed_array(
+		gvar_opts, &num_opts, sizeof(int32_t)));
 
 	for (unsigned int i = 0; i < num_opts; i++)
     {

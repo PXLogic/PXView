@@ -74,7 +74,7 @@ static void write_stack_trace_win(int sig)
         HANDLE process = GetCurrentProcess();
         SymInitialize(process, nullptr, TRUE);
 
-        SYMBOL_INFO *symbol = (SYMBOL_INFO *)malloc(sizeof(SYMBOL_INFO) + 256);
+        SYMBOL_INFO *symbol = reinterpret_cast<SYMBOL_INFO*>(malloc(sizeof(SYMBOL_INFO) + 256));
         if (symbol) {
             symbol->MaxNameLen = 255;
             symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
@@ -89,8 +89,8 @@ static void write_stack_trace_win(int sig)
                     if (SymGetLineFromAddr64(process, address, &displacement, &line)) {
                         snprintf(buf, sizeof(buf), "  [%3d] %s (%s:%lu+0x%lx)\n",
                                  i, symbol->Name, line.FileName,
-                                 (unsigned long)line.LineNumber,
-                                 (unsigned long)displacement);
+                                 static_cast<unsigned long>(line.LineNumber),
+                                 static_cast<unsigned long>(displacement));
                     } else {
                         snprintf(buf, sizeof(buf), "  [%3d] %s (0x%llx)\n",
                                  i, symbol->Name,

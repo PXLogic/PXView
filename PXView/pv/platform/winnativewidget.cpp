@@ -184,7 +184,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
         case WM_KEYDOWN:
         { 
-            QKeyEvent keyEvent(QEvent::KeyPress, (int)wParam, Qt::NoModifier);
+            QKeyEvent keyEvent(QEvent::KeyPress, static_cast<int>(wParam), Qt::NoModifier);
             QWidget *target = self->_bodyViewWidget ? self->_bodyViewWidget : self->_childWidget;
             if (target)
                 QApplication::sendEvent(target, &keyEvent);
@@ -192,7 +192,7 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
         case WM_KEYUP:
         {   
-            QKeyEvent keyEvent(QEvent::KeyRelease, (int)wParam, Qt::NoModifier);
+            QKeyEvent keyEvent(QEvent::KeyRelease, static_cast<int>(wParam), Qt::NoModifier);
             QWidget *target = self->_bodyViewWidget ? self->_bodyViewWidget : self->_childWidget;
             if (target)
                 QApplication::sendEvent(target, &keyEvent);
@@ -732,7 +732,7 @@ void WinNativeWidget::SetBorderColor(QColor color)
         {
             const DWORD DWMWINDOWATTRIBUTE_DWMWA_BORDER_COLOR = 34;
             COLORREF COLOR = RGB(color.red(), color.green(), color.blue());
-            using tDwmSetWindowAttribute = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
+            using tDwmSetWindowAttribute = HRESULTreinterpret_cast<WINAPI*>((HWND, DWORD, LPCVOID, DWORD));
             tDwmSetWindowAttribute pDwmSetWindowAttribute =
                 tDwmSetWindowAttribute(QLibrary::resolve("dwmapi", "DwmSetWindowAttribute"));
             if (pDwmSetWindowAttribute){
@@ -784,7 +784,7 @@ bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_versio
     *minor_version = 0;
     *build_number = 0;
 
-    using tRtlGetVersion = NTSTATUS(WINAPI *)(LPOSVERSIONINFOEXW);
+    using tRtlGetVersion = NTSTATUSreinterpret_cast<WINAPI*>((LPOSVERSIONINFOEXW));
     tRtlGetVersion pRtlGetVersion = tRtlGetVersion(QLibrary::resolve("ntdll", "RtlGetVersion"));
 
     if (pRtlGetVersion)

@@ -149,14 +149,14 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
         return false;
     } 
 
-    data = (char*)malloc((size_t)st.st_size);
+    data = reinterpret_cast<char*>(malloc((size_t)st.st_size));
     if (data == nullptr) {
         strcpy(m_error, "can't malloc buffer");
         fclose(fp);
         return false;
     }
 
-    if (fread(data, 1, (size_t)st.st_size, fp) < (size_t)st.st_size) {
+    if (fread(data, 1, static_cast<size_t>(st.st_size), fp) < static_cast<size_t>(st.st_size)) {
         strcpy(m_error, "fread error");
         free(data);
         fclose(fp);
@@ -164,7 +164,7 @@ bool ZipMaker::AddFromFile(const char *localFile, const char *innerFile)
     }
 
     fclose(fp);
-    size = (size_t)st.st_size;
+    size = static_cast<size_t>(st.st_size);
 
     bool ret = AddFromBuffer(innerFile, data, size);
     free(data);
@@ -239,7 +239,7 @@ std::unique_ptr<ZipInnerFileData> ZipReader::GetInnterFileData(const char *inner
         return nullptr;
     }
 
-    metafile = (char *)malloc(fileInfo.uncompressed_size);
+    metafile = reinterpret_cast<char*>(malloc(fileInfo.uncompressed_size));
     if (fileInfo.uncompressed_size > 0 && metafile)
     {
         // unzReadCurrentFile() takes an unsigned int length; the 4 GiB entry

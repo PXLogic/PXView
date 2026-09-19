@@ -323,7 +323,7 @@ void ViewGlitchFilter::on_apply_batch_requested(
                .arg(threshold);
   } else {
     desc = View::tr("已对 %1 个子通道应用滤波 (阈值 %2)")
-               .arg((int)sigs.size())
+               .arg(static_cast<int>(sigs.size()))
                .arg(threshold);
   }
   pv::ui::Toast::show(_view, desc, pv::ui::Toast::Info);

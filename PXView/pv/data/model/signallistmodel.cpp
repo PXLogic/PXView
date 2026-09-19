@@ -38,7 +38,7 @@ void SignalListModel::set_signal_models(
 }
 
 std::shared_ptr<SignalModel> SignalListModel::get_model(int row) const {
-  if (!_models || row < 0 || row >= (int)_models->size())
+  if (!_models || row < 0 || row >= static_cast<int>(_models->size()))
     return nullptr;
   return (*_models)[row];
 }
@@ -46,7 +46,7 @@ std::shared_ptr<SignalModel> SignalListModel::get_model(int row) const {
 int SignalListModel::rowCount(const QModelIndex &parent) const {
   if (parent.isValid() || !_models)
     return 0;
-  return (int)_models->size();
+  return static_cast<int>(_models->size());
 }
 
 int SignalListModel::columnCount(const QModelIndex &parent) const {
@@ -169,7 +169,7 @@ QVariant SignalListModel::headerData(int section, Qt::Orientation orientation,
 }
 
 void SignalListModel::refresh_row(int row) {
-  if (!_models || row < 0 || row >= (int)_models->size())
+  if (!_models || row < 0 || row >= static_cast<int>(_models->size()))
     return;
   QModelIndex topLeft = index(row, 0);
   QModelIndex bottomRight = index(row, ColCount - 1);

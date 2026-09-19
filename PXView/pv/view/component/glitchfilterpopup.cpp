@@ -84,7 +84,7 @@ GlitchFilterPopup::~GlitchFilterPopup()
 
 uint32_t GlitchFilterPopup::current_threshold() const
 {
-    return (uint32_t)_threshold_slider->value();
+    return static_cast<uint32_t>(_threshold_slider->value());
 }
 
 GlitchFilterMode GlitchFilterPopup::current_mode() const
@@ -418,14 +418,14 @@ void GlitchFilterPopup::refresh_from_signal()
 
 void GlitchFilterPopup::rebuild_histogram()
 {
-    const uint32_t cap = _max_spinbox ? (uint32_t)_max_spinbox->value() : 30;
+    const uint32_t cap = _max_spinbox ? static_cast<uint32_t>(_max_spinbox->value()) : 30;
     _cached_hist = pv::data::PulseAnalyzer::build_histogram(_cached_pulses, cap);
     _recommended_threshold = pv::data::PulseAnalyzer::recommend_threshold(_cached_hist);
 
     // 滑块上限 = cap(spinbox 值),柱子数 = cap,统一以 cap 为准。
     // 初始 cap=30,调整 spinbox 后滑块上限跟随。
     // blockSignals 防止 setRange 触发 valueChanged → on_slider_moved 连锁更新
-    const int upper = (int)cap;
+    const int upper = static_cast<int>(cap);
     if (_threshold_slider) {
         _threshold_slider->blockSignals(true);
         _threshold_slider->setRange(1, upper);
@@ -512,10 +512,10 @@ void GlitchFilterPopup::open_for_signal(LogicSignal* sig, const QPoint& anchor_p
             if (tit != saved_th.end() && tit->second > 0) {
                 // clamp 到当前滑块范围 [1, cap]
                 int cap = _max_spinbox ? _max_spinbox->value() : 30;
-                int v = (int)tit->second;
+                int v = static_cast<int>(tit->second);
                 if (v < 1) v = 1;
                 if (v > cap) v = cap;
-                initial_threshold = (uint32_t)v;
+                initial_threshold = static_cast<uint32_t>(v);
             }
             auto mit = saved_md.find(ch_idx);
             if (mit != saved_md.end()) {
@@ -526,8 +526,8 @@ void GlitchFilterPopup::open_for_signal(LogicSignal* sig, const QPoint& anchor_p
         // 兼容旧路径:滤波未激活时若 SignalModel 有遗留 width,沿用之
         if (sig->model()->glitch_filter_enabled() && sig->model()->glitch_filter_width() > 0) {
             int w = sig->model()->glitch_filter_width();
-            if (w >= 1 && w <= (int)_cached_hist.max_width) {
-                initial_threshold = (uint32_t)w;
+            if (w >= 1 && w <= static_cast<int>(_cached_hist.max_width)) {
+                initial_threshold = static_cast<uint32_t>(w);
             }
         }
     }
@@ -535,12 +535,12 @@ void GlitchFilterPopup::open_for_signal(LogicSignal* sig, const QPoint& anchor_p
     // 同步控件状态(注意:setValue 会触发 valueChanged -> on_slider_moved,
     // 但此时 _cached_pulses 已就绪,统计可正确计算)
     _threshold_slider->blockSignals(true);
-    _threshold_slider->setValue((int)initial_threshold);
+    _threshold_slider->setValue(static_cast<int>(initial_threshold));
     _threshold_slider->blockSignals(false);
     _threshold_value_lbl->setText(QString::number(initial_threshold));
 
     _mode_combo->blockSignals(true);
-    _mode_combo->setCurrentIndex((int)initial_mode);
+    _mode_combo->setCurrentIndex(static_cast<int>(initial_mode));
     _mode_combo->blockSignals(false);
 
 
@@ -630,16 +630,16 @@ void GlitchFilterPopup::open_for_batch(const std::vector<LogicSignal*>& sigs, co
             if (first) {
                 first = false;
                 // clamp 到滑块范围
-                int v = (int)t;
+                int v = static_cast<int>(t);
                 if (v < 1) v = 1;
                 if (v > cap) v = cap;
-                common_th = (uint32_t)v;
+                common_th = static_cast<uint32_t>(v);
                 common_md = m;
             } else {
-                int v = (int)t;
+                int v = static_cast<int>(t);
                 if (v < 1) v = 1;
                 if (v > cap) v = cap;
-                if ((uint32_t)v != common_th || m != common_md) {
+                if (static_cast<uint32_t>(v) != common_th || m != common_md) {
                     consistent = false;
                     break;
                 }
@@ -652,12 +652,12 @@ void GlitchFilterPopup::open_for_batch(const std::vector<LogicSignal*>& sigs, co
     }
 
     _threshold_slider->blockSignals(true);
-    _threshold_slider->setValue((int)initial_threshold);
+    _threshold_slider->setValue(static_cast<int>(initial_threshold));
     _threshold_slider->blockSignals(false);
     _threshold_value_lbl->setText(QString::number(initial_threshold));
 
     _mode_combo->blockSignals(true);
-    _mode_combo->setCurrentIndex((int)initial_mode);
+    _mode_combo->setCurrentIndex(static_cast<int>(initial_mode));
     _mode_combo->blockSignals(false);
 
     if (_auto_apply_chk) {
@@ -718,13 +718,13 @@ void GlitchFilterPopup::show_and_position(const QPoint& anchor_pos)
 void GlitchFilterPopup::on_slider_moved(int value)
 {
     _threshold_value_lbl->setText(QString::number(value));
-    _histogram->setFilterThreshold((uint32_t)value);
-    _histogram->setThresholds(_recommended_threshold, (uint32_t)value);
+    _histogram->setFilterThreshold(static_cast<uint32_t>(value));
+    _histogram->setThresholds(_recommended_threshold, static_cast<uint32_t>(value));
     update_stats();
     if (_is_batch_mode) {
-        emit preview_batch_changed(_target_sigs, (uint32_t)value, current_mode());
+        emit preview_batch_changed(_target_sigs, static_cast<uint32_t>(value), current_mode());
     } else if (_target_sig) {
-        emit preview_changed(_target_sig, (uint32_t)value, current_mode());
+        emit preview_changed(_target_sig, static_cast<uint32_t>(value), current_mode());
     }
 }
 
@@ -771,14 +771,14 @@ void GlitchFilterPopup::on_cancel_clicked()
 void GlitchFilterPopup::on_max_changed(int val)
 {
     (void)val;
-    const uint32_t cap = _max_spinbox ? (uint32_t)_max_spinbox->value() : 30;
+    const uint32_t cap = _max_spinbox ? static_cast<uint32_t>(_max_spinbox->value()) : 30;
     // 用户修改了统计上限 → 用新 cap 重建直方图 + 更新滑块范围。
     // rebuild_histogram 内部已 blockSignals + clamp 当前值 + 同步显示。
     rebuild_histogram();
 
     // 直方图控件更新(柱子数 = cap,与滑块上限同步)
     if (_histogram) {
-        _histogram->setNumBars((int)cap);
+        _histogram->setNumBars(static_cast<int>(cap));
         _histogram->setData(_cached_hist);
         _histogram->setThresholds(_recommended_threshold, current_threshold());
         _histogram->setFilterThreshold(current_threshold());
@@ -836,8 +836,8 @@ void GlitchFilterPopup::update_stats()
 {
     auto filtered = pv::data::PulseAnalyzer::preview_filter(
         _cached_pulses, current_threshold(), current_mode());
-    const int total = (int)_cached_pulses.size();
-    const int filtered_count = (int)filtered.size();
+    const int total = static_cast<int>(_cached_pulses.size());
+    const int filtered_count = static_cast<int>(filtered.size());
     const int remain_count = total - filtered_count;
 
     // UI 已将 "将滤除: " / " 个脉冲" 拆分为独立 label,这里只更新数字 label

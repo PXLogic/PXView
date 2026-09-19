@@ -17,8 +17,8 @@ double convert_voltage(double raw_adc,
                        uint64_t measure_vf,
                        uint64_t vfactor)
 {
-    return raw_adc * data_scale * (double)measure_vf * (double)vfactor
-           * (double)kDsoVdivs;
+    return raw_adc * data_scale * static_cast<double>(measure_vf) * static_cast<double>(vfactor)
+           * static_cast<double>(kDsoVdivs);
 }
 
 QString format_voltage(double v_mv, int precision)

@@ -240,7 +240,7 @@ bool DecoderAudioPlayer::playDecoder(DecodeTrace *dt, const PlayConfig &cfg,
                     for (const auto &ad : analog_data) {
                         if (ad && ad->channel() == row.channel) {
                             val += ad->get_value_at(static_cast<uint64_t>(i))
-                                   * row.outputs[(size_t)out];
+                                   * row.outputs[static_cast<size_t>(out)];
                             break;
                         }
                     }

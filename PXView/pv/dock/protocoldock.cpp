@@ -91,7 +91,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   QString repeatNammes;
 
   for (; l; l = l->next) {
-    const srd_decoder *const d = (srd_decoder *)l->data;
+    const srd_decoder *const d = reinterpret_cast<srd_decoder*>(l->data);
     if (!d) {
       pxv_warn("%s", "ProtocolDock: decoder list item d is nullptr, skipping");
       continue;
@@ -100,7 +100,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
     (void)d;
 
     DecoderInfoItem *info = new DecoderInfoItem();
-    srd_decoder *dec = (srd_decoder *)(l->data);
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>((l->data));
     info->_data_handle = dec;
     _decoderInfoList.push_back(info);
 
@@ -434,7 +434,7 @@ void ProtocolDock::bind_context(TabContext *ctx) {
     }
     const QJsonArray &expanded_states = ui.dock_protocol_expanded_states;
     for (int i = 0;
-         i < (int)_protocol_lay_items.size() && i < expanded_states.size();
+         i < static_cast<int>(_protocol_lay_items.size()) && i < expanded_states.size();
          i++) {
       _protocol_lay_items[i]->m_expanded = expanded_states[i].toBool(true);
     }
@@ -507,13 +507,13 @@ void ProtocolDock::reStyle() {
 }
 
 int ProtocolDock::decoder_name_cmp(const void *a, const void *b) {
-  return strcmp(((const srd_decoder *)a)->name, ((const srd_decoder *)b)->name);
+  return strcmp((reinterpret_cast<const srd_decoder*>(a))->name, (reinterpret_cast<const srd_decoder*>(b))->name);
 }
 
 int ProtocolDock::get_protocol_index_by_id(QString id) {
   int dex = 0;
   for (auto info : _decoderInfoList) {
-    srd_decoder *dec = (srd_decoder *)(info->_data_handle);
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
     QString proid(dec->id);
     if (id == proid) {
       return dex;
@@ -539,13 +539,13 @@ void ProtocolDock::on_add_protocol() {
   assert(dex >= 0);
 
   // check the base protocol
-  srd_decoder *const dec = (srd_decoder *)(_decoderInfoList[dex]->_data_handle);
+  srd_decoder *const dec = reinterpret_cast<srd_decoder*>((_decoderInfoList[dex]->_data_handle));
   QString pro_id(dec->id);
   std::list<data::decode::Decoder *> sub_decoders;
 
   assert(dec->inputs);
 
-  QString input_id = parse_protocol_id((char *)dec->inputs->data);
+  QString input_id = parse_protocol_id(reinterpret_cast<char*>(dec->inputs->data));
 
   if (input_id != "logic") {
     pro_id = ""; // reset base protocol
@@ -555,12 +555,12 @@ void ProtocolDock::on_add_protocol() {
 
     while (base_dex != -1) {
       srd_decoder *base_dec =
-          (srd_decoder *)(_decoderInfoList[base_dex]->_data_handle);
+          reinterpret_cast<srd_decoder*>((_decoderInfoList[base_dex]->_data_handle));
       pro_id = QString(base_dec->id); // change base protocol
 
       assert(base_dec->inputs);
 
-      input_id = parse_protocol_id((char *)base_dec->inputs->data);
+      input_id = parse_protocol_id(reinterpret_cast<char*>(base_dec->inputs->data));
 
       if (input_id == "logic") {
         break;
@@ -605,9 +605,9 @@ bool ProtocolDock::add_protocol_by_id(
   }
 
   srd_decoder *const decoder =
-      (srd_decoder *)(_decoderInfoList[dex]->_data_handle);
+      reinterpret_cast<srd_decoder*>((_decoderInfoList[dex]->_data_handle));
   DecoderStatus *dstatus = new DecoderStatus();
-  dstatus->m_format = (int)DecoderDataFormat::hex;
+  dstatus->m_format = static_cast<int>(DecoderDataFormat::hex);
 
   QString protocolName(decoder->name);
   QString protocolId(decoder->id);
@@ -735,7 +735,7 @@ void ProtocolDock::rebuild_protocol_layers() {
     if (it_layer != existing_layers.end()) {
       // Existing layer — update progress and state.
       ProtocolItemLayer *layer = it_layer->second;
-      DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
+      DecoderStatus *dstatus = reinterpret_cast<DecoderStatus*>(stack->get_key_handel());
 
       auto &decoders = stack->stack();
       layer->SetVisibilityState(decoders.front()->shown());
@@ -752,7 +752,7 @@ void ProtocolDock::rebuild_protocol_layers() {
       new_items.push_back(layer);
     } else {
       // New stack — create a new layer.
-      DecoderStatus *dstatus = (DecoderStatus *)stack->get_key_handel();
+      DecoderStatus *dstatus = reinterpret_cast<DecoderStatus*>(stack->get_key_handel());
 
       auto &decoders = stack->stack();
       QString protocolName(decoders.back()->decoder()->name);
@@ -931,7 +931,7 @@ void ProtocolDock::update_model() {
       name += "(" + lbl + ")";
     _decoder_combo->addItem(name);
     if (decoder_model->getDecoderStack() == stack.get())
-      current_combo_index = (int)(i + 1); // +1 for "All" offset
+      current_combo_index = static_cast<int>((i + 1)); // +1 for "All" offset
   }
   _decoder_combo->blockSignals(false);
 
@@ -943,7 +943,7 @@ void ProtocolDock::update_model() {
     // This check must come before the !getDecoderStack() check because
     // setAllStacks() sets _decoder_stack to nullptr, so getDecoderStack()
     // returns nullptr in multi-stack mode.
-    if (decoder_model->stackCount() != (int)decode_sigs.size()) {
+    if (decoder_model->stackCount() != static_cast<int>(decode_sigs.size())) {
       // Stack count changed: full rebuild (prefix sums + column map, O(stacks))
       std::vector<pv::data::DecoderStack *> stacks;
       for (auto &s : decode_sigs)
@@ -965,7 +965,7 @@ void ProtocolDock::update_model() {
     for (auto d : decode_sigs) {
       if (d.get() == decoder_model->getDecoderStack()) {
         decoder_model->setDecoderStack(d.get());
-        current_combo_index = (int)(index + 1); // +1 for "All" offset
+        current_combo_index = static_cast<int>((index + 1)); // +1 for "All" offset
         found = true;
         break;
       }
@@ -1093,7 +1093,7 @@ void ProtocolDock::item_clicked(const QModelIndex &index) {
       // Set the jump guard before show_region() so the async visible_range
       // notification triggered by the view change preserves this row.
       _jumping_to_row = true;
-      _jumping_target_row = (int64_t)query_row;
+      _jumping_target_row = static_cast<int64_t>(query_row);
       _session->show_region(ann.start_sample(), ann.end_sample(), false);
     }
   }
@@ -1144,8 +1144,8 @@ void ProtocolDock::nav_table_view() {
     int viewport_width = _view->viewport()->width();
     if (viewport_width <= 0)
       return;
-    uint64_t center_sample = (uint64_t)((double)(offset + viewport_width / 2)
-                                        * (double)samplerate * scale);
+    uint64_t center_sample = static_cast<uint64_t>(((double)(offset + viewport_width / 2)
+                                        * (double)samplerate * scale));
 
     // Binary search the merged list for the closest entry.
     int model_row = decoder_model->findRowBySample(center_sample);
@@ -1198,9 +1198,9 @@ void ProtocolDock::nav_table_view() {
     }
   }
 
-  int64_t source_row = (int64_t)row_index;
+  int64_t source_row = static_cast<int64_t>(row_index);
   if (decoder_model->visible_start_row() >= 0) {
-    source_row = (int64_t)row_index - decoder_model->visible_start_row();
+    source_row = static_cast<int64_t>(row_index) - decoder_model->visible_start_row();
   }
 
   if (source_row < 0 || source_row >= decoder_model->rowCount(QModelIndex()))
@@ -1408,8 +1408,8 @@ void ProtocolDock::OnProtocolFormatChanged(QString format, void *handle) {
 
 bool ProtocolDock::protocol_sort_callback(const DecoderInfoItem *o1,
                                           const DecoderInfoItem *o2) {
-  srd_decoder *dec1 = (srd_decoder *)(o1->_data_handle);
-  srd_decoder *dec2 = (srd_decoder *)(o2->_data_handle);
+  srd_decoder *dec1 = reinterpret_cast<srd_decoder*>((o1->_data_handle));
+  srd_decoder *dec2 = reinterpret_cast<srd_decoder*>((o2->_data_handle));
   const char *s1 = dec1->name;
   const char *s2 = dec2->name;
   char c1 = 0;
@@ -1473,9 +1473,9 @@ int ProtocolDock::get_output_protocol_by_id(QString id) {
   int dex = 0;
 
   for (auto info : _decoderInfoList) {
-    srd_decoder *dec = (srd_decoder *)(info->_data_handle);
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
     if (dec->outputs) {
-      QString output_id = parse_protocol_id((char *)dec->outputs->data);
+      QString output_id = parse_protocol_id(reinterpret_cast<char*>(dec->outputs->data));
       if (output_id == id) {
         QString proid(dec->id);
         if (!proid.startsWith("0:") || output_id == proid) {
@@ -1496,7 +1496,7 @@ void ProtocolDock::show_protocol_select() {
   SearchComboBox *panel = new SearchComboBox(this);
 
   for (auto info : _decoderInfoList) {
-    srd_decoder *dec = (srd_decoder *)(info->_data_handle);
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
     panel->AddDataItem(QString(dec->id), QString(dec->name), info,
                        dec->is_c_decoder);
   }
@@ -1515,8 +1515,8 @@ void ProtocolDock::OnItemClick(void *sender, void *data_handle) {
   (void)sender;
 
   if (data_handle != nullptr) {
-    DecoderInfoItem *info = (DecoderInfoItem *)data_handle;
-    srd_decoder *dec = (srd_decoder *)(info->_data_handle);
+    DecoderInfoItem *info = reinterpret_cast<DecoderInfoItem*>(data_handle);
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
     this->_pro_keyword_edit->SetInputText(QString(dec->name));
     _selected_protocol_id = QString(dec->id);
     this->on_add_protocol();
@@ -1728,16 +1728,16 @@ void ProtocolDock::on_visible_range_changed() {
 
     double scale = _view->scale();
     int64_t offset = _view->offset();
-    double samples_per_pixel = (double)samplerate * scale;
-    double start_sample_d = (double)offset * samples_per_pixel;
-    double end_sample_d = (double)(offset + viewport_width) * samples_per_pixel;
+    double samples_per_pixel = static_cast<double>(samplerate) * scale;
+    double start_sample_d = static_cast<double>(offset) * samples_per_pixel;
+    double end_sample_d = static_cast<double>((offset + viewport_width)) * samples_per_pixel;
     if (start_sample_d < 0)
       start_sample_d = 0;
     if (end_sample_d < 0)
       end_sample_d = 0;
 
-    uint64_t start_sample = (uint64_t)start_sample_d;
-    uint64_t end_sample = (uint64_t)end_sample_d;
+    uint64_t start_sample = static_cast<uint64_t>(start_sample_d);
+    uint64_t end_sample = static_cast<uint64_t>(end_sample_d);
     if (end_sample <= start_sample)
       return;
 
@@ -1771,17 +1771,17 @@ void ProtocolDock::on_visible_range_changed() {
 
   double scale = _view->scale();
   int64_t offset = _view->offset();
-  double samples_per_pixel = (double)samplerate * scale;
+  double samples_per_pixel = static_cast<double>(samplerate) * scale;
 
-  double start_sample_d = (double)offset * samples_per_pixel;
-  double end_sample_d = (double)(offset + viewport_width) * samples_per_pixel;
+  double start_sample_d = static_cast<double>(offset) * samples_per_pixel;
+  double end_sample_d = static_cast<double>((offset + viewport_width)) * samples_per_pixel;
   if (start_sample_d < 0)
     start_sample_d = 0;
   if (end_sample_d < 0)
     end_sample_d = 0;
 
-  uint64_t start_sample = (uint64_t)start_sample_d;
-  uint64_t end_sample = (uint64_t)end_sample_d;
+  uint64_t start_sample = static_cast<uint64_t>(start_sample_d);
+  uint64_t end_sample = static_cast<uint64_t>(end_sample_d);
   if (end_sample <= start_sample) {
     return;
   }
@@ -1804,13 +1804,13 @@ void ProtocolDock::on_visible_range_changed() {
 
   auto range = decoder_stack->get_visible_range(target_row, start_sample,
                                                 end_sample);
-  int64_t start_idx = (int64_t)range.first;
-  int64_t end_idx = (int64_t)range.second;
+  int64_t start_idx = static_cast<int64_t>(range.first);
+  int64_t end_idx = static_cast<int64_t>(range.second);
 
   int64_t mark = decoder_stack->get_mark_index();
   if (mark >= 0) {
     uint64_t mark_row_u = decoder_stack->get_annotation_index(target_row, mark);
-    int64_t mark_row = (int64_t)mark_row_u;
+    int64_t mark_row = static_cast<int64_t>(mark_row_u);
     if (mark_row >= end_idx) {
       end_idx = mark_row + 1;
     } else if (mark_row < start_idx) {
@@ -1825,7 +1825,7 @@ void ProtocolDock::on_visible_range_changed() {
 
   if (_jumping_to_row && _jumping_target_row >= start_idx &&
       _jumping_target_row < end_idx) {
-    int sliced_row = (int)(_jumping_target_row - start_idx);
+    int sliced_row = static_cast<int>((_jumping_target_row - start_idx));
     QModelIndex source_index = _decoder_model->index(
         sliced_row, _nav_column + pv::view::DecoderModel::PRESET_COLUMN_COUNT);
     QModelIndex proxy_index = _model_proxy.mapFromSource(source_index);
@@ -1924,7 +1924,7 @@ void ProtocolDock::on_decoder_combo_changed(int index) {
     _decoder_model->setAllStacks(stacks);
   } else {
     int stack_idx = index - 1; // offset by "All"
-    if (stack_idx < 0 || stack_idx >= (int)decode_sigs.size())
+    if (stack_idx < 0 || stack_idx >= static_cast<int>(decode_sigs.size()))
       return;
     _decoder_model->setDecoderStack(decode_sigs[stack_idx].get());
   }

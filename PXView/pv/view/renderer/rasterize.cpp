@@ -95,14 +95,14 @@ void rasterize_logic_channel(
   const double start = offset * samples_per_pixel;
   const double end = (offset + width + 1) * samples_per_pixel;
   const uint64_t end_index =
-      min(max((int64_t)floor(end), (int64_t)0), last_sample);
-  const uint64_t start_index = max((uint64_t)floor(start), (uint64_t)0);
+      min(max(static_cast<int64_t>(floor(end)), static_cast<int64_t>(0)), last_sample);
+  const uint64_t start_index = max(static_cast<uint64_t>(floor(start)), static_cast<uint64_t>(0));
 
   if (start_index > end_index)
     return;
 
   width =
-      min(width, (uint16_t)ceil((end_index + 1) / samples_per_pixel - offset));
+      min(width, static_cast<uint16_t>(ceil((end_index + 1) / samples_per_pixel - offset)));
   const uint16_t max_togs = width / kRasterizeTogMaxScale;
 
   // Scratch buffers (were LogicSignal::_cur_pulses/_cur_edges members).
@@ -203,8 +203,8 @@ void rasterize_logic_channel(
         const auto &r = *it;
         if (r.end < start_index)
           continue; // off-screen cull
-        int x1 = (int)(r.start / samples_per_pixel - offset);
-        int x2 = (int)(r.end / samples_per_pixel - offset);
+        int x1 = static_cast<int>((r.start / samples_per_pixel - offset));
+        int x2 = static_cast<int>((r.end / samples_per_pixel - offset));
         if (x2 <= x1)
           x2 = x1 + 1;
         p.drawRect(x1, high_offset, x2 - x1, low_offset - high_offset);
@@ -220,8 +220,8 @@ void rasterize_logic_channel(
     for (const auto &pulse : *preview_ranges) {
       if (pulse.end < start_index || pulse.start > end_index)
         continue;
-      int x1 = (int)(pulse.start / samples_per_pixel - offset);
-      int x2 = (int)(pulse.end / samples_per_pixel - offset);
+      int x1 = static_cast<int>((pulse.start / samples_per_pixel - offset));
+      int x2 = static_cast<int>((pulse.end / samples_per_pixel - offset));
       if (x2 <= x1)
         x2 = x1 + 1;
       p.drawRect(x1, high_offset, x2 - x1, low_offset - high_offset);
@@ -252,8 +252,8 @@ void rasterize_dso_channel(
   // `samples_buffer[s - start]` 索引保持不变。
   // contiguous_samples == sample_count - start，覆盖整个 [start, end)。
   const pv::data::SampleSpan sp =
-      snapshot->span((uint32_t)channel_index, (uint64_t)start,
-                     (uint64_t)(end - start));
+      snapshot->span(static_cast<uint32_t>(channel_index), static_cast<uint64_t>(start),
+                     static_cast<uint64_t>((end - start)));
   if (!sp.valid())
     return;
   const uint8_t *const samples_buffer = sp.data;
@@ -283,7 +283,7 @@ void rasterize_dso_channel(
     int pt_count = 0;
     for (int x = 0; x < width; x++) {
       double sample_pos = base_sample + x * spp;
-      int64_t s0 = (int64_t)floor(sample_pos);
+      int64_t s0 = static_cast<int64_t>(floor(sample_pos));
       double frac = sample_pos - s0;
 
       if (s0 < start) {
@@ -302,9 +302,9 @@ void rasterize_dso_channel(
       uint8_t v0 = samples_buffer[s0 - start];
       uint8_t v1 =
           (s1 <= end && s1 > start) ? samples_buffer[s1 - start] : v0;
-      float v = v0 + (float)(v1 - v0) * frac;
+      float v = v0 + static_cast<float>((v1 - v0)) * frac;
       float y = min(max(top, zeroY + (v - hw_offset) * scale), bottom);
-      pts[pt_count++] = QPointF((float)(left + x), y);
+      pts[pt_count++] = QPointF(static_cast<float>((left + x)), y);
     }
     p.drawPolyline(pts.data(), pt_count);
   } else {
@@ -316,8 +316,8 @@ void rasterize_dso_channel(
     }
 
     for (int x = 0; x < width; x++) {
-      int64_t s_start = (int64_t)floor(base_sample + x * spp);
-      int64_t s_end = (int64_t)floor(base_sample + (x + 1) * spp);
+      int64_t s_start = static_cast<int64_t>(floor(base_sample + x * spp));
+      int64_t s_end = static_cast<int64_t>(floor(base_sample + (x + 1) * spp));
 
       if (s_start < start)
         s_start = start;
@@ -372,7 +372,7 @@ void rasterize_dso_channel(
       else if (h <= 0.0f && h > -1.0f)
         h = -1.0f;
 
-      r[x] = QRectF((float)(left + x), y_top, 1.0f, h);
+      r[x] = QRectF(static_cast<float>((left + x)), y_top, 1.0f, h);
     }
     p.drawRects(r, width);
   }
@@ -386,7 +386,7 @@ void rasterize_analog_channel(
   // Verbatim extraction of AnalogSignal::paint_per_pixel (no arithmetic
   // changes — pixel parity required). Members replaced by parameters; the
   // member _rects scratch buffer is replaced by a static thread_local one.
-  const int64_t channel_num = (int64_t)snapshot->get_channel_num();
+  const int64_t channel_num = static_cast<int64_t>(snapshot->get_channel_num());
   const uint8_t unit_bytes = snapshot->get_unit_bytes();
   // 通道索引 -> snapshot 内部 order（全函数唯一一次转换）。
   // 不能把 order 当通道索引用：span() / get_ch_order() 收的是 SignalModel
@@ -400,7 +400,7 @@ void rasterize_analog_channel(
   // 所以取 group_base（只有 Analog 的 group_base 与 data 不同 —— data 现在
   // 指向"本通道第一个样本"）。
   const pv::data::SampleSpan sp =
-      snapshot->span((uint32_t)channel_index, 0, snapshot->get_sample_count());
+      snapshot->span(static_cast<uint32_t>(channel_index), 0, snapshot->get_sample_count());
   const uint8_t *const samples = sp.group_base;
   if (!samples || sample_count <= 0)
     return;
@@ -455,11 +455,11 @@ void rasterize_analog_channel(
 
     int pt_count = 0;
     for (int x = 0; x < pixel_width; x++) {
-      double sample_pos = (double)x * spp;
-      uint64_t s0_offset = (uint64_t)floor(sample_pos);
+      double sample_pos = static_cast<double>(x) * spp;
+      uint64_t s0_offset = static_cast<uint64_t>(floor(sample_pos));
       double frac = sample_pos - s0_offset;
 
-      if (s0_offset >= (uint64_t)sample_count) {
+      if (s0_offset >= static_cast<uint64_t>(sample_count)) {
         if (pt_count > 0)
           break;
         continue;
@@ -469,8 +469,8 @@ void rasterize_analog_channel(
       uint64_t s1 = (s0 + 1) % sample_cnt;
       float y0 = read_sample_y(s0);
       float y1 = read_sample_y(s1);
-      float v = y0 + (float)(y1 - y0) * frac;
-      pts[pt_count++] = QPointF((float)(left + x), v);
+      float v = y0 + static_cast<float>((y1 - y0)) * frac;
+      pts[pt_count++] = QPointF(static_cast<float>((left + x)), v);
 
       if (s0 == ring_end)
         break;
@@ -486,13 +486,13 @@ void rasterize_analog_channel(
 
     // Pass 1: compute min/max Y for each pixel column.
     for (int x = 0; x < pixel_width; x++) {
-      uint64_t s_start_off = (uint64_t)floor((double)x * spp);
-      uint64_t s_end_off = (uint64_t)floor((double)(x + 1) * spp);
+      uint64_t s_start_off = static_cast<uint64_t>(floor((double)x * spp));
+      uint64_t s_end_off = static_cast<uint64_t>(floor((double)(x + 1) * spp));
       if (s_end_off <= s_start_off)
         s_end_off = s_start_off + 1;
-      if (s_end_off > (uint64_t)sample_count)
-        s_end_off = (uint64_t)sample_count;
-      if (s_start_off >= (uint64_t)sample_count) {
+      if (s_end_off > static_cast<uint64_t>(sample_count))
+        s_end_off = static_cast<uint64_t>(sample_count);
+      if (s_start_off >= static_cast<uint64_t>(sample_count)) {
         if (x > 0) {
           min_buf[x] = min_buf[x - 1];
           max_buf[x] = max_buf[x - 1];
@@ -536,7 +536,7 @@ void rasterize_analog_channel(
       else if (h <= 0.0f && h > -1.0f)
         h = -1.0f;
 
-      r[x] = QRectF((float)(left + x), draw_min, 1.0f, h);
+      r[x] = QRectF(static_cast<float>((left + x)), draw_min, 1.0f, h);
     }
     p.drawRects(r, pixel_width);
   }

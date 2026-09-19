@@ -145,9 +145,9 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
             // 顺带去掉原先按“通道索引”下标的 2 元素数组 —— channel_num>=3 且
             // _xIndex/_yIndex 取到 2 时会越界（原有缺陷），改用两个局部指针。
             const pv::data::SampleSpan spx =
-                _data->span((uint32_t)_xIndex, 0, sample_count);
+                _data->span(static_cast<uint32_t>(_xIndex), 0, sample_count);
             const pv::data::SampleSpan spy =
-                _data->span((uint32_t)_yIndex, 0, sample_count);
+                _data->span(static_cast<uint32_t>(_yIndex), 0, sample_count);
             if (!spx.valid() || !spy.valid()) {
                 // 旧代码会解引用 nullptr（未定义行为）；显式报错。
                 p.setPen(_view ? _view->theme_red() : QColor(213, 15, 37, 255));

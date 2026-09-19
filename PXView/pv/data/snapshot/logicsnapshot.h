@@ -42,6 +42,8 @@
 #include <condition_variable>
 #include <thread>
 #include <atomic>
+#include <bit>      // std::countr_zero / std::bit_width (see lsb_index / msb_index)
+#include <cstdint>
 #define CHANNEL_MAX_COUNT 64
 
 // Extracted disk-cache/async-writer subsystem (cluster D). Defined in
@@ -586,7 +588,7 @@ private:
     bool get_sample_self(uint64_t index, int sig_index);
 
     // P5 diff 扫描 (spec 阶段3): 直接对 raw 块字节做 u64 差分 + ctz
-    // (bsf_folded) 定位 [start, end] 内第一个与 expected_level 不同的采样点,
+    // (lsb_index / std::countr_zero) 定位 [start, end] 内第一个与 expected_level 不同的采样点,
     // 输出到 out_pos 并返回 true. 相比 mipmap 树搜索 (get_nxt_edge_self),
     // 稠密数据下 O(bytes) 常量级扫描, 供毛刺滤波主循环复用 (spec:
     // "毛刺滤波走 diff+ctz, 吞吐不低于 RLE 版"). order 是 _ch_data 通道序,
@@ -606,55 +608,32 @@ private:
      *  logic.format == LA_CROSS_DATA. */
     void append_cross_payload(const sr_datafeed_logic &logic);
 
-    inline uint8_t bsf_folded (uint64_t bb)
+    // ---- Bit scan helpers (C++20 <bit>) ---------------------------------
+    //
+    // These replace the hand-rolled De Bruijn bit scan that used to live here
+    // (`bsf_folded` + a 64-entry table, `bsr32` + a 256-entry table). GCC/Clang
+    // lower std::countr_zero / std::bit_width to the very same `bsf` / `lzcnt`
+    // instruction the tables existed to avoid computing (verified equivalent
+    // over every single-bit / mask value, all 256 byte inputs and 6 M random
+    // sparse+dense values before the swap), so the hot mipmap walks and the raw
+    // diff scan keep their throughput and lose ~50 lines of magic numbers.
+    //
+    // Both keep the ZERO-INPUT CONVENTION of the code they replace: `bsf_folded(0)`
+    // returned 63 and `bsr64(0)` returned 0 (an artifact of the lookup tables),
+    // and call sites compute these positions BEFORE testing the mask for zero.
+    // Preserving those answers keeps that pattern valid; do not "fix" them to
+    // 64 / to an underflowing bit_width(0)-1 without auditing every caller.
+
+    /// Index of the least significant set bit (0..63); 63 for a zero input.
+    static inline uint8_t lsb_index(uint64_t bb) noexcept
     {
-        static const uint8_t lsb_64_table[64] = {
-            63, 30,  3, 32, 59, 14, 11, 33,
-            60, 24, 50,  9, 55, 19, 21, 34,
-            61, 29,  2, 53, 51, 23, 41, 18,
-            56, 28,  1, 43, 46, 27,  0, 35,
-            62, 31, 58,  4,  5, 49, 54,  6,
-            15, 52, 12, 40,  7, 42, 45, 16,
-            25, 57, 48, 13, 10, 39,  8, 44,
-            20, 47, 38, 22, 17, 37, 36, 26
-        };
-        unsigned int folded;
-        bb ^= bb - 1;
-        folded = (int) bb ^ (bb >> 32);
-        return lsb_64_table[folded * 0x78291ACF >> 26];
+        return static_cast<uint8_t>(bb ? std::countr_zero(bb) : 63);
     }
 
-    inline uint8_t bsr32(uint32_t bb)
+    /// Index of the most significant set bit (0..63); 0 for a zero input.
+    static inline uint8_t msb_index(uint64_t bb) noexcept
     {
-        static const uint8_t msb_256_table[256] = {
-            0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-            4, 4, 4, 4, 4, 4, 4, 4,4, 4, 4, 4,4, 4, 4, 4,
-            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-            6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-            6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-       };
-       uint8_t result = 0;
-
-       if (bb > 0xFFFF) {
-          bb >>= 16;
-          result += 16;
-       }
-       if (bb > 0xFF) {
-          bb >>= 8;
-          result += 8;
-       }
-
-       return (result + msb_256_table[bb]);
-    }
-
-    inline uint8_t bsr64(uint64_t bb)
-    {
-        const uint32_t hb = static_cast<uint32_t>(bb >> 32);
-        return hb ? 32 + bsr32((uint32_t)hb) : bsr32((uint32_t)bb);
+        return static_cast<uint8_t>(bb ? (std::bit_width(bb) - 1) : 0);
     }
 
     void move_first_node_to_last();

@@ -136,15 +136,15 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
     // 64-bit range on 32-bit machines. To solve the issue we need a
     // custom widget.
 
-    range_min = max(range_min, (int64_t)INT_MIN);
-    range_max = min(range_max, (int64_t)INT_MAX);
+    range_min = max(range_min, static_cast<int64_t>(INT_MIN));
+    range_max = min(range_max, static_cast<int64_t>(INT_MAX));
 
     if (_range)
-        _spin_box->setRange((int)_range->first, (int)_range->second);
+        _spin_box->setRange(static_cast<int>(_range->first), static_cast<int>(_range->second));
     else
-        _spin_box->setRange((int)range_min, (int)range_max);
+        _spin_box->setRange(static_cast<int>(range_min), static_cast<int>(range_max));
 
-    _spin_box->setValue((int)int_val);
+    _spin_box->setValue(static_cast<int>(int_val));
 
     if (auto_commit)
         connect(_spin_box, QOverload<int>::of(&QSpinBox::valueChanged),

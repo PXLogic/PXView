@@ -135,7 +135,7 @@ void LogicSnapshotGlitchFilter::invert_channel(
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
   int order = _host->get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _host->_ch_data.size())
+  if (order == -1 || static_cast<unsigned int>(order) >= _host->_ch_data.size())
     return;
 
   if (_host->_ring_sample_count == 0)
@@ -156,7 +156,7 @@ void LogicSnapshotGlitchFilter::invert_channel(
 
       if (rn.lbp[j] != nullptr) {
         // Block has actual data — XOR all sample bytes with 0xFF
-        uint8_t *lbp = (uint8_t *)rn.lbp[j];
+        uint8_t *lbp = reinterpret_cast<uint8_t*>(rn.lbp[j]);
         uint64_t sample_bytes = LogicSnapshot::LeafBlockSamples / 8;
 
         for (uint64_t k = 0; k < sample_bytes; k++) {
@@ -190,7 +190,7 @@ void LogicSnapshotGlitchFilter::invert_channel(
   // itself be an edit — an API-level trap for any caller that inverts twice
   // without an intervening revert). Toggling keeps the list equal to "orders
   // whose bytes are currently inverted", whatever the call pattern.
-  const unsigned int uorder = (unsigned int)order;
+  const unsigned int uorder = static_cast<unsigned int>(order);
   const auto it = std::find(_inverted_orders.begin(), _inverted_orders.end(),
                             uorder);
   if (it != _inverted_orders.end())
@@ -287,9 +287,9 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
             return;
           }
           const size_t old_size = prev.bytes.size();
-          prev.bytes.resize(old_size + (size_t)add);
-          memcpy(prev.bytes.data() + old_size, (const uint8_t *)lbp + prev_hi,
-                 (size_t)add);
+          prev.bytes.resize(old_size + static_cast<size_t>(add));
+          memcpy(prev.bytes.data() + old_size, reinterpret_cast<const uint8_t*>(lbp) + prev_hi,
+                 static_cast<size_t>(add));
           _edit_bytes += add;
         }
         return;
@@ -313,15 +313,15 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
   e.idx1 = idx1;
   e.byte_lo = byte_lo;
   e.allocated = false;
-  e.bytes.resize((size_t)len);
-  memcpy(e.bytes.data(), (const uint8_t *)lbp + byte_lo, (size_t)len);
+  e.bytes.resize(static_cast<size_t>(len));
+  memcpy(e.bytes.data(), reinterpret_cast<const uint8_t*>(lbp) + byte_lo, static_cast<size_t>(len));
   _edit_bytes += len;
   _edits.push_back(std::move(e));
 }
 
 bool LogicSnapshotGlitchFilter::edit_log_can_grow(uint64_t extra_payload,
                                                  uint64_t extra_records) const {
-  const uint64_t records = (uint64_t)_edits.size() + extra_records;
+  const uint64_t records = static_cast<uint64_t>(_edits.size()) + extra_records;
   const uint64_t estimated =
       _edit_bytes + extra_payload + records * kEditRecordOverheadBytes;
   return estimated <= edit_log_budget_bytes();
@@ -333,7 +333,7 @@ uint64_t LogicSnapshotGlitchFilter::edit_log_budget_bytes() const {
   uint64_t snapshot_bytes = 0;
   if (!_host->_ch_data.empty()) {
     const uint64_t samples = _host->_ring_sample_count;
-    snapshot_bytes = (uint64_t)_host->_ch_data.size() * (samples / 8);
+    snapshot_bytes = static_cast<uint64_t>(_host->_ch_data.size()) * (samples / 8);
   }
   uint64_t budget = snapshot_bytes + kEditLogFloorBytes;
   if (budget > kEditLogCeilingBytes)
@@ -406,12 +406,12 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
 
   // Record indices per block, in log (write) order — replayed in reverse below.
   std::vector<std::vector<uint32_t>> per_block(touched.size());
-  for (uint32_t ri = 0; ri < (uint32_t)_edits.size(); ++ri) {
+  for (uint32_t ri = 0; ri < static_cast<uint32_t>(_edits.size()); ++ri) {
     const EditRecord &e = _edits[ri];
-    const auto key = std::make_tuple((unsigned int)e.order, e.idx0, e.idx1);
+    const auto key = std::make_tuple(static_cast<unsigned int>(e.order), e.idx0, e.idx1);
     auto it = std::lower_bound(touched.begin(), touched.end(), key);
     if (it != touched.end() && *it == key)
-      per_block[(size_t)(it - touched.begin())].push_back(ri);
+      per_block[static_cast<size_t>((it - touched.begin()))].push_back(ri);
   }
 
   // The undo rewrites leaf blocks in place, so it needs exclusive visibility. It
@@ -502,13 +502,13 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
           memset(ptr, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
         else
           memset(ptr, 0, LogicSnapshot::LeafBlockSamples / 8);
-        memset((uint8_t *)ptr + LogicSnapshot::LeafBlockSamples / 8, 0,
+        memset(reinterpret_cast<uint8_t*>(ptr) + LogicSnapshot::LeafBlockSamples / 8, 0,
                LogicSnapshot::LeafBlockSpace -
                    LogicSnapshot::LeafBlockSamples / 8);
         rn.lbp[e.idx1] = ptr;
       }
       if (ptr && !e.bytes.empty())
-        memcpy((uint8_t *)ptr + e.byte_lo, e.bytes.data(), e.bytes.size());
+        memcpy(reinterpret_cast<uint8_t*>(ptr) + e.byte_lo, e.bytes.data(), e.bytes.size());
       return true;
     }
   };
@@ -617,7 +617,7 @@ void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,
   if (index1 > 0) {
     void* prev_ptr = _host->_ch_data[order][index0].lbp[index1 - 1];
     if (prev_ptr != nullptr) {
-      uint64_t *prev_lbp = (uint64_t *)prev_ptr;
+      uint64_t *prev_lbp = reinterpret_cast<uint64_t*>(prev_ptr);
       _host->_last_sample[order] =
           (prev_lbp[LogicSnapshot::LeafBlockSamples / LogicSnapshot::Scale - 1] &
            LogicSnapshot::MSB)
@@ -636,7 +636,7 @@ void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,
     _host->_last_sample[order] = 0;
   }
 
-  memset((uint8_t *)lbp + LogicSnapshot::LeafBlockSamples / 8, 0,
+  memset(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8, 0,
          LogicSnapshot::LeafBlockSpace - LogicSnapshot::LeafBlockSamples / 8);
 
   _host->_ch_data[order][index0].tog &= ~(1ULL << index1);
@@ -662,7 +662,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
     return;
 
   int order = _host->get_ch_order(sig_index);
-  if (order == -1 || (unsigned int)order >= _host->_ch_data.size())
+  if (order == -1 || static_cast<unsigned int>(order) >= _host->_ch_data.size())
     return;
 
   uint64_t max_sample = _host->_ring_sample_count;
@@ -722,7 +722,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
   pxv_info("[GlitchFilter] START sig_index=%d threshold=%u max_sample=%llu "
            "accepted_level=%d filter_mode=%d",
            sig_index, threshold, (unsigned long long)max_sample,
-           accepted_level, (int)filter_mode);
+           accepted_level, static_cast<int>(filter_mode));
 
   // 本次滤波的持久化区间在本地累积，全部完成后一次性发布为不可变快照。
   // 渲染线程通过 shared_ptr 拿到的是完整表，永远不会看到 push_back 中途
@@ -824,7 +824,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
             memset(lbp, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
           else
             memset(lbp, 0, LogicSnapshot::LeafBlockSamples / 8);
-          memset((uint8_t *)lbp + LogicSnapshot::LeafBlockSamples / 8, 0,
+          memset(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8, 0,
                  LogicSnapshot::LeafBlockSpace -
                      LogicSnapshot::LeafBlockSamples / 8);
           _host->_ch_data[order][idx0].lbp[idx1] = lbp;
@@ -857,7 +857,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
           }
         }
 
-        uint8_t *lbp = (uint8_t *)_host->_ch_data[order][idx0].lbp[idx1];
+        uint8_t *lbp = reinterpret_cast<uint8_t*>(_host->_ch_data[order][idx0].lbp[idx1]);
 
         // 由于马上要改写内容，此处清除该块的跳变标志位
         _host->_ch_data[order][idx0].tog &= ~(1ULL << idx1);
@@ -1021,7 +1021,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
                      (unsigned long long)stable_count, (unsigned long long)scan_pos,
                      (unsigned long long)pulse_start, (unsigned long long)pulse_end,
                      (unsigned long long)pulse_len, accepted_level,
-                     !accepted_level, (int)filter_mode);
+                     !accepted_level, static_cast<int>(filter_mode));
           }
           accepted_level = !accepted_level;
           scan_pos = pulse_start;
@@ -1050,7 +1050,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
       scan_pos = pulse_start;
     }
 
-    int progress = (int)((scan_pos - _host->_loop_offset) * 100 / max_sample);
+    int progress = static_cast<int>(((scan_pos - _host->_loop_offset) * 100 / max_sample));
     if (progress != last_progress && progress_callback) {
       progress_callback(progress);
       last_progress = progress;
@@ -1128,7 +1128,7 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter_all(
         return;
     }
     if (progress_callback) {
-      int progress = (int)((i + 1) * 100 / _host->_ch_index.size());
+      int progress = static_cast<int>(((i + 1) * 100 / _host->_ch_index.size()));
       progress_callback(progress);
     }
   }
@@ -1146,7 +1146,7 @@ void apply_glitch_filter_one_pass(const uint8_t *in, uint8_t *out,
     return;
 
   // 先用输入填充输出，未判定为毛刺的样本保持原电平
-  memcpy(out, in, (size_t)sample_count);
+  memcpy(out, in, static_cast<size_t>(sample_count));
 
   bool accepted_level = in[0] != 0;
   uint64_t scan_pos = 0;

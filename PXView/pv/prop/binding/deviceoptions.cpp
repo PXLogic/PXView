@@ -66,8 +66,8 @@ DeviceOptions::DeviceOptions(SigSession *session)
 		return;
     }
 
-	const uint32_t *const options = (const uint32_t *)g_variant_get_fixed_array(
-		gvar_opts, &num_opts, sizeof(uint32_t));
+	const uint32_t *const options = reinterpret_cast<const uint32_t*>(g_variant_get_fixed_array(
+		gvar_opts, &num_opts, sizeof(uint32_t)));
 
     pxv_info("DeviceOptions binding: num_opts=%zu", num_opts);
 
@@ -80,7 +80,7 @@ DeviceOptions::DeviceOptions(SigSession *session)
 		 * (e.g. SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST).
 		 * sr_key_info_get only recognizes bare keys.
 		 * SR_CONF_MASK = 0x1fffffff (libsigrok-internal.h, not public). */
-		const int key = (int)(options[i] & 0x1fffffff);
+		const int key = static_cast<int>((options[i] & 0x1fffffff));
 
 		/* Skip duplicate keys — some drivers may accidentally list the same
 		 * key twice in devopts[] (e.g. with different capability bits),
@@ -297,11 +297,11 @@ _session->reload();
 	if (ok && key == SR_CONF_CAPTURE_RATIO && _session) {
 		int pos = -1;
 		if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT64))
-			pos = (int)g_variant_get_uint64(value);
+			pos = static_cast<int>(g_variant_get_uint64(value));
 		else if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT32))
 			pos = g_variant_get_int32(value);
 		else if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32))
-			pos = (int)g_variant_get_uint32(value);
+			pos = static_cast<int>(g_variant_get_uint32(value));
 		if (pos >= 0 && pos <= 100) {
 			data::TriggerConfig cfg = _session->trigger_config();
 			cfg.set_trigger_pos(pos);
@@ -411,16 +411,16 @@ void DeviceOptions::bind_samplerate(const QString &name, const QString label,
 	{
 		gsize num_elements;
 		const uint64_t *const elements =
-			(const uint64_t *)g_variant_get_fixed_array(
-				gvar_list_samplerates, &num_elements, sizeof(uint64_t));
+			reinterpret_cast<const uint64_t*>(g_variant_get_fixed_array(
+				gvar_list_samplerates, &num_elements, sizeof(uint64_t)));
 
 		assert(num_elements == 3);
 
 		_properties.push_back(
 			//tr
 			new Double(name, label, 0, L_S(STR_PAGE_DLG, S_ID(IDS_DLG_HZ), "Hz"),
-				make_pair((double)elements[0], (double)elements[1]),
-						(double)elements[2],
+				make_pair(static_cast<double>(elements[0]), static_cast<double>(elements[1])),
+						static_cast<double>(elements[2]),
 				[this]() { return samplerate_double_getter(); },
 				[this](GVariant* v) { samplerate_double_setter(v); }));
 

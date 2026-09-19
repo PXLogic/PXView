@@ -1596,8 +1596,8 @@ void DecoderOptionsDlg::create_pwm_fast_options(
                 double spp = sr * _trace->get_view()->scale();
                 int64_t pix = _trace->get_view()->offset();
                 int w = _trace->get_view()->get_view_width();
-                uint64_t s0 = (uint64_t)std::max(0.0, pix * spp),
-                         s1 = (uint64_t)std::max(0.0, (pix + w) * spp);
+                uint64_t s0 = static_cast<uint64_t>(std::max(0.0, pix * spp)),
+                         s1 = static_cast<uint64_t>(std::max(0.0, (pix + w) * spp));
                 for (const auto &a : ss) {
                     if (a.end_sample < s0)
                         continue;
@@ -1618,8 +1618,8 @@ void DecoderOptionsDlg::create_pwm_fast_options(
         float range = mx - mn;
         double vz = 1.0, vp = 1.0;
         if (range >= 0.0001f) {
-            vz = std::clamp(2.0 / (double)range, 0.05, 100.0);
-            vp = std::clamp(1.0 + 0.9 * ((double)mn + mx) * 0.5 * vz, -3.0, 3.0);
+            vz = std::clamp(2.0 / static_cast<double>(range), 0.05, 100.0);
+            vp = std::clamp(1.0 + 0.9 * (static_cast<double>(mn) + mx) * 0.5 * vz, -3.0, 3.0);
         }
         ui->vzoom[ch]->setValue(vz);
         ui->vpos[ch]->setValue(vp);

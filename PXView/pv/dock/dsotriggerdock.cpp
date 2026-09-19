@@ -240,7 +240,7 @@ void DsoTriggerDock::auto_trig(int index) {
 void DsoTriggerDock::pos_changed(int pos) {
   int ret;
   /* SR_CONF_HORIZ_TRIGGERPOS is SR_T_FLOAT in hwdriver.c — must use double. */
-  ret = _signals->device()->set_config_double(SR_CONF_HORIZ_TRIGGERPOS, (double)pos);
+  ret = _signals->device()->set_config_double(SR_CONF_HORIZ_TRIGGERPOS, static_cast<double>(pos));
   if (!ret) {
     if (_signals->device()->is_hardware() || true) {
       QString strMsg(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_CHANGE_HOR_TRI_POS_FAIL),
@@ -416,7 +416,7 @@ void DsoTriggerDock::update_view() {
   // TRIGGERPOS (SR_T_FLOAT → double)
   double dpos;
   if (_signals->device()->get_config_double(SR_CONF_HORIZ_TRIGGERPOS, dpos)) {
-    _position_slider->setValue((int)dpos);
+    _position_slider->setValue(static_cast<int>(dpos));
   }
 
   if (_signals->device()->get_config_byte(SR_CONF_TRIGGER_SOURCE, src)) {

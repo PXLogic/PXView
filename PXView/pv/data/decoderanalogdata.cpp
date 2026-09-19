@@ -70,7 +70,7 @@ void DecoderAnalogData::append_samples(uint64_t start_sample,
     for (size_t i = 0; i < count; ++i) {
         uint64_t step = quotient;
         if (remainder != 0) {
-            const uint64_t threshold = (uint64_t)count - remainder;
+            const uint64_t threshold = static_cast<uint64_t>(count) - remainder;
             if (error >= threshold) {
                 ++step;
                 error -= threshold;
@@ -251,16 +251,16 @@ bool DecoderAnalogData::get_range_cycle_metrics(
         [](uint64_t position, const DecoderAnalogSample &sample) {
             return position < sample.start_sample;
         });
-    const size_t first = (size_t)(first_it - _samples.begin());
-    const size_t last = (size_t)(last_it - _samples.begin());
+    const size_t first = static_cast<size_t>((first_it - _samples.begin()));
+    const size_t last = static_cast<size_t>((last_it - _samples.begin()));
     if (last - first < 8)
         return false;
 
     double raw_min = _samples[first].value;
     double raw_max = raw_min;
     for (size_t i = first + 1; i < last; ++i) {
-        raw_min = std::min(raw_min, (double)_samples[i].value);
-        raw_max = std::max(raw_max, (double)_samples[i].value);
+        raw_min = std::min(raw_min, static_cast<double>(_samples[i].value));
+        raw_max = std::max(raw_max, static_cast<double>(_samples[i].value));
     }
     const double raw_range = raw_max - raw_min;
     if (!std::isfinite(raw_range) || raw_range < 1e-12)
@@ -289,8 +289,8 @@ bool DecoderAnalogData::get_range_cycle_metrics(
     if (low_count == 0 || high_count == 0)
         return false;
 
-    const double low_level = (double)(low_sum / low_count);
-    const double high_level = (double)(high_sum / high_count);
+    const double low_level = static_cast<double>((low_sum / low_count));
+    const double high_level = static_cast<double>((high_sum / high_count));
     const double amplitude = high_level - low_level;
     if (!std::isfinite(amplitude) || amplitude < 1e-12)
         return false;
@@ -311,14 +311,14 @@ bool DecoderAnalogData::get_range_cycle_metrics(
     const auto crossing_position = [](const DecoderAnalogSample &a,
                                       const DecoderAnalogSample &b,
                                       double threshold) {
-        const double dv = (double)b.value - (double)a.value;
+        const double dv = static_cast<double>(b.value) - static_cast<double>(a.value);
         if (std::abs(dv) < 1e-20)
-            return (double)a.start_sample;
+            return static_cast<double>(a.start_sample);
         const double fraction = std::clamp(
-            (threshold - (double)a.value) / dv, 0.0, 1.0);
-        return (double)a.start_sample +
-               fraction * ((double)b.start_sample -
-                           (double)a.start_sample);
+            (threshold - static_cast<double>(a.value)) / dv, 0.0, 1.0);
+        return static_cast<double>(a.start_sample) +
+               fraction * (static_cast<double>(b.start_sample) -
+                           static_cast<double>(a.start_sample));
     };
 
     for (size_t i = first + 1; i < last; ++i) {
@@ -410,30 +410,30 @@ bool DecoderAnalogData::get_range_cycle_metrics(
 
     if (time_count > 0) {
         const long double count = (long double)time_count;
-        out.period_samples = (double)(period_sum / count);
-        out.positive_width_samples = (double)(positive_width_sum / count);
-        out.negative_width_samples = (double)(negative_width_sum / count);
-        out.positive_duty_cycle = (double)(positive_duty_sum / count);
-        out.negative_duty_cycle = (double)(negative_duty_sum / count);
+        out.period_samples = static_cast<double>((period_sum / count));
+        out.positive_width_samples = static_cast<double>((positive_width_sum / count));
+        out.negative_width_samples = static_cast<double>((negative_width_sum / count));
+        out.positive_duty_cycle = static_cast<double>((positive_duty_sum / count));
+        out.negative_duty_cycle = static_cast<double>((negative_duty_sum / count));
         out.time_valid = true;
     }
     if (rise_count > 0) {
-        out.rise_samples = (double)(rise_sum / (long double)rise_count);
+        out.rise_samples = static_cast<double>((rise_sum / (long double)rise_count));
         out.rise_valid = true;
     }
     if (fall_count > 0) {
-        out.fall_samples = (double)(fall_sum / (long double)fall_count);
+        out.fall_samples = static_cast<double>((fall_sum / (long double)fall_count));
         out.fall_valid = true;
     }
 
     const uint64_t cycle_first =
         rising50.front() <= 0.0
             ? 0
-            : (uint64_t)std::ceil(rising50.front());
+            : static_cast<uint64_t>(std::ceil(rising50.front()));
     const uint64_t cycle_last =
         rising50.back() <= 0.0
             ? 0
-            : (uint64_t)std::floor(rising50.back());
+            : static_cast<uint64_t>(std::floor(rising50.back()));
     auto cycle_it = std::lower_bound(
         _samples.begin() + first, _samples.begin() + last, cycle_first,
         [](const DecoderAnalogSample &sample, uint64_t position) {
@@ -460,8 +460,8 @@ bool DecoderAnalogData::get_range_cycle_metrics(
 
     if (cycle_count > 0) {
         const long double count = (long double)cycle_count;
-        out.cycle_mean = (double)(cycle_sum / count);
-        out.cycle_rms = std::sqrt((double)(cycle_sum_squares / count));
+        out.cycle_mean = static_cast<double>((cycle_sum / count));
+        out.cycle_rms = std::sqrt(static_cast<double>((cycle_sum_squares / count)));
         out.cycle_rms_valid = true;
         out.positive_overshoot =
             std::max(0.0, (cycle_max - high_level) * 100.0 / amplitude);

@@ -278,7 +278,7 @@ void MainFrame::ParentShowNormal() { showNormal(); }
 
 void MainFrame::OnParentNativeEvent(ParentNativeEvent msg)
 {
-    sig_ParentNativeEvent((int)msg);
+    sig_ParentNativeEvent(static_cast<int>(msg));
 }
 
 void MainFrame::OnParentNaitveWindowEvent(int msg)

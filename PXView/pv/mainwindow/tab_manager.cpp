@@ -121,7 +121,7 @@ void TabManager::init_initial_tab() {
     pxv_info("MainWindow::setup_ui() saved initial signal config, mode=%d "
              "ch_count=%d",
              initial_doc->get_signal_config().work_mode,
-             (int)initial_doc->get_signal_config().channels.size());
+             static_cast<int>(initial_doc->get_signal_config().channels.size()));
   }
 
   pv::TabContext *initial_ctx = SessionManager::instance()->create_context(
@@ -531,7 +531,7 @@ void TabManager::on_new_tab_requested() {
     pxv_info("TabManager::on_new_tab_requested() saved signal config, mode=%d "
              "ch_count=%d",
              new_doc->get_signal_config().work_mode,
-             (int)new_doc->get_signal_config().channels.size());
+             static_cast<int>(new_doc->get_signal_config().channels.size()));
   }
 
   pv::TabContext *new_ctx =

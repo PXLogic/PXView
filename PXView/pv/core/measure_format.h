@@ -45,7 +45,7 @@ constexpr int kAdcFullScale = 255;
 // which is what produced the vfactor² / vdiv² defects. Storing the reciprocal
 // directly makes the whole formula height-independent and removes the need for
 // the View to push its geometry into Core.
-constexpr double kAdcScale = 1.0 / (double)kAdcFullScale;
+constexpr double kAdcScale = 1.0 / static_cast<double>(kAdcFullScale);
 
 // ---- mV <-> V 单位边界 ----
 //

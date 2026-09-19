@@ -596,7 +596,7 @@ void MainWindow::on_frame_began() {
 }
 
 void MainWindow::on_show_region(quint64 start, quint64 end, bool keep) {
-  current_view()->show_region((uint64_t)start, (uint64_t)end, keep);
+  current_view()->show_region(static_cast<uint64_t>(start), static_cast<uint64_t>(end), keep);
 }
 
 void MainWindow::on_show_wait_trigger() { current_view()->show_wait_trigger(); }

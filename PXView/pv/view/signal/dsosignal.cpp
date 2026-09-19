@@ -232,13 +232,13 @@ bool DsoSignal::go_vDialPre(bool manul) {
       set_scale(get_view_rect().height());
     }
     if (probe)
-      _model->set_probe_offset((uint16_t)_zero_offset, probe);
+      _model->set_probe_offset(static_cast<uint16_t>(_zero_offset), probe);
 
     _view->vDial_updated();
     _view->set_update_viewport(_viewport, true);
     _view->request_repaint();
     if (_model) {
-      _model->set_vdiv_mv((double)_vDial->get_value());
+      _model->set_vdiv_mv(static_cast<double>(_vDial->get_value()));
     }
     return true;
   } else {
@@ -276,13 +276,13 @@ bool DsoSignal::go_vDialNext(bool manul) {
       set_scale(get_view_rect().height());
     }
     if (probe)
-      _model->set_probe_offset((uint16_t)_zero_offset, probe);
+      _model->set_probe_offset(static_cast<uint16_t>(_zero_offset), probe);
 
     _view->vDial_updated();
     _view->set_update_viewport(_viewport, true);
     _view->request_repaint();
     if (_model) {
-      _model->set_vdiv_mv((double)_vDial->get_value());
+      _model->set_vdiv_mv(static_cast<double>(_vDial->get_value()));
     }
     return true;
   } else {
@@ -335,7 +335,7 @@ bool DsoSignal::load_settings() {
   // dso channel bits
   ret = _data_source->device()->get_unit_bits(v);
   if (ret) {
-    _bits = (uint8_t)v;
+    _bits = static_cast<uint8_t>(v);
   } else {
     _bits = DsoSignal::DefaultBits;
     pxv_warn("config_get SR_CONF_UNIT_BITS failed, set to %d (default)",
@@ -347,13 +347,13 @@ bool DsoSignal::load_settings() {
 
   ret = _data_source->device()->get_ref_min(ui32);
   if (ret)
-    _ref_min = (double)ui32;
+    _ref_min = static_cast<double>(ui32);
   else
     _ref_min = 1;
 
   ret = _data_source->device()->get_ref_max(ui32);
   if (ret)
-    _ref_max = (double)ui32;
+    _ref_max = static_cast<double>(ui32);
   else
     _ref_max = ((1 << _bits) - 1);
 
@@ -364,7 +364,7 @@ bool DsoSignal::load_settings() {
     ret = _data_source->device()->get_probe_vdiv(vdiv, probe);
     if (!ret) {
       // SR_CONF_PROBE_VDIV fork stub deleted; fall back to model.
-      vdiv = _model ? (uint64_t)_model->vdiv_mv() : 0;
+      vdiv = _model ? static_cast<uint64_t>(_model->vdiv_mv()) : 0;
     }
 
     ret = _data_source->device()->get_probe_factor(vfactor, probe);
@@ -395,10 +395,10 @@ bool DsoSignal::load_settings() {
       _acCoupling = uint8_t(v);
     } else {
       // SR_CONF_PROBE_COUPLING fork stub deleted; fall back to model.
-      _acCoupling = _model ? (uint8_t)_model->coupling() : 0;
+      _acCoupling = _model ? static_cast<uint8_t>(_model->coupling()) : 0;
     }
   } else {
-    _acCoupling = _model ? (uint8_t)_model->coupling() : 0;
+    _acCoupling = _model ? static_cast<uint8_t>(_model->coupling()) : 0;
   }
 
   // -- enable state (sync from driver so CH1 is enabled by default)
@@ -478,17 +478,17 @@ int DsoSignal::commit_settings() {
   _model->set_probe_enabled(enabled(), probe);
 
   // -- vdiv
-  _model->set_vdiv_mv((double)_vDial->get_value());
+  _model->set_vdiv_mv(static_cast<double>(_vDial->get_value()));
   _model->set_probe_factor(_vDial->get_factor(), probe);
 
   // -- coupling
-  _model->set_coupling((int)_acCoupling);
+  _model->set_coupling(static_cast<int>(_acCoupling));
 
   // -- offset
-  _model->set_probe_offset((uint16_t)_zero_offset, probe);
+  _model->set_probe_offset(static_cast<uint16_t>(_zero_offset), probe);
 
   // -- trig_value
-  _model->set_trigger_value((double)_trig_value, probe);
+  _model->set_trigger_value(static_cast<double>(_trig_value), probe);
 
   return 1;
 }
@@ -499,13 +499,13 @@ uint16_t DsoSignal::get_vDialSel() { return _vDial->get_sel(); }
 
 void DsoSignal::set_acCoupling(uint8_t coupling) {
   pxv_info("[DSO-COUPLING] set_acCoupling(%u) called, enabled=%d",
-           (unsigned)coupling, enabled());
+           static_cast<unsigned>(coupling), enabled());
   auto model = _model;
 
   if (enabled()) {
     _acCoupling = coupling;
     if (model) {
-      model->set_coupling((int)coupling);
+      model->set_coupling(static_cast<int>(coupling));
     }
   }
 }
@@ -571,7 +571,7 @@ void DsoSignal::set_zero_ratio(double ratio) {
   auto model = _model;
   _zero_offset = ratio2value(ratio);
   if (model) {
-    model->set_zero_offset((double)_zero_offset);
+    model->set_zero_offset(static_cast<double>(_zero_offset));
   }
 }
 
@@ -600,7 +600,7 @@ void DsoSignal::set_factor(uint64_t factor) {
       _view->set_update_viewport(_viewport, true);
       _view->request_repaint();
       if (model) {
-        model->set_vfactor((double)factor);
+        model->set_vfactor(static_cast<double>(factor));
       }
 
       // 联动 vDial: 把有效 vdiv (base_value × factor) 推送到 driver。
@@ -625,7 +625,7 @@ void DsoSignal::set_factor(uint64_t factor) {
       if (_data_source->is_stopped_status()) {
         // factor 变化等效于 vdiv 变化, 调整 stop_scale 保持显示比例
         // 新_vdiv / 旧_vdiv = factor / prefactor
-        set_stop_scale(_stop_scale * ((double)prefactor / (double)factor));
+        set_stop_scale(_stop_scale * (static_cast<double>(prefactor) / static_cast<double>(factor)));
         set_scale(get_view_rect().height());
       }
 

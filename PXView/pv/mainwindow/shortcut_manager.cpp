@@ -111,7 +111,7 @@ bool MainWindowShortcutManager::handleKeyPress(QObject *object,
                                                 QEvent *event) {
   (void)object;
 
-  QKeyEvent *ke = (QKeyEvent *)event;
+  QKeyEvent *ke = reinterpret_cast<QKeyEvent*>(event);
   QWidget *focused = qApp->focusWidget();
 
   pxv_info("MainWindow::eventFilter key=%d, object=%p (%s), focused=%p (%s)",
@@ -196,7 +196,7 @@ bool MainWindowShortcutManager::handleKeyPress(QObject *object,
 
     if (text.isEmpty() && target->inherits("QLineEdit")) {
       if (key >= Qt::Key_Space && key <= Qt::Key_AsciiTilde) {
-        char c = (char)key;
+        char c = static_cast<char>(key);
         bool shift = (ke->modifiers() & Qt::ShiftModifier);
         if (c >= 'A' && c <= 'Z' && !shift) {
           c += 32;
@@ -241,7 +241,7 @@ bool MainWindowShortcutManager::handleKeyPress(QObject *object,
     }
   }
 
-  int action = resolveShortcutAction(ke->key(), (int)modifier);
+  int action = resolveShortcutAction(ke->key(), static_cast<int>(modifier));
   if (action == 0) {
     if (modifier & Qt::ControlModifier || modifier & Qt::AltModifier) {
       return true;

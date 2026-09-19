@@ -33,10 +33,10 @@ DecoderMenu::DecoderMenu(QWidget *parent, bool first_level_decoder) :
 	QMenu(parent)
 {
 	GSList *l = g_slist_sort(g_slist_copy(
-		(GSList*)srd_decoder_list()), decoder_name_cmp);
+		reinterpret_cast<GSList*>(srd_decoder_list())), decoder_name_cmp);
 	for(; l; l = l->next)
 	{
-		const srd_decoder *const d = (srd_decoder*)l->data;
+		const srd_decoder *const d = reinterpret_cast<srd_decoder*>(l->data);
 		assert(d);
 		const bool have_probes = (d->channels || d->opt_channels) != 0;
 		if (first_level_decoder == have_probes) {
@@ -56,15 +56,15 @@ int DecoderMenu::decoder_name_cmp(const void *a, const void *b)
 	// decoder names like "I2C", "JTAG", "SPI", "UART" appear in a
 	// natural order instead of raw ASCII order.
 	return pv::base::strnatcasecmp(
-		((const srd_decoder*)a)->name,
-		((const srd_decoder*)b)->name);
+		(reinterpret_cast<const srd_decoder*>(a))->name,
+		(reinterpret_cast<const srd_decoder*>(b))->name);
 }
 
 void DecoderMenu::on_action(QObject *action)
 {
 	assert(action);
 	srd_decoder *const dec =
-		(srd_decoder*)((QAction*)action)->data().value<void*>();
+		reinterpret_cast<srd_decoder*>(((QAction*)action))->data().value<void*>();
 	assert(dec);
 
     selected();

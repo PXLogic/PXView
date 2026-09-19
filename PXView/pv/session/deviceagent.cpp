@@ -380,11 +380,11 @@ void DeviceAgent::release(bool destroy_file_device)
         if (_dev_type == DEV_TYPE_FILELOG && destroy_file_device) {
             // 阶段4：摘除+释放委托 DeviceManager（按 sdi 定位注册表项）。
             _dev_mgr.detach_sdi(_di, true);
-            pxv_info("release: freed sdi %p for file device", (void *)_di);
+            pxv_info("release: freed sdi %p for file device", reinterpret_cast<void*>(_di));
         } else if (_dev_type == DEV_TYPE_FILELOG) {
             pxv_info("release: keeping sdi %p for file device (handle %llu) "
                      "— owned by its document/tab",
-                     (void *)_di, (unsigned long long)_dev_handle);
+                     reinterpret_cast<void*>(_di), (unsigned long long)_dev_handle);
         }
 
         _di = nullptr;
@@ -614,7 +614,7 @@ bool DeviceAgent::enable_probe(int probe_index, bool enable)
 
     // Find channel by index.
     for (const GSList *l = get_channels(); l; l = l->next) {
-        sr_channel *probe = (sr_channel *)l->data;
+        sr_channel *probe = reinterpret_cast<sr_channel*>(l->data);
         if (probe && probe->index == probe_index) {
             if (sr_dev_channel_enable(probe, enable) == SR_OK) {
                 config_changed();
@@ -635,7 +635,7 @@ bool DeviceAgent::set_channel_name(int ch_index, const char *name)
 
     // Upstream API: sr_dev_channel_name_set(channel, name).
     for (const GSList *l = get_channels(); l; l = l->next) {
-        sr_channel *probe = (sr_channel *)l->data;
+        sr_channel *probe = reinterpret_cast<sr_channel*>(l->data);
         if (probe && probe->index == ch_index) {
             // 修复：原实现是空壳（直接 return true，写入被注释），导致
             // MCP configure_channel 改名从未落盘到 sr_channel->name。
@@ -655,7 +655,7 @@ bool DeviceAgent::set_channel_name(int ch_index, const char *name)
 bool DeviceAgent::channel_is_enable(int index)
 {
     for (const GSList *l = get_channels(); l; l = l->next) {
-        const sr_channel *const probe = (const sr_channel *)l->data;
+        const sr_channel *const probe = reinterpret_cast<const sr_channel*>(l->data);
         if (probe && probe->index == index)
             return probe->enabled;
     }
@@ -683,7 +683,7 @@ bool DeviceAgent::have_enabled_channel()
         return false;
     }
     for (const GSList *l = get_channels(); l; l = l->next) {
-        const sr_channel *const probe = (const sr_channel *)l->data;
+        const sr_channel *const probe = reinterpret_cast<const sr_channel*>(l->data);
         if (probe && probe->enabled)
             return true;
     }
@@ -775,7 +775,7 @@ uint64_t DeviceAgent::get_ring_sample_count()
     }
     if (ch_num <= 0) ch_num = 1;
 
-    uint64_t mem_buff_samples = (uint64_t)(buff_gb * 1000000000ULL) * 8 / ch_num;
+    uint64_t mem_buff_samples = static_cast<uint64_t>((buff_gb * 1000000000ULL)) * 8 / ch_num;
 
     uint64_t one_sec_samples = samplerate;
     uint64_t v = (mem_buff_samples > one_sec_samples) ? mem_buff_samples
@@ -893,7 +893,7 @@ const GSList* DeviceAgent::get_device_mode_list()
     bool has_analog = false;
     bool has_dso = false;
     for (const GSList *l = get_channels(); l; l = l->next) {
-        const sr_channel *ch = (const sr_channel *)l->data;
+        const sr_channel *ch = reinterpret_cast<const sr_channel*>(l->data);
         if (!ch)
             continue;
         switch (ch->type) {
@@ -1201,7 +1201,7 @@ GVariant* DeviceAgent::get_config_list(const sr_channel_group *group, int key)
         return nullptr;
 
     GVariant *data = nullptr;
-    int ret = sr_config_list(drv, _di, group, (uint32_t)key, &data);
+    int ret = sr_config_list(drv, _di, group, static_cast<uint32_t>(key), &data);
     if (ret != SR_OK) {
         // SR_ERR_NA / SR_ERR_ARG 表示设备不支持该 key，静默处理避免日志噪音
         if (ret != SR_ERR_NA && ret != SR_ERR_ARG)
@@ -1261,7 +1261,7 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
         if (!cg)
             cg = fallback_grp;
         pxv_dbg("DeviceAgent::get_config: cg lookup for key=%d ch=%p -> cg=%p (name=%s)",
-                 key, (void*)ch, (void*)cg,
+                 key, static_cast<const void*>(ch), static_cast<const void*>(cg),
                  cg ? (cg->name ? cg->name : "(nullptr)") : "(none)");
     }
 
@@ -1307,10 +1307,10 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
         bool devopt_has_get = false;
         if (gvar_devopts) {
             gsize n;
-            const uint32_t *opts = (const uint32_t *)g_variant_get_fixed_array(
-                gvar_devopts, &n, sizeof(uint32_t));
+            const uint32_t *opts = reinterpret_cast<const uint32_t*>(g_variant_get_fixed_array(
+                gvar_devopts, &n, sizeof(uint32_t)));
             for (gsize i = 0; i < n; i++) {
-                if ((opts[i] & 0x1fffffff) == (uint32_t)key &&
+                if ((opts[i] & 0x1fffffff) == static_cast<uint32_t>(key) &&
                     (opts[i] & SR_CONF_GET)) {
                     devopt_has_get = true;
                     break;
@@ -1327,7 +1327,7 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
         return nullptr;
 
     GVariant *data = nullptr;
-    int ret = sr_config_get(drv, _di, cg, (uint32_t)key, &data);
+    int ret = sr_config_get(drv, _di, cg, static_cast<uint32_t>(key), &data);
     if (ret != SR_OK) {
         // SR_ERR_NA / SR_ERR_ARG 表示设备不支持该 key（libsigrok 对"选项不可用"
         // 返回 SR_ERR_ARG 而非 SR_ERR_NA），属于正常情况，静默处理避免日志噪音。
@@ -1468,7 +1468,7 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
         }
     }
 
-    int ret = sr_config_set(_di, cg, (uint32_t)key, data);
+    int ret = sr_config_set(_di, cg, static_cast<uint32_t>(key), data);
     (void)ch;  // upstream sr_config_set does not take a channel parameter
     if (ret != SR_OK) {
         // SR_ERR_NA: device doesn't support this config key — common and
@@ -1481,7 +1481,7 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
         // persist undiagnosed. Now logged at warning level with key name and
         // actual GVariant type string for immediate diagnosis.
         if (ret == SR_ERR_ARG) {
-            const struct sr_key_info *kinfo = sr_key_info_get(SR_KEY_CONFIG, (uint32_t)key);
+            const struct sr_key_info *kinfo = sr_key_info_get(SR_KEY_CONFIG, static_cast<uint32_t>(key));
             const char *key_name = kinfo ? kinfo->name : "(unknown)";
             pxv_warn("DeviceAgent::set_config: key '%s' (id=%d) rejected (SR_ERR_ARG) — "
                      "likely type mismatch (got GVariant type '%s') or invalid value",
@@ -1511,15 +1511,15 @@ bool DeviceAgent::get_config_int32(int key, int &value, const sr_channel *ch, co
         if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
             value = g_variant_get_int32(gvar);
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
-            value = (int)g_variant_get_uint32(gvar);
+            value = static_cast<int>(g_variant_get_uint32(gvar));
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
             value = g_variant_get_int16(gvar);
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
             value = g_variant_get_uint16(gvar);
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
-            value = (int)g_variant_get_int64(gvar);
+            value = static_cast<int>(g_variant_get_int64(gvar));
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
-            value = (int)g_variant_get_uint64(gvar);
+            value = static_cast<int>(g_variant_get_uint64(gvar));
         else if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
             value = g_variant_get_byte(gvar);
         else {
@@ -1694,7 +1694,7 @@ bool DeviceAgent::set_config_byte(int key, int value, const sr_channel *ch, cons
         pxv_warn("%s", "DeviceAgent::set_config_byte: _dev_handle is nullptr");
         return false;
     }
-    GVariant *gvar = g_variant_new_byte((uint8_t)value);
+    GVariant *gvar = g_variant_new_byte(static_cast<uint8_t>(value));
     return set_config(key, gvar, ch, cg);
 }
 
@@ -1740,7 +1740,7 @@ struct sr_config *DeviceAgent::new_config(int key, GVariant *data)
 {
     struct sr_config *src = (struct sr_config *)g_new0(struct sr_config, 1);
     if (!src) return nullptr;
-    src->key = (uint32_t)key;
+    src->key = static_cast<uint32_t>(key);
     src->data = data;
     return src;
 }
@@ -1803,7 +1803,7 @@ int DeviceAgent::option_value_to_code(int mode, int key, const char *value)
     if (strs) {
         for (gsize i = 0; i < n_items; i++) {
             if (strs[i] && strcmp(strs[i], value) == 0) {
-                result = (int)i;
+                result = static_cast<int>(i);
                 break;
             }
         }
@@ -1817,7 +1817,7 @@ int DeviceAgent::option_value_to_code(int mode, int key, const char *value)
 // as a human-readable string. Caller must g_free() the returned pointer.
 char *sr_time_string(uint64_t duration)
 {
-    double seconds = (double)duration / 1e9;
+    double seconds = static_cast<double>(duration) / 1e9;
     if (seconds >= 86400.0)
         return g_strdup_printf("%.2fd", seconds / 86400.0);
     if (seconds >= 3600.0)
@@ -1942,13 +1942,13 @@ QVector<uint64_t> DeviceAgent::get_probe_vdiv_list() {
     GVariant *gvar_vdivs = g_variant_lookup_value(gvar, "vdivs", G_VARIANT_TYPE("at"));
     if (gvar_vdivs) {
         gsize num;
-        uint64_t *arr = (uint64_t *)g_variant_get_fixed_array(gvar_vdivs, &num, sizeof(uint64_t));
+        const uint64_t *arr = static_cast<const uint64_t*>(g_variant_get_fixed_array(gvar_vdivs, &num, sizeof(uint64_t)));
         for (gsize i = 0; i < num; i++)
             result.append(arr[i]);
         g_variant_unref(gvar_vdivs);
     } else if (g_variant_is_of_type(gvar, G_VARIANT_TYPE("at"))) {
         gsize num;
-        uint64_t *arr = (uint64_t *)g_variant_get_fixed_array(gvar, &num, sizeof(uint64_t));
+        const uint64_t *arr = static_cast<const uint64_t*>(g_variant_get_fixed_array(gvar, &num, sizeof(uint64_t)));
         for (gsize i = 0; i < num; i++)
             result.append(arr[i]);
     } else {
@@ -1989,7 +1989,7 @@ bool DeviceAgent::get_vid_pid(uint16_t &vid, uint16_t &pid) {
 
 const struct sr_key_info* DeviceAgent::get_config_info(int key)
 {
-    return sr_key_info_get(SR_KEY_CONFIG, (uint32_t)key);
+    return sr_key_info_get(SR_KEY_CONFIG, static_cast<uint32_t>(key));
 }
 
 void DeviceAgent::config_changed()

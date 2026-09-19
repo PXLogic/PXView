@@ -55,7 +55,7 @@ void SessionData::clear() {
   _analog = std::make_shared<data::AnalogSnapshot>();
   _dso = std::make_shared<data::DsoSnapshot>();
   if (_cur_snap_samplerate > 0) {
-    const double sr = (double)_cur_snap_samplerate;
+    const double sr = static_cast<double>(_cur_snap_samplerate);
     _logic->set_samplerate(sr);
     _analog->set_samplerate(sr);
     _dso->set_samplerate(sr);

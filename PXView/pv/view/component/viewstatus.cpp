@@ -113,7 +113,7 @@ void ViewStatus::paintEvent(QPaintEvent *)
             p.drawPixmap(QRect(rect.left()+10, rect.top(), rect.height(), rect.height()),
                          msPix);
 
-            p.setPen(((int)i == _hit_rect) ? View::Blue :
+            p.setPen((static_cast<int>(i) == _hit_rect) ? View::Blue :
                      active ? dsoSig->get_colour() : fore);
             p.setBrush(Qt::NoBrush);
             p.drawRect(rect);
@@ -214,7 +214,7 @@ void ViewStatus::mousePressEvent(QMouseEvent *event)
         for(size_t i = 0; i < _mrects.size(); i++) {
             const QRect rect = std::get<0>(_mrects[i]);
             if (rect.contains(event->position().toPoint())) {
-                _hit_rect = (int)i;
+                _hit_rect = static_cast<int>(i);
                 pv::dialogs::DsoMeasure dsoMeasureDialog(_session, _view, i, _last_sig_index);
                 dsoMeasureDialog.exec();
                 break;
@@ -239,13 +239,13 @@ void ViewStatus::set_measure(unsigned int index, bool canceled,
 QJsonArray ViewStatus::get_session()
 {
     QJsonArray measureVar;
-    for(int i = 0; i < (int)_mrects.size(); i++) {
+    for(int i = 0; i < static_cast<int>(_mrects.size()); i++) {
         const int index = std::get<1>(_mrects[i]);
         if (index != -1) {
             QJsonObject m_obj;
             m_obj["site"] = i;
             m_obj["index"] = index;
-            m_obj["type"] = (int)std::get<2>(_mrects[i]);
+            m_obj["type"] = static_cast<int>(std::get)<2>(_mrects[i]);
             measureVar.append(m_obj);
         }
     }
@@ -259,7 +259,7 @@ void ViewStatus::load_session(QJsonArray measure_array, int version)
         return;
     }
 
-    for(int i = 0; i < (int)_mrects.size(); i++) 
+    for(int i = 0; i < static_cast<int>(_mrects.size()); i++) 
     {
         std::get<1>(_mrects[i]) = -1;
         std::get<2>(_mrects[i]) = DSO_MS_BEGIN;

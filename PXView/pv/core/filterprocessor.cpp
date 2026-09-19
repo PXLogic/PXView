@@ -166,7 +166,7 @@ void FilterProcessor::apply_signal_invert(data::LogicSnapshot *logic,
   for (auto &m : _state->signal_models()) {
     if (!m || m->type() != SR_CHANNEL_LOGIC)
       continue;
-    if (ch_idx < (int)channels.size() && channels[ch_idx]) {
+    if (ch_idx < static_cast<int>(channels.size()) && channels[ch_idx]) {
       // Same progressive-refresh need as the glitch filter (see
       // notify_batch_committed): inverting a channel XORs every one of its leaf
       // blocks (2 MB each) and rebuilds each block's whole mipmap, which is
@@ -334,7 +334,7 @@ bool FilterProcessor::rebuild_filtered_state(
     // capture-pipeline degradation flag and must not fail edit passes.
     pxv_err("FilterProcessor: glitch filter aborted (edit_pass_failed=%d, "
             "edit_log_overflow=%d); rolling back to capture data",
-            (int)logic->edit_pass_failed(), (int)logic->edit_log_overflowed());
+            static_cast<int>(logic->edit_pass_failed()), static_cast<int>(logic->edit_log_overflowed()));
     // Make the refusal USER-VISIBLE for BOTH failure kinds (they are the same
     // OOM family). Rolling back and only logging leaves the waveform exactly
     // as it was, which is indistinguishable from "the filter did nothing" —
@@ -746,7 +746,7 @@ void FilterProcessor::signal_invert_task(const std::vector<bool> channels) {
   if (logic->edit_pass_aborted()) {
     pxv_err("FilterProcessor::signal_invert_task: pass failed "
             "(edit_pass_failed=%d, edit_log_overflow=%d); rolling back",
-            (int)logic->edit_pass_failed(), (int)logic->edit_log_overflowed());
+            static_cast<int>(logic->edit_pass_failed()), static_cast<int>(logic->edit_log_overflowed()));
     // Same user-visible report as the glitch-filter pass: OOM-family
     // failures must not look like "the invert did nothing".
     if (_coord) {

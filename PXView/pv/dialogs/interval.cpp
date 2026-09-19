@@ -79,7 +79,7 @@ void Interval::reject()
 
 void Interval::set_interval(double value)
 {
-    _interval_slider->setValue((int)value);
+    _interval_slider->setValue(static_cast<int>(value));
     _interval_spinBox->setValue(value);
 }
 
@@ -92,7 +92,7 @@ void Interval::on_slider_changed(int value)
 {
     if (!_bSetting){
         _bSetting = true;
-        _interval_spinBox->setValue((double)value);
+        _interval_spinBox->setValue(static_cast<double>(value));
         _bSetting = false;
     }    
 }
@@ -101,7 +101,7 @@ void Interval::on_inputbox_changed(double value)
 {
     if (!_bSetting){
         _bSetting = true;
-        _interval_slider->setValue((int)value);
+        _interval_slider->setValue(static_cast<int>(value));
         _bSetting = false;
     }    
 }

@@ -58,7 +58,7 @@ MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
     QVector<QString> vDialUnit;
     _math_stack->get_vdial_data(vDialValue, vDialUnit);
     _vDial = new view::dslDial(vDialValue.count(),
-                               (uint64_t)data::MathStack::vDialValueStep,
+                               static_cast<uint64_t>(data::MathStack::vDialValueStep),
                                vDialValue, vDialUnit, true);
     update_vDial();
     // Task 3.1: 原取静态 View::Red（主题 @signal-red，refreshSignalColors 维护）。
@@ -257,15 +257,15 @@ void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor 
         const double pixels_offset = offset;
         //const double samplerate = _view->session().cur_snap_samplerate();
         const double samplerate = _math_stack->samplerate();
-        const int64_t last_sample = max((int64_t)(_math_stack->get_sample_num() - 1), (int64_t)0);
+        const int64_t last_sample = max(static_cast<int64_t>((_math_stack->get_sample_num() - 1)), static_cast<int64_t>(0));
         const double samples_per_pixel = samplerate * scale;
         const double start = offset * samples_per_pixel - ctx.trig_hoff;
         const double end = start + samples_per_pixel * width;
 
-        const int64_t start_sample = min(max((int64_t)floor(start),
-            (int64_t)0), last_sample);
-        const int64_t end_sample = min(max((int64_t)ceil(end) + 1,
-            (int64_t)0), last_sample);
+        const int64_t start_sample = min(max(static_cast<int64_t>(floor(start)),
+            static_cast<int64_t>(0)), last_sample);
+        const int64_t end_sample = min(max(static_cast<int64_t>(ceil(end)) + 1,
+            static_cast<int64_t>(0)), last_sample);
 
         _scale = get_view_rect().height() * _math_stack->get_math_scale() * 1000.0 / get_vDialValue();
 
@@ -314,7 +314,7 @@ void MathTrace::paint_trace(QPainter &p,
         trace_colour.setAlpha(IRenderView::ForeAlpha);
         p.setPen(trace_colour);
 
-        if ((uint64_t)end >= _math_stack->get_sample_num())
+        if (static_cast<uint64_t>(end) >= _math_stack->get_sample_num())
             return;
 
         const double *const values = _math_stack->get_math(start);

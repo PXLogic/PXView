@@ -271,7 +271,7 @@ void DeviceOptions::accept() {
   if (mode == LOGIC || mode == ANALOG) {
     int index = 0;
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
       if (!probe) continue;
       assert(probe);
       probe->enabled = _probes_checkBox_list.at(index)->isChecked();
@@ -458,7 +458,7 @@ int contentHeight = 0;
   row2++;
 
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
     if (probe->enabled)
       cur_ch_num++;
@@ -566,7 +566,7 @@ vld_ch_num = dslogic_vld_ch_num;
 }
 
 while (cur_ch_num < vld_ch_num &&
-         cur_ch_num < (int)_probes_checkBox_list.size()) {
+         cur_ch_num < static_cast<int>(_probes_checkBox_list.size())) {
     auto box = _probes_checkBox_list[cur_ch_num];
     if (box->isChecked() == false) {
       box->setChecked(true);
@@ -658,7 +658,7 @@ void DeviceOptions::analog_channel_check() {
   QCheckBox *sc = dynamic_cast<QCheckBox *>(sender());
   if (sc != nullptr) {
     for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
       if (sc->property("index").toInt() == probe->index) {
         _device_agent->set_config_bool(SR_CONF_PROBE_MAP_DEFAULT,
@@ -719,7 +719,7 @@ if (cur_ch_num > vld_ch_num) {
   } else if (_device_agent->get_work_mode() == ANALOG) {
     if (sc != nullptr) {
       QGridLayout *const layout =
-          (QGridLayout *)sc->property("Layout").value<void *>();
+          reinterpret_cast<QGridLayout*>(sc->property("Layout").value)<void *>();
       int i = layout->count();
 
       int ck_index = -1;
@@ -776,7 +776,7 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
   int ch_dex = 0;
 
   for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe) continue;
     assert(probe);
 
@@ -787,14 +787,14 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
     probe_widget->setLayout(probe_layout);
 
     bool ch_enabled = probe->enabled;
-    if (ch_dex < (int)_lst_probe_enabled_status.size()) {
+    if (ch_dex < static_cast<int>(_lst_probe_enabled_status.size())) {
       ch_enabled = _lst_probe_enabled_status[ch_dex];
     }
 
     ch_dex++;
 
     QCheckBox *probe_checkBox = new QCheckBox(this);
-    QVariant vlayout = QVariant::fromValue((void *)probe_layout);
+    QVariant vlayout = QVariant::fromValue(reinterpret_cast<void*>(probe_layout));
     probe_checkBox->setProperty("Layout", vlayout);
     probe_checkBox->setProperty("Enable", true);
     probe_checkBox->setChecked(ch_enabled);
@@ -900,7 +900,7 @@ void DeviceOptions::analog_probes(QGridLayout &layout) {
     // channel must show its custom name here even though sr_channel->name still
     // holds the device-provided default.
     std::shared_ptr<SignalModel> m =
-        _session ? _session->get_signal_by_index((int)probe->index) : nullptr;
+        _session ? _session->get_signal_by_index(static_cast<int>(probe->index)) : nullptr;
     QString tabName = (m && !m->name().empty())
                           ? QString::fromStdString(m->name())
                           : (probe->name ? QString::fromUtf8(probe->name)

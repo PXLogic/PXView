@@ -117,7 +117,7 @@ void TabContext::activate()
     // 执行（行为与重组前完全一致，仅显式化命名阶段）。阶段1 起 TabSwitch
     // 不再走全局摧毁管线，全程零全局副作用。
     pxv_info("TabContext::activate() bind(ctx) doc=%p handle=%llu%s",
-             (void *)_document, (unsigned long long)_device_handle,
+             reinterpret_cast<void*>(_document), (unsigned long long)_device_handle,
              is_borrowing() ? " (borrowing)" : "");
     restore_device_for_this_tab();   // 1) 恢复本 tab 表达的设备（含借用）
     claim_active_document();         // 2) 认领 active document（所有权）+
@@ -305,7 +305,7 @@ void TabContext::apply_device_intent()
     if (!_session->is_working()) {
         pxv_info("TabContext::apply_device_intent() work_mode=%d ch_count=%d%s",
             rd->get_signal_config().work_mode,
-            (int)rd->get_signal_config().channels.size(),
+            static_cast<int>(rd->get_signal_config().channels.size()),
             is_borrowing() ? " (borrowed doc)" : "");
         rd->apply_signal_config();
         // 数据模型重构步骤2 修正：原位恢复的前提是【本文档真的持有模型】。
@@ -347,7 +347,7 @@ void TabContext::apply_device_intent()
         // 这里只做 View 层信号重建；QML/headless tab（view == nullptr）跳过。
         _view->rebuild_signals_from_config(rd->get_signal_config());
         pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
-            (int)_view->get_own_signals().size());
+            static_cast<int>(_view->get_own_signals().size()));
     } else {
         pxv_info("TabContext::apply_device_intent() no view, skip signal rebuild");
     }
@@ -377,8 +377,8 @@ void TabContext::borrow_document(std::shared_ptr<data::SessionDocument> doc,
     _borrow_doc = std::move(doc);
     _borrow_device_handle = handle;
     pxv_info("TabContext: borrowing doc=%p (device %llu) for tab doc=%p",
-             (void *)_borrow_doc.get(), (unsigned long long)handle,
-             (void *)_document);
+             reinterpret_cast<void*>(_borrow_doc.get()), (unsigned long long)handle,
+             reinterpret_cast<void*>(_document));
 }
 
 void TabContext::release_borrow()
@@ -386,7 +386,7 @@ void TabContext::release_borrow()
     if (!_borrow_doc)
         return;
     pxv_info("TabContext: releasing borrow of doc=%p, back to own doc=%p",
-             (void *)_borrow_doc.get(), (void *)_document);
+             reinterpret_cast<void*>(_borrow_doc.get()), reinterpret_cast<void*>(_document));
     _borrow_doc.reset();
     _borrow_device_handle = NULL_HANDLE;
     _borrow_label.clear();

@@ -463,7 +463,7 @@ bool RowData::emplace_annotations(
       pdata.data = &pda;
       pda.ann_class = it->ann_class;
       pda.ann_type = it->ann_type;
-      pda.ann_text = (char **)it->ann_text;
+      pda.ann_text = const_cast<char**>(it->ann_text);
       pda.numberic_value = it->numberic_value;
       memcpy(pda.str_number_hex, it->str_number_hex,
              sizeof(pda.str_number_hex));

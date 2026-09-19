@@ -536,7 +536,7 @@ void ViewSignalSync::layout_time_signals(
           1.0 / total_rows);
     }
   } else {
-    _view->layout_delegate()->set_signalHeight((int)((height <= 0) ? 1 : height));
+    _view->layout_delegate()->set_signalHeight(static_cast<int>(((height <= 0) ? 1 : height)));
   }
 
   _view->layout_delegate()->set_spanY(_view->layout_delegate()->signalHeight() + 2 * actualMargin);
@@ -614,7 +614,7 @@ void ViewSignalSync::layout_time_signals(
     } else {
       traceHeight = _view->layout_delegate()->signalHeight() * t->rows_size();
     }
-    t->set_totalHeight((int)traceHeight);
+    t->set_totalHeight(static_cast<int>(traceHeight));
     t->set_v_offset(qRound(next_v_offset + 0.5 * traceHeight + actualMargin));
     next_v_offset += traceHeight + 2 * actualMargin;
 
@@ -1281,7 +1281,7 @@ void ViewSignalSync::zoom_vertical(double steps) {
 
   bool heightScaleChanged = (_view->layout_delegate()->signalHeightScale() != oldHeight);
   double scale = (oldHeight > 0)
-                     ? (double)_view->layout_delegate()->signalHeightScale() / oldHeight
+                     ? static_cast<double>(_view->layout_delegate()->signalHeightScale()) / oldHeight
                      : 1.0;
 
   // When _signalHeightScale is clamped at minimum (i.e. it didn't change),
@@ -1298,7 +1298,7 @@ void ViewSignalSync::zoom_vertical(double steps) {
   for (auto t : traces) {
     if (t->get_own_height() > 0) {
       int newH =
-          max(View::MinSignalHeight, (int)(t->get_own_height() * scale));
+          max(View::MinSignalHeight, static_cast<int>((t->get_own_height() * scale)));
       if (newH != t->get_own_height()) {
         t->set_own_height(newH);
         ownHeightChanged = true;
@@ -1400,7 +1400,7 @@ bool ViewSignalSync::is_colored_card_mode() {
 QColor ViewSignalSync::get_group_card_color(int group_index) {
   if (is_colored_card_mode()) {
     const auto &groups = _view->get_signal_groups();
-    if (group_index >= 0 && group_index < (int)groups.size()) {
+    if (group_index >= 0 && group_index < static_cast<int>(groups.size())) {
       const auto &group = groups[group_index];
       if (!group.traces.empty()) {
         auto *trace = group.traces[0];

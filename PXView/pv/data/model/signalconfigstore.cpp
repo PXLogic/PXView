@@ -56,7 +56,7 @@ QJsonObject SignalConfigStore::signal_config_to_json() const {
     ch_obj["name"] = QString::fromStdString(ch.name);
     ch_obj["colour"] = QString::fromStdString(ch.colour);
     ch_obj["vfactor"] = (qint64)ch.vfactor;
-    ch_obj["trig_value"] = (int)ch.trig_value;
+    ch_obj["trig_value"] = static_cast<int>(ch.trig_value);
     ch_obj["map_unit"] = QString::fromStdString(ch.map_unit);
     ch_obj["map_min"] = ch.map_min;
     ch_obj["map_max"] = ch.map_max;
@@ -82,7 +82,7 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
       ChannelConfig cfg;
       cfg.index = ch_obj["index"].toInt();
       cfg.enabled = ch_obj["enabled"].toBool();
-      cfg.vdiv_mv = (uint64_t)ch_obj["vdiv"].toVariant().toULongLong();
+      cfg.vdiv_mv = static_cast<uint64_t>(ch_obj["vdiv"].toVariant().toULongLong());
       cfg.coupling = ch_obj["coupling"].toInt();
       cfg.map_default = ch_obj["map_default"].toBool();
       // Task 6: hw_offset/offset/zero_offset 补齐 contains() 保护，与其他字段风格一致。
@@ -114,7 +114,7 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
       // dslDial::set_factor). Old config files saved in LA mode may
       // have vfactor=0 for DSO channels. Clamp to 1 (x1 probe default).
       cfg.vfactor = ch_obj.contains("vfactor")
-                        ? (uint64_t)ch_obj["vfactor"].toVariant().toULongLong()
+                        ? static_cast<uint64_t>(ch_obj["vfactor"].toVariant().toULongLong())
                         : 0;
       if (cfg.vfactor == 0) {
         pxv_warn("SignalConfigStore: ch[%d] vfactor==0 in JSON, clamping to 1",
@@ -122,7 +122,7 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
         cfg.vfactor = 1;
       }
       cfg.trig_value = ch_obj.contains("trig_value")
-                           ? (uint8_t)ch_obj["trig_value"].toInt()
+                           ? static_cast<uint8_t>(ch_obj["trig_value"].toInt())
                            : 0;
       cfg.map_unit = ch_obj.contains("map_unit")
                          ? ch_obj["map_unit"].toString().toStdString()
@@ -175,7 +175,7 @@ void SignalConfigStore::save_signal_config(
   _signal_config.channels.clear();
   int mode = _signal_config.work_mode;
   for (const GSList *l = agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
 
     // SignalModel is the source of truth for channel identity/metadata. Locate
     // the model for this channel up front, then read every field through it so a
@@ -183,14 +183,14 @@ void SignalConfigStore::save_signal_config(
     // (no model exists yet) falls back to the sr_channel struct.
     std::shared_ptr<SignalModel> matched_model;
     for (auto m : signal_models) {
-      if (m && m->index() == (int)probe->index) {
+      if (m && m->index() == static_cast<int>(probe->index)) {
         matched_model = m;
         break;
       }
     }
 
     ChannelConfig cfg;
-    cfg.index = matched_model ? (int)matched_model->index() : (int)probe->index;
+    cfg.index = matched_model ? static_cast<int>(matched_model->index()) : static_cast<int>(probe->index);
     // enabled: prefer SignalModel (the user-editable single source of truth);
     // fall back to sr_channel before a model exists.
     cfg.enabled = matched_model ? matched_model->enabled()
@@ -201,7 +201,7 @@ void SignalConfigStore::save_signal_config(
 
     // type: prefer SignalModel (kept in sync with sr_channel by
     // commit_to_device); fall back to sr_channel.
-    cfg.type = matched_model ? matched_model->type() : (int)probe->type;
+    cfg.type = matched_model ? matched_model->type() : static_cast<int>(probe->type);
     // name: prefer SignalModel (the user-editable source of truth); fall back to
     // sr_channel->name.
     cfg.name = (matched_model && !matched_model->name().empty())
@@ -228,14 +228,14 @@ void SignalConfigStore::save_signal_config(
       // in upstream libsigrok. Read from SignalModel instead — model state
       // is the single source of truth (set_* methods sync to driver via
       // set_config_*).
-      cfg.hw_offset = matched_model ? (uint16_t)matched_model->hw_offset() : 0;
-      cfg.offset = matched_model ? (uint16_t)matched_model->vertical_offset() : 0;
-      cfg.zero_offset = matched_model ? (uint16_t)matched_model->zero_offset() : 0;
+      cfg.hw_offset = matched_model ? static_cast<uint16_t>(matched_model->hw_offset()) : 0;
+      cfg.offset = matched_model ? static_cast<uint16_t>(matched_model->vertical_offset()) : 0;
+      cfg.zero_offset = matched_model ? static_cast<uint16_t>(matched_model->zero_offset()) : 0;
       // Task 3: vfactor (DSO/ANALOG，原 MainWindow 路径 B 写入)。
       // Clamp to at least 1 — vfactor=0 is invalid (causes assertion failure
       // in dslDial::set_factor). When the current work mode is LOGIC, DSO
       // SignalModels may not have vfactor set, so the model value could be 0.
-      uint64_t vf = matched_model ? (uint64_t)matched_model->vfactor() : 0;
+      uint64_t vf = matched_model ? static_cast<uint64_t>(matched_model->vfactor()) : 0;
       if (vf == 0) {
         pxv_warn("SignalConfigStore::save: ch[%d] vfactor==0 from model, clamping to 1",
                  cfg.index);
@@ -246,7 +246,7 @@ void SignalConfigStore::save_signal_config(
 
     // Task 3: DSO 触发电平原始值 (原 MainWindow 路径 trigValue)。
     if (mode == DSO) {
-      cfg.trig_value = matched_model ? (uint8_t)matched_model->trig_value() : 0;
+      cfg.trig_value = matched_model ? static_cast<uint8_t>(matched_model->trig_value()) : 0;
     }
 
     // Task 3: Analog 映射参数 (原 MainWindow 路径 mapUnit/mapMin/mapMax)。
@@ -348,14 +348,14 @@ void SignalConfigStore::apply_signal_config() {
 
   int mode = _signal_config.work_mode;
   for (const GSList *l = agent->get_channels(); l; l = l->next) {
-    sr_channel *const probe = (sr_channel *)l->data;
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe)
       continue;
     // Task 3: 按 index 匹配 ChannelConfig（替代原 positional 匹配，更稳健；
     // 同设备的 sr_channel 顺序与 save 时一致，index 匹配等价且对顺序变化容错）。
     const ChannelConfig *cfg_ptr = nullptr;
     for (const auto &c : _signal_config.channels) {
-      if (c.index == (int)probe->index) {
+      if (c.index == static_cast<int>(probe->index)) {
         cfg_ptr = &c;
         break;
       }
@@ -436,7 +436,7 @@ void SignalConfigStore::apply_signal_config() {
     sr_channel *first_mode_ch = nullptr;
     bool any_mode_enabled = false;
     for (const GSList *l = agent->get_channels(); l; l = l->next) {
-      sr_channel *const probe = (sr_channel *)l->data;
+      sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
       if (!probe)
         continue;
       bool is_mode_type = false;

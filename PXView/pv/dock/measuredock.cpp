@@ -884,7 +884,7 @@ void MeasureDock::update_dist() {
       break;
 
     if (inf.cursor1 != -1) {
-      if (inf.cursor1 > (int)cursor_list.size()) {
+      if (inf.cursor1 > static_cast<int>(cursor_list.size())) {
         inf.start_bt->setText("");
         inf.cursor1 = -1;
       }
@@ -892,7 +892,7 @@ void MeasureDock::update_dist() {
     set_cursor_btn_color(inf.start_bt);
 
     if (inf.cursor2 != -1) {
-      if (inf.cursor2 > (int)cursor_list.size()) {
+      if (inf.cursor2 > static_cast<int>(cursor_list.size())) {
         inf.end_bt->setText("");
         inf.cursor2 = -1;
       }
@@ -926,14 +926,14 @@ void MeasureDock::update_edge() {
       break;
 
     if (inf.cursor1 != -1) {
-      if (inf.cursor1 > (int)cursor_list.size()) {
+      if (inf.cursor1 > static_cast<int>(cursor_list.size())) {
         inf.start_bt->setText("");
         set_cursor_btn_color(inf.start_bt);
         inf.cursor1 = -1;
       }
     }
     if (inf.cursor2 != -1) {
-      if (inf.cursor2 > (int)cursor_list.size()) {
+      if (inf.cursor2 > static_cast<int>(cursor_list.size())) {
         inf.end_bt->setText("");
         set_cursor_btn_color(inf.end_bt);
         inf.cursor2 = -1;
@@ -1081,8 +1081,8 @@ void MeasureDock::cursor_update() {
 void MeasureDock::build_cursor_pannel() {
   auto mode_rows = get_mode_rows();
   auto &cursor_list = _view->get_cursorList();
-  int newCount = (int)cursor_list.size();
-  int oldCount = (int)mode_rows->_opt_row_list.size();
+  int newCount = static_cast<int>(cursor_list.size());
+  int oldCount = static_cast<int>(mode_rows->_opt_row_list.size());
 
   if (newCount == 0) {
     for (auto &row : mode_rows->_opt_row_list) {

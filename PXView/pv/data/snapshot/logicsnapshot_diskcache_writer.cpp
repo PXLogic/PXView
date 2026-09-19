@@ -178,8 +178,8 @@ uint8_t *LogicSnapshotDiskCacheWriter::SlotPool::acquire()
 
     // 懒增长：只在真正需要时分配，稳态下只保留"实际并发在飞数"个槽位，
     // 而不是一上来就吃掉 slot_bytes * max_slots 的常驻内存。
-    if (_storage.size() < (size_t)_max_slots) {
-        _storage.emplace_back(new uint8_t[(size_t)_slot_bytes]);
+    if (_storage.size() < static_cast<size_t>(_max_slots)) {
+        _storage.emplace_back(new uint8_t[static_cast<size_t>(_slot_bytes)]);
         ++_in_use;
         if (_in_use > _peak_in_use) _peak_in_use = _in_use;
         return _storage.back().get();
@@ -216,7 +216,7 @@ void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
         const uint64_t rounded = (length + 4095ULL) & ~4095ULL;
         _slot_pool.configure(rounded, P2_MAX_SLOTS);
         pxv_info("P2 slot pool: slot_bytes=%llu max_slots=%u (upper bound %llu MB)",
-                 (unsigned long long)rounded, (unsigned)P2_MAX_SLOTS,
+                 (unsigned long long)rounded, static_cast<unsigned>(P2_MAX_SLOTS),
                  (unsigned long long)(rounded * P2_MAX_SLOTS / (1024ULL * 1024)));
     }
 
@@ -237,7 +237,7 @@ void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
             // 归还并 notify_one）。上界等价于 max_slots 个在飞 payload。
             _async_drain_cv.wait_for(lock, std::chrono::milliseconds(50));
         }
-        std::memcpy(slot, data, (size_t)length);
+        std::memcpy(slot, data, static_cast<size_t>(length));
         // P1-e 拷贝审计（仅在 ENABLE_DECODE_PERF 构建下计数，见 pv/base/perflog.h）
         PXV_PERF_COPY_STAGING(length);
         payload.slot = slot;
@@ -263,7 +263,7 @@ bool LogicSnapshotDiskCacheWriter::is_mmap_slot_fresh(uint16_t channel, uint64_t
 {
     if (_mmap_slot_written.empty()) return false;
     // _max_blocks_per_channel stays on LogicSnapshot (cluster A) — friend access.
-    uint64_t abs_slot = (uint64_t)channel * _owner->_max_blocks_per_channel
+    uint64_t abs_slot = static_cast<uint64_t>(channel) * _owner->_max_blocks_per_channel
                       + (global_block_seq % _owner->_max_blocks_per_channel);
     if (abs_slot >= _mmap_slot_written.size()) return false;
     return !_mmap_slot_written[abs_slot];
@@ -272,7 +272,7 @@ bool LogicSnapshotDiskCacheWriter::is_mmap_slot_fresh(uint16_t channel, uint64_t
 void LogicSnapshotDiskCacheWriter::mark_mmap_slot_written(uint16_t channel, uint64_t global_block_seq)
 {
     if (_mmap_slot_written.empty()) return;
-    uint64_t abs_slot = (uint64_t)channel * _owner->_max_blocks_per_channel
+    uint64_t abs_slot = static_cast<uint64_t>(channel) * _owner->_max_blocks_per_channel
                       + (global_block_seq % _owner->_max_blocks_per_channel);
     if (abs_slot >= _mmap_slot_written.size()) return;
     _mmap_slot_written[abs_slot] = true;
@@ -281,7 +281,7 @@ void LogicSnapshotDiskCacheWriter::mark_mmap_slot_written(uint16_t channel, uint
 void LogicSnapshotDiskCacheWriter::clear_mmap_slot_written(uint16_t channel, uint64_t global_block_seq)
 {
     if (_mmap_slot_written.empty()) return;
-    uint64_t abs_slot = (uint64_t)channel * _owner->_max_blocks_per_channel
+    uint64_t abs_slot = static_cast<uint64_t>(channel) * _owner->_max_blocks_per_channel
                       + (global_block_seq % _owner->_max_blocks_per_channel);
     if (abs_slot >= _mmap_slot_written.size()) return;
     _mmap_slot_written[abs_slot] = false;
@@ -404,7 +404,7 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             // Cross data length must be a multiple of (channel_num * 8) bytes
             // (each channel gets 8 bytes = 64 samples per chunk). Truncate
             // incomplete chunks to prevent channel desync.
-            uint64_t chunk_size = (uint64_t)_owner->_channel_num * 8;
+            uint64_t chunk_size = static_cast<uint64_t>(_owner->_channel_num) * 8;
             if (chunk_size > 0)
                 logic.length -= logic.length % chunk_size;
             // unitsize unused for CROSS path; set to 1 to avoid div-by-zero.
@@ -413,7 +413,7 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             // Sample-interleaved: unitsize = bytes per sample group, derived
             // from the snapshot's channel count. _channel_num stays on
             // Snapshot (base) — friend access through _owner.
-            logic.unitsize = (uint16_t)((_owner->_channel_num + 7) / 8);
+            logic.unitsize = static_cast<uint16_t>(((_owner->_channel_num + 7) / 8));
         }
 
         auto start = std::chrono::steady_clock::now();

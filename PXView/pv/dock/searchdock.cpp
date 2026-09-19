@@ -79,7 +79,7 @@ QVariant SearchResultModel::data(const QModelIndex &index, int role) const {
   int col = index.column();
 
   QMutexLocker locker(&_mutex);
-  if (row >= (int)_results.size())
+  if (row >= static_cast<int>(_results.size()))
     return QVariant();
 
   const SearchData &sd = _results[row];
@@ -147,7 +147,7 @@ QString SearchResultModel::format_time(int64_t sample) const {
   if (_samplerate == 0)
     return QString::number(sample);
 
-  double seconds = (double)sample / (double)_samplerate;
+  double seconds = static_cast<double>(sample) / static_cast<double>(_samplerate);
 
   if (seconds >= 1.0)
     return QString::number(seconds, 'f', 6) + "s";
@@ -557,7 +557,7 @@ void SearchDock::search_worker() {
                              ui_timer, has_new_results, first_flush)) {
     if (!local_batch.empty()) {
       _results_mutex.lock();
-      if ((int)_search_results.size() < kMaxResults) {
+      if (static_cast<int>(_search_results.size()) < kMaxResults) {
         _search_results.insert(_search_results.end(), local_batch.begin(),
                                local_batch.end());
       }
@@ -600,7 +600,7 @@ void SearchDock::search_worker() {
       emit search_result_found();
       first_flush = false;
 
-      if ((int)_search_results.size() >= kMaxResults)
+      if (static_cast<int>(_search_results.size()) >= kMaxResults)
         break;
     }
 
@@ -609,7 +609,7 @@ void SearchDock::search_worker() {
 
   if (!local_batch.empty()) {
     _results_mutex.lock();
-    if ((int)_search_results.size() < kMaxResults) {
+    if (static_cast<int>(_search_results.size()) < kMaxResults) {
       _search_results.insert(_search_results.end(), local_batch.begin(),
                              local_batch.end());
     }
@@ -665,7 +665,7 @@ void SearchDock::on_search_finished() {
 
 void SearchDock::refresh_ui_model() {
   _results_mutex.lock();
-  int current_size = (int)_search_results.size();
+  int current_size = static_cast<int>(_search_results.size());
   _results_mutex.unlock();
 
   _result_model->updateRowCount(current_size);
@@ -678,7 +678,7 @@ void SearchDock::on_result_clicked(const QModelIndex &index) {
   int row = index.row();
 
   _results_mutex.lock();
-  if (row >= 0 && row < (int)_search_results.size()) {
+  if (row >= 0 && row < static_cast<int>(_search_results.size())) {
     int64_t start_pos = _search_results[row].start;
     _results_mutex.unlock();
     _time_search_cur_index = row;
@@ -778,7 +778,7 @@ int64_t SearchDock::parse_time_text(const QString &text, bool &is_row_index) {
   if (unit.isEmpty()) {
     // No unit: treat as row index (1-based)
     is_row_index = true;
-    return (int64_t)value;
+    return static_cast<int64_t>(value);
   }
 
   uint64_t samplerate = 0;
@@ -801,7 +801,7 @@ int64_t SearchDock::parse_time_text(const QString &text, bool &is_row_index) {
     return -1;
   }
 
-  int64_t sample = (int64_t)(seconds * samplerate + 0.5);
+  int64_t sample = static_cast<int64_t>((seconds * samplerate + 0.5));
   return sample;
 }
 
@@ -811,7 +811,7 @@ int SearchDock::binary_search_time_index(int64_t sample_pos, bool find_next) {
   // sample_pos. If find_next is false, returns the index of the last result
   // with start <= sample_pos.
   QMutexLocker locker(&_results_mutex);
-  int n = (int)_search_results.size();
+  int n = static_cast<int>(_search_results.size());
   if (n == 0)
     return -1;
 
@@ -855,9 +855,9 @@ void SearchDock::on_time_search_return() {
 
   if (is_row_index) {
     // Pure number: treat as 1-based row index
-    idx = (int)value - 1; // convert to 0-based
+    idx = static_cast<int>(value) - 1; // convert to 0-based
     _results_mutex.lock();
-    int n = (int)_search_results.size();
+    int n = static_cast<int>(_search_results.size());
     _results_mutex.unlock();
     if (idx < 0 || idx >= n)
       return;
@@ -868,7 +868,7 @@ void SearchDock::on_time_search_return() {
       // No result at or after this time; try the last result
       QMutexLocker locker(&_results_mutex);
       if (!_search_results.empty())
-        idx = (int)_search_results.size() - 1;
+        idx = static_cast<int>(_search_results.size()) - 1;
       else
         return;
     }
@@ -877,7 +877,7 @@ void SearchDock::on_time_search_return() {
   _time_search_cur_index = idx;
 
   _results_mutex.lock();
-  if (idx >= 0 && idx < (int)_search_results.size()) {
+  if (idx >= 0 && idx < static_cast<int>(_search_results.size())) {
     int64_t start_pos = _search_results[idx].start;
     _results_mutex.unlock();
     _result_view->selectRow(idx);
@@ -890,7 +890,7 @@ void SearchDock::on_time_search_return() {
 
 void SearchDock::on_time_search_nxt() {
   QMutexLocker locker(&_results_mutex);
-  int n = (int)_search_results.size();
+  int n = static_cast<int>(_search_results.size());
   if (n == 0)
     return;
 
@@ -918,7 +918,7 @@ void SearchDock::on_time_search_nxt() {
 
 void SearchDock::on_time_search_pre() {
   QMutexLocker locker(&_results_mutex);
-  int n = (int)_search_results.size();
+  int n = static_cast<int>(_search_results.size());
   if (n == 0)
     return;
 

@@ -585,14 +585,14 @@ void TitleBar::resizeEvent(QResizeEvent *event) {
     QFont appFont = QApplication::font();
     pxv_info("FONT DIAG: App font: family='%s' strategy=0x%x hinting=%d",
              appFont.family().toUtf8().constData(),
-             (int)appFont.styleStrategy(),
-             (int)appFont.hintingPreference());
+             static_cast<int>(appFont.styleStrategy()),
+             static_cast<int>(appFont.hintingPreference()));
     if (_title) {
       QFont titleFont = _title->font();
       pxv_info("FONT DIAG: Title label font: family='%s' strategy=0x%x hinting=%d",
                titleFont.family().toUtf8().constData(),
-               (int)titleFont.styleStrategy(),
-               (int)titleFont.hintingPreference());
+               static_cast<int>(titleFont.styleStrategy()),
+               static_cast<int>(titleFont.hintingPreference()));
     }
     // Check first ribbon action button
     if (!_categoryLayouts.isEmpty()) {
@@ -603,8 +603,8 @@ void TitleBar::resizeEvent(QResizeEvent *event) {
           QFont wf = w->font();
           pxv_info("FONT DIAG: Ribbon btn[%d] font: family='%s' strategy=0x%x hinting=%d",
                    i, wf.family().toUtf8().constData(),
-                   (int)wf.styleStrategy(),
-                   (int)wf.hintingPreference());
+                   static_cast<int>(wf.styleStrategy()),
+                   static_cast<int>(wf.hintingPreference()));
           break;
         }
       }
@@ -711,8 +711,8 @@ void TitleBar::mousePressEvent(QMouseEvent *event) {
   bool ableMove = !ParentIsMaxsized();
 
   if (event->button() == Qt::LeftButton && ableMove && _is_able_drag) {
-    int x = (int)event->position().x();
-    int y = (int)event->position().y();
+    int x = static_cast<int>(event->position().x());
+    int y = static_cast<int>(event->position().y());
 
     bool bTopWidow = TopWindowTracker::Instance()->GetTopWindow() == _parent;
     bool bClick = (x >= 6 && y >= 5 && x <= width() - 6);

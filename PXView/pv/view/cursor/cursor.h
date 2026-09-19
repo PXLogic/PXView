@@ -87,7 +87,7 @@ public:
 
 public: 
 	inline uint64_t get_key(){
-		return (uint64_t)this;
+		return reinterpret_cast<uint64_t>(this);
 	}
  
 	inline uint64_t get_index(){

@@ -200,8 +200,8 @@ connect(_event_lag_timer, &QTimer::timeout, this, []() {
           std::chrono::duration<double>(now - _last_cpu_t).count();
       // 100ns FILETIME units -> ms, delta user+kernel since last tick.
       const double cpu_ms =
-          (double)((k.QuadPart - _last_kt.QuadPart) +
-                   (u.QuadPart - _last_ut.QuadPart)) /
+          static_cast<double>(((k.QuadPart - _last_kt.QuadPart) +
+                   (u.QuadPart - _last_ut.QuadPart))) /
           10000.0;
       const double util = sec > 0 ? cpu_ms / (sec * 1000.0) : 0.0;
       pv::base::perf::record_cpu_util(util);

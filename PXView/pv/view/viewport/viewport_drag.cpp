@@ -143,7 +143,7 @@ void ViewportDrag::applyDragFrame() {
         }
 
         const double pos = _viewport->view().pixel2index(curX);
-        const double pos_delta = pos - (uint64_t)pos;
+        const double pos_delta = pos - static_cast<uint64_t>(pos);
         const double curP = _viewport->view().index2pixel(index0);
         const double curN = _viewport->view().index2pixel(index1);
 
@@ -155,9 +155,9 @@ void ViewportDrag::applyDragFrame() {
           else
             grabbed_marker->set_index(index1);
         } else if (pos_delta < 0.5) {
-          grabbed_marker->set_index((uint64_t)floor(pos));
+          grabbed_marker->set_index(static_cast<uint64_t>(floor(pos)));
         } else {
-          grabbed_marker->set_index((uint64_t)ceil(pos));
+          grabbed_marker->set_index(static_cast<uint64_t>(ceil(pos)));
         }
 
         if (grabbed_marker == _viewport->view().get_search_cursor()) {

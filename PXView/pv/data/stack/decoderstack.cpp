@@ -233,7 +233,7 @@ void DecoderStack::build_row() {
     int order = 0;
     for (const GSList *l = decc->annotation_rows; l; l = l->next) {
       const srd_decoder_annotation_row *const ann_row =
-          (srd_decoder_annotation_row *)l->data;
+          reinterpret_cast<srd_decoder_annotation_row*>(l->data);
       if (!ann_row) {
         pxv_warn("%s", "DecoderStack::build_row: ann_row is nullptr, skipping");
         continue;
@@ -747,7 +747,7 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
         bool snapshot_ok = (m->snapshot() != nullptr);
 
         pxv_detail("  model: index=%d, type=%d (Logic=%d), snapshot=%p, index_match=%d, type_match=%d, snapshot_ok=%d",
-                 m->index(), (int)m->type(), (int)SR_CHANNEL_LOGIC,
+                 m->index(), static_cast<int>(m->type()), static_cast<int>(SR_CHANNEL_LOGIC),
                  m->snapshot().get(), index_match, type_match, snapshot_ok);
 
         if (index_match && type_match) {
@@ -818,7 +818,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   srd_decoder_inst *logic_di = nullptr;
 
   for (const GSList *d = srd_session_inst_list_get(session); d; d = d->next) {
-    srd_decoder_inst *di = (srd_decoder_inst *)d->data;
+    srd_decoder_inst *di = reinterpret_cast<srd_decoder_inst*>(d->data);
     srd_decoder *decoder = di->decoder;
     const bool have_probes = (decoder->channels || decoder->opt_channels) != 0;
     if (have_probes) {
@@ -851,7 +851,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   // 向下对齐到 8 样本：解码起点最多提前 7 个样本，换取位语义精确。
   // 对齐性可保持：后续起点 = i + chunk_limit（16384/32768/65536 均为 8 的倍数）
   // 或被 leaf block 边界截断（16,777,216 的倍数），两者都是 8 的倍数。
-  uint64_t i = decode_start & ~(uint64_t)7;
+  uint64_t i = decode_start & ~static_cast<uint64_t>(7);
   assert((i & 7) == 0);
   bool bError = false;
   bool bEndTime = false;
@@ -1006,7 +1006,7 @@ return;
     // （chunk_data == nullptr）由 chunk_const 提供取值，无连续内存要求。
     {
       uint64_t min_valid_bytes = UINT64_MAX;
-      for (int j = 0; j < (int)iterators.size(); j++) {
+      for (int j = 0; j < static_cast<int>(iterators.size()); j++) {
         auto *it = iterators[j].get();
         if (!it || it->exhausted)
           continue;
@@ -1044,7 +1044,7 @@ return;
     }
 
     sended_len += chunk_end - i;
-    _progress.store((int)(sended_len * 100 / end_index));
+    _progress.store(static_cast<int>((sended_len * 100 / end_index)));
 
     // P1-B: Advance iterators to the new position.
     // continue_sample_iteration() moves the iterator forward incrementally,
@@ -1053,7 +1053,7 @@ return;
     // re-computes all indices from scratch.
     {
       uint64_t advance = chunk_end - i;
-      for (int j = 0; j < (int)iterators.size(); j++) {
+      for (int j = 0; j < static_cast<int>(iterators.size()); j++) {
         if (iterators[j] && advance > 0) {
           _snapshot->continue_sample_iteration(iterators[j].get(), advance);
         }
@@ -1190,7 +1190,7 @@ srd_session_destroy(session);
   }
 
   int meta_ret = srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
-                           g_variant_new_uint64((uint64_t)_samplerate.load(std::memory_order_acquire)));
+                           g_variant_new_uint64(static_cast<uint64_t>(_samplerate.load(std::memory_order_acquire))));
 
   // Let batch decoders choose an efficient path.
   uint64_t decode_sample_count = _sample_count.load(std::memory_order_acquire);
@@ -1275,7 +1275,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
   assert(pdata);
   assert(self);
 
-  struct decode_task_status *st = (decode_task_status *)self;
+  struct decode_task_status *st = reinterpret_cast<decode_task_status*>(self);
 
   // lifecycle fix: weak_ptr -> lock() keeps the stack alive for this callback.
   auto d = st->_decoder.lock();  // strong ref only for the duration of cb
@@ -1317,7 +1317,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
 
   // Determine the annotation class from the proto data
   const srd_proto_data_annotation *const pda =
-      (const srd_proto_data_annotation *)pdata->data;
+      reinterpret_cast<const srd_proto_data_annotation*>(pdata->data);
   int ann_format = pda->ann_class;
 
 #ifdef PXVIEW_DECODE_PERF
@@ -1349,7 +1349,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
     // Only the first few are logged; the rest are counted silently via
     // _ann_dropped_row (already an atomic diagnostic counter).
     if (d->_ann_dropped_row.load(std::memory_order_relaxed) < 10)
-      pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", (void *)decc,
+      pxv_err("Unexpected annotation: decoder = 0x%x, format = %d", static_cast<const void*>(decc),
               ann_format);
     d->_ann_dropped_row++;
     return;
@@ -1377,7 +1377,7 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
   assert(batch);
   assert(self);
 
-  struct decode_task_status *st = (decode_task_status *)self;
+  struct decode_task_status *st = reinterpret_cast<decode_task_status*>(self);
 
   // lifecycle fix: weak_ptr -> lock() keeps the stack alive for this callback.
   auto d = st->_decoder.lock();
@@ -1615,7 +1615,7 @@ bool DecoderStack::get_analog_display_trigger_config(DecoderAnalogTriggerConfig 
     if (mode && !strcmp(mode, "normal")) config.mode = DecoderAnalogTriggerMode::Normal;
   }
   value = zb_decoder_option_value(decoder, "display_trigger_channel");
-  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.channel = (int)g_variant_get_int64(value);
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.channel = static_cast<int>(g_variant_get_int64(value));
   config.channel = std::clamp(config.channel, 0, is_pwm ? 3 : 7);
   value = zb_decoder_option_value(decoder, "display_trigger_edge");
   if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)) {
@@ -1626,7 +1626,7 @@ bool DecoderStack::get_analog_display_trigger_config(DecoderAnalogTriggerConfig 
   value = zb_decoder_option_value(decoder, "display_trigger_level");
   if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_DOUBLE)) config.level = g_variant_get_double(value);
   value = zb_decoder_option_value(decoder, "display_trigger_position");
-  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.display_position_percent = (int)g_variant_get_int64(value);
+  if (value && g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) config.display_position_percent = static_cast<int>(g_variant_get_int64(value));
   config.display_position_percent = std::clamp(config.display_position_percent, 0, 100);
   return true;
 }
@@ -1644,7 +1644,7 @@ bool DecoderStack::find_analog_display_trigger(uint64_t &sample_position, Decode
   if (samples.size() < 2) return false;
   const uint64_t range_start = samples.front().start_sample;
   const uint64_t range_end = samples.back().start_sample;
-  const uint64_t target = range_start + (range_end - range_start) * (uint64_t)config.display_position_percent / 100U;
+  const uint64_t target = range_start + (range_end - range_start) * static_cast<uint64_t>(config.display_position_percent) / 100U;
   bool found = false;
   uint64_t best_sample = 0;
   uint64_t best_distance = std::numeric_limits<uint64_t>::max();
@@ -1663,8 +1663,8 @@ bool DecoderStack::find_analog_display_trigger(uint64_t &sample_position, Decode
     const double delta = current_value - previous_value;
     if (std::isfinite(delta) && std::abs(delta) > 1e-20)
       fraction = std::clamp((config.level - previous_value) / delta, 0.0, 1.0);
-    const double interpolated = (double)previous.start_sample + fraction * (double)(current.start_sample - previous.start_sample);
-    const uint64_t crossing = interpolated <= 0.0 ? 0U : (uint64_t)std::llround(interpolated);
+    const double interpolated = static_cast<double>(previous.start_sample) + fraction * static_cast<double>((current.start_sample - previous.start_sample));
+    const uint64_t crossing = interpolated <= 0.0 ? 0U : static_cast<uint64_t>(std::llround(interpolated));
     const uint64_t distance = crossing > target ? crossing - target : target - crossing;
     if (!found || distance < best_distance) { found = true; best_sample = crossing; best_distance = distance; }
   }

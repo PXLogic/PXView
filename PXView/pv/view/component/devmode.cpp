@@ -166,7 +166,7 @@ void DevMode::set_device()
 
     for (const GSList *l = dev_mode_list; l; l = l->next)
     {
-        const sr_dev_mode *mode = (const sr_dev_mode *)l->data;
+        const sr_dev_mode *mode = reinterpret_cast<const sr_dev_mode*>(l->data);
         auto *mode_name = get_mode_name(mode->mode);
         QString icon_name = QString::fromLocal8Bit(mode_name->_logo);
 

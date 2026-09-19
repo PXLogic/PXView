@@ -693,7 +693,7 @@ bool ViewDataSync::eventFilter(QObject *object, QEvent *event) {
       else
         _view->hover_point() = mouse_event->position().toPoint();
     } else if (object == _view->header_widget())
-      _view->hover_point() = QPoint(0, (int)mouse_event->position().y());
+      _view->hover_point() = QPoint(0, static_cast<int>(mouse_event->position().y()));
     else
       _view->hover_point() = QPoint(-1, -1);
 
@@ -777,7 +777,7 @@ ViewContext ViewContext::from_view(View *view, bool has_hoff)
         return ViewContext{};
 
     const double sr = view->document_snapshot_source()
-        ? (double)view->document_snapshot_source()->cur_snap_samplerate()
+        ? static_cast<double>(view->document_snapshot_source()->cur_snap_samplerate())
         : 0;
     return ViewContext(
         sr,

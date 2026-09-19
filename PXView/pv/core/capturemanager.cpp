@@ -313,7 +313,7 @@ bool CaptureManager::action_start_capture(bool instant,
 
     double disk_gb = 16;
     _state->device_agent().get_config_double(SR_CONF_STREAM_BUFF, disk_gb);
-    _disk_cache_config.total_cache_depth_gb = (uint64_t)disk_gb;
+    _disk_cache_config.total_cache_depth_gb = static_cast<uint64_t>(disk_gb);
     _disk_cache_config.memory_size_gb =
         0; // mmap mode: all data goes to disk file
     _disk_cache_config.calculate();
@@ -500,7 +500,7 @@ bool CaptureManager::exec_capture(data::SessionDocument *pending_owner) {
   // Set the buffer to store the captured data
   if (bSwapBuffer) {
     int buf_index = -1;
-    for (int i = 0; i < (int)_state->data_list().size(); i++) {
+    for (int i = 0; i < static_cast<int>(_state->data_list().size()); i++) {
       if (_state->data_list()[i].get() != _state->view_data()) {
         buf_index = i;
         break;
@@ -509,7 +509,7 @@ bool CaptureManager::exec_capture(data::SessionDocument *pending_owner) {
 
     if (buf_index < 0) {
       _state->data_list().push_back(std::make_unique<SessionData>());
-      buf_index = (int)_state->data_list().size() - 1;
+      buf_index = static_cast<int>(_state->data_list().size()) - 1;
     }
 
     _coord->set_capture_data(_state->data_list()[buf_index].get());
@@ -756,7 +756,7 @@ bool CaptureManager::get_capture_status(bool &triggered, int &progress) {
   }
 
   const uint64_t sample_count = snapshot->get_sample_count();
-  progress = (int)(sample_count * 100 / sample_limits);
+  progress = static_cast<int>((sample_count * 100 / sample_limits));
   return true;
 }
 
@@ -1012,7 +1012,7 @@ bool CaptureManager::is_repeat_mode() const { return _clt_mode == COLLECT_REPEAT
 
 bool CaptureManager::is_loop_mode() const { return _clt_mode == COLLECT_LOOP; }
 
-int CaptureManager::get_collect_mode() const { return (int)_clt_mode; }
+int CaptureManager::get_collect_mode() const { return static_cast<int>(_clt_mode); }
 
 } // namespace core
 } // namespace pv

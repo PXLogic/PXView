@@ -431,7 +431,7 @@ bool SigSession::init() {
   GSList *fw_paths = sr_resourcepaths_get(SR_RESOURCE_FIRMWARE);
   pxv_info("libsigrok firmware search paths:");
   for (GSList *p = fw_paths; p; p = p->next) {
-    pxv_info("  -> %s", p->data ? (const char *)p->data : "(nullptr)");
+    pxv_info("  -> %s", p->data ? reinterpret_cast<const char*>(p->data) : "(nullptr)");
   }
   g_slist_free_full(fw_paths, g_free);
 
@@ -879,7 +879,7 @@ bool SigSession::import_file(QString name) {
       cur_channels = 8;  // fallback
 
     uint64_t cur_rate = 0;
-    cur_rate = (uint64_t)_state->device_agent().get_sample_rate();
+    cur_rate = static_cast<uint64_t>(_state->device_agent().get_sample_rate());
     if (cur_rate == 0)
       cur_rate = 1000000;  // fallback 1 MHz
 
@@ -949,7 +949,7 @@ bool SigSession::import_file(QString name) {
   }
 
   pxv_info("Import file: input module \"%s\" ready, sdi=%p",
-           mod_id_str.c_str(), (void *)sdi);
+           mod_id_str.c_str(), reinterpret_cast<void*>(sdi));
 
   // Step 4: Register the input sdi with DeviceAgent and set up the
   // session (create sr_session, add device, register datafeed callback,
@@ -1152,7 +1152,7 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
   }
 
   // Allocate (count + 1) entries; last entry is a sentinel with handle=0.
-  int count = (int)all_sdi.size();
+  int count = static_cast<int>(all_sdi.size());
   struct ds_device_base_info *array = (struct ds_device_base_info *)
       calloc(count + 1, sizeof(struct ds_device_base_info));
   if (!array) {
@@ -1250,7 +1250,7 @@ void SigSession::refresh_device_list() {
   }
 
   pxv_info("refresh_device_list: total %d drivers, init_fail=%d, devices found=%d",
-           drv_count, init_fail_count, (int)all_sdi.size());
+           drv_count, init_fail_count, static_cast<int>(all_sdi.size()));
 
   _state->device_agent().set_scanned_devices(all_sdi);
 }
@@ -1338,11 +1338,11 @@ void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
         // 快照上，读取路径（含 MCP get_samples）不需要回头查 SignalModel，
         // 也就能把 raw ADC 就地换算成物理量（伏特）。见 §4.9.3。
         _state->capture_data()->get_dso()->set_measure_voltage_factor(
-            (uint64_t)m->vdiv_mv(), m->index());
+            static_cast<uint64_t>(m->vdiv_mv()), m->index());
         _state->capture_data()->get_dso()->set_measure_probe_factor(
-            (uint64_t)m->vfactor(), m->index());
+            static_cast<uint64_t>(m->vfactor()), m->index());
         _state->capture_data()->get_dso()->set_data_scale(
-            (float)core::kAdcScale, m->index());
+            static_cast<float>(core::kAdcScale), m->index());
       }
     }
   }
@@ -1444,7 +1444,7 @@ void SigSession::init_signals() {
   // Detect what data types we will receive
   if (_state->device_agent().have_instance()) {
     for (const GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-      const sr_channel *const probe = (const sr_channel *)l->data;
+      const sr_channel *const probe = reinterpret_cast<const sr_channel*>(l->data);
 
       switch (probe->type) {
       case SR_CHANNEL_LOGIC:
@@ -1460,7 +1460,7 @@ void SigSession::init_signals() {
   }
 
   int mode = _state->device_agent().get_work_mode();
-  int channel_count = g_slist_length((GSList *)_state->device_agent().get_channels());
+  int channel_count = g_slist_length(reinterpret_cast<GSList*>(_state->device_agent().get_channels()));
   pxv_info("SigSession::init_signals() start. mode=%d, channel_count=%d", mode, channel_count);
 
   // Ensure at least one channel of the current work mode's type is enabled.
@@ -1470,7 +1470,7 @@ void SigSession::init_signals() {
   {
     bool has_enabled = false;
     for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-      sr_channel *p = (sr_channel *)l->data;
+      sr_channel *p = reinterpret_cast<sr_channel*>(l->data);
       if (!p) continue;
       if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
       if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
@@ -1480,7 +1480,7 @@ void SigSession::init_signals() {
     }
     if (!has_enabled) {
       for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-        sr_channel *p = (sr_channel *)l->data;
+        sr_channel *p = reinterpret_cast<sr_channel*>(l->data);
         if (!p) continue;
         if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
         if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
@@ -1496,7 +1496,7 @@ void SigSession::init_signals() {
   }
 
   for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-    sr_channel *probe = (sr_channel *)l->data;
+    sr_channel *probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe) {
       pxv_warn("%s", "SigSession: probe is nullptr in channel loop, skipping");
       continue;
@@ -1584,7 +1584,7 @@ void SigSession::init_signals() {
             pxv_warn("SigSession: vfactor==0 from driver, clamping to 1");
             vfactor = 1;
           }
-          model->set_vfactor((double)vfactor);
+          model->set_vfactor(static_cast<double>(vfactor));
         } else
           model->set_vfactor(1.0);
 
@@ -1651,7 +1651,7 @@ void SigSession::init_signals() {
   if (_state->signal_models().empty()) {
     pxv_info("ERROR: Unable to create any channel. (models is empty)");
   } else {
-    pxv_info("SigSession::init_signals() end. models.size()=%d", (int)_state->signal_models().size());
+    pxv_info("SigSession::init_signals() end. models.size()=%d", static_cast<int>(_state->signal_models().size()));
   }
 }
 
@@ -1673,7 +1673,7 @@ void SigSession::reload() {
 
   std::vector<std::shared_ptr<data::SignalModel>> models;
   int mode = _state->device_agent().get_work_mode();
-  int channel_count = g_slist_length((GSList *)_state->device_agent().get_channels());
+  int channel_count = g_slist_length(reinterpret_cast<GSList*>(_state->device_agent().get_channels()));
   pxv_info("SigSession::reload() start. mode=%d, channel_count=%d", mode, channel_count);
 
   // Ensure at least one channel of the current work mode's type is enabled.
@@ -1682,7 +1682,7 @@ void SigSession::reload() {
   {
     bool has_enabled = false;
     for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-      sr_channel *p = (sr_channel *)l->data;
+      sr_channel *p = reinterpret_cast<sr_channel*>(l->data);
       if (!p) continue;
       if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
       if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
@@ -1692,7 +1692,7 @@ void SigSession::reload() {
     }
     if (!has_enabled) {
       for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-        sr_channel *p = (sr_channel *)l->data;
+        sr_channel *p = reinterpret_cast<sr_channel*>(l->data);
         if (!p) continue;
         if (mode == LOGIC && p->type != SR_CHANNEL_LOGIC) continue;
         if (mode == DSO && p->type != SR_CHANNEL_DSO) continue;
@@ -1714,7 +1714,7 @@ void SigSession::reload() {
   set_cur_samplelimits(sl);
 
   for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-    sr_channel *probe = (sr_channel *)l->data;
+    sr_channel *probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe) {
       pxv_warn("%s", "SigSession: probe is nullptr in channel loop, skipping");
       continue;
@@ -1766,7 +1766,7 @@ void SigSession::reload() {
       // Try to preserve settings from the existing model with the same index
       std::shared_ptr<data::SignalModel> old_model = nullptr;
       for (auto &m : _state->signal_models()) {
-        if (m->index() == (int)probe->index) {
+        if (m->index() == static_cast<int>(probe->index)) {
           old_model = m;
           break;
         }
@@ -1798,7 +1798,7 @@ void SigSession::reload() {
             pxv_warn("SigSession: vfactor==0 from driver, clamping to 1");
             vfactor = 1;
           }
-          model->set_vfactor((double)vfactor);
+          model->set_vfactor(static_cast<double>(vfactor));
         } else
           model->set_vfactor(1.0);
 
@@ -1829,7 +1829,7 @@ void SigSession::reload() {
   }
 
   if (!models.empty()) {
-    pxv_info("SigSession::reload() end. clear signals, models.size()=%d", (int)models.size());
+    pxv_info("SigSession::reload() end. clear signals, models.size()=%d", static_cast<int>(models.size()));
     clear_signals();
     std::vector<std::shared_ptr<data::SignalModel>>().swap(_state->signal_models());
     _state->signal_models() = models;
@@ -1872,7 +1872,7 @@ void SigSession::reload() {
     } else {
       pxv_warn("reload: device reports no channels, keeping existing %d "
                "signal models (channel list unavailable)",
-               (int)_state->signal_models().size());
+               static_cast<int>(_state->signal_models().size()));
     }
   }
 
@@ -1972,11 +1972,11 @@ bool SigSession::add_decoder(
     std::vector<const srd_channel *> all_probes;
 
     for (const GSList *i = dec->channels; i; i = i->next) {
-      all_probes.push_back((const srd_channel *)i->data);
+      all_probes.push_back(reinterpret_cast<const srd_channel*>(i->data));
     }
 
     for (const GSList *i = dec->opt_channels; i; i = i->next) {
-      all_probes.push_back((const srd_channel *)i->data);
+      all_probes.push_back(reinterpret_cast<const srd_channel*>(i->data));
     }
 
     decoder_stack->stack().front()->set_probes(probes);
@@ -2098,7 +2098,7 @@ bool SigSession::restore_decoders(const QJsonArray &dec_array,
 
     std::shared_ptr<data::DecoderStack> out_stack;
     DecoderStatus *dstatus = new DecoderStatus();  // owned by DecoderStack
-    dstatus->m_format = (int)DecoderDataFormat::hex;
+    dstatus->m_format = static_cast<int>(DecoderDataFormat::hex);
 
     const bool ok =
         add_decoder(root_dec, true, dstatus, sub_decoders, out_stack, target);
@@ -2168,7 +2168,7 @@ bool SigSession::restore_decoders(const QJsonArray &dec_array,
 
       // Restore configured options.
       for (const GSList *l = d->options; l; l = l->next) {
-        const srd_decoder_option *const opt = (srd_decoder_option *)l->data;
+        const srd_decoder_option *const opt = reinterpret_cast<srd_decoder_option*>(l->data);
         if (!opt || !opt->id || !options_obj.contains(opt->id))
           continue;
         GVariant *new_value = nullptr;
@@ -2270,7 +2270,7 @@ int SigSession::get_trace_index_by_key_handel(void *handel,
 
 void SigSession::remove_decoder(int index, data::SessionDocument *doc) {
   data::SessionDocument *target = doc ? doc : _document_registry->get_active_document();
-  int size = (int)decode_traces(target).size();
+  int size = static_cast<int>(decode_traces(target).size());
   (void)size;
   assert(index < size);
 
@@ -2344,7 +2344,7 @@ void SigSession::lissajous_rebuild(bool enable, int xindex, int yindex,
   m->set_enabled(enable);
   m->set_x_index(xindex);
   m->set_y_index(yindex);
-  m->set_percent((int)percent);
+  m->set_percent(static_cast<int>(percent));
   _state->set_lissajous_model(std::move(m));
   signals_changed();
 }
@@ -2588,10 +2588,10 @@ void SigSession::on_notify_batch_timeout() {
 std::shared_ptr<data::DecoderStack>
 SigSession::get_decoder_trace(int index, data::SessionDocument *doc) {
   auto &traces = decode_traces(doc);
-  if (index >= 0 && index < (int)traces.size()) {
+  if (index >= 0 && index < static_cast<int>(traces.size())) {
     return traces[index];
   }
-  pxv_err("get_decode_trace_by_index: index %d out of range (size=%d)", index, (int)traces.size());
+  pxv_err("get_decode_trace_by_index: index %d out of range (size=%d)", index, static_cast<int>(traces.size()));
   return nullptr;
 }
 
@@ -2873,7 +2873,7 @@ void SigSession::DeviceConfigChanged() {
   // Notify UI that device config changed (e.g. disk cache toggle),
   // so sampling duration can be recalculated from SR_CONF_HW_DEPTH
   _event_bus->broadcast_async<interface::SampleCountUpdated>(
-      {(uint64_t)get_ring_sample_count()});
+      {static_cast<uint64_t>(get_ring_sample_count())});
 }
 
 void SigSession::DeviceSessionStopped() {
@@ -3051,7 +3051,7 @@ void SigSession::reset_repeat_analog_trigger_frame() {
       pxv_info("Analog display trigger armed: mode=%s ch=%d edge=%d level=%.9g pos=%d%%",
              _repeat_analog_trigger_config.mode == data::DecoderAnalogTriggerMode::Normal ? "normal" : "auto",
              _repeat_analog_trigger_config.channel,
-             (int)_repeat_analog_trigger_config.edge,
+             static_cast<int>(_repeat_analog_trigger_config.edge),
              _repeat_analog_trigger_config.level,
              _repeat_analog_trigger_config.display_position_percent);
   }
@@ -3183,7 +3183,7 @@ bool SigSession::switch_work_mode(int mode) {
     //   ANALOG mode— enable ANALOG channels, disable LOGIC/DSO.
     //   MSO mode   — enable LOGIC + ANALOG, disable DSO.
     for (GSList *l = _state->device_agent().get_channels(); l; l = l->next) {
-      sr_channel *probe = (sr_channel *)l->data;
+      sr_channel *probe = reinterpret_cast<sr_channel*>(l->data);
       if (!probe)
         continue;
       bool want_enabled = false;
@@ -3296,7 +3296,7 @@ void SigSession::set_decoder_row_label(int index, QString label) {
   // export functions and list_analyzers can distinguish multiple instances
   // of the same decoder (e.g. "SPI(CH2.SPI)" vs "SPI(CH3.SPI)").
   auto &stacks = get_decoder_stacks();
-  if (index >= 0 && index < (int)stacks.size()) {
+  if (index >= 0 && index < static_cast<int>(stacks.size())) {
     if (stacks[index])
       stacks[index]->set_label(label);
   }
@@ -3452,7 +3452,7 @@ SigSession::get_measurements(int channel_index) {
   // 视图高度不再计入键 —— 电压换算已与视图几何无关 (§4.9.2).
   {
     std::lock_guard<std::mutex> lk(_measure_cache_mutex);
-    if (_measure_cache_valid && _measure_cache_data == (void*)data &&
+    if (_measure_cache_valid && _measure_cache_data == reinterpret_cast<void*>(data) &&
         _measure_cache_ch == channel_index && _measure_cache_ring == ring)
       return _measure_cache_val;
   }
@@ -3474,7 +3474,7 @@ SigSession::get_measurements(int channel_index) {
     uint64_t vfactor = 1;
 
     if (dso->has_data(r.channel_index)) {
-      data_scale = (double)dso->get_data_scale(r.channel_index);
+      data_scale = static_cast<double>(dso->get_data_scale(r.channel_index));
       measure_vf = dso->get_measure_voltage_factor(r.channel_index);
     }
 
@@ -3484,7 +3484,7 @@ SigSession::get_measurements(int channel_index) {
     // View-only _vDial widget.
     for (const auto &m : signal_models) {
       if (m && m->index() == r.channel_index) {
-        vfactor = (uint64_t)m->vfactor();
+        vfactor = static_cast<uint64_t>(m->vfactor());
         break;
       }
     }
@@ -3501,7 +3501,7 @@ SigSession::get_measurements(int channel_index) {
   // #3 写缓存: 键见上文. 数据变更 (ring 增长 / 文档切换) 时下次调用失效.
   {
     std::lock_guard<std::mutex> lk(_measure_cache_mutex);
-    _measure_cache_data = (void*)data;
+    _measure_cache_data = reinterpret_cast<void*>(data);
     _measure_cache_ch = channel_index;
     _measure_cache_ring = ring;
     _measure_cache_val = result;

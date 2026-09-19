@@ -34,8 +34,8 @@ public:
 
     bool is_mmap_address(void* ptr) const {
         if (!_base_ptr) return false;
-        return (uint8_t*)ptr >= (uint8_t*)_base_ptr &&
-               (uint8_t*)ptr < ((uint8_t*)_base_ptr + _total_bytes);
+        return reinterpret_cast<uint8_t*>(ptr) >= reinterpret_cast<uint8_t*>(_base_ptr) &&
+               reinterpret_cast<uint8_t*>(ptr) < (reinterpret_cast<uint8_t*>(_base_ptr) + _total_bytes);
     }
 
     uint64_t get_total_bytes() const { return _total_bytes; }

@@ -49,7 +49,7 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 	}
 	assert(pdata);
 	const srd_proto_data_annotation *const pda =
-		(const srd_proto_data_annotation*)pdata->data;
+		reinterpret_cast<const srd_proto_data_annotation*>(pdata->data);
 	if (!pda) {
 		throw std::invalid_argument("Annotation: pda is nullptr");
 	}
@@ -86,7 +86,7 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 		key.append(pda->str_number_hex, strlen(pda->str_number_hex));
 
 		//get numeric data
-		const int str_len = (int)strlen(pda->str_number_hex);
+		const int str_len = static_cast<int>(strlen(pda->str_number_hex));
 		if (str_len <= DECODER_MAX_DATA_BLOCK_LEN){
 			hex = QString::fromUtf8(pda->str_number_hex, str_len);
 			is_numeric = true;

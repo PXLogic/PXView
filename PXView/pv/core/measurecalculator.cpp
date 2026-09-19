@@ -86,7 +86,7 @@ MeasureCalculator::compute(SessionData *data,
     for (const auto &m : dso_models) {
         MeasurementResult r;
         r.channel_index = m->index();
-        r.hw_offset = (int)m->hw_offset();
+        r.hw_offset = static_cast<int>(m->hw_offset());
 
         // P1-c（统一读取抽象）：改用 SampleSpan 获取只读视图。
         //
@@ -94,7 +94,7 @@ MeasureCalculator::compute(SessionData *data,
         // contiguous_samples —— 可安全读取的样本数上界 —— 而不是让调用方
         // 假定"返回的缓冲一定覆盖 sample_count"。下方所有循环统一按 n 收敛。
         const pv::data::SampleSpan sp =
-            dso->span((uint32_t)m->index(), 0, sample_count);
+            dso->span(static_cast<uint32_t>(m->index()), 0, sample_count);
         if (!sp.valid()) {
             pxv_err("MeasureCalculator::compute: span invalid for channel %d",
                     m->index());
@@ -126,12 +126,12 @@ MeasureCalculator::compute(SessionData *data,
         // mathematical result is identical).
         {
             double sum_sq = 0.0;
-            const double zero_off = (double)r.hw_offset;
+            const double zero_off = static_cast<double>(r.hw_offset);
             for (uint64_t i = 0; i < n; i++) {
-                const double diff = zero_off - (double)samples[i];
+                const double diff = zero_off - static_cast<double>(samples[i]);
                 sum_sq += diff * diff;
             }
-            r.rms = std::sqrt(sum_sq / (double)n);
+            r.rms = std::sqrt(sum_sq / static_cast<double>(n));
         }
 
         // ---- mean (equivalent to DsoSnapshot::cal_vmean(order)) ----
@@ -139,9 +139,9 @@ MeasureCalculator::compute(SessionData *data,
         {
             double sum = 0.0;
             for (uint64_t i = 0; i < n; i++) {
-                sum += (double)samples[i];
+                sum += static_cast<double>(samples[i]);
             }
-            r.mean = sum / (double)n;
+            r.mean = sum / static_cast<double>(n);
         }
 
         r.mValid = true;
@@ -199,7 +199,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
 
     // Find the two histogram peaks by scanning left/right of the mid value.
     // The mid value is approximated as (max + min) / 2.
-    const uint8_t mid_adc = (uint8_t)(((int)r.max + (int)r.min) / 2);
+    const uint8_t mid_adc = (uint8_t)((static_cast<int>(r.max) + static_cast<int>(r.min)) / 2);
 
     // Scan lower half (ADC values 0..mid_adc) for the most frequent value
     // → this is the high-voltage steady-state → stored in `low`.
@@ -208,7 +208,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
     for (int v = 0; v <= mid_adc; v++) {
         if (hist[v] > best_lower_count) {
             best_lower_count = hist[v];
-            best_lower_val   = (uint8_t)v;
+            best_lower_val   = static_cast<uint8_t>(v);
         }
     }
 
@@ -219,7 +219,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
     for (int v = mid_adc + 1; v < 256; v++) {
         if (hist[v] > best_upper_count) {
             best_upper_count = hist[v];
-            best_upper_val   = (uint8_t)v;
+            best_upper_val   = static_cast<uint8_t>(v);
         }
     }
 
@@ -244,15 +244,15 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
 
     // -- Step 2: Mid-threshold and edge detection --
     // Threshold is the midpoint of high and low ADC values.
-    const double threshold = ((double)r.high + (double)r.low) / 2.0;
+    const double threshold = (static_cast<double>(r.high) + static_cast<double>(r.low)) / 2.0;
 
     // 10% and 90% levels for rise/fall time computation.
     // In ADC space: 10% of swing from `low` (high-voltage) toward `high`
     // (low-voltage). The 10% point is near `low` (high-voltage side),
     // the 90% point is near `high` (low-voltage side).
-    const double swing = (double)r.high - (double)r.low;
-    const double v10 = (double)r.low + 0.1 * swing;  // 10% from high-voltage
-    const double v90 = (double)r.low + 0.9 * swing;  // 90% from high-voltage
+    const double swing = static_cast<double>(r.high) - static_cast<double>(r.low);
+    const double v10 = static_cast<double>(r.low) + 0.1 * swing;  // 10% from high-voltage
+    const double v90 = static_cast<double>(r.low) + 0.9 * swing;  // 90% from high-voltage
 
     // Scan for edges: a rising edge (voltage rising = ADC value falling)
     // occurs when the signal crosses threshold from above. A falling edge
@@ -275,10 +275,10 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
     // edges. Reserve 256 to avoid reallocation in the common case.
     edges.reserve(256);
 
-    bool was_above = (double)samples[0] > threshold;
+    bool was_above = static_cast<double>(samples[0]) > threshold;
 
     for (uint64_t i = 1; i < sample_count; i++) {
-        const bool is_above = (double)samples[i] > threshold;
+        const bool is_above = static_cast<double>(samples[i]) > threshold;
         if (was_above && !is_above) {
             // Crossing from above → ADC value decreased → voltage rising
             edges.push_back({i, true});
@@ -307,7 +307,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
         // Find the next rising edge
         for (size_t j = i + 1; j < edges.size(); j++) {
             if (edges[j].rising) {
-                period_sum += (double)(edges[j].index - edges[i].index);
+                period_sum += static_cast<double>((edges[j].index - edges[i].index));
                 period_count++;
                 break;
             }
@@ -315,7 +315,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
         // Find the next falling edge after this rising edge
         for (size_t j = i + 1; j < edges.size(); j++) {
             if (!edges[j].rising) {
-                high_time_sum += (double)(edges[j].index - edges[i].index);
+                high_time_sum += static_cast<double>((edges[j].index - edges[i].index));
                 high_time_count++;
                 break;
             }
@@ -352,7 +352,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
         // We look in a window of at most `period_samples` samples before the
         // edge to avoid scanning the entire buffer for each edge.
         const double period_samples = period_sum / period_count;
-        const uint64_t window = (uint64_t)std::max(period_samples * 0.5, 2.0);
+        const uint64_t window = static_cast<uint64_t>(std::max(period_samples * 0.5, 2.0));
         const uint64_t search_start = (e.index >= window) ? (e.index - window) : 0;
 
         if (e.rising) {
@@ -362,18 +362,18 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
             int64_t v90_idx = -1;
             int64_t v10_idx = -1;
             for (uint64_t j = e.index; j > search_start; j--) {
-                const double prev = (double)samples[j - 1];
-                const double curr = (double)samples[j];
+                const double prev = static_cast<double>(samples[j - 1]);
+                const double curr = static_cast<double>(samples[j]);
                 if (v90_idx < 0 && prev >= v90 && curr < v90) {
-                    v90_idx = (int64_t)j;
+                    v90_idx = static_cast<int64_t>(j);
                 }
                 if (v90_idx >= 0 && prev >= v10 && curr < v10) {
-                    v10_idx = (int64_t)j;
+                    v10_idx = static_cast<int64_t>(j);
                     break;
                 }
             }
             if (v90_idx >= 0 && v10_idx >= 0 && v10_idx > v90_idx) {
-                rise_sum += (double)(v10_idx - v90_idx) * ns_per_sample;
+                rise_sum += static_cast<double>((v10_idx - v90_idx)) * ns_per_sample;
                 rise_count++;
             }
         } else {
@@ -383,18 +383,18 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
             int64_t v10_idx = -1;
             int64_t v90_idx = -1;
             for (uint64_t j = e.index; j > search_start; j--) {
-                const double prev = (double)samples[j - 1];
-                const double curr = (double)samples[j];
+                const double prev = static_cast<double>(samples[j - 1]);
+                const double curr = static_cast<double>(samples[j]);
                 if (v10_idx < 0 && prev <= v10 && curr > v10) {
-                    v10_idx = (int64_t)j;
+                    v10_idx = static_cast<int64_t>(j);
                 }
                 if (v10_idx >= 0 && prev <= v90 && curr > v90) {
-                    v90_idx = (int64_t)j;
+                    v90_idx = static_cast<int64_t>(j);
                     break;
                 }
             }
             if (v10_idx >= 0 && v90_idx >= 0 && v90_idx > v10_idx) {
-                fall_sum += (double)(v90_idx - v10_idx) * ns_per_sample;
+                fall_sum += static_cast<double>((v90_idx - v10_idx)) * ns_per_sample;
                 fall_count++;
             }
         }
@@ -406,7 +406,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
     // -- Step 5: Burst time --
     // Total time span from the first edge to the last edge.
     if (edges.size() >= 2) {
-        r.burst_time = (double)(edges.back().index - edges.front().index)
+        r.burst_time = static_cast<double>((edges.back().index - edges.front().index))
                        * ns_per_sample;
     }
 
@@ -454,32 +454,32 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
 
     // DSO_MS_AMPT — amplitude (high - low), level-dependent
     make(DSO_MS_AMPT,
-         r.level_valid ? to_mv((double)r.high - (double)r.low) : 0.0,
+         r.level_valid ? to_mv(static_cast<double>(r.high) - static_cast<double>(r.low)) : 0.0,
          "mV", r.level_valid && r.mValid);
 
     // DSO_MS_VHIG — high voltage (hw_offset - low), level-dependent
     make(DSO_MS_VHIG,
-         r.level_valid ? to_mv((double)r.hw_offset - (double)r.low) : 0.0,
+         r.level_valid ? to_mv(static_cast<double>(r.hw_offset) - static_cast<double>(r.low)) : 0.0,
          "mV", r.level_valid && r.mValid);
 
     // DSO_MS_VLOW — low voltage (hw_offset - high), level-dependent
     make(DSO_MS_VLOW,
-         r.level_valid ? to_mv((double)r.hw_offset - (double)r.high) : 0.0,
+         r.level_valid ? to_mv(static_cast<double>(r.hw_offset) - static_cast<double>(r.high)) : 0.0,
          "mV", r.level_valid && r.mValid);
 
     // DSO_MS_VP2P — peak-to-peak (max - min)
     make(DSO_MS_VP2P,
-         r.mValid ? to_mv((double)r.max - (double)r.min) : 0.0,
+         r.mValid ? to_mv(static_cast<double>(r.max) - static_cast<double>(r.min)) : 0.0,
          "mV", r.mValid);
 
     // DSO_MS_VMAX — max voltage (hw_offset - min)
     make(DSO_MS_VMAX,
-         r.mValid ? to_mv((double)r.hw_offset - (double)r.min) : 0.0,
+         r.mValid ? to_mv(static_cast<double>(r.hw_offset) - static_cast<double>(r.min)) : 0.0,
          "mV", r.mValid);
 
     // DSO_MS_VMIN — min voltage (hw_offset - max)
     make(DSO_MS_VMIN,
-         r.mValid ? to_mv((double)r.hw_offset - (double)r.max) : 0.0,
+         r.mValid ? to_mv(static_cast<double>(r.hw_offset) - static_cast<double>(r.max)) : 0.0,
          "mV", r.mValid);
 
     // DSO_MS_PERD — period (ns), level-dependent
@@ -504,16 +504,16 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
     // DSO_MS_NOVR — overshoot ((max - high) * 100 / (high - low)), level-dependent
     make(DSO_MS_NOVR,
          (r.level_valid && (r.high - r.low != 0))
-             ? ((double)r.max - (double)r.high) * 100.0
-                   / ((double)r.high - (double)r.low)
+             ? (static_cast<double>(r.max) - static_cast<double>(r.high)) * 100.0
+                   / (static_cast<double>(r.high) - static_cast<double>(r.low))
              : 0.0,
          "%", r.level_valid && r.mValid && (r.high - r.low != 0));
 
     // DSO_MS_POVR — preshoot ((low - min) * 100 / (high - low)), level-dependent
     make(DSO_MS_POVR,
          (r.level_valid && (r.high - r.low != 0))
-             ? ((double)r.low - (double)r.min) * 100.0
-                   / ((double)r.high - (double)r.low)
+             ? (static_cast<double>(r.low) - static_cast<double>(r.min)) * 100.0
+                   / (static_cast<double>(r.high) - static_cast<double>(r.low))
              : 0.0,
          "%", r.level_valid && r.mValid && (r.high - r.low != 0));
 
@@ -549,7 +549,7 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
     make(DSO_MS_BRST, r.burst_time, "ns", r.level_valid && r.mValid);
 
     // DSO_MS_PCNT — pulse count, level-dependent
-    make(DSO_MS_PCNT, (double)r.pcount, "",
+    make(DSO_MS_PCNT, static_cast<double>(r.pcount), "",
          r.level_valid && r.mValid);
 
     return out;

@@ -115,14 +115,14 @@ static void drawFloatingPanel(QPainter &p, const QPointF &cursorPos,
   }
 
   int cols = (hasLabels && rows.size() >= 2) ? 2 : 1;
-  int gridRows = ((int)rows.size() + cols - 1) / cols;
+  int gridRows = (static_cast<int>(rows.size()) + cols - 1) / cols;
 
   int cellH = fmLabel.height() + labelValueGap + fmValue.height();
   int cellH_noLabel = fmValue.height();
 
   int colWidths[2] = {0, 0};
   for (size_t i = 0; i < rows.size(); i++) {
-    int col = (int)i % cols;
+    int col = static_cast<int>(i) % cols;
     QString cleanLabel = rows[i].first.trimmed().toUpper();
     if (cleanLabel.endsWith(':'))
       cleanLabel.chop(1);
@@ -164,8 +164,8 @@ static void drawFloatingPanel(QPainter &p, const QPointF &cursorPos,
 
   double y = panelRect.top() + pad;
   for (size_t i = 0; i < rows.size(); i++) {
-    int col = (int)i % cols;
-    int row = (int)i / cols;
+    int col = static_cast<int>(i) % cols;
+    int row = static_cast<int>(i) / cols;
 
     double cellX = panelRect.left() + pad + col * (colWidths[0] + gridGapH);
     double cellY = y + row * (usedCellH + gridGapV);
@@ -440,7 +440,7 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
               logic_signal->model() ? logic_signal->model()->index() : 0;
           const int right = t->get_view_rect().right();
           const int y = logic_signal->get_y() +
-                        (int)(logic_signal->get_totalHeight() * 0.5);
+                        static_cast<int>((logic_signal->get_totalHeight() * 0.5));
           const int total_height = logic_signal->get_totalHeight();
 
           std::vector<GlitchRange> preview;
@@ -959,7 +959,7 @@ void MeasureOverlayPass::draw_logic_jump(QPainter &p,
   };
   p.drawPoints(pre_points, countof(pre_points));
   if (std::abs(vp->cur_aftX() - vp->cur_preX()) +
-          std::abs((double)(vp->cur_aftY() - vp->cur_preY())) >
+          std::abs(static_cast<double>((vp->cur_aftY() - vp->cur_preY()))) >
       20) {
     if (vp->edge_hit()) {
       const QPointF aft_points[] = {

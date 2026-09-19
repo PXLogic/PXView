@@ -241,7 +241,7 @@ QString SpectrumTrace::format_freq(double freq, unsigned precision)
         QString units = FreqPrefixes[prefix] + "Hz";
         // Bounded: precision is a public parameter and a large value would make
         // "%.Nf" emit more digits than buffer can hold.
-        snprintf(format, sizeof(format), "%%.%df", (int)precision);    
+        snprintf(format, sizeof(format), "%%.%df", static_cast<int>(precision));    
         snprintf(buffer, sizeof(buffer), format, freq / divider);
         strncat(buffer, units.toUtf8().data(), sizeof(buffer) - strlen(buffer) - 1);
         return QString(buffer);
@@ -402,14 +402,14 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
     const double FreqRange = NyFreq * _scale;
     const double FreqOffset = NyFreq * _offset;
 
-    const int order = (int)floor(log10(FreqRange));
+    const int order = static_cast<int>(floor(log10(FreqRange)));
     const double multiplier = (pow(10.0, order) == FreqRange) ? FreqRange/10 : pow(10.0, order);
     const double freq_per_pixel = FreqRange / width;
 
     p.setPen(fore);
     p.setBrush(Qt::NoBrush);
-    double tick_freq = multiplier * (int)floor(FreqOffset / multiplier);
-    int division = (int)round(tick_freq * FreqMinorDivNum / multiplier);
+    double tick_freq = multiplier * static_cast<int>(floor(FreqOffset / multiplier));
+    int division = static_cast<int>(round(tick_freq * FreqMinorDivNum / multiplier));
     double x = (tick_freq - FreqOffset) / freq_per_pixel;
     do{
         if (division%FreqMinorDivNum == 0) {
@@ -427,7 +427,7 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
         division++;
         x =  (tick_freq - FreqOffset) / freq_per_pixel;
     } while(x < width);
-    blank_top = max(blank_top, (double)TickHeight + text_height);
+    blank_top = max(blank_top, static_cast<double>(TickHeight) + text_height);
 
     // delta Frequency
     QString freq_str =  QString::fromWCharArray(L" \u0394") + "Freq: " + format_freq(deltaFreq,4);

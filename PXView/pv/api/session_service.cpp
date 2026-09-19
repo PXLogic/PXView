@@ -1195,8 +1195,8 @@ Result<int> SessionService::configure_and_start(
         std::map<int, uint32_t> thresholds;
         std::map<int, ::GlitchFilterMode> modes;
         for (const auto &gf : glitch_filters) {
-            thresholds[(int)gf.first] = static_cast<uint32_t>(gf.second);
-            modes[(int)gf.first] = ::GlitchFilterMode::Both;
+            thresholds[static_cast<int>(gf.first)] = static_cast<uint32_t>(gf.second);
+            modes[static_cast<int>(gf.first)] = ::GlitchFilterMode::Both;
         }
         _session->set_glitch_filter(thresholds, modes);
     }
@@ -1832,10 +1832,10 @@ ProbeConfig SessionService::get_probe_config(int16_t channel) const {
         int ival = 0;
         bool bval = true;
         if (_device->get_probe_factor(u64, target_ch))
-            config.vfactor = (double)u64;
+            config.vfactor = static_cast<double>(u64);
         if (_device->get_probe_vdiv(u64, target_ch))
             // 驱动单位毫伏/格 -> API 契约单位 V/div（唯一允许的边界换算）
-            config.vdiv = core::millivolts_to_volts((double)u64);
+            config.vdiv = core::millivolts_to_volts(static_cast<double>(u64));
         if (_device->get_probe_coupling(ival, target_ch)) {
             // 驱动 0=GND/1=DC/2=AC → API AC=0/DC=1（GND 无 API 表示）
             config.coupling = (ival == 1) ? Coupling::DC : Coupling::AC;
@@ -1876,7 +1876,7 @@ Result<void> SessionService::set_probe_config(int16_t channel,
         if (config.vdiv > 0.0) {
             // API vdiv 单位为伏特/格；驱动 PROBE_VDIV 为 uint64 毫伏/格
             const uint64_t vdiv_mv =
-                (uint64_t)llround(core::volts_to_millivolts(config.vdiv));
+                static_cast<uint64_t>(llround(core::volts_to_millivolts(config.vdiv)));
             if (_device->set_config_uint64(SR_CONF_PROBE_VDIV, vdiv_mv,
                                            target_ch))
                 any_ok = true;
@@ -1891,7 +1891,7 @@ Result<void> SessionService::set_probe_config(int16_t channel,
         }
         {
             const uint64_t factor =
-                (config.vfactor > 0.0) ? (uint64_t)llround(config.vfactor) : 1;
+                (config.vfactor > 0.0) ? static_cast<uint64_t>(llround(config.vfactor)) : 1;
             if (_device->set_config_uint64(SR_CONF_PROBE_FACTOR, factor,
                                            target_ch))
                 any_ok = true;
@@ -3222,7 +3222,7 @@ Result<std::string> SessionService::add_decoder(
             }
             pxv_info("add_decoder channel mapping: %s probes=%d index_list=%d have_view_data=%d",
                      probe_info.toUtf8().constData(),
-                     (int)prep.prepared_probes.size(), (int)prep.prepared_index_list.size(),
+                     static_cast<int>(prep.prepared_probes.size()), static_cast<int>(prep.prepared_index_list.size()),
                      _session->have_view_data() ? 1 : 0);
         }
 
@@ -3250,7 +3250,7 @@ Result<std::string> SessionService::add_decoder(
         std::shared_ptr<data::DecoderStack> decoder_stack;
         std::list<pv::data::decode::Decoder *> sub_decoders;
         DecoderStatus *dstatus = new DecoderStatus();
-        dstatus->m_format = (int)DecoderDataFormat::hex;
+        dstatus->m_format = static_cast<int>(DecoderDataFormat::hex);
 
         bool ok = _session->add_decoder(dec, true, dstatus, sub_decoders,
                                         decoder_stack, api_document());
@@ -3836,7 +3836,7 @@ Result<void> SessionService::set_glitch_filter(const GlitchFilterConfig &config)
     std::map<int, ::GlitchFilterMode> modes;
 
     for (size_t i = 0; i < config.channels.size() && i < config.thresholds.size(); i++) {
-        int ch_idx = (int)config.channels[i];
+        int ch_idx = static_cast<int>(config.channels[i]);
         thresholds[ch_idx] = static_cast<uint32_t>(config.thresholds[i]);
         // 默认 BOTH 模式
         modes[ch_idx] = ::GlitchFilterMode::Both;
@@ -3844,7 +3844,7 @@ Result<void> SessionService::set_glitch_filter(const GlitchFilterConfig &config)
     // 如果有 mode 信息，覆盖默认值
     // config.modes 使用 pv::api::GlitchFilterMode, 需转换为全局 ::GlitchFilterMode
     for (size_t i = 0; i < config.channels.size() && i < config.modes.size(); i++) {
-        int ch_idx = (int)config.channels[i];
+        int ch_idx = static_cast<int>(config.channels[i]);
         switch (config.modes[i]) {
         case pv::api::GlitchFilterMode::Both:
             modes[ch_idx] = ::GlitchFilterMode::Both;
@@ -4295,7 +4295,7 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
                 if (!warned.exchange(true)) {
                     pxv_warn("export_binary: DSO vertical scale (mV/div) unavailable "
                              "for ch %d — falling back to 0..1 normalised amplitudes. "
-                             "Emitted once per process.", (int)ch_idx);
+                             "Emitted once per process.", static_cast<int>(ch_idx));
                 }
             }
             float data_scale = snapshot->get_data_scale(ch_idx);

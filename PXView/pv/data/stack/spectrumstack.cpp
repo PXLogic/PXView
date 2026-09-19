@@ -175,7 +175,7 @@ void SpectrumStack::calc_fft()
     // get_sample_count() >= _sample_num * _sample_interval，故 contiguous_samples
     // 覆盖所有被读取的下标（最大为 (_sample_num-1)*step）。
     const pv::data::SampleSpan sp =
-        data->span((uint32_t)_index, 0, (uint64_t)_sample_num * _sample_interval);
+        data->span(static_cast<uint32_t>(_index), 0, static_cast<uint64_t>(_sample_num) * _sample_interval);
     if (!sp.valid())
         return;
     const uint8_t *const samples = sp.data;

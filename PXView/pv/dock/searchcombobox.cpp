@@ -207,7 +207,7 @@ void SearchComboBox::OnItemClick(void *sender, void *data_handle) {
   (void)sender;
 
   if (data_handle != nullptr && _item_click) {
-    SearchDataItem *item = (SearchDataItem *)data_handle;
+    SearchDataItem *item = reinterpret_cast<SearchDataItem*>(data_handle);
     this->close();
     ISearchItemClick *click = _item_click;
     this->deleteLater();

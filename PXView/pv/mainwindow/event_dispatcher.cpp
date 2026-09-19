@@ -579,9 +579,9 @@ static void dock_dbg(const std::string &s) {
     }
 }
 void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &ev) {
-  pxv_info("on_device_options_updated: from_external=%d", (int)ev.from_external);
+  pxv_info("on_device_options_updated: from_external=%d", static_cast<int>(ev.from_external));
   dock_dbg(std::string("on_device_options_updated: from_external=") +
-           std::to_string((int)ev.from_external));
+           std::to_string(static_cast<int>(ev.from_external)));
   // 命令/通知拆分（2026-09-16）：本 handler 是纯通知订阅者 —— 只刷新读
   // 驱动值的控件并收割当前布局到 tab 文档。Core 模型重建已由广播方在发
   // 事件之前经显式命令 apply_device_options()（内部 reload()）同步完成，

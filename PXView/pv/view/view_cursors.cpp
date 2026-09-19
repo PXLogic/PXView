@@ -278,9 +278,9 @@ void ViewCursors::del_xcursor(XCursor *xcursor) {
 
 uint64_t ViewCursors::get_cursor_samples(int index) {
   auto &lst = get_cursorList();
-  if (index < 0 || index >= (int)lst.size()) {
+  if (index < 0 || index >= static_cast<int>(lst.size())) {
     pxv_warn("ViewCursors::get_cursor_samples: index %d out of range (size=%d)",
-             index, (int)lst.size());
+             index, static_cast<int>(lst.size()));
     return 0;
   }
 

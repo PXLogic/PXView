@@ -192,7 +192,7 @@ void ProtocolItemLayer::SetProtocolFormat(const char *format) {
 
   m_bSetting = true;
   int dex = DecoderDataFormat::Parse(format);
-  if (dex < (int)_format_combox->count()) {
+  if (dex < static_cast<int>(_format_combox->count())) {
     _format_combox->setCurrentIndex(dex);
   }
   m_bSetting = false;

@@ -188,7 +188,7 @@ bool StoreSession::save_start()
     if (type_set.size() > 1) {
         // 架构修复：MSO 模式（混合 LOGIC + ANALOG）现在支持保存。
         // 不再拒绝混合类型，save_proc 会分别保存 logic 和 analog 数据块。
-        pxv_info("MSO mode: saving mixed data types (%d types).", (int)type_set.size());
+        pxv_info("MSO mode: saving mixed data types (%d types).", static_cast<int>(type_set.size()));
     }
 
     if (type_set.size() == 0) {
@@ -299,7 +299,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
 
     if (start_index > logic_snapshot->get_ring_sample_count()){
         pxv_err("ERROR:the start curosr is invalid!");
-        _units_stored.store((uint64_t)-1);
+        _units_stored.store(static_cast<uint64_t>(-1));
         progress_updated();
         return;
     }
@@ -370,7 +370,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                 }
                 
                 if (need_malloc) {
-                    buf = (uint8_t *)malloc(size);
+                    buf = reinterpret_cast<uint8_t*>(malloc(size));
                     if (buf == nullptr) {
                         _has_error.store(true);
 set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
@@ -380,8 +380,8 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
                     }
                 }
                 
-                MakeChunkName(chunk_name, i - start_block, ch_index, (int)ch_type, HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)buf, size) ? SR_OK : -1;
+                MakeChunkName(chunk_name, i - start_block, ch_index, static_cast<int>(ch_type), HEADER_FORMAT_VERSION);
+                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
 
                 if (ret != SR_OK) {
                     if (need_malloc && buf) { free(buf); buf = nullptr; }
@@ -430,7 +430,7 @@ void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
     int ch_type = -1;
     std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
         if (m->type() == SR_CHANNEL_ANALOG) {
-            ch_type = (int)m->type();
+            ch_type = static_cast<int>(m->type());
             break;
         }
     }
@@ -447,18 +447,18 @@ _unit_count.store(analog_snapshot->get_sample_count() *
         uint8_t *buf = nullptr;
         uint8_t *buf_start = nullptr;
 
-        buf = (uint8_t *)analog_snapshot->get_data() +
+        buf = reinterpret_cast<uint8_t*>(analog_snapshot->get_data()) +
                         (analog_snapshot->get_ring_start() * analog_snapshot->get_unit_bytes()
                                          * analog_snapshot->get_channel_num());
 
-        buf_start = (uint8_t *)analog_snapshot->get_data();
+        buf_start = reinterpret_cast<uint8_t*>(analog_snapshot->get_data());
 
         const uint8_t *buf_end = buf_start + _unit_count.load();
 
         for (int i = 0; !_canceled && i < num; i++) {
             const uint64_t size = analog_snapshot->get_block_size(i);
             if ((buf + size) > buf_end) {
-                uint8_t *tmp = (uint8_t *)malloc(size);
+                uint8_t *tmp = reinterpret_cast<uint8_t*>(malloc(size));
                 if (tmp == nullptr) {
                     _has_error.store(true);
 set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
@@ -469,7 +469,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
                 } 
 
                 MakeChunkName(chunk_name, i, 0, ch_type, HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)tmp, size) ? SR_OK : -1;
+                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(tmp), size) ? SR_OK : -1;
 
                 /* Wrap-around: buf should now point to the start of the
                  * wrapped data in buf_start. The number of bytes that
@@ -483,7 +483,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
             } 
             else { 
                 MakeChunkName(chunk_name, i, 0, ch_type, HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)buf, size) ? SR_OK : -1;
+                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
 
                 buf += size;
             }
@@ -533,10 +533,10 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
             // get_samples(0, 0, ch_index) 严格等价 —— 包括 size==0 / 通道不存在 /
             // 平面未分配时返回 nullptr 的行为（span 此时 valid()==false 且 data==nullptr）。
             const uint8_t *data_buffer =
-                dso_snapshot->span((uint32_t)ch_index, 0, size).data;
+                dso_snapshot->span(static_cast<uint32_t>(ch_index), 0, size).data;
         
             snprintf(chunk_name, 19, "O-%d/0", ch_index);
-            ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)data_buffer, size) ? SR_OK : -1;
+            ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(data_buffer), size) ? SR_OK : -1;
             // P1-e 拷贝审计：.pxc 保存时写入 zip 的整通道拷贝
             PXV_PERF_COPY_EXPORT(size);
 
@@ -828,7 +828,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     /* trigger time: written in ALL modes (not just LOGIC) so the frontend
      * can restore the original capture timestamp when reopening a .pxl file.
      * Format: milliseconds since Unix epoch (int64). */
-    snprintf(meta, sizeof(meta), "trigger time = %lld\n", (long long)_session->get_session_time().toMSecsSinceEpoch()); str += meta;
+    snprintf(meta, sizeof(meta), "trigger time = %lld\n", static_cast<long long>(_session->get_session_time().toMSecsSinceEpoch())); str += meta;
 
     int analogcnt = 0;
 
@@ -910,13 +910,13 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             double trig_value = matched_model ? matched_model->trig_value() : 0;
             snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
             str += meta;
-            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
+            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vdiv));
             str += meta;
-            snprintf(meta, sizeof(meta), " vFactor%d = %" PRIu64 "\n", analogcnt, (uint64_t)vfactor);
+            snprintf(meta, sizeof(meta), " vFactor%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vfactor));
             str += meta;
-            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, (int)hw_offset);
+            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, static_cast<int>(hw_offset));
             str += meta;
-            snprintf(meta, sizeof(meta), " vTrig%d = %d\n", analogcnt, (int)trig_value);
+            snprintf(meta, sizeof(meta), " vTrig%d = %d\n", analogcnt, static_cast<int>(trig_value));
             str += meta;
         }
         else if (mode == ANALOG)
@@ -928,9 +928,9 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
             snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
             str += meta;
-            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
+            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vdiv));
             str += meta;
-            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, (int)hw_offset);
+            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, static_cast<int>(hw_offset));
             str += meta;
             snprintf(meta, sizeof(meta), " mapUnit%d = %s\n", analogcnt, "");
             str += meta;
@@ -969,7 +969,7 @@ bool StoreSession::export_start()
             if (std::find(_export_channels.begin(), _export_channels.end(), m->index()) == _export_channels.end()) {
                 continue;
             }
-        } else if (_export_channel_type >= 0 && (int)m->type() != _export_channel_type) {
+        } else if (_export_channel_type >= 0 && static_cast<int>(m->type()) != _export_channel_type) {
             continue;
         }
         int _tp = m->type();
@@ -1221,7 +1221,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         if (is_binary_output)
             file.write(data_out->str, data_out->len);
         else
-            out << QString::fromUtf8((char*) data_out->str);
+            out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
         g_string_free(data_out,TRUE);
     }
     for (GSList *l = meta.config; l; l = l->next) {
@@ -1250,7 +1250,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
         if (start_index > logic_snapshot->get_ring_sample_count()){
             pxv_err("ERROR:the start curosr is invalid!");
-            _units_stored.store((uint64_t)-1);
+            _units_stored.store(static_cast<uint64_t>(-1));
             progress_updated();
             return;
         }
@@ -1340,13 +1340,13 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 if(buf_sample_num - i < usize)
                     // size is a per-chunk byte count bounded by usize (8192).
                     size = static_cast<unsigned int>(buf_sample_num - i);
-                uint8_t *xbuf = (uint8_t *)malloc((size_t)size * unitsize);
+                uint8_t *xbuf = reinterpret_cast<uint8_t*>(malloc((size_t)size * unitsize));
                 if (xbuf == nullptr) {
                     _has_error.store(true);
                     set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed."));
                     return;
                 }                
-                memset(xbuf, 0, (size_t)size * unitsize);
+                memset(xbuf, 0, static_cast<size_t>(size) * unitsize);
 
                 for (uint64_t j = 0; j < size; j++) {
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
@@ -1358,7 +1358,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 }
 
                 lp.data = xbuf;
-                lp.length = (uint64_t)size * unitsize;
+                lp.length = static_cast<uint64_t>(size) * unitsize;
                 lp.unitsize = unitsize;
                 p.type = SR_DF_LOGIC;
                 p.payload = &lp;
@@ -1368,7 +1368,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     if (is_binary_output)
                         file.write(data_out->str, data_out->len);
                     else
-                        out << QString::fromUtf8((char*) data_out->str);
+                        out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
                     g_string_free(data_out,TRUE);
                 }
 
@@ -1385,7 +1385,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         unsigned int size = usize;
         struct sr_datafeed_dso dp;
 
-        uint8_t *ch_data_buffer = (uint8_t*)malloc(usize * dso_snapshot->get_channel_num() + 1);
+        uint8_t *ch_data_buffer = reinterpret_cast<uint8_t*>(malloc(usize * dso_snapshot->get_channel_num() + 1));
         if (ch_data_buffer == nullptr){
             pxv_err("StoreSession::export_proc, malloc failed.");
             // PulseView RAII pattern: ensure all resources are cleaned up
@@ -1406,7 +1406,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         /* Initialize DSO packet fields. Previously dp was uninitialized,
          * causing sample_bits/en_ch_num/trig_flag to contain garbage. */
         memset(&dp, 0, sizeof(dp));
-        dp.en_ch_num = (uint8_t)ch_num;
+        dp.en_ch_num = static_cast<uint8_t>(ch_num);
         int bits = 0;
         _session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, bits);
         dp.sample_bits = static_cast<uint8_t>(bits ? bits : 8);
@@ -1431,7 +1431,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 // 外层循环保证 i + size <= _unit_count == get_sample_count()，
                 // 因此 span 的 contiguous_samples 必然覆盖 size。
                 const pv::data::SampleSpan rd_sp =
-                    dso_snapshot->span((uint32_t)m->index(), i, size);
+                    dso_snapshot->span(static_cast<uint32_t>(m->index()), i, size);
                 if (!rd_sp.valid()) {
                     // 旧代码会解引用 nullptr（未定义行为）；显式跳过该通道。
                     pxv_err("StoreSession: DSO span invalid (ch=%d, i=%llu, size=%u)",
@@ -1461,7 +1461,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 if (is_binary_output)
                     file.write(data_out->str, data_out->len);
                 else
-                    out << (char*) data_out->str;
+                    out << reinterpret_cast<char*>(data_out->str);
                 g_string_free(data_out,TRUE);
             }
 
@@ -1570,7 +1570,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     if (is_binary_output)
                         file.write(data_out->str, data_out->len);
                     else
-                        out << (char*) data_out->str;
+                        out << reinterpret_cast<char*>(data_out->str);
                     g_string_free(data_out,TRUE);
                 }           
 
@@ -1598,7 +1598,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         if (is_binary_output)
             file.write(data_out->str, data_out->len);
         else
-            out << QString::fromUtf8((char*) data_out->str);
+            out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
         g_string_free(data_out, TRUE);
     }
 
@@ -1659,7 +1659,7 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
             for (GSList *l = d->options; l; l = l->next)
             {
                 const srd_decoder_option *const opt =
-                    (srd_decoder_option*)l->data;
+                    reinterpret_cast<srd_decoder_option*>(l->data);
 
                 if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE("d"))) {
                     GVariant *const var = data::decode::get_decoder_option_value(dec, opt->id);
@@ -1763,9 +1763,12 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
                 for(const QJsonValue &value : dec_obj["stacked decoders"].toArray()) {
                     QJsonObject stacked_obj = value.toObject();
 
-                    GSList *dl = g_slist_copy((GSList*)srd_decoder_list());
-                    for(; dl; dl = dl->next) {
-                        const srd_decoder *const d = (srd_decoder*)dl->data;
+                    // Iterate the library's decoder registry directly: it is
+                    // read-only here, so no defensive g_slist_copy() is needed
+                    // (the copy also leaked — it was freed only from whatever
+                    // node the loop stopped at).
+                    for (const GSList *dl = srd_decoder_list(); dl; dl = dl->next) {
+                        const srd_decoder *const d = static_cast<const srd_decoder*>(dl->data);
                         assert(d);
                         if (!d) {
                             pxv_warn("StoreSession::load_decoders: srd_decoder list node has nullptr data, skipping.");
@@ -1777,7 +1780,6 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
                             break;
                         }
                     }
-                    g_slist_free(dl);
                 }
         }
 
@@ -1811,7 +1813,7 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
         std::list<int> bind_indexs;
 
         auto &aft_dsigs = _session->get_decoder_stacks();
-        pxv_info("StoreSession::load_decoders: pre_dsigs.size()=%d, aft_dsigs.size()=%d", (int)pre_dsigs.size(), (int)aft_dsigs.size());
+        pxv_info("StoreSession::load_decoders: pre_dsigs.size()=%d, aft_dsigs.size()=%d", static_cast<int>(pre_dsigs.size()), static_cast<int>(aft_dsigs.size()));
 
         if (aft_dsigs.size() >= pre_dsigs.size()) {
             const GSList *l;
@@ -1889,13 +1891,13 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
                             }
                         }
                     }
-                    pxv_info("StoreSession::load_decoders: setting %d probes on decoder", (int)probe_map.size());
+                    pxv_info("StoreSession::load_decoders: setting %d probes on decoder", static_cast<int>(probe_map.size()));
                     if (!probe_map.empty())
                         dec->set_probes(probe_map);
                 }
 
                 for (l = d->options; l; l = l->next) {
-                    const srd_decoder_option *const opt = (srd_decoder_option*)l->data;
+                    const srd_decoder_option *const opt = reinterpret_cast<srd_decoder_option*>(l->data);
 
                     if (options_obj.contains(opt->id)) 
                     {
@@ -2080,7 +2082,7 @@ QString StoreSession::MakeSaveFile(bool bDlg)
 
     for (const GSList *l = _session->get_device()->get_device_mode_list(); l; l = l->next) 
     {
-        const sr_dev_mode *mode = (const sr_dev_mode *)l->data;
+        const sr_dev_mode *mode = reinterpret_cast<const sr_dev_mode*>(l->data);
         if (_session->get_device()->get_work_mode() == mode->mode) {
             default_name += mode->acronym;
             break;
@@ -2139,7 +2141,7 @@ QString StoreSession::MakeExportFile(bool bDlg)
     }  
 
     for (const GSList *l = _session->get_device()->get_device_mode_list(); l; l = l->next) {
-        const sr_dev_mode *mode = (const sr_dev_mode *)l->data;
+        const sr_dev_mode *mode = reinterpret_cast<const sr_dev_mode*>(l->data);
         if (_session->get_device()->get_work_mode() == mode->mode) {
             default_name += mode->acronym;
             break;
@@ -2219,12 +2221,12 @@ bool StoreSession::IsLogicDataType()
 {
     std::set<int> type_set;
     std::vector<std::shared_ptr<data::SignalModel>> _sm_models = _session->get_signal_models_snapshot(); for(auto m : _sm_models) {
-        type_set.insert((int)m->type());
+        type_set.insert(static_cast<int>(m->type()));
     }
 
     if (type_set.size()){
         int type = *(type_set.begin());
-        return type == (int)SR_CHANNEL_LOGIC;
+        return type == static_cast<int>(SR_CHANNEL_LOGIC);
     }
 
     return false;
