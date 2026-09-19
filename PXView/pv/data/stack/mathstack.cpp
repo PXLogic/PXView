@@ -109,7 +109,9 @@ MathStack::MathStack(pv::data::ISignalModelSource *source,
     _envelope_en(false),
     _envelope_done(false)
 {
-    memset(_envelope_level, 0, sizeof(_envelope_level));
+    // NOTE: no memset of _envelope_level — its Envelope members now own
+    // std::vector storage, so byte-wise zeroing would be undefined behaviour.
+    // Default construction already zero-initialises them.
 
     // Resolve both channel indices against SignalModel so we fail fast if
     // the caller passed a non-existent / non-DSO channel.
@@ -129,11 +131,15 @@ MathStack::~MathStack()
 
 void MathStack::free_envelop()
 {
-    for(auto &e : _envelope_level) {
-        if (e.samples)
-            free(e.samples);
+    for (auto &e : _envelope_level) {
+        // clear() + shrink_to_fit(): a cleared vector keeps its capacity, so
+        // without the shrink a smaller math buffer would still hold the
+        // previous one's envelope storage (the old code freed it outright).
+        e.samples.clear();
+        e.samples.shrink_to_fit();
+        e.length = 0;
+        e.data_length = 0;
     }
-    memset(_envelope_level, 0, sizeof(_envelope_level));
 }
 
 void MathStack::clear()
@@ -166,11 +172,25 @@ void MathStack::realloc(uint64_t num)
         _total_sample_num = num;
 
         _math.resize(_total_sample_num);
+
+        // BUG FIX: the old code malloc()'d every envelope level and never
+        // checked the result — an allocation failure left `samples` null and
+        // the next append_to_envelope_level() wrote through it. Vectors make
+        // the failure explicit; on bad_alloc the remaining levels keep size 0,
+        // so the writers below stay in bounds instead of truncating.
         uint64_t envelop_count = _total_sample_num / EnvelopeScaleFactor;
         for (unsigned int level = 0; level < ScaleStepCount; level++) {
             envelop_count = ((envelop_count + EnvelopeDataUnit - 1) /
                     EnvelopeDataUnit) * EnvelopeDataUnit;
-            _envelope_level[level].samples = reinterpret_cast<EnvelopeSample*>(malloc(envelop_count * sizeof(EnvelopeSample)));
+            try {
+                _envelope_level[level].samples.resize(static_cast<size_t>(envelop_count));
+                _envelope_level[level].data_length = envelop_count;
+            } catch (const std::bad_alloc &) {
+                pxv_err("MathStack::realloc: envelope level %u allocation failed "
+                        "(requested %llu samples)",
+                        level, (unsigned long long)envelop_count);
+                break;
+            }
             envelop_count = envelop_count / EnvelopeScaleFactor;
         }
     }
@@ -414,7 +434,7 @@ void MathStack::get_math_envelope_section(EnvelopeSection &s,
     else
         s.length = end - start;
 
-    s.samples = _envelope_level[min_level].samples + start;
+    s.samples = _envelope_level[min_level].samples.data() + start;
 }
 
 void MathStack::calc_math(uint64_t mathFactor)
@@ -525,6 +545,17 @@ void MathStack::reallocate_envelope(Envelope &e)
     if (new_data_length > e.data_length)
     {
         e.data_length = new_data_length;
+        // Grow the storage to match (the old code only bumped data_length and
+        // relied on realloc()'s rounding, so a level that outgrew its buffer
+        // became a silent heap overflow).
+        try {
+            if (e.samples.size() < e.data_length)
+                e.samples.resize(static_cast<size_t>(e.data_length));
+        } catch (const std::bad_alloc &) {
+            pxv_err("MathStack::reallocate_envelope: out of memory, clamping length");
+            e.length = e.samples.size();
+            e.data_length = e.samples.size();
+        }
     }
 }
 
@@ -548,7 +579,7 @@ void MathStack::append_to_envelope_level(bool header)
     // Expand the data buffer to fit the new samples
     reallocate_envelope(e0);
 
-    dest_ptr = e0.samples + prev_length;
+    dest_ptr = e0.samples.data() + prev_length;
 
     // Iterate through the samples to populate the first level mipmap
     const double *const stop_src_ptr = reinterpret_cast<double*>(_math.data()) +
@@ -595,9 +626,9 @@ void MathStack::append_to_envelope_level(bool header)
 
         // Subsample the level lower level
         const EnvelopeSample *src_ptr =
-            el.samples + prev_length * EnvelopeScaleFactor;
-        const EnvelopeSample *const end_dest_ptr = e.samples + e.length;
-        for (dest_ptr = e.samples + prev_length;
+            el.samples.data() + prev_length * EnvelopeScaleFactor;
+        const EnvelopeSample *const end_dest_ptr = e.samples.data() + e.length;
+        for (dest_ptr = e.samples.data() + prev_length;
             dest_ptr < end_dest_ptr; dest_ptr++)
         {
             const EnvelopeSample *const end_src_ptr =

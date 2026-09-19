@@ -75,9 +75,12 @@ public:
 private:
     struct Envelope
     {
-        uint64_t length;
-        uint64_t data_length;
-        EnvelopeSample *samples;
+        uint64_t length = 0;
+        uint64_t data_length = 0;
+        // Owns its storage (was a malloc'd pointer freed by free_envelop()).
+        // get_math_envelope_section() still hands a raw pointer out through
+        // EnvelopeSection::samples = samples.data(), so callers are unaffected.
+        std::vector<EnvelopeSample> samples;
     };
 
 private:
