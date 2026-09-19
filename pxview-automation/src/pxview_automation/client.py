@@ -1477,8 +1477,18 @@ class McpClient:
         channelType must match current work mode:
         'logic' for Logic/MSO, 'analog' for Analog, 'dso' for DSO.
 
-        For logic channels, returns decoded bytes (one byte per sample).
+        For logic channels the payload is a **bit-packed bitmap** (8 samples
+        per byte, LSB-first) — the same encoding as
+        ``export_raw_data('binary')`` and the ``.pxl/.pxc`` files, so a
+        full-capture read has ``len(data) == ceil(sample_count / 8)`` bytes.
+        Use :meth:`get_samples_meta` when you need the exact covered range
+        (``first_sample`` / ``sample_count`` / ``byte_count`` / ``truncated``)
+        and :meth:`unpack_logic_samples` to expand it to one byte per sample.
+
         For analog/DSO channels, returns a list of float values.
+
+        Omitting ``end_sample`` means "read to the last captured sample" —
+        no sentinel is needed (passing ``-1`` is accepted but not required).
         """
         args: Dict[str, Any] = {
             "channelIndex": channel_index,
@@ -1488,13 +1498,66 @@ class McpClient:
         if end_sample is not None:
             args["endSample"] = end_sample
         result = self._call_tool("get_samples", args, timeout=timeout)
-        # Extract data from the {sample_count, data, encoding} response
+        # Extract data from the response ({data, encoding, metadata...})
         if isinstance(result, dict) and "data" in result:
             data = result["data"]
             if channel_type == "logic" and isinstance(data, str):
                 return base64.b64decode(data)
             return data
         return result
+
+    def get_samples_meta(
+        self,
+        channel_index: int,
+        channel_type: str,
+        start_sample: int = 0,
+        end_sample: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Like :meth:`get_samples`, but returns the full response dict.
+
+        Logic reads are self-describing (never infer the sample range from
+        ``len(data)``):
+
+        * ``data``            — base64-encoded bit-packed bitmap
+        * ``first_sample``    — absolute sample index of bit 0 of ``data[0]``
+          (``start_sample`` rounded down to a byte boundary, so it can be up
+          to 7 samples lower — do not assume it equals ``start_sample``)
+        * ``sample_count``    — samples the payload covers
+        * ``byte_count``      — ``len(data)`` == ``ceil(sample_count / 8)``
+        * ``bits_per_sample`` — 1; ``bit_order`` — ``'lsb0'``
+        * ``truncated``       — True when the range was clipped at a snapshot
+          block boundary; continue from ``first_sample + sample_count``
+
+        Sample ``n`` for ``first_sample <= n < first_sample + sample_count``::
+
+            bit = (data[(n - first_sample) >> 3] >> ((n - first_sample) & 7)) & 1
+        """
+        args: Dict[str, Any] = {
+            "channelIndex": channel_index,
+            "channelType": channel_type,
+            "startSample": start_sample,
+        }
+        if end_sample is not None:
+            args["endSample"] = end_sample
+        result = self._call_tool("get_samples", args, timeout=timeout)
+        if not isinstance(result, dict):
+            return {"data": result}
+        return result
+
+    @staticmethod
+    def unpack_logic_samples(data: bytes) -> bytes:
+        """Expand a bit-packed logic bitmap to one byte per sample (0/1).
+
+        ``data`` is what :meth:`get_samples` returns for a logic channel
+        (8 samples per byte, LSB-first).  The result is ``8 * len(data)``
+        bytes long — trim it with the response's ``sample_count``.
+        """
+        return bytes(
+            (b >> k) & 1
+            for b in data
+            for k in range(8)
+        )
 
     # ---- Generic Device Config (SR_CONF_* keys) ----
 

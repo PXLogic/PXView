@@ -105,7 +105,8 @@ class TestLeftCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
+        total_samples = mcp.get_samples_meta(
+            channel_type="logic", channel_index=0)["sample_count"]
         assert total_samples > 1000, f"Only {total_samples} samples"
 
         left = 500
@@ -126,7 +127,8 @@ class TestLeftCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
+        total_samples = mcp.get_samples_meta(
+            channel_type="logic", channel_index=0)["sample_count"]
         left = 500
         mcp.set_export_config(start_sample=left, end_sample=total_samples)
         mcp.export_raw_data("binary", tmp_capture_dir, digital_channels=[0])
@@ -155,7 +157,8 @@ class TestRightCursorExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
+        total_samples = mcp.get_samples_meta(
+            channel_type="logic", channel_index=0)["sample_count"]
         right = 5000
         mcp.set_export_config(start_sample=0, end_sample=right)
         mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])
@@ -200,7 +203,8 @@ class TestBothCursorsExport:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        total_samples = len(mcp.get_samples(channel_type="logic", channel_index=0))
+        total_samples = mcp.get_samples_meta(
+            channel_type="logic", channel_index=0)["sample_count"]
         left, right = 1000, 5000
         mcp.set_export_config(start_sample=left, end_sample=right)
         mcp.export_raw_data("csv", tmp_capture_dir, digital_channels=[0])

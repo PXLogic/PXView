@@ -21,21 +21,13 @@ import pytest
 from pxview_automation import McpClient
 
 from helpers.capture_helper import do_buffer_capture_with_pattern
+from helpers.sample_helper import unpack_logic_bits
 
 pytestmark = pytest.mark.p2
 
 SAMPLE_RATE = 1_000_000
 SAMPLE_COUNT = 100_000
 I2C_SPB = 50  # demo I2C bit-time in samples at 1 MHz
-
-
-def _unpack_bits(raw: bytes, count: int) -> list:
-    valid = len(raw) // 8
-    bits = []
-    for b in raw[:valid]:
-        for k in range(8):
-            bits.append((b >> k) & 1)
-    return bits[:count]
 
 
 def _count_transitions(bits: list) -> int:
@@ -55,7 +47,7 @@ def _capture_sc_edges(mcp: McpClient, device_id: str, threshold: int):
     )
     raw = mcp.get_samples(channel_index=0, channel_type="logic",
                           start_sample=0, end_sample=SAMPLE_COUNT)
-    bits = _unpack_bits(bytes(raw), SAMPLE_COUNT)
+    bits = unpack_logic_bits(bytes(raw), SAMPLE_COUNT)
     return _count_transitions(bits)
 
 

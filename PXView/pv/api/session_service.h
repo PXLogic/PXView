@@ -176,9 +176,10 @@ explicit SessionService(SigSession *session, DeviceAgent *device);
     std::vector<SignalInfo> get_signal_list() const override;
 
     // ---- ISessionService: 11. Waveform data reading ----
-    Result<uint64_t> get_logic_samples(
+    // 位打包位图窗口 + 自描述元数据，见 api::LogicSampleBlock。
+    Result<LogicSampleBlock> get_logic_samples(
         uint64_t start_sample, uint64_t end_sample,
-        const std::vector<int16_t> &channel_indices,
+        int16_t channel_index,
         std::vector<uint8_t> &out_data) override;
     Result<uint64_t> get_analog_samples(
         uint64_t start_sample, uint64_t end_sample,

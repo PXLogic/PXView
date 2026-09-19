@@ -487,6 +487,40 @@ inline const char* service_event_topic(ServiceEvent ev) {
     }
 }
 
+// ---- Logic sample block（位打包位图窗口 + 自描述元数据）----
+//
+// `get_samples(channelType="logic")` 的统一返回契约。**不改变存储布局**：
+// payload 就是 logic 快照的位打包位图窗口（8 样本/字节，字节内 LSB-first），
+// 与 .pxl/.pxc 落盘、export_raw_data("binary")、BinaryCodec 帧同构 ——
+// 因此对字节对齐窗口可以零拷贝直发（span.data 就是 leaf block 内的字节），
+// 也是唯一不会让"get_samples 的字节数"与"导出 bin 的字节数"对不上的形态。
+//
+// 索引规则（客户端唯一需要知道的一条）：
+//     bit(n) = (data[(n - first_sample) >> 3] >> ((n - first_sample) & 7)) & 1
+//   n ∈ [first_sample, first_sample + sample_count)
+//
+// 注意 first_sample 是**字节对齐**后的实际起点（= floor(请求 start / 8) * 8），
+// 可能比请求的 start 小 0..7 —— 不要假设 bit 0 就是请求的 start（这是
+// SampleSpan 的既有语义，见 pv/data/snapshot/sample_span.h）。
+struct LogicSampleBlock {
+    // data[0] 的 bit 0 对应的绝对样本索引。
+    uint64_t first_sample = 0;
+
+    // payload 覆盖的样本数（自 first_sample 起）。它与请求的长度可能不同：
+    // 请求 end 超出已采集区间时被钳到末尾；跨 leaf block 时被截断（见 truncated）。
+    uint64_t sample_count = 0;
+
+    // 实际载荷字节数 == out_data.size() == ceil(sample_count / 8)。
+    // 不变式：byte_count == (sample_count + 7) / 8。
+    uint64_t byte_count = 0;
+
+    // true = 请求区间被 leaf block 边界截断（单次返回不超过一个 leaf block：
+    // 2^24 样本 = 2MB 位图）。**这不是错误**，客户端从
+    // first_sample + sample_count 继续续读即可；为 false 时表示区间已完整返回
+    // （""读到末尾"" 的哨兵同样算完整）。
+    bool truncated = false;
+};
+
 // ---- Interface ----
 
 class IServiceEventListener {

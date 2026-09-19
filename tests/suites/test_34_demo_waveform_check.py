@@ -25,6 +25,7 @@ Post-fix generation intent (per libsigrok/src/hardware/demo/protocol.c):
 import pytest
 
 from helpers.capture_helper import do_buffer_capture_with_pattern
+from helpers.sample_helper import unpack_logic_bits
 
 pytestmark = pytest.mark.p1
 
@@ -240,16 +241,9 @@ def _capture_mixed_channels(mcp, device_id, enabled_count):
         )
         assert raw is not None and len(raw) > 0, f"ch{ch}: no samples"
         raw_bytes[ch] = bytes(raw)
-        # get_logic_samples copies `count` BYTES of packed bitmap data where
-        # each byte holds 8 samples (LSB-first, bit k = sample byte*8+k), so
-        # the returned buffer is 8x larger than the real data. Only the first
-        # len(raw)//8 bytes are genuine packed samples; the rest is garbage.
-        valid_bytes = len(raw) // 8
-        bits = []
-        for b in raw[:valid_bytes]:
-            for k in range(8):
-                bits.append((b >> k) & 1)
-        chans[ch] = bits[:SAMPLE_COUNT]
+        # 位打包位图（8 样本/字节，LSB-first；响应 bit_order='lsb0'）。
+        # start_sample=0 -> first_sample=0，所以 bit k 就是样本 k。
+        chans[ch] = unpack_logic_bits(raw_bytes[ch], SAMPLE_COUNT)
     return (chans, raw_bytes)
 
 

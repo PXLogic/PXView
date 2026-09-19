@@ -2221,59 +2221,86 @@ std::vector<SignalInfo> SessionService::get_signal_list() const {
 // 11. Waveform data reading
 // ===========================================================================
 
-Result<uint64_t> SessionService::get_logic_samples(
+namespace {
+
+// 样本读取的 "读到末尾" 哨兵收口 —— **唯一**一处把 UINT64_MAX 变成有限值的地方。
+//
+// 历史：旧 LogicSnapshot/DsoSnapshot/AnalogSnapshot::get_samples() 在快照内部
+// 把 end_sample 钳到 sample_count - 1，所以 API 层把哨兵透传下去是安全的。
+// P1-c 把区间长度计算搬到 API 层之后，`end_sample - start_sample + 1` 对
+// UINT64_MAX 会无符号回绕成 **0**：span() 收到 count == 0 直接返回无效 span，
+// 整块被丢掉，于是 MCP get_samples 在不传 endSample（默认 UINT64_MAX）或
+// 传 -1 时返回空数据 —— 这是 V1.6.5 大面积回归的根因。哨兵语义必须在这里收口。
+//
+// 返回 false 表示请求区间与已采集区间无交集（调用方按"空结果"返回，不是错误）。
+inline bool clamp_read_range(uint64_t start_sample, uint64_t end_sample,
+                             uint64_t total_samples, uint64_t &last_sample) {
+  if (total_samples == 0 || start_sample >= total_samples)
+    return false;
+  last_sample = (end_sample >= total_samples) ? (total_samples - 1)
+                                              : end_sample;
+  return last_sample >= start_sample;
+}
+
+} // namespace
+
+Result<LogicSampleBlock> SessionService::get_logic_samples(
     uint64_t start_sample, uint64_t end_sample,
-    const std::vector<int16_t> &channel_indices,
+    int16_t channel_index,
     std::vector<uint8_t> &out_data) {
     auto fn = [this, start_sample, end_sample,
-               &channel_indices, &out_data]() -> Result<uint64_t> {
+               channel_index, &out_data]() -> Result<LogicSampleBlock> {
         if (!_session)
-            return Result<uint64_t>::Fail(ErrorCode::InternalError,
-                                          "Session is nullptr");
+            return Result<LogicSampleBlock>::Fail(ErrorCode::InternalError,
+                                                  "Session is nullptr");
         auto *snapshot = _session->get_logic_snapshot();
         if (!snapshot || !snapshot->have_data())
-            return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                          "No logic data available");
+            return Result<LogicSampleBlock>::Fail(ErrorCode::NoData,
+                                                  "No logic data available");
         out_data.clear();
-        uint64_t total_copied = 0;
-        // P1-c：统一读取抽象。logic 是位打包布局，两个原先"必须用 get_samples"的点
-        // 现在都由 SampleSpan 覆盖：
-        //  1) 常量块（lbp == nullptr）：span.is_constant + constant_bit 显式表达，
-        //     bit_at() 内建常量分支 —— 不再需要 thread_local 合成缓冲。
-        //  2) end_sample 出参（回写为 leaf block 末尾）：等价于
-        //     span.start_sample + span.contiguous_samples - 1（已代数证明）。
-        //
-        // MCP 契约（mcp_tool_registry.cpp 的 get_samples 描述）明确写的是
-        // "one byte per sample, each byte is 0 or 1"，而旧实现是
-        // `byte_count = count` 个**位打包**字节 —— 既违反自己的契约，又多读 8 倍
-        // 并越过 leaf block。这里按契约展开为每样本一个字节。
-        for (auto ch_idx : channel_indices) {
-            const pv::data::SampleSpan sp =
-                snapshot->span(static_cast<uint32_t>(ch_idx), start_sample,
-                               (end_sample >= start_sample)
-                                   ? (end_sample - start_sample + 1)
-                                   : 1);
-            if (!sp.readable())
-                continue;
 
-            const uint64_t total_samples = snapshot->get_sample_count();
-            const uint64_t leaf_last =
-                sp.start_sample + sp.contiguous_samples - 1;
-            uint64_t last = std::min(leaf_last, total_samples - 1);
-            if (end_sample < last)
-                last = end_sample;
-            if (last < start_sample)
-                continue;
+        // 0) 哨兵收口：UINT64_MAX / -1 / 越界 end 都在这里变成有限值。
+        uint64_t last = 0;
+        if (!clamp_read_range(start_sample, end_sample,
+                              snapshot->get_sample_count(), last))
+            return Result<LogicSampleBlock>::Success(LogicSampleBlock{});
 
-            const uint64_t count = last - start_sample + 1;
-            out_data.reserve(out_data.size() + static_cast<size_t>(count));
-            for (uint64_t s = start_sample; s <= last; s++)
-                out_data.push_back(sp.bit_at(s) ? 1 : 0);
-            total_copied += count;
-        }
-        return Result<uint64_t>::Success(total_copied);
+        // 1) 取位打包位图窗口。span.start_sample 已向下取整到字节边界（可能比
+        //    请求的 start_sample 小 0..7），payload 的 bit0 就是它 —— 这正是
+        //    LogicSampleBlock.first_sample 要如实回显的东西；客户端按它索引
+        //    才不会整体错位 start%8 位（不要假设 bit0 == 请求的 start）。
+        const pv::data::SampleSpan sp = snapshot->span(
+            static_cast<uint32_t>(channel_index), start_sample,
+            last - start_sample + 1);
+        if (!sp.readable())
+            return Result<LogicSampleBlock>::Fail(ErrorCode::NoData,
+                                                  "Failed to read logic samples");
+
+        // 2) 单次返回不超过一个 leaf block（span.contiguous_samples 的上界：
+        //    2^24 样本 = 2MB 位图）。被截断时用 truncated 显式告知，而不是像
+        //    旧实现那样静默少给数据。
+        const uint64_t covered_end = std::min(last, sp.end_sample() - 1);
+
+        LogicSampleBlock block;
+        block.first_sample = sp.start_sample;
+        block.sample_count = covered_end - sp.start_sample + 1;
+        block.byte_count = (block.sample_count + 7) / 8;
+        block.truncated = covered_end < last;
+
+        // 3) **零拷贝**：字节对齐窗口就是 leaf block 内的连续字节
+        //    （byte_count ≤ sp.bytes()）。常量块（该 leaf 内本通道无跳变）没有
+        //    真实指针，按 level 填充。两条路径都保证不变式：
+        //      out_data.size() == byte_count == ceil(sample_count / 8)
+        out_data.resize(static_cast<size_t>(block.byte_count));
+        if (sp.is_constant)
+            std::fill(out_data.begin(), out_data.end(),
+                      sp.constant_fill_byte());
+        else
+            std::memcpy(out_data.data(), sp.data, out_data.size());
+
+        return Result<LogicSampleBlock>::Success(block);
     };
-    return run_result_on_main_thread<uint64_t>(fn);
+    return run_result_on_main_thread<LogicSampleBlock>(fn);
 }
 
 Result<uint64_t> SessionService::get_analog_samples(
@@ -2317,8 +2344,14 @@ Result<uint64_t> SessionService::get_analog_samples(
 
         const bool is_float = snapshot->is_float();
 
-        uint64_t count = (end_sample >= start_sample)
-                             ? (end_sample - start_sample + 1) : 0;
+        // 哨兵收口（见 clamp_read_range）：UINT64_MAX / -1 不得参与
+        // `end - start + 1`（会回绕成 0，静默返回空 —— 与 logic 同一根因）。
+        uint64_t last = 0;
+        if (!clamp_read_range(start_sample, end_sample,
+                              snapshot->get_sample_count(), last))
+            return Result<uint64_t>::Success(0);
+
+        uint64_t count = last - start_sample + 1;
         // 不得越过 span 的连续上界（旧代码在请求越界时会越界读）
         if (count > sp.contiguous_samples)
             count = sp.contiguous_samples;
@@ -2353,21 +2386,26 @@ Result<uint64_t> SessionService::get_dso_samples(
         // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
         // get_samples(start, end, ch) 返回的指针严格等价
         // （start_sample == start，无位打包取整）。
-        // 旧接口要求 start/end 都落在 [0, sample_count) 且 start <= end；span 只检查
-        // start，故这里显式保留同样的 range 校验。
-        const uint64_t dso_total = snapshot->get_sample_count();
-        if (start_sample > end_sample || start_sample >= dso_total ||
-            end_sample >= dso_total)
-            return Result<uint64_t>::Fail(ErrorCode::NoData,
-                                          "Failed to read DSO samples");
+        //
+        // 旧实现在请求越界时（含 end_sample = UINT64_MAX —— 正是 MCP endSample
+        // 的默认值）直接 Fail("Failed to read DSO samples")，于是 DSO 上"不传
+        // endSample 就读到末尾"表现为**报错**而不是数据。改为与 logic/analog
+        // 一致的哨兵收口：越界钳到已采集末尾，空区间返回 0 条样本。
+        uint64_t last = 0;
+        if (!clamp_read_range(start_sample, end_sample,
+                              snapshot->get_sample_count(), last))
+            return Result<uint64_t>::Success(0);
+
         const pv::data::SampleSpan sp =
             snapshot->span(static_cast<uint32_t>(channel_index), start_sample,
-                           end_sample - start_sample + 1);
+                           last - start_sample + 1);
         if (!sp.valid())
             return Result<uint64_t>::Fail(ErrorCode::NoData,
                                           "Failed to read DSO samples");
         const uint8_t *raw = sp.data;
-        uint64_t count = end_sample - start_sample + 1;
+        uint64_t count = last - start_sample + 1;
+        if (count > sp.contiguous_samples)
+            count = sp.contiguous_samples;
         const float data_scale = snapshot->get_data_scale(channel_index);
         out_data.reserve(static_cast<size_t>(count));
 

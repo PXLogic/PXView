@@ -27,6 +27,7 @@ from helpers.export_helper import (
     read_binary_file,
     get_logic_sample_bit,
 )
+from helpers.sample_helper import read_logic
 
 pytestmark = pytest.mark.p0
 
@@ -163,10 +164,10 @@ class TestExportDataCorrectness:
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=1.0)
 
-        all_samples = mcp.get_samples(channel_type="logic", channel_index=0)
-        # get_samples returns roughly 1 byte per logic sample; use its length
-        # as the capture's sample count.
-        ring = len(all_samples)
+        all_samples, ring_meta = read_logic(mcp, 0)
+        # 样本数取响应元数据：packed 位图的 len 只是 ceil(sample_count/8)，
+        # 不能当样本数用（旧用例曾按"1 字节 1 样本"写死，格式改回位打包后失效）。
+        ring = ring_meta["sample_count"]
         assert ring > 1000
 
         left = 500

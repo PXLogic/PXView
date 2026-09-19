@@ -48,13 +48,20 @@ def find_exported_binary(directory: str, pattern: str = "channel") -> List[str]:
     return result
 
 
-def get_logic_sample_bit(samples: bytes, sample_index: int) -> int:
-    """Extract a single bit from logic sample bytes."""
-    byte_idx = sample_index // 8
-    bit_idx = sample_index % 8
-    if byte_idx >= len(samples):
+def get_logic_sample_bit(samples: bytes, sample_index: int,
+                         first_sample: int = 0) -> int:
+    """Extract one sample level from a packed logic payload.
+
+    Delegates to ``helpers.sample_helper.logic_bit`` — the single place that
+    knows the packed layout.  Pass the response's ``first_sample`` when the
+    read did not start at sample 0.  Returns -1 when out of range.
+    """
+    from helpers.sample_helper import logic_bit
+
+    try:
+        return logic_bit(samples, sample_index, first_sample=first_sample)
+    except IndexError:
         return -1
-    return (samples[byte_idx] >> bit_idx) & 1
 
 
 def compare_logic_samples(data1: bytes, data2: bytes) -> bool:

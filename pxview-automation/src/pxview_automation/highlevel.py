@@ -576,6 +576,8 @@ class PXView:
         channel: int,
         start: int = 0,
         count: Optional[int] = None,
+        *,
+        unpack: bool = False,
     ) -> bytes:
         """Read logic samples for a channel.
 
@@ -583,24 +585,49 @@ class PXView:
             channel: Digital channel index.
             start:   Start sample index (0-based).
             count:   Number of samples to read.  None = to end.
+            unpack:  False (default) -> the bit-packed bitmap exactly as the
+                     server returns it (8 samples per byte, LSB-first — the
+                     same encoding as the binary export and .pxl files).
+                     True -> one byte per sample (0/1).
 
         Returns:
-            Raw bytes (one byte per sample, 0 or 1).
+            Raw bytes.  In the packed form the payload starts at the
+            response's ``first_sample`` (= ``start`` rounded down to a byte
+            boundary, so it can be up to 7 samples lower); use
+            :meth:`get_logic_samples_meta` when the exact range matters.
         """
-        import base64
+        meta = self.get_logic_samples_meta(channel, start=start, count=count)
+        raw = meta.get("data", b"")
+        if isinstance(raw, str):
+            import base64
+            raw = base64.b64decode(raw)
+        data = bytes(raw) if raw is not None else b""
+        if unpack:
+            return self._client.unpack_logic_samples(data)
+        return data
+
+    def get_logic_samples_meta(
+        self,
+        channel: int,
+        start: int = 0,
+        count: Optional[int] = None,
+    ) -> dict:
+        """Read logic samples and return the full MCP response.
+
+        Carries the self-describing bitmap metadata (``first_sample``,
+        ``sample_count``, ``byte_count``, ``bits_per_sample``,
+        ``bit_order``, ``truncated``) alongside the base64 ``data``.
+        """
         end = start + count if count is not None else None
-        result = self._client.get_samples(
+        result = self._client.get_samples_meta(
             channel_index=channel,
             channel_type="logic",
             start_sample=start,
             end_sample=end,
         )
         if isinstance(result, dict):
-            data = result.get("data", result)
-            if isinstance(data, str):
-                return base64.b64decode(data)
-            return data
-        return result
+            return result
+        return {"data": result}
 
     def get_analog_samples(
         self,

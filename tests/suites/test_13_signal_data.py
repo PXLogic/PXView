@@ -12,6 +12,7 @@ import pytest
 from pxview_automation import McpClient, McpError
 from helpers.assertions import assert_samples_non_empty
 from helpers.capture_helper import do_timed_capture
+from helpers.sample_helper import logic_bit, read_logic
 
 pytestmark = pytest.mark.p1
 
@@ -20,50 +21,121 @@ class TestSignalData:
 
     def test_get_logic_samples_basic(self, mcp: McpClient, device_id: str,
                                      cleanup_after_test):
-        """get_logic_samples returns base64-encoded bytes."""
+        """get_samples 返回位打包位图 + 自描述元数据。
+
+        回归保护（V1.6.5）：不传 endSample 时必须**读到采集末尾**，而不是因为
+        UINT64_MAX 哨兵在 `end - start + 1` 里回绕成 0 而返回空数据。
+        """
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        samples = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert samples is not None
-        assert len(samples) > 0
+        raw, meta = read_logic(mcp, 0)
+        assert len(raw) > 0, "默认读取（无 endSample）返回空数据"
+        assert meta["sample_count"] > 0
+        assert meta["first_sample"] == 0
+        assert meta["bits_per_sample"] == 1
+        assert meta["bit_order"] == "lsb0"
+        assert meta["truncated"] is False
+        # 自描述不变式：byte_count == len(data) == ceil(sample_count / 8)
+        assert meta["byte_count"] == len(raw)
+        assert meta["byte_count"] == (meta["sample_count"] + 7) // 8
 
     def test_get_logic_samples_range(self, mcp: McpClient, device_id: str,
                                      cleanup_after_test):
-        """get_logic_samples with startSample/endSample."""
+        """startSample/endSample 精确选中区间（含 end 端点）。"""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        samples = mcp.get_samples(channel_type="logic", channel_index=0,
-                                        start_sample=0,
-                                        end_sample=100)
-        assert samples is not None
+        raw, meta = read_logic(mcp, 0, start=0, end=100)
+        assert len(raw) > 0
+        assert meta["first_sample"] == 0
+        assert meta["sample_count"] == 101, \
+            f"请求 [0, 100] 应覆盖 101 个样本，实得 {meta['sample_count']}"
+        assert meta["byte_count"] == (101 + 7) // 8
 
     def test_get_logic_samples_pagination(self, mcp: McpClient, device_id: str,
                                           cleanup_after_test):
-        """Page through logic samples in chunks."""
+        """按样本分页读，拼接结果与全量读逐字节一致。"""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.5)
-        all_samples = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert len(all_samples) > 0
+        full, full_meta = read_logic(mcp, 0)
+        total = full_meta["sample_count"]
+        assert total > 0
 
-        # Read in pages of 100 bytes
-        page_size = 100
-        total_read = 0
-        for i in range(0, min(len(all_samples), 1000), page_size):
-            page = mcp.get_samples(channel_type="logic", channel_index=0,
-                                         start_sample=i * 8,
-                                         end_sample=(i + page_size) * 8 - 1)
-            assert page is not None
-            total_read += len(page)
-        assert total_read > 0
+        page = 8192  # 8 的整数倍 -> 每页首样本都落在字节边界
+        rebuilt = bytearray()
+        for start in range(0, min(total, page * 4), page):
+            end = min(start + page, total) - 1
+            chunk, meta = read_logic(mcp, 0, start=start, end=end)
+            assert meta["first_sample"] == start, (
+                f"page {start}: first_sample={meta['first_sample']} "
+                f"（8 的整数倍起点不该发生字节对齐回退）")
+            assert meta["byte_count"] == len(chunk)
+            assert meta["byte_count"] == (meta["sample_count"] + 7) // 8
+            rebuilt.extend(chunk)
+
+        assert len(rebuilt) > 0
+        assert bytes(rebuilt) == full[:len(rebuilt)], \
+            "分页拼接结果与全量读不一致（位打包或对齐有偏移）"
 
     def test_get_logic_samples_end_negative_one(self, mcp: McpClient,
                                                 device_id: str,
                                                 cleanup_after_test):
-        """endSample=-1 means end of capture."""
+        """endSample=-1 等价于"读到末尾"（UINT64_MAX 哨兵）。"""
         do_timed_capture(mcp, device_id, channels=[0],
                          sample_rate=1000000, duration_seconds=0.3)
-        samples = mcp.get_samples(channel_type="logic", channel_index=0, end_sample=-1)
-        assert len(samples) > 0
+        raw, meta = read_logic(mcp, 0, end=-1)
+        assert len(raw) > 0, "endSample=-1 返回空数据"
+        omitted_raw, omitted_meta = read_logic(mcp, 0)
+        assert meta["sample_count"] == omitted_meta["sample_count"], \
+            "-1 哨兵必须与省略 endSample 等价"
+        assert meta["first_sample"] == omitted_meta["first_sample"]
+
+    def test_get_logic_samples_bit_order_matches_edge(self, mcp: McpClient,
+                                                      device_id: str,
+                                                      cleanup_after_test):
+        """位序 LSB-first：用 find_next_edge 作独立 oracle 交叉验证。
+
+        packed 位图里 bit k 对应同一字节内偏移 k 的样本。位序若被写成
+        MSB-first，边沿位置上的电平就会与 find_next_edge 的结论矛盾。
+        """
+        do_timed_capture(mcp, device_id, channels=[0],
+                         sample_rate=1000000, duration_seconds=0.5)
+        raw, meta = read_logic(mcp, 0)
+        first = meta["first_sample"]
+
+        checked = 0
+        for rising in (True, False):
+            try:
+                edge = mcp.find_next_edge(channel_index=0, from_sample=1,
+                                          rising_edge=rising)
+            except McpError:
+                continue
+            pos = edge["sample"] if isinstance(edge, dict) else int(edge)
+            assert pos > 0
+            assert logic_bit(raw, pos, first_sample=first) == (1 if rising else 0)
+            assert logic_bit(raw, pos - 1, first_sample=first) == \
+                (0 if rising else 1)
+            checked += 1
+        assert checked > 0, "采集中没有任何边沿，无法交叉验证位序"
+
+    def test_get_logic_samples_byte_aligned_start(self, mcp: McpClient,
+                                                  device_id: str,
+                                                  cleanup_after_test):
+        """非 8 对齐起点：first_sample 必须如实回显字节对齐后的实际起点。"""
+        do_timed_capture(mcp, device_id, channels=[0],
+                         sample_rate=1000000, duration_seconds=0.3)
+        full, full_meta = read_logic(mcp, 0)
+
+        raw13, meta13 = read_logic(mcp, 0, start=13, end=100)
+        assert meta13["first_sample"] == 8, \
+            f"start=13 应向下对齐到 8，实得 {meta13['first_sample']}"
+        assert logic_bit(raw13, 13, first_sample=meta13["first_sample"]) == \
+            logic_bit(full, 13, first_sample=full_meta["first_sample"]), \
+            "绝对样本 13 的电平在窗口读与全量读之间不一致"
+
+        raw5, meta5 = read_logic(mcp, 0, start=5, end=100)
+        assert meta5["first_sample"] == 0
+        assert logic_bit(raw5, 5, first_sample=0) == \
+            logic_bit(full, 5, first_sample=full_meta["first_sample"])
 
     def test_find_next_edge(self, mcp: McpClient, device_id: str,
                             cleanup_after_test):

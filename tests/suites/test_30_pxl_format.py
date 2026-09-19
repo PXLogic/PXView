@@ -22,6 +22,7 @@ from helpers.capture_helper import (
     do_buffer_capture_with_pattern,
 )
 from helpers.export_helper import compare_logic_samples
+from helpers.sample_helper import read_logic
 
 pytestmark = pytest.mark.p0
 
@@ -148,8 +149,8 @@ class TestPxlFormat:
             sample_rate=1000000, sample_count=1000000, pattern="i2c")
         assert_capture_status(status, "completed")
 
-        orig = mcp.get_samples(channel_type="logic", channel_index=0)
-        total = len(orig)
+        orig, orig_meta = read_logic(mcp, 0)
+        total = orig_meta["sample_count"]
         assert total > 20000, f"Only {total} samples captured"
 
         left, right = 5000, 8000
@@ -171,13 +172,13 @@ class TestPxlFormat:
         mcp.close_capture()
         mcp.load_capture(tmp_pxl_file)
         time.sleep(1)
-        loaded = mcp.get_samples(channel_type="logic", channel_index=0)
-        assert abs(len(loaded) - expected) <= 8, \
-            f"loaded {len(loaded)} != expected ~{expected}"
+        loaded, loaded_meta = read_logic(mcp, 0)
+        assert abs(loaded_meta["sample_count"] - expected) <= 8, \
+            f"loaded {loaded_meta['sample_count']} != expected ~{expected}"
 
         # Data integrity: get_samples returns the packed per-channel bitmap
-        # (8 samples/byte, length == sample count), so the 64-aligned saved
-        # range [al, ar) maps to bitmap bytes [al//8, ar//8).
+        # (8 samples/byte, byte_count == ceil(sample_count/8)), so the
+        # 64-aligned saved range [al, ar) maps to bitmap bytes [al//8, ar//8).
         al, ar = align_down(left), align_up(right)
         b0, b1 = al // 8, ar // 8
         assert loaded[:b1 - b0] == orig[b0:b1], \

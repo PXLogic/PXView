@@ -23,6 +23,7 @@ import pytest
 from pxview_automation import McpClient, McpError
 
 from helpers.capture_helper import do_buffer_capture_with_pattern
+from helpers.sample_helper import unpack_logic_bits
 
 pytestmark = pytest.mark.p2
 
@@ -35,16 +36,6 @@ def _rising_trigger_json() -> str:
     return ('{"mode":0,"stage_count":1,"trigger_pos":50,'
             '"stages":[{"value0":"0","value1":"1",'
             '"logic":0,"inv0":0,"inv1":0,"count0":0,"count1":0}]}')
-
-
-def _unpack_bits(raw: bytes, count: int) -> list:
-    """Unpack get_samples logic bitmap (8 samples per byte, LSB-first)."""
-    valid = len(raw) // 8
-    bits = []
-    for b in raw[:valid]:
-        for k in range(8):
-            bits.append((b >> k) & 1)
-    return bits[:count]
 
 
 def _count_transitions(bits: list) -> int:
@@ -83,7 +74,7 @@ class TestTriggerEndToEnd:
         raw = mcp.get_samples(channel_index=0, channel_type="logic",
                               start_sample=0, end_sample=SAMPLE_COUNT)
         assert raw is not None and len(raw) > 0, "no samples with trigger"
-        bits = _unpack_bits(bytes(raw), SAMPLE_COUNT)
+        bits = unpack_logic_bits(bytes(raw), SAMPLE_COUNT)
         # Trigger fires on a rising edge -> level that was low must also occur,
         # so the buffer is not all-ones after the 50% pre-trigger hold.
         assert 0 in bits, "buffer has no low level; trigger gating likely wrong"

@@ -179,10 +179,22 @@ public:
     virtual std::vector<SignalInfo> get_signal_list() const = 0;
 
     // 11. Waveform data reading
-    virtual Result<uint64_t> get_logic_samples(
+    //
+    // 逻辑采样读取：out_data 是**位打包位图窗口**（8 样本/字节，字节内
+    // LSB-first，与 .pxl/export_raw_data("binary") 同构），返回自描述元数据
+    // （见 api::LogicSampleBlock：first_sample / sample_count / byte_count /
+    // truncated）。bit(n) 的索引规则写在 LogicSampleBlock 的注释里。
+    //
+    // end_sample 的 "读到末尾" 哨兵 = UINT64_MAX（MCP endSample 的默认值；
+    // 客户端传 -1 亦同）。**实现必须在进入 span 之前把它钳成有限值** ——
+    // span 的长度参数是无符号的，`end - start + 1` 对 UINT64_MAX 会回绕成 0，
+    // 整块会被判为不可读而静默丢弃（V1.6.5 的 MCP 空数据回归）。
+    virtual Result<LogicSampleBlock> get_logic_samples(
         uint64_t start_sample, uint64_t end_sample,
-        const std::vector<int16_t>& channel_indices,
+        int16_t channel_index,
         std::vector<uint8_t>& out_data) = 0;
+    // 模拟/DSO 采样读取：end_sample 哨兵语义同上（越界一律钳到已采集末尾，
+    // 不再对 DSO 报 "Failed to read DSO samples"）。返回实际读到的样本数。
     virtual Result<uint64_t> get_analog_samples(
         uint64_t start_sample, uint64_t end_sample,
         int16_t channel_index,

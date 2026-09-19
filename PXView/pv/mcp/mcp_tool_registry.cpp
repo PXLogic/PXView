@@ -306,15 +306,21 @@ ToolResult handle_get_samples(ISessionService* session,
 
     if (type == "logic") {
         std::vector<uint8_t> out_data;
-        std::vector<int16_t> channels = {ch};
-        auto r = session->get_logic_samples(
-            start, end, channels, out_data);
+        auto r = session->get_logic_samples(start, end, ch, out_data);
         if (!r)
             throw ToolError(r.error().message);
+        const auto &blk = r.value();
+        // 位打包位图 + 自描述元数据：客户端据此索引，不再靠"字节数≈样本数"猜。
+        //   bit(n) = (data[(n - first_sample) >> 3] >> ((n - first_sample) & 7)) & 1
         return json_result({
-            {"sample_count", r.value()},
             {"data", base64_encode(out_data)},
-            {"encoding", "base64"}
+            {"encoding", "base64"},
+            {"bits_per_sample", 1},
+            {"bit_order", "lsb0"},
+            {"first_sample", blk.first_sample},
+            {"sample_count", blk.sample_count},
+            {"byte_count", blk.byte_count},
+            {"truncated", blk.truncated}
         });
     }
 
@@ -1402,9 +1408,21 @@ static void register_advanced_feature_tools(McpServer& server,
         "Read raw samples from a channel. channelType must match the "
         "current work mode: 'logic' for Logic/MSO mode, 'analog' for "
         "Analog mode, 'dso' for DSO mode. Use get_work_mode to check "
-        "current mode. Returns base64-encoded data for logic channels "
-        "(one byte per sample, each byte is 0 or 1) and float arrays "
-        "for analog/DSO channels. "
+        "current mode. "
+        "Logic channels return a base64-encoded PACKED bitmap: 8 samples "
+        "per byte, LSB-first — the same encoding as export_raw_data "
+        "('binary') and the .pxl/.pxc files. The response is "
+        "self-describing: first_sample is the absolute sample index of "
+        "bit 0 of data[0]; sample_count is how many samples the payload "
+        "covers; byte_count == len(data) == ceil(sample_count/8); "
+        "bits_per_sample is 1 and bit_order is 'lsb0'. Index it with "
+        "bit(n) = (data[(n - first_sample) >> 3] >> ((n - first_sample) & 7)) & 1 "
+        "for first_sample <= n < first_sample + sample_count. "
+        "first_sample is startSample rounded DOWN to a byte boundary (up "
+        "to 7 samples lower), so never assume bit 0 is startSample. "
+        "truncated=true means the range was clipped at a snapshot block "
+        "boundary — continue from first_sample + sample_count. "
+        "Analog/DSO channels return float arrays instead. "
         "Units: DSO float samples are in VOLTS by default (pass "
         "normalized=true to get 0..1 full-scale amplitudes instead; the "
         "response 'unit' field tells you which). Analog float samples are "
@@ -1416,8 +1434,11 @@ static void register_advanced_feature_tools(McpServer& server,
         .enum_param<std::string>("channelType",
             {"logic", "analog", "dso"},
             "Channel type — must match current work mode", Required)
-        .param<uint64_t>("startSample", "Start sample index (default 0)")
-        .param<uint64_t>("endSample", "End sample index (default = all)")
+        .param<uint64_t>("startSample", "First sample index (default 0). The "
+                        "payload starts at startSample rounded down to a byte "
+                        "boundary — read 'first_sample' in the response")
+        .param<uint64_t>("endSample", "Last sample index (inclusive). Omit to "
+                        "read to the last captured sample")
         .param<bool>("normalized", "DSO only: return 0..1 full-scale "
                      "amplitudes instead of volts (default false)")
         .read_only()
