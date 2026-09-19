@@ -10,6 +10,11 @@ FPGA/IC吹水群：377248676
     PXView V1.6.5修改
     时间：2026年9月20日
     变更如下：
+    【重构】
+    *位扫描改用 C++20 <bit>：删除 bsf_folded/bsr32/bsr64 三个手写 De Bruijn 查表函数及其 64 项 lsb_64_table 与 256 项 msb_256_table（约 50 行魔法常数），改由 lsb_index()=std::countr_zero、msb_index()=std::bit_width-1 提供；两者都显式保留旧实现的零输入约定（0 仍返回 63/0），因为调用点是先算位置再判掩码是否为 0。等价性先用独立对照程序穷举单位位/掩码/全部 256 个 byte 输入并叠加 600 万随机稀疏+稠密值验证通过，编译器生成同一条 bsf/lzcnt 指令，mipmap 遍历与毛刺滤波 raw diff 扫描吞吐不变（logicsnapshot.h、logicsnapshot.cpp、logicsnapshot_edge_scan.cpp）
+    *全工程 C 风格强转改写为 C++ 强转：115 个文件约 1150 处 (T*)expr /(int)expr 统一换成 reinterpret_cast/static_cast/const_cast。C 风格强转会把“丢弃 const”“指针转整数”“把 < 与 >> 当成模板实参”等意图伪装成普通括号，改写后编译器立刻暴露出 11 处真实可疑点并处理：日志打印 (void*)constPtr 改 static_cast<const void*>；g_variant_get_fixed_array 的结果改 const uint64_t* 只读；QVariant::value<void*>() 模板调用不再被外层的指针强转截断；函数指针别名声明（HRESULT(WINAPI *)(...)）与无形参的虚函数声明不再被误当成强转；语义不明的 (QAction*)action 下行转换改 qobject_cast<QAction*>，顺带去掉一处可能的 nullptr 解引用（decodermenu.cpp、decoder.cpp、decoderstack.cpp、annotationrestable.cpp、rowdata.cpp、deviceagent.cpp、deviceoptions.cpp、deviceoptionsdock.cpp、dscombobox.cpp、winnativewidget.cpp、viewport.h、viewstatus.cpp、cursor.h 等）
+    *日志宏去 GNU 扩展化：pxv_err/warn/info/db/detail 与 pxv_assert 一律由 GCC 专有变参宏 `fmt, args...` 改为标准 `fmt, ...` + `##__VA_ARGS__`（旧写法 MSVC 不接受，属于隐性跨平台债），宏语义与调用点行为均不变；散落在注释里的 10 处 NULL 改为 nullptr，日志文案中面向用户的 "xxx is NULL" 字符串保持不动（log.h、datafeedparser.cpp、rowdata.cpp、rowdata.h、deviceagent.h、sigsession.cpp、storesession.cpp）
+
 
     【问题修复】
     *修复撤销（revert_all_edits）后同一 root node 内其它块的 tog/first/last 被污染、波形看起来"撤销没生效"：allocated 记录原样整字回写 rn.tog/rn.first/rn.last，而这三个 64 位字是**实例化那一刻**（趟中途）的快照，对同 root node 里更早被改过的块存的是"滤波后"的值；回放按 (order,idx0,idx1) 升序，序号更小的块已经还原并重算过 mipmap 且不会再被访问，于是字节对而元数据错——tog 位错使 get_display_edges 跳过该块边沿、画成常量，first/last 错使跨块 get_nxt_edge/get_pre_edge 判定错。改为只回写本块那一位（mask = 1ULL << idx1）：实例化一个块并不会动同 root node 其它块的元数据，整字回写本无必要（logicsnapshot_glitch_filter.cpp）
@@ -17,6 +22,8 @@ FPGA/IC吹水群：377248676
     *修复编辑日志段合并在写入段非升序时静默丢失记录：record_edit 只与 _edits.back() 比较且只判 byte_lo <= prev_hi + 64，若某次写入的起点早于上一条记录的窗口（未来新增就地写者、按通道并行、loop 模式块轮转），会命中合并分支再走 byte_hi <= prev_hi 的早退，该次写入完全没有记录——永久不可撤销且无任何报错。改为补上 byte_lo >= prev.byte_lo 下界，让合并失败即另开一条记录（fail-closed）；不额外加断言，失败即降级已能保证日志正确，断言只会把可恢复的排序意外变成 debug 版崩溃（logicsnapshot_glitch_filter.cpp）
     *修复预算恰在"实例化 RLE 块"那一刻耗尽时该块没有任何记录、永久不可撤销：apply_batch 是先 LeafBlockPool::acquire 再 record_edit，而 record_edit 在预算耗尽时直接早退，于是块已被实例化却没有记录——撤销既无法回收它，也无法还原它取代的常量值元数据，趟中间留下一处不可回滚的状态改动；改为在 acquire 之前先判 edit_log_can_grow(0,1)，超限即置 _edit_log_overflow 并中止整趟（logicsnapshot_glitch_filter.cpp）
     *修复中止后尾部 apply_batch 把同一批写入再回放一遍：OOM（acquire 失败）与预算超限的提前 return 都没有清空 fills/dirty，扫描循环 break 之后函数末尾的 apply_batch() 会拿着这批 fills 再写一次、再记一遍日志——反序回放能救回正确性，但白做一遍并多占本已见底的预算；改为三处中止分支统一 fills.clear() + dirty.clear()（logicsnapshot_glitch_filter.cpp）
+
+    *修复 StoreSession::load_decoders 中 g_slist_copy 出来的链表副本被泄漏：原写法 DSList *dl = g_slist_copy(...)，随后用 dl 自身推进遍历，循环结束或提前 break 后再 g_slist_free(dl) 释放的是“停止位置之后的节点”（break 场景）或 nullptr（完整遍历场景），副本头部——乃至整份副本——被漏掉；该副本存在的唯一理由是规避 srd_decoder_list() 返回的 const 链表。改为直接只读遍历 const GSList，既不需要副本也不需要释放（storesession.cpp）
 
     【构建与工程】
     *删除实测不可用的 ENABLE_OLD_STYLE_CAST_WARNINGS 开关：该开关默认 OFF，打开后约 4800 条告警中约 3744 条来自 glib 的 gmacros.h，且把依赖头改为 SYSTEM include 也压不住（4563 → 3827，GCC 对"系统头定义、用户 TU 展开"的宏仍会报告），从未能被有效打开；删除其 option 定义与应用分支，并在 CMake/flags.cmake 注释中保留该评估结论以免重复踩坑。剩余 ENABLE_STRICT_WARNINGS（默认 ON，-Wconversion 闸门）不变（CMake/flags.cmake）
