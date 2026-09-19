@@ -916,7 +916,7 @@ QJsonDocument MainWindowConfigIO::get_config_json_from_data_file(QString file,
 
   auto f_name = pv::path::ConvertPath(file);
   ZipReader rd(f_name.c_str());
-  auto *data = rd.GetInnterFileData("session");
+  auto data = rd.GetInnterFileData("session");
 
   if (data != nullptr) {
     // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
@@ -932,7 +932,6 @@ QJsonDocument MainWindowConfigIO::get_config_json_from_data_file(QString file,
       bSucesss = true;
     }
 
-    rd.ReleaseInnerFileData(data);
   }
 
   return sessionDoc;
@@ -952,7 +951,7 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
 
   auto f_name = path::ConvertPath(file);
   ZipReader rd(f_name.c_str());
-  auto *data = rd.GetInnterFileData("decoders");
+  auto data = rd.GetInnterFileData("decoders");
 
   if (data != nullptr) {
     // 按长度拷贝原始字节，避免 QString(const char*) 在 NUL 处截断，
@@ -970,7 +969,6 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
     }
 
     dec_array = sessionDoc.array();
-    rd.ReleaseInnerFileData(data);
   }
 
   return dec_array;

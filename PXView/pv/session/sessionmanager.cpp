@@ -17,7 +17,7 @@ SessionManager::SessionManager()
 SessionManager* SessionManager::instance()
 {
     if (!_instance)
-        _instance = std::unique_ptr<SessionManager>(new SessionManager());
+        _instance = std::make_unique<SessionManager>();
     return _instance.get();
 }
 

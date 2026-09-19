@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -101,7 +102,10 @@ private:
     // Dedicated IO thread for network transports (McpTransport/WsTransport).
     // Moves all socket I/O off the GUI main thread so that blocking
     // operations (e.g. wait_capture) never freeze the UI.
-    QThread* _io_thread = nullptr;
+    // Owning handle: released after quit()/wait() in Stop(). The other API
+    // objects below are deliberately raw — they are QObject-parented, so a
+    // unique_ptr here would double-own them.
+    std::unique_ptr<QThread> _io_thread;
 
     // API port numbers (defaults: MCP=10110, WS=10430)
     int _mcp_port = 10110;

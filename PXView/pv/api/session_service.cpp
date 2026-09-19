@@ -3979,7 +3979,7 @@ Result<void> SessionService::load_file(const std::string &path) {
     try {
         ZipReader zip(path.c_str());
         if (zip.HaveArchive()) {
-            ZipInnerFileData *dec_data = zip.GetInnterFileData("decoders");
+            auto dec_data = zip.GetInnterFileData("decoders");
             if (dec_data && dec_data->data() && dec_data->size() > 0) {
                 QByteArray raw(dec_data->data(), dec_data->size());
                 QJsonParseError perr;
@@ -4014,8 +4014,6 @@ Result<void> SessionService::load_file(const std::string &path) {
                              perr.errorString().toUtf8().constData());
                 }
             }
-            if (dec_data)
-                zip.ReleaseInnerFileData(dec_data);
             zip.Close();
         }
     } catch (...) {

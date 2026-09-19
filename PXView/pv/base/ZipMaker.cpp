@@ -54,14 +54,14 @@ bool ZipMaker::CreateNew(const char *fileName, bool bAppend)
     } 
 
 //make zip inner file time 
-    m_zi = new zip_fileinfo();
+    m_zi = std::make_unique<zip_fileinfo>();
 
     time_t rawtime;
     time (&rawtime);
     struct tm *tinf= localtime(&rawtime);
 
     struct tm &ti = *tinf;
-    zip_fileinfo &zi= *(zip_fileinfo*)m_zi;
+    zip_fileinfo &zi = *m_zi;
 
     zi.tmz_date.tm_year = ti.tm_year;
     zi.tmz_date.tm_mon  = ti.tm_mon;
@@ -80,10 +80,7 @@ void ZipMaker::Release()
        zipClose((zipFile)m_zDoc, nullptr);
        m_zDoc = nullptr;       
    }
-   if (m_zi){
-       delete ((zip_fileinfo*)m_zi);
-       m_zi = nullptr;
-   }
+   m_zi.reset();
 }
 
 bool ZipMaker::Close(){
@@ -117,7 +114,7 @@ bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, size_t b
         level = Z_DEFAULT_COMPRESSION;
     }
 
-    zipOpenNewFileInZip((zipFile)m_zDoc,innerFile,(zip_fileinfo*)m_zi,
+    zipOpenNewFileInZip((zipFile)m_zDoc,innerFile,m_zi.get(),
                                 nullptr,0,nullptr,0,nullptr ,
                                 Z_DEFLATED,
                                 level);
@@ -216,7 +213,7 @@ void ZipReader::Close()
     }
 }
 
-ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
+std::unique_ptr<ZipInnerFileData> ZipReader::GetInnterFileData(const char *innerFile)
 {
     char *metafile = nullptr;
     char szFilePath[15];
@@ -250,16 +247,12 @@ ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
         unzReadCurrentFile(m_archive, metafile, static_cast<unsigned int>(fileInfo.uncompressed_size));
         unzCloseCurrentFile(m_archive);
 
-         ZipInnerFileData *data = new ZipInnerFileData(metafile, static_cast<int>(fileInfo.uncompressed_size));
-         return data;
+         return std::make_unique<ZipInnerFileData>(metafile, static_cast<int>(fileInfo.uncompressed_size));
     } 
- 
-    return nullptr;
-}
 
-void ZipReader::ReleaseInnerFileData(ZipInnerFileData *data)
-{
-    if (data){
-        delete data;
-    }
+    // Buffer allocated but unusable (zero-length entry, or malloc failed).
+    // free() here so the caller — who receives nullptr and owns nothing —
+    // cannot leak it. free(nullptr) is a no-op.
+    free(metafile);
+    return nullptr;
 }

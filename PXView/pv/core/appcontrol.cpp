@@ -413,14 +413,14 @@ bool AppControl::Start()
     // new connections inherit the IO thread's affinity. start() is invoked
     // via post_to (QCoreApplication::postEvent) which is safe from the main
     // thread — the event is processed on the IO thread's event loop.
-    _io_thread = new QThread();
+    _io_thread = std::make_unique<QThread>();
     _io_thread->start();
 
     _ws_transport = new pv::api::WsTransport(_rpc_dispatcher, _ws_port);
     _mcp_transport = new pv::api::McpTransport(_rpc_dispatcher, _mcp_port);
 
-    _ws_transport->moveToThread(_io_thread);
-    _mcp_transport->moveToThread(_io_thread);
+    _ws_transport->moveToThread(_io_thread.get());
+    _mcp_transport->moveToThread(_io_thread.get());
 
     // Start on IO thread — post_to queues the start() call on the IO
     // thread's event loop. The IO thread processes it when it pumps events.
@@ -479,7 +479,8 @@ bool AppControl::Start()
     if (_rpc_dispatcher) { delete _rpc_dispatcher; _rpc_dispatcher = nullptr; }
     if (_app_service) { _app_service->shutdown(); delete _app_service; _app_service = nullptr; }
 
-    if (_io_thread) { delete _io_thread; _io_thread = nullptr; }
+    // quit()/wait() above already stopped the thread; reset() releases it.
+    _io_thread.reset();
 
     _session->Close();
  }

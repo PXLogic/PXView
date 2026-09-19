@@ -26,6 +26,8 @@
 
 #include <minizip/zip.h>
 #include <minizip/unzip.h>
+
+#include <memory>
  
 
 class ZipMaker
@@ -58,7 +60,7 @@ public:
 
 private:
     zipFile         m_zDoc; //zip file handle
-    zip_fileinfo    *m_zi; //life must as m_zDoc; 
+    std::unique_ptr<zip_fileinfo> m_zi; //life must as m_zDoc; 
     char     m_error[500];
 };
 
@@ -92,9 +94,10 @@ public:
         return m_archive != nullptr;
     }
 
-    ZipInnerFileData* GetInnterFileData(const char *innerFile);
-
-    void ReleaseInnerFileData(ZipInnerFileData *data);
+    // Returns an owning handle (nullptr if the entry is missing/unreadable).
+    // The caller must not delete it and there is no release function:
+    // forgetting to free the old raw pointer was the leak this replaces.
+    std::unique_ptr<ZipInnerFileData> GetInnterFileData(const char *innerFile);
 
 
 private:

@@ -213,20 +213,22 @@ target_precompile_headers(pxview-render PRIVATE
 #= Strict modernization warnings — core leaf libraries + pxview-core
 #-------------------------------------------------------------------------------
 # Applied per-target rather than via global CMAKE_CXX_FLAGS: enabling
-# -Wconversion tree-wide yields ~9k hits, while these four targets are clean.
+# -Wconversion tree-wide yields ~9k hits, while these targets are clean.
 # The option and the full measurement live in CMake/flags.cmake.
 #
 # pxview-interface is INTERFACE-only (no sources compiled), so it is not listed.
 #
-# pxview-render is deliberately EXCLUDED, although it is also a no-Widgets layer.
-# Measured 2026-09-19: adding it yields 633 -Wconversion hits from our own files,
+# pxview-render is also a no-Widgets layer and is now GATED (2026-09-20).
+# Measured 2026-09-19: it produced 633 -Wconversion hits from our own files,
 # all under pv/view/ (dsosignal_paint.cpp 81, logicsignal.cpp 78,
 # decodetrace.cpp 63, analogsignal.cpp 55, mathtrace.cpp 48, trace.cpp 46, ...).
-# Gate it only after those files are cleaned up — the same reason the View
-# executable is not gated.
+# dsosignal_paint.cpp and the shared header trace.h were cleaned first; the
+# remainder is burned down to 0 so the gate covers the whole render pipeline.
+# The View executable stays ungated: it pulls in Widgets-heavy TUs whose
+# baseline is not 0.
 #-------------------------------------------------------------------------------
 if(PXVIEW_CORE_STRICT_FLAGS)
-	foreach(_strict_target pxview-core pxview-data pxview-utility pxview-config)
+	foreach(_strict_target pxview-core pxview-data pxview-utility pxview-config pxview-render)
 		if(TARGET ${_strict_target})
 			target_compile_options(${_strict_target} PRIVATE ${PXVIEW_CORE_STRICT_FLAGS})
 		endif()
