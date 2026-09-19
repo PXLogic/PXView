@@ -42,6 +42,7 @@
 #include "pv/core/measure_format.h"  // kMvPerVolt / volts_to_millivolts / convert_voltage
 #include "pv/base/log.h"
 #include "pv/base/ZipMaker.h"
+#include "pv/base/gslist_helpers.h"
 
 #include <libsigrok/libsigrok.h>
 #include <libsigrokdecode/libsigrokdecode.h>
@@ -680,8 +681,7 @@ void SessionService::ensure_logic_mode_for_digital(
     int cur_mode = _device->get_work_mode();
 
     GSList *channels = _device->get_channels();
-    int ch_count = 0;
-    for (GSList *l = channels; l; l = l->next) ch_count++;
+    int ch_count = count_gslist(channels);
 
     // If we need digital channels but device isn't in LOGIC mode or has
     // too few channels, force switch to LOGIC mode.
@@ -713,12 +713,11 @@ void SessionService::configure_capture_channels(
     }
 
     // Disable all channels first
-    for (GSList *l = channels; l; l = l->next) {
-        auto *ch = static_cast<sr_channel *>(l->data);
+    for_each_gslist<sr_channel>(channels, [&](sr_channel *ch) {
         if (ch && ch->enabled) {
             _device->enable_probe(ch->index, false);
         }
-    }
+    });
 
     // Enable specified digital channels
     for (int16_t idx : digital_channels) {
@@ -1417,10 +1416,9 @@ std::vector<ChannelInfo> SessionService::get_channels() const {
         if (!_device)
             return result;
         GSList *channels = _device->get_channels();
-        for (GSList *l = channels; l; l = l->next) {
-            auto *ch = static_cast<sr_channel *>(l->data);
+        for_each_gslist<sr_channel>(channels, [&](sr_channel *ch) {
             if (!ch)
-                continue;
+                return;
             ChannelInfo info;
             info.index = static_cast<int32_t>(ch->index);
             // name: SignalModel is the source of truth for the user-editable
@@ -1440,7 +1438,7 @@ std::vector<ChannelInfo> SessionService::get_channels() const {
                 info.vfactor = m->vfactor();
             }
             result.push_back(info);
-        }
+    });
         return result;
     };
     return run_value_on_main_thread<std::vector<ChannelInfo>>(fn);
@@ -1817,13 +1815,12 @@ ProbeConfig SessionService::get_probe_config(int16_t channel) const {
             return config;
         GSList *channels = _device->get_channels();
         sr_channel *target_ch = nullptr;
-        for (GSList *l = channels; l; l = l->next) {
-            auto *ch = static_cast<sr_channel *>(l->data);
+        for_each_gslist<sr_channel>(channels, [&](sr_channel *ch) {
             if (ch && ch->index == channel) {
                 target_ch = ch;
-                break;
+                return;
             }
-        }
+        });
         /* 修复：PROBE_FACTOR/PROBE_VDIV 均为 SR_T_UINT64（hwdriver.c），
          * 旧实现用 get_config_double 会被类型检查拒绝 → vfactor 恒为默认
          * 值。改用 DeviceAgent typed wrapper 读取，并补齐 vdiv/coupling/
@@ -1856,13 +1853,12 @@ Result<void> SessionService::set_probe_config(int16_t channel,
 
         GSList *channels = _device->get_channels();
         sr_channel *target_ch = nullptr;
-        for (GSList *l = channels; l; l = l->next) {
-            auto *ch = static_cast<sr_channel *>(l->data);
+        for_each_gslist<sr_channel>(channels, [&](sr_channel *ch) {
             if (ch && ch->index == channel) {
                 target_ch = ch;
-                break;
+                return;
             }
-        }
+        });
 
         bool any_ok = false;
 
@@ -2512,10 +2508,9 @@ std::vector<DecoderDescriptor> SessionService::get_available_decoders() const {
 
     // Python decoders
     const GSList *decoders = srd_decoder_list();
-    for (const GSList *l = decoders; l; l = l->next) {
-        auto *dec = static_cast<srd_decoder *>(l->data);
+    for_each_gslist<srd_decoder>(decoders, [&](srd_decoder *dec) {
         if (!dec)
-            continue;
+            return;
 
         DecoderDescriptor desc;
         desc.id = dec->id ? dec->id : "";
@@ -2558,7 +2553,7 @@ std::vector<DecoderDescriptor> SessionService::get_available_decoders() const {
         }
 
         result.push_back(desc);
-    }
+    });
 
     return result;
 }
@@ -2567,14 +2562,13 @@ Result<json> SessionService::get_decoder_options(const std::string& decoder_id) 
     // Find the decoder by ID
     const GSList *decoders = srd_decoder_list();
     const srd_decoder *target_dec = nullptr;
-    for (const GSList *l = decoders; l; l = l->next) {
-        auto *dec = static_cast<srd_decoder *>(l->data);
-        if (!dec || !dec->id) continue;
+    for_each_gslist<srd_decoder>(decoders, [&](srd_decoder *dec) {
+        if (!dec || !dec->id) return;
         if (decoder_id == dec->id) {
             target_dec = dec;
-            break;
+            return;
         }
-    }
+    });
 
     if (!target_dec)
         return Result<json>::Fail(ErrorCode::DecoderNotFound,
@@ -2804,13 +2798,12 @@ Result<std::string> SessionService::add_decoder(
     // decoder list to avoid "Decoder not found" errors.
     srd_decoder *dec = srd_decoder_get_by_id(decoder_id.c_str());
     if (!dec) {
-        for (const GSList *l = srd_decoder_list(); l; l = l->next) {
-            auto *d = static_cast<srd_decoder *>(l->data);
+        for_each_gslist<srd_decoder>(srd_decoder_list(), [&](srd_decoder *d) {
             if (d->id && g_ascii_strcasecmp(d->id, decoder_id.c_str()) == 0) {
                 dec = d;
-                break;
+                return;
             }
-        }
+        });
     }
     if (!dec)
         return Result<std::string>::Fail(ErrorCode::DecoderNotFound,

@@ -499,7 +499,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
     }
   }
 
-  assert(_channel_num < CHANNEL_MAX_COUNT);
+  assert(_channel_num < kChannelMaxCount);
 
   _sample_count = 0;
   _ring_sample_count = 0;
@@ -870,7 +870,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   }
 
   // Cache leaf block pointers per channel (re-allocated at leaf block boundary)
-  void *ch_lbp[CHANNEL_MAX_COUNT];
+  void *ch_lbp[kChannelMaxCount];
   for (unsigned int ch = 0; ch < _channel_num; ch++) {
     ch_lbp[ch] = allocate_block(static_cast<uint16_t>(ch), index0, index1);
     if (ch_lbp[ch] == nullptr) {
@@ -885,7 +885,7 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   // sample s channel ch bit = src[s*unitsize + ch/8] bit (ch%8). Precompute
   // byte_pos/bit_mask to avoid recomputing in every phase loop.
   struct ChannelCtx { uint8_t byte_pos; uint8_t bit_mask; };
-  ChannelCtx ch_ctx[CHANNEL_MAX_COUNT];
+  ChannelCtx ch_ctx[kChannelMaxCount];
   for (unsigned int ch = 0; ch < _channel_num; ch++) {
     ch_ctx[ch] = {static_cast<uint8_t>(ch / 8),
                   static_cast<uint8_t>(1u << (ch % 8))};
@@ -1356,7 +1356,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
     // Per-channel destination u64 pointers into their current leaf blocks.
     // All channels share the same sample position in CROSS format.
-    uint64_t *dst[CHANNEL_MAX_COUNT];
+    uint64_t *dst[kChannelMaxCount];
     for (uint64_t c = 0; c < _channel_num; c++) {
       if (idx0 >= _ch_data[c].size()) {
         pxv_err("append_cross_payload: idx0 %llu out of range (blocked)",
@@ -1463,7 +1463,7 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
   uint64_t filled_sample = align_sample_count % LeafBlockSamples;
   uint64_t old_filled_sample = filled_sample;
-  uint64_t *chans_read_addr[CHANNEL_MAX_COUNT];
+  uint64_t *chans_read_addr[kChannelMaxCount];
   for (unsigned int i = 0; i < _channel_num; i++) {
     chans_read_addr[i] = reinterpret_cast<uint64_t*>(data_src_ptr) + i;
   }

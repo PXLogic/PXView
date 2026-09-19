@@ -44,7 +44,11 @@
 #include <atomic>
 #include <bit>      // std::countr_zero / std::bit_width (see lsb_index / msb_index)
 #include <cstdint>
-#define CHANNEL_MAX_COUNT 64
+
+// Max number of logic channels the snapshot layer can represent. Compile-time
+// constant (was a #define) so it can be used in array bounds and template args
+// without leaking a macro into every TU that includes this header.
+inline constexpr uint16_t kChannelMaxCount = 64;
 
 // Extracted disk-cache/async-writer subsystem (cluster D). Defined in
 // logicsnapshot_diskcache_writer.h/.cpp. Forward-declared here to avoid a
@@ -685,8 +689,8 @@ private:
     uint16_t    _ch_fraction;
     uint8_t    *_dest_ptr;
 
-    uint64_t    _last_sample[CHANNEL_MAX_COUNT];
-    uint64_t    _last_calc_count[CHANNEL_MAX_COUNT];
+    uint64_t    _last_sample[kChannelMaxCount];
+    uint64_t    _last_calc_count[kChannelMaxCount];
     // std::atomic：写方是数据馈送线程（DataFeedParser 在每场采集开始时经
     // set_loop() 置位，见 datafeedparser.cpp 的 last_ended() 分支），读方遍布
     // 采样/迭代/边沿扫描/渲染等 10+ 处**无锁**读——它们据此决定"走 _mutex 路径
@@ -712,7 +716,7 @@ private:
     // flush_deferred_free_list() when the transaction closes (or at teardown),
     // never inline — see push_to_free_list().
     std::vector<void*> _edit_deferred_free;
-    struct BlockIndex _cur_ref_block_indexs[CHANNEL_MAX_COUNT];
+    struct BlockIndex _cur_ref_block_indexs[kChannelMaxCount];
     int         _lst_free_block_index;
 
     // mmap-backed chunk allocator state (cluster A — heavily used by

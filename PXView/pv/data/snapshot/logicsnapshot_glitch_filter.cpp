@@ -561,7 +561,7 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
   // path (calc_mipmap) reads them, never the sample query paths.
   for (const auto &t : touched) {
     const unsigned int order = std::get<0>(t);
-    if (order < CHANNEL_MAX_COUNT) {
+    if (order < kChannelMaxCount) {
       _host->_last_calc_count[order] = 0;
       _host->_last_sample[order] = 0;
     }

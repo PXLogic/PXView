@@ -100,9 +100,9 @@ bool LogicSnapshotPatternSearch::pattern_search_self(int64_t start, int64_t end,
     return true;
   }
 
-  char flagList[CHANNEL_MAX_COUNT];
-  char lstValues[CHANNEL_MAX_COUNT];
-  int chanIndexs[CHANNEL_MAX_COUNT];
+  char flagList[kChannelMaxCount];
+  char lstValues[kChannelMaxCount];
+  int chanIndexs[kChannelMaxCount];
   int count = 0;
   bool bEdgeFlag = false;
 

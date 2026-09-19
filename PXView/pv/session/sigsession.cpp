@@ -1173,17 +1173,17 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
     const char *model = sr_dev_inst_model_get(all_sdi[i]);
     const char *conn = sr_dev_inst_connid_get(all_sdi[i]);
 
-    char name_buf[150] = {0};
+    std::string name_buf;
     if (vendor && model) {
-      snprintf(name_buf, sizeof(name_buf), "%s %s", vendor, model);
+      name_buf = std::string(vendor) + " " + model;
     } else if (model) {
-      snprintf(name_buf, sizeof(name_buf), "%s", model);
+      name_buf = model;
     } else if (conn) {
-      snprintf(name_buf, sizeof(name_buf), "%s", conn);
+      name_buf = conn;
     } else {
-      snprintf(name_buf, sizeof(name_buf), "device-%d", i);
+      name_buf = "device-" + std::to_string(i);
     }
-    snprintf(entry->name, sizeof(entry->name), "%s", name_buf);
+    snprintf(entry->name, sizeof(entry->name), "%s", name_buf.c_str());
     entry->name[sizeof(entry->name) - 1] = '\0';
   }
 

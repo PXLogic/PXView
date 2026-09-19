@@ -540,15 +540,15 @@ void DeviceAgent::update()
     const char *model = sr_dev_inst_model_get(_di);
     const char *conn = sr_dev_inst_connid_get(_di);
 
-    char name_buf[160] = {0};
+    std::string name_buf;
     if (vendor && model) {
-        snprintf(name_buf, sizeof(name_buf), "%s %s", vendor, model);
+        name_buf = std::string(vendor) + " " + model;
     } else if (model) {
-        snprintf(name_buf, sizeof(name_buf), "%s", model);
+        name_buf = model;
     } else if (conn) {
-        snprintf(name_buf, sizeof(name_buf), "%s", conn);
+        name_buf = conn;
     }
-    _dev_name = QString::fromLocal8Bit(name_buf);
+    _dev_name = QString::fromLocal8Bit(name_buf.c_str());
 
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(_di);
     if (drv) {
@@ -1456,16 +1456,14 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
     // config_set() (both fall through to g_variant_unref). The check_key()
     // early-return path leaks data instead (no unref), but we must not rely
     // on which path was taken.
-    char type_buf[16] = "(nullptr)";
+    std::string type_buf("(nullptr)");
     const GVariantType *gvt_pre = data ? g_variant_get_type(data) : nullptr;
     if (gvt_pre) {
         const gchar *ts = g_variant_type_peek_string(gvt_pre);
-        if (ts) {
-            size_t n = strlen(ts);
-            if (n >= sizeof(type_buf)) n = sizeof(type_buf) - 1;
-            memcpy(type_buf, ts, n);
-            type_buf[n] = '\0';
-        }
+        // std::string copies on assignment, so there is no fixed-buffer
+        // truncation/overflow risk (the old code capped at 16 bytes).
+        if (ts)
+            type_buf = ts;
     }
 
     int ret = sr_config_set(_di, cg, static_cast<uint32_t>(key), data);
@@ -1485,7 +1483,7 @@ bool DeviceAgent::set_config(int key, GVariant *data, const sr_channel *ch, cons
             const char *key_name = kinfo ? kinfo->name : "(unknown)";
             pxv_warn("DeviceAgent::set_config: key '%s' (id=%d) rejected (SR_ERR_ARG) — "
                      "likely type mismatch (got GVariant type '%s') or invalid value",
-                     key_name, key, type_buf);
+                     key_name, key, type_buf.c_str());
         } else if (ret != SR_ERR_NA) {
             pxv_err("%s%d", "ERROR:DeviceAgent::set_config, Failed to set value of config id:", key);
         }
