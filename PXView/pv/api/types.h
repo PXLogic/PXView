@@ -263,6 +263,18 @@ struct ChannelInfo {
     ChannelType type           = ChannelType::Logic;
     bool        enabled        = false;
     bool        enabled_default = false;
+
+    // 探头档位（仅 DSO / Analog 通道有意义；Logic 通道保持默认值）。
+    //
+    // 这两个字段的作用是让 get_samples 的换算契约**闭合**：客户端拿到
+    // get_samples 返回的采样值后，不必再额外调用 get_probe_config 才知道
+    // 怎么换算成电压。
+    //
+    //   vdiv    —— **V/div**（与 ProbeConfig::vdiv 同单位；内部 SignalModel
+    //              存的是 mV/div，这里在 API 边界换算过）
+    //   vfactor —— 探头衰减因子（×1 / ×10 / ×100）
+    double      vdiv           = 0.0;
+    double      vfactor        = 1.0;
 };
 
 struct SampleConfig {

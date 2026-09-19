@@ -52,6 +52,7 @@
 #include <libsigrokdecode.h>
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
+#include "pv/base/copy_audit.h"   // P1-e 拷贝审计宏 PXV_PERF_COPY_*（轻量头，仅 <cstdint>）
 #include "pv/utility/encoding.h"
 #include "pv/utility/path.h"
 #include "pv/base/log.h" 
@@ -508,10 +509,16 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
             if (_canceled)
                 break;
 
-            const uint8_t *data_buffer = dso_snapshot->get_samples(0, 0, ch_index);
+            // P1-c（统一读取抽象）：DSO 平面布局下 span(ch, 0, size).data 与旧
+            // get_samples(0, 0, ch_index) 严格等价 —— 包括 size==0 / 通道不存在 /
+            // 平面未分配时返回 nullptr 的行为（span 此时 valid()==false 且 data==nullptr）。
+            const uint8_t *data_buffer =
+                dso_snapshot->span((uint32_t)ch_index, 0, size).data;
         
             snprintf(chunk_name, 19, "O-%d/0", ch_index);
             ret = m_zipDoc.AddFromBuffer(chunk_name, (const char*)data_buffer, size) ? SR_OK : -1;
+            // P1-e 拷贝审计：.pxc 保存时写入 zip 的整通道拷贝
+            PXV_PERF_COPY_EXPORT(size);
 
             if (ret != SR_OK) {
                 if (!_has_error.load()) {
@@ -873,7 +880,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             sprintf(meta, " enable%d = %d\n", analogcnt, probe->enabled);
             str += meta;
             int coupling = matched_model ? matched_model->coupling() : 0;
-            double vdiv = matched_model ? matched_model->vdiv() : 0;
+            double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double vfactor = matched_model ? matched_model->vfactor() : 1;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
             double trig_value = matched_model ? matched_model->trig_value() : 0;
@@ -893,7 +900,7 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             sprintf(meta, " enable%d = %d\n", analogcnt, probe->enabled);
             str += meta;
             int coupling = matched_model ? matched_model->coupling() : 0;
-            double vdiv = matched_model ? matched_model->vdiv() : 0;
+            double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
             sprintf(meta, " coupling%d = %d\n", analogcnt, coupling);
             str += meta;
@@ -1395,7 +1402,18 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
                 uint8_t *wr = ch_data_buffer + ch;
                 ch++;
-                const uint8_t *rd = dso_snapshot->get_samples(0,0, m->index()) + i;
+                // P1-c（统一读取抽象）：从第 i 个样本起读 size 个。
+                // 外层循环保证 i + size <= _unit_count == get_sample_count()，
+                // 因此 span 的 contiguous_samples 必然覆盖 size。
+                const pv::data::SampleSpan rd_sp =
+                    dso_snapshot->span((uint32_t)m->index(), i, size);
+                if (!rd_sp.valid()) {
+                    // 旧代码会解引用 nullptr（未定义行为）；显式跳过该通道。
+                    pxv_err("StoreSession: DSO span invalid (ch=%d, i=%llu, size=%u)",
+                            m->index(), (unsigned long long)i, size);
+                    continue;
+                }
+                const uint8_t *rd = rd_sp.data;
                 const uint8_t *rd_end = rd + size;
 
                 while (rd < rd_end)
@@ -1404,6 +1422,8 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     wr += ch_num;
                     rd++;
                 }
+                // P1-e 拷贝审计：导出交叉重打包（每个样本一次逐字节搬运）
+                PXV_PERF_COPY_EXPORT(size);
             }
 
             dp.data = ch_data_buffer;

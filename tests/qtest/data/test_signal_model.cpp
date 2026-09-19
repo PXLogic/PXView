@@ -234,7 +234,7 @@ void TestSignalModel::Defaults() {
     QCOMPARE(m.type(), (int)SR_CHANNEL_LOGIC);
     QVERIFY(!m.enabled());
     QCOMPARE(QString::fromStdString(m.color()), QString());
-    QCOMPARE(m.vdiv(), 0.0);
+    QCOMPARE(m.vdiv_mv(), 0.0);
     QCOMPARE(m.coupling(), 0);
     QCOMPARE(m.vfactor(), 1.0);
     QVERIFY(m.map_default());
@@ -257,7 +257,7 @@ void TestSignalModel::SetGetRoundTrip() {
     m.set_type(SR_CHANNEL_ANALOG);
     m.set_enabled(true);
     m.set_color("#112233");
-    m.set_vdiv(0.5);
+    m.set_vdiv_mv(0.5);
     m.set_coupling(2);
     m.set_vfactor(10.0);
     m.set_map_default(false);
@@ -275,7 +275,7 @@ void TestSignalModel::SetGetRoundTrip() {
     QCOMPARE(m.type(), (int)SR_CHANNEL_ANALOG);
     QVERIFY(m.enabled());
     QCOMPARE(QString::fromStdString(m.color()), QStringLiteral("#112233"));
-    QCOMPARE(m.vdiv(), 0.5);
+    QCOMPARE(m.vdiv_mv(), 0.5);
     QCOMPARE(m.coupling(), 2);
     QCOMPARE(m.vfactor(), 10.0);
     QVERIFY(!m.map_default());
@@ -923,7 +923,8 @@ void TestSignalModel::JsonRoundTripPreservesChannels() {
     const ChannelConfig &ch = cfg.channels[0];
     QCOMPARE(ch.index, 0);
     QVERIFY(ch.enabled);
-    QCOMPARE((int)ch.vdiv, 1000000);
+    // 单位是 mV/div（.pxc 的 JSON key 仍叫 "vdiv"，本用例只验证往返一致）
+    QCOMPARE((int)ch.vdiv_mv, 1000000);
     QCOMPARE(ch.coupling, 1);
     QVERIFY(ch.map_default);
     QCOMPARE((int)ch.hw_offset, 3);

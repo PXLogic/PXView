@@ -246,10 +246,17 @@ void rasterize_dso_channel(
   if (width <= 0 || end <= start)
     return;
 
-  const uint8_t *const samples_buffer =
-      snapshot->get_samples(start, end, channel_index);
-  if (!samples_buffer)
+  // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
+  // get_samples(start, end, channel_index) 返回的指针严格等价
+  // （start_sample == start，无位打包取整），因此下方所有
+  // `samples_buffer[s - start]` 索引保持不变。
+  // contiguous_samples == sample_count - start，覆盖整个 [start, end)。
+  const pv::data::SampleSpan sp =
+      snapshot->span((uint32_t)channel_index, (uint64_t)start,
+                     (uint64_t)(end - start));
+  if (!sp.valid())
     return;
+  const uint8_t *const samples_buffer = sp.data;
 
   QColor trace_colour = colour;
   trace_colour.setAlpha(kRasterizeForeAlpha);
@@ -374,14 +381,27 @@ void rasterize_dso_channel(
 void rasterize_analog_channel(
     QPainter &p, data::AnalogSnapshot *snapshot, int zeroY, int left,
     int right, uint64_t start_index, int64_t sample_count,
-    double samples_per_pixel, int order, float top, float bottom,
+    double samples_per_pixel, int channel_index, float top, float bottom,
     int hw_offset, float scale, float float_scale, const QColor &colour) {
   // Verbatim extraction of AnalogSignal::paint_per_pixel (no arithmetic
   // changes — pixel parity required). Members replaced by parameters; the
   // member _rects scratch buffer is replaced by a static thread_local one.
   const int64_t channel_num = (int64_t)snapshot->get_channel_num();
   const uint8_t unit_bytes = snapshot->get_unit_bytes();
-  const uint8_t *const samples = snapshot->get_samples(0);
+  // 通道索引 -> snapshot 内部 order（全函数唯一一次转换）。
+  // 不能把 order 当通道索引用：span() / get_ch_order() 收的是 SignalModel
+  // 索引（sr_channel->index），对 demo 这类把模拟通道排在逻辑通道之后的
+  // 设备，order 与 index 不相等，混用会导致 span() 返回空 span（波形不绘制）。
+  const int order = snapshot->get_ch_order(channel_index);
+  if (order < 0)
+    return;
+  // P1-c（统一读取抽象）+ B+C 收口：AnalogSnapshot 是单块交织布局。
+  // 这里需要**整块样本组基址**来按 (ring * channel_num + order) 自行遍历，
+  // 所以取 group_base（只有 Analog 的 group_base 与 data 不同 —— data 现在
+  // 指向"本通道第一个样本"）。
+  const pv::data::SampleSpan sp =
+      snapshot->span((uint32_t)channel_index, 0, snapshot->get_sample_count());
+  const uint8_t *const samples = sp.group_base;
   if (!samples || sample_count <= 0)
     return;
 

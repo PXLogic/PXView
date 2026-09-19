@@ -187,10 +187,13 @@ public:
         uint64_t start_sample, uint64_t end_sample,
         int16_t channel_index,
         std::vector<float>& out_data) = 0;
+    // DSO 采样读取。取值域与 get_analog_samples() 一致：**物理量（伏特）**。
+    // 需要 0..1 归一化幅度时显式传 normalized = true（这是修复前唯一的行为）。
     virtual Result<uint64_t> get_dso_samples(
         uint64_t start_sample, uint64_t end_sample,
         int16_t channel_index,
-        std::vector<float>& out_data) = 0;
+        std::vector<float>& out_data,
+        bool normalized = false) = 0;
     virtual Result<uint64_t> find_next_edge(
         uint64_t from_sample, int16_t channel_index, bool rising_edge) = 0;
     virtual Result<uint64_t> find_pattern(

@@ -100,11 +100,14 @@ public:
 	void append_payload(const sr_datafeed_analog &analog);
 
     const uint8_t *get_samples(int64_t start_sample);
+    // P1-c: 统一读取抽象（见 pv/data/snapshot/sample_span.h）。
+    SampleSpan span(uint32_t channel, uint64_t start, uint64_t count) const override;
+
 
     void get_envelope_section(EnvelopeSection &s,
         uint64_t start, int64_t count, float min_length, int probe_index);
 
-    int get_ch_order(int sig_index);
+    int get_ch_order(int sig_index) const;
 
     int get_scale_factor();
 

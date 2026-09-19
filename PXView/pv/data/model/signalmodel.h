@@ -91,8 +91,21 @@ public:
     void set_color(const std::string &color);
 
     // ---- Probe configuration ----
-    [[nodiscard]] inline double vdiv() const { return _vdiv; }
-    void set_vdiv(double vdiv);
+    //
+    // 单位约定（务必遵守 —— 这里的名字带 _mv 就是为了让编译器帮忙）：
+    //   vdiv_mv()  **毫伏/格 (mV/div)**，与驱动 SR_CONF_PROBE_VDIV、dslDial 的
+    //              取值列表、.pxc 的 "vdiv" 字段、以及 measure_voltage_factor
+    //              （DsoSnapshot）完全一致。上游 DSView 的
+    //              `ch->get_vDial()->get_value()` 也是 mV/div。
+    //   vfactor()  探头衰减因子（×1 / ×10 / ×100），无量纲。
+    //
+    // 历史缺陷：该字段曾经叫 `vdiv`（无单位），UI/配置文件路径写 mV/div，而
+    // `SessionService::set_probe_config()`（API 的 ProbeConfig::vdiv 是 **V/div**）
+    // 直接把 V/div 写进来 —— 于是 1 V/div 变成 1 mV/div，经
+    // `(uint64_t)m->vdiv_mv()` 灌进 measure_voltage_factor 后，DSO 测量电压
+    // 偏差 1000×。改名后 API 边界必须显式换算（×1000）。
+    [[nodiscard]] inline double vdiv_mv() const { return _vdiv_mv; }
+    void set_vdiv_mv(double vdiv_mv);
 
     [[nodiscard]] inline int coupling() const { return _coupling; }
     void set_coupling(int coupling);
@@ -195,7 +208,7 @@ private:
     bool                _enabled;
     std::string         _color;
 
-    double              _vdiv;
+    double              _vdiv_mv;   // 毫伏/格 (mV/div) —— 见 vdiv_mv() 的单位约定
     int                 _coupling;
     double              _vfactor;
     bool                _map_default;

@@ -190,8 +190,8 @@ uint64_t MathStack::default_vDialValue()
     data::SignalModel *m2 = lookup_dso_model(_source, _ch2_index);
     assert(m1 && m2);
 
-    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
-    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv());
+    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv_mv());
+    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv_mv());
     const uint64_t factor1 = static_cast<uint64_t>(m1->vfactor());
     const uint64_t factor2 = static_cast<uint64_t>(m2->vfactor());
     const uint64_t v1 = factor1 * dial1_value;
@@ -246,8 +246,8 @@ uint64_t MathStack::default_factor()
     }
     const uint64_t f1 = factor1 > 0 ? factor1 : 1;
     const uint64_t f2 = factor2 > 0 ? factor2 : 1;
-    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv());
-    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv());
+    const uint64_t dial1_value = static_cast<uint64_t>(m1->vdiv_mv());
+    const uint64_t dial2_value = static_cast<uint64_t>(m2->vdiv_mv());
     const uint64_t v1 = dial1_value * f1;
     const uint64_t v2 = dial2_value * f2;
 
@@ -443,12 +443,12 @@ void MathStack::calc_math(uint64_t mathFactor)
     // _stop_scale defaults to 1 and is only mutated during vDial navigation.
     // In the Core layer (no View) we cannot read _stop_scale, so we use 1.0
     // and follow the same 8-bit ADC assumption (255.0) as SpectrumStack.
-    const double scale1 = static_cast<double>(m1->vdiv()) / 1000.0 * k1 *
+    const double scale1 = static_cast<double>(m1->vdiv_mv()) / 1000.0 * k1 *
                           DS_CONF_DSO_VDIVS / 255.0;
 
     const double delta1 = m1->hw_offset() * scale1;
 
-    const double scale2 = static_cast<double>(m2->vdiv()) / 1000.0 * k2 *
+    const double scale2 = static_cast<double>(m2->vdiv_mv()) / 1000.0 * k2 *
                           DS_CONF_DSO_VDIVS / 255.0;
 
     const double delta2 = m2->hw_offset() * scale2;
@@ -458,8 +458,21 @@ void MathStack::calc_math(uint64_t mathFactor)
 
     const int index1 = _ch1_index;
     const int index2 = _ch2_index;
-    const uint8_t* value_buffer1 = data->get_samples(0, 0, index1);
-    const uint8_t* value_buffer2 = data->get_samples(0, 0, index2);
+    // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
+    // get_samples(0, 0, ch) 的基指针等价（start_sample == 0，无位打包取整）；
+    // _sample_num == get_sample_count()，故 contiguous_samples 恰好覆盖全部样本。
+    const pv::data::SampleSpan span1 = data->span((uint32_t)index1, 0, _sample_num);
+    const pv::data::SampleSpan span2 = data->span((uint32_t)index2, 0, _sample_num);
+    if (!span1.valid() || !span2.valid()) {
+        // 旧代码会解引用 nullptr（未定义行为）；显式停止本次计算。
+        pxv_warn("MathStack: span invalid (ch %d valid=%d, ch %d valid=%d) — "
+                 "aborting math computation",
+                 index1, (int)span1.valid(), index2, (int)span2.valid());
+        _math_state = Stopped;
+        return;
+    }
+    const uint8_t* value_buffer1 = span1.data;
+    const uint8_t* value_buffer2 = span2.data;
     double value1, value2;
 
     for (uint64_t sample = 0; sample < _sample_num; sample++) {

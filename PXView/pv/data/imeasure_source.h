@@ -16,8 +16,7 @@ class IMeasureSource {
 public:
     virtual ~IMeasureSource() = default;
     virtual std::vector<data::MeasurementValue> get_measurements(
-        int channel_index = -1,
-        int view_rect_height = 0) = 0;
+        int channel_index = -1) = 0;
     virtual std::vector<data::CursorEntry> get_cursors() const = 0;
     virtual int add_cursor(uint64_t sample_position) = 0;
     virtual bool remove_cursor(int index) = 0;

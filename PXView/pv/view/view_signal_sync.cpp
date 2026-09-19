@@ -742,7 +742,7 @@ _own_signals.clear();
     model->set_type(ch_type);
 
     if (ch_type == SR_CHANNEL_DSO || ch_type == SR_CHANNEL_ANALOG) {
-      model->set_vdiv(ch.vdiv);
+      model->set_vdiv_mv(ch.vdiv_mv);
       model->set_coupling(ch.coupling);
       model->set_hw_offset(ch.hw_offset);
       model->set_vertical_offset(ch.offset);

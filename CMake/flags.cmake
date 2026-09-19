@@ -64,11 +64,18 @@ add_compile_definitions($<$<CONFIG:Debug>:_GLIBCXX_ASSERTIONS>)
 # (every ~2s or 120 frames) to %TEMP%/pxv_decode_perf.log, sorted by total
 # track time so the jank hotspot is easy to spot. Default OFF — zero runtime
 # cost in normal builds.
+#
+# It also defines PXVIEW_COPY_AUDIT (P1-e), which counts the remaining
+# whole-payload copies on the real capture/export paths and prints a COPY_AUDIT
+# line in the same window flush. The counters live in the deliberately
+# lightweight pv/base/copy_audit.h so the capture/export translation units can
+# include them without pulling in windows.h / glib.h.
 #-------------------------------------------------------------------------------
 option(ENABLE_DECODE_PERF "Enable decode-render timing instrumentation" OFF)
 if(ENABLE_DECODE_PERF)
     add_compile_definitions(PXVIEW_DECODE_PERF)
-    message(STATUS "Decode render perf instrumentation: ENABLED")
+    add_compile_definitions(PXVIEW_COPY_AUDIT)
+    message(STATUS "Decode render perf instrumentation: ENABLED (incl. P1-e copy audit)")
 endif()
 
 #===============================================================================

@@ -4,6 +4,7 @@
 #include "pv/core/decodetaskmanager.h"
 #include "pv/core/documentregistry.h"
 #include "pv/core/eventbus.h"
+#include "pv/core/measure_format.h"   // core::kAdcScale (DSO 电压换算)
 #include "pv/session/sigsession.h"  // SessionData full definition
 #include "pv/data/snapshot/analogsnapshot.h"
 #include "pv/data/stack/decoderstack.h"
@@ -288,9 +289,18 @@ _buffers->capture_data()->get_dso()->set_samplerate(samplerate);
   if (mode == DSO) {
     for (auto m : signal_models_snapshot()) {
       if (m->type() == SR_CHANNEL_DSO) {
+        // 与 SigSession::set_cur_snap_samplerate 保持一致（见该处注释与 §4.9.2）:
+        //   measure_voltage_factor = m->vdiv_mv() -> mV/div 档位
+        //   measure_probe_factor   = m->vfactor() -> 探头衰减因子
+        //   data_scale             = 1/255         -> ADC 计数归一化 (kAdcScale)
+        // 三者都是 core::convert_voltage() 的输入，一起冻结在快照上，使
+        // 读取路径（MCP get_samples / export_binary）能就地算出物理量。
         _buffers->capture_data()->get_dso()->set_measure_voltage_factor(
+            (uint64_t)m->vdiv_mv(), m->index());
+        _buffers->capture_data()->get_dso()->set_measure_probe_factor(
             (uint64_t)m->vfactor(), m->index());
-        _buffers->capture_data()->get_dso()->set_data_scale(m->vdiv(), m->index());
+        _buffers->capture_data()->get_dso()->set_data_scale(
+            (float)core::kAdcScale, m->index());
       }
     }
   }

@@ -39,6 +39,7 @@
 #include "pv/data/decode/row.h"
 #include "pv/data/triggerconfig.h"
 #include "pv/session/storesession.h"
+#include "pv/core/measure_format.h"  // kMvPerVolt / volts_to_millivolts / convert_voltage
 #include "pv/base/log.h"
 #include "pv/base/ZipMaker.h"
 
@@ -47,6 +48,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <atomic>
 #include <QColor>
 #include <QDateTime>
 #include <QJsonDocument>
@@ -1431,6 +1433,12 @@ std::vector<ChannelInfo> SessionService::get_channels() const {
             info.type = sr_channel_type_to_api(ch->type);
             info.enabled = ch->enabled;
             info.enabled_default = ch->enabled;
+            // 探头档位：让 get_samples 的换算契约闭合（客户端不必再调
+            // get_probe_config）。SignalModel 内部是 mV/div，API 边界统一成 V/div。
+            if (m && (m->type() == SR_CHANNEL_DSO || m->type() == SR_CHANNEL_ANALOG)) {
+                info.vdiv = core::millivolts_to_volts(m->vdiv_mv());
+                info.vfactor = m->vfactor();
+            }
             result.push_back(info);
         }
         return result;
@@ -1826,7 +1834,8 @@ ProbeConfig SessionService::get_probe_config(int16_t channel) const {
         if (_device->get_probe_factor(u64, target_ch))
             config.vfactor = (double)u64;
         if (_device->get_probe_vdiv(u64, target_ch))
-            config.vdiv = (double)u64 / 1000.0; // 驱动单位毫伏/格
+            // 驱动单位毫伏/格 -> API 契约单位 V/div（唯一允许的边界换算）
+            config.vdiv = core::millivolts_to_volts((double)u64);
         if (_device->get_probe_coupling(ival, target_ch)) {
             // 驱动 0=GND/1=DC/2=AC → API AC=0/DC=1（GND 无 API 表示）
             config.coupling = (ival == 1) ? Coupling::DC : Coupling::AC;
@@ -1867,7 +1876,7 @@ Result<void> SessionService::set_probe_config(int16_t channel,
         if (config.vdiv > 0.0) {
             // API vdiv 单位为伏特/格；驱动 PROBE_VDIV 为 uint64 毫伏/格
             const uint64_t vdiv_mv =
-                (uint64_t)llround(config.vdiv * 1000.0);
+                (uint64_t)llround(core::volts_to_millivolts(config.vdiv));
             if (_device->set_config_uint64(SR_CONF_PROBE_VDIV, vdiv_mv,
                                            target_ch))
                 any_ok = true;
@@ -1899,8 +1908,16 @@ Result<void> SessionService::set_probe_config(int16_t channel,
         if (_session) {
             auto m = _session->get_signal_by_index(channel);
             if (m) {
-                if (config.vdiv > 0.0)
-                    m->set_vdiv(config.vdiv);
+                if (config.vdiv > 0.0) {
+                    // **单位边界换算**：API 契约 ProbeConfig::vdiv 是 **V/div**，
+                    // 而 SignalModel 内部（以及驱动 SR_CONF_PROBE_VDIV、dslDial、
+                    // .pxc 的 "vdiv" 字段）统一是 **mV/div**。
+                    // 历史上这里直接 `set_vdiv(config.vdiv)` 把 V/div 写进
+                    // mV/div 的字段：1 V/div 被写成 1 mV/div，随后
+                    // `set_measure_voltage_factor((uint64_t)m->vdiv_mv())` 得到 1，
+                    // DSO 测量电压整体偏小 1000×。
+                    m->set_vdiv_mv(core::volts_to_millivolts(config.vdiv));
+                }
                 m->set_coupling((config.coupling == Coupling::DC) ? 1 : 2);
                 if (config.vfactor > 0.0)
                     m->set_vfactor(config.vfactor);
@@ -2219,15 +2236,39 @@ Result<uint64_t> SessionService::get_logic_samples(
                                           "No logic data available");
         out_data.clear();
         uint64_t total_copied = 0;
+        // P1-c：统一读取抽象。logic 是位打包布局，两个原先"必须用 get_samples"的点
+        // 现在都由 SampleSpan 覆盖：
+        //  1) 常量块（lbp == nullptr）：span.is_constant + constant_bit 显式表达，
+        //     bit_at() 内建常量分支 —— 不再需要 thread_local 合成缓冲。
+        //  2) end_sample 出参（回写为 leaf block 末尾）：等价于
+        //     span.start_sample + span.contiguous_samples - 1（已代数证明）。
+        //
+        // MCP 契约（mcp_tool_registry.cpp 的 get_samples 描述）明确写的是
+        // "one byte per sample, each byte is 0 or 1"，而旧实现是
+        // `byte_count = count` 个**位打包**字节 —— 既违反自己的契约，又多读 8 倍
+        // 并越过 leaf block。这里按契约展开为每样本一个字节。
         for (auto ch_idx : channel_indices) {
-            uint64_t actual_end = end_sample;
-            const uint8_t *data = snapshot->get_samples(start_sample, actual_end,
-                                                         static_cast<int>(ch_idx));
-            if (!data)
+            const pv::data::SampleSpan sp =
+                snapshot->span(static_cast<uint32_t>(ch_idx), start_sample,
+                               (end_sample >= start_sample)
+                                   ? (end_sample - start_sample + 1)
+                                   : 1);
+            if (!sp.readable())
                 continue;
-            uint64_t count = actual_end - start_sample + 1;
-            size_t byte_count = static_cast<size_t>(count);
-            out_data.insert(out_data.end(), data, data + byte_count);
+
+            const uint64_t total_samples = snapshot->get_sample_count();
+            const uint64_t leaf_last =
+                sp.start_sample + sp.contiguous_samples - 1;
+            uint64_t last = std::min(leaf_last, total_samples - 1);
+            if (end_sample < last)
+                last = end_sample;
+            if (last < start_sample)
+                continue;
+
+            const uint64_t count = last - start_sample + 1;
+            out_data.reserve(out_data.size() + static_cast<size_t>(count));
+            for (uint64_t s = start_sample; s <= last; s++)
+                out_data.push_back(sp.bit_at(s) ? 1 : 0);
             total_copied += count;
         }
         return Result<uint64_t>::Success(total_copied);
@@ -2249,16 +2290,45 @@ Result<uint64_t> SessionService::get_analog_samples(
             return Result<uint64_t>::Fail(ErrorCode::NoData,
                                           "No analog data available");
         out_data.clear();
-        const uint8_t *raw = snapshot->get_samples(static_cast<int64_t>(start_sample));
-        if (!raw)
+        // 缺陷修复：对齐 export_binary() 的 Analog 分支（那里的 CRITICAL FIX 是本项目
+        // 对"上游 interleaved 布局"的权威处理）。
+        //
+        // 旧实现用 pitch = get_scale_factor() —— 而该函数返回 EnvelopeScaleFactor
+        // (1 << EnvelopeScalePower = 16)，是**包络降采样因子**，不是交织步长；
+        // 并把未经 get_ch_order() 映射的 channel_index 直接当通道内字节偏移，
+        // 再 /255.0f 归一化。这套约定是 fork 时代为「ADC 整数 + 包络布局」写的，
+        // 对当前 [s0_ch0][s0_ch1]... 的 float/uint16/uint8 交织布局完全错误 ——
+        // 它会读到别的通道/别的样本的字节。
+        //
+        // 现在的取值域与 AnalogSignal 渲染、export_binary 一致：
+        //   float 编码 -> 电压值 (V)
+        //   整数编码   -> 原始整数计数
+        // 这与 get_dso_samples() 也一致（那里已统一为伏特，见 §4.9.3）：
+        // analog 数据本身就是物理量，不需要 ADC 归一化。
+        //
+        // B+C 收口：span.data 已指向**本通道第一个样本**（AnalogSnapshot::span()
+        // 内部加过 order * unit_bytes），所以这里不再需要 get_ch_order() 手算
+        // 通道内偏移 —— 少一处易错点。
+        const pv::data::SampleSpan sp =
+            snapshot->span(static_cast<uint32_t>(channel_index), start_sample, 1);
+        if (!sp.valid())
             return Result<uint64_t>::Fail(ErrorCode::NoData,
                                           "Failed to read analog samples");
-        uint64_t count = end_sample - start_sample + 1;
-        int pitch = snapshot->get_scale_factor();
+
+        const bool is_float = snapshot->is_float();
+
+        uint64_t count = (end_sample >= start_sample)
+                             ? (end_sample - start_sample + 1) : 0;
+        // 不得越过 span 的连续上界（旧代码在请求越界时会越界读）
+        if (count > sp.contiguous_samples)
+            count = sp.contiguous_samples;
+        if (count == 0)
+            return Result<uint64_t>::Success(0);
+
         out_data.reserve(static_cast<size_t>(count));
         for (uint64_t i = 0; i < count; i++) {
-            uint8_t byte_val = raw[i * pitch + channel_index];
-            out_data.push_back(static_cast<float>(byte_val) / 255.0f);
+            out_data.push_back(static_cast<float>(
+                sp.analog_value_at(start_sample + i, is_float)));
         }
         return Result<uint64_t>::Success(count);
     };
@@ -2268,9 +2338,10 @@ Result<uint64_t> SessionService::get_analog_samples(
 Result<uint64_t> SessionService::get_dso_samples(
     uint64_t start_sample, uint64_t end_sample,
     int16_t channel_index,
-    std::vector<float> &out_data) {
+    std::vector<float> &out_data,
+    bool normalized) {
     auto fn = [this, start_sample, end_sample,
-               channel_index, &out_data]() -> Result<uint64_t> {
+               channel_index, &out_data, normalized]() -> Result<uint64_t> {
         if (!_session)
             return Result<uint64_t>::Fail(ErrorCode::InternalError,
                                           "Session is nullptr");
@@ -2279,18 +2350,65 @@ Result<uint64_t> SessionService::get_dso_samples(
             return Result<uint64_t>::Fail(ErrorCode::NoData,
                                           "No DSO data available");
         out_data.clear();
-        const uint8_t *raw = snapshot->get_samples(
-            static_cast<int64_t>(start_sample),
-            static_cast<int64_t>(end_sample),
-            static_cast<uint16_t>(channel_index));
-        if (!raw)
+        // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
+        // get_samples(start, end, ch) 返回的指针严格等价
+        // （start_sample == start，无位打包取整）。
+        // 旧接口要求 start/end 都落在 [0, sample_count) 且 start <= end；span 只检查
+        // start，故这里显式保留同样的 range 校验。
+        const uint64_t dso_total = snapshot->get_sample_count();
+        if (start_sample > end_sample || start_sample >= dso_total ||
+            end_sample >= dso_total)
             return Result<uint64_t>::Fail(ErrorCode::NoData,
                                           "Failed to read DSO samples");
+        const pv::data::SampleSpan sp =
+            snapshot->span(static_cast<uint32_t>(channel_index), start_sample,
+                           end_sample - start_sample + 1);
+        if (!sp.valid())
+            return Result<uint64_t>::Fail(ErrorCode::NoData,
+                                          "Failed to read DSO samples");
+        const uint8_t *raw = sp.data;
         uint64_t count = end_sample - start_sample + 1;
-        float data_scale = snapshot->get_data_scale(channel_index);
+        const float data_scale = snapshot->get_data_scale(channel_index);
         out_data.reserve(static_cast<size_t>(count));
+
+        // ---- 显式归一化（normalized=true）：raw * data_scale -> 0..1 ----
+        //
+        // 这是修复前 get_dso_samples() 的**唯一**行为。现在它退化为一个
+        // 显式开关：需要 0..1 幅度的调用方（例如只看相对形状、或做归一化
+        // 显示）主动要求，而不是靠"这个函数恰好归一化、那个函数恰好是物理量"。
+        if (normalized) {
+            for (uint64_t i = 0; i < count; i++)
+                out_data.push_back(static_cast<float>(raw[i]) * data_scale);
+            return Result<uint64_t>::Success(count);
+        }
+
+        // ---- 默认：物理量（伏特），与 get_analog_samples() 取值域一致 ----
+        //
+        // 修复前这里返回 0..1 而 get_analog_samples() 返回物理量，两个"读采样"
+        // 接口取值域不一致；客户端要把 DSO 采样换成伏特，必须再调
+        // get_probe_config 拿 vdiv/vfactor 自己乘 —— 契约不闭合，且极易漏乘
+        // （§4.9.2 的 vfactor² 缺陷就是这么来的）。
+        //
+        // 现在换算在 Core 里一次做对，复用 core::convert_voltage()（与测量面板
+        // / 游标 / mathstack / spectrumstack 同一公式），避免出现第二处实现。
+        // 所需的三个量都在 DsoSnapshot 上（采集期冻结的测量档位上下文）。
+        const uint64_t measure_vf = snapshot->get_measure_voltage_factor(channel_index);
+        uint64_t probe = snapshot->get_measure_probe_factor(channel_index);
+        if (probe == 0)
+            probe = 1;   // 未灌入时按 ×1 处理
+        if (measure_vf == 0) {
+            // 档位上下文缺失（例如旧会话文件未带上 vdiv）：**不**退化成 0..1，
+            // 那正是本函数要消灭的单位混用。显式报错，让调用方自己决定。
+            return Result<uint64_t>::Fail(
+                ErrorCode::NoData,
+                "DSO vertical scale (mV/div) is unavailable for this snapshot; "
+                "pass normalized=true to get 0..1 amplitudes instead");
+        }
         for (uint64_t i = 0; i < count; i++) {
-            out_data.push_back(static_cast<float>(raw[i]) * data_scale);
+            const double v_mv = core::convert_voltage(
+                raw[i], data_scale, measure_vf, probe);
+            out_data.push_back(
+                static_cast<float>(core::millivolts_to_volts(v_mv)));
         }
         return Result<uint64_t>::Success(count);
     };
@@ -4020,13 +4138,25 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
             if (!snapshot || !snapshot->have_data())
                 continue;
 
-            uint64_t actual_end = end;
-            const uint8_t *data = snapshot->get_samples(start, actual_end,
-                                                         static_cast<int>(ch_idx));
-            if (!data)
+            // P1-c：统一读取抽象。logic 位打包布局下：
+            //   - span.data 是 floor(start/8) 处的字节指针（与旧 get_samples 相同）
+            //   - span.start_sample + contiguous_samples == leaf_end_abs + 1
+            //     （旧 get_samples 的 end_sample 出参语义，已代数证明等价）
+            //   - 常量块（lbp == nullptr）时 is_constant 为真、data 为 nullptr；
+            //     旧实现靠 thread_local 合成缓冲（全 0x00 / 0xFF），现在用
+            //     constant_fill_byte() 在写出时展开。
+            const pv::data::SampleSpan sp =
+                snapshot->span(static_cast<uint32_t>(ch_idx), start,
+                               (end >= start) ? (end - start + 1) : 1);
+            if (!sp.readable())
                 continue;
 
-            uint64_t count = actual_end - start + 1;
+            // 复现旧出参语义：actual_end = min(leaf_end_abs + 1, sample_count)
+            const uint64_t total_samples = snapshot->get_sample_count();
+            const uint64_t actual_end =
+                std::min(sp.start_sample + sp.contiguous_samples, total_samples);
+
+            uint64_t count = (actual_end > start) ? (actual_end - start + 1) : 0;
             // CRITICAL FIX: get_samples() extends actual_end up to the enclosing
             // leaf-block boundary (8 samples = 1 byte), so for captures that do
             // not end exactly on a leaf boundary `count` can exceed the real
@@ -4047,57 +4177,54 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
                 count = req_count;
             // Logic: 1 bit per channel per sample, packed into bytes
             size_t byte_count = static_cast<size_t>((count + 7) / 8);
-            file.write(reinterpret_cast<const char*>(data), byte_count);
+            // 不得越过 span 的可用字节（旧代码在 leaf 边界处可能多写 1 字节）。
+            if (byte_count > sp.bytes())
+                byte_count = static_cast<size_t>(sp.bytes());
+            if (sp.is_constant) {
+                std::vector<char> fill(byte_count,
+                                       static_cast<char>(sp.constant_fill_byte()));
+                file.write(fill.data(), static_cast<qint64>(fill.size()));
+            } else {
+                file.write(reinterpret_cast<const char*>(sp.data), byte_count);
+            }
         } else if (ch_type == ChannelType::Analog) {
             auto *snapshot = _session->get_analog_snapshot();
             if (!snapshot || !snapshot->have_data())
                 continue;
 
-            const uint8_t *raw = snapshot->get_samples(static_cast<int64_t>(start));
-            if (!raw)
-                continue;
-
-            // CRITICAL FIX: 上游 libsigrok analog 数据布局是 interleaved：
+            // P1-c（统一读取抽象）+ B+C 收口：span.data 指向**本通道第一个样本**
+            // （AnalogSnapshot::span() 内部已加 order * unit_bytes），不再需要
+            // 调用方用 get_ch_order() 手算通道内偏移。
+            //
+            // 上游 libsigrok analog 数据布局是 interleaved：
             //   [s0_ch0][s0_ch1]...[s0_chN][s1_ch0][s1_ch1]...
             // 每个样本占 unit_bytes 字节（float=4, uint16=2, uint8=1）。
             // 旧代码用 pitch=EnvelopeScaleFactor=16 + ch_idx（如 8）+ /255.0f
             // 是 fork 时代码为 ADC 整数（0-255）写的，对上游 float 电压数据完全错误。
-            // 现在按正确的 interleaved 布局读取，并用 get_ch_order 把通道索引
-            // 映射到 snapshot 内部的 order（如 ch=8 在 5 通道 analog 中是 order=0）。
-            int order = snapshot->get_ch_order(ch_idx);
-            if (order < 0) {
+            // get_analog_samples() 已对齐到同一实现（共用 SampleSpan::analog_value_at）。
+            const pv::data::SampleSpan analog_sp =
+                snapshot->span(static_cast<uint32_t>(ch_idx), start, 1);
+            if (!analog_sp.valid()) {
                 pxv_warn("export_binary: channel %d not in analog snapshot, skipping", ch_idx);
                 continue;
             }
 
-            uint32_t channel_num = snapshot->get_channel_num();
-            uint8_t unit_bytes = snapshot->get_unit_bytes();
-            bool is_float = snapshot->is_float();
+            const bool is_float = snapshot->is_float();
 
-            // interleaved 步长：每个样本占 channel_num * unit_bytes 字节
-            uint64_t stride = (uint64_t)channel_num * unit_bytes;
-            uint64_t ch_offset = (uint64_t)order * unit_bytes;
-
-            uint64_t count = end - start + 1;
+            uint64_t count = (end >= start) ? (end - start + 1) : 0;
+            // P1-c：不得越过 span 的连续上界（旧代码未做此检查，请求越界时会越界读）。
+            if (count > analog_sp.contiguous_samples)
+                count = analog_sp.contiguous_samples;
 
             // Apply downsample ratio
             uint64_t step = config.analog_downsample_ratio > 1
                                 ? config.analog_downsample_ratio : 1;
 
             for (uint64_t i = 0; i < count; i += step) {
-                const uint8_t *p = raw + i * stride + ch_offset;
-                float val;
-                if (is_float && unit_bytes == sizeof(float)) {
-                    // float 电压数据：直接 memcpy 4 字节
-                    memcpy(&val, p, sizeof(float));
-                } else {
-                    // 整数数据：按 unit_bytes 拼接（little-endian）后转 float
-                    uint64_t iv = 0;
-                    for (uint8_t b = 0; b < unit_bytes; b++) {
-                        iv |= ((uint64_t)p[b]) << (b * 8);
-                    }
-                    val = static_cast<float>(iv);
-                }
+                // 取值域：float 编码 -> 电压(V)；整数编码 -> 原始整数计数。
+                // 与 AnalogSignal 渲染、get_analog_samples() 一致。
+                float val = static_cast<float>(
+                    analog_sp.analog_value_at(start + i, is_float));
                 file.write(reinterpret_cast<const char*>(&val), sizeof(float));
             }
         } else if (ch_type == ChannelType::Dso) {
@@ -4105,18 +4232,46 @@ Result<void> SessionService::export_binary(const ExportConfig &config) {
             if (!snapshot || !snapshot->have_data())
                 continue;
 
-            const uint8_t *raw = snapshot->get_samples(
-                static_cast<int64_t>(start),
-                static_cast<int64_t>(end),
-                static_cast<uint16_t>(ch_idx));
-            if (!raw)
+            // P1-c（统一读取抽象）：DSO 通道平面，span.data 与旧
+            // get_samples(start, end, ch) 指针等价；保留旧接口的 range 校验。
+            const uint64_t dso_total = snapshot->get_sample_count();
+            if (start > end || start >= dso_total || end >= dso_total)
                 continue;
+            const pv::data::SampleSpan dso_export_sp =
+                snapshot->span(static_cast<uint32_t>(ch_idx), start,
+                               end - start + 1);
+            if (!dso_export_sp.valid())
+                continue;
+            const uint8_t *raw = dso_export_sp.data;
 
             uint64_t count = end - start + 1;
+            // 与 get_dso_samples() 同口径：默认写**伏特**（物理量），与 Analog
+            // 分支（float 编码 -> 电压 V）取值域一致。
+            // 档位上下文缺失时退回 0..1 归一化，并在日志里说明 —— 导出是"尽量
+            // 出数据"的路径，不适合因为缺 vdiv 就整个失败。
+            const uint64_t measure_vf = snapshot->get_measure_voltage_factor(ch_idx);
+            uint64_t probe = snapshot->get_measure_probe_factor(ch_idx);
+            if (probe == 0)
+                probe = 1;
+            const bool as_volts = (measure_vf != 0);
+            if (!as_volts) {
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) {
+                    pxv_warn("export_binary: DSO vertical scale (mV/div) unavailable "
+                             "for ch %d — falling back to 0..1 normalised amplitudes. "
+                             "Emitted once per process.", (int)ch_idx);
+                }
+            }
             float data_scale = snapshot->get_data_scale(ch_idx);
 
             for (uint64_t i = 0; i < count; i++) {
-                float val = static_cast<float>(raw[i]) * data_scale;
+                float val;
+                if (as_volts) {
+                    val = static_cast<float>(core::millivolts_to_volts(
+                        core::convert_voltage(raw[i], data_scale, measure_vf, probe)));
+                } else {
+                    val = static_cast<float>(raw[i]) * data_scale;
+                }
                 file.write(reinterpret_cast<const char*>(&val), sizeof(float));
             }
         }

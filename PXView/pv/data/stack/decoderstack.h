@@ -42,6 +42,7 @@
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/data/decoderanalogdata.h"
 #include "pv/data/isession_host.h"
+#include "pv/data/cache/mmap_allocator.h"
 #include "pv/utility/atomic_shared_ptr.h"
 
 
@@ -314,6 +315,18 @@ private:
 	// TS-3 fix: _stack owns decoders via unique_ptr — no manual delete needed.
 	std::list<std::unique_ptr<decode::Decoder>> _stack;
     std::shared_ptr<pv::data::LogicSnapshot> _snapshot;
+
+    // P1-b（零拷贝生命周期契约）：本代 mmap 区域的"钉住"句柄。
+    //
+    // 解码线程把裸内部指针交给 libsigrokdecode（di->inbuf 指向 leaf block），
+    // 这些指针的生命周期不由 _snapshot 的引用计数覆盖 —— 采集线程可能在下一帧
+    // first_payload 里重建 MmapAllocator（几何变更路径），一旦映射被 munmap，
+    // 解码线程就在 term_matches 里踩悬垂指针（历史 SIGSEGV）。
+    //
+    // 在整轮解码期间持有这份拷贝，映射引用计数 > 0，重建只递减本对象的计数，
+    // 不会解除映射。这是"读者自保"：不再依赖 _iterator_count 的时序巧合，
+    // 也不依赖 free_data() 的提前返回。
+    std::shared_ptr<pv::data::MmapAllocator> _pinned_region;
   
     // Plan A: dedicated heap for this stack's annotation storage. Created in
     // the ctor, destroyed after _rows in the dtor. Reference-counted so a

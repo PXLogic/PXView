@@ -282,9 +282,10 @@ public:
   // values from the view_data() DsoSnapshot + signal_models. The View layer
   // (view::DsoMeasure::get_measure) and the MCP API (SessionService::
   // get_measurements) both call this so headless mode returns real data.
+  // No view geometry is needed: the voltage conversion is height-independent
+  // (see devdoc/P0-P1-P2架构设计与实施计划.md §4.9.2).
   std::vector<data::MeasurementValue> get_measurements(
-      int channel_index = -1,
-      int view_rect_height = 0) override;
+      int channel_index = -1) override;
   // Task C2.4: cursor position state forwarded to
   // SessionStateContext::cursor_registry(). The View layer reads/writes
   // through these so headless MCP clients see real cursor state without
@@ -674,13 +675,14 @@ std::vector<core::Subscription> _event_subscriptions;
 
   // --- DSO 测量缓存 (#3, 源自 c6cd59fd 非 RLE 部分) ---
   // MeasureCalculator::compute 在主线程 O(样本数) 遍历, hover 测量时频繁触发.
-  // 缓存按 (data 指针, channel, ring_sample_count, view_rect_height) 键,
-  // 数据变更 (running 时 ring 增长 / 文档切换) 自动失效, stopped hover 命中.
+  // 缓存按 (data 指针, channel, ring_sample_count) 键, 数据变更 (running 时
+  // ring 增长 / 文档切换) 自动失效, stopped hover 命中.
+  // 注: 不再把 view_rect_height 计入键 —— 电压换算已与视图几何无关, 窗口
+  // 缩放不应导致 O(N) 重算 (§4.9.2).
   mutable std::mutex _measure_cache_mutex;
   void *_measure_cache_data = nullptr;
   int _measure_cache_ch = -1;
   uint64_t _measure_cache_ring = 0;
-  int _measure_cache_h = 0;
   bool _measure_cache_valid = false;
   std::vector<data::MeasurementValue> _measure_cache_val;
 };

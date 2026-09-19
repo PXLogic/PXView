@@ -31,6 +31,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
+#include "pv/base/copy_audit.h"   // P1-e 拷贝审计宏 PXV_PERF_COPY_*（轻量头，仅 <cstdint>）
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/snapshot/logicsnapshot_diskcache_writer.h"
 
@@ -97,10 +98,16 @@ void LogicSnapshotDiskCacheWriter::drain_and_join()
     }
     {
         std::lock_guard<std::mutex> q_lock(_async_mutex);
-        std::queue<AsyncPayload> empty;
-        _async_queue.swap(empty);
+        // P2: 逐项归还槽位再清空（swap 到局部队列会丢掉槽位指针 → 池永久泄漏）。
+        while (!_async_queue.empty()) {
+            if (_async_queue.front().slot != nullptr)
+                _slot_pool.release(_async_queue.front().slot);
+            _async_queue.pop();
+        }
         _async_queue_depth = 0;
         _async_queue_bytes_size = 0;
+        // worker 已 join、队列已空 → 无在飞槽位，可安全释放整个池。
+        _slot_pool.reset();
         _async_drain_cv.notify_all();  // final release for any straggler feed thread
     }
 }
@@ -131,43 +138,120 @@ uint64_t LogicSnapshotDiskCacheWriter::get_async_queue_bytes() const
 }
 
 // ----------------------------------------------------------------------------
+// P2 槽位池（调用方必须持有 _async_mutex）
+// ----------------------------------------------------------------------------
+
+void LogicSnapshotDiskCacheWriter::SlotPool::configure(uint64_t slot_bytes,
+                                                       uint32_t max_slots)
+{
+    // 仅在无在飞槽位时重配置，避免把已借出的指针留在旧尺寸的假设下。
+    if (_in_use != 0) return;
+    _storage.clear();
+    _free.clear();
+    _in_use = 0;
+    _peak_in_use = 0;
+    _slot_bytes = slot_bytes;
+    _max_slots = max_slots;
+}
+
+void LogicSnapshotDiskCacheWriter::SlotPool::reset()
+{
+    if (_in_use != 0) return;  // 有在飞槽位时不释放（调用方应先 drain）
+    _storage.clear();
+    _free.clear();
+    _peak_in_use = 0;
+    _slot_bytes = 0;
+    _max_slots = 0;
+}
+
+uint8_t *LogicSnapshotDiskCacheWriter::SlotPool::acquire()
+{
+    if (!configured()) return nullptr;
+
+    if (!_free.empty()) {
+        uint8_t *p = _free.back();
+        _free.pop_back();
+        ++_in_use;
+        if (_in_use > _peak_in_use) _peak_in_use = _in_use;
+        return p;
+    }
+
+    // 懒增长：只在真正需要时分配，稳态下只保留"实际并发在飞数"个槽位，
+    // 而不是一上来就吃掉 slot_bytes * max_slots 的常驻内存。
+    if (_storage.size() < (size_t)_max_slots) {
+        _storage.emplace_back(new uint8_t[(size_t)_slot_bytes]);
+        ++_in_use;
+        if (_in_use > _peak_in_use) _peak_in_use = _in_use;
+        return _storage.back().get();
+    }
+
+    return nullptr;  // 池耗尽 → 调用方反压等待
+}
+
+void LogicSnapshotDiskCacheWriter::SlotPool::release(uint8_t *slot)
+{
+    if (slot == nullptr) return;
+    _free.push_back(slot);
+    if (_in_use > 0) --_in_use;
+}
+
+// ----------------------------------------------------------------------------
 // Enqueue (called by LogicSnapshot::append_payload)
 // ----------------------------------------------------------------------------
 
-void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length, int format)
+void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
+                                            int format)
 {
-    AsyncPayload payload;
-    payload.data = std::vector<uint8_t>(data, data + length);
-    payload.format = format;
-    size_t v_size = payload.data.size();
+    if (length == 0) return;
 
-    {
-        std::unique_lock<std::mutex> lock(_async_mutex);
-        // Backpressure (Task 3): if the async write queue is larger than the high
-        // watermark, block the feed thread here until the async worker drains it
-        // below the low watermark. This backs pressure up to the device driver
-        // instead of letting the queue grow unbounded and OOM under fast capture +
-        // slow disk. The `|| !_async_running` clause guarantees we never block
-        // forever when the async writer is being shut down (stop paths notify_all
-        // on _async_drain_cv). Hysteresis: block above HIGH, release below LOW.
-        if (_async_queue_bytes_size.load() > ASYNC_HIGH_WATERMARK) {
-            _async_drain_cv.wait(lock, [this] {
-                return _async_queue_bytes_size.load() <= ASYNC_LOW_WATERMARK
-                    || !_async_running.load();
-            });
-            // If the writer was stopped while we were blocked, drop this payload:
-            // the stop path is about to (or already has) cleared the queue, so any
-            // push here would become an orphan entry referencing freed mmap state.
+    AsyncPayload payload;
+    payload.length = length;
+    payload.format = format;
+
+    std::unique_lock<std::mutex> lock(_async_mutex);
+
+    // 懒配置：首个 payload 决定槽位尺寸（上取整到 4KB）。驱动 payload 尺寸稳定，
+    // 因此后续 payload 都命中池化路径。
+    if (!_slot_pool.configured()) {
+        const uint64_t rounded = (length + 4095ULL) & ~4095ULL;
+        _slot_pool.configure(rounded, P2_MAX_SLOTS);
+        pxv_info("P2 slot pool: slot_bytes=%llu max_slots=%u (upper bound %llu MB)",
+                 (unsigned long long)rounded, (unsigned)P2_MAX_SLOTS,
+                 (unsigned long long)(rounded * P2_MAX_SLOTS / (1024ULL * 1024)));
+    }
+
+    const bool fits = (length <= _slot_pool.slot_bytes());
+    if (fits) {
+        // ---- 池化路径：取槽位 + memcpy（无堆分配、无归还 OS）----
+        uint8_t *slot = nullptr;
+        for (;;) {
+            slot = _slot_pool.acquire();
+            if (slot != nullptr) break;
             if (!_async_running.load()) {
-                pxv_warn("append_payload: async writer stopped during backpressure wait, "
-                         "dropping %llu bytes", (unsigned long long)v_size);
+                // 停止路径：队列即将被清空，此处 push 会变成引用已释放状态的孤儿项。
+                pxv_warn("append_payload: async writer stopped while waiting for a "
+                         "free slot, dropping %llu bytes", (unsigned long long)length);
                 return;
             }
+            // 池耗尽 → 反压：等 worker 归还槽位（它每处理完一个 payload 都会
+            // 归还并 notify_one）。上界等价于 max_slots 个在飞 payload。
+            _async_drain_cv.wait_for(lock, std::chrono::milliseconds(50));
         }
-        _async_queue.push(std::move(payload));
-        _async_queue_depth = _async_queue.size();
-        _async_queue_bytes_size += v_size;
+        std::memcpy(slot, data, (size_t)length);
+        // P1-e 拷贝审计（仅在 ENABLE_DECODE_PERF 构建下计数，见 pv/base/perflog.h）
+        PXV_PERF_COPY_STAGING(length);
+        payload.slot = slot;
+    } else {
+        // ---- 超长 payload 兜底：与改造前的堆分配行为一致，保证不比现状更差 ----
+        payload.heap.assign(data, data + length);
+        PXV_PERF_COPY_STAGING(length);
     }
+
+    _async_queue.push(std::move(payload));
+    _async_queue_depth = _async_queue.size();
+    _async_queue_bytes_size += length;
+
+    lock.unlock();
     _async_cv.notify_one();
 }
 
@@ -259,11 +343,14 @@ void LogicSnapshotDiskCacheWriter::drain_queue_for_capture_end()
             {
                 std::lock_guard<std::mutex> q_lock(_async_mutex);
                 while (!_async_queue.empty()) {
-                    dropped += _async_queue.front().data.size();
+                    dropped += _async_queue.front().length;
+                    if (_async_queue.front().slot != nullptr)
+                        _slot_pool.release(_async_queue.front().slot);
                     _async_queue.pop();
                 }
                 _async_queue_depth = 0;
                 _async_queue_bytes_size = 0;
+                _slot_pool.reset();  // worker 已 join、队列已空
                 _async_drain_cv.notify_all();  // final release for any straggler feed thread
             }
             pxv_warn("capture_ended: dropped %llu bytes from async queue after timeout",
@@ -296,19 +383,16 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             payload = std::move(_async_queue.front());
             _async_queue.pop();
             _async_queue_depth = _async_queue.size();
-            _async_queue_bytes_size -= payload.data.size();
-            // Backpressure (Task 3): if the queue has drained back below the low
-            // watermark, release one feed thread that is blocked in enqueue().
-            // notify_one (not notify_all) per spec to avoid thundering herd.
-            if (_async_queue_bytes_size.load() <= ASYNC_LOW_WATERMARK) {
-                _async_drain_cv.notify_one();
-            }
+            _async_queue_bytes_size -= payload.length;
+            // 注意：槽位归还与 _async_drain_cv 的通知放在 payload 处理完之后
+            // （见本函数尾部）—— 提前归还会让 feed 线程在 worker 还在读该槽位时
+            // 就把它 memcpy 覆盖掉。
         }
 
         _async_busy.store(true);
         sr_datafeed_logic logic;
-        logic.length = payload.data.size();
-        logic.data = payload.data.data();
+        logic.length = payload.length;
+        logic.data = payload.data();
         logic.format = payload.format;
 
         // LA_CROSS_DATA: raw channel-block — forward to append_cross_payload
@@ -344,16 +428,29 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             _owner->append_payload_impl(logic);
 
         auto end = std::chrono::steady_clock::now();
-        _async_bytes_written += payload.data.size();
+        _async_bytes_written += payload.length;
 
         double elapsed_s = std::chrono::duration<double>(end - start).count();
         if (elapsed_s > 0) {
-            double mbps = (payload.data.size() / (1024.0 * 1024.0)) / elapsed_s;
+            double mbps = (payload.length / (1024.0 * 1024.0)) / elapsed_s;
             // Exponential moving average for smoothing UI
             double old = _async_write_speed_mbps.load();
             if (old == 0.0) _async_write_speed_mbps = mbps;
             else _async_write_speed_mbps = old * 0.8 + mbps * 0.2;
         }
+
+        // P2: 归还槽位 —— 必须在 append_* 完全消费完 payload 之后。
+        // heap 兜底路径（payload.slot == nullptr）无需归还。
+        if (payload.slot != nullptr) {
+            {
+                std::lock_guard<std::mutex> lock(_async_mutex);
+                _slot_pool.release(payload.slot);
+                payload.slot = nullptr;
+            }
+            // 唤醒可能在等空闲槽位的 feed 线程（notify_one 避免惊群）。
+            _async_drain_cv.notify_one();
+        }
+
         _async_busy.store(false);
     }
 }

@@ -333,14 +333,16 @@ ToolResult handle_get_samples(ISessionService* session,
 
     if (type == "dso") {
         std::vector<float> out_data;
+        auto normalized = p.get_or<bool>("normalized", false);
         auto r = session->get_dso_samples(
-            start, end, ch, out_data);
+            start, end, ch, out_data, normalized);
         if (!r)
             throw ToolError(r.error().message);
         return json_result({
             {"sample_count", r.value()},
             {"data", out_data},
-            {"encoding", "float32"}
+            {"encoding", "float32"},
+            {"unit", normalized ? "normalized_0_1" : "V"}
         });
     }
 
@@ -1402,7 +1404,13 @@ static void register_advanced_feature_tools(McpServer& server,
         "Analog mode, 'dso' for DSO mode. Use get_work_mode to check "
         "current mode. Returns base64-encoded data for logic channels "
         "(one byte per sample, each byte is 0 or 1) and float arrays "
-        "for analog/DSO channels.")
+        "for analog/DSO channels. "
+        "Units: DSO float samples are in VOLTS by default (pass "
+        "normalized=true to get 0..1 full-scale amplitudes instead; the "
+        "response 'unit' field tells you which). Analog float samples are "
+        "in volts when the device sends float-encoded data, otherwise they "
+        "are raw integer counts. Per-channel vdiv (V/div) and vfactor are "
+        "available from get_channels.")
         .param<int16_t>("channelIndex", "Channel index as returned by "
                         "get_channels ('index' field)", Required)
         .enum_param<std::string>("channelType",
@@ -1410,6 +1418,8 @@ static void register_advanced_feature_tools(McpServer& server,
             "Channel type — must match current work mode", Required)
         .param<uint64_t>("startSample", "Start sample index (default 0)")
         .param<uint64_t>("endSample", "End sample index (default = all)")
+        .param<bool>("normalized", "DSO only: return 0..1 full-scale "
+                     "amplitudes instead of volts (default false)")
         .read_only()
         .on_call([app_svc](const Params& p) -> ToolResult {
             auto* session = require_session(app_svc);

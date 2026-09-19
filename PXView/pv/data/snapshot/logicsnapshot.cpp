@@ -127,6 +127,8 @@ LogicSnapshot::LogicSnapshot() : Snapshot(1, 0, 0) {
   _able_free = true;
   _mmap_alloc = nullptr;
   _max_blocks_per_channel = 0;
+  _mmap_geom_channel_num = 0;
+  _mmap_geom_max_blocks = 0;
   _disk_cache_writer = std::make_unique<LogicSnapshotDiskCacheWriter>(this);
   _glitch_filter = std::make_unique<LogicSnapshotGlitchFilter>(this);
   _pattern_search = std::make_unique<LogicSnapshotPatternSearch>(this);
@@ -216,7 +218,21 @@ void LogicSnapshot::free_data() {
 
   // Now safe to release the mmap allocator — all non-mmap blocks have been
   // returned to LeafBlockPool, and mmap-backed blocks are unmapped by reset().
+  //
+  // P1-b（零拷贝生命周期契约）：这里的 reset() 只递减**本对象**的引用计数。
+  // 若仍有读者（解码线程 / 渲染 / 测量）通过 mmap_region() 持有拷贝，
+  // 映射会一直存活到最后一个读者释放为止 —— 不再依赖 _iterator_count 的
+  // 时序巧合，也不再需要 wait_active_iterators_zero() 的超时降级。
+  // 上面的 has_active_iterators() 提前返回仍然保留：它保护的是
+  // LeafBlockPool 的非 mmap 块（那些块没有引用计数，必须靠迭代器计数延后释放）。
+  if (_mmap_alloc && _mmap_alloc.use_count() > 1) {
+    pxv_info("LogicSnapshot::free_data: mmap region handed off to %ld external "
+             "reader(s) — mapping stays alive until they release",
+             (long)(_mmap_alloc.use_count() - 1));
+  }
   _mmap_alloc.reset();
+  _mmap_geom_channel_num = 0;
+  _mmap_geom_max_blocks = 0;
 
   for (void *p : _free_block_list) {
     LeafBlockPool::instance().release(p);
@@ -514,48 +530,69 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
            _disk_cache_writer->disk_cache_config().enabled, _ch_data.size());
 
   if (_channel_num > 0) {
-    // CRITICAL FIX (SIGSEGV in repeat mode): Only create a new MmapAllocator
-    // if there isn't one already. In repeat mode (else branch above, config
-    // unchanged), _mmap_alloc still points to the old allocator. Replacing it
-    // with a new one would destroy the old shared_ptr → MmapAllocator
-    // destructor calls UnmapViewOfFile → the entire old mmap region is
-    // unmapped. The decoder thread from the previous capture (still running,
-    // started by CopyToDocDone) holds raw pointers (di->inbuf) into the old
-    // mmap → SIGSEGV in term_matches (instance.c:1238).
+    // ---- P1-b: 先算出本代几何，再决定“复用 / 重建” ----
     //
-    // In the if branch (config changed), free_data() already reset
-    // _mmap_alloc to nullptr, so a new allocator is created. On the very
-    // first call, _mmap_alloc is also nullptr (initialized in constructor).
-    if (!_mmap_alloc) {
-      // Create and configure MmapAllocator
-      _mmap_alloc = std::make_shared<MmapAllocator>();
+    // 原实现把几何计算塞在“新建 allocator”分支里，复用分支直接沿用上一次的
+    // _max_blocks_per_channel。而 free_data() 在迭代器活跃时会提前返回
+    // （不 reset _mmap_alloc），此时若通道数或采集深度已变，就会带着旧几何
+    // 进入复用分支 —— allocate_block() 按 _max_blocks_per_channel 计算 mmap
+    // 槽位，会写到错误的位置。
+    //
+    // 现在几何无条件先算，复用条件从“存在即复用”收紧为“几何一致才复用”。
+    uint64_t want_blocks = (_total_sample_count / LeafBlockSamples) + 16;
+    const bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
 
-      // Calculate total required memory based on total_sample_count + padding
-      // For loop mode, _total_sample_count is the size of the ring buffer.
-      _max_blocks_per_channel = (_total_sample_count / LeafBlockSamples) + 16;
-      uint64_t total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
-
-      bool use_disk = _disk_cache_writer->disk_cache_config().enabled;
-      // P4 整文件预分配上限 (spec 阶段3): 磁盘模式按 DiskCacheConfig 的
-      // total_cache_depth_gb 封顶, 采集深度由盘容量决定而非内存. 每通道均分
-      // (layout 已按 channel * max_blocks_per_channel 分片). 超过盘容量时截断
-      // _max_blocks_per_channel 与 total_bytes, 采集超出时由 allocate_block /
-      // get_block_data 越界报错并回退 LeafBlockPool.
-      if (use_disk) {
-        const uint64_t disk_cap_bytes =
-            _disk_cache_writer->disk_cache_config().total_cache_depth_gb *
-            (1024ULL * 1024 * 1024);
-        if (disk_cap_bytes > 0 && total_bytes > disk_cap_bytes) {
-          pxv_warn("LogicSnapshot::first_payload: capture needs %llu bytes > "
-                   "disk cap %llu GB, clamping (depth becomes disk-limited)",
-                   (unsigned long long)total_bytes,
-                   (unsigned long long)_disk_cache_writer->disk_cache_config().total_cache_depth_gb);
-          // 均分到每通道后折算成每通道块数 (整块对齐)
-          _max_blocks_per_channel =
-              disk_cap_bytes / (LeafBlockSpace * _channel_num);
-          total_bytes = _max_blocks_per_channel * LeafBlockSpace * _channel_num;
-        }
+    // P4 整文件预分配上限 (spec 阶段3): 磁盘模式按 DiskCacheConfig 的
+    // total_cache_depth_gb 封顶, 采集深度由盘容量决定而非内存. 每通道均分
+    // (layout 已按 channel * max_blocks_per_channel 分片). 超过盘容量时截断
+    // want_blocks, 采集超出时由 allocate_block / get_block_data 越界报错
+    // 并回退 LeafBlockPool.
+    if (use_disk) {
+      const uint64_t disk_cap_bytes =
+          _disk_cache_writer->disk_cache_config().total_cache_depth_gb *
+          (1024ULL * 1024 * 1024);
+      const uint64_t want_bytes = want_blocks * LeafBlockSpace * _channel_num;
+      if (disk_cap_bytes > 0 && want_bytes > disk_cap_bytes) {
+        pxv_warn("LogicSnapshot::first_payload: capture needs %llu bytes > "
+                 "disk cap %llu GB, clamping (depth becomes disk-limited)",
+                 (unsigned long long)want_bytes,
+                 (unsigned long long)_disk_cache_writer->disk_cache_config().total_cache_depth_gb);
+        // 均分到每通道后折算成每通道块数 (整块对齐)
+        want_blocks = disk_cap_bytes / (LeafBlockSpace * _channel_num);
       }
+    }
+
+    const bool geom_match =
+        _mmap_alloc &&
+        _mmap_geom_channel_num == (uint64_t)_channel_num &&
+        _mmap_geom_max_blocks == want_blocks;
+
+    _max_blocks_per_channel = want_blocks;
+
+    if (!geom_match) {
+      // ---- 新建 / 几何变更后重建 ----
+      //
+      // P1-b（零拷贝生命周期契约）：这里重新赋值 _mmap_alloc 现在是安全的。
+      // 旧映射不会被 unmap —— 上一代的读者（解码线程 / 渲染 / 测量）若已通过
+      // mmap_region() 钉住它，引用计数仍 > 0，映射存活到最后一个读者释放为止。
+      // 原先那条 "CRITICAL FIX (SIGSEGV in repeat mode)" 注释所担心的
+      // UnmapViewOfFile 场景，现在由引用计数保证，而不再依赖“只在为空时才新建”
+      // 这一时序巧合。
+      if (_mmap_alloc) {
+        pxv_info("first_payload: geometry changed (ch %llu->%u, blocks %llu->%llu) "
+                 "-> recreate MmapAllocator; old region stays mapped while "
+                 "%ld external reader(s) pin it",
+                 (unsigned long long)_mmap_geom_channel_num, _channel_num,
+                 (unsigned long long)_mmap_geom_max_blocks,
+                 (unsigned long long)want_blocks,
+                 (long)(_mmap_alloc.use_count() - 1));
+      }
+
+      _mmap_alloc = std::make_shared<MmapAllocator>();
+      _mmap_geom_channel_num = _channel_num;
+      _mmap_geom_max_blocks = want_blocks;
+
+      const uint64_t total_bytes = want_blocks * LeafBlockSpace * _channel_num;
 
       QString disk_dir = QString::fromStdString(_disk_cache_writer->disk_cache_config().cache_path);
       auto _mmap_t0 = std::chrono::steady_clock::now();
@@ -578,6 +615,8 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
           // dereferencing an unconfigured (nullptr _base_ptr) allocator.
           _disk_cache_writer->clear_all_mmap_slots();
           _mmap_alloc.reset();
+          _mmap_geom_channel_num = 0;
+          _mmap_geom_max_blocks = 0;
       } else {
           // 设置 loop mode（loop mode 禁用 trailing decommit，保留所有数据在 RAM）
           _mmap_alloc->set_loop_mode(_is_loop);
@@ -589,7 +628,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(_pf_t1 - _pf_t0).count());
       }
     } else {
-// Reusing existing MmapAllocator (repeat mode, config unchanged).
+// Reusing existing MmapAllocator (geometry unchanged).
 // The mmap region stays mapped — decoder threads from the previous
 // capture can safely read from it while the new capture overwrites
 // data in-place. No need to re-configure: same total_sample_count,
@@ -601,8 +640,34 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
 // would overwrite the previous capture's data. Since the UI renders
 // from the same mmap (view_data == capture_data in non-stream repeat
 // mode), zeroing the blocks causes a blank screen on stop.
+//
+// NOTE (P1-b): 这条路径下新采集会原地覆写旧数据，上一代解码线程可能读到
+// 新旧混合数据 —— 它不会崩溃（映射已被引用计数保护），但结果可能撕裂。
+//
+// 风险 4.4 —— **产品决策：保持单块复用（2026-09-19）**。
+// 评估过的三个选项（见 devdoc/零拷贝三大风险点解决方案.md §3）：
+//   单块复用 1× 内存 / 高吞吐 / 可能撕裂  ← 采纳（撕裂是可接受的降级，
+//                                           不会崩溃，且只在解码慢于采集时出现）
+//   ping-pong 2 代   2× 内存 / 高吞吐
+//   复用前强制排空   1× 内存 / 解码慢则采集被拖住
+// 因此**不引入世代化**。这里只保留可观测性：若复用时仍有上一代读者钉住本
+// region（use_count() > 1），记录一次告警，便于事后评估实际发生频率。
+// 进程内只告警一次，避免 repeat 模式下刷屏。
+const long external_readers = (long)(_mmap_alloc.use_count() - 1);
 _mmap_alloc->stop_prefault();
-pxv_info("first_payload: reusing existing MmapAllocator (repeat mode, prefault not restarted)");
+if (external_readers > 0) {
+  static std::atomic<bool> risk44_warned{false};
+  if (!risk44_warned.exchange(true)) {
+    pxv_warn("first_payload: reusing MmapAllocator while %ld external "
+             "reader(s) still pin it -> in-place overwrite may tear the "
+             "previous capture's decode results. This is the accepted "
+             "trade-off of risk 4.4 (single-block reuse); see "
+             "devdoc/零拷贝三大风险点解决方案.md §3. "
+             "Emitted once per process.",
+             external_readers);
+  }
+}
+pxv_info("first_payload: reusing existing MmapAllocator (geometry unchanged, prefault not restarted)");
     }
   }
 
@@ -2374,7 +2439,64 @@ uint8_t *LogicSnapshot::get_block_buf(int block_index, int sig_index,
   return lbp;
 }
 
-int LogicSnapshot::get_ch_order(int sig_index) {
+// P1-c（统一读取抽象）：位打包布局 —— 8 样本/字节，字节内 LSB 对应较小样本索引。
+//
+// 关键语义（与 sample_span.h 的契约一致）：
+//   - start_sample 向下取整到字节边界（floor(start/8)*8），可能比请求的 start
+//     小 0..7。调用方必须按 span.start_sample 索引，否则位偏移整体错位。
+//   - contiguous_samples 只保证**单个 leaf block 内**连续。越过它会读进同块内
+//     紧随其后的 mipmap 层级（L1 32,768 字节），不崩溃但数据错误。
+//   - 常量块（lbp == nullptr）没有连续数据指针，返回无效 span；
+//     这类通道的取值走 get_sample()。
+SampleSpan LogicSnapshot::span(uint32_t channel, uint64_t start,
+                               uint64_t count) const {
+  SampleSpan s;
+  s.channel = channel;
+  if (count == 0) return s;
+
+  // 逻辑样本计数：finite 模式是 release-published 值（无锁安全）；
+  // loop 模式该访问器读 _ring_sample_count 而不持锁 —— 与"span 是尽力而为的
+  // 只读视图"定位一致，调用方需要强一致时应持锁后再调。
+  if (start >= committed_sample_count()) return s;
+
+  const int order = get_ch_order((int)channel);
+  if (order < 0 || (unsigned int)order >= _ch_data.size()) return s;
+
+  const uint64_t idx = _is_loop ? (start + _loop_offset) : start;
+  const uint64_t index0 = idx >> (LeafBlockPower + RootScalePower);
+  const uint64_t index1 = (idx & RootMask) >> LeafBlockPower;
+  const uint64_t byte_off = (idx & LeafMask) / 8;
+
+  if (index0 >= _ch_data[order].size()) return s;
+
+  const uint64_t leaf_bytes = LeafBlockSamples / 8;
+  if (byte_off >= leaf_bytes) return s;
+
+  const void *blk = _ch_data[order][index0].lbp[index1];
+  if (blk == nullptr) {
+    // 常量块：该 leaf 内此通道无跳变，电平编码在块头 first 的第 index1 位。
+    // 旧 get_samples() 会返回一个 thread_local 合成缓冲（全 0x00 / 0xFF），
+    // 那是"有数据的假指针"且无法长期持有。这里改为显式表达：
+    // is_constant = true, data 保持 nullptr，调用方用 bit_at()/constant_fill_byte()。
+    // 语义与旧合成缓冲一致（LSB-first 打包：全 1 -> 0xFF，全 0 -> 0x00）。
+    s.is_constant = true;
+    s.constant_bit = (_ch_data[order][index0].first & (1ULL << index1)) != 0;
+  } else {
+    s.data = (const uint8_t *)blk + byte_off;
+  }
+
+  s.start_sample = idx - (idx & 7ULL);
+  s.contiguous_samples = (leaf_bytes - byte_off) * 8;
+  s.unit_bytes = 1;
+  s.stride = 1;
+  s.bits_per_sample = 1;
+  // 逻辑通道本身就是位打包、按通道隔离的：整块基址与 data 相同。
+  // 常量块时 data == nullptr，group_base 同步为 nullptr（不可解引用）。
+  s.group_base = s.data;
+  return s;
+}
+
+int LogicSnapshot::get_ch_order(int sig_index) const {
   uint16_t order = 0;
 
   for (uint16_t i : _ch_index) {

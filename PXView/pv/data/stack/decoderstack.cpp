@@ -782,7 +782,19 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
     return;
   }
 
+  // P1-b（零拷贝生命周期契约）：钉住本代 mmap 区域，直到本轮解码跑完。
+  //
+  // 解码线程把裸内部指针交给 libsigrokdecode（di->inbuf 指向 leaf block 数据），
+  // 而采集线程可能在下一帧 first_payload 里重建 MmapAllocator（几何变更路径）
+  // 或在 free_data() 里 reset 它。持有这份 shared_ptr 拷贝后，映射的引用计数
+  // 保持 > 0，重建/reset 只递减本对象的计数而不会 munmap/UnmapViewOfFile ——
+  // 裸指针在整轮解码期间始终有效。
+  //
+  // 这是"读者自保"，与 _snapshot 的持有同理；不再依赖 _iterator_count 的
+  // 时序巧合（那个守卫只保护 leaf block 的释放，不保护映射本身）。
+  _pinned_region = _snapshot->mmap_region();
   execute_decode_stack();
+  _pinned_region.reset();
 }
 
 void DecoderStack::notify_data_ready() {
@@ -827,7 +839,20 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   const bool adaptive_pwm_fast = logic_di->decoder && logic_di->decoder->id &&
       std::strstr(logic_di->decoder->id, "pwm_waveform_c") != nullptr;
 
-  uint64_t i = decode_start;
+  // P1-a（零拷贝对齐契约 A）：chunk 起点必须 8 样本对齐。
+  //
+  // 位偏移契约要求 inbuf[ch] 的位 0 对应 chunk 的绝对起点（libsigrokdecode/
+  // instance.c:1671-1677），而 LogicSnapshot 的迭代器按字节定位：
+  //   byte_offset = (start & LeafMask) / 8      // logicsnapshot.cpp:1944/2011/2053
+  // 这是向下取整，所以返回指针的位 0 实际对应 floor(start/8)*8 而非 start。
+  // 若 decode_start 不是 8 的倍数，Python 侧的 (abs_cur - abs_start) % 8 会整体
+  // 错位 decode_start % 8 位 —— 解码结果静默错误，不崩溃。
+  //
+  // 向下对齐到 8 样本：解码起点最多提前 7 个样本，换取位语义精确。
+  // 对齐性可保持：后续起点 = i + chunk_limit（16384/32768/65536 均为 8 的倍数）
+  // 或被 leaf block 边界截断（16,777,216 的倍数），两者都是 8 的倍数。
+  uint64_t i = decode_start & ~(uint64_t)7;
+  assert((i & 7) == 0);
   bool bError = false;
   bool bEndTime = false;
 
@@ -960,6 +985,47 @@ return;
     }
     if (chunk_end - i > chunk_limit)
       chunk_end = i + chunk_limit;
+
+    // P1-a（零拷贝对齐契约 B）：chunk 不得跨越 leaf block 边界。
+    //
+    // 迭代器的 chunk_remaining 一直是准确的（logicsnapshot.cpp:1950/2022/2067），
+    // 但此前从未被消费 —— get_iterator_valid_length() 全仓零调用者，
+    // chunk_end 只按 chunk_limit 截断（上一行）。
+    //
+    // 不截断的后果：inbuf[ch] + byte_offset 会越过该 leaf block 的 level-0
+    // 数据区（2,097,152 字节）继续读，落进紧随其后的 level-1 mipmap
+    // （32,768 字节）。块布局：L0 2,097,152 B → L1 32,768 B → L2 512 B
+    // → L3 8 B = LeafBlockSpace 2,130,440 B。16 KiB chunk = 2,048 字节 < 32,768，
+    // 所以不越出分配边界、不崩溃，但会把 mipmap 位当作样本 —— 静默的解码错误。
+    //
+    // 现状之所以不出事，仅因 LeafBlockSamples / MaxChunkSize = 16,777,216 /
+    // 16,384 = 1024 整除，decode_start == 0 时 16 KiB chunk 恰好铺满 leaf block。
+    // 一旦 decode_start 不是 16384 的倍数即被打破。
+    //
+    // 取所有"有数据指针"的通道中最小的剩余字节数作为窗口上界；常量块
+    // （chunk_data == nullptr）由 chunk_const 提供取值，无连续内存要求。
+    {
+      uint64_t min_valid_bytes = UINT64_MAX;
+      for (int j = 0; j < (int)iterators.size(); j++) {
+        auto *it = iterators[j].get();
+        if (!it || it->exhausted)
+          continue;
+        if (LogicSnapshot::get_iterator_value(it) == nullptr)
+          continue;  // 常量块
+        const uint64_t vb = LogicSnapshot::get_iterator_valid_length(it);
+        if (vb < min_valid_bytes)
+          min_valid_bytes = vb;
+      }
+      if (min_valid_bytes != UINT64_MAX) {
+        const uint64_t max_samples = min_valid_bytes * 8;
+        // valid_bytes >= 1 恒成立（byte_offset <= (LeafBlockSamples-1)/8），
+        // 故 max_samples >= 8，截断后至少前进一个字节，不会死循环。
+        assert(max_samples >= 8);
+        if (chunk_end - i > max_samples)
+          chunk_end = i + max_samples;
+      }
+    }
+    assert((i & 7) == 0 && chunk_end > i);
 
     bEndTime = (chunk_end == end_index);
 

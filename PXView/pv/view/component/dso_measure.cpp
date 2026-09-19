@@ -57,12 +57,10 @@ QString DsoMeasure::get_measure(int type) {
 
   // Task C1.7: computation moved to Core layer (core::MeasureCalculator,
   // reached via DataSource::get_measurements). The View layer keeps only
-  // the display formatting logic below. Pass the actual view_rect_height
-  // so GUI-displayed voltages match the original DsoMeasure computation
-  // (the voltage formula divides by view_rect_height).
-  const int view_rect_height = _signal->get_view_rect().height();
+  // the display formatting logic below. No view geometry is passed: the
+  // voltage conversion is height-independent (see §4.9.2).
   auto measurements = _signal->_data_source->get_measurements(
-      _signal->get_index(), view_rect_height);
+      _signal->get_index());
 
   const data::MeasurementValue *found = nullptr;
   for (const auto &mv : measurements) {
@@ -192,7 +190,14 @@ QPointF DsoMeasure::get_point(uint64_t index, float &value) {
   if (index >= _signal->_data->get_sample_count())
     return pt;
 
-  value = *_signal->_data->get_samples(index, index, _signal->get_index());
+  // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
+  // get_samples(index, index, ch) 返回的指针严格等价
+  // （start_sample == index，无位打包取整）。
+  const pv::data::SampleSpan sp =
+      _signal->_data->span((uint32_t)_signal->get_index(), index, 1);
+  if (!sp.valid())
+    return pt;
+  value = sp.data[0];
   const float top = _signal->get_view_rect().top();
   const float bottom = _signal->get_view_rect().bottom();
   const int hw_offset = _signal->get_hw_offset();
@@ -214,7 +219,12 @@ double DsoMeasure::get_voltage(uint64_t index) {
   if (index >= _signal->_data->get_sample_count())
     return 1;
 
-  const double value = *_signal->_data->get_samples(index, index, _signal->get_index());
+  // P1-c（统一读取抽象）：单样本读取；DSO 平面布局下与旧指针等价。
+  const pv::data::SampleSpan sp =
+      _signal->_data->span((uint32_t)_signal->get_index(), index, 1);
+  if (!sp.valid())
+    return 1;
+  const double value = (double)sp.data[0];
   const int hw_offset = _signal->get_hw_offset();
   uint64_t k = _signal->_data->get_measure_voltage_factor(_signal->get_index());
   float data_scale = _signal->_data->get_data_scale(_signal->get_index());
@@ -240,12 +250,17 @@ QString DsoMeasure::get_voltage(double v, int p, bool scaled) {
   uint64_t k = _signal->_data->get_measure_voltage_factor(_signal->get_index());
   float data_scale = _signal->_data->get_data_scale(_signal->get_index());
 
+  // scaled=true : `v` is in *pixels* (cursor ΔV, trigger-level readout) —
+  //               the /height converts pixels -> divisions and is required.
+  // scaled=false: `v` is in *ADC counts* — already normalised by data_scale
+  //               (= kAdcScale = 1/255), so there is no view height in the
+  //               formula. Upstream's /height only cancelled against
+  //               DsoSignal::get_scale() inside data_scale. See §4.9.2.
   if (scaled)
     v = v * k * _signal->_vDial->get_factor() * DS_CONF_DSO_VDIVS /
         _signal->get_view_rect().height();
   else
-    v = v * data_scale * k * _signal->_vDial->get_factor() * DS_CONF_DSO_VDIVS /
-        _signal->get_view_rect().height();
+    v = v * data_scale * k * _signal->_vDial->get_factor() * DS_CONF_DSO_VDIVS;
 
   return abs(v) >= 1000 ? QString::number(v / 1000.0, 'f', p) + "V"
                         : QString::number(v, 'f', p) + "mV";

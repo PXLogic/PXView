@@ -28,6 +28,8 @@
 #include <vector>
 #include <atomic>
 
+#include "pv/data/snapshot/sample_span.h"
+
 // P1-5 fix: Use recursive_mutex instead of mutex to allow nested locking
 // within the same thread. This matches PulseView's Segment::mutex_ design
 // and eliminates the need for the sample_count() non-locking accessor.
@@ -92,6 +94,22 @@ public:
     virtual bool has_data(int index) = 0;
     virtual int get_block_num() = 0;
     virtual uint64_t get_block_size(int block_index) = 0;
+
+    // P1-c（统一读取抽象）：返回一次只读的样本视图。
+    //
+    // 默认实现返回无效 span（data == nullptr），这样既有的 Snapshot 子类
+    // （含测试里的桩）不必立即实现它，迁移可以逐个调用方推进。
+    // LogicSnapshot / DsoSnapshot / AnalogSnapshot 各自 override。
+    //
+    // 契约要点（见 sample_span.h）：
+    //   - 返回的 start_sample 可能小于请求的 start（logic 按字节向下取整），
+    //     调用方必须按 span.start_sample 做索引；
+    //   - contiguous_samples 是硬上界，越过即读越界；
+    //   - span 的有效期不覆盖快照的并发修改（与旧 get_samples 一致）。
+    virtual SampleSpan span(uint32_t channel, uint64_t start, uint64_t count) const {
+        (void)channel; (void)start; (void)count;
+        return SampleSpan{};
+    }
 
     // B-6: PulseView-style memory optimisation.
     // Frees memory from completed chunks that are no longer needed.

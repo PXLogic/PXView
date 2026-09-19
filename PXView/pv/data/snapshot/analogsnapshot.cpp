@@ -711,7 +711,41 @@ void AnalogSnapshot::append_payload_to_envelope_levels()
     }
 }
 
-int AnalogSnapshot::get_ch_order(int sig_index)
+// P1-c（统一读取抽象）：模拟数据是**单块交织**存储 —— 相邻样本之间隔着
+// channel_num 个单元，因此 stride = unit_bytes * channel_num。
+// 这正是旧 get_samples(start) 只给起始指针、把 stride 甩给调用方自己算的地方。
+//
+// B+C 收口：`data` 指向**本通道第一个样本**（基址 + order * unit_bytes），
+// 与 DSO/Logic 的"通道视角"语义一致；`group_base` 保留整块样本组基址，供
+// 需要按 (sample * channel_num + order) 自行遍历的调用方使用。
+//
+// 这样 `channel` 参数**真正影响返回值**，不再是"只校验不生效"的摆设 ——
+// 之前正是因为参数不影响结果，调用方把内部 order 当通道索引传进来也毫无
+// 反馈（span 直接变空），rasterize.cpp 的模拟波形就这样静默消失了。
+SampleSpan AnalogSnapshot::span(uint32_t channel, uint64_t start,
+                                uint64_t count) const {
+    SampleSpan s;
+    s.channel = channel;
+    if (count == 0) return s;
+    if (_data == nullptr) return s;
+    if (start >= _sample_count) return s;
+
+    const int order = get_ch_order((int)channel);
+    if (order < 0 || (unsigned int)order >= _channel_num) return s;
+
+    const uint64_t stride = (uint64_t)_unit_bytes * _channel_num;
+    const uint8_t *const group = (const uint8_t *)_data + start * stride;
+    s.group_base = group;
+    s.data = group + (uint64_t)order * _unit_bytes;
+    s.start_sample = start;
+    s.contiguous_samples = _sample_count - start;
+    s.unit_bytes = _unit_bytes;
+    s.stride = (uint32_t)stride;
+    s.bits_per_sample = (uint8_t)(_unit_bytes * 8);
+    return s;
+}
+
+int AnalogSnapshot::get_ch_order(int sig_index) const
 {
     uint16_t order = 0;
     for (auto& iter:_ch_index) {

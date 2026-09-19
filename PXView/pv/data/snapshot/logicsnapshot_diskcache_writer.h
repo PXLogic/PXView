@@ -106,21 +106,67 @@ private:
     std::atomic<bool> _async_busy{false}; // true while writer is processing a dequeued payload
 
     struct AsyncPayload {
-        std::vector<uint8_t> data;
-        int format;  // LA_SPLIT_DATA or LA_CROSS_DATA
+        // P2 池化：slot 指向固定槽位池中的一块，长度由 length 给出。
+        // nullptr 表示走 heap 兜底（payload 大于槽位尺寸时的罕见路径）。
+        uint8_t *slot = nullptr;
+        std::vector<uint8_t> heap;
+        uint64_t length = 0;
+        int format = 0;  // LA_SPLIT_DATA or LA_CROSS_DATA
+
+        const uint8_t *data() const { return slot ? slot : heap.data(); }
+        uint8_t *data() { return slot ? slot : heap.data(); }
+        uint64_t size() const { return length; }
     };
 
-    // Backpressure watermarks for the async write queue (hysteresis):
-    // feed thread blocks above HIGH, unblocks below LOW.
-    static constexpr uint64_t ASYNC_HIGH_WATERMARK = 1024ULL * 1024 * 1024;
-    static constexpr uint64_t ASYNC_LOW_WATERMARK  = 256ULL * 1024 * 1024;
+    // P2（消除 staging 拷贝的分配/回收成本）：固定槽位池。
+    //
+    // 背景：实测（tests/qtest/data/test_feed_staging_copy_cost.cpp）显示
+    // 原实现 `payload.data = std::vector<uint8_t>(data, data + length)` 的代价
+    // 里 memcpy 只占 ~9%，**分配 + 归还 OS 占 ~91%**（4MB = 1024 页，
+    // 827us/1024 ≈ 808ns/页，与内核首次触碰新映射页的缺页+清零成本吻合）。
+    // 槽位复用把这 91% 消掉，同时把峰值额外常驻从 1073MB 降到 slot_bytes*max_slots。
+    //
+    // **调用方必须持有 _async_mutex**（不设独立互斥量，避免锁序问题）。
+    class SlotPool
+    {
+    public:
+        void configure(uint64_t slot_bytes, uint32_t max_slots);
+        void reset();                       // 仅在无在飞槽位时调用
+
+        uint8_t *acquire();                 // nullptr = 池耗尽（调用方应等待）
+        void release(uint8_t *slot);
+
+        uint64_t slot_bytes() const { return _slot_bytes; }
+        uint32_t capacity() const { return (uint32_t)_storage.size(); }
+        uint32_t in_use() const { return _in_use; }
+        uint32_t peak_in_use() const { return _peak_in_use; }
+        uint32_t max_slots() const { return _max_slots; }
+        bool configured() const { return _slot_bytes > 0 && _max_slots > 0; }
+
+    private:
+        uint64_t _slot_bytes = 0;
+        uint32_t _max_slots = 0;
+        std::vector<std::unique_ptr<uint8_t[]>> _storage;  // 已分配槽位（懒增长）
+        std::vector<uint8_t *> _free;                      // 空闲槽位
+        uint32_t _in_use = 0;
+        uint32_t _peak_in_use = 0;
+    };
+
+    // P2 槽位参数：4MB 与驱动 payload 同量级；64 槽 → 上限 256MB
+    // （原 ASYNC_HIGH_WATERMARK 是 1073MB，纯粹为吸收分配抖动而留的冗余）。
+    static constexpr uint64_t P2_SLOT_BYTES = 4ULL * 1024 * 1024;
+    static constexpr uint32_t P2_MAX_SLOTS = 64;
+    static constexpr uint64_t ASYNC_HIGH_WATERMARK = P2_SLOT_BYTES * P2_MAX_SLOTS;
+    static constexpr uint64_t ASYNC_LOW_WATERMARK  = ASYNC_HIGH_WATERMARK / 4;
 
     std::queue<AsyncPayload> _async_queue;
     std::mutex _async_mutex;
     std::condition_variable _async_cv;
-    std::condition_variable _async_drain_cv;  // feed waits on this when queue exceeds high watermark
+    std::condition_variable _async_drain_cv;  // feed 等待槽位归还 / 队列降到低水位
     std::thread _async_thread;
     std::atomic<bool> _async_running;
+
+    SlotPool _slot_pool;  // 受 _async_mutex 保护
 
     std::atomic<uint64_t> _async_bytes_written;
     std::atomic<double>   _async_write_speed_mbps;

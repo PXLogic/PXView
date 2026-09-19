@@ -113,17 +113,13 @@ public:
      * @param signal_models   SignalModel list (from SessionStateContext) —
      *                        used to look up hw_offset per DSO channel.
      * @param channel_index   sr_channel index, or -1 for all DSO channels.
-     * @param view_rect_height Pixel height of the DSO trace (used downstream
-     *                        by to_measurement_values for voltage conversion
-     *                        — pass 0 to use the default headless height).
      * @return Vector of MeasurementResult (one per requested channel; empty
      *         if no DSO data or snapshot is empty).
      */
     static std::vector<MeasurementResult> compute(
         SessionData *data,
         const std::vector<std::shared_ptr<data::SignalModel>> &signal_models,
-        int channel_index = -1,
-        int view_rect_height = 0);
+        int channel_index = -1);
 
     /**
      * Convert a raw MeasurementResult into a list of API data::MeasurementValue
@@ -131,8 +127,8 @@ public:
      * switch as the original DsoMeasure::get_measure(int type):
      *   - Voltage measurements (VMAX/VMIN/VP2P/VRMS/VMEA/VHIG/VLOW/AMPT)
      *     are converted from raw ADC counts to millivolts using the same
-     *     data_scale * measure_vf * vfactor * DS_CONF_DSO_VDIVS / height
-     *     formula.
+     *     data_scale * measure_vf * vfactor * DS_CONF_DSO_VDIVS formula
+     *     (no view height — it cancels, see measure_format.h / §4.9.2).
      *   - Percentage measurements (PDUT/NDUT/NOVR/POVR) use the same
      *     ratio formulas.
      *   - Time measurements (PERD/PWDT/NWDT/RISE/FALL/BRST) use the same
@@ -145,10 +141,12 @@ public:
      * (View layer or MCP JSON serializer) may rescale for display.
      *
      * @param r              The raw measurement result.
-     * @param data_scale     vdiv (mV per division) from SignalModel.
-     * @param measure_vf     measure_voltage_factor from DsoSnapshot (vfactor).
-     * @param vfactor        vDial probe factor (1/10/100).
-     * @param view_rect_height Pixel height of the trace (0 = use default).
+     * @param data_scale     DsoSnapshot data_scale — raw ADC count -> 0..1
+     *                       normalised amplitude (pv::core::kAdcScale = 1/255).
+     * @param measure_vf     measure_voltage_factor from DsoSnapshot — the V/div
+     *                       dial step in mV/div (SignalModel::vdiv_mv()).
+     * @param vfactor        Probe attenuation factor (1/10/100), from
+     *                       SignalModel::vfactor().
      * @return Vector of data::MeasurementValue (one per DSO_MS_* type, in enum
      *         order; entries with valid=false when the underlying value is
      *         not available).
@@ -157,8 +155,7 @@ public:
         const MeasurementResult &r,
         double data_scale,
         uint64_t measure_vf,
-        uint64_t vfactor,
-        int view_rect_height);
+        uint64_t vfactor);
 
     // ---- Formatting helpers (reused by view::DsoMeasure for QString output) ----
 
@@ -166,13 +163,15 @@ public:
      * Convert a raw ADC value (or ADC delta) to millivolts using the same
      * formula as DsoMeasure::get_voltage(double v, int p, bool scaled=false):
      *   v_mV = v * data_scale * measure_vf * vfactor * DS_CONF_DSO_VDIVS
-     *          / view_rect_height
+     *
+     * There is no view-height divisor: the upstream `/height` only cancelled
+     * against DsoSignal::get_scale() inside data_scale. See measure_format.h
+     * and devdoc/P0-P1-P2架构设计与实施计划.md §4.9.2.
      */
     static double convert_voltage(double raw_adc,
                                   double data_scale,
                                   uint64_t measure_vf,
-                                  uint64_t vfactor,
-                                  int view_rect_height);
+                                  uint64_t vfactor);
 
     /**
      * Format a millivolt value as a display string ("1.23V" / "456.7mV"),
@@ -192,16 +191,6 @@ public:
      * in DsoMeasure::get_measure.
      */
     static QString format_frequency(double period_ns);
-
-    /**
-     * Default trace pixel height used for voltage conversion when no View
-     * geometry is available (headless mode). The original View code used
-     * DsoSignal::get_view_rect().height(); in headless we fall back to
-     * DS_CONF_DSO_VDIVS * DefaultPixelsPerDiv so the voltage formula stays
-     * dimensionally consistent.
-     */
-    static constexpr int DefaultViewRectHeight = 256;
-    static constexpr int DefaultPixelsPerDiv = 32;
 
 public:
     /**

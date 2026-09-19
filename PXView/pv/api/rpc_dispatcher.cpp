@@ -86,7 +86,9 @@ json RpcDispatcher::to_json(const ChannelInfo& c) {
         {"name",            c.name},
         {"type",            static_cast<int>(c.type)},
         {"enabled",         c.enabled},
-        {"enabled_default", c.enabled_default}
+        {"enabled_default", c.enabled_default},
+        {"vdiv",            c.vdiv},     // V/div（DSO/Analog 有意义）
+        {"vfactor",         c.vfactor}   // 探头衰减因子（×1/×10/×100）
     };
 }
 

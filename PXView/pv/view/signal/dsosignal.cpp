@@ -238,7 +238,7 @@ bool DsoSignal::go_vDialPre(bool manul) {
     _view->set_update_viewport(_viewport, true);
     _view->request_repaint();
     if (_model) {
-      _model->set_vdiv((double)_vDial->get_value());
+      _model->set_vdiv_mv((double)_vDial->get_value());
     }
     return true;
   } else {
@@ -282,7 +282,7 @@ bool DsoSignal::go_vDialNext(bool manul) {
     _view->set_update_viewport(_viewport, true);
     _view->request_repaint();
     if (_model) {
-      _model->set_vdiv((double)_vDial->get_value());
+      _model->set_vdiv_mv((double)_vDial->get_value());
     }
     return true;
   } else {
@@ -364,7 +364,7 @@ bool DsoSignal::load_settings() {
     ret = _data_source->device()->get_probe_vdiv(vdiv, probe);
     if (!ret) {
       // SR_CONF_PROBE_VDIV fork stub deleted; fall back to model.
-      vdiv = _model ? (uint64_t)_model->vdiv() : 0;
+      vdiv = _model ? (uint64_t)_model->vdiv_mv() : 0;
     }
 
     ret = _data_source->device()->get_probe_factor(vfactor, probe);
@@ -373,7 +373,7 @@ bool DsoSignal::load_settings() {
       return false;
     }
   } else {
-    vdiv = _model ? _model->vdiv() : 0;
+    vdiv = _model ? _model->vdiv_mv() : 0;
     vfactor = _model ? _model->vfactor() : 1;
   }
 
@@ -478,7 +478,7 @@ int DsoSignal::commit_settings() {
   _model->set_probe_enabled(enabled(), probe);
 
   // -- vdiv
-  _model->set_vdiv((double)_vDial->get_value());
+  _model->set_vdiv_mv((double)_vDial->get_value());
   _model->set_probe_factor(_vDial->get_factor(), probe);
 
   // -- coupling

@@ -200,19 +200,15 @@ public:
     //      an empty vector (SessionDocument/SessionSnapshot stubs inherit
     //      this); only SigSession overrides with real computation via
     //      core::MeasureCalculator::compute(view_data()).
-    //      view_rect_height is the pixel height of the DSO trace, used by
-    //      the voltage conversion formula (raw_adc * data_scale *
-    //      measure_vf * vfactor * DS_CONF_DSO_VDIVS / view_rect_height).
-    //      Pass 0 (or omit) to use the headless default (256 = 8 divs *
-    //      32 px/div); the View layer passes its actual get_view_rect().
-    //      height() so GUI-displayed voltages match the original DsoMeasure
-    //      computation exactly.
+    //      No view geometry is passed: the DSO voltage conversion is
+    //      height-independent (upstream's /height cancelled against
+    //      DsoSignal::get_scale() inside data_scale). GUI and headless
+    //      therefore produce identical values. See §4.9.2.
     //      Non-const to match the pattern of other data accessors
     //      (get_signal_models / get_decoder_stacks / get_dso_snapshot)
     //      which read non-const SessionStateContext state.
     virtual std::vector<data::MeasurementValue> get_measurements(
-        int channel_index = -1,
-        int view_rect_height = 0);
+        int channel_index = -1);
 
     // ---- Cursors (Task C2: cursor position state moved to Core so
     //      headless MCP clients can enumerate/mutate cursors without a

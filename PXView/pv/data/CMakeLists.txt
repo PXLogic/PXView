@@ -55,9 +55,6 @@ add_library(pxview-data STATIC
     stack/mathstack.cpp
     stack/spectrumstack.cpp
     decoderanalogdata.cpp
-    cache/disk_buffer_manager.cpp
-    cache/disk_write_thread.cpp
-    cache/disk_read_cache.cpp
     cache/mmap_allocator.cpp
     decode/rowdata.cpp
     decode/row.cpp

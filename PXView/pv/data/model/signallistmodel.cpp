@@ -88,7 +88,7 @@ QVariant SignalListModel::data(const QModelIndex &index, int role) const {
   case ColorRole:
     return QString::fromStdString(model->color());
   case VdivRole:
-    return model->vdiv();
+    return model->vdiv_mv();
   case CouplingRole:
     return model->coupling();
   case TrigTypeRole:

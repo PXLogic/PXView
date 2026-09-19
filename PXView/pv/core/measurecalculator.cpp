@@ -45,8 +45,7 @@ namespace core {
 std::vector<MeasureCalculator::MeasurementResult>
 MeasureCalculator::compute(SessionData *data,
                            const std::vector<std::shared_ptr<data::SignalModel>> &signal_models,
-                           int channel_index,
-                           int view_rect_height)
+                           int channel_index)
 {
     std::vector<MeasurementResult> results;
 
@@ -65,14 +64,12 @@ MeasureCalculator::compute(SessionData *data,
         return results;
     }
 
-    // Resolve view_rect_height default (headless mode). The original View
-    // code used DsoSignal::get_view_rect().height() which is the pixel
-    // height of the DSO trace. In headless we fall back to the standard
-    // DS_CONF_DSO_VDIVS * DefaultPixelsPerDiv so the voltage conversion
-    // formula stays dimensionally consistent.
-    if (view_rect_height <= 0) {
-        view_rect_height = DefaultViewRectHeight;
-    }
+    // NOTE: there is no view_rect_height parameter any more. The upstream
+    // voltage formula divided by the trace pixel height only because its
+    // data_scale was DsoSignal::get_scale() = height / (ref_max - ref_min)
+    // * stop_scale; the height cancelled. We now store the height-independent
+    // reciprocal (pv::core::kAdcScale) in data_scale, so the measurement result
+    // is identical in GUI and headless mode. See §4.9.2.
 
     // Build the list of DSO channels to process. The original DsoMeasure
     // was per-DsoSignal, so each DSO channel gets its own MeasurementResult.
@@ -91,21 +88,22 @@ MeasureCalculator::compute(SessionData *data,
         r.channel_index = m->index();
         r.hw_offset = (int)m->hw_offset();
 
-        // get_samples returns a pointer to the contiguous sample buffer
-        // for this channel (signal index → order conversion is internal).
-        // start_sample=0, end_sample=sample_count-1 returns the whole
-        // channel buffer. The lock is held only during get_samples; the
-        // returned pointer is valid as long as the snapshot is not
-        // modified concurrently (stopped captures are stable).
-        const uint8_t *samples = nullptr;
-        if (sample_count >= 1) {
-            samples = dso->get_samples(
-                0, (int64_t)(sample_count - 1), (uint16_t)m->index());
-        }
-
-        if (!samples) {
-            pxv_err("MeasureCalculator::compute: get_samples returned null for channel %d",
+        // P1-c（统一读取抽象）：改用 SampleSpan 获取只读视图。
+        //
+        // 相比旧 get_samples(0, sample_count-1, ch)，span 显式给出
+        // contiguous_samples —— 可安全读取的样本数上界 —— 而不是让调用方
+        // 假定"返回的缓冲一定覆盖 sample_count"。下方所有循环统一按 n 收敛。
+        const pv::data::SampleSpan sp =
+            dso->span((uint32_t)m->index(), 0, sample_count);
+        if (!sp.valid()) {
+            pxv_err("MeasureCalculator::compute: span invalid for channel %d",
                     m->index());
+            results.push_back(r);
+            continue;
+        }
+        const uint8_t *samples = sp.data;
+        const uint64_t n = std::min<uint64_t>(sample_count, sp.contiguous_samples);
+        if (n < 1) {
             results.push_back(r);
             continue;
         }
@@ -113,7 +111,7 @@ MeasureCalculator::compute(SessionData *data,
         // ---- max / min (equivalent to DsoSnapshot::get_max_min_value) ----
         uint8_t maxv = samples[0];
         uint8_t minv = samples[0];
-        for (uint64_t i = 1; i < sample_count; i++) {
+        for (uint64_t i = 1; i < n; i++) {
             const uint8_t v = samples[i];
             if (v > maxv) maxv = v;
             if (v < minv) minv = v;
@@ -129,21 +127,21 @@ MeasureCalculator::compute(SessionData *data,
         {
             double sum_sq = 0.0;
             const double zero_off = (double)r.hw_offset;
-            for (uint64_t i = 0; i < sample_count; i++) {
+            for (uint64_t i = 0; i < n; i++) {
                 const double diff = zero_off - (double)samples[i];
                 sum_sq += diff * diff;
             }
-            r.rms = std::sqrt(sum_sq / (double)sample_count);
+            r.rms = std::sqrt(sum_sq / (double)n);
         }
 
         // ---- mean (equivalent to DsoSnapshot::cal_vmean(order)) ----
         // cal_vmean computes sum(samples) / count.
         {
             double sum = 0.0;
-            for (uint64_t i = 0; i < sample_count; i++) {
+            for (uint64_t i = 0; i < n; i++) {
                 sum += (double)samples[i];
             }
-            r.mean = sum / (double)sample_count;
+            r.mean = sum / (double)n;
         }
 
         r.mValid = true;
@@ -153,8 +151,8 @@ MeasureCalculator::compute(SessionData *data,
         // replaces the original "never computed" behavior where level_valid
         // was always false and all level-dependent measurements returned "--".
         const double samplerate = dso->samplerate();
-        if (samplerate > 0.0 && sample_count >= 4) {
-            compute_level_measurements(samples, sample_count,
+        if (samplerate > 0.0 && n >= 4) {
+            compute_level_measurements(samples, n,
                                        samplerate, r);
         }
 
@@ -429,8 +427,7 @@ std::vector<data::MeasurementValue>
 MeasureCalculator::to_measurement_values(const MeasurementResult &r,
                                          double data_scale,
                                          uint64_t measure_vf,
-                                         uint64_t vfactor,
-                                         int view_rect_height)
+                                         uint64_t vfactor)
 {
     std::vector<data::MeasurementValue> out;
 
@@ -446,8 +443,7 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
 
     // Helper to convert raw ADC delta to millivolts.
     auto to_mv = [&](double raw_adc) -> double {
-        return convert_voltage(raw_adc, data_scale, measure_vf, vfactor,
-                               view_rect_height);
+        return convert_voltage(raw_adc, data_scale, measure_vf, vfactor);
     };
 
     // Matches the original switch in DsoMeasure::get_measure(int type).
@@ -566,11 +562,9 @@ MeasureCalculator::to_measurement_values(const MeasurementResult &r,
 double MeasureCalculator::convert_voltage(double raw_adc,
                                           double data_scale,
                                           uint64_t measure_vf,
-                                          uint64_t vfactor,
-                                          int view_rect_height)
+                                          uint64_t vfactor)
 {
-    return pv::core::convert_voltage(raw_adc, data_scale, measure_vf,
-                                     vfactor, view_rect_height);
+    return pv::core::convert_voltage(raw_adc, data_scale, measure_vf, vfactor);
 }
 
 QString MeasureCalculator::format_voltage(double v_mv, int precision)

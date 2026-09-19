@@ -88,7 +88,14 @@ void DsoSignal::paint_prepare() {
       if (trig_index >= (int64_t)_data->get_sample_count())
         return;
 
-      const uint8_t *const trig_samples = _data->get_samples(0, 0, get_index());
+      // P1-c（统一读取抽象）：DSO 平面布局，span.data 与旧
+      // get_samples(0, 0, ch) 的基指针等价；contiguous_samples == 样本总数，
+      // 而上方已保证 trig_index < get_sample_count()，故 i0/i1 均在界内。
+      const pv::data::SampleSpan trig_span =
+          _data->span((uint32_t)get_index(), 0, _data->get_sample_count());
+      if (!trig_span.valid())
+        return;
+      const uint8_t *const trig_samples = trig_span.data;
       for (uint16_t i = 0; i < TrigHRng; i++) {
         const int64_t i0 = trig_index - i - 1;
         const int64_t i1 = trig_index - i;

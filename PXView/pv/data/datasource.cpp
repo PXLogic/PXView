@@ -74,10 +74,8 @@ void DataSource::decode_done() {}
 // get_signal_models / get_decoder_stacks / get_dso_snapshot are also
 // non-const because they read non-const SessionStateContext state).
 std::vector<data::MeasurementValue> DataSource::get_measurements(
-    int channel_index,
-    int view_rect_height) {
+    int channel_index) {
     (void)channel_index;
-    (void)view_rect_height;
     return {};
 }
 

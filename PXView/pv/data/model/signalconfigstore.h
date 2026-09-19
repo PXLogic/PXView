@@ -39,7 +39,7 @@ struct ChannelLayoutState {
 struct ChannelConfig {
   int index;
   bool enabled;
-  uint64_t vdiv;
+  uint64_t vdiv_mv;  // 毫伏/格 (mV/div)，与 SignalModel::vdiv_mv() 同单位
   int coupling;
   bool map_default;
   uint16_t hw_offset;
@@ -66,7 +66,7 @@ struct ChannelConfig {
   double map_max;      // Analog 映射最大值
 
   ChannelConfig()
-      : index(0), enabled(false), vdiv(0), coupling(0),
+      : index(0), enabled(false), vdiv_mv(0), coupling(0),
         map_default(true), hw_offset(0), offset(0), zero_offset(0),
         trig_type(0), view_index(-1), v_offset(0), own_height(-1), type(0),
         vfactor(0), trig_value(0), map_min(0.0), map_max(0.0) {}

@@ -128,6 +128,32 @@ inline void record_batch_stats(size_t n) {
   if (n > g_batch_max) g_batch_max = n;
 }
 
+// ---- P1-e: copy audit (devdoc/P0-P1-P2架构设计与实施计划.md) ----
+// Counts the remaining whole-payload copies on the REAL capture / export paths,
+// so the "copy distribution" can be measured at runtime instead of inferred
+// from benchmarks.
+//
+//   staging : LogicSnapshotDiskCacheWriter 入队时的 memcpy（libsigrok 借用式
+//             payload 契约导致，见 AGENTS/零拷贝调查）。P2 槽位池化后单核占用
+//             已降到 ~1.8%，此计数器用于确认该结论在真实采集下成立。
+//   export  : StoreSession / SessionService 导出时的交叉重打包（本就必要）。
+//
+// Reuses the existing ENABLE_DECODE_PERF gate rather than inventing a second
+// one — zero cost in normal builds, no extra CMake option. Printed as
+// COPY_AUDIT in the same %TEMP%/pxv_decode_perf.log window flush.
+inline uint64_t g_copy_staging_calls = 0;
+inline uint64_t g_copy_staging_bytes = 0;
+inline uint64_t g_copy_export_calls  = 0;
+inline uint64_t g_copy_export_bytes  = 0;
+inline void record_copy_staging(uint64_t bytes) {
+  g_copy_staging_calls++;
+  g_copy_staging_bytes += bytes;
+}
+inline void record_copy_export(uint64_t bytes) {
+  g_copy_export_calls++;
+  g_copy_export_bytes += bytes;
+}
+
 // ---- P3-D8: heap topology probe ----
 // Confirms the convoy premise: main-thread CRT malloc, Qt qMalloc and glib
 // g_malloc all land on the SAME heap (one lock), while Plan A's per-stack
@@ -337,6 +363,21 @@ inline void flush() {
   g_batch_flushes = 0;
   g_batch_ann_sum = 0;
   g_batch_max = 0;
+
+  // P1-e: copy audit — remaining whole-payload copies on the capture/export paths.
+#ifdef PXVIEW_COPY_AUDIT
+  fprintf(lf,
+          "COPY_AUDIT    staging_calls=%llu staging_MB=%.1f"
+          " export_calls=%llu export_MB=%.1f\n",
+          (unsigned long long)g_copy_staging_calls,
+          (double)g_copy_staging_bytes / (1024.0 * 1024.0),
+          (unsigned long long)g_copy_export_calls,
+          (double)g_copy_export_bytes / (1024.0 * 1024.0));
+  g_copy_staging_calls = 0;
+  g_copy_staging_bytes = 0;
+  g_copy_export_calls  = 0;
+  g_copy_export_bytes  = 0;
+#endif
 
   // P3-D6: max process CPU util per 100ms tick this window (1.0 = one core).
   // High util (~n cores) alongside a large EVENT_LAG_MAX ⇒ decode threads

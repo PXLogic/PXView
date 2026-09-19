@@ -15,14 +15,10 @@ namespace core {
 double convert_voltage(double raw_adc,
                        double data_scale,
                        uint64_t measure_vf,
-                       uint64_t vfactor,
-                       int view_rect_height)
+                       uint64_t vfactor)
 {
-    if (view_rect_height <= 0) {
-        view_rect_height = kDefaultViewRectHeight;
-    }
     return raw_adc * data_scale * (double)measure_vf * (double)vfactor
-           * (double)kDsoVdivs / (double)view_rect_height;
+           * (double)kDsoVdivs;
 }
 
 QString format_voltage(double v_mv, int precision)

@@ -38,6 +38,7 @@ int xlog_detail(xlog_writer *w, const char *, ...) { (void)w; return 0; }
 }
 
 #include "pv/data/snapshot/dsosnapshot.h"
+#include "pv/core/measure_format.h"   // convert_voltage / kAdcScale / millivolts_to_volts
 
 using namespace pv::data;
 
@@ -228,6 +229,42 @@ void TestDsoSnapshot::test_setter_getter_roundtrip()
     snap.set_measure_voltage_factor(5678, 1);
     QCOMPARE((quint64)snap.get_measure_voltage_factor(0), (quint64)1234);
     QCOMPARE((quint64)snap.get_measure_voltage_factor(1), (quint64)5678);
+
+    // measure_probe_factor (双因子槽) —— 与 measure_voltage_factor 同构，
+    // 两者一起构成"采集期冻结的测量档位上下文"，使读取路径能就地算出伏特。
+    snap.set_measure_probe_factor(10, 0);
+    snap.set_measure_probe_factor(100, 1);
+    QCOMPARE((quint64)snap.get_measure_probe_factor(0), (quint64)10);
+    QCOMPARE((quint64)snap.get_measure_probe_factor(1), (quint64)100);
+
+    // 未灌入时探头因子默认 ×1（不能是 0，否则换算出的电压恒为 0）
+    {
+        DsoSnapshot fresh;
+        QCOMPARE((quint64)fresh.get_measure_probe_factor(0), (quint64)1);
+        QCOMPARE((quint64)fresh.get_measure_probe_factor(1), (quint64)1);
+    }
+
+    // 档位上下文 + convert_voltage 的端到端量纲检查：
+    //   1 V/div（= 1000 mV/div）+ ×10 探头，8-bit 满量程 255
+    //   满量程 = 4 格(±) × 1V/div × 10× = 80 V
+    //
+    // 容差说明：data_scale 在 DsoSnapshot 里是 **float**，(float)(1/255) 与
+    // 精确值差 ~6e-8 相对误差，故不能用精确比较。
+    {
+        DsoSnapshot s;
+        s.set_measure_voltage_factor(1000, 0);          // mV/div
+        s.set_measure_probe_factor(10, 0);              // ×10 探头
+        s.set_data_scale((float)pv::core::kAdcScale, 0); // 1/255
+        const double v_mv = pv::core::convert_voltage(
+            255.0, (double)s.get_data_scale(0),
+            s.get_measure_voltage_factor(0),
+            s.get_measure_probe_factor(0));
+        QVERIFY2(std::abs(v_mv - 80000.0) < 0.01,               // 毫伏
+                 qPrintable(QString("v_mv = %1").arg(v_mv)));
+        const double v = pv::core::millivolts_to_volts(v_mv);
+        QVERIFY2(std::abs(v - 80.0) < 1e-5,                     // 伏特
+                 qPrintable(QString("v = %1").arg(v)));
+    }
 
     // data_scale (双因子槽)
     snap.set_data_scale(2.5f, 0);

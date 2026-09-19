@@ -169,8 +169,11 @@ int AnalogSignal::commit_settings() {
   // -- enable
   _model->set_probe_enabled(enabled(), probe);
 
-  // -- vdiv
-  _model->set_vdiv(_model ? _model->vdiv() : 0);
+  // -- vdiv: 模拟通道没有 vDial 控件，SignalModel 就是唯一真值来源，
+  //    这里**不需要**回写（旧代码是 `set_vdiv_mv(_model ? _model->vdiv_mv() : 0)`
+  //    的自赋值 no-op，且那个 `_model ?` 守卫是死的 —— 调用本身已经解引用
+  //    `_model`。死代码已删除，避免后人误以为这里会同步什么）。
+  //    与下面的 coupling / offset 不同，它们各自对应一个可编辑的 View 控件。
 
   // -- coupling
   _model->set_coupling(_model ? _model->coupling() : 0);
@@ -250,9 +253,18 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
       (uint64_t)(_data->get_ring_start() + floor(index)) %
       _data->get_sample_count();
   const uint8_t unit_bytes = _data->get_unit_bytes();
-  const uint8_t *samples = _data->get_samples(ring_index);
-  // get_samples(ring_index) 已返回该样本组起始地址，只需通道内 order 偏移
-  const uint64_t sample_offs = static_cast<uint64_t>(order) * unit_bytes;
+  const bool is_float = _data->is_float();
+  // P1-c + B+C 收口：span.data 已指向**本通道第一个样本**
+  // （AnalogSnapshot::span() 内部加过 order * unit_bytes），所以这里既不需要
+  // 手算通道内偏移，也不需要手写小端拼接循环 —— 取值统一走
+  // SampleSpan::analog_value_at()（与 get_analog_samples() / export_binary
+  // 共用同一解码实现）。
+  // ring_index 由上方取模保证 < get_sample_count()，故 contiguous_samples >= 1。
+  // 注意：span() 收的是**通道索引**（内部再映射到 order），不是 order。
+  const pv::data::SampleSpan sp =
+      _data->span((uint32_t)get_index(), ring_index, 1);
+  if (!sp.valid())
+    return pt;
 
   const int height = get_totalHeight();
   const float top = get_y() - height * 0.5;
@@ -261,14 +273,10 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
   const float x = (index / samples_per_pixel - pixels_offset);
 
   float y;
-  if (_data->is_float() && unit_bytes == sizeof(float)) {
-    value = *reinterpret_cast<const float*>(samples + sample_offs);
+  value = (float)sp.analog_value_at(ring_index, is_float);
+  if (is_float && unit_bytes == sizeof(float)) {
     y = min(max(top, get_zero_vpos() - value * _float_scale), bottom);
   } else {
-    value = *(samples + sample_offs);
-    for (uint8_t i = 1; i < unit_bytes; i++) {
-      value += (samples[sample_offs + i] << i * 8);
-    }
     y = min(max(top, get_zero_vpos() + (value - hw_offset) * _scale), bottom);
   }
   pt = QPointF(x, y);
@@ -280,7 +288,7 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
  * Probe options
  **/
 uint64_t AnalogSignal::get_vdiv() {
-  return _model ? (uint64_t)_model->vdiv() : 0;
+  return _model ? (uint64_t)_model->vdiv_mv() : 0;
 }
 
 uint8_t AnalogSignal::get_acCoupling() {
@@ -530,8 +538,9 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   // (zeroY / hw_offset / _scale / _float_scale / top / bottom / _colour) as
   // value parameters; the function reads only the snapshot + those values.
   rasterize_analog_channel(p, _data, zeroY, left, right, start_index,
-                           show_length, samples_per_pixel, order, top, bottom,
-                           get_hw_offset(), _scale, _float_scale, _colour);
+                           show_length, samples_per_pixel, get_index(), top,
+                           bottom, get_hw_offset(), _scale, _float_scale,
+                           _colour);
 }
 
 void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,

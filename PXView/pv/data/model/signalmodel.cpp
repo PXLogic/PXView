@@ -36,7 +36,7 @@ SignalModel::SignalModel()
     : _index(0)
     , _type(SR_CHANNEL_LOGIC)
     , _enabled(false)
-    , _vdiv(0.0)
+    , _vdiv_mv(0.0)
     , _coupling(0)
     , _vfactor(1.0)
     , _map_default(true)
@@ -115,9 +115,9 @@ void SignalModel::set_color(const std::string &color) {
     }
 }
 
-void SignalModel::set_vdiv(double vdiv) {
-    if (_vdiv != vdiv) {
-        _vdiv = vdiv;
+void SignalModel::set_vdiv_mv(double vdiv_mv) {
+    if (_vdiv_mv != vdiv_mv) {
+        _vdiv_mv = vdiv_mv;
         emit appearance_changed();
     }
 }
@@ -171,7 +171,7 @@ void SignalModel::set_map_default(bool map_default) {
 }
 
 // ---- Probe configuration (explicit sr_channel override) ----
-// Pattern: follow set_vdiv — use the explicit |probe| if non-nullptr, else
+// Pattern: follow set_vdiv_mv — use the explicit |probe| if non-nullptr, else
 // fall back to the model's _sr_channel. In headless mode (no sr_channel and
 // no session), only update the model field without touching libsigrok.
 
@@ -327,10 +327,10 @@ void SignalModel::commit_to_device()
     _sr_channel->type = _type;
 
     // Fork libsigrok's sr_channel had extra fields (offset, zero_offset,
-    // hw_offset, vdiv, vfactor, coupling, trig_value) that upstream
+    // hw_offset, vdiv_mv, vfactor, coupling, trig_value) that upstream
     // libsigrok does not expose. Those are synced to the driver via the
     // DeviceAgent set_config_* calls below — model state lives in the
-    // _vertical_offset / _zero_offset / _hw_offset / _vdiv / _vfactor /
+    // _vertical_offset / _zero_offset / _hw_offset / _vdiv_mv / _vfactor /
     // _coupling / _trig_value fields on this object.
 
     // ---- Hardware-relevant fields via DeviceAgent set_config_* ----

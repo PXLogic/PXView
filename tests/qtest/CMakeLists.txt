@@ -93,6 +93,15 @@ pv_add_qtest(test_cursor_registry
     ${PXVIEW_INCLUDE_DIR}/pv/core/cursorregistry.cpp
 )
 
+# ==== P1-d DSO 电压换算因子契约（含已知缺陷表征）====
+# 审计结论见 devdoc/P0-P1-P2架构设计与实施计划.md §4.9:
+# 4 处 V/div 换算不是重复实现; convert_voltage 里 vfactor 被乘了两次(已知缺陷)。
+# 依赖: measure_format.cpp (纯函数) + pxvdef.h (kDsoVdivs 等常量)。
+pv_add_qtest(test_voltage_scale_factors
+    core/test_voltage_scale_factors.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/core/measure_format.cpp
+)
+
 # ==== CaptureManager 离线状态机/查询单测 (Spec harden-review T7) ====
 # MockSessionState 实现完整 ISessionState (pv::) + ISessionCoordination。链接方式:
 #   * pxview-core 静态库 (capturemanager/eventbus/log/deviceagent + pxview-data/
@@ -318,6 +327,85 @@ target_include_directories(test_logic_snapshot_cross_throughput PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 
+# ==== P2 决策门禁: 采集入队 staging 拷贝成本量化 ====
+# 量化 logicsnapshot_diskcache_writer.cpp:140 那笔唯一整包拷贝的 CPU/内存代价,
+# 对比 现状 / A3 池化 / A1 零拷贝 三个变体, 为"是否改动 libsigrok 数据包契约"
+# 提供数据。依赖链同 test_logic_snapshot_cross_throughput。
+pv_add_qtest(test_feed_staging_copy_cost
+    data/test_feed_staging_copy_cost.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_feed_staging_copy_cost PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== P1-a 解码 chunk 对齐契约回归 ====
+# 锁定 decoderstack.cpp P1-a 修复依赖的两条不变式:
+#   1) 迭代器指针按字节向下取整 (非 8 对齐起点 == 对齐起点同指针)
+#   2) get_iterator_valid_length() 精确到 leaf block 末尾, 窗口不跨块
+# 覆盖 2 个 leaf block + 非 8 对齐起点。依赖链同 test_logic_snapshot_query。
+pv_add_qtest(test_decode_chunk_alignment
+    data/test_decode_chunk_alignment.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_decode_chunk_alignment PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== P1-b mmap 区域生命周期契约回归 ====
+# 锁定 mmap_region() 的引用计数语义: 读者钉住的映射在释放前不被解除;
+# 几何变更重建 allocator 而旧映射存活; 几何一致复用同一 allocator。
+# 依赖链同 test_logic_snapshot_query。
+pv_add_qtest(test_mmap_region_lifetime
+    data/test_mmap_region_lifetime.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_mmap_region_lifetime PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== P1-c 统一读取抽象 SampleSpan 契约回归 ====
+# 锁定三种存储布局（logic 位打包块树 / dso 通道平面 / analog 交织）经同一
+# SampleSpan 结构暴露时的语义: start_sample 向下取整、contiguous_samples 硬上界、
+# stride / bits_per_sample 正确, 并与旧 get_sample(s) 对拍。
+pv_add_qtest(test_sample_span
+    data/test_sample_span.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/dsosnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/analogsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_sample_span PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+
 # ==== EventBus 并发/析构语义 (harden-review-findings T6 / R2) ====
 # 测试文件内定义 pxv_log 桩; 链接 eventbus + QtAsyncDispatcher + xlog.c 提供 xlog_warn。
 pv_add_qtest(test_eventbus
@@ -397,6 +485,10 @@ pv_add_qtest(test_dso_snapshot
     data/test_dso_snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/dsosnapshot.cpp
+    # measure_format.cpp: 测试用 core::convert_voltage 验证"测量档位上下文
+    # (measure_voltage_factor + measure_probe_factor + data_scale) -> 伏特"
+    # 的端到端量纲，与 test_voltage_scale_factors 共用同一实现。
+    ${PXVIEW_INCLUDE_DIR}/pv/core/measure_format.cpp
 )
 target_include_directories(test_dso_snapshot PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
@@ -501,16 +593,10 @@ elseif(NOT APPLE)
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
 endif()
 
-# ==== DiskCache 子系统 (config/mmap/buffer-manager/write-thread/read-cache) ====
-# 5 个 cache 类编译进目标, 内部 stub xlog。纯数据层, 无 QWidget 依赖。
-pv_add_qtest(test_disk_cache
-    data/test_disk_cache.cpp
-    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
-    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_buffer_manager.cpp
-    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_read_cache.cpp
-    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/disk_write_thread.cpp
-)
-target_include_directories(test_disk_cache PRIVATE
-    ${CMAKE_SOURCE_DIR}/libsigrok/include
-    ${CMAKE_SOURCE_DIR}/common
-)
+# ==== DiskCache 子系统 (config/mmap) ====
+# P0 (零拷贝架构): DiskBufferManager / DiskWriteThread / DiskReadCache 三件套已删除
+# —— 它们是被 MmapAllocator 取代的第二套（拷贝式）磁盘缓存实现，生产代码零调用，
+# 设计方向与零拷贝相反（submit 内部 malloc 拷贝、load malloc 物化整块）。
+# 保留的 cache 层只有 mmap_allocator.cpp（唯一存储后端，已由各 snapshot 测试覆盖）
+# 与 disk_cache_config.h（MmapAllocator 的配置结构）。
+

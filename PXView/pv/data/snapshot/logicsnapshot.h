@@ -314,6 +314,9 @@ public:
 	void append_payload(const sr_datafeed_logic &logic);
 
     const uint8_t * get_samples(uint64_t start_sample, uint64_t& end_sample, int sig_index, void **lbp=nullptr);
+    // P1-c: 统一读取抽象（见 pv/data/snapshot/sample_span.h）。
+    SampleSpan span(uint32_t channel, uint64_t start, uint64_t count) const override;
+
 
     bool get_sample(uint64_t index, int sig_index);
 
@@ -448,6 +451,18 @@ public:
     // 逻辑落盘字节 = 已采集样本数/8（8 samples/byte），磁盘占用 = mmap 分配器文件大小。
     uint64_t get_mmap_total_bytes();
 
+    // P1-b（零拷贝生命周期契约）：把 mmap 区域提升为可被读者"钉住"的引用计数句柄。
+    //
+    // 背景：解码线程通过 libsigrokdecode 持有裸内部指针（di->inbuf）指向 mmap 区域，
+    // 但这些指针的生命周期此前只由 LogicSnapshot 的私有成员 _mmap_alloc 决定 ——
+    // 一旦该成员被 reset / 重新赋值，映射被 munmap/UnmapViewOfFile，裸指针立即悬垂。
+    // 已有的 _iterator_count 守卫只保护 leaf block 的释放，不保护映射本身。
+    //
+    // 现在任何读者（解码线程、渲染、测量）都可以取一份拷贝并在读取期间持有它，
+    // 引用计数归零前映射不可能被解除。返回 nullptr 表示当前没有 mmap 后端
+    // （配置失败回退到 LeafBlockPool，或尚未 first_payload）。
+    std::shared_ptr<MmapAllocator> mmap_region() const { return _mmap_alloc; }
+
     bool has_data(int sig_index);
     int get_block_num();
     uint64_t get_block_size(int block_index);
@@ -571,7 +586,7 @@ private:
     bool find_first_different_raw(int order, uint64_t start, uint64_t end,
                                   bool expected_level, uint64_t &out_pos);
 
-    int get_ch_order(int sig_index);
+    int get_ch_order(int sig_index) const;
 
     void calc_mipmap(unsigned int order, uint8_t index0, uint8_t index1, uint64_t samples, bool isEnd);
 
@@ -688,6 +703,14 @@ private:
     // _disk_cache_config + _mmap_slot_written moved to LogicSnapshotDiskCacheWriter.
     std::shared_ptr<MmapAllocator> _mmap_alloc;
     uint64_t _max_blocks_per_channel;
+
+    // P1-b: 记录 _mmap_alloc 被 configure 时的几何，供 first_payload 判断
+    // "能否复用现有区域"。free_data() 在迭代器活跃时会提前返回（不 reset
+    // _mmap_alloc），此时若通道数/深度已变，旧代码会带着旧几何进入复用分支，
+    // 而 allocate_block() 按 _max_blocks_per_channel 计算 mmap 槽位 —— 会写错位置。
+    // 0 表示当前 _mmap_alloc 为空或几何未知。
+    uint64_t _mmap_geom_channel_num = 0;
+    uint64_t _mmap_geom_max_blocks = 0;
 
     std::atomic<uint64_t> _last_pf_count{0};
     std::atomic<int64_t> _last_pf_time{0};

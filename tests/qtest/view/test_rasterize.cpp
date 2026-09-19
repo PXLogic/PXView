@@ -217,6 +217,8 @@ private slots:
     void analog_minmax_mode_draws();
     // Analog: polyline mode (spp < 1) draws.
     void analog_polyline_mode_draws();
+    // Analog: channel index != internal order (demo-style _ch_index) draws.
+    void analog_non_identity_channel_index_draws();
 };
 
 void TestRasterize::logic_waveform_draws_pixels()
@@ -424,6 +426,63 @@ void TestRasterize::analog_polyline_mode_draws()
 
     QVERIFY2(countOpaque(img, img.rect()) > 0,
              "analog polyline mode must draw non-transparent pixels");
+}
+
+// Regression（P1-c 迁移引入的回归）：rasterize_analog_channel() 收的是
+// **通道索引**（SignalModel::index() == sr_channel->index），不是 snapshot
+// 内部 order。
+//
+// 旧签名收 order，函数内部又把它当通道索引传给 AnalogSnapshot::span()，
+// 而 span() 会用 get_ch_order() 反查 —— 当 _ch_index 不是恒等映射时
+// （demo 驱动：模拟通道索引 = i + num_logic_channels，如 {8,9}），
+// get_ch_order(0) 返回 -1，span() 返回空 span，samples == nullptr，
+// 函数提前 return → **整条模拟波形静默不绘制**。
+//
+// 既有两个 analog 用例用 _ch_index={0}（恒等映射），因此完全测不到这个错。
+// 本用例用 demo 布局 {8,9} + 两通道互为反向斜坡，同时验证：
+//   1) 两个通道都能绘制（非空 span）；
+//   2) 两张位图不同（order 推导正确，没有把两个通道都解析成同一通道）。
+void TestRasterize::analog_non_identity_channel_index_draws()
+{
+    const size_t N = 200;
+    // interleaved: [s_i ch8][s_i ch9]
+    std::vector<uint8_t> data(N * 2);
+    for (size_t i = 0; i < N; ++i) {
+        data[i * 2 + 0] = (uint8_t)(i & 0xFF);          // ch8: 上升斜坡
+        data[i * 2 + 1] = (uint8_t)(255 - (i & 0xFF));  // ch9: 下降斜坡
+    }
+
+    // demo 布局：逻辑通道 0..7，模拟通道 8..9 → _ch_index == {8, 9}
+    AnalogFixture fx({8, 9}, 1, false);
+    AnalogSnapshot snap;
+    fx.feed_all_channels(snap, N, data.data(), (uint32_t)N);
+
+    QVERIFY2(snap.get_ch_order(8) == 0 && snap.get_ch_order(9) == 1,
+             "fixture precondition: _ch_index must be the non-identity {8,9}");
+
+    auto rasterize_into = [&](int channel_index) {
+        QImage img(200, 30, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        QPainter p(&img);
+        pv::view::rasterize_analog_channel(
+            p, &snap, 15, 0, 200, 0, (int64_t)N, 2.0, channel_index,
+            0.0f, 30.0f, 128, 0.1f, 1.0f, QColor(255, 255, 255));
+        p.end();
+        return img;
+    };
+
+    const QImage img_ch8 = rasterize_into(8);
+    QVERIFY2(countOpaque(img_ch8, img_ch8.rect()) > 0,
+             "channel index 8 (order 0) must draw — passing order instead of "
+             "channel index yields an empty span and a blank trace");
+
+    const QImage img_ch9 = rasterize_into(9);
+    QVERIFY2(countOpaque(img_ch9, img_ch9.rect()) > 0,
+             "channel index 9 (order 1) must draw");
+
+    QVERIFY2(img_ch8 != img_ch9,
+             "channel 8 and 9 hold opposite ramps; identical bitmaps mean the "
+             "order lookup collapsed both channels onto one channel");
 }
 
 QTEST_MAIN(TestRasterize)

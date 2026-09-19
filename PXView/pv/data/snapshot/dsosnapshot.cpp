@@ -52,6 +52,8 @@ DsoSnapshot::DsoSnapshot() :
     _threshold = 0;
     _measure_voltage_factor1 = 0;
     _measure_voltage_factor2 = 0;
+    _measure_probe_factor1 = 1;   // ×1 探头为默认，避免未灌入时算出 0 V
+    _measure_probe_factor2 = 1;
     _data_scale1 = 0;
     _data_scale2 = 0;  
     _is_file = false;
@@ -600,7 +602,31 @@ bool DsoSnapshot::has_data(int sig_index)
     return get_ch_order(sig_index) != -1;
 }
 
-int DsoSnapshot::get_ch_order(int sig_index)
+// P1-c（统一读取抽象）：DSO 每通道一个独立平面缓冲，样本按 uint8 存储
+// （电压换算由消费端各自完成）。通道内连续，stride = 1。
+SampleSpan DsoSnapshot::span(uint32_t channel, uint64_t start,
+                             uint64_t count) const {
+    SampleSpan s;
+    s.channel = channel;
+    if (count == 0) return s;
+    if (start >= _sample_count) return s;
+
+    const int order = get_ch_order((int)channel);
+    if (order < 0 || (unsigned int)order >= _ch_data.size()) return s;
+    if (_ch_data[order] == nullptr) return s;
+
+    s.data = (const uint8_t *)_ch_data[order] + start;
+    // DSO 是"按通道平面"布局：data 本身已在通道起点，整块基址与 data 相同。
+    s.group_base = s.data;
+    s.start_sample = start;
+    s.contiguous_samples = _sample_count - start;
+    s.unit_bytes = 1;
+    s.stride = 1;
+    s.bits_per_sample = 8;
+    return s;
+}
+
+int DsoSnapshot::get_ch_order(int sig_index) const
 {
     uint16_t order = 0;
 

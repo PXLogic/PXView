@@ -142,6 +142,14 @@ void rasterize_dso_channel(
 //                    thread inside paint_mid)
 //   top/bottom     — get_y() ± total_height*0.5
 //   colour         — _colour
+//
+// P1-c 修正：本函数收 **通道索引**（SignalModel::index()，即 sr_channel->index），
+// 不接内部 order。旧签名收 order，内部又把它当通道索引传给
+// AnalogSnapshot::span()，而 span() 会用 get_ch_order() 做映射 —— 当
+// snapshot 的 _ch_index 不是恒等映射时（例如 demo 驱动把模拟通道索引分配为
+// i + num_logic_channels，_ch_index == [8..15]），get_ch_order(0) 返回 -1，
+// span() 返回空 span，整条模拟波形静默不绘制。order 现在由本函数内部唯一
+// 一次 get_ch_order() 推导，调用方不再持有两套索引空间。
 void rasterize_analog_channel(
     QPainter &p,
     data::AnalogSnapshot *snapshot,
@@ -151,7 +159,7 @@ void rasterize_analog_channel(
     uint64_t start_index,
     int64_t sample_count,
     double samples_per_pixel,
-    int order,
+    int channel_index,
     float top,
     float bottom,
     int hw_offset,

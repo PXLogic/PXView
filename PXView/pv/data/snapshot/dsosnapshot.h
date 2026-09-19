@@ -92,6 +92,9 @@ public:
 
     void append_payload(const sr_datafeed_dso &dso);
     const uint8_t* get_samples(int64_t start_sample, int64_t end_sample, uint16_t ch_index);
+    // P1-c: 统一读取抽象（见 pv/data/snapshot/sample_span.h）。
+    SampleSpan span(uint32_t channel, uint64_t start, uint64_t count) const override;
+
 
 	void get_envelope_section(EnvelopeSection &s,
         uint64_t start, uint64_t end, float min_length, int probe_index);
@@ -113,12 +116,35 @@ public:
         return _threshold;
     }
 
+    // ---- 采集期冻结的"测量档位"上下文 ----
+    //
+    // 这两个量加上 base Snapshot 的 data_scale，就是 core::convert_voltage()
+    // 的全部输入，也就是把 raw ADC 计数换算成毫伏所需的**全部**信息：
+    //
+    //   v_mV = raw * data_scale * measure_voltage_factor * measure_probe_factor
+    //          * kDsoVdivs
+    //
+    // 放在快照上（而不是读取时回头查 SignalModel）的理由：它们属于"这次采集
+    // 的物理上下文"，一旦采集开始就固定；读取路径因此不依赖 session/UI 存活，
+    // headless 与 GUI 得到相同结果。sigsession.cpp / sessionstatecontext.cpp
+    // 在采集开始时从 SignalModel 灌入（vdiv_mv() / vfactor()）。
+    //
+    // 单位：measure_voltage_factor = **mV/div**（SignalModel::vdiv_mv()）；
+    //       measure_probe_factor   = 探头衰减因子（×1/×10/×100），无量纲。
     inline void set_measure_voltage_factor(uint64_t v, int index){   
         index == 0 ? _measure_voltage_factor1 = v : _measure_voltage_factor2 = v;
     }
 
     inline uint64_t get_measure_voltage_factor(int index){
         return index == 0 ? _measure_voltage_factor1 : _measure_voltage_factor2;
+    }
+
+    inline void set_measure_probe_factor(uint64_t v, int index){
+        index == 0 ? _measure_probe_factor1 = v : _measure_probe_factor2 = v;
+    }
+
+    inline uint64_t get_measure_probe_factor(int index){
+        return index == 0 ? _measure_probe_factor1 : _measure_probe_factor2;
     }
 
     inline void set_data_scale(float scale, int index){
@@ -148,7 +174,7 @@ private:
 	void reallocate_envelope(Envelope &l);
     void append_payload_to_envelope_levels(bool header);
     void free_data();   
-    int  get_ch_order(int sig_index);
+    int  get_ch_order(int sig_index) const;
 
 private:
     struct Envelope _envelope_levels[2*DS_MAX_DSO_PROBES_NUM][ScaleStepCount];
@@ -159,6 +185,8 @@ private:
     float   _threshold;
     uint64_t _measure_voltage_factor1;
     uint64_t _measure_voltage_factor2;
+    uint64_t _measure_probe_factor1;
+    uint64_t _measure_probe_factor2;
     float _data_scale1 = 0;
     float _data_scale2 = 0;
     bool    _is_file;

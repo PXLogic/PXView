@@ -38,7 +38,8 @@ QJsonObject SignalConfigStore::signal_config_to_json() const {
     QJsonObject ch_obj;
     ch_obj["index"] = ch.index;
     ch_obj["enabled"] = ch.enabled;
-    ch_obj["vdiv"] = (qint64)ch.vdiv;
+    // JSON key 保持 "vdiv"（.pxc 格式兼容），值单位是 mV/div
+    ch_obj["vdiv"] = (qint64)ch.vdiv_mv;
     ch_obj["coupling"] = ch.coupling;
     ch_obj["map_default"] = ch.map_default;
     ch_obj["hw_offset"] = ch.hw_offset;
@@ -81,7 +82,7 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
       ChannelConfig cfg;
       cfg.index = ch_obj["index"].toInt();
       cfg.enabled = ch_obj["enabled"].toBool();
-      cfg.vdiv = (uint64_t)ch_obj["vdiv"].toVariant().toULongLong();
+      cfg.vdiv_mv = (uint64_t)ch_obj["vdiv"].toVariant().toULongLong();
       cfg.coupling = ch_obj["coupling"].toInt();
       cfg.map_default = ch_obj["map_default"].toBool();
       // Task 6: hw_offset/offset/zero_offset 补齐 contains() 保护，与其他字段风格一致。
@@ -194,7 +195,7 @@ void SignalConfigStore::save_signal_config(
     // fall back to sr_channel before a model exists.
     cfg.enabled = matched_model ? matched_model->enabled()
                                : (probe->enabled != FALSE);
-    cfg.vdiv = 0;
+    cfg.vdiv_mv = 0;
     cfg.coupling = 0;
     cfg.map_default = true;
 
@@ -216,7 +217,7 @@ void SignalConfigStore::save_signal_config(
     if (cfg.type == SR_CHANNEL_DSO ||
         cfg.type == SR_CHANNEL_ANALOG) {
       // SR_CONF_PROBE_VDIV / SR_CONF_PROBE_COUPLING fork DSO keys deleted;
-      // cfg.vdiv / cfg.coupling keep their defaults (0). map_default is still
+      // cfg.vdiv_mv / cfg.coupling keep their defaults (0). map_default is still
       // queried (key retained in pxvdef.h, migrated in Phase 2).
       bool map_default = true;
       agent->get_config_bool(SR_CONF_PROBE_MAP_DEFAULT, map_default, probe,

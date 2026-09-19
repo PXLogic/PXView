@@ -34,6 +34,7 @@
 #include "pv/core/documentregistry.h"
 #include "pv/core/capturemanager.h"
 #include "pv/core/measurecalculator.h"  // Task C1.5: MeasureCalculator::compute
+#include "pv/core/measure_format.h"     // core::kAdcScale / convert_voltage
 #include "pv/data/snapshot/analogsnapshot.h"
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/row.h"
@@ -1314,10 +1315,34 @@ void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
   if (mode == DSO) {
     for (auto m : _state->signal_models()) {
       if (m->type() == SR_CHANNEL_DSO) {
-        // TODO: verify - vfactor and vdiv replace view::DsoSignal getters.
+        // Upstream DSView (sigsession.cpp:428-430):
+        //   uint64_t k = ch->get_vDial()->get_value();
+        //   set_measure_voltage_factor(k, ...);            // V/div 档位 (mV/div)
+        //   set_data_scale(ch->get_scale(), ...);          // height/255 (见下)
+        //
+        // measure_voltage_factor 与 data_scale 是**两个不同的量**:
+        //   measure_voltage_factor = SignalModel::vdiv_mv()  -> mV/div 档位
+        //   data_scale             = 1/255                 -> ADC 计数归一化
+        //   (探头衰减因子不在这里, 它在测量时由 SignalModel::vfactor() 单独乘入)
+        //
+        // 旧代码把两者都写成 vfactor/vdiv, 导致 convert_voltage() 里 vfactor
+        // 被乘两次 (接 10× 探头时读数偏大 10 倍), 且游标 ΔV 路径 (只乘 k,
+        // 不乘 data_scale) 偏差 vdiv 倍. 详见 §4.9.2.
+        //
+        // data_scale 用 height-independent 的 kAdcScale: 上游 get_scale() 是
+        // height/(ref_max-ref_min)*stop_scale, 而每个消费者又除以 height,
+        // 两者相消 —— 净因子恒为 1/(ref_max-ref_min) = 1/255 (8-bit DSO)。
+        //
+        // measure_probe_factor 与 measure_voltage_factor 同属"采集期冻结的测量
+        // 档位"，一并灌进快照 —— 这样 core::convert_voltage() 的全部输入都在
+        // 快照上，读取路径（含 MCP get_samples）不需要回头查 SignalModel，
+        // 也就能把 raw ADC 就地换算成物理量（伏特）。见 §4.9.3。
         _state->capture_data()->get_dso()->set_measure_voltage_factor(
+            (uint64_t)m->vdiv_mv(), m->index());
+        _state->capture_data()->get_dso()->set_measure_probe_factor(
             (uint64_t)m->vfactor(), m->index());
-        _state->capture_data()->get_dso()->set_data_scale(m->vdiv(), m->index());
+        _state->capture_data()->get_dso()->set_data_scale(
+            (float)core::kAdcScale, m->index());
       }
     }
   }
@@ -3390,24 +3415,25 @@ std::shared_ptr<data::DsoSnapshot> SigSession::get_dso_snapshot_shared() {
 // Task C1.5: DSO measurement computation via core::MeasureCalculator.
 // Computes raw MeasurementResult list from the view_data() DsoSnapshot +
 // signal_models, then converts each result to data::MeasurementValue list
-// using the per-channel data_scale (vdiv) + measure_vf (probe factor from
-// SignalModel via DsoSnapshot) + vfactor (probe factor from SignalModel —
-// same value as the View layer's _vDial->get_factor(), kept in sync via
-// DsoSignal::set_factor → model->set_vfactor).
+// using the per-channel:
+//   data_scale  = DsoSnapshot data_scale  -> ADC 计数归一化 (core::kAdcScale = 1/255)
+//   measure_vf  = DsoSnapshot measure_voltage_factor -> V/div 档位 (mV/div)
+//   vfactor     = SignalModel::vfactor()  -> 探头衰减因子 (1/10/100)
 //
-// The voltage formula preserves the original DsoMeasure behavior exactly:
-//   v_mV = raw_adc * data_scale * measure_vf * vfactor * DS_CONF_DSO_VDIVS
-//          / view_rect_height
-// where measure_vf and vfactor are both the probe factor (this matches the
-// original code where k = get_measure_voltage_factor() and _vDial->
-// get_factor() were both the probe factor). See dso_measure.cpp original
-// get_voltage(double v, int p, scaled=false).
+// These are **three independent quantities**. Upstream DSView used the same
+// shape:
+//   v_mV = raw * get_scale() * vDial->get_value() * vDial->get_factor()
+//          * DS_CONF_DSO_VDIVS / height
+// with get_scale() = height/(ref_max-ref_min)*stop_scale, so the height
+// cancelled and the net was `raw * vdiv * vfactor * 8 / 255` — independent of
+// the view geometry. That is exactly what we compute here.
 //
-// view_rect_height: 0 = use headless default (256). The View layer passes
-// its actual get_view_rect().height() so GUI-displayed voltages match the
-// original DsoMeasure computation exactly.
+// §4.9.2: the earlier port stored measure_voltage_factor = vfactor and
+// data_scale = vdiv, which made convert_voltage() square the probe factor and
+// made the cursor ΔV path (which multiplies k only, no data_scale) off by vdiv.
+// Both mappings are fixed above.
 std::vector<data::MeasurementValue>
-SigSession::get_measurements(int channel_index, int view_rect_height) {
+SigSession::get_measurements(int channel_index) {
   SessionData *data = _state->view_data();
   if (!data)
     return {};
@@ -3417,13 +3443,13 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
     return {};
 
   const uint64_t ring = dso->get_sample_count();
-  // #3 缓存查询: 键 (data 指针, channel, ring, h). running 时 ring 增长自动
+  // #3 缓存查询: 键 (data 指针, channel, ring). running 时 ring 增长自动
   // 失效, stopped hover 时命中, 消除主线程 O(N) 重复计算.
+  // 视图高度不再计入键 —— 电压换算已与视图几何无关 (§4.9.2).
   {
     std::lock_guard<std::mutex> lk(_measure_cache_mutex);
     if (_measure_cache_valid && _measure_cache_data == (void*)data &&
-        _measure_cache_ch == channel_index && _measure_cache_ring == ring &&
-        _measure_cache_h == view_rect_height)
+        _measure_cache_ch == channel_index && _measure_cache_ring == ring)
       return _measure_cache_val;
   }
 
@@ -3432,15 +3458,14 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
 
   // Step 1: compute raw MeasurementResult list (max/min/rms/mean per channel)
   auto raw_results = core::MeasureCalculator::compute(
-      data, signal_models, channel_index, view_rect_height);
+      data, signal_models, channel_index);
 
   // Step 2: convert each raw result to data::MeasurementValue list
   for (const auto &r : raw_results) {
-    // Look up data_scale and measure_vf from the DsoSnapshot (same source
-    // as the original DsoMeasure::get_voltage — set by
-    // SessionStateContext::set_cur_snap_samplerate from m->vdiv() and
-    // m->vfactor()).
-    double data_scale = 0.0;
+    // data_scale / measure_vf come from the DsoSnapshot, written by
+    // SigSession::set_cur_snap_samplerate / SessionStateContext::
+    // set_cur_snap_samplerate (m->vdiv_mv() and core::kAdcScale).
+    double data_scale = core::kAdcScale;
     uint64_t measure_vf = 1;
     uint64_t vfactor = 1;
 
@@ -3461,7 +3486,7 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
     }
 
     auto values = core::MeasureCalculator::to_measurement_values(
-        r, data_scale, measure_vf, vfactor, view_rect_height);
+        r, data_scale, measure_vf, vfactor);
 
     // Flatten into the result vector
     for (auto &v : values) {
@@ -3475,7 +3500,6 @@ SigSession::get_measurements(int channel_index, int view_rect_height) {
     _measure_cache_data = (void*)data;
     _measure_cache_ch = channel_index;
     _measure_cache_ring = ring;
-    _measure_cache_h = view_rect_height;
     _measure_cache_val = result;
     _measure_cache_valid = true;
   }

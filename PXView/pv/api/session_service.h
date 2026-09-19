@@ -187,7 +187,8 @@ explicit SessionService(SigSession *session, DeviceAgent *device);
     Result<uint64_t> get_dso_samples(
         uint64_t start_sample, uint64_t end_sample,
         int16_t channel_index,
-        std::vector<float> &out_data) override;
+        std::vector<float> &out_data,
+        bool normalized = false) override;
     Result<uint64_t> find_next_edge(
         uint64_t from_sample, int16_t channel_index, bool rising_edge) override;
     Result<uint64_t> find_pattern(

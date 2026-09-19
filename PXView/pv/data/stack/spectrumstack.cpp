@@ -166,9 +166,17 @@ void SpectrumStack::calc_fft()
     // prepare _xn data — read hardware offset / vdiv / vfactor from the
     // SignalModel (pure data layer, no view::DsoSignal dependency).
     const int offset = model->hw_offset();
-    const double vscale = model->vdiv() * model->vfactor() * DS_CONF_DSO_VDIVS / (1000*255.0);
+    const double vscale = model->vdiv_mv() * model->vfactor() * DS_CONF_DSO_VDIVS / (1000*255.0);
     const uint16_t step = _sample_interval;
-    const uint8_t *const samples = data->get_samples(0, _sample_num*_sample_interval-1, _index);
+    // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
+    // get_samples(0, N-1, _index) 返回的基指针等价。上方已保证
+    // get_sample_count() >= _sample_num * _sample_interval，故 contiguous_samples
+    // 覆盖所有被读取的下标（最大为 (_sample_num-1)*step）。
+    const pv::data::SampleSpan sp =
+        data->span((uint32_t)_index, 0, (uint64_t)_sample_num * _sample_interval);
+    if (!sp.valid())
+        return;
+    const uint8_t *const samples = sp.data;
     double wsum = 0;
     
     for (unsigned int i = 0; i < _sample_num; i++) {

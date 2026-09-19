@@ -139,14 +139,27 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
                        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DATA_SOURCE_ERROR), "Data source error."));
         }
         else {
-            const uint8_t* chan_data_array[2];
-            chan_data_array[_xIndex] = _data->get_samples(0, sample_count-1, _xIndex);
-            chan_data_array[_yIndex] = _data->get_samples(0, sample_count-1, _yIndex);
+            // P1-c（统一读取抽象）：DSO 平面布局，span.data 与旧
+            // get_samples(0, sample_count-1, ch) 的基指针等价；
+            // sample_count <= get_sample_count()，contiguous_samples 必然覆盖。
+            // 顺带去掉原先按“通道索引”下标的 2 元素数组 —— channel_num>=3 且
+            // _xIndex/_yIndex 取到 2 时会越界（原有缺陷），改用两个局部指针。
+            const pv::data::SampleSpan spx =
+                _data->span((uint32_t)_xIndex, 0, sample_count);
+            const pv::data::SampleSpan spy =
+                _data->span((uint32_t)_yIndex, 0, sample_count);
+            if (!spx.valid() || !spy.valid()) {
+                // 旧代码会解引用 nullptr（未定义行为）；显式报错。
+                p.setPen(_view ? _view->theme_red() : QColor(213, 15, 37, 255));
+                p.drawText(_border.marginsRemoved(QMargins(10, 30, 10, 30)),
+                           L_S(STR_PAGE_DLG, S_ID(IDS_DLG_DATA_SOURCE_ERROR),
+                               "Data source error."));
+                return;
+            }
+            const uint8_t* dx = spx.data;
+            const uint8_t* dy = spy.data;
 
             for (uint64_t i = 0; i < sample_count; i++) {
-                const uint8_t* dx = chan_data_array[_xIndex];
-                const uint8_t* dy = chan_data_array[_yIndex];
-
                 *point++ = QPointF(left + dx[i] * scale,
                                     bottom - dy[i] * scale);
             }
