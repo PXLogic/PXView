@@ -432,7 +432,7 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
 
         double elapsed_s = std::chrono::duration<double>(end - start).count();
         if (elapsed_s > 0) {
-            double mbps = (payload.length / (1024.0 * 1024.0)) / elapsed_s;
+            double mbps = (static_cast<double>(payload.length) / (1024.0 * 1024.0)) / elapsed_s;
             // Exponential moving average for smoothing UI
             double old = _async_write_speed_mbps.load();
             if (old == 0.0) _async_write_speed_mbps = mbps;

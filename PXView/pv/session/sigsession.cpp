@@ -1273,11 +1273,11 @@ uint64_t SigSession::cur_samplelimits() {
 }
 
 double SigSession::cur_sampletime() {
-  return cur_samplelimits() * 1.0 / cur_samplerate();
+  return static_cast<double>(cur_samplelimits()) / static_cast<double>(cur_samplerate());
 }
 
 double SigSession::cur_snap_sampletime() {
-  return cur_samplelimits() * 1.0 / cur_snap_samplerate();
+  return static_cast<double>(cur_samplelimits()) / static_cast<double>(cur_snap_samplerate());
 }
 
 double SigSession::get_logic_data_view_time() {
@@ -1286,12 +1286,12 @@ double SigSession::get_logic_data_view_time() {
   if (_capture_manager->is_realtime_refresh() &&
       _state->capture_data() != _state->view_data())
     data = _state->capture_data();
-  return data->get_logic()->get_ring_sample_count() * 1.0 /
-         cur_snap_samplerate();
+  return static_cast<double>(data->get_logic()->get_ring_sample_count()) /
+         static_cast<double>(cur_snap_samplerate());
 }
 
 double SigSession::cur_view_time() {
-  return _state->device_agent().get_time_base() * DS_CONF_DSO_HDIVS * 1.0 / SR_SEC(1);
+  return static_cast<double>(_state->device_agent().get_time_base()) * DS_CONF_DSO_HDIVS / static_cast<double>(SR_SEC(1));
 }
 
 void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
@@ -1306,9 +1306,9 @@ void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
            _state->device_agent().name().toUtf8().data());
 
   _state->capture_data()->_cur_snap_samplerate = samplerate;
-  _state->capture_data()->get_logic()->set_samplerate(samplerate);
-  _state->capture_data()->get_analog()->set_samplerate(samplerate);
-  _state->capture_data()->get_dso()->set_samplerate(samplerate);
+  _state->capture_data()->get_logic()->set_samplerate(static_cast<double>(samplerate));
+  _state->capture_data()->get_analog()->set_samplerate(static_cast<double>(samplerate));
+  _state->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplerate));
 
   int mode = _state->device_agent().get_work_mode();
 
@@ -1349,15 +1349,15 @@ void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
 
   // DecoderStack
   for (auto d : decode_traces()) {
-    d->set_samplerate(samplerate);
+    d->set_samplerate(static_cast<double>(samplerate));
   }
 
   // Math
   if (_state->math_stack())
-    _state->math_stack()->set_samplerate(_state->device_agent().get_sample_rate());
+    _state->math_stack()->set_samplerate(static_cast<double>(_state->device_agent().get_sample_rate()));
   // SpectrumStack
   for (auto m : _state->spectrum_stacks()) {
-    m->set_samplerate(samplerate);
+    m->set_samplerate(static_cast<double>(samplerate));
   }
 
   cur_snap_samplerate_changed();
@@ -1928,7 +1928,7 @@ uint16_t SigSession::get_ch_num(int type) {
     num_channels = analog_ch_num;
     break;
   default:
-    num_channels = logic_ch_num + dso_ch_num + analog_ch_num;
+    num_channels = static_cast<uint16_t>(logic_ch_num + dso_ch_num + analog_ch_num);
     break;
   }
 
@@ -2184,11 +2184,11 @@ bool SigSession::restore_decoders(const QJsonArray &dec_array,
           if (vs != "")
             vi = vs.toInt();
           if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
-            new_value = g_variant_new_byte(vi);
+            new_value = g_variant_new_byte(static_cast<guint8>(vi));
           else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
-            new_value = g_variant_new_int16(vi);
+            new_value = g_variant_new_int16(static_cast<gint16>(vi));
           else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
-            new_value = g_variant_new_uint16(vi);
+            new_value = g_variant_new_uint16(static_cast<guint16>(vi));
           else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
             new_value = g_variant_new_int32(vi);
           else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
@@ -2652,16 +2652,20 @@ void SigSession::on_trig_next_collect() {
 
     if (_capture_manager->get_repeat_intvl() > 0) {
       _capture_manager->set_repeat_hold_prg(100);
-      _capture_manager->start_repeat_timer(_capture_manager->get_repeat_intvl() * 1000);
-      int intvl = _capture_manager->get_repeat_intvl() * 1000 / 20;
+      // get_repeat_intvl() returns a double (seconds). Hoist the millisecond
+      // value once so the int narrowing below is explicit and the interval is
+      // read a single time.
+      const double intvl_ms = _capture_manager->get_repeat_intvl() * 1000.0;
+      _capture_manager->start_repeat_timer(static_cast<int>(intvl_ms));
+      int intvl = static_cast<int>(intvl_ms / 20);
 
       if (intvl >= 100) {
         _capture_manager->set_repeat_wait_prog_step(5);
       } else if (_capture_manager->get_repeat_intvl() >= 1) {
-        intvl = _capture_manager->get_repeat_intvl() * 1000 / 10;
+        intvl = static_cast<int>(intvl_ms / 10);
         _capture_manager->set_repeat_wait_prog_step(10);
       } else {
-        intvl = _capture_manager->get_repeat_intvl() * 1000 / 5;
+        intvl = static_cast<int>(intvl_ms / 5);
         _capture_manager->set_repeat_wait_prog_step(20);
       }
 

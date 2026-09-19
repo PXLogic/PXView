@@ -1258,7 +1258,7 @@ uint64_t DecoderStack::sample_count() {
     return 0;
 }
 
-uint64_t DecoderStack::sample_rate() { return _samplerate.load(std::memory_order_acquire); }
+uint64_t DecoderStack::sample_rate() { return static_cast<uint64_t>(_samplerate.load(std::memory_order_acquire)); }
 
 // P2-7 fix: annotation_callback now uses emplace_annotation instead of
 // new/delete. The Annotation is stored as a value in RowData's deque,

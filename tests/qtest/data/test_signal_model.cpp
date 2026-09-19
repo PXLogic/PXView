@@ -211,6 +211,7 @@ private slots:
     // ---- SignalModel <-> sr_channel two-way sync (P4 safety net) ----
     void SetEnabledWritesSrChannel();
     void SetNameWritesSrChannelAndFreesOld();
+    void SetNameClampsOverlongName();
     void SetTypeWritesSrChannel();
     void CommitToDeviceSyncsType();
     void SettersWithoutSrChannelAreNoOps();
@@ -582,6 +583,37 @@ void TestSignalModel::SetNameWritesSrChannelAndFreesOld() {
     const char *before = ch.name;
     m.set_name("SDA");
     QVERIFY(ch.name == before);
+
+    g_free(ch.name);
+    ch.name = nullptr;
+}
+
+void TestSignalModel::SetNameClampsOverlongName() {
+    SignalModel m;
+    sr_channel ch{};
+    ch.name = g_strdup("D0");
+    m.set_sr_channel(&ch);
+
+    // A name longer than the cap must be truncated rather than stored whole:
+    // the save path formats it into a fixed-size buffer (storesession.cpp
+    // meta_gen), so an unbounded name is a stack-overflow hazard.
+    const std::string overlong(SignalModel::kMaxNameLength + 64, 'x');
+    m.set_name(overlong);
+    QCOMPARE(int(m.name().size()), int(SignalModel::kMaxNameLength));
+    QVERIFY(ch.name != nullptr);
+    QCOMPARE(int(std::string(ch.name).size()), int(SignalModel::kMaxNameLength));
+
+    // Clamping must not defeat the change guard: the same over-long input
+    // clamps to the same value, so the sr_channel buffer is not churned.
+    const char *before = ch.name;
+    m.set_name(overlong);
+    QVERIFY(ch.name == before);
+
+    // A name exactly at the cap passes through untouched.
+    const std::string exact(SignalModel::kMaxNameLength, 'y');
+    m.set_name(exact);
+    QCOMPARE(QString::fromStdString(m.name()), QString::fromStdString(exact));
+    QCOMPARE(std::string(ch.name), exact);
 
     g_free(ch.name);
     ch.name = nullptr;

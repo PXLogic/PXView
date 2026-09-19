@@ -95,13 +95,22 @@ bool ZipMaker::Close(){
    return false;     
 }
 
-bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, unsigned int buferSize)
+bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, size_t buferSize)
 {
     if (!buffer || !innerFile || !m_zDoc)
         return false;
     assert(buffer);
     assert(innerFile);
     assert(m_zDoc);
+
+    // zipWriteInFileInZip() below takes an unsigned int length, so a single
+    // entry is capped at 4 GiB. Fail loudly rather than letting the narrowing
+    // conversion silently truncate the entry and corrupt the archive.
+    if (buferSize > static_cast<size_t>(0xFFFFFFFFu)) {
+        strcpy(m_error, "entry exceeds 4GiB zip limit");
+        return false;
+    }
+
     int level = m_opt_compress_level;
 
     if (level < Z_DEFAULT_COMPRESSION  || level > Z_BEST_COMPRESSION){
@@ -113,7 +122,7 @@ bool ZipMaker::AddFromBuffer(const char *innerFile, const char *buffer, unsigned
                                 Z_DEFLATED,
                                 level);
 
-    zipWriteInFileInZip((zipFile)m_zDoc, buffer, (unsigned int)buferSize);
+    zipWriteInFileInZip((zipFile)m_zDoc, buffer, static_cast<unsigned int>(buferSize));
 
     zipCloseFileInZip((zipFile)m_zDoc);
 
@@ -236,10 +245,12 @@ ZipInnerFileData* ZipReader::GetInnterFileData(const char *innerFile)
     metafile = (char *)malloc(fileInfo.uncompressed_size);
     if (fileInfo.uncompressed_size > 0 && metafile)
     {
-        unzReadCurrentFile(m_archive, metafile, fileInfo.uncompressed_size);
+        // unzReadCurrentFile() takes an unsigned int length; the 4 GiB entry
+        // cap is inherent to this minizip API (same limit as AddFromBuffer).
+        unzReadCurrentFile(m_archive, metafile, static_cast<unsigned int>(fileInfo.uncompressed_size));
         unzCloseCurrentFile(m_archive);
 
-         ZipInnerFileData *data = new ZipInnerFileData(metafile, fileInfo.uncompressed_size);
+         ZipInnerFileData *data = new ZipInnerFileData(metafile, static_cast<int>(fileInfo.uncompressed_size));
          return data;
     } 
  

@@ -51,6 +51,12 @@ public:
     };
 
 public:
+    // Upper bound on a channel name. Names are user-editable and are written
+    // verbatim into the .pxc/.pxl header, so the cap keeps a rename from
+    // overflowing the fixed-size formatting buffers on the save path.
+    static constexpr std::size_t kMaxNameLength = 128;
+
+public:
     SignalModel();
     ~SignalModel();
 

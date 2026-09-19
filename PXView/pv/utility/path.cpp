@@ -37,7 +37,7 @@ namespace path{
 
     QString GetDirectoryName(QString path)
     {
-        int lstdex = path.lastIndexOf('/');
+        const qsizetype lstdex = path.lastIndexOf('/');
         if (lstdex != -1)
         {
             return path.left(lstdex);

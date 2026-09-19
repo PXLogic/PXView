@@ -78,7 +78,9 @@ void SpectrumStack::set_sample_num(uint64_t num)
     _xn.resize(_sample_num);
     _xk.resize(_sample_num);
     _power_spectrum.resize(_sample_num/2+1);
-    _fft_plan = fftw_plan_r2r_1d(_sample_num, _xn.data(), _xk.data(),
+    // FFTW's plan API takes an int length. _sample_num is bounded well below
+    // INT_MAX by the capture size, so the narrowing is safe.
+    _fft_plan = fftw_plan_r2r_1d(static_cast<int>(_sample_num), _xn.data(), _xk.data(),
                                  FFTW_R2HC, FFTW_ESTIMATE);
 }
 
@@ -165,9 +167,9 @@ void SpectrumStack::calc_fft()
 
     // prepare _xn data — read hardware offset / vdiv / vfactor from the
     // SignalModel (pure data layer, no view::DsoSignal dependency).
-    const int offset = model->hw_offset();
+    const int offset = static_cast<int>(model->hw_offset());
     const double vscale = model->vdiv_mv() * model->vfactor() * DS_CONF_DSO_VDIVS / (1000*255.0);
-    const uint16_t step = _sample_interval;
+    const uint16_t step = static_cast<uint16_t>(_sample_interval);
     // P1-c（统一读取抽象）：DSO 是通道平面布局，span.data 与旧
     // get_samples(0, N-1, _index) 返回的基指针等价。上方已保证
     // get_sample_count() >= _sample_num * _sample_interval，故 contiguous_samples
@@ -205,17 +207,20 @@ void SpectrumStack::calc_fft()
 
 double SpectrumStack::window(uint64_t i, int type)
 {
-    const double n_m_1 = _sample_num-1;
+    const double n_m_1 = static_cast<double>(_sample_num - 1);
+    // Every window coefficient below is a double, so hoist the sample index
+    // once instead of letting each cos() argument convert implicitly.
+    const double di = static_cast<double>(i);
     switch(type) {
     case 1: // Hann window
-        return 0.5*(1-cos(2*PI*i/n_m_1));
+        return 0.5*(1-cos(2*PI*di/n_m_1));
     case 2: // Hamming window
-        return 0.54-0.46*cos(2*PI*i/n_m_1);
+        return 0.54-0.46*cos(2*PI*di/n_m_1);
     case 3: // Blackman window
-        return 0.42659-0.49656*cos(2*PI*i/n_m_1) + 0.076849*cos(4*PI*i/n_m_1);
+        return 0.42659-0.49656*cos(2*PI*di/n_m_1) + 0.076849*cos(4*PI*di/n_m_1);
     case 4: // Flat_top window
-        return 1-1.93*cos(2*PI*i/n_m_1)+1.29*cos(4*PI*i/n_m_1)-
-                 0.388*cos(6*PI*i/n_m_1)+0.028*cos(8*PI*i/n_m_1);
+        return 1-1.93*cos(2*PI*di/n_m_1)+1.29*cos(4*PI*di/n_m_1)-
+                 0.388*cos(6*PI*di/n_m_1)+0.028*cos(8*PI*di/n_m_1);
     default:
         return 1;
     }

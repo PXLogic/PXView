@@ -59,8 +59,15 @@ SignalModel::~SignalModel()
 void SignalModel::set_index(int index) { _index = index; }
 
 void SignalModel::set_name(const std::string &name) {
-    if (_name != name) {
-        _name = name;
+    // Clamp before the comparison so an over-long rename still updates the
+    // stored name (and the sr_channel mirror) instead of being silently
+    // dropped by the equality check below.
+    std::string clamped = name;
+    if (clamped.size() > kMaxNameLength)
+        clamped.resize(kMaxNameLength);
+
+    if (_name != clamped) {
+        _name = clamped;
         // Write back to the underlying sr_channel struct so libsigrok and
         // any UI that reads from sr_channel directly stay in sync. The
         // sr_channel owns its name string via g_strdup; free the old one
@@ -70,7 +77,7 @@ void SignalModel::set_name(const std::string &name) {
                 g_free(_sr_channel->name);
                 _sr_channel->name = nullptr;
             }
-            _sr_channel->name = g_strdup(name.c_str());
+            _sr_channel->name = g_strdup(clamped.c_str());
         }
         emit appearance_changed();
     }

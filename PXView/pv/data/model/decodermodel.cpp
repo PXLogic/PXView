@@ -327,7 +327,7 @@ int DecoderModel::rowCount(const QModelIndex & /* parent */) const
         int64_t count = end - _visible_start_row;
         return count > 0 ? (int)count : 0;
     }
-    return _decoder_stack->list_annotation_size();
+    return static_cast<int>(_decoder_stack->list_annotation_size());
 }
 
 int DecoderModel::columnCount(const QModelIndex & /* parent */) const
@@ -399,7 +399,7 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
                 }
                 if (cm.first == row_stack) {
                     pv::data::decode::Annotation ann;
-                    if (s->list_annotation(&ann, cm.second, row_in_stack)) {
+                    if (s->list_annotation(&ann, static_cast<uint16_t>(cm.second), row_in_stack)) {
                         const auto &texts = ann.annotations(s->protocol_format());
                         if (!texts.empty())
                             return texts.at(0);
@@ -437,7 +437,7 @@ QVariant DecoderModel::data(const QModelIndex &index, int role) const
             }
             int ann_col = index.column() - PRESET_COLUMN_COUNT;
             pv::data::decode::Annotation ann;
-            if (_decoder_stack->list_annotation(&ann, ann_col, query_row)) {
+            if (_decoder_stack->list_annotation(&ann, static_cast<uint16_t>(ann_col), query_row)) {
                 const auto &texts =
                     ann.annotations(_decoder_stack->protocol_format());
                 if (!texts.empty())

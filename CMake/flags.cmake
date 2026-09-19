@@ -13,6 +13,51 @@ if(NOT DISABLE_WERROR)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
 endif()
 
+#===============================================================================
+#= Strict modernization warnings (scoped to the pxview-core target)
+#-------------------------------------------------------------------------------
+# Deliberately NOT global CMAKE_CXX_FLAGS: applied per-target in the root
+# CMakeLists.txt via PXVIEW_CORE_STRICT_FLAGS. Measured on this tree (gcc/UCRT64).
+#
+#   -Wconversion, pxview-core:  0 warnings.  <- DEFAULT ON
+#       All 180 pre-existing hits were fixed (2026-09-19). Every one was a
+#       benign implicit conversion, not a bug: block counts divided by
+#       LeafBlockSamples, intentional truncation of integer-valued doubles, and
+#       u64->double precision notes. See devdoc/Wconversion-告警工作清单.md.
+#       Because the baseline is clean, a new hit stands out immediately — this
+#       is the actual regression gate. It is a gate, NOT a bug finder.
+#
+#   -Wconversion, whole tree:  9043 warnings — NOT viable, hence the scoping.
+#       In C++ mode -Wconversion also pulls in -Wsign-conversion (5181 alone),
+#       plus third-party C (libsigrokdecode/c_decoder_api.c 2640,
+#       libsigrok/src/libsigrok-internal.h 1086, minizip, ...) and the View
+#       layer (dsosignal_paint.cpp 81, trace.h 78, logicsignal.cpp 78, ...).
+#       Widening to those targets requires fixing them first.
+#
+#   -Wold-style-cast:  ~4800 warnings, ~3744 originating in glib's gmacros.h.
+#       Marking dependencies as SYSTEM does NOT suppress them (4563 -> 3827):
+#       GCC still reports old-style casts for macros a system header defines but
+#       our TUs expand. DEFAULT OFF — not usable without wrapping the glib
+#       includes in `#pragma GCC diagnostic ignored`.
+#
+# Warning-only, never combined with -Werror: a hit is reported, not fatal.
+#
+#     cmake .. -DENABLE_STRICT_WARNINGS=OFF   # opt out of the -Wconversion gate
+#-------------------------------------------------------------------------------
+option(ENABLE_STRICT_WARNINGS "Emit -Wconversion for pxview-core (warnings only)" ON)
+option(ENABLE_OLD_STYLE_CAST_WARNINGS "Emit -Wold-style-cast for pxview-core (glib noise dominates)" OFF)
+
+set(PXVIEW_CORE_STRICT_FLAGS "")
+if(ENABLE_STRICT_WARNINGS)
+    list(APPEND PXVIEW_CORE_STRICT_FLAGS -Wconversion)
+endif()
+if(ENABLE_OLD_STYLE_CAST_WARNINGS)
+    list(APPEND PXVIEW_CORE_STRICT_FLAGS -Wold-style-cast)
+endif()
+if(PXVIEW_CORE_STRICT_FLAGS)
+    message(STATUS "Strict warnings for pxview-core: ${PXVIEW_CORE_STRICT_FLAGS} (never -Werror)")
+endif()
+
 # C++23: required for std::expected / std::print / concepts (C++20) /
 # std::span (C++20). Use CMAKE_CXX_STANDARD instead of -std=c++23 in
 # CMAKE_CXX_FLAGS so that CMake appends the standard flag AFTER Qt's
@@ -33,10 +78,14 @@ include_directories(
 )
 
 
+# SYSTEM (i.e. -isystem, not -I) keeps dependency headers out of our warning
+# output in general. Note it does NOT solve the -Wold-style-cast problem below:
+# GCC still reports old-style casts for macros that a system header defines but
+# our translation units expand, which is exactly the glib gmacros.h case.
 if(STATIC_PKGDEPS_LIBS)
-	include_directories(${PKGDEPS_STATIC_INCLUDE_DIRS})
+	include_directories(SYSTEM ${PKGDEPS_STATIC_INCLUDE_DIRS})
 else()
-	include_directories(${PKGDEPS_INCLUDE_DIRS})
+	include_directories(SYSTEM ${PKGDEPS_INCLUDE_DIRS})
 endif()
 
 #===============================================================================

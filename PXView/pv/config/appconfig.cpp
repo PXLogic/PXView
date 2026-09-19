@@ -108,7 +108,7 @@ static void setFiled(const char *key, QSettings &st, bool f){
 
 static void getFiled(const char *key, QSettings &st, float &f, float dv)
 {
-    f = st.value(key, dv).toInt();
+    f = static_cast<float>(st.value(key, dv).toInt());
 }
 
 static void setFiled(const char *key, QSettings &st, float f)
@@ -402,7 +402,7 @@ static void _loadShortcuts(ShortcutOptions &o, QSettings &st)
 static void _saveShortcuts(ShortcutOptions &o, QSettings &st)
 {
     st.beginGroup(keys::Group::Shortcuts.toUtf8().constData());
-    st.beginWriteArray(keys::Shortcuts::items.toUtf8().constData(), o.items.size());
+    st.beginWriteArray(keys::Shortcuts::items.toUtf8().constData(), static_cast<int>(o.items.size()));
     for (int i = 0; i < o.items.size(); i++) {
         st.setArrayIndex(i);
         st.setValue(keys::Shortcuts::actionId.toUtf8().constData(), o.items[i].actionId);
@@ -431,7 +431,7 @@ static void _loadStyle(StyleOptions &o, QSettings &st)
 static void _saveStyle(StyleOptions &o, QSettings &st)
 {
     st.beginGroup(keys::Group::Style.toUtf8().constData());
-    st.beginWriteArray(keys::Style::items.toUtf8().constData(), o.items.size());
+    st.beginWriteArray(keys::Style::items.toUtf8().constData(), static_cast<int>(o.items.size()));
     for (int i = 0; i < o.items.size(); i++) {
         st.setArrayIndex(i);
         st.setValue(keys::Style::tokenName.toUtf8().constData(), o.items[i].tokenName);

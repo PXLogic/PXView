@@ -258,7 +258,7 @@ uint16_t SessionStateContext::get_ch_num(int type) {
     num_channels = analog_ch_num;
     break;
   default:
-    num_channels = logic_ch_num + dso_ch_num + analog_ch_num;
+    num_channels = static_cast<uint16_t>(logic_ch_num + dso_ch_num + analog_ch_num);
     break;
   }
 
@@ -280,9 +280,9 @@ void SessionStateContext::set_cur_snap_samplerate(uint64_t samplerate) {
   }
 
   _buffers->capture_data()->_cur_snap_samplerate = samplerate;
-_buffers->capture_data()->get_logic()->set_samplerate(samplerate);
-_buffers->capture_data()->get_analog()->set_samplerate(samplerate);
-_buffers->capture_data()->get_dso()->set_samplerate(samplerate);
+_buffers->capture_data()->get_logic()->set_samplerate(static_cast<double>(samplerate));
+_buffers->capture_data()->get_analog()->set_samplerate(static_cast<double>(samplerate));
+_buffers->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplerate));
 
   int mode = _device_agent.get_work_mode();
 
@@ -306,13 +306,13 @@ _buffers->capture_data()->get_dso()->set_samplerate(samplerate);
   }
 
   for (auto d : decode_traces()) {
-    d->set_samplerate(samplerate);
+    d->set_samplerate(static_cast<double>(samplerate));
   }
 
   if (_math_stack)
-    _math_stack->set_samplerate(_device_agent.get_sample_rate());
+    _math_stack->set_samplerate(static_cast<double>(_device_agent.get_sample_rate()));
   for (auto m : _spectrum_stacks) {
-    m->set_samplerate(samplerate);
+    m->set_samplerate(static_cast<double>(samplerate));
   }
 
   cur_snap_samplerate_changed();

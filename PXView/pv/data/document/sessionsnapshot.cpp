@@ -73,13 +73,13 @@ uint64_t SessionSnapshot::cur_samplelimits() { return _samplelimits; }
 double SessionSnapshot::cur_sampletime() {
   if (_samplerate == 0)
     return 0;
-  return _samplelimits * 1.0 / _samplerate;
+  return static_cast<double>(_samplelimits) / static_cast<double>(_samplerate);
 }
 
 double SessionSnapshot::cur_snap_sampletime() {
   if (_samplerate == 0)
     return 0;
-  return _samplelimits * 1.0 / _samplerate;
+  return static_cast<double>(_samplelimits) / static_cast<double>(_samplerate);
 }
 
 data::LogicSnapshot *SessionSnapshot::get_logic_snapshot() { return _logic.get(); }
@@ -152,9 +152,9 @@ if (rate > 0) {
 if (!_logic) _logic = std::make_shared<LogicSnapshot>();
 if (!_analog) _analog = std::make_shared<AnalogSnapshot>();
 if (!_dso) _dso = std::make_shared<DsoSnapshot>();
-_logic->set_samplerate(rate);
-_analog->set_samplerate(rate);
-_dso->set_samplerate(rate);
+  _logic->set_samplerate(static_cast<double>(rate));
+  _analog->set_samplerate(static_cast<double>(rate));
+  _dso->set_samplerate(static_cast<double>(rate));
 }
 }
 

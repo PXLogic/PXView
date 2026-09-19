@@ -226,7 +226,7 @@ void AnalogSnapshot::first_payload(const sr_datafeed_analog &analog, uint64_t to
 
             // TODO: get the enabled channel index.
             if (probe->type == SR_CHANNEL_ANALOG) {
-                _ch_index.push_back(probe->index);
+                _ch_index.push_back(static_cast<uint16_t>(probe->index));
 
                 if (probe->enabled){
                     _enabled_channel_indexs.push_back(probe->index);
@@ -777,8 +777,9 @@ bool AnalogSnapshot::has_data(int index)
 int AnalogSnapshot::get_block_num()
 {
     const uint64_t size = _sample_count * get_unit_bytes() * get_channel_num();
-    return (size >> LeafBlockPower) +
-           ((size & LeafMask) != 0);
+    // Leaf block count — bounded by capture size / LeafBlockSamples, far below INT_MAX.
+    return static_cast<int>((size >> LeafBlockPower) +
+                            ((size & LeafMask) != 0));
 }
 
 uint64_t AnalogSnapshot::get_block_size(int block_index)

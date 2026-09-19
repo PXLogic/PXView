@@ -844,7 +844,7 @@ double DeviceAgent::get_sample_time()
     uint64_t sample_limit = get_sample_limit();
     if (sample_rate == 0)
         return 0;
-    return sample_limit * 1.0 / sample_rate;
+    return static_cast<double>(sample_limit) / static_cast<double>(sample_rate);
 }
 
 // --- Mode ---
@@ -1631,7 +1631,7 @@ bool DeviceAgent::set_config_uint16(int key, int value, const sr_channel *ch, co
         pxv_warn("%s", "DeviceAgent::set_config_uint16: _dev_handle is nullptr");
         return false;
     }
-    GVariant *gvar = g_variant_new_uint16(value);
+    GVariant *gvar = g_variant_new_uint16(static_cast<guint16>(value));
     return set_config(key, gvar, ch, cg);
 }
 
@@ -1673,7 +1673,7 @@ bool DeviceAgent::set_config_int16(int key, int value, const sr_channel *ch, con
         pxv_warn("%s", "DeviceAgent::set_config_int16: _dev_handle is nullptr");
         return false;
     }
-    GVariant *gvar = g_variant_new_int16(value);
+    GVariant *gvar = g_variant_new_int16(static_cast<gint16>(value));
     return set_config(key, gvar, ch, cg);
 }
 

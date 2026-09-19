@@ -178,7 +178,10 @@ public:
     }
 
     inline int get_rightWidth(){
-        return 2 * Margin + _typeWidth * SquareWidth + 1.5 * SquareWidth;
+        // The 1.5 * SquareWidth term makes this a double expression; the
+        // returned pixel width is deliberately truncated.
+        return static_cast<int>(2 * Margin + _typeWidth * SquareWidth +
+                                1.5 * SquareWidth);
     }
 
     inline int get_headerHeight(){

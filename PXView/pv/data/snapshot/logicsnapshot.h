@@ -645,7 +645,7 @@ private:
 
     inline uint8_t bsr64(uint64_t bb)
     {
-        const uint32_t hb = bb >> 32;
+        const uint32_t hb = static_cast<uint32_t>(bb >> 32);
         return hb ? 32 + bsr32((uint32_t)hb) : bsr32((uint32_t)bb);
     }
 

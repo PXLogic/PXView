@@ -615,7 +615,7 @@ void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,
 
   _host->_last_calc_count[order] = 0;
 
-  _host->calc_mipmap(order, index0, index1, LogicSnapshot::LeafBlockSamples, true);
+  _host->calc_mipmap(order, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1), LogicSnapshot::LeafBlockSamples, true);
 }
 
 // ----------------------------------------------------------------------------

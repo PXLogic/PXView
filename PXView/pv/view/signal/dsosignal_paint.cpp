@@ -145,29 +145,34 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   p.setPen(fore);
 
   const uint64_t sample_len = _data_source->cur_samplelimits();
-  const double samplerate = _data_source->cur_snap_samplerate();
+  const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
   const double samples_per_pixel = samplerate * ctx.scale;
   const double shown_rate =
-      min(samples_per_pixel * width * 1.0 / sample_len, 1.0);
-  const double start = ctx.offset * samples_per_pixel;
-  const double shown_offset = min(start / sample_len, 1.0) * width;
+      min(samples_per_pixel * width * 1.0 / static_cast<double>(sample_len), 1.0);
+  const double start = static_cast<double>(ctx.offset) * samples_per_pixel;
+  const double shown_offset =
+      min(start / static_cast<double>(sample_len), 1.0) * width;
   const double shown_len = max(shown_rate * width, 6.0);
-  const QPointF left_edge[] = {QPoint(shown_offset + 3, UpMargin / 2 - 6),
-                               QPoint(shown_offset, UpMargin / 2 - 6),
-                               QPoint(shown_offset, UpMargin / 2 + 6),
-                               QPoint(shown_offset + 3, UpMargin / 2 + 6)};
+  // QPoint / drawLine / drawRect take int pixel coordinates, so snap the
+  // computed doubles once here instead of truncating at every call site.
+  const int offset_x = static_cast<int>(shown_offset);
+  const int span_x = static_cast<int>(shown_len);
+  const int mid_y = UpMargin / 2;
+  const QPointF left_edge[] = {QPoint(offset_x + 3, mid_y - 6),
+                               QPoint(offset_x, mid_y - 6),
+                               QPoint(offset_x, mid_y + 6),
+                               QPoint(offset_x + 3, mid_y + 6)};
   const QPointF right_edge[] = {
-      QPoint(shown_offset + shown_len - 3, UpMargin / 2 - 6),
-      QPoint(shown_offset + shown_len, UpMargin / 2 - 6),
-      QPoint(shown_offset + shown_len, UpMargin / 2 + 6),
-      QPoint(shown_offset + shown_len - 3, UpMargin / 2 + 6)};
-  p.drawLine(left, UpMargin / 2, shown_offset, UpMargin / 2);
-  p.drawLine(shown_offset + shown_len, UpMargin / 2, left + width,
-             UpMargin / 2);
+      QPoint(offset_x + span_x - 3, mid_y - 6),
+      QPoint(offset_x + span_x, mid_y - 6),
+      QPoint(offset_x + span_x, mid_y + 6),
+      QPoint(offset_x + span_x - 3, mid_y + 6)};
+  p.drawLine(left, mid_y, offset_x, mid_y);
+  p.drawLine(offset_x + span_x, mid_y, left + width, mid_y);
   p.drawPolyline(left_edge, countof(left_edge));
   p.drawPolyline(right_edge, countof(right_edge));
   p.setBrush(fore);
-  p.drawRect(shown_offset, UpMargin / 2 - 3, shown_len, 6);
+  p.drawRect(offset_x, mid_y - 3, span_x, 6);
 
   // draw divider
   fore.setAlpha(IRenderView::BackAlpha);
@@ -175,25 +180,33 @@ void DsoSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   dashPen.setStyle(Qt::DashLine);
   p.setPen(dashPen);
   const double spanY = height * 1.0 / DS_CONF_DSO_VDIVS;
+  // Loop-invariant pixel positions. Note the casts must wrap the whole
+  // float expression (e.g. width / 2.0f - 5 truncates toward zero, which is
+  // NOT the same as integer (width / 2) - 5 for odd widths).
+  const int tick_x1 = static_cast<int>(width / 2.0 - 5);
+  const int tick_x2 = static_cast<int>(width / 2.0 + 5);
   for (i = 1; i <= DS_CONF_DSO_VDIVS; i++) {
     const double posY = spanY * i + UpMargin;
     if (i != DS_CONF_DSO_VDIVS)
-      p.drawLine(left, posY, right, posY);
+      p.drawLine(left, static_cast<int>(posY), right, static_cast<int>(posY));
     const double miniSpanY = spanY / 5;
     for (j = 1; j < 5; j++) {
-      p.drawLine(width / 2.0f - 5, posY - miniSpanY * j, width / 2.0f + 5,
-                 posY - miniSpanY * j);
+      const int yy = static_cast<int>(posY - miniSpanY * j);
+      p.drawLine(tick_x1, yy, tick_x2, yy);
     }
   }
   const double spanX = width * 1.0 / DS_CONF_DSO_HDIVS;
+  const int tick_y1 = static_cast<int>(height / 2.0 + UpMargin - 5);
+  const int tick_y2 = static_cast<int>(height / 2.0 + UpMargin + 5);
   for (i = 1; i <= DS_CONF_DSO_HDIVS; i++) {
     const double posX = spanX * i;
     if (i != DS_CONF_DSO_HDIVS)
-      p.drawLine(posX, UpMargin, posX, height + UpMargin);
+      p.drawLine(static_cast<int>(posX), UpMargin, static_cast<int>(posX),
+                 height + UpMargin);
     const double miniSpanX = spanX / 5;
     for (j = 1; j < 5; j++) {
-      p.drawLine(posX - miniSpanX * j, height / 2.0f + UpMargin - 5,
-                 posX - miniSpanX * j, height / 2.0f + UpMargin + 5);
+      const int xx = static_cast<int>(posX - miniSpanX * j);
+      p.drawLine(xx, tick_y1, xx, tick_y2);
     }
   }
   _view->set_back(true);
@@ -219,7 +232,7 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   if (enabled()) {
     const int index = get_index();
     const int width = right - left;
-    const float zeroY = get_zero_vpos();
+    const int zeroY = get_zero_vpos();
 
     const double scale = ctx.scale;
     if (scale <= 0)
@@ -231,7 +244,7 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     }
 
     // Use document_snapshot_source samplerate for coordinate consistency
-    const double samplerate = _data_source->cur_snap_samplerate();
+    const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
 
     if (samplerate <= 0) {
         pxv_warn("DsoSignal::paint_mid: samplerate <= 0, skipping paint");
@@ -241,7 +254,8 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const int64_t last_sample =
         max((int64_t)(_data->get_sample_count() - 1), (int64_t)0);
     const double samples_per_pixel = samplerate * scale;
-    const double start = offset * samples_per_pixel - ctx.trig_hoff;
+    const double start =
+        static_cast<double>(offset) * samples_per_pixel - ctx.trig_hoff;
     const double end = start + samples_per_pixel * width;
 
     const int64_t start_sample =
@@ -263,7 +277,8 @@ void DsoSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     const QRect vrect = get_view_rect();
     rasterize_dso_channel(p, _data, zeroY, left, right, start_sample,
                           end_sample, hw_offset, samples_per_pixel,
-                          get_index(), vrect.top(), vrect.bottom(), _scale,
+                          get_index(), static_cast<float>(vrect.top()),
+                          static_cast<float>(vrect.bottom()), _scale,
                           _colour);
     s_dso_timing.paint_draw_ms = dso_ft.elapsed() - dso_paint_start;
     s_dso_timing.active = true;
@@ -304,28 +319,32 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
     p.drawPolygon(points, countof(points));
 
     p.setPen(fore);
+    // QPoint takes int pixel coordinates while QRectF exposes qreal, so snap
+    // the trig-label anchor once instead of truncating on every element.
+    const int label_left = static_cast<int>(label_rect.left());
+    const int label_cy = static_cast<int>(label_rect.center().y());
     const QPointF arrow_points[] = {
-        QPoint(label_rect.left(), label_rect.center().y()),
-        QPoint(label_rect.left(), label_rect.center().y() - 1),
-        QPoint(label_rect.left(), label_rect.center().y() + 1),
-        QPoint(label_rect.left(), label_rect.center().y() - 2),
-        QPoint(label_rect.left(), label_rect.center().y() + 2),
-        QPoint(label_rect.left(), label_rect.center().y() - 3),
-        QPoint(label_rect.left(), label_rect.center().y() + 3),
-        QPoint(label_rect.left(), label_rect.center().y() - 4),
-        QPoint(label_rect.left(), label_rect.center().y() + 4),
-        QPoint(label_rect.left() - 1, label_rect.center().y() - 3),
-        QPoint(label_rect.left() - 1, label_rect.center().y() + 3),
-        QPoint(label_rect.left() + 1, label_rect.center().y() - 3),
-        QPoint(label_rect.left() + 1, label_rect.center().y() + 3),
-        QPoint(label_rect.left() - 1, label_rect.center().y() - 2),
-        QPoint(label_rect.left() - 1, label_rect.center().y() + 2),
-        QPoint(label_rect.left() + 1, label_rect.center().y() - 2),
-        QPoint(label_rect.left() + 1, label_rect.center().y() + 2),
-        QPoint(label_rect.left() - 2, label_rect.center().y() - 2),
-        QPoint(label_rect.left() - 2, label_rect.center().y() + 2),
-        QPoint(label_rect.left() + 2, label_rect.center().y() - 2),
-        QPoint(label_rect.left() + 2, label_rect.center().y() + 2),
+        QPoint(label_left, label_cy),
+        QPoint(label_left, label_cy - 1),
+        QPoint(label_left, label_cy + 1),
+        QPoint(label_left, label_cy - 2),
+        QPoint(label_left, label_cy + 2),
+        QPoint(label_left, label_cy - 3),
+        QPoint(label_left, label_cy + 3),
+        QPoint(label_left, label_cy - 4),
+        QPoint(label_left, label_cy + 4),
+        QPoint(label_left - 1, label_cy - 3),
+        QPoint(label_left - 1, label_cy + 3),
+        QPoint(label_left + 1, label_cy - 3),
+        QPoint(label_left + 1, label_cy + 3),
+        QPoint(label_left - 1, label_cy - 2),
+        QPoint(label_left - 1, label_cy + 2),
+        QPoint(label_left + 1, label_cy - 2),
+        QPoint(label_left + 1, label_cy + 2),
+        QPoint(label_left - 2, label_cy - 2),
+        QPoint(label_left - 2, label_cy + 2),
+        QPoint(label_left + 2, label_cy - 2),
+        QPoint(label_left + 2, label_cy + 2),
     };
     if (hover || selected())
       p.drawPoints(arrow_points, countof(arrow_points));
@@ -345,10 +364,11 @@ void DsoSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
     // paint the _trig_vpos line
     if (ctx.dso_trig_moved) {
       p.setPen(QPen(_colour, 1, Qt::DotLine));
-      p.drawLine(left, trigp,
-                 right -
-                     p.boundingRect(t_vol_rect, Qt::AlignLeft, t_vol_s).width(),
-                 trigp);
+      // The QRectF overload of boundingRect() returns QRectF, so its width()
+      // is qreal; drawLine needs an int.
+      const int text_w = static_cast<int>(
+          p.boundingRect(t_vol_rect, Qt::AlignLeft, t_vol_s).width());
+      p.drawLine(left, trigp, right - text_w, trigp);
     }
 
     // Paint the text

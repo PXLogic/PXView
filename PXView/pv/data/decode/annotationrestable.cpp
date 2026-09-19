@@ -421,7 +421,7 @@ int AnnotationResTable::hexToDecimal(char * hex)
 		return 0;
 	}
 	assert(hex);
-    int len = strlen(hex);
+    int len = static_cast<int>(strlen(hex));
 
     double b = 16;
     int result = 0;

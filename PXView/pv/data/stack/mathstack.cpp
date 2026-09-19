@@ -197,16 +197,22 @@ uint64_t MathStack::default_vDialValue()
     const uint64_t v1 = factor1 * dial1_value;
     const uint64_t v2 = factor2 * dial2_value;
 
+    // Scale factors are held as uint64_t for the dial tables, but the MUL/DIV
+    // results are inherently fractional, so hoist the doubles once rather than
+    // letting each operand convert implicitly inside the expression.
+    const double d1 = static_cast<double>(dial1_value);
+    const double d2 = static_cast<double>(dial2_value);
+
     switch(_type) {
     case MATH_ADD:
     case MATH_SUB:
         value = v1 > v2 ? dial1_value : dial2_value;
         break;
     case MATH_MUL:
-        value = dial1_value * dial2_value / 1000.0;
+        value = static_cast<uint64_t>(d1 * d2 / 1000.0);
         break;
     case MATH_DIV:
-        value = dial1_value * 1000.0 / dial2_value;
+        value = static_cast<uint64_t>(d1 * 1000.0 / d2);
         break;
     }
 
@@ -289,6 +295,11 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
         dial1_max = dial2_max = dial_values.last();
     }
 
+    // The MUL/DIV bounds below are fractional (mV scaling), so convert the dial
+    // extremes once instead of letting each operand convert implicitly.
+    const double d1_min = static_cast<double>(dial1_min), d1_max = static_cast<double>(dial1_max);
+    const double d2_min = static_cast<double>(dial2_min), d2_max = static_cast<double>(dial2_max);
+
     switch(_type) {
     case MATH_ADD:
     case MATH_SUB:
@@ -304,10 +315,11 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
         break;
     case MATH_MUL:
         for (int i = 0; i < vDialValueCount; i++) {
-            if (vDialValue[i] < dial1_min * dial2_min / 1000.0)
+            const double dial_value = static_cast<double>(vDialValue[i]);
+            if (dial_value < d1_min * d2_min / 1000.0)
                 continue;
             vValue.append(vDialValue[i]);
-            if (vDialValue[i] > dial1_max * dial2_max / 1000.0)
+            if (dial_value > d1_max * d2_max / 1000.0)
                 break;
         }
         for(int i = 0; i < vDialUnitCount; i++)
@@ -315,10 +327,11 @@ void MathStack::get_vdial_data(QVector<uint64_t> &vValue,
         break;
     case MATH_DIV:
         for (int i = 0; i < vDialValueCount; i++) {
-            if (vDialValue[i] < min(dial1_min * 1000.0 / dial2_max, dial2_min * 1000.0  / dial1_max))
+            const double dial_value = static_cast<double>(vDialValue[i]);
+            if (dial_value < min(d1_min * 1000.0 / d2_max, d2_min * 1000.0 / d1_max))
                 continue;
             vValue.append(vDialValue[i]);
-            if (vDialValue[i] > max(dial1_max * 1000.0 / dial2_min, dial2_max * 1000.0 / dial1_min))
+            if (dial_value > max(d1_max * 1000.0 / d2_min, d2_max * 1000.0 / d1_min))
                 break;
         }
         for(int i = 0; i < vDialUnitCount; i++)
@@ -412,6 +425,8 @@ void MathStack::calc_math(uint64_t mathFactor)
         pxv_warn("MathStack::calc_math: mathFactor == 0, clamping to 1");
         mathFactor = 1;
     }
+    // Used only as a divisor in the double expressions below, so convert once.
+    const double math_factor = static_cast<double>(mathFactor);
 
     std::lock_guard<std::mutex> lock(_mutex);
 
@@ -443,13 +458,13 @@ void MathStack::calc_math(uint64_t mathFactor)
     // _stop_scale defaults to 1 and is only mutated during vDial navigation.
     // In the Core layer (no View) we cannot read _stop_scale, so we use 1.0
     // and follow the same 8-bit ADC assumption (255.0) as SpectrumStack.
-    const double scale1 = static_cast<double>(m1->vdiv_mv()) / 1000.0 * k1 *
-                          DS_CONF_DSO_VDIVS / 255.0;
+    const double scale1 = static_cast<double>(m1->vdiv_mv()) / 1000.0 *
+                          static_cast<double>(k1) * DS_CONF_DSO_VDIVS / 255.0;
 
     const double delta1 = m1->hw_offset() * scale1;
 
-    const double scale2 = static_cast<double>(m2->vdiv_mv()) / 1000.0 * k2 *
-                          DS_CONF_DSO_VDIVS / 255.0;
+    const double scale2 = static_cast<double>(m2->vdiv_mv()) / 1000.0 *
+                          static_cast<double>(k2) * DS_CONF_DSO_VDIVS / 255.0;
 
     const double delta2 = m2->hw_offset() * scale2;
 
@@ -482,16 +497,16 @@ void MathStack::calc_math(uint64_t mathFactor)
         switch(_type)
         {
             case MATH_ADD:
-                _math[sample] = ((delta1 - scale1 * value1) + (delta2 - scale2 * value2)) / mathFactor;
+                _math[sample] = ((delta1 - scale1 * value1) + (delta2 - scale2 * value2)) / math_factor;
                 break;
             case MATH_SUB:
-                _math[sample] = ((delta1 - scale1 * value1) - (delta2 - scale2 * value2)) / mathFactor;
+                _math[sample] = ((delta1 - scale1 * value1) - (delta2 - scale2 * value2)) / math_factor;
                 break;
             case MATH_MUL:
-                _math[sample] = (delta1 - scale1 * value1) * (delta2 - scale2 * value2) / mathFactor;
+                _math[sample] = (delta1 - scale1 * value1) * (delta2 - scale2 * value2) / math_factor;
                 break;
             case MATH_DIV:
-                _math[sample] = (delta1 - scale1 * value1) / (delta2 - scale2 * value2) / mathFactor;
+                _math[sample] = (delta1 - scale1 * value1) / (delta2 - scale2 * value2) / math_factor;
                 break;
         }
     }

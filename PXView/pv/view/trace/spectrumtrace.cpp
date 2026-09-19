@@ -239,9 +239,11 @@ QString SpectrumTrace::format_freq(double freq, unsigned precision)
         char buffer[50] = {0};
         char format[15] = {0}; 
         QString units = FreqPrefixes[prefix] + "Hz";
-        sprintf(format, "%%.%df", (int)precision);    
-        sprintf(buffer, format, freq / divider);
-        strcat(buffer, units.toUtf8().data());
+        // Bounded: precision is a public parameter and a large value would make
+        // "%.Nf" emit more digits than buffer can hold.
+        snprintf(format, sizeof(format), "%%.%df", (int)precision);    
+        snprintf(buffer, sizeof(buffer), format, freq / divider);
+        strncat(buffer, units.toUtf8().data(), sizeof(buffer) - strlen(buffer) - 1);
         return QString(buffer);
     }
 }

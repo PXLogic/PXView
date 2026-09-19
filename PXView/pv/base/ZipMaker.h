@@ -45,7 +45,7 @@ public:
     bool Close();
 
     //add a inner file from  buffer
-    bool AddFromBuffer(const char *innerFile, const char *buffer, unsigned int buferSize);
+    bool AddFromBuffer(const char *innerFile, const char *buffer, size_t buferSize);
 
     //add a inner file from local file
     bool AddFromFile(const char *localFile, const char *innerFile);

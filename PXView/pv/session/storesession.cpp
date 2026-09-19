@@ -63,6 +63,26 @@
  
 namespace pv {
 
+namespace {
+
+// Channel names are user-editable and are serialized verbatim into the .pxc/.pxl
+// header as "key = value" lines. Cap the length and strip CR/LF so an oversized
+// or multi-line name can neither overflow the fixed-size formatting buffer nor
+// inject spurious header lines into the saved file.
+std::string sanitize_meta_value(const char *value)
+{
+    std::string clean;
+    for (const char *p = value; p && *p; ++p) {
+        if (*p != '\n' && *p != '\r')
+            clean.push_back(*p);
+    }
+    if (clean.size() > SignalModel::kMaxNameLength)
+        clean.resize(SignalModel::kMaxNameLength);
+    return clean;
+}
+
+} // namespace
+
 StoreSession::StoreSession(SigSession *session) :
 	_session(session),
     _outModule(nullptr)
@@ -635,15 +655,15 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     char *s;
     char meta[300] = {0};
   
-    sprintf(meta, "%s", "[version]\n"); str += meta;
-    sprintf(meta, "version = %d\n", HEADER_FORMAT_VERSION); str += meta;
-    sprintf(meta, "%s", "[header]\n"); str += meta;
+    snprintf(meta, sizeof(meta), "%s", "[version]\n"); str += meta;
+    snprintf(meta, sizeof(meta), "version = %d\n", HEADER_FORMAT_VERSION); str += meta;
+    snprintf(meta, sizeof(meta), "%s", "[header]\n"); str += meta;
 
     int mode = _session->get_device()->get_work_mode();
 
     if (true) {
-        sprintf(meta, "driver = %s\n", _session->get_device()->driver_name().toLocal8Bit().data()); str += meta;
-        sprintf(meta, "device mode = %d\n", mode); str += meta;
+        snprintf(meta, sizeof(meta), "driver = %s\n", _session->get_device()->driver_name().toLocal8Bit().data()); str += meta;
+        snprintf(meta, sizeof(meta), "device mode = %d\n", mode); str += meta;
     }
  
     // 光标范围保存：header 中的 "total samples" 必须与实际写入文件的数据长度一致，
@@ -693,8 +713,8 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         }
     }
 
-    sprintf(meta, "capturefile = data\n"); str += meta;
-    sprintf(meta, "total samples = %" PRIu64 "\n", saved_samples); str += meta;
+    snprintf(meta, sizeof(meta), "capturefile = data\n"); str += meta;
+    snprintf(meta, sizeof(meta), "total samples = %" PRIu64 "\n", saved_samples); str += meta;
 
     // MSO 架构修复：按通道类型分别统计 logic/analog 通道数。
     // session_file.c 解析时：total probes → 创建 SR_CHANNEL_LOGIC，
@@ -748,23 +768,23 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             block_count = end_block + 1;
         }
 
-        sprintf(meta, "total probes = %d\n", to_save_probes); str += meta;
-        sprintf(meta, "total blocks = %d\n", block_count); str += meta;
+        snprintf(meta, sizeof(meta), "total probes = %d\n", to_save_probes); str += meta;
+        snprintf(meta, sizeof(meta), "total blocks = %d\n", block_count); str += meta;
     }
     else {
         // 非 LOGIC 模式（ANALOG/DSO）：logic_count 可能为 0，analog_count > 0
-        sprintf(meta, "total probes = %d\n", logic_count); str += meta;
-        sprintf(meta, "total blocks = %d\n", snapshot->get_block_num()); str += meta;
+        snprintf(meta, sizeof(meta), "total probes = %d\n", logic_count); str += meta;
+        snprintf(meta, sizeof(meta), "total blocks = %d\n", snapshot->get_block_num()); str += meta;
     }
 
     // MSO 架构修复：写入 total analog，让 session_file.c 创建 SR_CHANNEL_ANALOG 通道。
     if (analog_count > 0) {
-        sprintf(meta, "total analog = %d\n", analog_count); str += meta;
+        snprintf(meta, sizeof(meta), "total analog = %d\n", analog_count); str += meta;
     }
 
     s = sr_samplerate_string(_session->cur_snap_samplerate());
 
-    sprintf(meta, "samplerate = %s\n", s); str += meta;
+    snprintf(meta, sizeof(meta), "samplerate = %s\n", s); str += meta;
 
     uint64_t tmp_u64;
     int tmp_u8;
@@ -772,19 +792,19 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
 
     if (mode == DSO) {
         if (_session->get_device()->get_config_uint64(SR_CONF_TIMEBASE, tmp_u64)) {
-            sprintf(meta, "hDiv = %" PRIu64 "\n", tmp_u64); str += meta;
+            snprintf(meta, sizeof(meta), "hDiv = %" PRIu64 "\n", tmp_u64); str += meta;
         }
 
         if (_session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, tmp_u8)) {
-            sprintf(meta, "bits = %d\n", tmp_u8); str += meta;
+            snprintf(meta, sizeof(meta), "bits = %d\n", tmp_u8); str += meta;
         }
  
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MIN, tmp_u32)) {
-            sprintf(meta, "ref min = %d\n", tmp_u32); str += meta;
+            snprintf(meta, sizeof(meta), "ref min = %d\n", tmp_u32); str += meta;
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MAX, tmp_u32)) {
-            sprintf(meta, "ref max = %d\n", tmp_u32); str += meta;
+            snprintf(meta, sizeof(meta), "ref max = %d\n", tmp_u32); str += meta;
         }
     }
     else if (mode == ANALOG) {
@@ -792,23 +812,23 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot);
         if (analog_snapshot) {
             uint8_t tmp_u8 = analog_snapshot->get_unit_bytes();
-            sprintf(meta, "bits = %d\n", tmp_u8*8); str += meta;
+            snprintf(meta, sizeof(meta), "bits = %d\n", tmp_u8*8); str += meta;
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MIN, tmp_u32)) {
-            sprintf(meta, "ref min = %d\n", tmp_u32); str += meta;
+            snprintf(meta, sizeof(meta), "ref min = %d\n", tmp_u32); str += meta;
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MAX, tmp_u32)) {
-            sprintf(meta, "ref max = %d\n", tmp_u32); str += meta;
+            snprintf(meta, sizeof(meta), "ref max = %d\n", tmp_u32); str += meta;
         }
     }
-    sprintf(meta, "trigger pos = %" PRIu64 "\n", saved_trig_pos); str += meta;
+    snprintf(meta, sizeof(meta), "trigger pos = %" PRIu64 "\n", saved_trig_pos); str += meta;
 
     /* trigger time: written in ALL modes (not just LOGIC) so the frontend
      * can restore the original capture timestamp when reopening a .pxl file.
      * Format: milliseconds since Unix epoch (int64). */
-    sprintf(meta, "trigger time = %lld\n", (long long)_session->get_session_time().toMSecsSinceEpoch()); str += meta;
+    snprintf(meta, sizeof(meta), "trigger time = %lld\n", (long long)_session->get_session_time().toMSecsSinceEpoch()); str += meta;
 
     int analogcnt = 0;
 
@@ -861,10 +881,14 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
                                       ? matched_model->name().c_str()
                                       : (probe->name ? probe->name : "");
             if (ch_name && ch_name[0] != '\0') {
+                // probe->name comes straight from the driver and bypasses
+                // SignalModel's clamp, so sanitize here rather than trusting
+                // either source.
+                const std::string safe_name = sanitize_meta_value(ch_name);
                 if (is_logic) {
-                    sprintf(meta, "probe%d = %s\n", probe->index, ch_name);
+                    snprintf(meta, sizeof(meta), "probe%d = %s\n", probe->index, safe_name.c_str());
                 } else {
-                    sprintf(meta, "analog%d = %s\n", analogcnt, ch_name);
+                    snprintf(meta, sizeof(meta), "analog%d = %s\n", analogcnt, safe_name.c_str());
                 }
                 str += meta;
             }
@@ -877,42 +901,42 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
              * because probecnt only counts logic channels and stays 0
              * in DSO/ANALOG mode, causing all channels to write to
              * index 0 and overwrite each other. */
-            sprintf(meta, " enable%d = %d\n", analogcnt, probe->enabled);
+            snprintf(meta, sizeof(meta), " enable%d = %d\n", analogcnt, probe->enabled);
             str += meta;
             int coupling = matched_model ? matched_model->coupling() : 0;
             double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double vfactor = matched_model ? matched_model->vfactor() : 1;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
             double trig_value = matched_model ? matched_model->trig_value() : 0;
-            sprintf(meta, " coupling%d = %d\n", analogcnt, coupling);
+            snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
             str += meta;
-            sprintf(meta, " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
+            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
             str += meta;
-            sprintf(meta, " vFactor%d = %" PRIu64 "\n", analogcnt, (uint64_t)vfactor);
+            snprintf(meta, sizeof(meta), " vFactor%d = %" PRIu64 "\n", analogcnt, (uint64_t)vfactor);
             str += meta;
-            sprintf(meta, " vOffset%d = %d\n", analogcnt, (int)hw_offset);
+            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, (int)hw_offset);
             str += meta;
-            sprintf(meta, " vTrig%d = %d\n", analogcnt, (int)trig_value);
+            snprintf(meta, sizeof(meta), " vTrig%d = %d\n", analogcnt, (int)trig_value);
             str += meta;
         }
         else if (mode == ANALOG)
         {
-            sprintf(meta, " enable%d = %d\n", analogcnt, probe->enabled);
+            snprintf(meta, sizeof(meta), " enable%d = %d\n", analogcnt, probe->enabled);
             str += meta;
             int coupling = matched_model ? matched_model->coupling() : 0;
             double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
-            sprintf(meta, " coupling%d = %d\n", analogcnt, coupling);
+            snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
             str += meta;
-            sprintf(meta, " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
+            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, (uint64_t)vdiv);
             str += meta;
-            sprintf(meta, " vOffset%d = %d\n", analogcnt, (int)hw_offset);
+            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, (int)hw_offset);
             str += meta;
-            sprintf(meta, " mapUnit%d = %s\n", analogcnt, "");
+            snprintf(meta, sizeof(meta), " mapUnit%d = %s\n", analogcnt, "");
             str += meta;
-            sprintf(meta, " mapMax%d = %lf\n", analogcnt, 0.0);
+            snprintf(meta, sizeof(meta), " mapMax%d = %lf\n", analogcnt, 0.0);
             str += meta;
-            sprintf(meta, " mapMin%d = %lf\n", analogcnt, 0.0);
+            snprintf(meta, sizeof(meta), " mapMin%d = %lf\n", analogcnt, 0.0);
             str += meta;
         }
 
@@ -927,9 +951,9 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         analog_snap_for_meta = dynamic_cast<data::AnalogSnapshot*>(snap_analog);
     }
     if (analog_snap_for_meta) {
-        sprintf(meta, "analog bytes = %d\n", analog_snap_for_meta->get_unit_bytes());
+        snprintf(meta, sizeof(meta), "analog bytes = %d\n", analog_snap_for_meta->get_unit_bytes());
         str += meta;
-        sprintf(meta, "analog float = %d\n", analog_snap_for_meta->is_float() ? 1 : 0);
+        snprintf(meta, sizeof(meta), "analog float = %d\n", analog_snap_for_meta->is_float() ? 1 : 0);
         str += meta;
     }
 
@@ -1307,14 +1331,15 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 }
             }
 
-            uint16_t unitsize = ceil(buf_vec.size() / 8.0);
+            const uint16_t unitsize = static_cast<uint16_t>(ceil(static_cast<double>(buf_vec.size()) / 8.0));
             unsigned int usize = 8192;
             unsigned int size = usize;
             struct sr_datafeed_logic lp;
 
             for(uint64_t i = 0; !_canceled && i < buf_sample_num; i+=usize){
                 if(buf_sample_num - i < usize)
-                    size = buf_sample_num - i;
+                    // size is a per-chunk byte count bounded by usize (8192).
+                    size = static_cast<unsigned int>(buf_sample_num - i);
                 uint8_t *xbuf = (uint8_t *)malloc((size_t)size * unitsize);
                 if (xbuf == nullptr) {
                     _has_error.store(true);
@@ -1326,9 +1351,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 for (uint64_t j = 0; j < size; j++) {
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
                         if (buf_vec[k] == nullptr && buf_sample[k])
-                            xbuf[j*unitsize+k/8] +=  1 << k%8;
+                            xbuf[j*unitsize+k/8] = static_cast<uint8_t>(xbuf[j*unitsize+k/8] + (1u << (k % 8)));
                         else if (buf_vec[k] && (buf_vec[k][(exp_start+i+j)/8] & (1 << (exp_start+i+j)%8)))
-                            xbuf[j*unitsize+k/8] +=  1 << k%8;
+                            xbuf[j*unitsize+k/8] = static_cast<uint8_t>(xbuf[j*unitsize+k/8] + (1u << (k % 8)));
                     }
                 }
 
@@ -1384,11 +1409,11 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         dp.en_ch_num = (uint8_t)ch_num;
         int bits = 0;
         _session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, bits);
-        dp.sample_bits = bits ? bits : 8;
+        dp.sample_bits = static_cast<uint8_t>(bits ? bits : 8);
 
         for(uint64_t i = 0; !_canceled.load() && i < _unit_count.load(); i+=usize){
             if(_unit_count.load() - i < usize)
-                size = _unit_count.load() - i;
+                size = static_cast<unsigned int>(_unit_count.load() - i);
 
             int ch = 0;
             // Make the cross data buffer.
@@ -1499,7 +1524,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         encoding.offset.q = 1;
         spec.spec_digits = 2;
         /* Override with actual snapshot format */
-        encoding.unitsize = unit_bytes;
+        encoding.unitsize = static_cast<uint8_t>(unit_bytes);
         encoding.is_float = analog_snapshot->is_float();
         encoding.is_signed = TRUE;
         encoding.is_bigendian = FALSE;
@@ -1532,7 +1557,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 unsigned int size = usize;
 
                 if(sample_count - i < usize){
-                    size = sample_count - i;
+                    size = static_cast<unsigned int>(sample_count - i);
                 }
          
                 ap.data = (unsigned char*)block_buffer[j] + i * ch_count * unit_bytes;
@@ -1891,17 +1916,17 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
                             if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE)){
                                 int vi = options_obj[opt->id].toInt();                               
                                 if (vs != "") vi = vs.toInt();
-                                new_value = g_variant_new_byte(vi);
+                                new_value = g_variant_new_byte(static_cast<guint8>(vi));
                             }
                             else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16)){
                                 int vi = options_obj[opt->id].toInt();                               
                                 if (vs != "") vi = vs.toInt();
-                                new_value = g_variant_new_int16(vi);
+                                new_value = g_variant_new_int16(static_cast<gint16>(vi));
                             }
                             else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16)){
                                 int vi = options_obj[opt->id].toInt();                               
                                 if (vs != "") vi = vs.toInt();
-                                new_value = g_variant_new_uint16(vi);
+                                new_value = g_variant_new_uint16(static_cast<guint16>(vi));
                             }
                             else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32)){
                                 int vi = options_obj[opt->id].toInt();                               
@@ -2027,9 +2052,9 @@ double StoreSession::get_integer(GVariant *var)
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
         val = g_variant_get_uint32(var);
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
-        val = g_variant_get_int64(var);
+        val = static_cast<double>(g_variant_get_int64(var));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
-        val = g_variant_get_uint64(var);
+        val = static_cast<double>(g_variant_get_uint64(var));
     else {
         pxv_err("StoreSession: unsupported GVariant type for uint64 conversion");
         val = 0;

@@ -61,8 +61,8 @@ Annotation::Annotation(const srd_proto_data *const pdata, DecoderStatus *status)
 
 	_start_sample =	pdata->start_sample;
 	_end_sample	  =	pdata->end_sample;
-	_format 	= pda->ann_class;
-    _type 		= pda->ann_type;
+	_format 	= static_cast<short>(pda->ann_class);
+    _type 		= static_cast<short>(pda->ann_type);
  
 	// 收集原文与数值 hex（规则与旧实现一致），交给去重表换回一个不可变的
 	// AnnotationText。这里只借用 status 完成去重与数值标记，不保存它。

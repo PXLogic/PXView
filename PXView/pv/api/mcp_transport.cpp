@@ -105,7 +105,7 @@ bool McpTransport::start()
     connect(_server, &QTcpServer::newConnection,
             this, &McpTransport::on_new_connection);
 
-    if (!_server->listen(QHostAddress::LocalHost, _port)) {
+    if (!_server->listen(QHostAddress::LocalHost, static_cast<quint16>(_port))) {
         delete _server;
         _server = nullptr;
         return false;
@@ -265,7 +265,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
     QByteArray data = socket->readAll();
 
     // Find header/body boundary
-    int header_end = data.indexOf("\r\n\r\n");
+    int header_end = static_cast<int>(data.indexOf("\r\n\r\n"));
     if (header_end < 0) {
         // Incomplete headers — wait for more data
         _pending_sockets.insert(socket);
@@ -283,7 +283,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
             socket->setProperty("_http_buffer", accumulated);
 
             // Check if we have complete headers now
-            int he = accumulated.indexOf("\r\n\r\n");
+            int he = static_cast<int>(accumulated.indexOf("\r\n\r\n"));
             if (he < 0) return; // Still incomplete
 
             // Check Content-Length
@@ -335,7 +335,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
             accumulated.append(socket->readAll());
             socket->setProperty("_http_buffer", accumulated);
 
-            int he = accumulated.indexOf("\r\n\r\n");
+            int he = static_cast<int>(accumulated.indexOf("\r\n\r\n"));
             if (he < 0) return;
 
             QByteArray body = accumulated.mid(he + 4);
@@ -359,7 +359,7 @@ void McpTransport::try_handle_request(QTcpSocket* socket)
 void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& data)
 {
     // Find header/body boundary
-    int header_end = data.indexOf("\r\n\r\n");
+    int header_end = static_cast<int>(data.indexOf("\r\n\r\n"));
     if (header_end < 0) {
         send_http_response(socket, 400,
             "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Invalid HTTP request\"},\"id\":null}");

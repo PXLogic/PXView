@@ -199,8 +199,9 @@ bool LogicSnapshotEdgeScan::get_display_edges_common(
                         : get_nxt_edge_self(index, last_sample, end, 0, sig_index);
 
     // calc the edge position
-    int64_t gap = (index / min_length) - pixels_offset;
-    index = max((uint64_t)ceil((floor(index / min_length) + 1) * min_length),
+    const double index_d = static_cast<double>(index);
+    int64_t gap = static_cast<int64_t>(index_d / min_length - pixels_offset);
+    index = max(static_cast<uint64_t>(ceil((floor(index_d / min_length) + 1) * min_length)),
                 index + 1);
 
     while (gap > (int64_t)edges.size() && edges.size() < width) {
@@ -298,7 +299,7 @@ bool LogicSnapshotEdgeScan::get_nxt_edge_self(uint64_t &index, bool last_sample,
   // const unsigned int min_level = max((int)floorf(logf(min_length) /
   // logf(Scale)) - 1, 0);
   const unsigned int min_level =
-      max((int)(log2f(min_length) - 1) / (int)LogicSnapshot::ScalePower, 0);
+      max((int)(log2f(static_cast<float>(min_length)) - 1) / (int)LogicSnapshot::ScalePower, 0);
   uint64_t root_index = index >> (LogicSnapshot::LeafBlockPower + LogicSnapshot::RootScalePower);
   uint8_t root_pos = (index & LogicSnapshot::RootMask) >> LogicSnapshot::LeafBlockPower;
   bool root_last = (root_index != 0 && root_index - 1 < _host->_ch_data[order].size())
@@ -467,8 +468,8 @@ bool LogicSnapshotEdgeScan::get_pre_edge_self(uint64_t &index, bool last_sample,
   }
   // logf(Scale)) - 1, 1);
   const unsigned int min_level =
-      max((int)(log2f(min_length) - 1) / (int)LogicSnapshot::ScalePower, 0);
-  int root_index = index >> (LogicSnapshot::LeafBlockPower + LogicSnapshot::RootScalePower);
+      max((int)(log2f(static_cast<float>(min_length)) - 1) / (int)LogicSnapshot::ScalePower, 0);
+  int root_index = static_cast<int>(index >> (LogicSnapshot::LeafBlockPower + LogicSnapshot::RootScalePower));
   uint8_t root_pos = (index & LogicSnapshot::RootMask) >> LogicSnapshot::LeafBlockPower;
   if ((unsigned int)root_index >= _host->_ch_data[order].size()) {
     pxv_warn("LogicSnapshot::get_pre_edge_self: root_index=%llu out of range (size=%zu)",
@@ -629,7 +630,7 @@ bool LogicSnapshotEdgeScan::block_nxt_edge(uint64_t *lbp, uint64_t &index,
       // continue only within current block
       if (level == 0)
         level++;
-      const int level_scale_power = (level + 1) * LogicSnapshot::ScalePower;
+      const int level_scale_power = static_cast<int>((level + 1) * LogicSnapshot::ScalePower);
       const uint64_t offset =
           (index & ~(~0ULL << LogicSnapshot::LeafBlockPower)) >> level_scale_power;
       const uint64_t mask =
@@ -653,7 +654,7 @@ bool LogicSnapshotEdgeScan::block_nxt_edge(uint64_t *lbp, uint64_t &index,
     while ((index <= block_end) && (level > min_level)) {
       // continue only within current block
       level--;
-      const int level_scale_power = (level + 1) * LogicSnapshot::ScalePower;
+      const int level_scale_power = static_cast<int>((level + 1) * LogicSnapshot::ScalePower);
       const uint64_t offset =
           (index & ~(~0ULL << LogicSnapshot::LeafBlockPower)) >> level_scale_power;
       const uint64_t mask =
@@ -798,7 +799,7 @@ bool LogicSnapshotEdgeScan::block_pre_edge(uint64_t *lbp, uint64_t &index,
       // continue only within current block
       if (level == 0)
         level++;
-      const int level_scale_power = (level + 1) * LogicSnapshot::ScalePower;
+      const int level_scale_power = static_cast<int>((level + 1) * LogicSnapshot::ScalePower);
       const uint64_t offset =
           (index & ~(~0ULL << LogicSnapshot::LeafBlockPower)) >> level_scale_power;
       const uint64_t mask =
@@ -826,7 +827,7 @@ bool LogicSnapshotEdgeScan::block_pre_edge(uint64_t *lbp, uint64_t &index,
     while ((index >= block_start) && (level > min_level)) {
       // continue only within current block
       level--;
-      const int level_scale_power = (level + 1) * LogicSnapshot::ScalePower;
+      const int level_scale_power = static_cast<int>((level + 1) * LogicSnapshot::ScalePower);
       const uint64_t offset =
           (index & ~(~0ULL << LogicSnapshot::LeafBlockPower)) >> level_scale_power;
       const uint64_t mask =

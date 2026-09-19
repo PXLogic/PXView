@@ -269,7 +269,7 @@ public:
   void lissajous_disable();
   void math_rebuild(bool enable, int ch1_index, int ch2_index, data::MathStack::MathType type);
   bool trigd() override { return _state->trigger_flag(); }
-  uint8_t trigd_ch() override { return _state->trigger_ch(); }
+  uint8_t trigd_ch() override { return static_cast<uint8_t>(_state->trigger_ch()); }
   data::Snapshot *get_snapshot(int type) override;
   data::LogicSnapshot *get_logic_snapshot() override;
   std::shared_ptr<data::LogicSnapshot> get_logic_snapshot_shared() override;

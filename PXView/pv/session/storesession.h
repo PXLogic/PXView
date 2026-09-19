@@ -109,7 +109,7 @@ public:
         // otherwise leave _suffix empty, causing export_start() to fail
         // with "Invalid export format" even though the file extension
         // clearly indicates the format.
-        int dot = name.lastIndexOf('.');
+        const qsizetype dot = name.lastIndexOf('.');
         if (dot >= 0 && dot < name.size() - 1)
             _suffix = name.mid(dot + 1).toLower();
     }

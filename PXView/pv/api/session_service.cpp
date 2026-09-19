@@ -4370,8 +4370,8 @@ Result<void> SessionService::export_decoder_table(
                 // Format start/end sample
                 QString start_str, end_str;
                 if (iso8601_timestamp && samplerate > 0) {
-                    double start_sec = static_cast<double>(ann.start_sample()) / samplerate;
-                    double end_sec = static_cast<double>(ann.end_sample()) / samplerate;
+                    double start_sec = static_cast<double>(ann.start_sample()) / static_cast<double>(samplerate);
+                    double end_sec = static_cast<double>(ann.end_sample()) / static_cast<double>(samplerate);
                     auto start_dt = QDateTime::fromMSecsSinceEpoch(
                         static_cast<qint64>(start_sec * 1000), QTimeZone::UTC);
                     auto end_dt = QDateTime::fromMSecsSinceEpoch(

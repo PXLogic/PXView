@@ -63,7 +63,7 @@ bool WsTransport::start()
     connect(_server, &QWebSocketServer::newConnection,
             this, &WsTransport::on_new_connection);
 
-    if (!_server->listen(QHostAddress::LocalHost, _port)) {
+    if (!_server->listen(QHostAddress::LocalHost, static_cast<quint16>(_port))) {
         delete _server;
         _server = nullptr;
         return false;

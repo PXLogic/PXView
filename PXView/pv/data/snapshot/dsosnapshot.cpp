@@ -189,7 +189,7 @@ void DsoSnapshot::first_payload(const sr_datafeed_dso &dso, uint64_t total_sampl
                     break;
                 }
                 _ch_data.push_back(chan_buffer);
-                _ch_index.push_back(probe->index);
+                _ch_index.push_back(static_cast<uint16_t>(probe->index));
             }
         }
         
@@ -510,7 +510,7 @@ double DsoSnapshot::cal_vrms(double zero_off, int index)
             vrms += tmp * tmp;
             begin_src_ptr++;
         }
-        vrms = vrms_pre + vrms / _sample_count;
+        vrms = vrms_pre + vrms / static_cast<double>(_sample_count);
         vrms_pre = vrms;
     }
     vrms = pow(vrms, 0.5);
@@ -540,7 +540,7 @@ double DsoSnapshot::cal_vmean(int index)
             vmean += *begin_src_ptr;
             begin_src_ptr += _channel_num;
         }
-        vmean = vmean_pre + vmean / _sample_count;
+        vmean = vmean_pre + vmean / static_cast<double>(_sample_count);
         vmean_pre = vmean;
     }
 
@@ -550,8 +550,9 @@ double DsoSnapshot::cal_vmean(int index)
 int DsoSnapshot::get_block_num()
 {
     const uint64_t size = _sample_count * get_unit_bytes() * get_channel_num();
-    return (size >> LeafBlockPower) +
-           ((size & LeafMask) != 0);
+    // Leaf block count — bounded by capture size / LeafBlockSamples, far below INT_MAX.
+    return static_cast<int>((size >> LeafBlockPower) +
+                            ((size & LeafMask) != 0));
 }
 
 uint64_t DsoSnapshot::get_block_size(int block_index)

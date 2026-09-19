@@ -92,7 +92,7 @@ uint64_t SessionDocument::get_trigger_pos() { return _trigger_pos; }
 double SessionDocument::get_sampletime() const {
   if (_samplerate == 0)
     return 0;
-  return _samplelimits * 1.0 / _samplerate;
+  return static_cast<double>(_samplelimits) / static_cast<double>(_samplerate);
 }
 
 bool SessionDocument::has_data() {
@@ -189,11 +189,11 @@ uint64_t SessionDocument::cur_snap_samplerate() { return _samplerate; }
 uint64_t SessionDocument::cur_samplelimits() { return _samplelimits; }
 
 double SessionDocument::cur_sampletime() {
-  return _samplerate > 0 ? (_samplelimits * 1.0 / _samplerate) : 0.0;
+  return _samplerate > 0 ? (static_cast<double>(_samplelimits) / static_cast<double>(_samplerate)) : 0.0;
 }
 
 double SessionDocument::cur_snap_sampletime() {
-  return _samplerate > 0 ? (_samplelimits * 1.0 / _samplerate) : 0.0;
+  return _samplerate > 0 ? (static_cast<double>(_samplelimits) / static_cast<double>(_samplerate)) : 0.0;
 }
 
 data::Snapshot *SessionDocument::get_snapshot(int type) {
