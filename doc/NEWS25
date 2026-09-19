@@ -7,6 +7,20 @@ FPGA/IC吹水群：377248676
 雷电扩展坞群：807604723
 --------------------------------------------------------------------------------
 
+    PXView V1.6.5修改
+    时间：2026年9月20日
+    变更如下：
+
+    【问题修复】
+    *修复撤销（revert_all_edits）后同一 root node 内其它块的 tog/first/last 被污染、波形看起来"撤销没生效"：allocated 记录原样整字回写 rn.tog/rn.first/rn.last，而这三个 64 位字是**实例化那一刻**（趟中途）的快照，对同 root node 里更早被改过的块存的是"滤波后"的值；回放按 (order,idx0,idx1) 升序，序号更小的块已经还原并重算过 mipmap 且不会再被访问，于是字节对而元数据错——tog 位错使 get_display_edges 跳过该块边沿、画成常量，first/last 错使跨块 get_nxt_edge/get_pre_edge 判定错。改为只回写本块那一位（mask = 1ULL << idx1）：实例化一个块并不会动同 root node 其它块的元数据，整字回写本无必要（logicsnapshot_glitch_filter.cpp）
+    *修复"编辑路径永不释放已发布块"这一不变式实际未成立：滤波/反相把块抹平为常量时 calc_mipmap 走 push_to_free_list，撤销 allocated 记录时同样直接 push_to_free_list，而该函数对 mmap 块执行 VirtualFree(MEM_DECOMMIT)（之后再访问是访问违例，不是"旧内容"）、对池内块挂回 _free_block_list 供后续 allocate_block 复用；stream 会话 _able_free 为真且非 loop 时读路径走的仍是 committed_sample_count() 无锁分支，等于把"读的时候内存被抽走"从旧的 copy_from 搬进了编辑路径自身。改为事务内只登记延迟释放（_edit_deferred_free），由 EditWriteGuard::close() 在仍持独占锁时统一回收、free_data() 兜底；同步修正原注释里"decommit 后读者仍看到有效内存"这一错误结论（logicsnapshot.h、logicsnapshot.cpp、logicsnapshot_glitch_filter.cpp）
+    *修复编辑日志段合并在写入段非升序时静默丢失记录：record_edit 只与 _edits.back() 比较且只判 byte_lo <= prev_hi + 64，若某次写入的起点早于上一条记录的窗口（未来新增就地写者、按通道并行、loop 模式块轮转），会命中合并分支再走 byte_hi <= prev_hi 的早退，该次写入完全没有记录——永久不可撤销且无任何报错。改为补上 byte_lo >= prev.byte_lo 下界，让合并失败即另开一条记录（fail-closed）；不额外加断言，失败即降级已能保证日志正确，断言只会把可恢复的排序意外变成 debug 版崩溃（logicsnapshot_glitch_filter.cpp）
+    *修复预算恰在"实例化 RLE 块"那一刻耗尽时该块没有任何记录、永久不可撤销：apply_batch 是先 LeafBlockPool::acquire 再 record_edit，而 record_edit 在预算耗尽时直接早退，于是块已被实例化却没有记录——撤销既无法回收它，也无法还原它取代的常量值元数据，趟中间留下一处不可回滚的状态改动；改为在 acquire 之前先判 edit_log_can_grow(0,1)，超限即置 _edit_log_overflow 并中止整趟（logicsnapshot_glitch_filter.cpp）
+    *修复中止后尾部 apply_batch 把同一批写入再回放一遍：OOM（acquire 失败）与预算超限的提前 return 都没有清空 fills/dirty，扫描循环 break 之后函数末尾的 apply_batch() 会拿着这批 fills 再写一次、再记一遍日志——反序回放能救回正确性，但白做一遍并多占本已见底的预算；改为三处中止分支统一 fills.clear() + dirty.clear()（logicsnapshot_glitch_filter.cpp）
+
+    【构建与工程】
+    *删除实测不可用的 ENABLE_OLD_STYLE_CAST_WARNINGS 开关：该开关默认 OFF，打开后约 4800 条告警中约 3744 条来自 glib 的 gmacros.h，且把依赖头改为 SYSTEM include 也压不住（4563 → 3827，GCC 对"系统头定义、用户 TU 展开"的宏仍会报告），从未能被有效打开；删除其 option 定义与应用分支，并在 CMake/flags.cmake 注释中保留该评估结论以免重复踩坑。剩余 ENABLE_STRICT_WARNINGS（默认 ON，-Wconversion 闸门）不变（CMake/flags.cmake）
+
     PXView V1.6.4修改
     时间：2026年9月18日
     变更如下：

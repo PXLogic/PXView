@@ -34,25 +34,22 @@ endif()
 #       layer (dsosignal_paint.cpp 81, trace.h 78, logicsignal.cpp 78, ...).
 #       Widening to those targets requires fixing them first.
 #
-#   -Wold-style-cast:  ~4800 warnings, ~3744 originating in glib's gmacros.h.
-#       Marking dependencies as SYSTEM does NOT suppress them (4563 -> 3827):
-#       GCC still reports old-style casts for macros a system header defines but
-#       our TUs expand. DEFAULT OFF — not usable without wrapping the glib
-#       includes in `#pragma GCC diagnostic ignored`.
+#   -Wold-style-cast:  ~4800 warnings, ~3744 from glib's gmacros.h. Marking
+#       dependencies as SYSTEM does NOT suppress them (4563 -> 3827): GCC still
+#       reports old-style casts for macros a system header defines but our TUs
+#       expand. The ENABLE_OLD_STYLE_CAST_WARNINGS switch was therefore REMOVED
+#       (it could never be turned on productively); this note is kept so the
+#       evaluation is not repeated.
 #
 # Warning-only, never combined with -Werror: a hit is reported, not fatal.
 #
 #     cmake .. -DENABLE_STRICT_WARNINGS=OFF   # opt out of the -Wconversion gate
 #-------------------------------------------------------------------------------
 option(ENABLE_STRICT_WARNINGS "Emit -Wconversion for pxview-core (warnings only)" ON)
-option(ENABLE_OLD_STYLE_CAST_WARNINGS "Emit -Wold-style-cast for pxview-core (glib noise dominates)" OFF)
 
 set(PXVIEW_CORE_STRICT_FLAGS "")
 if(ENABLE_STRICT_WARNINGS)
     list(APPEND PXVIEW_CORE_STRICT_FLAGS -Wconversion)
-endif()
-if(ENABLE_OLD_STYLE_CAST_WARNINGS)
-    list(APPEND PXVIEW_CORE_STRICT_FLAGS -Wold-style-cast)
 endif()
 if(PXVIEW_CORE_STRICT_FLAGS)
     message(STATUS "Strict warnings for pxview-core: ${PXVIEW_CORE_STRICT_FLAGS} (never -Werror)")

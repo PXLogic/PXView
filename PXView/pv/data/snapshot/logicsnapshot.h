@@ -266,6 +266,14 @@ public:
         void close() noexcept {
             _snap->_edit_write_depth.fetch_sub(1, std::memory_order_relaxed);
             _snap->_edit_epoch.fetch_add(1, std::memory_order_release);
+            // Still exclusive here, and the transaction's own revision is
+            // already published — so this is the point where the storage the
+            // transaction detached can actually go back to the allocator
+            // (see push_to_free_list(): inside a transaction releases are only
+            // DEFERRED, because a block that is being freed must never be
+            // decommitted or recycled while a reader may still hold a pointer
+            // into it).
+            _snap->flush_deferred_free_list();
             _snap->_edit_visibility.unlock();
         }
 
@@ -658,7 +666,33 @@ private:
 // set_complete() (via _mem_optimization_requested) after capture ends.
 void free_unused_memory() override;
 
+    // Hand a detached leaf block back to the allocator.
+    //
+    // INSIDE AN EDIT TRANSACTION the release is DEFERRED (parked in
+    // _edit_deferred_free and flushed when the transaction closes) instead of
+    // being performed inline. The edit passes detach published blocks:
+    //   - calc_mipmap() collapses a block that the filter flattened to a
+    //     constant (RLE representation), and
+    //   - revert_all_edits() drops a block that the pass had materialised.
+    // Both run while readers may hold pointers obtained before the pass
+    // started (the decoder's get_samples() raw pointers, and — in stream
+    // sessions, where `_able_free` is true — the lock-free
+    // committed_sample_count() readers). Releasing inline would decommit an
+    // mmap block (VirtualFree(MEM_DECOMMIT) — a later access is an access
+    // violation, not "the old content") or park a pool block where the next
+    // allocate_block() hands it to somebody else (a later read returns
+    // unrelated data). Deferring is what makes "a published block is never
+    // freed or unmapped" true for the whole edit path instead of only for the
+    // part guarded by _able_free.
     void push_to_free_list(void* ptr);
+    /// The inline half of push_to_free_list(): mmap blocks are decommitted,
+    /// pool blocks are parked in _free_block_list. Never call this directly
+    /// from inside an edit transaction.
+    void release_block_now(void* ptr);
+    /// Flush _edit_deferred_free through release_block_now(). Safe only when
+    /// no reader can be inside — i.e. while _edit_visibility is held
+    /// exclusively (EditWriteGuard::close) or at teardown (free_data).
+    void flush_deferred_free_list();
     void* allocate_block(uint16_t channel, uint64_t index0, uint64_t index1);
 
     bool is_mmap_slot_fresh(uint16_t channel, uint64_t global_block_seq) const;
@@ -695,6 +729,10 @@ private:
     std::atomic<uint64_t> _ring_published{0};
     bool        _able_free;
     std::vector<void*> _free_block_list;
+    // Blocks detached WHILE an edit transaction was open. Released by
+    // flush_deferred_free_list() when the transaction closes (or at teardown),
+    // never inline — see push_to_free_list().
+    std::vector<void*> _edit_deferred_free;
     struct BlockIndex _cur_ref_block_indexs[CHANNEL_MAX_COUNT];
     int         _lst_free_block_index;
 

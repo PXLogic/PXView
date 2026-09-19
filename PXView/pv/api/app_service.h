@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <vector>
 
 class AppControl;
@@ -78,7 +79,9 @@ private:
                       const std::map<std::string, std::string>& params = {});
 
     AppControl* _app_control;
-    std::map<int, SessionService*> _sessions;
+    // Owning container: entries are released automatically, so no path
+    // (including early returns) can leak a SessionService.
+    std::map<int, std::unique_ptr<SessionService>> _sessions;
     int _active_session_id;
     int _next_session_id;
     std::vector<IServiceEventListener*> _event_listeners;

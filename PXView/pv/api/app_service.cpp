@@ -54,7 +54,7 @@ Result<void> AppService::initialize()
     SigSession* session = _app_control ? _app_control->GetSession() : nullptr;
     if (session) {
         int session_id = _next_session_id++;
-        auto* svc = new SessionService(session, session->get_device());
+        auto svc = std::make_unique<SessionService>(session, session->get_device());
 
         // Create the MCP-dedicated document used as the stable target container
         // for MCP operations, decoupled from the UI's _active_document cursor.
@@ -68,7 +68,7 @@ Result<void> AppService::initialize()
         size_t api_doc_idx = session->document_registry()->create_api_document(session);
         svc->set_api_document(api_doc_idx);
 
-        _sessions[session_id] = svc;
+        _sessions[session_id] = std::move(svc);
         _active_session_id = session_id;
     }
     return Result<void>::Success();
@@ -76,10 +76,7 @@ Result<void> AppService::initialize()
 
 Result<void> AppService::shutdown()
 {
-    // Destroy all sessions
-    for (auto& pair : _sessions) {
-        delete pair.second;
-    }
+    // Destroy all sessions: the unique_ptr entries release themselves.
     _sessions.clear();
     _active_session_id = -1;
     return Result<void>::Success();
@@ -311,7 +308,7 @@ Result<int> AppService::create_session(
     }
 
     int session_id = _next_session_id++;
-    auto* svc = new SessionService(session, session->get_device());
+    auto svc = std::make_unique<SessionService>(session, session->get_device());
 
     // Inject the MCP-dedicated document (same rationale as in initialize()).
     // This branch is only reached when no SessionService exists yet; the
@@ -321,7 +318,7 @@ Result<int> AppService::create_session(
     size_t api_doc_idx = session->document_registry()->create_api_document(session);
     svc->set_api_document(api_doc_idx);
 
-    _sessions[session_id] = svc;
+    _sessions[session_id] = std::move(svc);
     _active_session_id = session_id;
 
     // Note: Do NOT call _on_new_tab_requested() here.
@@ -339,7 +336,6 @@ Result<void> AppService::destroy_session(int session_id)
         return Result<void>::Fail(ErrorCode::InvalidRequest,
                                   "Session not found");
 
-    delete it->second;
     _sessions.erase(it);
 
     if (_active_session_id == session_id) {
@@ -354,7 +350,7 @@ ISessionService* AppService::get_session(int session_id)
     auto it = _sessions.find(session_id);
     if (it == _sessions.end())
         return nullptr;
-    return it->second;
+    return it->second.get();
 }
 
 std::vector<int> AppService::get_session_ids() const

@@ -178,6 +178,13 @@ void LogicSnapshot::free_data() {
     return;
   }
 
+  // Teardown safety net: an edit pass that was cut short (cancel / OOM) can
+  // leave blocks parked in _edit_deferred_free. They are not reachable from
+  // _ch_data any more, so releasing them here is the only chance to give the
+  // pool blocks back. Must run before _mmap_alloc.reset() below, because
+  // release_block_now() classifies a block by is_mmap_address().
+  flush_deferred_free_list();
+
   // The leaf blocks are about to go away, so the reversible filter/invert
   // edit log — which holds pre-edit copies of those blocks' bytes — is no
   // longer applicable and must be dropped before the pointers dangle.
@@ -2543,6 +2550,30 @@ void LogicSnapshot::decode_end() {
 }
 
 void LogicSnapshot::push_to_free_list(void* ptr) {
+  if (!ptr) return;
+
+  // Inside an edit transaction: defer (see the declaration in logicsnapshot.h).
+  // The block has already been detached from the chunk tree (lbp = nullptr), so
+  // no reader can find it again; but its storage must stay committed and
+  // un-recycled until the transaction closes, because pointers obtained before
+  // the pass may still be alive in a decoder or in a lock-free reader.
+  if (_edit_write_depth.load(std::memory_order_relaxed) > 0) {
+    _edit_deferred_free.push_back(ptr);
+    return;
+  }
+  release_block_now(ptr);
+}
+
+void LogicSnapshot::flush_deferred_free_list() {
+  if (_edit_deferred_free.empty())
+    return;
+  std::vector<void*> pending;
+  pending.swap(_edit_deferred_free);
+  for (void *p : pending)
+    release_block_now(p);
+}
+
+void LogicSnapshot::release_block_now(void* ptr) {
   if (!ptr) return;
   if (_mmap_alloc && _mmap_alloc->is_mmap_address(ptr)) {
     // Decommit physical pages back to OS. If decommit_block() returns true

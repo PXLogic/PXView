@@ -261,12 +261,25 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
   //    written only after this call returns. So the merged blob is the original
   //    content of [prev.byte_lo, byte_hi) either way. Runs are visited in
   //    ascending order, so the extension only ever grows forward.
+  //
+  //    That ascending order is a PRECONDITION, not an observation: the merge
+  //    only looks at _edits.back(), so if a run ever started BEFORE the
+  //    previous record's window (a future in-place writer that scans out of
+  //    order, per-channel parallelism, loop-mode block rotation), the old
+  //    `byte_lo <= prev_hi + gap` test would still merge and then take the
+  //    `byte_hi <= prev_hi` early return below — i.e. that run would be
+  //    written with NO record at all and silently become un-undoable.
+  //    `byte_lo >= prev.byte_lo` makes the merge fail CLOSED in that case:
+  //    a new record is started, which costs a little log space instead of
+  //    losing reversibility. (A debug assert would be redundant — the
+  //    fail-closed branch already keeps the log correct, and the assert would
+  //    turn a recoverable ordering surprise into a debug-build crash.)
   if (!_edits.empty()) {
     EditRecord &prev = _edits.back();
     if (!prev.allocated && prev.order == order && prev.idx0 == idx0 &&
         prev.idx1 == idx1) {
       const uint64_t prev_hi = prev.byte_lo + prev.bytes.size();
-      if (byte_lo <= prev_hi + kEditMergeGapBytes) {
+      if (byte_lo >= prev.byte_lo && byte_lo <= prev_hi + kEditMergeGapBytes) {
         if (byte_hi > prev_hi) {
           const uint64_t add = byte_hi - prev_hi;
           if (!edit_log_can_grow(add, 0)) {
@@ -433,15 +446,32 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
       // recalc_mipmap() cannot help here (it bails out on a nullptr block),
       // so put back the constant-value representation the block had before
       // it was materialised.
-      rn.tog = e.meta_tog;
-      rn.first = e.meta_first;
-      rn.last = e.meta_last;
-      // Deferred only: push_to_free_list() decommits mmap blocks and parks
-      // pool blocks in _free_block_list, neither of which makes the storage
-      // available to another thread immediately. A lock-free reader that
-      // grabbed the pointer before the swap therefore still sees valid
-      // memory, and a reader that sees nullptr falls back to the constant
-      // first/last representation — which is exactly the pre-edit state.
+      //
+      // RESTORE THIS BLOCK'S BIT ONLY — never the whole 64-bit word.
+      // meta_tog / meta_first / meta_last are a snapshot of the whole words
+      // taken at materialisation time, i.e. MID-PASS: for every OTHER block in
+      // this root node they hold whatever that block's state was at that
+      // moment, which for a block edited earlier is the POST-EDIT value. The
+      // undo visits blocks in ascending (order, idx0, idx1) order and
+      // re-derives each block's metadata from its restored bytes, so a whole-
+      // word write-back clobbers the metadata of a lower-indexed block that
+      // has already been restored and will not be visited again: the bytes are
+      // then correct but `tog` is stale — get_display_edges() skips the
+      // block's edges and renders it as a constant, and wrong first/last bits
+      // break cross-block get_nxt_edge()/get_pre_edge(). Materialising a block
+      // never touches the metadata of the other blocks in its root node, so
+      // the masked form is both sufficient and strictly safer.
+      const uint64_t meta_mask = 1ULL << e.idx1;
+      rn.tog = (rn.tog & ~meta_mask) | (e.meta_tog & meta_mask);
+      rn.first = (rn.first & ~meta_mask) | (e.meta_first & meta_mask);
+      rn.last = (rn.last & ~meta_mask) | (e.meta_last & meta_mask);
+      // The block has already been detached above (lbp = nullptr), so no
+      // reader can find it again; a reader that sees nullptr falls back to the
+      // constant first/last representation, which is exactly the pre-edit
+      // state. The storage itself is released by push_to_free_list() — inside
+      // an edit transaction that only DEFERS the release until the
+      // transaction closes, so nothing is decommitted or recycled while a
+      // pointer obtained earlier could still be alive.
       if (ptr)
         _host->push_to_free_list(ptr);
       return true;
@@ -761,11 +791,33 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
         // 如果该块尚未被实例化，则分配空间
         bool materialised = false;
         if (_host->_ch_data[order][idx0].lbp[idx1] == nullptr) {
+          // Materialising costs a log record of its own (undo = drop the block
+          // again and restore the constant-value metadata it replaced), so the
+          // budget is checked BEFORE allocating. Acquiring first and only then
+          // finding the log full would leave a block instantiated with NO
+          // record: the undo could neither free it nor restore that metadata,
+          // i.e. an unrecorded — and therefore permanently un-undoable — state
+          // change sitting in the middle of an otherwise reversible pass.
+          if (!edit_log_can_grow(0, 1)) {
+            _edit_log_overflow = true;
+            pxv_err("[GlitchFilter] edit log budget exceeded while "
+                    "materialising idx0=%llu idx1=%llu; aborting so the pass "
+                    "stays reversible",
+                    (unsigned long long)idx0, (unsigned long long)idx1);
+            // Drop the pending runs: the pass is aborted and the caller
+            // reverts, so re-applying them at the tail apply_batch() would
+            // only rewrite (and re-log) work that is about to be undone.
+            fills.clear();
+            dirty.clear();
+            return;
+          }
           bool const_val =
               (_host->_ch_data[order][idx0].first & (1ULL << idx1)) != 0;
           void *lbp = LeafBlockPool::instance().acquire(LogicSnapshot::LeafBlockSpace);
           if (lbp == nullptr) {
             _host->_edit_pass_failed = true;
+            fills.clear();
+            dirty.clear();
             return;
           }
           if (const_val)
@@ -797,6 +849,10 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
             pxv_err("[GlitchFilter] edit log budget exceeded at idx0=%llu "
                     "idx1=%llu; aborting so the pass stays reversible",
                     (unsigned long long)idx0, (unsigned long long)idx1);
+            // Same reason as the two aborts above: the pass is over, so the
+            // tail apply_batch() must not replay these runs.
+            fills.clear();
+            dirty.clear();
             return;
           }
         }
