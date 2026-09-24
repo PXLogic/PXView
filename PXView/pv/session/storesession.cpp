@@ -1097,6 +1097,53 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // 'type' in the hash table causes sr_output_new() to reject them as
     // unknown options and return nullptr — which previously caused a silent
     // failure (no file created, no error reported).
+    // Narrow the channel set BEFORE sr_output_new().
+    //
+    // sr_output_new() runs the output module's init() handler, and csv.c's
+    // init() derives num_analog_channels / num_logic_channels from the channels
+    // that are enabled *at that moment*. If channels of other types are still
+    // enabled, an export of logic data also claims it will receive analog
+    // samples, so dump_saved_values() discards every buffer as a "partial
+    // packet" and the file comes out empty (0 bytes, not even a header).
+    // The restorer used to be constructed *after* sr_output_new(), i.e. too
+    // late to have any effect on init().
+    struct ChannelStateRestorer {
+        GSList *channels;
+        std::vector<bool> original_states;
+        ChannelStateRestorer(GSList *channels, const std::vector<int32_t> &export_channels,
+                             int channel_type) : channels(channels) {
+            if (channels) {
+                for (GSList *l = channels; l; l = l->next) {
+                    struct sr_channel *ch = (struct sr_channel *)l->data;
+                    original_states.push_back(ch->enabled);
+                    // Two independent filters:
+                    //  * only the exported channel type may stay enabled -- the
+                    //    output module counts channels per type in init(), so a
+                    //    stray enabled channel of another type makes it expect
+                    //    data that will never be sent;
+                    //  * when an explicit channel list was given, only those
+                    //    indices stay enabled.
+                    if (ch->type != channel_type) {
+                        ch->enabled = FALSE;
+                    } else if (!export_channels.empty() && std::find(export_channels.begin(), export_channels.end(), ch->index) == export_channels.end()) {
+                        ch->enabled = FALSE;
+                    }
+                }
+            }
+        }
+        ~ChannelStateRestorer() {
+            if (channels) {
+                size_t i = 0;
+                for (GSList *l = channels; l; l = l->next) {
+                    struct sr_channel *ch = (struct sr_channel *)l->data;
+                    if (i < original_states.size()) {
+                        ch->enabled = original_states[i++];
+                    }
+                }
+            }
+        }
+    } restorer(_session->get_device()->get_channels(), _export_channels, channel_type);
+
     GHashTable *params = g_hash_table_new(g_str_hash, g_str_equal);
 
     // Upstream libsigrok makes sr_output opaque — use sr_output_new() to create
@@ -1114,33 +1161,6 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         g_hash_table_destroy(params);
         return;
     }
-
-    struct ChannelStateRestorer {
-        GSList *channels;
-        std::vector<bool> original_states;
-        ChannelStateRestorer(GSList *channels, const std::vector<int32_t> &export_channels) : channels(channels) {
-            if (channels) {
-                for (GSList *l = channels; l; l = l->next) {
-                    struct sr_channel *ch = (struct sr_channel *)l->data;
-                    original_states.push_back(ch->enabled);
-                    if (!export_channels.empty() && std::find(export_channels.begin(), export_channels.end(), ch->index) == export_channels.end()) {
-                        ch->enabled = FALSE;
-                    }
-                }
-            }
-        }
-        ~ChannelStateRestorer() {
-            if (channels) {
-                size_t i = 0;
-                for (GSList *l = channels; l; l = l->next) {
-                    struct sr_channel *ch = (struct sr_channel *)l->data;
-                    if (i < original_states.size()) {
-                        ch->enabled = original_states[i++];
-                    }
-                }
-            }
-        }
-    } restorer(_session->get_device()->get_channels(), _export_channels);
 
     // Binary output format must be written as raw bytes — using QTextStream
     // or QString::fromUtf8() corrupts binary data in three ways:

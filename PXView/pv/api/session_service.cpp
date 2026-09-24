@@ -4067,7 +4067,8 @@ Result<void> SessionService::export_data(const ExportConfig &config) {
     
     // Set specific channels and type for export.
     // SignalModel::type() now returns the libsigrok SR_CHANNEL_* value
-    // (SR_CHANNEL_LOGIC=10000, SR_CHANNEL_ANALOG=10002) as the single source
+    // (SR_CHANNEL_LOGIC=10000, SR_CHANNEL_ANALOG=10001, SR_CHANNEL_DSO=10002)
+    // as the single source
     // of truth, so set_export_channel_type must use SR_CHANNEL_* values to
     // match the type check `_export_channel_type != m->type()` in
     // export_start().

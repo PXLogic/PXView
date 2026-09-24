@@ -600,3 +600,44 @@ endif()
 # 保留的 cache 层只有 mmap_allocator.cpp（唯一存储后端，已由各 snapshot 测试覆盖）
 # 与 disk_cache_config.h（MmapAllocator 的配置结构）。
 
+# ==== PopupDlgList 遍历安全（重入 erase / 悬挂条目）====
+# 直接编译 popupdlglist.cpp（含 pv/base/log.h，测试内 stub xlog）。
+# 覆盖 0xc0000374 那一类生命周期 bug 中的"容器重入"分支：
+#   * close() 经 closeEvent → ~PxDialog/~DSMessageBox → RemoveDlgFromList() 重入改同一个
+#     vector —— 旧实现拿 begin()+i 跨过 close() 再 erase，会删掉旁观者甚至越界；
+#   * 对话框被控件树销毁而没走 RemoveDlgFromList 时，裸指针条目会悬挂，
+#     现已改 QPointer<QWidget> 自动置空并丢弃。
+pv_add_qtest(test_popup_dlg_list
+    ui/test_popup_dlg_list.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/ui/popupdlglist.cpp
+)
+target_include_directories(test_popup_dlg_list PRIVATE
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# ==== csv 输出模块的通道计数 / 采样数契约（"导出 0 字节"回归）====
+# 只走 libsigrok 公开 API 造一个假设备（sr_dev_inst_user_new +
+# sr_dev_inst_channel_add / sr_dev_inst_channels_get / sr_dev_channel_enable），
+# 再直接驱动 csv 输出模块，锁住两件事：
+#   * 设备上还有本模块消费不了的类型（DSO）时，channel_count 与 channels_seen
+#     必须同口径，否则每个数据包都被 "Discarding partial packet" 丢掉；
+#   * 末尾短包必须按实际样本数输出，不能按上一包的 num_samples 补脏行。
+# 旧实现在这些用例上确定性失败（24 行只写出 16 行 / 19 行变成 24 行）。
+#
+# 注意：这里**故意不**用 -Wl,--whole-archive（其它几个测试用）。本测试只用公开
+# API，而 output.c 的 output_module_list[] 直接取 &output_csv 的地址，链接
+# sr_output_find 就会把 csv.o 拉进来，无需全量保留。
+# 反过来，本机 binutils（GNU ld 2.47.20260726）在 whole-archive 且存在未解析
+# 符号时**静默失败**（collect2 只报 "ld returned 5 exit status"，零诊断），
+# 而其它测试能过是因为它们额外编入了 common/ + libsigrokdecode/ 对象并链接
+# pxview-core/pxview-data 等（已用最小对照实验定位）。
+pv_add_qtest(test_csv_export_channels
+    data/test_csv_export_channels.cpp
+)
+target_include_directories(test_csv_export_channels PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+# 普通链接（非 whole-archive）：只要被引用到的成员。
+target_link_libraries(test_csv_export_channels PRIVATE libsigrok)
+
