@@ -384,12 +384,24 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
             _async_queue.pop();
             _async_queue_depth = _async_queue.size();
             _async_queue_bytes_size -= payload.length;
+            // Publish "this payload is in flight" INSIDE the critical section,
+            // atomically with the pop. A concurrent drain_queue_for_capture_end()
+            // decides with `_async_queue.empty() && !_async_busy`, so the pop and
+            // this flag must become visible together: setting it after the unlock
+            // leaves a window where the queue is already empty and the flag is
+            // still false, and the drain then returns while this payload is still
+            // unwritten. capture_ended() then finalizes from a stale
+            // _ring_sample_count (its tail mipmap + _sample_count are computed
+            // from it), so the last chunk of the capture is silently unaccounted.
+            // Empirical: with the store after the unlock this reproduced under
+            // CPU contention (test_decode_chunk_alignment, 5/160 runs) with the
+            // dump sequence pop -> drain-break -> busy1 -> append-enter.
+            _async_busy.store(true);
             // 注意：槽位归还与 _async_drain_cv 的通知放在 payload 处理完之后
             // （见本函数尾部）—— 提前归还会让 feed 线程在 worker 还在读该槽位时
             // 就把它 memcpy 覆盖掉。
         }
 
-        _async_busy.store(true);
         sr_datafeed_logic logic;
         logic.length = payload.length;
         logic.data = payload.data();

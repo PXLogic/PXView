@@ -21,6 +21,16 @@
  * 3) 现状之所以不出事仅因 LeafBlockSamples / MaxChunkSize = 1024 整除；
  *    本测试用 2 个 leaf block 覆盖边界场景，并覆盖非 8 对齐起点。
  *
+ * 4) 采集收尾契约（异步写入线程 ↔ capture_ended 的排空握手）：
+ *    append_payload() 只是把 payload 交给后台写入线程，capture_ended() 靠
+ *    drain_queue_for_capture_end() 等它落盘。drain 的判定是
+ *      "_async_queue.empty() && !_async_busy"
+ *    因此"本 payload 在飞"的置位必须与出队发生在**同一个临界区内**；一旦
+ *    放在出队之后、锁之外，drain 就能挤进这个窗口提前返回，capture_ended()
+ *    随即用**过期的** _ring_sample_count 收尾（_sample_count、尾部 leaf block
+ *    的 mipmap 都取自它）——最后一个 chunk 静默不计入。契约用例见
+ *    test_capture_ended_sees_enqueued_payload()。
+ *
  * 纯数据层，无 QWidget 依赖。依赖链同 test_logic_snapshot_query。
  */
 
@@ -80,6 +90,7 @@ class TestDecodeChunkAlignment : public QObject
 private slots:
     void test_iterator_window_contract();
     void test_bit_offset_floor_contract();
+    void test_capture_ended_sees_enqueued_payload();
 };
 
 // ---------------------------------------------------------------------------
@@ -203,6 +214,54 @@ void TestDecodeChunkAlignment::test_bit_offset_floor_contract()
     // （解码侧必须向下对齐到 8 样本才能把它变成 0）
     for (uint64_t off = 1; off < 8; ++off)
         QCOMPARE((uint64_t)(off % 8), off);
+}
+
+// ---------------------------------------------------------------------------
+// 契约 4：capture_ended() 返回时，**此前已入队的每一个 payload 都已完全写入**
+// ---------------------------------------------------------------------------
+// 复现过的失效形态（本次修复前，8 路并发下 5/160 次）：
+//     worker 出队 → drain 看到 "队列空 && !busy" 提前返回 → capture_ended
+//     读到 _ring_sample_count == 0 → 之后 worker 才置忙并真正 append。
+// 窗口只在 worker 恰好在"出队→置位"之间被抢占时命中，所以**单次调用**几乎
+// 测不到（无负载连跑 30 次全过）；本用例把同一采集边界重复多轮，把线程调度
+// 窗口的暴露次数放大 ROUNDS 倍。第 2 轮起逻辑走的是配置未变的**复用路径**
+// （first_payload 的 else 分支），与 repeat 模式下真实采集收尾同构。
+void TestDecodeChunkAlignment::test_capture_ended_sees_enqueued_payload()
+{
+    const int CH = 1;
+    const uint64_t PAYLOAD = 64ULL * 1024;          // 1 通道 → 512 K 样本
+    const uint64_t SAMPLES = PAYLOAD * 8 / CH;
+    const int ROUNDS = 16;
+
+    Fixture fx(CH);
+    std::vector<uint8_t> payload(PAYLOAD);
+    std::mt19937_64 rng(0x0D5A1);
+    for (auto &b : payload) b = (uint8_t)(rng() & 0xFF);
+
+    LogicSnapshot snap;
+    sr_datafeed_logic l{};
+    l.length = PAYLOAD;
+    l.data = payload.data();
+    l.unitsize = 1;
+    l.format = LA_CROSS_DATA;
+
+    for (int round = 0; round < ROUNDS; ++round) {
+        // first_payload 既建立几何也入队（内部 append_payload → 后台线程）
+        snap.first_payload(l, SAMPLES, &fx.nodes[0], true);
+        snap.capture_ended();
+
+        // capture_ended 返回即契约生效点：入队的 payload 必须已经写完。
+        QVERIFY2(snap.get_ring_sample_count() == SAMPLES,
+                 qPrintable(QString("round %1: capture_ended returned before the "
+                                    "enqueued payload was written (ring=%2, "
+                                    "expected %3)")
+                                .arg(round)
+                                .arg(snap.get_ring_sample_count())
+                                .arg(SAMPLES)));
+        // capture_ended 用 _ring_sample_count 给 _sample_count 收尾，
+        // 提前返回会让两者一起停在 0。
+        QCOMPARE(snap.get_sample_count(), SAMPLES);
+    }
 }
 
 QTEST_GUILESS_MAIN(TestDecodeChunkAlignment)
