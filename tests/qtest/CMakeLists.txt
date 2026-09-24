@@ -674,6 +674,19 @@ target_include_directories(test_srzip_load PRIVATE
 )
 target_link_libraries(test_srzip_load PRIVATE libsigrok)
 
+# ==== pv::prop::Int 编辑器的取值范围契约（uint64 被钉死在 0 的回归）====
+# 只编 property.cpp + int.cpp + dsspinbox.cpp，Qt Widgets 环境（ctest 已设
+# QT_QPA_PLATFORM=offscreen），不链接 libsigrok。
+pv_add_qtest(test_prop_int_widget
+    ui/test_prop_int_widget.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/prop/property.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/prop/int.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/ui/dsspinbox.cpp
+)
+# GVariant 用到 glib（该目标不经 libsigrok，需显式链接；link_directories 已在
+# deps.cmake 全局设置，与 test_signal_model/test_rowdata_batch 同法）。
+target_link_libraries(test_prop_int_widget PRIVATE -lglib-2.0)
+
 # ==== raw binary 文件名的参数提示（通道数/采样率）====
 # 约定 "<base>-<N>ch-<rate>Hz.binary"：导出时写入、导入时填入选项对话框。
 # 纯逻辑（只用 QRegularExpression），不链接 libsigrok。

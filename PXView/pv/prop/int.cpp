@@ -122,8 +122,17 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
     }
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
     {
-        int_val = g_variant_get_uint64(_value);
-        range_min = 0, range_max = UINT64_MAX;
+        // Cap the RAW value at INT_MAX instead of letting it narrow further
+        // down: UINT64_MAX assigned to the int64_t range_max becomes -1, the
+        // clamps below then leave setRange(0, -1), and Qt makes min the only
+        // legal value when max < min — so the editor was pinned at 0 no matter
+        // what value it was given. binary's "samplerate" is a uint64 option and
+        // the first one PXView binds to a widget, which is how this surfaced.
+        const guint64 raw = g_variant_get_uint64(_value);
+        const guint64 capped = raw > static_cast<guint64>(INT_MAX)
+            ? static_cast<guint64>(INT_MAX) : raw;
+        int_val = static_cast<int64_t>(capped);
+        range_min = 0, range_max = INT_MAX;
     }
     else
     {
@@ -138,6 +147,11 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
 
     range_min = max(range_min, static_cast<int64_t>(INT_MIN));
     range_max = min(range_max, static_cast<int64_t>(INT_MAX));
+
+    // A value the widget cannot represent must be clamped BEFORE the narrowing
+    // cast below: a uint32 above INT_MAX would otherwise wrap negative and land
+    // on the lower bound (the same failure mode the uint64 branch above fixes).
+    int_val = min(max(int_val, range_min), range_max);
 
     if (_range)
         _spin_box->setRange(static_cast<int>(_range->first), static_cast<int>(_range->second));

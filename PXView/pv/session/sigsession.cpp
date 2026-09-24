@@ -867,6 +867,10 @@ QVariantMap SigSession::import_option_prefill(const QString &file_name) const
   // correct default when the caller passes no options at all.
   const data::binary_name_hints::Hints hints =
       data::binary_name_hints::parse(file_name);
+  if (!hints.empty()) {
+    pxv_info("Import file: name hints channels=%d samplerate=%llu",
+             hints.channels, static_cast<unsigned long long>(hints.samplerate));
+  }
   if (hints.channels > 0)
     prefill.insert(QStringLiteral("numchannels"), hints.channels);
   if (hints.samplerate > 0)
