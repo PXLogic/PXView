@@ -29,6 +29,9 @@
 #include <QWidget>
 #include <QDialog>
 #include <QSpinBox>
+#include <QPointer>
+
+class QTimer;
 
 class IKeywordActive{
 public:
@@ -125,6 +128,10 @@ protected:
 private:
     KeyLineEdit     *_textInput;
     QWidget         *_line;
+    // Per-instance, NOT a file-scope global: the timer is a QObject child of
+    // this dialog, so it dies with it. A global pointing at a child outlived
+    // the dialog and the next Popup() call dereferenced freed memory.
+    QTimer          *_move_timer;
 };
 
 //---------PopupLineEdit
@@ -158,7 +165,12 @@ private:
 private:
     QString     _old_text;
     bool        _is_instant;
-    PopupLineEditInput  *_popup_input;
+    // QPointer, not a raw pointer: the input dialog is a child of this line
+    // edit and can be destroyed by the widget tree (dock rebuild, tab close,
+    // device switch) without ever reaching InputRelease(), which is the only
+    // place that used to null this field. A raw pointer then dangled and
+    // hide()/setRange() dereferenced freed memory.
+    QPointer<PopupLineEditInput> _popup_input;
 };
 
 #endif

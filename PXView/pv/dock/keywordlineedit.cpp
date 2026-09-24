@@ -29,8 +29,15 @@
 #include <QTimer>
 
 namespace {
-QTimer *move_timer = nullptr;
-}
+
+// NOTE: a file-scope `QTimer *move_timer` used to live here. It was parented to
+// the current PopupLineEditInput, so when that dialog was destroyed by the
+// widget tree (dock rebuild / tab close / device switch) the child timer was
+// freed while the global kept pointing at it -- the next Popup() call then did
+// move_timer->stop() on freed memory. It is now a per-instance member
+// (PopupLineEditInput::_move_timer) that cannot outlive its owner.
+
+} // namespace
 
 KeywordLineEdit::KeywordLineEdit(QWidget *parent, IKeywordActive *active)
     : QLineEdit(parent) {
@@ -178,6 +185,7 @@ PopupLineEditInput::PopupLineEditInput(QWidget *parent) : QDialog(parent) {
   setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint |
                  Qt::WindowSystemMenuHint);
   _line = nullptr;
+  _move_timer = nullptr;
 
   QHBoxLayout *lay = new QHBoxLayout();
   lay->setContentsMargins(0, 0, 0, 0);
@@ -203,15 +211,23 @@ void PopupLineEditInput::changeEvent(QEvent *event) {
 }
 
 void PopupLineEditInput::InputRelease() {
+  // sig_inputEnd drives PopupLineEdit::onPopupInputEditEnd(), which emits
+  // editingFinished() / valueChanged(). Those can start a session or device
+  // rebuild that destroys the owning dock -- and, being its child, this dialog
+  // along with it. Self-guard so nothing below runs on a freed object.
+  QPointer<PopupLineEditInput> self(this);
   sig_inputEnd(_textInput->text());
+  if (self.isNull())
+    return;
+
+  if (_move_timer != nullptr) {
+    _move_timer->stop();
+    delete _move_timer;
+    _move_timer = nullptr;
+  }
+
   this->close();
   this->deleteLater();
-
-  if (move_timer != nullptr) {
-    move_timer->stop();
-    delete move_timer;
-    move_timer = nullptr;
-  }
 }
 
 void PopupLineEditInput::onCheckPositionTimeout() {
@@ -248,16 +264,16 @@ void PopupLineEditInput::Popup(QWidget *editline) {
   _textInput->setFocus();
   _textInput->setCursorPosition(_textInput->text().length());
 
-  if (move_timer != nullptr) {
-    move_timer->stop();
-    delete move_timer;
-    move_timer = nullptr;
+  if (_move_timer != nullptr) {
+    _move_timer->stop();
+    delete _move_timer;
+    _move_timer = nullptr;
   }
-  move_timer = new QTimer(this);
-  move_timer->setInterval(100);
+  _move_timer = new QTimer(this);
+  _move_timer->setInterval(100);
 
-  connect(move_timer, &QTimer::timeout, this, &PopupLineEditInput::onCheckPositionTimeout);
-  move_timer->start();
+  connect(_move_timer, &QTimer::timeout, this, &PopupLineEditInput::onCheckPositionTimeout);
+  _move_timer->start();
 
   this->show();
 }
