@@ -94,6 +94,10 @@ private:
     QComboBox           *_end_cursor;
     view::View          *_view; 
     bool                _is_done;
+    /// Set once closeEvent() has committed to destroying this dialog, so the
+    /// completion broadcast and the teardown happen exactly once even though
+    /// m_timer can call close() repeatedly.
+    bool                _is_closing;
     QTimer              m_timer; 
 };
 

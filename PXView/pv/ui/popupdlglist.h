@@ -22,7 +22,9 @@
 #ifndef POPUP_DLG_LIST_H
 #define POPUP_DLG_LIST_H
 
+#include <cstddef>
 #include <vector>
+#include <QPointer>
 #include <QWidget>
 
 class QScreen;
@@ -30,7 +32,12 @@ class QScreen;
 struct PopuDlgItem
 {
     QScreen *screen;
-    QWidget *widget;
+    // QPointer, not a raw pointer: a dialog can be destroyed without going
+    // through RemoveDlgFromList() (e.g. a stack-allocated DSMessageBox whose
+    // deferred delete lands out of order). With a raw pointer that entry stays
+    // in the list and the next walk dereferences freed memory; with QPointer it
+    // auto-nulls and the walk can drop it safely.
+    QPointer<QWidget> widget;
 };
 
 class PopupDlgList

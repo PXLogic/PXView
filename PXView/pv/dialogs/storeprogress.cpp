@@ -48,6 +48,7 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
 {
     _fileLab = nullptr;
     _ckOrigin = nullptr;
+    _ckCompress = nullptr;
 
     _store_session = std::make_unique<StoreSession>(session);
 
@@ -59,6 +60,7 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
 
     _isExport = false;
     _is_done = false;
+    _is_closing = false;
     _start_cursor = nullptr;
     _end_cursor = nullptr;
     _view = nullptr;  
@@ -112,6 +114,7 @@ StoreProgress::StoreProgress(SigSession *session, QWidget *parent) :
 
 StoreProgress::~StoreProgress()
 {
+    m_timer.stop();
     _store_session->wait();
 }
 
@@ -123,15 +126,41 @@ void StoreProgress::closeEvent(QCloseEvent* event)
         event->ignore();
         return;
     }
-   
+
+    // Guard against re-entry: m_timer fires every 100 ms and calls close() as
+    // soon as the export is no longer busy, so closeEvent() can be reached more
+    // than once before this dialog actually goes away. The completion broadcast
+    // below must be sent exactly once.
+    if (_is_closing){
+        return;
+    }
+    _is_closing = true;
+
+    m_timer.stop();
+
     _store_session->session()->set_saving(false);
     _store_session->session()->broadcast_async<interface::SaveComplete>({});
 
-    // Use deleteLater() instead of delete this — Qt processes it at the end
-    // of the current event loop iteration, so no code after closeEvent returns
-    // can access the destroyed object. This is the idiomatic Qt pattern for
-    // self-deleting dialogs.
-    this->deleteLater();
+    event->accept();
+
+    // Destroy this dialog SYNCHRONOUSLY, right here -- do NOT use deleteLater().
+    //
+    // broadcast_async<SaveComplete>() is delivered only after this function
+    // returns, and it runs SessionEventDispatcher::on_save_complete(), which
+    // tears down and rebuilds the device/session
+    // (set_default_device() / set_device()). That rebuild runs nested event
+    // loops of its own. If this dialog were still alive at that point -- which
+    // is exactly what deleteLater() guarantees -- its deferred deletion could be
+    // delivered *inside* that rebuild, destroying the dialog together with its
+    // _store_session and _view (raw pointers into the session being rebuilt) at
+    // an unsafe point. The result is heap corruption (0xc0000374) that surfaces
+    // later at the next heap free, which is ~DsComboBox: a child of _main_widget
+    // inside this dialog.
+    //
+    // Deleting from inside closeEvent() is safe here: QWidgetPrivate::close_helper()
+    // holds a QPointer to the widget and returns early once it is gone. This is
+    // the behaviour PXView 1.5.8 and upstream DSView have always used.
+    delete this;
 }
 
 void StoreProgress::keyPressEvent(QKeyEvent *event)

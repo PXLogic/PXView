@@ -57,21 +57,36 @@ void PopupDlgList::RemoveDlgFromList(QWidget *w)
 
 void PopupDlgList::TryCloseAllByScreenChanged(QScreen *windowScreen)
 {
-    int num = g_popup_dlg_list.size();
-  
-    for (int i=0; i<num; i++)
-    {
-        auto it = g_popup_dlg_list.begin() + i;
-        auto w = (*it).widget;
+    // This walk must survive re-entrant mutation of the list.
+    //
+    // close() runs the dialog's closeEvent(), which destroys it, and
+    // ~PxDialog / ~DSMessageBox call RemoveDlgFromList() from inside that
+    // destruction. So the container can be modified *while* close() is on the
+    // stack: holding an iterator (or a size captured up front) across the call
+    // leaves it dangling, and erasing with a dangling iterator corrupts the
+    // heap. Take the entry out of the list FIRST, then close the widget, and
+    // re-read the size every iteration.
+    for (std::size_t i = 0; i < g_popup_dlg_list.size(); ) {
+        const PopuDlgItem item = g_popup_dlg_list[i];
 
-        if (w->isVisible()){
-            if ((*it).screen != windowScreen){
-                w->close(); //Close the dialog.
-                g_popup_dlg_list.erase(it);
-                --num;
-                --i;                 
-            }
+        // widget is a QPointer: a dialog destroyed by any other path auto-nulls,
+        // so a stale entry can never be dereferenced -- just drop it.
+        if (item.widget.isNull()) {
+            g_popup_dlg_list.erase(g_popup_dlg_list.begin() +
+                                   static_cast<std::ptrdiff_t>(i));
+            continue;
         }
+
+        if (item.screen != windowScreen && item.widget->isVisible()) {
+            // Remove before closing; the destructor may call
+            // RemoveDlgFromList() re-entrantly, which is now a harmless no-op.
+            g_popup_dlg_list.erase(g_popup_dlg_list.begin() +
+                                   static_cast<std::ptrdiff_t>(i));
+            item.widget->close(); //Close the dialog.
+            continue;
+        }
+
+        ++i;
     }
 }
 

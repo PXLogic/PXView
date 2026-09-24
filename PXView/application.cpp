@@ -25,7 +25,6 @@
 #include <QMessageBox>
 #include <QEvent>
 #include <QMetaObject>
-#include <QPointer>
 #ifndef NDEBUG
 #include "pv/base/log.h"
 #endif
@@ -42,9 +41,12 @@ bool Application::notify(QObject *receiver_, QEvent *event_)
     }
 
     try {
-        QPointer<QObject> receiverGuard(receiver_);
-        bool result = QApplication::notify(receiver_, event_);
-        return result;
+        // NOTE: a QPointer "guard" on receiver_ used to live here, but it was
+        // constructed and then never read -- it protected nothing. A QPointer
+        // only auto-nulls; it cannot keep the receiver alive across the call,
+        // and this function returns immediately afterwards anyway. If a
+        // post-notify use of receiver_ is ever added, check the pointer then.
+        return QApplication::notify(receiver_, event_);
     } catch ( std::exception& e ) {
         QMessageBox msg(nullptr);
         msg.setText(tr("Application Error"));
