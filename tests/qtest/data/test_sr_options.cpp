@@ -116,6 +116,12 @@ private slots:
     /* 文档化 sr_input_new() 的两条硬约束（这是上面过滤存在的原因）。 */
     void srInputNewRejectsUnknownKeysAndIllTypedValues();
 
+    /* D) 控件侧的值统一是 int32/int64（所有整数选项共用 Int 控件），必须按模块
+     *    声明的类型转换回去，否则 csv 会因为 uint32 选项收到 int32 而拒绝整次
+     *    导入——线上日志里的 "Invalid type for 'single_column' option."。 */
+    void widgetValuesAreCoercedToDeclaredTypes();
+    void csvImportAcceptsWidgetTypedValues();
+
     /* C) binary 导入的通道数来自用户给的选项，不再是写死的 8。 */
     void binaryImportUsesUserChannelCount();
 
@@ -313,6 +319,123 @@ void TestSrOptions::srInputNewRejectsUnknownKeysAndIllTypedValues()
                         g_variant_ref_sink(g_variant_new_int32(1000)));
     QVERIFY(sr_input_new(module, mistyped) == nullptr);
     g_hash_table_destroy(mistyped);
+}
+
+void TestSrOptions::widgetValuesAreCoercedToDeclaredTypes()
+{
+    using sr_options::coerce_variant;
+
+    // int32（Int 控件的产物）→ uint32（csv 的 single_column / logic_channels…）
+    GVariant *value = g_variant_ref_sink(g_variant_new_int32(16));
+    GVariant *converted = coerce_variant(value, G_VARIANT_TYPE_UINT32);
+    QVERIFY(converted != nullptr);
+    QCOMPARE(QString::fromUtf8(g_variant_get_type_string(converted)), QStringLiteral("u"));
+    QCOMPARE(g_variant_get_uint32(converted), static_cast<guint32>(16));
+    g_variant_unref(converted);
+
+    // 跨族拒绝：字符串不能变数字（否则会把 "bin" 静默当成 0）。
+    QVERIFY(coerce_variant(value, G_VARIANT_TYPE_STRING) == nullptr);
+    g_variant_unref(value);
+
+    // int64 → uint64（samplerate 的常见组合：Int 控件核 64 位时给 int64）。
+    value = g_variant_ref_sink(g_variant_new_int64(1000000));
+    converted = coerce_variant(value, G_VARIANT_TYPE_UINT64);
+    QVERIFY(converted != nullptr);
+    QCOMPARE(QString::fromUtf8(g_variant_get_type_string(converted)), QStringLiteral("t"));
+    QCOMPARE(g_variant_get_uint64(converted), static_cast<guint64>(1000000));
+    g_variant_unref(converted);
+
+    // 越界拒绝：负数进无符号、超范围进窄类型。
+    GVariant *negative = g_variant_ref_sink(g_variant_new_int32(-1));
+    QVERIFY(coerce_variant(negative, G_VARIANT_TYPE_UINT32) == nullptr);
+    QVERIFY(coerce_variant(negative, G_VARIANT_TYPE_UINT64) == nullptr);
+    g_variant_unref(negative);
+
+    GVariant *wide = g_variant_ref_sink(g_variant_new_int64(70000));
+    QVERIFY(coerce_variant(wide, G_VARIANT_TYPE_UINT16) == nullptr);
+    converted = coerce_variant(wide, G_VARIANT_TYPE_UINT32);
+    QVERIFY(converted != nullptr);
+    QCOMPARE(g_variant_get_uint32(converted), static_cast<guint32>(70000));
+    g_variant_unref(converted);
+    g_variant_unref(wide);
+
+    // 同型直接可用（字符串/布尔/枚举值永远走这条路）。
+    GVariant *text = g_variant_ref_sink(g_variant_new_string("bin"));
+    converted = coerce_variant(text, G_VARIANT_TYPE_STRING);
+    QVERIFY(converted != nullptr);
+    QCOMPARE(QString::fromUtf8(g_variant_get_string(converted, nullptr)),
+             QStringLiteral("bin"));
+    g_variant_unref(converted);
+    g_variant_unref(text);
+}
+
+void TestSrOptions::csvImportAcceptsWidgetTypedValues()
+{
+    const struct sr_input_module *module = sr_input_find("csv");
+    QVERIFY(module != nullptr);
+
+    sr_options::OptionsHandle handle = sr_options::OptionsHandle::for_input(module);
+    QVERIFY(!handle.empty());
+
+    // 对话框里点“确定”时控件交出的值：所有整数选项都用同一个 Int 控件，因此
+    // 一律是 int32/int64，而 csv 声明的是 uint32/uint64。这就是线上那份日志里
+    // "sr: input: Invalid type for 'single_column' option." 的来源。
+    std::map<std::string, GVariant *> widget_values;
+    widget_values.emplace("single_column", g_variant_ref_sink(g_variant_new_int32(0)));
+    widget_values.emplace("first_column", g_variant_ref_sink(g_variant_new_int32(1)));
+    widget_values.emplace("logic_channels", g_variant_ref_sink(g_variant_new_int32(2)));
+    widget_values.emplace("start_line", g_variant_ref_sink(g_variant_new_int32(1)));
+    widget_values.emplace("samplerate", g_variant_ref_sink(g_variant_new_int64(1000000)));
+
+    // 复现：原样交给 libsigrok，整次导入被拒。
+    GHashTable *raw = sr_options::make_option_table(widget_values);
+    QVERIFY(sr_input_new(module, raw) == nullptr);
+    g_hash_table_destroy(raw);
+
+    // 按模块声明转换后：类型正确、导入成立，而且值真的生效。
+    std::map<std::string, GVariantType *> declared;
+    for (int i = 0; handle.options()[i]; i++) {
+        const struct sr_option *const option = handle.options()[i];
+        if (option->id && option->def) {
+            declared.emplace(option->id,
+                             g_variant_type_copy(g_variant_get_type(option->def)));
+        }
+    }
+
+    GHashTable *coerced = sr_options::make_option_table(declared, widget_values);
+
+    auto *single_column =
+        static_cast<GVariant *>(g_hash_table_lookup(coerced, "single_column"));
+    QVERIFY(single_column != nullptr);
+    QCOMPARE(QString::fromUtf8(g_variant_get_type_string(single_column)),
+             QStringLiteral("u"));
+
+    auto *samplerate =
+        static_cast<GVariant *>(g_hash_table_lookup(coerced, "samplerate"));
+    QVERIFY(samplerate != nullptr);
+    QCOMPARE(QString::fromUtf8(g_variant_get_type_string(samplerate)),
+             QStringLiteral("t"));
+
+    const struct sr_input *input = sr_input_new(module, coerced);
+    QVERIFY(input != nullptr);
+
+    // 两列逻辑数据 + logic_channels=2 → 实例必须恰好建出 2 个逻辑通道（值生效，
+    // 而不仅仅是类型被接受）。
+    GString *chunk = g_string_new("0,1\n1,0\n");
+    QCOMPARE(sr_input_send(input, chunk), SR_OK);
+    g_string_free(chunk, TRUE);
+
+    struct sr_dev_inst *sdi = sr_input_dev_inst_get(input);
+    QVERIFY(sdi != nullptr);
+    QCOMPARE(g_slist_length(sr_dev_inst_channels_get(sdi)), 2u);
+
+    sr_input_free(input);
+    g_hash_table_destroy(coerced);
+
+    for (auto &entry : declared)
+        g_variant_type_free(entry.second);
+    for (auto &entry : widget_values)
+        g_variant_unref(entry.second);
 }
 
 void TestSrOptions::binaryImportUsesUserChannelCount()

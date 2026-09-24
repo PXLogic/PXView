@@ -225,6 +225,102 @@ inline GVariant *make_variant(const struct sr_option *option, const QVariant &va
 }
 
 /**
+ * Convert @p value into the GVariant type the module declared for that option.
+ *
+ * The property widgets are deliberately type-agnostic: every integer option is
+ * edited by the same Int widget, which yields int32 (or int64 for the wide
+ * cases), and Enum/String/Bool yield their own type. libsigrok however validates
+ * the table strictly -- csv.c refuses the whole import with
+ *
+ *     sr: input: Invalid type for 'single_column' option.
+ *
+ * when its uint32 `single_column` arrives as int32. So the dialog's values must
+ * be mapped onto the declaration before they reach sr_input_new(). This is that
+ * mapping; it is also what makes an option's GVariant type a detail of the
+ * module rather than of the widget.
+ *
+ * Only the numeric family is convertible, and only within that family: a string
+ * never becomes a number (that would silently import nonsense). A value that
+ * cannot be represented in @p declared returns nullptr, and the caller then
+ * drops the option so the module keeps its own default.
+ *
+ * @return a sunk (non-floating) variant owning one reference, or nullptr.
+ */
+inline GVariant *coerce_variant(GVariant *value, const GVariantType *declared)
+{
+    if (!value || !declared || g_variant_is_floating(value))
+        return nullptr;
+
+    const GVariantType *const type = g_variant_get_type(value);
+    if (!type)
+        return nullptr;
+
+    // Already exact (every value make_variant() produced, plus strings and
+    // booleans that no widget widens): nothing to convert.
+    if (g_variant_type_equal(type, declared))
+        return g_variant_ref(value);
+
+    double number = 0.0;
+    if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
+        number = g_variant_get_byte(value);
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
+        number = g_variant_get_int16(value);
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
+        number = g_variant_get_uint16(value);
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
+        number = g_variant_get_int32(value);
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
+        number = g_variant_get_uint32(value);
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
+        number = static_cast<double>(g_variant_get_int64(value));
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
+        number = static_cast<double>(g_variant_get_uint64(value));
+    else if (g_variant_type_equal(type, G_VARIANT_TYPE_DOUBLE))
+        number = g_variant_get_double(value);
+    else
+        return nullptr;  // string/bool/... : not numeric, no conversion
+
+    // Option values are counts, rates and line numbers -- all far below 2^53,
+    // so the double round-trip above is exact for every value in use.
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_BYTE)) {
+        if (number < 0 || number > G_MAXUINT8)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_byte(static_cast<guint8>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_INT16)) {
+        if (number < G_MININT16 || number > G_MAXINT16)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_int16(static_cast<gint16>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_UINT16)) {
+        if (number < 0 || number > G_MAXUINT16)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_uint16(static_cast<guint16>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_INT32)) {
+        if (number < G_MININT32 || number > G_MAXINT32)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_int32(static_cast<gint32>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_UINT32)) {
+        if (number < 0 || number > G_MAXUINT32)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_uint32(static_cast<guint32>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_INT64))
+        return g_variant_ref_sink(g_variant_new_int64(static_cast<gint64>(number)));
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_UINT64)) {
+        if (number < 0)
+            return nullptr;
+        return g_variant_ref_sink(g_variant_new_uint64(static_cast<guint64>(number)));
+    }
+    if (g_variant_type_equal(declared, G_VARIANT_TYPE_DOUBLE))
+        return g_variant_ref_sink(g_variant_new_double(number));
+
+    return nullptr;
+}
+
+/**
  * Build the option table handed to sr_input_new() / sr_output_new() from
  * already typed values (id -> variant).
  *
@@ -278,6 +374,41 @@ inline GHashTable *make_option_table(const struct sr_option **options,
 
         // make_variant() returns a sunk reference: the table becomes its owner.
         g_hash_table_insert(table, g_strdup(option->id), value);
+    }
+
+    return table;
+}
+
+/**
+ * Same as above, but for values that came out of a property widget: every entry
+ * is first coerced to the option's declared type (see coerce_variant()) and
+ * entries whose id the module does not declare are dropped.
+ *
+ * This is the variant the dialogs use. Properties cannot know the module's
+ * declared type -- all integers share one Int widget -- so without this step a
+ * uint32 option would arrive as int32 and sr_input_new() would reject the whole
+ * import ("Invalid type for '<id>' option.").
+ *
+ * @param declared id -> declared type, copied via g_variant_type_copy() by the
+ *                 caller and owned by it.
+ */
+inline GHashTable *make_option_table(
+    const std::map<std::string, GVariantType *> &declared,
+    const std::map<std::string, GVariant *> &values)
+{
+    GHashTable *const table = g_hash_table_new_full(
+        g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
+
+    for (const auto &entry : values) {
+        const auto type_it = declared.find(entry.first);
+        if (type_it == declared.end() || !type_it->second)
+            continue;  // unknown option id: sr_input_new() would refuse
+
+        GVariant *const value = coerce_variant(entry.second, type_it->second);
+        if (!value)
+            continue;
+
+        g_hash_table_insert(table, g_strdup(entry.first.c_str()), value);
     }
 
     return table;

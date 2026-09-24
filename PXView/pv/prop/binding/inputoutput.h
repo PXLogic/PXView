@@ -89,6 +89,11 @@ private:
                         Property::Getter getter, Property::Setter setter);
 
     std::map<std::string, GVariant *> _values;
+
+    /// id -> the GVariant type the module declared for that option. The widgets
+    /// are type-agnostic, so the declared type is the only thing that can tell
+    /// make_options_table() what to convert the values back into.
+    std::map<std::string, GVariantType *> _declared_types;
 };
 
 } // binding

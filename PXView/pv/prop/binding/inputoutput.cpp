@@ -73,6 +73,13 @@ InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &pr
         const std::string id(option->id);
         // The module owns its `def` reference; our map keeps its own.
         _values[id] = g_variant_ref(initial);
+        // The declared type is remembered because the widgets cannot preserve
+        // it: every integer option is edited by the same Int widget, which
+        // yields int32/int64 whatever the module asked for. make_options_table()
+        // maps the values back onto this type (uint32 for csv's single_column,
+        // uint64 for samplerate, ...) -- libsigrok rejects the entire import on
+        // a single mistyped option ("Invalid type for '<id>' option.").
+        _declared_types[id] = g_variant_type_copy(g_variant_get_type(initial));
         if (created)
             g_variant_unref(created);
 
@@ -143,11 +150,17 @@ InputOutput::~InputOutput()
             g_variant_unref(entry.second);
     }
     _values.clear();
+
+    for (auto &entry : _declared_types) {
+        if (entry.second)
+            g_variant_type_free(entry.second);
+    }
+    _declared_types.clear();
 }
 
 GHashTable *InputOutput::make_options_table() const
 {
-    return data::sr_options::make_option_table(_values);
+    return data::sr_options::make_option_table(_declared_types, _values);
 }
 
 Property *InputOutput::bind_enum(const QString &label,
