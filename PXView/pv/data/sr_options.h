@@ -436,6 +436,81 @@ inline uint64_t option_table_uint64(GHashTable *table, const char *id)
 }
 
 /**
+ * One entry of the import file dialog: the filter text the user sees and the
+ * input module that entry stands for.
+ */
+struct ImportFilterEntry
+{
+    QString filter;
+    /// Empty for the leading "all supported formats" entry: that one means
+    /// "let libsigrok detect the format from the file".
+    QString module_id;
+};
+
+/**
+ * The per-module entries of the import file dialog, in display order.
+ *
+ * @param all_extensions receives the union of every module's extensions, for
+ *                       the leading "all supported formats" entry (whose label
+ *                       is translated by the caller, so it stays out of here).
+ *
+ * The filter text is unique per module (the module name), which is what lets
+ * import_module_id_for_filter() map the dialog's answer back to a module.
+ */
+inline QList<ImportFilterEntry> import_filter_entries(QStringList *all_extensions = nullptr)
+{
+    QList<ImportFilterEntry> entries;
+
+    const struct sr_input_module **modules = sr_input_list();
+    for (int i = 0; modules && modules[i]; i++) {
+        const struct sr_input_module *const module = modules[i];
+        const char *const id = sr_input_id_get(module);
+        if (!id)
+            continue;
+
+        const char *const name = sr_input_name_get(module);
+        const char *const *exts = sr_input_extensions_get(module);
+
+        QString filter = QString::fromUtf8(name ? name : id) + QStringLiteral(" (");
+        for (int e = 0; exts && exts[e]; e++) {
+            if (e)
+                filter += QLatin1Char(' ');
+            const QString pattern = QStringLiteral("*.") + QString::fromUtf8(exts[e]);
+            filter += pattern;
+            if (all_extensions)
+                *all_extensions << pattern;
+        }
+        filter += QLatin1Char(')');
+
+        entries << ImportFilterEntry{filter, QString::fromUtf8(id)};
+    }
+
+    return entries;
+}
+
+/**
+ * The module id the chosen import dialog entry stands for.
+ *
+ * An **empty** result means "auto-detect": the user kept the leading
+ * all-formats entry, or the string does not match any entry (a locale or module
+ * list that changed under us) -- in that case the caller probes the file exactly
+ * as before. Returning a module id is the whole point of the per-format
+ * entries: sniffing cannot succeed for every file (a raw `.bin`, a `.txt` CSV,
+ * a file whose header another module claims), and this is how the user overrides
+ * it without any extra button.
+ */
+inline QString import_module_id_for_filter(const QList<ImportFilterEntry> &entries,
+                                           const QString &selected)
+{
+    for (const ImportFilterEntry &entry : entries) {
+        if (entry.filter == selected)
+            return entry.module_id;
+    }
+
+    return QString();
+}
+
+/**
  * Whether the "current device / file name" hints may pre-fill this input
  * module's options.
  *

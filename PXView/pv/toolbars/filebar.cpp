@@ -259,60 +259,41 @@ void FileBar::on_actionImport_triggered()
     // 多 tab 架构：导入文件创建新 tab，旧 tab 数据保留在文档中，
     // 因此移除旧版单 tab 的"是否保存数据"提示（见 on_actionOpen_triggered）。
 
-    // Build file filter from libsigrok input modules
-    QStringList filters;
-    QStringList allExtensions;
-    const struct sr_input_module **imods = sr_input_list();
-    if (imods) {
-        while (*imods) {
-            const struct sr_input_module *imod = *imods;
-            const char *id = sr_input_id_get(imod);
-            const char *name = sr_input_name_get(imod);
-            const char *const *exts = sr_input_extensions_get(imod);
+    // Build the filter list from libsigrok's input modules. The entry the user
+    // picks now *selects* the module: the per-format entries used to be
+    // cosmetic (the static QFileDialog::getOpenFileName() cannot report which
+    // filter was chosen, and the module was always detected from the file), so a
+    // file whose content cannot be sniffed -- a raw .bin, a .txt CSV, anything
+    // whose header another module claims -- could not be imported at all.
+    QStringList all_extensions;
+    const QList<data::sr_options::ImportFilterEntry> format_entries =
+        data::sr_options::import_filter_entries(&all_extensions);
 
-            if (!id)
-                continue;
-
-            // Collect extensions for "All supported formats" filter
-            if (exts) {
-                for (int i = 0; exts[i]; i++) {
-                    allExtensions << QString("*.") + exts[i];
-                }
-            }
-
-            // Build per-module filter: "Module Name (*.ext1 *.ext2)"
-            QString filter = QString(name ? name : id) + " (";
-            if (exts) {
-                for (int i = 0; exts[i]; i++) {
-                    if (i > 0)
-                        filter += " ";
-                    filter += "*." + QString(exts[i]);
-                }
-            }
-            filter += ")";
-            filters << filter;
-
-            imods++;
-        }
+    QStringList name_filters;
+    if (!all_extensions.isEmpty()) {
+        // Leading entry = "let the format be detected from the file".
+        name_filters << QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File")) +
+                            " (" + all_extensions.join(" ") + ")";
     }
+    for (const data::sr_options::ImportFilterEntry &entry : format_entries)
+        name_filters << entry.filter;
 
-    // Build the complete filter string
-    QString filterStr;
-    if (!allExtensions.isEmpty()) {
-        filterStr = QString(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File")) +
-                    " (" + allExtensions.join(" ") + ")";
-        filterStr += ";;";
-    }
-    filterStr += filters.join(";;");
+    QFileDialog dialog(
+        this, L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File"),
+        app.userHistory.openDir);
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setNameFilters(name_filters);
+    if (!all_extensions.isEmpty())
+        dialog.selectNameFilter(name_filters.first());  // default: auto-detect
 
-    const QString file_name = QFileDialog::getOpenFileName(
-        this,
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File"),
-        app.userHistory.openDir,
-        filterStr);
-
-    if (file_name.isEmpty())
+    if (dialog.exec() != QDialog::Accepted)
         return;
+
+    const QStringList selected_files = dialog.selectedFiles();
+    if (selected_files.isEmpty())
+        return;
+    const QString file_name = selected_files.first();
 
     QString fname = path::GetDirectoryName(file_name);
     if (fname != app.userHistory.openDir){
@@ -320,14 +301,23 @@ void FileBar::on_actionImport_triggered()
         app.SaveHistory();
     }
 
-    // Ask which module claims this file *before* importing: only then can the
-    // module's option dialog be shown (picking "Binary" in the menu and picking
-    // a .binary file here end up in the same place).
-    const QString format_id = _session->probe_import_format(file_name);
+    // Which module claims this file must be known *before* importing: only then
+    // can the module's option dialog be shown. An explicit format from the
+    // dialog wins over the probe; the "all supported formats" entry (and any
+    // string we cannot map, e.g. after a locale change) falls back to detection.
+    QString format_id =
+        data::sr_options::import_module_id_for_filter(format_entries,
+                                                      dialog.selectedNameFilter());
     if (format_id.isEmpty()) {
-        pxv_warn("Import file: no input module matches \"%s\"; "
-                 "letting libsigrok decide during the import",
-                 file_name.toUtf8().constData());
+        format_id = _session->probe_import_format(file_name);
+        if (format_id.isEmpty()) {
+            pxv_warn("Import file: no input module matches \"%s\"; "
+                     "letting libsigrok decide during the import",
+                     file_name.toUtf8().constData());
+        }
+    } else {
+        pxv_info("Import file: \"%s\" forced to \"%s\" by the file dialog filter",
+                 file_name.toUtf8().constData(), format_id.toUtf8().constData());
     }
 
     run_import(file_name, format_id);

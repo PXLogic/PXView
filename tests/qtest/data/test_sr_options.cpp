@@ -44,7 +44,9 @@
 #include <glib.h>
 #include <libsigrok/libsigrok.h>
 
+#include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <cstring>
@@ -125,6 +127,10 @@ private slots:
     /* E) 导入时把"用户确认的采样率"发布给 DeviceAgent，靠的就是这个读取函数：
      *    只认 uint64（samplerate 的声明类型），缺失/错型一律 0=未知，不猜。 */
     void optionTableUint64ReadsOnlyDeclaredValues();
+
+    /* F) 导入对话框的"按格式"过滤器必须真的能指定格式：每个条目要能反查回它的
+     *    模块 id，"所有支持的格式"/无法识别的条目则返回空（= 自动识别）。 */
+    void importFiltersMapBackToTheirModules();
 
     /* C) binary 导入的通道数来自用户给的选项，不再是写死的 8。 */
     void binaryImportUsesUserChannelCount();
@@ -475,6 +481,58 @@ void TestSrOptions::optionTableUint64ReadsOnlyDeclaredValues()
              static_cast<uint64_t>(0));
 
     g_hash_table_destroy(table);
+}
+
+void TestSrOptions::importFiltersMapBackToTheirModules()
+{
+    QStringList all_extensions;
+    const QList<sr_options::ImportFilterEntry> entries =
+        sr_options::import_filter_entries(&all_extensions);
+
+    QVERIFY(!entries.isEmpty());
+
+    // "所有支持的格式" 那一项由调用方拼（标签要翻译），这里只提供扩展名并集，
+    // 它必须覆盖各模块声明的扩展名。
+    QVERIFY(all_extensions.contains(QStringLiteral("*.csv")));
+    QVERIFY(all_extensions.contains(QStringLiteral("*.vcd")));
+    QVERIFY(all_extensions.contains(QStringLiteral("*.binary")));
+
+    // 每个条目都能反查回自己的模块 id —— 这正是"选了就生效"的依据。
+    QSet<QString> ids;
+    for (const sr_options::ImportFilterEntry &entry : entries) {
+        QVERIFY(!entry.filter.isEmpty());
+        QVERIFY(!entry.module_id.isEmpty());
+        QCOMPARE(sr_options::import_module_id_for_filter(entries, entry.filter),
+                 entry.module_id);
+        ids.insert(entry.module_id);
+    }
+
+    // 三个可回导的核心格式必须在列表里（与导出侧对称的那一组）。
+    QVERIFY(ids.contains(QStringLiteral("csv")));
+    QVERIFY(ids.contains(QStringLiteral("binary")));
+    QVERIFY(ids.contains(QStringLiteral("vcd")));
+
+    // 过滤器文本必须唯一，否则反查会给出错误的模块。
+    QSet<QString> filters;
+    for (const sr_options::ImportFilterEntry &entry : entries) {
+        QVERIFY2(!filters.contains(entry.filter),
+                 qPrintable(QStringLiteral("duplicate filter: ") + entry.filter));
+        filters.insert(entry.filter);
+    }
+
+    // 反查得到的 id 必须能被 libsigrok 认出来（否则导入会退化成"未知模块"）。
+    QCOMPARE(sr_options::import_module_id_for_filter(entries, QStringLiteral("CSV (*.csv)")),
+             QStringLiteral("csv"));
+    QVERIFY(sr_input_find("csv") != nullptr);
+
+    // "所有支持的格式"（由调用方拼的标签）与任何无法识别的串 → 空 = 自动识别。
+    QVERIFY(sr_options::import_module_id_for_filter(
+                entries, QStringLiteral("Import File (*.csv *.vcd)")).isEmpty());
+    QVERIFY(sr_options::import_module_id_for_filter(
+                entries, QStringLiteral("No Such Module (*.xyz)")).isEmpty());
+    QVERIFY(sr_options::import_module_id_for_filter(
+                entries, QString()).isEmpty());
+    QVERIFY(sr_options::import_module_id_for_filter({}, QStringLiteral("CSV (*.csv)")).isEmpty());
 }
 
 void TestSrOptions::binaryImportUsesUserChannelCount()
