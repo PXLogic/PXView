@@ -646,6 +646,33 @@ void SamplingBar::update_sample_rate_selector() {
   update_sample_count_selector();
 }
 
+void SamplingBar::refresh_sample_rate_if_stale() {
+  if (!_device_agent || !_device_agent->have_instance())
+    return;
+
+  // 只处理文件设备（导入的数据文件 / 会话回放）：它们的采样率不是驱动给的，
+  // 而是数据流到达后才公布；硬件设备的列表由驱动提供、另有自己的刷新路径。
+  if (!_device_agent->is_file())
+    return;
+
+  const uint64_t device_rate = _device_agent->get_sample_rate();
+  if (device_rate == 0)
+    return;
+
+  // 框里已经是这个值 → 不用动（导入时 META 只报一次，但流模式下
+  // SampleRateChanged 可能被高频广播，这里必须便宜）。
+  if (_sample_rate->count() == 1 &&
+      _sample_rate->itemData(0).value<uint64_t>() == device_rate)
+    return;
+
+  // 空列表或旧值：重建"采样率"+"采样深度"两个框（无列表的文件设备走
+  // update_sample_rate_selector() 里的"当前值单项"回退分支）。
+  pxv_info("SamplingBar: file device samplerate is %llu Hz, rebuilding the "
+           "rate/depth boxes",
+           static_cast<unsigned long long>(device_rate));
+  update_sample_rate_list();
+}
+
 void SamplingBar::update_sample_rate_selector_value() {
   if (_updating_sample_rate)
     return;

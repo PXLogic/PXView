@@ -110,6 +110,21 @@ namespace pv
                 update_sample_rate_selector();
             }
 
+            /**
+             * Rebuild the rate/depth boxes only when the shown rate no longer
+             * matches the device's.
+             *
+             * A data file's sdi has no driver: its rate is published while the
+             * data flows (SR_DF_META) and/or by the import options, i.e. *after*
+             * this bar was built — the combo then holds no (or an outdated)
+             * entry and the bar would stay blank, unlike opening a .pxl whose
+             * driver answers SR_CONF_SAMPLERATE at activation time.
+             * Hardware devices get their list from the driver and have their own
+             * refresh paths, so this is deliberately a no-op for them; it also
+             * keeps SampleRateChanged (broadcast from the feed thread) cheap.
+             */
+            void refresh_sample_rate_if_stale();
+
             void update_sample_count_selector();
 
             void commit_settings();

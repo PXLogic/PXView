@@ -627,6 +627,18 @@ void SessionEventDispatcher::on_dso_view_option_changed(const pv::interface::Dso
   }
 }
 void SessionEventDispatcher::on_sample_rate_changed(const pv::interface::SampleRateChanged &) {
+  // 采样率/时长变化必须重建采样栏的"采样率"与"采样深度"两个框
+  // （update_sample_rate_list() → update_sample_rate_selector() 收尾会一并重建
+  //  采样深度）。导入数据文件时采样率只有数据流开始后才到（模块的 SR_DF_META：
+  //  binary/csv 首块即报，VCD/saleae 要解析文件头；文件设备的 sdi 没有驱动可查），
+  //  此时采样栏已按 0 建好 —— 只刷波形不重建这两个框，用户看到的就是空白，与打开
+  //  .pxl（驱动在设备激活时就能答 SR_CONF_SAMPLERATE）的表现不一致。
+  // 无列表的文件设备在此走"当前值单项"回退分支（samplingbar.cpp 的
+  // gvar_dict == nullptr 分支），正好把刚公布的采样率填进去。
+  // 用 refresh_sample_rate_if_stale() 而不是无条件的 update_sample_rate_list()：
+  // 本事件在采集/流模式下可能被高频广播，只有"显示值 != 设备值"时才需要重建，
+  // 硬件设备有自己的刷新路径（不掺和）。
+  _window->sampling_bar()->refresh_sample_rate_if_stale();
   _window->dock_manager()->trigger_widget()->device_updated();
   if (auto *v = safe_current_view()) v->timebase_changed();
   _window->on_cur_snap_samplerate_changed();
