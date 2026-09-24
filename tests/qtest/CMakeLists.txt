@@ -687,6 +687,18 @@ pv_add_qtest(test_prop_int_widget
 # deps.cmake 全局设置，与 test_signal_model/test_rowdata_batch 同法）。
 target_link_libraries(test_prop_int_widget PRIVATE -lglib-2.0)
 
+# ==== 导出 CSV → 用 csv 输入模块默认选项读回（往返契约）====
+# 锁定"用户什么都不改直接确定也能导入我们自己的 CSV"，以及 Auto detect 入口
+# （sr_input_scan_file）把这种文件识别成 csv。链接方式同 test_csv_export_channels。
+pv_add_qtest(test_csv_roundtrip
+    data/test_csv_roundtrip.cpp
+)
+target_include_directories(test_csv_roundtrip PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_csv_roundtrip PRIVATE libsigrok)
+
 # ==== raw binary 文件名的参数提示（通道数/采样率）====
 # 约定 "<base>-<N>ch-<rate>Hz.binary"：导出时写入、导入时填入选项对话框。
 # 纯逻辑（只用 QRegularExpression），不链接 libsigrok。

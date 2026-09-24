@@ -43,6 +43,7 @@
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/data/binary_name_hints.h"
+#include "pv/data/csv_header_hints.h"
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/sr_options.h"
 #include "pv/data/stack/mathstack.h"
@@ -876,6 +877,33 @@ QVariantMap SigSession::import_option_prefill(const QString &file_name) const
   if (hints.samplerate > 0)
     prefill.insert(QStringLiteral("samplerate"),
                    QVariant::fromValue<qulonglong>(hints.samplerate));
+
+  // A CSV exported by PXView (or by PulseView — same libsigrok csv.c) carries
+  // its parameters in the comment block written by gen_header():
+  //   "; Samplerate: 1 MHz" and "; Channels (32/39): D0, D1, ..."
+  // The csv INPUT module only strips comment lines, it never reads them, so
+  // without this the dialog falls back to the device guess above even though the
+  // file itself states the sample rate. Reading the head of the file is cheap
+  // and the parser refuses anything that is not a generated CSV.
+  {
+    QFile file(file_name);
+    if (file.open(QIODevice::ReadOnly)) {
+      const QByteArray head = file.read(4096);
+      file.close();
+
+      const data::csv_header_hints::Hints csv =
+          data::csv_header_hints::parse(QString::fromUtf8(head));
+      if (csv.channels > 0)
+        prefill.insert(QStringLiteral("logic_channels"), csv.channels);
+      if (csv.samplerate > 0)
+        prefill.insert(QStringLiteral("samplerate"),
+                       QVariant::fromValue<qulonglong>(csv.samplerate));
+      if (!csv.empty()) {
+        pxv_info("Import file: CSV header hints channels=%d samplerate=%llu",
+                 csv.channels, static_cast<unsigned long long>(csv.samplerate));
+      }
+    }
+  }
 
   return prefill;
 }
