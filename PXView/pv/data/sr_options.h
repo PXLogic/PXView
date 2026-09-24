@@ -415,49 +415,6 @@ inline GHashTable *make_option_table(
 }
 
 /**
- * The option value in full precision, or an empty string when a Qt spin box can
- * show it exactly.
- *
- * Int uses a QSpinBox, which only holds an int: uint32/int64/uint64 options
- * beyond that range are *displayed* clamped (VCD's "skip" defaults to
- * UINT64_MAX = "start at the first timestamp" and shows up as 2147483647). The
- * declared value itself is still preserved — Int remembers it and hands it over
- * unchanged while the field is left untouched — but the dialog has to say so,
- * which is what this text is for.
- */
-inline QString out_of_spinbox_range_text(GVariant *value)
-{
-    if (!value || g_variant_is_floating(value))
-        return QString();
-
-    const GVariantType *const type = g_variant_get_type(value);
-    if (!type)
-        return QString();
-
-    if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32)) {
-        const guint32 v = g_variant_get_uint32(value);
-        if (v > static_cast<guint32>(G_MAXINT32))
-            return QString::number(v);
-        return QString();
-    }
-    if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64)) {
-        const gint64 v = g_variant_get_int64(value);
-        if (v > G_MAXINT32 || v < G_MININT32)
-            return QString::number(v);
-        return QString();
-    }
-    if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64)) {
-        const guint64 v = g_variant_get_uint64(value);
-        if (v > static_cast<guint64>(G_MAXINT32))
-            return QString::number(v);
-        return QString();
-    }
-
-    // The narrow types (byte/int16/uint16/int32) always fit.
-    return QString();
-}
-
-/**
  * Read an unsigned 64-bit option out of a table built by make_option_table().
  *
  * Used by the import path to publish the sample rate the user confirmed, before

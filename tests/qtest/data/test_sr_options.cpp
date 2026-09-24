@@ -126,11 +126,6 @@ private slots:
      *    只认 uint64（samplerate 的声明类型），缺失/错型一律 0=未知，不猜。 */
     void optionTableUint64ReadsOnlyDeclaredValues();
 
-    /* F) 超出 Int 控件（QSpinBox，只装得下 int）表示能力的选项值必须能被识别
-     *    出来，对话框据此显示"实际值"提示；否则用户只会看到一个夹紧后的数字
-     *    （VCD 的 skip = UINT64_MAX 显示成 2147483647）。 */
-    void outOfSpinboxRangeIsReported();
-
     /* C) binary 导入的通道数来自用户给的选项，不再是写死的 8。 */
     void binaryImportUsesUserChannelCount();
 
@@ -480,42 +475,6 @@ void TestSrOptions::optionTableUint64ReadsOnlyDeclaredValues()
              static_cast<uint64_t>(0));
 
     g_hash_table_destroy(table);
-}
-
-void TestSrOptions::outOfSpinboxRangeIsReported()
-{
-    auto report = [](GVariant *v) {
-        GVariant *const sunk = g_variant_ref_sink(v);
-        const QString text = sr_options::out_of_spinbox_range_text(sunk);
-        g_variant_unref(sunk);
-        return text;
-    };
-
-    // VCD 的 skip 默认值（UINT64_MAX，均超出 QSpinBox 的 int 范围）。此时真实值
-    // 必须能被报出来，供对话框显示；模块声明的值本身由 Int 保留并原样提交。
-    QCOMPARE(report(g_variant_new_uint64(G_MAXUINT64)),
-             QString::number(static_cast<qulonglong>(G_MAXUINT64)));
-    QCOMPARE(report(g_variant_new_uint64(G_MAXINT32 + 1ll)),
-             QString::number(static_cast<qlonglong>(G_MAXINT32) + 1));
-    QCOMPARE(report(g_variant_new_uint32(3000000000u)),
-             QString::number(3000000000u));
-    QCOMPARE(report(g_variant_new_int64(-3000000000ll)),
-             QString::number(-3000000000ll));
-
-    // 装得下的值 / 窄类型 / 非整数类型：空文本（不要拿提示打扰用户）。
-    QVERIFY(report(g_variant_new_uint64(1000000)).isEmpty());
-    QVERIFY(report(g_variant_new_uint32(32)).isEmpty());
-    QVERIFY(report(g_variant_new_int32(32)).isEmpty());
-    QVERIFY(report(g_variant_new_uint16(65535)).isEmpty());
-    QVERIFY(report(g_variant_new_string("bin")).isEmpty());
-    QVERIFY(report(g_variant_new_boolean(TRUE)).isEmpty());
-
-    // 空指针 / 浮动引用（非法输入）不得崩。
-    QVERIFY(sr_options::out_of_spinbox_range_text(nullptr).isEmpty());
-    GVariant *const floating = g_variant_new_uint64(G_MAXUINT64);
-    QVERIFY(sr_options::out_of_spinbox_range_text(floating).isEmpty());
-    g_variant_ref_sink(floating);
-    g_variant_unref(floating);
 }
 
 void TestSrOptions::binaryImportUsesUserChannelCount()

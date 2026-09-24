@@ -176,22 +176,11 @@ InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &pr
         }
 
         if (prop) {
-            // A declared value the editor cannot show exactly is worth saying
-            // out loud: the field shows the clamp, but the untouched value that
-            // reaches the module is still the module's own (Int::commit()).
-            QString tooltip = description;
-            const QString full_value =
-                data::sr_options::out_of_spinbox_range_text(initial);
-            if (!full_value.isEmpty()) {
-                QString hint = QString::fromUtf8(L_S(STR_PAGE_INPUT_OUTPUT,
-                                                     S_ID(IDS_OPTION_VALUE_CLAMPED),
-                                                     "Actual value: %1"));
-                hint.replace(QStringLiteral("%1"), full_value);
-                tooltip = tooltip.isEmpty() ? hint
-                                            : hint + QLatin1Char('\n') + tooltip;
-            }
-            if (!tooltip.isEmpty())
-                prop->set_description(tooltip);
+            // The editor shows every value of the declared type exactly (Int
+            // picks a 64-bit spin box where a QSpinBox would clamp), so the only
+            // tooltip left to carry is the option's own explanation.
+            if (!description.isEmpty())
+                prop->set_description(description);
             _properties.push_back(prop);
         }
     }

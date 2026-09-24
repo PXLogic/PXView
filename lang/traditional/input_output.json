@@ -126,9 +126,5 @@
     {
         "id": "IDS_OPTION_COMPRESS_DESC",
         "text": "壓縮長於指定 timescale 刻度數的閒置區段，0 表示不壓縮。"
-    },
-    {
-        "id": "IDS_OPTION_VALUE_CLAMPED",
-        "text": "實際值：%1"
     }
 ]

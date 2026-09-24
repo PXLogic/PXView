@@ -33,6 +33,7 @@
 namespace pv {
 namespace ui {
 class DsSpinBox;
+class IntSpinBox;
 }
 
 namespace prop {
@@ -56,20 +57,38 @@ public:
 
 private slots:
     void on_value_changed(int);
+    /* The wide editor reports a settled value (editing finished / step). */
+    void on_wide_value_changed();
 
 private:
+    /* Whether the editor must be the 64-bit spin box: true for the integer types
+     * a QSpinBox cannot express (uint32/int64/uint64), unless an explicit
+     * int-sized range proves the value stays inside the QSpinBox. */
+    bool needs_wide_spin_box(const GVariantType *type) const;
+
+    QWidget *create_spin_box(QWidget *parent, bool auto_commit);
+    QWidget *create_wide_spin_box(QWidget *parent, bool auto_commit);
+
 	const QString _suffix;
 	const std::optional< std::pair<int64_t, int64_t> > _range;
 
     GVariant *_value;
 	pv::ui::DsSpinBox *_spin_box;
 
-    /* The value as the widget shows it, i.e. clamped to what a Qt spin box can
-     * hold. commit() compares the current field content against it: an untouched
-     * field must submit the module's declared value verbatim, otherwise a value
-     * outside the widget's range (VCD's "skip" defaults to UINT64_MAX, meaning
-     * "start at the first timestamp") would be replaced by the clamp (INT_MAX)
-     * merely because the dialog was accepted. */
+    /* Wide types (uint32/int64/uint64) get pv::ui::IntSpinBox: a full 64-bit spin
+     * box, because QSpinBox tops out at INT_MAX and cannot express a 4 GHz
+     * samplerate or VCD's "skip" sentinel (UINT64_MAX = "start at the first
+     * timestamp") — the same custom widget the @todo in this file asked for. */
+    pv::ui::IntSpinBox *_int_spin_box = nullptr;
+
+    /* The widget handed to the form. */
+    QWidget *_editor = nullptr;
+
+    /* What the spin box shows right now. commit() compares the field content
+     * against it: an untouched spin box must submit the module's declared value
+     * verbatim, otherwise a value outside its int range would be replaced by the
+     * clamp merely because the dialog was accepted. The wide editor keeps the
+     * value in 64 bits, so it needs no such rescue. */
     int _displayed_value = 0;
 };
 

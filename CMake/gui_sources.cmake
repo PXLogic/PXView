@@ -115,6 +115,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/ui/toast.cpp
     PXView/pv/ui/dscombobox.cpp
     PXView/pv/ui/dsspinbox.cpp
+    PXView/pv/ui/intspinbox.cpp
     PXView/pv/ui/fn.cpp
     PXView/pv/ui/xtoolbutton.cpp
     PXView/pv/ui/draggabletabbar.cpp
@@ -268,6 +269,7 @@ PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/ui/toast.h
     PXView/pv/ui/dscombobox.h
     PXView/pv/ui/dsspinbox.h
+    PXView/pv/ui/intspinbox.h
     PXView/pv/base/pxvdef.h
     PXView/pv/dialogs/inputoutputoptions.h
     PXView/pv/prop/binding/inputoutput.h

@@ -190,11 +190,6 @@ private slots:
             QVERIFY2(loadEntries(langRoot() + QLatin1Char('/') + relative, &ids, &error),
                      qPrintable(error));
 
-            // 控件装不下时用来显示"实际值"的模板（由对话框层合成，不在 Int 里）。
-            QVERIFY2(ids.contains(QStringLiteral("IDS_OPTION_VALUE_CLAMPED")),
-                     qPrintable(relative + QStringLiteral(": missing ") +
-                                QStringLiteral("IDS_OPTION_VALUE_CLAMPED")));
-
             for (const QString &option_id : option_ids) {
                 const QString base = QStringLiteral("IDS_OPTION_") + option_id.toUpper();
                 QVERIFY2(ids.contains(base),

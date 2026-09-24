@@ -1583,7 +1583,14 @@ QProgressBar::chunk:horizontal
     border-radius: 3px;
 }
 
+/* QAbstractSpinBox is listed next to the concrete classes on purpose: PXView's
+ * own IntSpinBox (pv/ui/intspinbox.*, the 64-bit editor used for samplerate /
+ * VCD "skip" values beyond INT_MAX) derives from QAbstractSpinBox, and a
+ * "QSpinBox" selector does not match it — without this line such a field keeps
+ * the unstyled native frame and arrows. Keep the three names together whenever
+ * a spin box rule is added. */
 QSpinBox,
+QAbstractSpinBox,
 QDoubleSpinBox
 {
     padding: 2px;
@@ -1610,6 +1617,7 @@ QAbstractSpinBox
 }
 
 QSpinBox::up-button,
+QAbstractSpinBox::up-button,
 QDoubleSpinBox::up-button
 {
     subcontrol-origin: content;
@@ -1620,6 +1628,7 @@ QDoubleSpinBox::up-button
 }
 
 QSpinBox::up-arrow,
+QAbstractSpinBox::up-arrow,
 QDoubleSpinBox::up-arrow
 {
     image: url(:/@icon-dir/up_arrow.svg);
@@ -1628,7 +1637,9 @@ QDoubleSpinBox::up-arrow
 }
 
 QSpinBox::up-arrow:hover,
+QAbstractSpinBox::up-arrow:hover,
 QSpinBox::up-arrow:pressed,
+QAbstractSpinBox::up-arrow:pressed,
 QDoubleSpinBox::up-arrow:hover,
 QDoubleSpinBox::up-arrow:pressed
 {
@@ -1638,7 +1649,9 @@ QDoubleSpinBox::up-arrow:pressed
 }
 
 QSpinBox::up-arrow:disabled,
+QAbstractSpinBox::up-arrow:disabled,
 QSpinBox::up-arrow:off,
+QAbstractSpinBox::up-arrow:off,
 QDoubleSpinBox::up-arrow:disabled,
 QDoubleSpinBox::up-arrow:off
 {
@@ -1646,6 +1659,7 @@ QDoubleSpinBox::up-arrow:off
 }
 
 QSpinBox::down-button,
+QAbstractSpinBox::down-button,
 QDoubleSpinBox::down-button
 {
     subcontrol-origin: content;
@@ -1656,6 +1670,7 @@ QDoubleSpinBox::down-button
 }
 
 QSpinBox::down-arrow,
+QAbstractSpinBox::down-arrow,
 QDoubleSpinBox::down-arrow
 {
     image: url(:/@icon-dir/down_arrow.svg);
@@ -1664,7 +1679,9 @@ QDoubleSpinBox::down-arrow
 }
 
 QSpinBox::down-arrow:hover,
+QAbstractSpinBox::down-arrow:hover,
 QSpinBox::down-arrow:pressed,
+QAbstractSpinBox::down-arrow:pressed,
 QDoubleSpinBox::down-arrow:hover,
 QDoubleSpinBox::down-arrow:pressed
 {
@@ -1674,7 +1691,9 @@ QDoubleSpinBox::down-arrow:pressed
 }
 
 QSpinBox::down-arrow:disabled,
+QAbstractSpinBox::down-arrow:disabled,
 QSpinBox::down-arrow:off,
+QAbstractSpinBox::down-arrow:off,
 QDoubleSpinBox::down-arrow:disabled,
 QDoubleSpinBox::down-arrow:off
 {

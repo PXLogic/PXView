@@ -693,6 +693,7 @@ pv_add_qtest(test_prop_int_widget
     ${PXVIEW_INCLUDE_DIR}/pv/prop/property.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/prop/int.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/ui/dsspinbox.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/ui/intspinbox.cpp
 )
 # GVariant 用到 glib（该目标不经 libsigrok，需显式链接；link_directories 已在
 # deps.cmake 全局设置，与 test_signal_model/test_rowdata_batch 同法）。

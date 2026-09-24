@@ -126,9 +126,5 @@
     {
         "id": "IDS_OPTION_COMPRESS_DESC",
         "text": "Compress idle periods which are longer than the specified number of timescale ticks."
-    },
-    {
-        "id": "IDS_OPTION_VALUE_CLAMPED",
-        "text": "Actual value: %1"
     }
 ]

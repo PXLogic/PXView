@@ -126,9 +126,5 @@
     {
         "id": "IDS_OPTION_COMPRESS_DESC",
         "text": "压缩长于指定 timescale 刻度数的空闲段，0 表示不压缩。"
-    },
-    {
-        "id": "IDS_OPTION_VALUE_CLAMPED",
-        "text": "实际值：%1"
     }
 ]
