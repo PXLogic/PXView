@@ -31,6 +31,8 @@
 #include <QMessageBox>
 #include <QPixmap>
 
+#include <memory>
+
 #include "pv/config/appconfig.h"
 #include "pv/session/deviceagent.h"
 #include "pv/base/log.h"
@@ -132,7 +134,15 @@ void MainWindowFileOps::on_load_file(QString file_name) {
   }
 }
 
-void MainWindowFileOps::on_import_file(QString file_name) {
+void MainWindowFileOps::on_import_file(QString file_name, QString format_id,
+                                       GHashTable *input_options) {
+  // The option table arrives with transferred ownership, but this function has
+  // several early returns (duplicate tab, failed import, exception) and the
+  // session only borrows it — so hold it in a guard rather than freeing it by
+  // hand on each path.
+  std::unique_ptr<GHashTable, decltype(&g_hash_table_destroy)> options_guard(
+      input_options, &g_hash_table_destroy);
+
   // Rebind model: one file = one data pool slot (same dedup as on_load_file).
   for (pv::TabContext *ctx0 : _wnd->tab_manager()->contexts()) {
     if (QString::compare(ctx0->file_path(), file_name,
@@ -164,7 +174,10 @@ void MainWindowFileOps::on_import_file(QString file_name) {
   try {
     // Import external data file using libsigrok input modules
     // (VCD, CSV, binary, Saleae, etc.) — aligned with PulseView.
-    if (!_wnd->session()->import_file(file_name)) {
+    // format_id comes from the toolbar's import menu (empty = auto-detect) and
+    // input_options carries the module options the user confirmed.
+    if (!_wnd->session()->import_file(
+            file_name, format_id, options_guard.get())) {
       QString strMsg(
           L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
       strMsg += file_name;

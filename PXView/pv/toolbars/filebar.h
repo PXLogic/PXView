@@ -27,6 +27,9 @@
 #include <QToolBar>
 #include <QAction>
 #include <QMenu>
+#include <QVector>
+
+#include <glib.h>
 
 #include "pv/session/sigsession.h" 
 #include "pv/interface/icallbacks.h"
@@ -64,7 +67,13 @@ signals:
     void sig_load_file(QString);
     void sig_save();
     void sig_export();
-    void sig_import_file(QString); //post import data file event message
+    // Import a file through a libsigrok input module.
+    //   format_id     : empty = detect from the file, else the chosen module id
+    //   input_options : the user's option values (sunk GVariant values), or
+    //                   nullptr when the module takes none. OWNERSHIP IS
+    //                   TRANSFERRED: the receiving slot destroys the table.
+    void sig_import_file(QString file_name, QString format_id,
+                         GHashTable *input_options);
     void sig_screenShot(); //post screen capture event message
     void sig_load_session(QString); //post load session event message
     void sig_store_session(QString); //post store session event message
@@ -73,6 +82,20 @@ signals:
     // 最新值），取代原 StoreConfPrev 事件 —— 异步事件的"前置"保证
     // 名存实亡（提交落在读取之后）。
     void store_conf_pending();
+
+private:
+    /* Fill the "Import..." submenu from sr_input_list(): one entry per input
+     * module plus the auto-detect entry. Rebuilt only in the constructor —
+     * libsigrok's module list is static. */
+    void build_import_menu();
+
+    /* Import using one explicitly chosen input module (its option dialog is
+     * shown before the import when the module declares options). */
+    void on_import_format_triggered(const QString &format_id);
+
+    /* Shared tail of both import entries: ask for the module's options and
+     * hand file + format + options to the session (see sig_import_file). */
+    void run_import(const QString &file_name, const QString &format_id);
 
 private slots:
     void on_actionLoad_triggered();
@@ -90,6 +113,8 @@ public:
     // XToolButton _file_button;
     QMenu   *_menu;
     QMenu   *_menu_session; //when the hardware device is connected,it will be enable
+    QMenu   *_menu_import;  //one entry per libsigrok input module + auto-detect
+    QVector<QAction *> _import_format_actions;
     QAction *_action_load;
     QAction *_action_store;
     QAction *_action_default;

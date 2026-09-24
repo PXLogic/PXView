@@ -26,6 +26,8 @@
 
 #include <QString>
 
+#include <glib.h>
+
 namespace pv {
 
 class MainWindow;
@@ -43,7 +45,17 @@ public:
     explicit MainWindowFileOps(MainWindow *wnd) : _wnd(wnd) {}
 
     void on_load_file(QString file_name);
-    void on_import_file(QString file_name);
+
+    /**
+     * Import an external data file.
+     *
+     * @param format_id     the input module the user picked (empty = detect).
+     * @param input_options the user's option values, or nullptr. OWNERSHIP IS
+     *                      TAKEN: the table is destroyed when this returns,
+     *                      whatever the outcome (the session only borrows it).
+     */
+    void on_import_file(QString file_name, QString format_id,
+                        GHashTable *input_options);
     void on_save();
     void on_export();
     void on_screenShot();

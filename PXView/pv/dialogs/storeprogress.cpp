@@ -182,6 +182,14 @@ void StoreProgress::on_timeout()
 {   
     //The task is end, to close the window.
     if (_store_session->is_busy() == false) {
+        // Surface a failed export before closing: the store session can abort
+        // on paths that never emit progress_updated() (e.g. a module that
+        // rejects the metadata packet), and closing silently would hide the
+        // reason for an empty output file.
+        const QString err = _store_session->error();
+        if (!err.isEmpty()) {
+            show_error();
+        }
         close();      
     }
 }

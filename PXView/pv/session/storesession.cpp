@@ -35,7 +35,9 @@
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/decoder_options.h"
 #include "pv/data/decode/row.h"
+#include "pv/data/binary_name_hints.h"
 #include "pv/data/model/signalmodel.h"
+#include "pv/data/sr_options.h"   // export-module allow-list (getSuportedExportFormats)
 
 #include "pv/core/ui_hooks.h"
 #include <QDir>
@@ -143,24 +145,31 @@ void StoreSession::cancel()
 QList<QString> StoreSession::getSuportedExportFormats(){
     const struct sr_output_module** supportedModules = sr_output_list();
     QList<QString> list;
+    if (supportedModules == nullptr)
+        return list;
+
+    const bool logic_data = (_session->get_device()->get_work_mode() == LOGIC);
+
     while(*supportedModules){
-        if(*supportedModules == nullptr)
-            break;
         // Upstream libsigrok makes sr_output_module opaque — use accessor
         // functions sr_output_id_get() / sr_output_description_get() instead
         // of direct field access (fork libsigrok exposed ->id / ->desc).
         const char *mod_id = sr_output_id_get(*supportedModules);
         const char *mod_desc = sr_output_description_get(*supportedModules);
-        // In non-LOGIC modes (DSO/ANALOG/MSO), only CSV is supported.
-        // Use 'continue' to skip non-CSV modules instead of 'break' which
-        // would abort the entire traversal before reaching the CSV module
-        // (CSV is the 4th entry in the output module list, after
-        // ascii/binary/bits).
-        if (_session->get_device()->get_work_mode() != LOGIC &&
-            strcmp(mod_id, "csv") != 0) {
+
+        // Opt-in list instead of "every module libsigrok knows". This pipeline
+        // opens the target file itself and writes the module's returned GString
+        // into it; modules with a different output contract silently produced a
+        // 0-byte file (srzip creates its own archive via libzip and cannot do so
+        // while we hold that path open, null discards everything, wav/analog
+        // never receive logic data). See sr_options.h for the full rationale.
+        // The list also folds in the old "non-LOGIC modes only support CSV"
+        // rule — 'continue' (not 'break') so a later CSV entry is still found.
+        if (!pv::data::sr_options::is_export_module_supported(mod_id, logic_data)) {
             supportedModules++;
             continue;
         }
+
         QString format(mod_desc ? mod_desc : "");
         format.append(" (*.");
         format.append(mod_id ? mod_id : "");
@@ -1003,6 +1012,11 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1),
         return false;
     }
 
+    // Resolve the module from scratch: a stale _outModule left over from a
+    // previous export (or from a failed lookup below) must not be silently
+    // reused for the next one.
+    _outModule = nullptr;
+    const bool logic_data = (_session->get_device()->get_work_mode() == LOGIC);
     const struct sr_output_module **supportedModules = sr_output_list();
     while (*supportedModules)
     {
@@ -1013,6 +1027,16 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR1),
         const char *mod_id = sr_output_id_get(*supportedModules);
         if (mod_id && !strcmp(mod_id, _suffix.toUtf8().data()))
         {
+            // Second gate behind the (now whitelisted) format list. _suffix can
+            // come from AppConfig::userHistory.exportFormat, i.e. from a config
+            // written before the whitelist existed (".srzip" was exactly that):
+            // such a module must not be resurrected here -- it would fail on the
+            // first packet and report a module-level error instead of the clear
+            // "Invalid export format" below.
+            if (!pv::data::sr_options::is_export_module_supported(mod_id, logic_data)) {
+                pxv_warn("Export: module \"%s\" is not a supported export format", mod_id);
+                break;
+            }
             _outModule = *supportedModules;
             break;
         }
@@ -1144,7 +1168,52 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         }
     } restorer(_session->get_device()->get_channels(), _export_channels, channel_type);
 
-    GHashTable *params = g_hash_table_new(g_str_hash, g_str_equal);
+    // Option table for the output module. It stays empty for every module whose
+    // own defaults are the ones we want; a value is pinned only where a default
+    // is actively unhelpful. Every key MUST be an option the module declares —
+    // sr_output_new() rejects the whole export for an unknown key ("Input
+    // module 'x' has no option 'y'"), so entries are added per format.
+    GHashTable *params = g_hash_table_new_full(
+        g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
+
+    if (_suffix == "csv") {
+        // csv's own default for `label` is "units", and in that mode it labels
+        // every logic column with the literal "logic" (csv.c: label_names is
+        // only true for the "channel" mode) instead of the channel names shown
+        // in the UI — so the first row of an exported CSV was
+        // "logic,logic,...,logic". Pin "channel" → the row becomes D0,D1,...
+        g_hash_table_insert(params, g_strdup("label"),
+                            g_variant_ref_sink(g_variant_new_string("channel")));
+    }
+
+    // Every exit path below has to release the module instance and the option
+    // table. There are more of them now that a failing module is reported
+    // instead of being ignored (see send_packet() further down).
+    struct ExportCleanupGuard {
+        const struct sr_output *output = nullptr;
+        GHashTable *params = nullptr;
+        ~ExportCleanupGuard() {
+            if (output)
+                sr_output_free(output);
+            if (params)
+                g_hash_table_destroy(params);
+        }
+    } guard;
+    guard.params = params;
+
+    // Report a module failure instead of silently producing an empty file.
+    // sr_output_send()'s return value used to be dropped on the floor: srzip
+    // (which creates its own archive and therefore cannot work through this
+    // pipeline) failed on every packet, so the export "succeeded" and left the
+    // 0 bytes QFile::open() had truncated the file to, with no message at all.
+    auto module_failed = [this](const char *stage, int ret) {
+        _has_error.store(true);
+        set_error(QString("Export module '%1' failed while handling %2 "
+                          "(error %3).")
+                      .arg(_suffix)
+                      .arg(QString::fromUtf8(stage))
+                      .arg(ret));
+    };
 
     // Upstream libsigrok makes sr_output opaque — use sr_output_new() to create
     // an instance instead of stack-allocating and manually assigning fields
@@ -1158,9 +1227,9 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         _has_error.store(true);
         set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR4),
                      "Failed to init export module."));
-        g_hash_table_destroy(params);
         return;
     }
+    guard.output = output;
 
     // Binary output format must be written as raw bytes — using QTextStream
     // or QString::fromUtf8() corrupts binary data in three ways:
@@ -1178,8 +1247,6 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         _has_error.store(true);
         set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTSTART_ERROR3),
                      "Failed to open export file."));
-        sr_output_free(output);
-        g_hash_table_destroy(params);
         return;
     }
     QTextStream out(&file);
@@ -1187,8 +1254,37 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     //out.setGenerateByteOrderMark(true);  // UTF-8 without BOM
 
     // Meta
-    GString *data_out;
     struct sr_datafeed_packet p;
+    GString *data_out = nullptr;
+    bool module_ok = true;
+
+    // Send one packet to the output module and write whatever it produced.
+    // Returns false once the module has failed; after that every further send
+    // is skipped (the error is already reported — continuing would only write a
+    // truncated file behind the user's back).
+    auto send_packet = [&](const char *stage) -> bool {
+        if (!module_ok)
+            return false;
+
+        data_out = nullptr;
+        const int ret = sr_output_send(output, &p, &data_out);
+        if (ret != SR_OK) {
+            module_ok = false;
+            module_failed(stage, ret);
+            return false;
+        }
+
+        if (data_out) {
+            if (is_binary_output)
+                file.write(data_out->str, data_out->len);
+            else
+                out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
+            g_string_free(data_out, TRUE);
+            data_out = nullptr;
+        }
+        return true;
+    };
+
     struct sr_datafeed_meta meta;
     struct sr_config *src;
 
@@ -1235,20 +1331,55 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // upstream libsigrok — only type and payload remain.
     p.type = SR_DF_META;
     p.payload = &meta;
-    sr_output_send(output, &p, &data_out);
+    // The meta packet is what carries the sample rate into the module (the srzip
+    // module's zip_create() reads it from here), so a failure matters — but the
+    // config list must be released on this path too.
+    const bool meta_ok = send_packet("the metadata packet");
 
-    if(data_out){
-        if (is_binary_output)
-            file.write(data_out->str, data_out->len);
-        else
-            out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
-        g_string_free(data_out,TRUE);
-    }
     for (GSList *l = meta.config; l; l = l->next) {
         src = (struct sr_config *)l->data;
         _session->get_device()->free_config(src);
     }
     g_slist_free(meta.config);
+
+    if (!meta_ok)
+        return;
+
+    // Capture header packet, right after the meta packet — the order upstream
+    // PulseView sends them (session.cpp: create_meta_packet() then
+    // create_header_packet()).
+    //
+    // csv is the module that consumes it: gen_header() runs ONLY on
+    // SR_DF_HEADER (csv.c) and is what emits the "; CSV generated by …",
+    // "; Channels (n/m): D0, D1, …" and "; Samplerate: …" comment lines — so
+    // without this packet csv's `header` option (default TRUE) stayed dead and
+    // an exported CSV carried no metadata at all. chronovu_la8 is the second
+    // consumer: its HEADER case writes the leading `divcount` byte the .la8
+    // format requires, which PXView was leaving out too.
+    //
+    // Every other offered format simply ignores the type (none of them has a
+    // `default:` case in receive(), they fall through and return SR_OK), which
+    // is also why the packet is safe to send unconditionally.
+    // The capture start time (the same one the default file name and the .pxl
+    // header use); csv renders it with ctime(), so an unset session time would
+    // print a nonsense date — fall back to "now" instead.
+    const QDateTime capture_time = _session->get_session_time().isValid()
+        ? _session->get_session_time() : QDateTime::currentDateTime();
+
+    struct sr_datafeed_header header;
+    header.feed_version = 1;
+    // `time_t`/`suseconds_t` are spelled differently across toolchains (MinGW
+    // has no suseconds_t), so derive the types from the struct itself and stay
+    // clear of -Wconversion on every platform.
+    header.starttime.tv_sec = static_cast<decltype(header.starttime.tv_sec)>(
+        capture_time.toSecsSinceEpoch());
+    header.starttime.tv_usec = static_cast<decltype(header.starttime.tv_usec)>(
+        (capture_time.time().msec() % 1000) * 1000);
+
+    p.type = SR_DF_HEADER;
+    p.payload = &header;
+    if (!send_packet("the capture header packet"))
+        return;
 
     if (channel_type == SR_CHANNEL_LOGIC) {
         // Use get_sample_count() (the true captured length) rather than
@@ -1382,15 +1513,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 lp.unitsize = unitsize;
                 p.type = SR_DF_LOGIC;
                 p.payload = &lp;
-                sr_output_send(output, &p, &data_out);
-
-                if(data_out){
-                    if (is_binary_output)
-                        file.write(data_out->str, data_out->len);
-                    else
-                        out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
-                    g_string_free(data_out,TRUE);
-                }
+                send_packet("a logic data packet");
 
                 _units_stored.fetch_add(size);
                 if (xbuf)
@@ -1415,9 +1538,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             _has_error.store(true);
             set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2),
                 "Failed to allocate memory for DSO export."));
-            file.close();
-            sr_output_free(output);
-            g_hash_table_destroy(params);
+            // `guard` releases the module instance and the option table.
             return;
         }
 
@@ -1475,15 +1596,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             dp.num_samples = size;
             p.type = SR_DF_DSO;
             p.payload = &dp;
-            sr_output_send(output, &p, &data_out);
-
-            if(data_out){
-                if (is_binary_output)
-                    file.write(data_out->str, data_out->len);
-                else
-                    out << reinterpret_cast<char*>(data_out->str);
-                g_string_free(data_out,TRUE);
-            }
+            send_packet("a DSO data packet");
 
             _units_stored.fetch_add(size);
             progress_updated();
@@ -1584,15 +1697,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 ap.num_samples = size;
                 p.type = SR_DF_ANALOG;
                 p.payload = &ap;
-                sr_output_send(output, &p, &data_out);
-
-                if(data_out){
-                    if (is_binary_output)
-                        file.write(data_out->str, data_out->len);
-                    else
-                        out << reinterpret_cast<char*>(data_out->str);
-                    g_string_free(data_out,TRUE);
-                }           
+                send_packet("an analog data packet");
 
                 _units_stored.fetch_add(size);
                 progress_updated();
@@ -1613,21 +1718,28 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
     // SR_DF_END carries no payload (see enum sr_packettype in libsigrok.h).
     p.type = SR_DF_END;
     p.payload = nullptr;
-    sr_output_send(output, &p, &data_out);
-    if (data_out) {
-        if (is_binary_output)
-            file.write(data_out->str, data_out->len);
-        else
-            out << QString::fromUtf8(reinterpret_cast<char*>(data_out->str));
-        g_string_free(data_out, TRUE);
-    }
+    send_packet("the end-of-stream packet");
 
     // optional, as QFile destructor will already do it:
     file.close();
     // Upstream libsigrok: sr_output_free() replaces fork _outModule->cleanup().
-    sr_output_free(output);
-    g_hash_table_destroy(params);
+    // Both the module instance and the option table are released by `guard`.
 
+    if (!_has_error.load()) {
+        // Last line of defence against the silent-empty-file failure mode: the
+        // snapshot was checked non-empty in export_start(), so a module that
+        // produced nothing at all is broken, not legitimately empty.
+        const qint64 written = QFileInfo(_file_name).size();
+        if (written <= 0) {
+            _has_error.store(true);
+            set_error(QString("Export module '%1' produced no data "
+                              "(file is empty).").arg(_suffix));
+        }
+    }
+
+    // This queued signal is what makes the progress dialog surface error()
+    // (StoreProgress::on_progress_updated) — emit it on the failure path too,
+    // otherwise a failed export would just close without a word.
     progress_updated();
 }
 
@@ -2178,10 +2290,43 @@ QString StoreSession::MakeExportFile(bool bDlg)
             filter.append(";;");
     }
 
+    const bool logic_data = (_session->get_device()->get_work_mode() == LOGIC);
     QString selfilter;
-    if (app.userHistory.exportFormat != "" 
-            && _session->get_device()->get_work_mode() == LOGIC){
-        selfilter.append(app.userHistory.exportFormat);
+    if (app.userHistory.exportFormat != "" && logic_data){
+        // The stored format must still be one of the offered ones. A value
+        // persisted before the format list became a whitelist (".srzip" is the
+        // one that bit users) would otherwise be handed to export_start() as
+        // _suffix on the very next "Export" -- the dialog is skipped there, so
+        // nothing else would correct it. Repair it to the matching filter entry
+        // of the current list and persist that, so the dialog also opens on it.
+        const QString requested = data::sr_options::export_module_id_from_filter(
+            app.userHistory.exportFormat);
+        const QString chosen = data::sr_options::normalize_export_module_id(
+            app.userHistory.exportFormat, logic_data);
+
+        if (chosen != requested) {
+            selfilter.clear();
+            for (int i = 0; i < supportedFormats.count(); i++) {
+                if (data::sr_options::export_module_id_from_filter(supportedFormats[i])
+                        == chosen) {
+                    selfilter = supportedFormats[i];
+                    break;
+                }
+            }
+            if (selfilter.isEmpty())
+                selfilter = "." + chosen;
+
+            pxv_warn("Export: stored format \"%s\" is no longer offered, using \"%s\"",
+                     app.userHistory.exportFormat.toUtf8().constData(),
+                     chosen.toUtf8().constData());
+            app.userHistory.exportFormat = selfilter;
+            app.SaveHistory();
+        }
+        else {
+            // Still offered: keep the exact stored string so the dialog reopens
+            // on the filter entry the user picked last time.
+            selfilter = app.userHistory.exportFormat;
+        }
     }
     else{
         selfilter.append(".csv");
@@ -2226,6 +2371,34 @@ QString StoreSession::MakeExportFile(bool bDlg)
 
     QStringList list = extName.split('.').last().split(')');
     _suffix = list.first();
+
+    // Raw binary has no header, so the file name is the only place its two
+    // essential parameters can live. Write them in, using the same channel set
+    // the LOGIC export path packs (see export_exec), so whatever the number in
+    // the name says is exactly what a re-import needs to decode the file.
+    if (_suffix == "binary") {
+        data::LogicSnapshot *logic_snapshot =
+            dynamic_cast<data::LogicSnapshot*>(_session->get_snapshot(SR_CHANNEL_LOGIC));
+        int channels = 0;
+        if (logic_snapshot) {
+            for (auto m : _session->get_signal_models_snapshot()) {
+                if (!_export_channels.empty()) {
+                    if (std::find(_export_channels.begin(), _export_channels.end(),
+                                  m->index()) == _export_channels.end())
+                        continue;
+                } else if (_export_channel_type >= 0 &&
+                           static_cast<int>(m->type()) != _export_channel_type) {
+                    continue;
+                }
+                if (m->type() == SR_CHANNEL_LOGIC && logic_snapshot->has_data(m->index()))
+                    channels++;
+            }
+        }
+
+        const uint64_t samplerate = _session->cur_snap_samplerate();
+        if (channels > 0 && samplerate > 0)
+            default_name = data::binary_name_hints::apply(default_name, channels, samplerate);
+    }
 
     QFileInfo f(default_name);
     if(f.suffix().compare(_suffix)){

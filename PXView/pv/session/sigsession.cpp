@@ -42,7 +42,9 @@
 #include "pv/data/cache/disk_cache_config.h"
 #include "pv/data/snapshot/dsosnapshot.h"
 #include "pv/data/stack/lissajousmodel.h"
+#include "pv/data/binary_name_hints.h"
 #include "pv/data/snapshot/logicsnapshot.h"
+#include "pv/data/sr_options.h"
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/document/sessionsnapshot.h"
 #include "pv/data/document/sessiondocument.h"
@@ -817,38 +819,107 @@ bool SigSession::set_file(QString name) {
   return true;
 }
 
-bool SigSession::import_file(QString name) {
+QString SigSession::probe_import_format(const QString &file_name) const
+{
+  const std::string path = pv::path::ToUnicodePath(file_name);
+
+  const struct sr_input *tmp_input = nullptr;
+  if (sr_input_scan_file(path.c_str(), &tmp_input) != SR_OK || !tmp_input)
+    return QString();
+
+  const struct sr_input_module *imod = sr_input_module_get(tmp_input);
+  const char *mod_id = imod ? sr_input_id_get(imod) : nullptr;
+  const QString result = mod_id ? QString::fromUtf8(mod_id) : QString();
+  sr_input_free(tmp_input);
+  return result;
+}
+
+QVariantMap SigSession::import_option_prefill(const QString &file_name) const
+{
+  QVariantMap prefill;
+
+  if (_state->device_agent().have_instance()) {
+    // Enabled logic channels of the device that happens to be open: a raw binary
+    // file arriving here was most likely exported from that device. This is a
+    // *hint* for the import options dialog, not a decision — the user can
+    // override both values, which is what the previous auto-detect-only design
+    // got wrong whenever the file came from a different device.
+    int channels = 0;
+    for (auto m : _state->signal_models()) {
+      if (m->type() == SR_CHANNEL_LOGIC && m->enabled())
+        channels++;
+    }
+    if (channels < 1)
+      channels = 8;  // legacy fallback, matches binary.c DEFAULT_NUM_CHANNELS
+
+    uint64_t rate = static_cast<uint64_t>(_state->device_agent().get_sample_rate());
+    if (rate == 0)
+      rate = 1000000;  // legacy fallback: binary.c defaults to 0 Hz
+
+    prefill.insert(QStringLiteral("numchannels"), channels);
+    prefill.insert(QStringLiteral("samplerate"),
+                   QVariant::fromValue<qulonglong>(rate));
+  }
+
+  // The file name beats the device: it describes THIS file (PXView's binary
+  // export writes "<n>ch-<rate>Hz" into it), while the device above only
+  // describes what happens to be open. This also gives the headless/MCP path a
+  // correct default when the caller passes no options at all.
+  const data::binary_name_hints::Hints hints =
+      data::binary_name_hints::parse(file_name);
+  if (hints.channels > 0)
+    prefill.insert(QStringLiteral("numchannels"), hints.channels);
+  if (hints.samplerate > 0)
+    prefill.insert(QStringLiteral("samplerate"),
+                   QVariant::fromValue<qulonglong>(hints.samplerate));
+
+  return prefill;
+}
+
+bool SigSession::import_file(QString name, const QString &format_id,
+                             GHashTable *input_options) {
   assert(!_state->is_saving());
   assert(!_state->is_working());
 
   std::string file_name = pv::path::ToUnicodePath(name);
   pxv_info("Import file: \"%s\"", file_name.c_str());
 
-  // Step 1: Detect format using sr_input_scan_file (aligned with PulseView).
-  // sr_input_scan_file reads the file header and finds the best matching
-  // input module. It creates a temporary sr_input with the header data
-  // buffered in input->buf, but receive() has NOT been called yet.
-  const struct sr_input *tmp_input = nullptr;
-  int ret = sr_input_scan_file(file_name.c_str(), &tmp_input);
-  if (ret != SR_OK || !tmp_input) {
-    pxv_err("Import file error: sr_input_scan_file failed for \"%s\"",
-            file_name.c_str());
-    return false;
-  }
+  // Step 1: Resolve the input module. An explicit id (the user picked a format
+  // in the toolbar's import menu) wins over detection: the extension then
+  // stops mattering, which is the only way to import e.g. a ".bin" file as
+  // "binary" when another module also claims that extension.
+  std::string mod_id_str;
+  if (!format_id.isEmpty()) {
+    mod_id_str = format_id.toStdString();
+    pxv_info("Import file: using requested input module \"%s\"",
+             mod_id_str.c_str());
+  } else {
+    // Detect format using sr_input_scan_file (aligned with PulseView).
+    // sr_input_scan_file reads the file header and finds the best matching
+    // input module. It creates a temporary sr_input with the header data
+    // buffered in input->buf, but receive() has NOT been called yet.
+    const struct sr_input *tmp_input = nullptr;
+    int ret = sr_input_scan_file(file_name.c_str(), &tmp_input);
+    if (ret != SR_OK || !tmp_input) {
+      pxv_err("Import file error: sr_input_scan_file failed for \"%s\"",
+              file_name.c_str());
+      return false;
+    }
 
-  // Extract the module ID, then free the temporary input instance.
-  // We create a fresh input below so we can control exactly when data
-  // is fed to the module (the temp input has up to 4MB of pre-read data
-  // in its buffer which complicates the feed sequence).
-  const struct sr_input_module *imod = sr_input_module_get(tmp_input);
-  const char *mod_id = imod ? sr_input_id_get(imod) : nullptr;
-  if (!mod_id) {
-    pxv_err("Import file error: cannot determine input module ID");
+    // Extract the module ID, then free the temporary input instance.
+    // We create a fresh input below so we can control exactly when data
+    // is fed to the module (the temp input has up to 4MB of pre-read data
+    // in its buffer which complicates the feed sequence).
+    const struct sr_input_module *imod = sr_input_module_get(tmp_input);
+    const char *mod_id = imod ? sr_input_id_get(imod) : nullptr;
+    if (!mod_id) {
+      pxv_err("Import file error: cannot determine input module ID");
+      sr_input_free(tmp_input);
+      return false;
+    }
+    mod_id_str.assign(mod_id);
     sr_input_free(tmp_input);
-    return false;
   }
-  std::string mod_id_str(mod_id);
-  sr_input_free(tmp_input);
 
   // Step 2: Create a fresh input instance.
   // sr_input_new() calls the module's init() which creates the sdi.
@@ -862,42 +933,29 @@ bool SigSession::import_file(QString name) {
     return false;
   }
 
-  // For the binary input module, auto-detect channel count and sample rate
-  // from the current device. Raw binary files have no header, so the module
-  // defaults to 8 channels @ 0 Hz — which is almost never correct.
-  // PulseView solves this by showing an options dialog before import; we
-  // auto-detect from the current device context (if a device is open with
-  // 16/32 channels, the binary file was likely exported from that device).
-  GHashTable *input_opts = nullptr;
-  if (mod_id_str == "binary" && _state->device_agent().have_instance()) {
-    int cur_channels = 0;
-    for (auto m : _state->signal_models()) {
-      if (m->type() == SR_CHANNEL_LOGIC && m->enabled())
-        cur_channels++;
+  // Options: headerless formats (binary, chronovu-la8, raw analog) carry no
+  // metadata, so the module's declared options are the only way to describe
+  // the data. The view collects them in InputOutputOptions and hands the table
+  // in as `input_options`; a programmatic caller (MCP / headless) passes none,
+  // in which case the device-derived guess is used as a last resort so the
+  // previous behaviour is preserved. The guess is never the only source of
+  // truth any more — it only pre-fills that dialog.
+  GHashTable *own_options = nullptr;
+  GHashTable *use_options = input_options;
+  if (!use_options) {
+    const struct sr_option **mod_options = sr_input_options_get(mod);
+    if (mod_options) {
+      own_options = data::sr_options::make_option_table(mod_options,
+                                                       import_option_prefill(name));
+      // Frees the module's static option array (and its default values).
+      sr_input_options_free(mod_options);
+      use_options = own_options;
     }
-    if (cur_channels < 1)
-      cur_channels = 8;  // fallback
-
-    uint64_t cur_rate = 0;
-    cur_rate = static_cast<uint64_t>(_state->device_agent().get_sample_rate());
-    if (cur_rate == 0)
-      cur_rate = 1000000;  // fallback 1 MHz
-
-    pxv_info("Import file: binary module — auto-detect channels=%d, "
-             "samplerate=%llu from current device",
-             cur_channels, (unsigned long long)cur_rate);
-
-    input_opts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
-                                       (GDestroyNotify)g_variant_unref);
-    g_hash_table_insert(input_opts, g_strdup("numchannels"),
-                        g_variant_ref_sink(g_variant_new_int32(cur_channels)));
-    g_hash_table_insert(input_opts, g_strdup("samplerate"),
-                        g_variant_ref_sink(g_variant_new_uint64(cur_rate)));
   }
 
-  const struct sr_input *input = sr_input_new(mod, input_opts);
-  if (input_opts)
-    g_hash_table_destroy(input_opts);
+  const struct sr_input *input = sr_input_new(mod, use_options);
+  if (own_options)
+    g_hash_table_destroy(own_options);
   if (!input) {
     pxv_err("Import file error: sr_input_new failed for \"%s\"",
             mod_id_str.c_str());

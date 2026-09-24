@@ -36,8 +36,11 @@
 #include "pv/base/log.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/iconcache.h"
+#include "pv/data/sr_options.h"
+#include "pv/dialogs/inputoutputoptions.h"
 #include <libsigrok/libsigrok.h>
 #include <QFileInfo>
+#include <QStringList>
 
 
 namespace pv {
@@ -85,13 +88,22 @@ FileBar::FileBar(SigSession *session, QWidget *parent) :
     // _file_button.setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     // _file_button.setPopupMode(QToolButton::InstantPopup);
 
+    // Import lives in a submenu: one entry per libsigrok input module plus the
+    // auto-detect entry. Picking a format explicitly is the only way to import
+    // a headerless file whose extension another module also claims (e.g. ".bin"
+    // vs Saleae) — and it is what makes the module's options dialog possible.
+    _menu_import = new QMenu(this);
+    _menu_import->setObjectName(QString::fromUtf8("menuImport"));
+
     _menu = new QMenu(this);
     _menu->addMenu(_menu_session);
     _menu->addAction(_action_open);
     _menu->addAction(_action_save);
     _menu->addAction(_action_export);
-    _menu->addAction(_action_import);
+    _menu->addMenu(_menu_import);
     _menu->addAction(_action_capture);
+
+    build_import_menu();
     // _file_button.setMenu(_menu);
     // addWidget(&_file_button);
 
@@ -122,7 +134,11 @@ void FileBar::retranslateUi()
     _action_open->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_OPEN), "&Open..."));
     _action_save->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_SAVE), "&Save..."));
     _action_export->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_EXPORT), "&Export..."));
-    _action_import->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT), "&Import..."));
+    // Submenu title keeps the historic id; the first entry is the old
+    // single-action behaviour (module detected from the file content).
+    _menu_import->setTitle(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT), "&Import..."));
+    _action_import->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT_AUTO),
+                                "Auto detect (all supported formats)"));
     _action_capture->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CAPTURE), "&Capture..."));
 }
 
@@ -144,6 +160,7 @@ void FileBar::reStyle()
     _action_save->setIcon(getIcon("/save.svg"));
     _action_export->setIcon(getIcon("/export.svg"));
     _action_import->setIcon(getIcon("/import.svg"));
+    _menu_import->setIcon(getIcon("/import.svg"));
     _action_capture->setIcon(getIcon("/capture.svg"));
     // _file_button.setIcon(QIcon(iconPath+"/file.svg"));
 }
@@ -158,12 +175,21 @@ void FileBar::on_actionOpen_triggered()
     // 当前多 tab 下此提示是误导性的（用户以为数据会丢，实际不会）。
     // 因此移除保存提示，直接弹出文件选择对话框。
 
-    // Show the dialog
+    // Show the dialog.
+    // The loader behind this entry is sr_session_load_file_device() (see
+    // SigSession::set_file()), which understands BOTH containers:
+    //   * PXView's own data file (.pxl, chunks L-<ch>/<n>), and
+    //   * upstream sigrok session archives (.sr / .srzip, version/metadata +
+    //     logic-N — what libsigrok's srzip output module writes).
+    // Only *.pxl used to be offered here, so an archive coming from sigrok or
+    // from another PXView build could not be picked without typing its name.
     const QString file_name = QFileDialog::getOpenFileName(
         this, 
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OPEN_FILE), "Open File"), 
         app.userHistory.openDir,
-        "PXView Data (*.pxl)");
+        "PXView Data (*.pxl);;"
+        "Sigrok Session (*.sr *.srzip);;"
+        "All Supported (*.pxl *.sr *.srzip)");
 
     if (!file_name.isEmpty()) { 
         QString fname = path::GetDirectoryName(file_name);
@@ -173,6 +199,50 @@ void FileBar::on_actionOpen_triggered()
         }
 
         sig_load_file(file_name);
+    }
+}
+
+void FileBar::build_import_menu()
+{
+    if (!_menu_import)
+        return;
+
+    // First entry = the old single "Import..." action: the module is detected
+    // from the file content. Everything below it forces one specific module.
+    _menu_import->addAction(_action_import);
+    _menu_import->addSeparator();
+
+    const struct sr_input_module **imods = sr_input_list();
+    if (!imods)
+        return;
+
+    for (int i = 0; imods[i]; i++) {
+        const struct sr_input_module *imod = imods[i];
+        const char *id = sr_input_id_get(imod);
+        if (!id)
+            continue;
+
+        const char *name = sr_input_name_get(imod);
+        const QString format_id = QString::fromUtf8(id);
+
+        QStringList extensions;
+        const char *const *exts = sr_input_extensions_get(imod);
+        for (int e = 0; exts && exts[e]; e++)
+            extensions << QString::fromUtf8(exts[e]);
+
+        QAction *action = new QAction(
+            name ? QString::fromUtf8(name) : format_id, this);
+        action->setObjectName("actionImportFormat_" + format_id);
+        action->setData(format_id);
+        // The file dialog of an explicitly chosen format must only offer that
+        // module's own extensions, otherwise the choice would be pointless.
+        action->setProperty("extensions", extensions);
+        connect(action, &QAction::triggered, this, [this, format_id]() {
+            on_import_format_triggered(format_id);
+        });
+
+        _menu_import->addAction(action);
+        _import_format_actions.push_back(action);
     }
 }
 
@@ -237,15 +307,113 @@ void FileBar::on_actionImport_triggered()
         app.userHistory.openDir,
         filterStr);
 
-    if (!file_name.isEmpty()) {
-        QString fname = path::GetDirectoryName(file_name);
-        if (fname != app.userHistory.openDir){
-            app.userHistory.openDir = fname;
-            app.SaveHistory();
-        }
+    if (file_name.isEmpty())
+        return;
 
-        sig_import_file(file_name);
+    QString fname = path::GetDirectoryName(file_name);
+    if (fname != app.userHistory.openDir){
+        app.userHistory.openDir = fname;
+        app.SaveHistory();
     }
+
+    // Ask which module claims this file *before* importing: only then can the
+    // module's option dialog be shown (picking "Binary" in the menu and picking
+    // a .binary file here end up in the same place).
+    const QString format_id = _session->probe_import_format(file_name);
+    if (format_id.isEmpty()) {
+        pxv_warn("Import file: no input module matches \"%s\"; "
+                 "letting libsigrok decide during the import",
+                 file_name.toUtf8().constData());
+    }
+
+    run_import(file_name, format_id);
+}
+
+void FileBar::on_import_format_triggered(const QString &format_id)
+{
+    AppConfig &app = AppConfig::Instance();
+
+    QStringList patterns;
+    for (QAction *action : _import_format_actions) {
+        if (action->data().toString() != format_id)
+            continue;
+        for (const QString &ext : action->property("extensions").toStringList())
+            patterns << "*." + ext;
+        break;
+    }
+
+    QString filter = L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File");
+    // A module may declare no extension at all: then the user picks freely.
+    filter += patterns.isEmpty() ? " (*)" : " (" + patterns.join(" ") + ")";
+
+    const QString file_name = QFileDialog::getOpenFileName(
+        this,
+        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File"),
+        app.userHistory.openDir,
+        filter);
+
+    if (file_name.isEmpty())
+        return;
+
+    QString fname = path::GetDirectoryName(file_name);
+    if (fname != app.userHistory.openDir){
+        app.userHistory.openDir = fname;
+        app.SaveHistory();
+    }
+
+    run_import(file_name, format_id);
+}
+
+void FileBar::run_import(const QString &file_name, const QString &format_id)
+{
+    GHashTable *options = nullptr;
+
+    // Show the module's own options (numchannels/samplerate for "binary", ...)
+    // when it declares any. The values are pre-filled with what the currently
+    // open device suggests -- a hint the user can override, which is exactly
+    // what the old "detect and hope" path could not do.
+    if (!format_id.isEmpty()) {
+        const struct sr_input_module *module =
+            sr_input_find(format_id.toUtf8().constData());
+        if (module) {
+            data::sr_options::OptionsHandle handle =
+                data::sr_options::OptionsHandle::for_input(module);
+
+            if (!handle.empty()) {
+                QString title =
+                    L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_FILE), "Import File");
+                const char *module_name = sr_input_name_get(module);
+                if (module_name)
+                    title += " - " + QString::fromUtf8(module_name);
+
+                // The file name is passed along so a name carrying PXView's
+                // hint block ("-32ch-1000000Hz") pre-fills channel count and
+                // sample rate instead of the "current device" guess.
+                dialogs::InputOutputOptions dlg(
+                    this, title, handle.options(),
+                    _session->import_option_prefill(file_name));
+
+                // The dialog copied every value it needs while constructing;
+                // release the module's static option array before showing it.
+                handle.reset();
+
+                if (dlg.exec() != QDialog::Accepted)
+                    return;  // user cancelled the import
+
+                options = dlg.make_options_table();
+                pxv_info("Import file: \"%s\" as \"%s\" with %d option(s)",
+                         file_name.toUtf8().constData(), format_id.toUtf8().constData(),
+                         dlg.option_count());
+            }
+        } else {
+            pxv_warn("Import file: unknown input module \"%s\", falling back to "
+                     "detection", format_id.toUtf8().constData());
+        }
+    }
+
+    // Ownership of `options` travels with the signal; the receiving slot
+    // destroys it (see MainWindowFileOps::on_import_file).
+    emit sig_import_file(file_name, format_id, options);
 }
 
 void FileBar::on_actionLoad_triggered()

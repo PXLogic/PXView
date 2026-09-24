@@ -148,7 +148,10 @@ public slots:
     void on_screenShot();
     void on_save();
     void on_export();
-    void on_import_file(QString file_name);
+    // format_id: chosen input module (empty = auto-detect); input_options:
+    // module options whose ownership is transferred (may be nullptr).
+    void on_import_file(QString file_name, QString format_id,
+                        GHashTable *input_options);
     bool on_load_session(QString name);  
     bool on_store_session(QString name); 
     void on_data_updated();

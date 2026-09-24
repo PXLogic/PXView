@@ -97,6 +97,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/dialogs/regionoptions.cpp
     PXView/pv/dialogs/applicationpardlg.cpp
     PXView/pv/dialogs/decoderoptionsdlg.cpp
+    PXView/pv/dialogs/inputoutputoptions.cpp
     # Custom widgets
     PXView/pv/widgets/border.cpp
     PXView/pv/widgets/slidingdrawer.cpp
@@ -133,6 +134,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/prop/binding/deviceoptions.cpp
     PXView/pv/prop/binding/decoderoptions.cpp
     PXView/pv/prop/binding/probeoptions.cpp
+    PXView/pv/prop/binding/inputoutput.cpp
 )
 # Backwards-compat alias so any code referencing PXView_SOURCES still works.
 set(PXView_SOURCES ${PXVIEW_CORE_SOURCES} ${PXVIEW_GUI_SOURCES})
@@ -267,6 +269,8 @@ PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/ui/dscombobox.h
     PXView/pv/ui/dsspinbox.h
     PXView/pv/base/pxvdef.h
+    PXView/pv/dialogs/inputoutputoptions.h
+    PXView/pv/prop/binding/inputoutput.h
     PXView/pv/dialogs/applicationpardlg.h
     PXView/pv/dock/keywordlineedit.h
     PXView/pv/dock/searchcombobox.h

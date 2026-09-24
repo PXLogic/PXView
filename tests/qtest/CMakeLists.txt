@@ -641,3 +641,43 @@ target_include_directories(test_csv_export_channels PRIVATE
 # 普通链接（非 whole-archive）：只要被引用到的成员。
 target_link_libraries(test_csv_export_channels PRIVATE libsigrok)
 
+# ==== 导入/导出模块选项 + 导出格式白名单回归（".srzip 为 0 字节"）====
+# 锁定三件事：
+#   * 导出格式白名单：枚举真实的 sr_output_list()，srzip/null 仍在列表里但必须
+#     被拒绝（旧代码"枚举全部"就会把它们列出来 —— 0 字节文件的入口），
+#     csv/binary/vcd 等仍可用，非逻辑数据只允许 csv；
+#   * 选项值类型契约：make_variant() 必须按 sr_option::def 的类型产出，
+#     错型返回 nullptr —— sr_input_new() 对混型/未知键是整单拒绝的；
+#   * 端到端：binary 模块 + numchannels=16 → 实例 16 通道（模块默认是 8）。
+# 只走 libsigrok 公开 API；链接方式同 test_csv_export_channels（普通链接）。
+pv_add_qtest(test_sr_options
+    data/test_sr_options.cpp
+)
+target_include_directories(test_sr_options PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_sr_options PRIVATE libsigrok)
+
+# ==== 「打开 .pxl / .sr / .srzip」可读性回归 ====
+# 文件 → 打开 的过滤串新增了 *.sr / *.srzip（加载器 sr_session_load_file_device
+# 本来就支持 upstream sigrok 的 version/metadata + logic-N 容器）。本测试把
+# srzip 输出模块（唯一的 SR_OUTPUT_INTERNAL_IO_HANDLING 模块，自己写文件）产出的
+# 归档用**同一个 API** 读回来，锁住通道数与采样率的往返一致——任何让这两个后缀
+# 变成"能选但读不了"的改动都会在 CI 里失败。
+pv_add_qtest(test_srzip_load
+    data/test_srzip_load.cpp
+)
+target_include_directories(test_srzip_load PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_srzip_load PRIVATE libsigrok)
+
+# ==== raw binary 文件名的参数提示（通道数/采样率）====
+# 约定 "<base>-<N>ch-<rate>Hz.binary"：导出时写入、导入时填入选项对话框。
+# 纯逻辑（只用 QRegularExpression），不链接 libsigrok。
+pv_add_qtest(test_binary_name_hints
+    data/test_binary_name_hints.cpp
+)
+

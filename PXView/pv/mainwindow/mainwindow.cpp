@@ -402,7 +402,10 @@ void MainWindow::retranslateUi() {
 
 void MainWindow::on_load_file(QString file_name) { _file_ops->on_load_file(file_name); }
 
-void MainWindow::on_import_file(QString file_name) { _file_ops->on_import_file(file_name); }
+void MainWindow::on_import_file(QString file_name, QString format_id,
+                                GHashTable *input_options) {
+  _file_ops->on_import_file(file_name, format_id, input_options);
+}
 
 
 void MainWindow::on_session_error() { _event_dispatcher->handle_session_error(); }

@@ -28,6 +28,7 @@
 #include <QTimer>
 #include <QString>
 #include <QJsonArray>
+#include <QVariantMap>
 #include <atomic>
 #include <future>
 #include <list>
@@ -205,7 +206,43 @@ public:
                   interface::DeviceChangeReason reason =
                       interface::DeviceChangeReason::UserSelection);
   bool set_file(QString name); void close_file(unsigned long long dev_handle) override;
-  bool import_file(QString name);
+  /**
+   * Import an external data file through a libsigrok input module.
+   *
+   * @param name          the file to import.
+   * @param format_id     explicit input module id (e.g. "binary"). Empty means
+   *                      "let sr_input_scan_file() detect it". An explicit id
+   *                      makes the extension irrelevant and lets the caller ask
+   *                      the user for the module's options first.
+   * @param input_options option table for the module (key = option id, value =
+   *                      sunk GVariant of the declared type). BORROWED, test-only
+   *                      read here: the caller keeps ownership and frees it
+   *                      after this function returns. nullptr means "no user
+   *                      input available" — the legacy device-based guess
+   *                      (import_option_prefill()) is applied instead.
+   */
+  bool import_file(QString name, const QString &format_id = QString(),
+                   GHashTable *input_options = nullptr);
+  /**
+   * Which input module would parse @p file_name, or an empty string.
+   * Used by the view to show the module's option dialog before importing
+   * (the same scan sr_input_scan_file() performs inside import_file()).
+   */
+  QString probe_import_format(const QString &file_name) const;
+  /**
+   * Initial values for a headerless module's options (numchannels /
+   * samplerate).
+   *
+   * Two sources, the second one winning: the current device (enabled logic
+   * channel count, current sample rate) and — when @p file_name is given — the
+   * hint block PXView's binary export writes into the file name
+   * ("-<channels>ch-<samplerate>Hz"), which describes THIS file instead of
+   * whatever happens to be open. Empty when neither source knows anything.
+   *
+   * Used as the prefill of the import options dialog and as the fallback when a
+   * programmatic caller passes no options.
+   */
+  QVariantMap import_option_prefill(const QString &file_name = QString()) const;
   // 方案A 的 _saved_device_handle/restore_previous_device 已删除（数据模型
   // 重构步骤5）：关闭文件 tab 的设备回退由 close_file 的 isCurrent 分支
   // （set_default_device）+ 幸存 tab activate() 的 per-tab 设备恢复完成，

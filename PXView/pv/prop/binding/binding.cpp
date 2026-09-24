@@ -67,6 +67,14 @@ void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit, QFon
             ? p->get_widget_live(layout->parentWidget())
             : p->get_widget_deferred(layout->parentWidget());
 
+        // A property whose widget could not be built (Int/String return
+        // nullptr when their getter yields no value) must be skipped: the
+        // code below dereferences the widget unconditionally, so adding the
+        // row would crash. Options that carry no default value are skipped by
+        // the bindings themselves, this is the safety net.
+        if (!widget)
+            continue;
+
         // P2-B: Connect each property's committed() signal to the
         // aggregated config-changed callback so consumers only need
         // to register one callback instead of per-property connections.
