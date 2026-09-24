@@ -73,6 +73,12 @@ public:
         _config_changed_cb = std::move(cb);
     }
 
+    /* Whether add_properties_to_form() drops the row literally labelled
+     * "Data format" (old device-options behaviour; on by default so every
+     * existing panel is unaffected). The input/output option dialog turns it
+     * off — there "Data format" is a real module option. */
+    void set_skip_data_format(bool skip) { _skip_data_format = skip; }
+
 protected:
 	std::vector<Property*> _properties;
 
@@ -81,6 +87,8 @@ protected:
 	int    _row_num;
 
     ConfigChangedCallback _config_changed_cb;
+
+    bool   _skip_data_format = true;
 };
 
 } // binding

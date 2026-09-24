@@ -124,8 +124,7 @@ public:
   void clear_dso_xm();
 
   // 信号重建后旧 Signal/Trace 会被销毁,清空缓存的拖拽/悬停裸指针,
-  // 避免悬垂。由 View::signals_changed() 在非 RESIZE_SIGNAL 活动拖拽时
-  // 防御性调用(高度拖拽期间 applyDragFrame 也会调用 signals_changed)。
+  // 避免悬垂。由 View::signals_changed() 防御性调用。
   void clear_interaction_state();
   void set_need_update(bool update);
   void set_decode_dirty();
@@ -256,11 +255,6 @@ public:
   int64_t& mouse_down_offset() { return _mouse_down_offset; }
   ActionType& action_type() { return _action_type; }
   Signal*& drag_sig() { return _drag_sig; }
-  Trace*& resize_trace_upper() { return _resize_trace_upper; }
-  Trace*& resize_trace_lower() { return _resize_trace_lower; }
-  int& resize_mouse_down_y() { return _resize_mouse_down_y; }
-  int& resize_upper_height() { return _resize_upper_height; }
-  int& resize_lower_height() { return _resize_lower_height; }
   bool& curs_moved() { return _curs_moved; }
   bool& xcurs_moved() { return _xcurs_moved; }
   LogicSignal*& hover_logic_signal() { return _hover_logic_signal; }
@@ -455,11 +449,6 @@ private:
   int _dso_ym_end;
   int _waiting_trig;
   bool _dso_trig_moved;
-  Trace *_resize_trace_upper;
-  Trace *_resize_trace_lower;
-  int _resize_mouse_down_y;
-  int _resize_upper_height;
-  int _resize_lower_height;
   bool _curs_moved;
   bool _xcurs_moved;
   int _curVOffset;

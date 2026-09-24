@@ -50,22 +50,11 @@ ViewportDrag::~ViewportDrag() {}
 
 // ActionType / MeasureType enumerators are at pv::view namespace scope (see
 // viewport.h). Bring them here so the legacy code ported from viewport.cpp
-// can keep using bare names like Viewport::RESIZE_SIGNAL.
+// can keep using bare names like Viewport::DSO_TRIG_MOVE.
+// 注意:通道高度拉伸(RESIZE_SIGNAL)已收归 Header 独占,Viewport 不再参与。
 
 void ViewportDrag::applyDragFrame() {
   _viewport->drag_frame_pending() = false;
-
-  if (_viewport->action_type() == RESIZE_SIGNAL) {
-    int deltaY =
-        _viewport->drag_last_pos().y() - _viewport->resize_mouse_down_y();
-    int newUpperHeight = _viewport->resize_upper_height() + deltaY;
-    if (newUpperHeight >= View::MinSignalHeight &&
-        _viewport->view().is_logic_rendering_mode()) {
-      _viewport->resize_trace_upper()->set_own_height(newUpperHeight);
-      _viewport->view().signals_changed(nullptr);
-    }
-    return;
-  }
 
   int mode = _viewport->view().get_work_mode();
 

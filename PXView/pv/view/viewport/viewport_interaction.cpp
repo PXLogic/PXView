@@ -111,53 +111,8 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
   _viewport->drag_strength() = 0;
   _viewport->elapsed_time().restart();
 
-  if (_viewport->type() == TIME_VIEW &&
-      _viewport->view().is_logic_rendering_mode()) {
-    std::vector<Trace *> traces;
-    _viewport->view().get_traces(TIME_VIEW, traces);
-    int mouseY = event->position().toPoint().y() +
-                 _viewport->view().get_vOffset();
-    const int HitBorderMargin = 5;
-
-    std::vector<Trace *> enabled_traces;
-    for (auto t : traces)
-      if (t->enabled())
-        enabled_traces.push_back(t);
-
-    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
-      int traceBottom = enabled_traces[i]->get_v_offset() +
-                        enabled_traces[i]->get_totalHeight() / 2 +
-                        View::SignalMargin;
-
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        _viewport->action_type() = RESIZE_SIGNAL;
-        _viewport->resize_trace_upper() = enabled_traces[i];
-        _viewport->resize_trace_lower() = enabled_traces[i + 1];
-        _viewport->resize_mouse_down_y() = event->position().toPoint().y();
-        _viewport->resize_upper_height() = enabled_traces[i]->get_totalHeight();
-        _viewport->resize_lower_height() =
-            enabled_traces[i + 1]->get_totalHeight();
-        return;
-      }
-    }
-
-    // Check bottom border of the last enabled trace
-    if (!enabled_traces.empty()) {
-      Trace *lastTrace = enabled_traces.back();
-      int traceBottom = lastTrace->get_v_offset() +
-                        lastTrace->get_totalHeight() / 2 +
-                        View::SignalMargin;
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        _viewport->action_type() = RESIZE_SIGNAL;
-        _viewport->resize_trace_upper() = lastTrace;
-        _viewport->resize_trace_lower() = nullptr;
-        _viewport->resize_mouse_down_y() = event->position().toPoint().y();
-        _viewport->resize_upper_height() = lastTrace->get_totalHeight();
-        _viewport->resize_lower_height() = 0;
-        return;
-      }
-    }
-  }
+  // 通道高度拉伸的判定区只在 Header（左侧通道面板）内，Viewport 不再命中
+  // 通道分隔条，避免波形区被误判为高度拖拽而吞掉框选/移动等操作。
 
   // 【阶段9 遗留决策 + 数据模型澄清】本文件（及 viewport_drag.cpp）所有
   // is_stopped_status() 交互判定**有意保留全局执行态**，不替换为 per-tab 判定：
@@ -331,48 +286,8 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
     return;
   }
 
-  if (_viewport->action_type() == NO_ACTION && _viewport->type() == TIME_VIEW &&
-      _viewport->view().is_logic_rendering_mode()) {
-    std::vector<Trace *> traces;
-    _viewport->view().get_traces(TIME_VIEW, traces);
-    int mouseY =
-        event->position().toPoint().y() + _viewport->view().get_vOffset();
-    const int HitBorderMargin = 5;
-    bool onBorder = false;
-
-    std::vector<Trace *> enabled_traces;
-    for (auto t : traces)
-      if (t->enabled())
-        enabled_traces.push_back(t);
-
-    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
-      int traceBottom = enabled_traces[i]->get_v_offset() +
-                        enabled_traces[i]->get_totalHeight() / 2 +
-                        View::SignalMargin;
-
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        onBorder = true;
-        break;
-      }
-    }
-
-    // Check bottom border of the last enabled trace
-    if (!onBorder && !enabled_traces.empty()) {
-      Trace *lastTrace = enabled_traces.back();
-      int traceBottom = lastTrace->get_v_offset() +
-                        lastTrace->get_totalHeight() / 2 +
-                        View::SignalMargin;
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        onBorder = true;
-      }
-    }
-
-    _viewport->setCursor(onBorder ? Qt::SplitVCursor : Qt::ArrowCursor);
-  }
-
   bool is_drag_action =
-      (_viewport->action_type() == RESIZE_SIGNAL ||
-       _viewport->action_type() == DSO_TRIG_MOVE ||
+      (_viewport->action_type() == DSO_TRIG_MOVE ||
        _viewport->action_type() == CURS_MOVE) ||
       ((event->buttons() & Qt::LeftButton) &&
        (_viewport->type() == TIME_VIEW || _viewport->type() == FFT_VIEW));
@@ -716,13 +631,6 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
 
   int mode = _viewport->view().get_work_mode();
 
-  if (_viewport->action_type() == RESIZE_SIGNAL) {
-    _viewport->resize_trace_upper() = nullptr;
-    _viewport->resize_trace_lower() = nullptr;
-    _viewport->set_action(NO_ACTION);
-    return;
-  }
-
   if (_viewport->view().is_logic_rendering_mode()) {
     onLogicMouseRelease(event);
   } else if (mode == DSO) {
@@ -773,46 +681,6 @@ void ViewportInteraction::mouseDoubleClickEvent(QMouseEvent *event) {
 
   if (!_viewport->view().get_view_rect().contains(event->position().toPoint()))
     return;
-
-  if (_viewport->type() == TIME_VIEW &&
-      _viewport->view().is_logic_rendering_mode()) {
-    std::vector<Trace *> traces;
-    _viewport->view().get_traces(TIME_VIEW, traces);
-    int mouseY =
-        event->position().toPoint().y() + _viewport->view().get_vOffset();
-    const int HitBorderMargin = 5;
-
-    std::vector<Trace *> enabled_traces;
-    for (auto t : traces)
-      if (t->enabled())
-        enabled_traces.push_back(t);
-
-    for (int i = 0; i < static_cast<int>(enabled_traces.size()) - 1; i++) {
-      int traceBottom = enabled_traces[i]->get_v_offset() +
-                        enabled_traces[i]->get_totalHeight() / 2 +
-                        View::SignalMargin;
-
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        enabled_traces[i]->set_own_height(-1);
-        enabled_traces[i + 1]->set_own_height(-1);
-        _viewport->view().signals_changed(nullptr);
-        return;
-      }
-    }
-
-    // Check bottom border of the last enabled trace
-    if (!enabled_traces.empty()) {
-      Trace *lastTrace = enabled_traces.back();
-      int traceBottom = lastTrace->get_v_offset() +
-                        lastTrace->get_totalHeight() / 2 +
-                        View::SignalMargin;
-      if (abs(mouseY - traceBottom) < HitBorderMargin) {
-        lastTrace->set_own_height(-1);
-        _viewport->view().signals_changed(nullptr);
-        return;
-      }
-    }
-  }
 
   if (_viewport->view().is_logic_rendering_mode()) {
     if (event->button() == Qt::RightButton) {

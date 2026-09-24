@@ -233,16 +233,26 @@ public:
    * Initial values for a headerless module's options (numchannels /
    * samplerate).
    *
-   * Two sources, the second one winning: the current device (enabled logic
-   * channel count, current sample rate) and — when @p file_name is given — the
-   * hint block PXView's binary export writes into the file name
-   * ("-<channels>ch-<samplerate>Hz"), which describes THIS file instead of
-   * whatever happens to be open. Empty when neither source knows anything.
+   * Sources, later ones winning: the current device (enabled logic channel
+   * count, current sample rate), the hint block PXView's binary export writes
+   * into the file name ("-<channels>ch-<samplerate>Hz") and a generated CSV's
+   * own comment block — the latter two describe THIS file instead of whatever
+   * happens to be open. Empty when no source knows anything.
+   *
+   * @param module_id the chosen/detected input module id
+   *                  (sr_input_id_get()), or nullptr when unknown. The
+   *                  device-derived guess is applied only for modules that
+   *                  cannot describe themselves
+   *                  (sr_options::uses_device_metadata_hints()); for VCD/CSV/...
+   *                  the file's own metadata must not be overridden — VCD's
+   *                  "numchannels", for instance, is a maximum, and lowering it
+   *                  to the open device's channel count drops signals.
    *
    * Used as the prefill of the import options dialog and as the fallback when a
    * programmatic caller passes no options.
    */
-  QVariantMap import_option_prefill(const QString &file_name = QString()) const;
+  QVariantMap import_option_prefill(const QString &file_name = QString(),
+                                    const char *module_id = nullptr) const;
   // 方案A 的 _saved_device_handle/restore_previous_device 已删除（数据模型
   // 重构步骤5）：关闭文件 tab 的设备回退由 close_file 的 isCurrent 分支
   // （set_default_device）+ 幸存 tab activate() 的 per-tab 设备恢复完成，

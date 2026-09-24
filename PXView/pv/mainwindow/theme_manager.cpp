@@ -217,6 +217,11 @@ void MainWindowThemeManager::setupRibbonCategories() {
   _wnd->title_bar()->addAction(_wnd->category_file_index(), _wnd->file_bar()->_action_save);
   _wnd->title_bar()->addSeparator(_wnd->category_file_index());
   _wnd->title_bar()->addAction(_wnd->category_file_index(), _wnd->file_bar()->_action_export);
+  // Import reads "导入" and opens the system file dialog directly (all
+  // supported formats in one filter); the module is detected from the file
+  // itself, and its option dialog is still shown before the import runs.
+  // The per-format list lives in FileBar's own menu, which this layout keeps
+  // hidden — a submenu here would add a second, arrow-only button to the bar.
   _wnd->title_bar()->addAction(_wnd->category_file_index(), _wnd->file_bar()->_action_import);
   _wnd->title_bar()->addAction(_wnd->category_file_index(), _wnd->file_bar()->_action_capture);
 

@@ -158,7 +158,8 @@ QWidget* Int::get_widget(QWidget *parent, bool auto_commit)
     else
         _spin_box->setRange(static_cast<int>(range_min), static_cast<int>(range_max));
 
-    _spin_box->setValue(static_cast<int>(int_val));
+    _displayed_value = static_cast<int>(int_val);
+    _spin_box->setValue(_displayed_value);
 
     if (auto_commit)
         connect(_spin_box, QOverload<int>::of(&QSpinBox::valueChanged),
@@ -180,6 +181,13 @@ void Int::commit()
         return;
     assert(_value);
 
+    // An untouched field must hand over the module's declared value verbatim:
+    // the spin box can only hold an int, so a wider declared value is shown
+    // clamped (see get_widget()) and submitting the clamp would silently change
+    // the meaning — VCD's "skip" is UINT64_MAX ("start at the first timestamp"),
+    // its clamp is INT_MAX ("skip 2^31-1").
+    const bool untouched = (_spin_box->value() == _displayed_value);
+
     GVariant *new_value = nullptr;
     const GVariantType *const type = g_variant_get_type(_value);
     if (!type)
@@ -187,19 +195,29 @@ void Int::commit()
     assert(type);
 
     if (g_variant_type_equal(type, G_VARIANT_TYPE_BYTE))
-        new_value = g_variant_new_byte(_spin_box->value());
+        new_value = g_variant_new_byte(untouched
+            ? g_variant_get_byte(_value) : static_cast<guint8>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT16))
-        new_value = g_variant_new_int16(_spin_box->value());
+        new_value = g_variant_new_int16(untouched
+            ? g_variant_get_int16(_value) : static_cast<gint16>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT16))
-        new_value = g_variant_new_uint16(_spin_box->value());
+        new_value = g_variant_new_uint16(untouched
+            ? g_variant_get_uint16(_value) : static_cast<guint16>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT32))
-        new_value = g_variant_new_int32(_spin_box->value());
+        new_value = g_variant_new_int32(untouched
+            ? g_variant_get_int32(_value) : static_cast<gint32>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32))
-        new_value = g_variant_new_int32(_spin_box->value());
+        // Note the declared type: this used to build an int32 for a uint32
+        // option (sr_input_new() rejects a mistyped option and fails the whole
+        // import, which is why the option table is coerced again on its way out).
+        new_value = g_variant_new_uint32(untouched
+            ? g_variant_get_uint32(_value) : static_cast<guint32>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64))
-        new_value = g_variant_new_int64(_spin_box->value());
+        new_value = g_variant_new_int64(untouched
+            ? g_variant_get_int64(_value) : static_cast<gint64>(_spin_box->value()));
     else if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64))
-        new_value = g_variant_new_uint64(_spin_box->value());
+        new_value = g_variant_new_uint64(untouched
+            ? g_variant_get_uint64(_value) : static_cast<guint64>(_spin_box->value()));
     else
     {
         // Unexpected value type.

@@ -102,6 +102,17 @@ pv_add_qtest(test_voltage_scale_factors
     ${PXVIEW_INCLUDE_DIR}/pv/core/measure_format.cpp
 )
 
+# ==== 语言文件契约（顶层数组 + 注册页齐全 + 导入选项 id 三语齐全）====
+# 回归保护：lang/cn/input_output.json 曾用 {"language":…,"items":[…]} 包装，而
+# LangResource::load_page() 只认顶层数组 → 整页静默不加载，导入选项对话框全部
+# 回退英文（文件语法合法，普通 JSON 检查发现不了）。只需 Qt，不链接核心库。
+pv_add_qtest(test_lang_files
+    core/test_lang_files.cpp
+)
+target_compile_definitions(test_lang_files PRIVATE
+    PXVIEW_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 # ==== CaptureManager 离线状态机/查询单测 (Spec harden-review T7) ====
 # MockSessionState 实现完整 ISessionState (pv::) + ISessionCoordination。链接方式:
 #   * pxview-core 静态库 (capturemanager/eventbus/log/deviceagent + pxview-data/

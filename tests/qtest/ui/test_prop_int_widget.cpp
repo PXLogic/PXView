@@ -114,6 +114,10 @@ private slots:
 
     /* 编辑器里改值后 commit() 会带着新值回调 setter。 */
     void commitDeliversTheEditedValue();
+
+    /* 用户没碰过的字段：提交的必须是模块声明的原值，而不是控件夹紧后的值
+     * （VCD 的 "skip" 默认是 UINT64_MAX = "从第一个时间戳开始"）。 */
+    void untouchedSentinelIsNotReplacedByTheClamp();
 };
 
 void TestPropIntWidget::uint64OptionShowsTheGivenValue()
@@ -188,6 +192,40 @@ void TestPropIntWidget::commitDeliversTheEditedValue()
     QVERIFY(harness.committed() != nullptr);
     QVERIFY(g_variant_is_of_type(harness.committed(), G_VARIANT_TYPE_UINT64));
     QCOMPARE(g_variant_get_uint64(harness.committed()), static_cast<guint64>(2000000));
+}
+
+void TestPropIntWidget::untouchedSentinelIsNotReplacedByTheClamp()
+{
+    // VCD 的 "skip" 是 uint64 且默认 UINT64_MAX（"从文件第一个时间戳开始"）；
+    // QSpinBox 只装得下 int，所以控件显示 2147483647。用户什么都不改直接确定时，
+    // 提交的必须是 UINT64_MAX —— 否则语义被悄悄改成"跳过 21 亿个时间戳"，
+    // VCD 导入结果会全空。
+    IntHarness harness(g_variant_new_uint64(static_cast<guint64>(UINT64_MAX)));
+    QSpinBox *const spin = harness.spin();
+    QVERIFY(spin != nullptr);
+    QCOMPARE(spin->value(), INT_MAX);  // 显示只能是夹紧值
+
+    harness.commit();
+    QVERIFY(harness.committed() != nullptr);
+    QVERIFY(g_variant_is_of_type(harness.committed(), G_VARIANT_TYPE_UINT64));
+    QCOMPARE(g_variant_get_uint64(harness.committed()),
+             static_cast<guint64>(UINT64_MAX));
+
+    // 对照：能装下的值，未改动时提交的仍是同一个值（不多不少）。
+    IntHarness plain(g_variant_new_uint64(1000000));
+    QVERIFY(plain.spin() != nullptr);
+    plain.commit();
+    QVERIFY(plain.committed() != nullptr);
+    QCOMPARE(g_variant_get_uint64(plain.committed()), static_cast<guint64>(1000000));
+
+    // 用户改过之后，提交的是用户输入（夹紧值域内的新值）。
+    IntHarness edited(g_variant_new_uint64(static_cast<guint64>(UINT64_MAX)));
+    QSpinBox *const edited_spin = edited.spin();
+    QVERIFY(edited_spin != nullptr);
+    edited_spin->setValue(1000);
+    edited.commit();
+    QVERIFY(edited.committed() != nullptr);
+    QCOMPARE(g_variant_get_uint64(edited.committed()), static_cast<guint64>(1000));
 }
 
 QTEST_MAIN(TestPropIntWidget)

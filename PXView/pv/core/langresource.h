@@ -75,6 +75,7 @@ static const struct lang_page_item lange_page_keys[] =
     {STR_PAGE_DSL, "dsl_list.json, dsl_label.json, dsl_channel.json", false},
     {STR_PAGE_DECODER, "dec/0.json,dec/a.json,dec/f.json,dec/k.json,dec/p.json,dec/u.json", true},
     {STR_PAGE_SIGNAL_PROC, "signal_proc.json", false},
+    {STR_PAGE_INPUT_OUTPUT, "input_output.json", false},
 };
 
 class LangResource

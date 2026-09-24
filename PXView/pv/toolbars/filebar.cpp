@@ -137,8 +137,12 @@ void FileBar::retranslateUi()
     // Submenu title keeps the historic id; the first entry is the old
     // single-action behaviour (module detected from the file content).
     _menu_import->setTitle(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT), "&Import..."));
-    _action_import->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT_AUTO),
-                                "Auto detect (all supported formats)"));
+    // This action is the title bar's import entry: it opens the system file
+    // dialog right away (all formats in one filter, module detected from the
+    // file), keeping the historic "导入" wording. Inside the submenu it doubles
+    // as the "auto detect" entry.
+    _action_import->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_IMPORT),
+                                "&Import..."));
     _action_capture->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_FILE_CAPTURE), "&Capture..."));
 }
 
@@ -388,10 +392,16 @@ void FileBar::run_import(const QString &file_name, const QString &format_id)
 
                 // The file name is passed along so a name carrying PXView's
                 // hint block ("-32ch-1000000Hz") pre-fills channel count and
-                // sample rate instead of the "current device" guess.
+                // sample rate instead of the "current device" guess — but only
+                // for modules whose files carry no metadata of their own
+                // (binary/chronovu-la8/raw_analog). VCD et al. describe
+                // themselves; seeding them would override the file, and for VCD
+                // "numchannels" is a maximum that must not be lowered to the
+                // currently open device's channel count.
                 dialogs::InputOutputOptions dlg(
                     this, title, handle.options(),
-                    _session->import_option_prefill(file_name));
+                    _session->import_option_prefill(file_name,
+                                                   sr_input_id_get(module)));
 
                 // The dialog copied every value it needs while constructing;
                 // release the module's static option array before showing it.

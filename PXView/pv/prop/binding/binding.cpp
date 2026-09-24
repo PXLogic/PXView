@@ -91,12 +91,29 @@ void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit, QFon
         else{
             const QString &lbstr = p->label();
             //remove data format options
-            if (lbstr == "Data format"){
+            // Legacy: only the device-options panel wanted this row hidden.
+            // The import/export option dialog turns it off (a libsigrok module
+            // option is legitimately named "Data format", e.g. raw_analog), and
+            // the check compares untranslated text, so it must never apply to
+            // translated labels either.
+            if (_skip_data_format && lbstr == "Data format"){
                 continue;                
             }   
             QLabel *lb = new QLabel(p->label());
             lb->setFont(font);
             widget->setFont(font);
+            // Module options carry a one-sentence explanation; too long for a
+            // label, so it becomes the tooltip of the whole row. The editor may
+            // already carry one of its own (e.g. Int reports the full value when
+            // the spin box had to clamp it), so keep both.
+            if (!p->description().isEmpty()) {
+                const QString existing = widget->toolTip();
+                const QString combined = existing.isEmpty()
+                    ? p->description()
+                    : existing + QLatin1Char('\n') + p->description();
+                lb->setToolTip(combined);
+                widget->setToolTip(combined);
+            }
             layout->addRow(lb, widget);
             _row_num++;
         } 

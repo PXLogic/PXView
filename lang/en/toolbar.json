@@ -164,6 +164,10 @@
         "text": "&Import..."
     },
     {
+        "id": "IDS_TOOLBAR_FILE_IMPORT_AUTO",
+        "text": "Auto detect..."
+    },
+    {
         "id": "IDS_TOOLBAR_FILE_CAPTURE",
         "text": "&Capture..."
     },

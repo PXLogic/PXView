@@ -164,6 +164,10 @@
         "text": "导入"
     },
     {
+        "id": "IDS_TOOLBAR_FILE_IMPORT_AUTO",
+        "text": "自动识别"
+    },
+    {
         "id": "IDS_TOOLBAR_FILE_CAPTURE",
         "text": "截屏"
     },

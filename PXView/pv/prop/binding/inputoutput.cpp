@@ -28,6 +28,8 @@
 
 #include "pv/base/gvarptr.h"
 #include "pv/base/log.h"
+#include "pv/base/string_ids.h"
+#include "pv/core/langresource.h"
 #include "pv/data/sr_options.h"
 #include "pv/prop/bool.h"
 #include "pv/prop/double.h"
@@ -39,8 +41,38 @@ namespace pv {
 namespace prop {
 namespace binding {
 
+namespace {
+
+/*
+ * libsigrok declares every option in English ("numchannels" / "Number of logic
+ * channels" / "The number of (logic) channels in the data"). PXView translates
+ * them by option id in lang/<lang>/input_output.json:
+ *   IDS_OPTION_<ID>       -> the label
+ *   IDS_OPTION_<ID>_DESC  -> the explanation shown as the row's tooltip
+ * An id the language file does not know falls back to the module's own text,
+ * so a new libsigrok module is usable before anyone translates it.
+ */
+QString option_text_id(const char *option_id, const char *suffix)
+{
+    return QStringLiteral("IDS_OPTION_") + QString::fromUtf8(option_id).toUpper() +
+           QString::fromUtf8(suffix);
+}
+
+QString translated_option_text(const char *option_id, const char *fallback,
+                               const char *suffix)
+{
+    const QByteArray id = option_text_id(option_id, suffix).toUtf8();
+    return QString::fromUtf8(L_S(STR_PAGE_INPUT_OUTPUT, id.constData(), fallback));
+}
+
+} // namespace
+
 InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &prefill)
 {
+    // "Data format" is a real module option here (raw_analog); the legacy
+    // device-options row filter must not swallow it.
+    set_skip_data_format(false);
+
     if (!options)
         return;
 
@@ -115,8 +147,13 @@ InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &pr
         // Widgets show label(); name() is only used for widget-specific
         // behaviour (e.g. String's path/dir detection), so feed the raw id.
         const QString name = QString::fromUtf8(option->id);
-        const QString label = QString::fromUtf8(option->name ? option->name
-                                                             : option->id);
+        // Label and tooltip go through the language files; the module's own
+        // English text is the fallback (never an empty label).
+        const QString label = translated_option_text(
+            option->id, option->name ? option->name : option->id, "");
+        const QString description = option->desc
+            ? translated_option_text(option->id, option->desc, "_DESC")
+            : QString();
 
         const GVariantType *const type = g_variant_get_type(initial);
         Property *prop = nullptr;
@@ -138,8 +175,25 @@ InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &pr
                      "skipped", option->id, type_str ? type_str : "?");
         }
 
-        if (prop)
+        if (prop) {
+            // A declared value the editor cannot show exactly is worth saying
+            // out loud: the field shows the clamp, but the untouched value that
+            // reaches the module is still the module's own (Int::commit()).
+            QString tooltip = description;
+            const QString full_value =
+                data::sr_options::out_of_spinbox_range_text(initial);
+            if (!full_value.isEmpty()) {
+                QString hint = QString::fromUtf8(L_S(STR_PAGE_INPUT_OUTPUT,
+                                                     S_ID(IDS_OPTION_VALUE_CLAMPED),
+                                                     "Actual value: %1"));
+                hint.replace(QStringLiteral("%1"), full_value);
+                tooltip = tooltip.isEmpty() ? hint
+                                            : hint + QLatin1Char('\n') + tooltip;
+            }
+            if (!tooltip.isEmpty())
+                prop->set_description(tooltip);
             _properties.push_back(prop);
+        }
     }
 }
 

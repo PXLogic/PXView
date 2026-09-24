@@ -1,0 +1,134 @@
+[
+    {
+        "id": "IDS_OPTION_NUMCHANNELS",
+        "text": "通道数"
+    },
+    {
+        "id": "IDS_OPTION_NUMCHANNELS_DESC",
+        "text": "数据中的通道数。"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE",
+        "text": "采样率（Hz）"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_DESC",
+        "text": "数据的采样率，单位 Hz。"
+    },
+    {
+        "id": "IDS_OPTION_FORMAT",
+        "text": "数据格式"
+    },
+    {
+        "id": "IDS_OPTION_FORMAT_DESC",
+        "text": "数据的格式（数据类型、有无符号、字节序）。"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS",
+        "text": "列格式"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS_DESC",
+        "text": "各列的数据类型：逗号分隔的 [<列数>]<格式>[<位数>] 列表；* 表示其余所有列，- 忽略该列，x/o/b/l 为逻辑数据，a（及数字）为模拟数据，t 为时间戳。"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN",
+        "text": "单列模式"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN_DESC",
+        "text": "简单单列模式：只取指定列（从 1 开始计数）的文本。已由“列格式=4-,x16”取代。"
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN",
+        "text": "起始列"
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN_DESC",
+        "text": "简单多列模式下第一列逻辑数据的列号（从 1 开始，默认 1）。已由“列格式=4-,*l”取代。"
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS",
+        "text": "逻辑通道数"
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS_DESC",
+        "text": "逻辑通道数：单列模式必填，多列模式默认为“其余所有列”。已由“列格式=8l”取代。"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT",
+        "text": "单列模式数据格式"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT_DESC",
+        "text": "简单单列模式下输入文本的数值格式：bin、hex、oct。已由“列格式=x8”取代。"
+    },
+    {
+        "id": "IDS_OPTION_START_LINE",
+        "text": "起始行"
+    },
+    {
+        "id": "IDS_OPTION_START_LINE_DESC",
+        "text": "从第几行开始处理输入文本（默认 1）。"
+    },
+    {
+        "id": "IDS_OPTION_HEADER",
+        "text": "从首行取通道名"
+    },
+    {
+        "id": "IDS_OPTION_HEADER_DESC",
+        "text": "用第一条有效数据行的列标题（若有）作为通道名，默认开启。"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR",
+        "text": "列分隔符"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR_DESC",
+        "text": "用于分隔各列的字符序列，非空文本，默认为逗号。"
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER",
+        "text": "注释起始符"
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER_DESC",
+        "text": "行尾注释的起始字符序列，默认为分号。"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE",
+        "text": "覆盖采样率"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE_DESC",
+        "text": "覆盖文件里的采样率（用于 timescale 段无法表示的频率）。默认会从 VCD 文件的 timescale 段计算采样率；填非 0 值即以该值为准，并忽略 timescale 段。"
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE",
+        "text": "降采样倍数"
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE_DESC",
+        "text": "对文件的采样率做降采样，即除以该倍数。"
+    },
+    {
+        "id": "IDS_OPTION_SKIP",
+        "text": "跳过起始样本"
+    },
+    {
+        "id": "IDS_OPTION_SKIP_DESC",
+        "text": "跳过样本直到指定的时间戳：默认（64 位最大值）表示从文件第一个时间戳开始；填 0 表示从时间戳 0 开始；大于 0 则从该时间戳开始处理。"
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS",
+        "text": "压缩空闲段"
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS_DESC",
+        "text": "压缩长于指定 timescale 刻度数的空闲段，0 表示不压缩。"
+    },
+    {
+        "id": "IDS_OPTION_VALUE_CLAMPED",
+        "text": "实际值：%1"
+    }
+]

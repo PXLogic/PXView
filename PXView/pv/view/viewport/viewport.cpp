@@ -176,8 +176,6 @@ Viewport::Viewport(View &parent, View_type type)
       _cur_sample(0), _nxt_sample(1), _cur_preX(0), _cur_aftX(1), _cur_midY(0),
       _hover_index(0), _hover_hit(false), _dso_xm_valid(false),
       _dso_ym_valid(false), _waiting_trig(0), _dso_trig_moved(false),
-      _resize_trace_upper(nullptr), _resize_trace_lower(nullptr),
-      _resize_mouse_down_y(0), _resize_upper_height(0), _resize_lower_height(0),
       _curs_moved(false), _xcurs_moved(false), _curVOffset(0),
       _max_frame_time(0), _fps(0), _is_idle(true), _drag_frame_pending(false),
       _hover_logic_signal(nullptr), g_drag_active(false),
@@ -575,8 +573,6 @@ void Viewport::clear_interaction_state() {
   // 信号重建后旧 Signal/Trace 已销毁,清空拖拽/悬停缓存的裸指针,
   // 避免后续 mouseMove/Release/applyDragFrame 解引用悬垂对象。
   _drag_sig = nullptr;
-  _resize_trace_upper = nullptr;
-  _resize_trace_lower = nullptr;
   _hover_logic_signal = nullptr;
 }
 

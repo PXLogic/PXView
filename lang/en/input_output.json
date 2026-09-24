@@ -1,0 +1,134 @@
+[
+    {
+        "id": "IDS_OPTION_NUMCHANNELS",
+        "text": "Number of channels"
+    },
+    {
+        "id": "IDS_OPTION_NUMCHANNELS_DESC",
+        "text": "The number of channels in the data."
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE",
+        "text": "Sample rate (Hz)"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_DESC",
+        "text": "The sample rate of the data in Hz."
+    },
+    {
+        "id": "IDS_OPTION_FORMAT",
+        "text": "Data format"
+    },
+    {
+        "id": "IDS_OPTION_FORMAT_DESC",
+        "text": "The format of the data (data type, signedness, endianness)."
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS",
+        "text": "Column format specs"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS_DESC",
+        "text": "Text columns data types. A comma separated list of [<cols>]<fmt>[<bits>] items. * for all remaining columns. - ignores columns, x/o/b/l logic data, a (and digits) analog data, t timestamps."
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN",
+        "text": "Single column"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN_DESC",
+        "text": "Simple single-column mode, exclusively use text from the specified column (number starting at 1). Obsoleted by 'column_formats=4-,x16'."
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN",
+        "text": "First column"
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN_DESC",
+        "text": "First column with logic data in simple multi-column mode (number starting at 1, default 1). Obsoleted by 'column_formats=4-,*l'."
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS",
+        "text": "Number of logic channels"
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS_DESC",
+        "text": "Logic channel count, required in simple single-column mode, defaults to \"all remaining columns\" in simple multi-column mode. Obsoleted by 'column_formats=8l'."
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT",
+        "text": "Data format for simple single-column mode."
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT_DESC",
+        "text": "The input text number format of simple single-column mode: bin, hex, oct. Obsoleted by 'column_formats=x8'."
+    },
+    {
+        "id": "IDS_OPTION_START_LINE",
+        "text": "Start line"
+    },
+    {
+        "id": "IDS_OPTION_START_LINE_DESC",
+        "text": "The line number at which to start processing input text (default: 1)."
+    },
+    {
+        "id": "IDS_OPTION_HEADER",
+        "text": "Get channel names from first line."
+    },
+    {
+        "id": "IDS_OPTION_HEADER_DESC",
+        "text": "Use the first processed line's column captions (when available) as channel names. Enabled by default."
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR",
+        "text": "Column separator"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR_DESC",
+        "text": "The sequence which separates text columns. Non-empty text, comma by default."
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER",
+        "text": "Comment leader character"
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER_DESC",
+        "text": "The text which starts comments at the end of text lines, semicolon by default."
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE",
+        "text": "Overwrite Samplerate"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE_DESC",
+        "text": "Overwrite the input file's samplerate, i.e. for frequencies not representable via timescale. By default the VCD file is searched for a timescale section to compute the samplerate. For values other than 0 this value will be considered as the actual samplerate and the timescale section will be ignored."
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE",
+        "text": "Downsampling factor"
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE_DESC",
+        "text": "Downsample the input file's samplerate, i.e. divide by the specified factor."
+    },
+    {
+        "id": "IDS_OPTION_SKIP",
+        "text": "Skip this many initial samples"
+    },
+    {
+        "id": "IDS_OPTION_SKIP_DESC",
+        "text": "Skip samples until the specified timestamp. By default samples start at the first timestamp in the file. Value 0 creates samples starting at timestamp 0. Values above 0 only start processing at the given timestamp."
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS",
+        "text": "Compress idle periods"
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS_DESC",
+        "text": "Compress idle periods which are longer than the specified number of timescale ticks."
+    },
+    {
+        "id": "IDS_OPTION_VALUE_CLAMPED",
+        "text": "Actual value: %1"
+    }
+]

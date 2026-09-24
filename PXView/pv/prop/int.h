@@ -63,6 +63,14 @@ private:
 
     GVariant *_value;
 	pv::ui::DsSpinBox *_spin_box;
+
+    /* The value as the widget shows it, i.e. clamped to what a Qt spin box can
+     * hold. commit() compares the current field content against it: an untouched
+     * field must submit the module's declared value verbatim, otherwise a value
+     * outside the widget's range (VCD's "skip" defaults to UINT64_MAX, meaning
+     * "start at the first timestamp") would be replaced by the clamp (INT_MAX)
+     * merely because the dialog was accepted. */
+    int _displayed_value = 0;
 };
 
 } // prop

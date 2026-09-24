@@ -1,0 +1,134 @@
+[
+    {
+        "id": "IDS_OPTION_NUMCHANNELS",
+        "text": "通道數"
+    },
+    {
+        "id": "IDS_OPTION_NUMCHANNELS_DESC",
+        "text": "資料中的通道數。"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE",
+        "text": "取樣率（Hz）"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_DESC",
+        "text": "資料的取樣率，單位 Hz。"
+    },
+    {
+        "id": "IDS_OPTION_FORMAT",
+        "text": "資料格式"
+    },
+    {
+        "id": "IDS_OPTION_FORMAT_DESC",
+        "text": "資料的格式（資料型別、有無符號、位元組順序）。"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS",
+        "text": "欄位格式"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_FORMATS_DESC",
+        "text": "各欄位的資料型別：逗號分隔的 [<欄數>]<格式>[<位數>] 清單；* 表示其餘所有欄位，- 忽略該欄位，x/o/b/l 為邏輯資料，a（及數字）為類比資料，t 為時間戳。"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN",
+        "text": "單欄模式"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_COLUMN_DESC",
+        "text": "簡單單欄模式：只取指定欄位（從 1 開始計數）的文字。已由「欄位格式=4-,x16」取代。"
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN",
+        "text": "起始欄"
+    },
+    {
+        "id": "IDS_OPTION_FIRST_COLUMN_DESC",
+        "text": "簡單多欄模式下第一欄邏輯資料的欄號（從 1 開始，預設 1）。已由「欄位格式=4-,*l」取代。"
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS",
+        "text": "邏輯通道數"
+    },
+    {
+        "id": "IDS_OPTION_LOGIC_CHANNELS_DESC",
+        "text": "邏輯通道數：單欄模式必填，多欄模式預設為「其餘所有欄位」。已由「欄位格式=8l」取代。"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT",
+        "text": "單欄模式資料格式"
+    },
+    {
+        "id": "IDS_OPTION_SINGLE_FORMAT_DESC",
+        "text": "簡單單欄模式下輸入文字的數值格式：bin、hex、oct。已由「欄位格式=x8」取代。"
+    },
+    {
+        "id": "IDS_OPTION_START_LINE",
+        "text": "起始行"
+    },
+    {
+        "id": "IDS_OPTION_START_LINE_DESC",
+        "text": "從第幾行開始處理輸入文字（預設 1）。"
+    },
+    {
+        "id": "IDS_OPTION_HEADER",
+        "text": "從首行取得通道名稱"
+    },
+    {
+        "id": "IDS_OPTION_HEADER_DESC",
+        "text": "使用第一條有效資料行的欄位標題（若有）作為通道名稱，預設開啟。"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR",
+        "text": "欄位分隔符"
+    },
+    {
+        "id": "IDS_OPTION_COLUMN_SEPARATOR_DESC",
+        "text": "用於分隔各欄位的字元序列，不可為空，預設為逗號。"
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER",
+        "text": "註解起始符"
+    },
+    {
+        "id": "IDS_OPTION_COMMENT_LEADER_DESC",
+        "text": "行尾註解的起始字元序列，預設為分號。"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE",
+        "text": "覆寫取樣率"
+    },
+    {
+        "id": "IDS_OPTION_SAMPLERATE_OVERWRITE_DESC",
+        "text": "覆寫檔案中的取樣率（用於 timescale 區段無法表示的頻率）。預設會從 VCD 檔案的 timescale 區段計算取樣率；填入非 0 值即以該值為準，並忽略 timescale 區段。"
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE",
+        "text": "降取樣倍數"
+    },
+    {
+        "id": "IDS_OPTION_DOWNSAMPLE_DESC",
+        "text": "對檔案的取樣率做降取樣，即除以該倍數。"
+    },
+    {
+        "id": "IDS_OPTION_SKIP",
+        "text": "略過起始樣本"
+    },
+    {
+        "id": "IDS_OPTION_SKIP_DESC",
+        "text": "略過樣本直到指定的時間戳：預設（64 位元最大值）表示從檔案第一個時間戳開始；填 0 表示從時間戳 0 開始；大於 0 則從該時間戳開始處理。"
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS",
+        "text": "壓縮閒置區段"
+    },
+    {
+        "id": "IDS_OPTION_COMPRESS_DESC",
+        "text": "壓縮長於指定 timescale 刻度數的閒置區段，0 表示不壓縮。"
+    },
+    {
+        "id": "IDS_OPTION_VALUE_CLAMPED",
+        "text": "實際值：%1"
+    }
+]

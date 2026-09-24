@@ -415,6 +415,49 @@ inline GHashTable *make_option_table(
 }
 
 /**
+ * The option value in full precision, or an empty string when a Qt spin box can
+ * show it exactly.
+ *
+ * Int uses a QSpinBox, which only holds an int: uint32/int64/uint64 options
+ * beyond that range are *displayed* clamped (VCD's "skip" defaults to
+ * UINT64_MAX = "start at the first timestamp" and shows up as 2147483647). The
+ * declared value itself is still preserved — Int remembers it and hands it over
+ * unchanged while the field is left untouched — but the dialog has to say so,
+ * which is what this text is for.
+ */
+inline QString out_of_spinbox_range_text(GVariant *value)
+{
+    if (!value || g_variant_is_floating(value))
+        return QString();
+
+    const GVariantType *const type = g_variant_get_type(value);
+    if (!type)
+        return QString();
+
+    if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT32)) {
+        const guint32 v = g_variant_get_uint32(value);
+        if (v > static_cast<guint32>(G_MAXINT32))
+            return QString::number(v);
+        return QString();
+    }
+    if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64)) {
+        const gint64 v = g_variant_get_int64(value);
+        if (v > G_MAXINT32 || v < G_MININT32)
+            return QString::number(v);
+        return QString();
+    }
+    if (g_variant_type_equal(type, G_VARIANT_TYPE_UINT64)) {
+        const guint64 v = g_variant_get_uint64(value);
+        if (v > static_cast<guint64>(G_MAXINT32))
+            return QString::number(v);
+        return QString();
+    }
+
+    // The narrow types (byte/int16/uint16/int32) always fit.
+    return QString();
+}
+
+/**
  * Read an unsigned 64-bit option out of a table built by make_option_table().
  *
  * Used by the import path to publish the sample rate the user confirmed, before
@@ -433,6 +476,44 @@ inline uint64_t option_table_uint64(GHashTable *table, const char *id)
         return 0;
 
     return g_variant_get_uint64(value);
+}
+
+/**
+ * Whether the "current device / file name" hints may pre-fill this input
+ * module's options.
+ *
+ * Only headerless formats need them: their file carries no metadata at all, so
+ * without a hint the module falls back to its own placeholders (binary: 8
+ * channels at 0 Hz). Formats that describe themselves — VCD, CSV, Saleae, ISF,
+ * STF, ... — must not be seeded with a guess:
+ *
+ *   * VCD's "numchannels" is a *maximum* number of sigrok channels, so filling
+ *     it with the currently open device's channel count silently drops signals
+ *     from a wider capture;
+ *   * VCD's samplerate is computed from the file's timescale section, which the
+ *     "samplerate_overwrite" option (a different id) only overrides on request.
+ *
+ * The libsigrok input module struct — and with it SR_INPUT_META_HEADER — is
+ * internal to libsigrok, so the headerless formats are listed explicitly. An
+ * unknown id counts as "described by its own file" (safer: a guess that is not
+ * applied cannot do harm).
+ */
+inline bool uses_device_metadata_hints(const char *module_id)
+{
+    // Ids as reported by sr_input_id_get().
+    static const char *const headerless_modules[] = {
+        "binary", "chronovu-la8", "raw_analog", nullptr,
+    };
+
+    if (!module_id)
+        return false;
+
+    for (int i = 0; headerless_modules[i]; i++) {
+        if (g_strcmp0(headerless_modules[i], module_id) == 0)
+            return true;
+    }
+
+    return false;
 }
 
 /**

@@ -98,6 +98,8 @@ void Header::clear_interaction_state() {
   _context_trace = nullptr;
   _resize_trace_upper = nullptr;
   _resize_trace_lower = nullptr;
+  if (QWidget::mouseGrabber() == this)
+    releaseMouse();
   _mouse_is_down = false;
   _moveFlag = false;
   _colorFlag = false;
@@ -430,6 +432,9 @@ void Header::mousePressEvent(QMouseEvent *event) {
         _resize_mouse_down_y = event->position().toPoint().y();
         _resize_upper_height = enabled_traces[i]->get_totalHeight();
         _resize_lower_height = enabled_traces[i + 1]->get_totalHeight();
+        // 高度拉伸的判定区已收归 Header 独占,捕获鼠标以保证拖拽过程中指针
+        // 横向移出 Header(进入 Viewport)时仍能持续收到 mouseMove。
+        grabMouse(Qt::SplitVCursor);
         return;
       }
     }
@@ -445,6 +450,7 @@ void Header::mousePressEvent(QMouseEvent *event) {
         _resize_mouse_down_y = event->position().toPoint().y();
         _resize_upper_height = lastTrace->get_totalHeight();
         _resize_lower_height = 0;
+        grabMouse(Qt::SplitVCursor);
         return;
       }
     }
@@ -595,6 +601,8 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
     }
     _resize_trace_upper = nullptr;
     _resize_trace_lower = nullptr;
+    if (QWidget::mouseGrabber() == this)
+      releaseMouse();
     return;
   }
 

@@ -164,6 +164,10 @@
         "text": "匯入"
     },
     {
+        "id": "IDS_TOOLBAR_FILE_IMPORT_AUTO",
+        "text": "自動識別"
+    },
+    {
         "id": "IDS_TOOLBAR_FILE_CAPTURE",
         "text": "截圖"
     },

@@ -835,11 +835,25 @@ QString SigSession::probe_import_format(const QString &file_name) const
   return result;
 }
 
-QVariantMap SigSession::import_option_prefill(const QString &file_name) const
+QVariantMap SigSession::import_option_prefill(const QString &file_name,
+                                              const char *module_id) const
 {
   QVariantMap prefill;
 
-  if (_state->device_agent().have_instance()) {
+  // The device-derived guess is only for formats whose file says nothing about
+  // itself (binary / chronovu-la8 / raw_analog). A self-describing format must
+  // not be seeded: VCD's "numchannels" is a *maximum* (seeding it with the open
+  // device's channel count drops signals from a wider capture), and its
+  // samplerate comes from the file's timescale section unless the user asks to
+  // overwrite it.
+  const bool device_hints =
+      data::sr_options::uses_device_metadata_hints(module_id);
+  if (!device_hints && module_id) {
+    pxv_info("Import file: module \"%s\" describes itself, no device prefill",
+             module_id);
+  }
+
+  if (device_hints && _state->device_agent().have_instance()) {
     // Enabled logic channels of the device that happens to be open: a raw binary
     // file arriving here was most likely exported from that device. This is a
     // *hint* for the import options dialog, not a decision — the user can
@@ -865,16 +879,22 @@ QVariantMap SigSession::import_option_prefill(const QString &file_name) const
   // The file name beats the device: it describes THIS file (PXView's binary
   // export writes "<n>ch-<rate>Hz" into it), while the device above only
   // describes what happens to be open. This also gives the headless/MCP path a
-  // correct default when the caller passes no options at all.
+  // correct default when the caller passes no options at all. Same gate as the
+  // device guess: the name block belongs to a raw export, so it must not be fed
+  // to a format that carries its own channel/samplerate definitions.
   const data::binary_name_hints::Hints hints =
       data::binary_name_hints::parse(file_name);
-  if (!hints.empty()) {
+  if (!hints.empty() && !device_hints) {
+    pxv_info("Import file: ignoring name hints (channels=%d samplerate=%llu) "
+             "for a self-describing format",
+             hints.channels, static_cast<unsigned long long>(hints.samplerate));
+  } else if (!hints.empty()) {
     pxv_info("Import file: name hints channels=%d samplerate=%llu",
              hints.channels, static_cast<unsigned long long>(hints.samplerate));
   }
-  if (hints.channels > 0)
+  if (device_hints && hints.channels > 0)
     prefill.insert(QStringLiteral("numchannels"), hints.channels);
-  if (hints.samplerate > 0)
+  if (device_hints && hints.samplerate > 0)
     prefill.insert(QStringLiteral("samplerate"),
                    QVariant::fromValue<qulonglong>(hints.samplerate));
 
@@ -977,8 +997,10 @@ bool SigSession::import_file(QString name, const QString &format_id,
   if (!use_options) {
     const struct sr_option **mod_options = sr_input_options_get(mod);
     if (mod_options) {
-      own_options = data::sr_options::make_option_table(mod_options,
-                                                       import_option_prefill(name));
+      // Same prefill the dialog would have offered — honours the module's own
+      // metadata (see import_option_prefill()) and the file name/hints.
+      own_options = data::sr_options::make_option_table(
+          mod_options, import_option_prefill(name, mod_id_str.c_str()));
       // Frees the module's static option array (and its default values).
       sr_input_options_free(mod_options);
       use_options = own_options;

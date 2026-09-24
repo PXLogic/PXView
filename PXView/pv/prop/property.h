@@ -51,6 +51,13 @@ public:
     const QString& name();
     const QString& label();
 
+    /* Longer explanation of what the option does, used as the tooltip of both
+     * the row label and the editor widget. Empty by default: the input/output
+     * option bindings set it because libsigrok modules describe every option in
+     * one sentence that is far too long for a label. */
+    void set_description(const QString &desc) { _description = desc; }
+    const QString& description() const { return _description; }
+
     virtual ~Property();
 
     /* Build the editor widget. Subclasses implement the actual widget creation.
@@ -91,6 +98,7 @@ protected:
 private:
     QString _name;
     QString _label;
+    QString _description;
 };
 
 } // prop
