@@ -415,6 +415,27 @@ inline GHashTable *make_option_table(
 }
 
 /**
+ * Read an unsigned 64-bit option out of a table built by make_option_table().
+ *
+ * Used by the import path to publish the sample rate the user confirmed, before
+ * any data (and thus any SR_DF_META) has arrived. Returns 0 when the module does
+ * not declare the id, when nothing set it, or when its type is not uint64 --
+ * i.e. "unknown", never a guess.
+ */
+inline uint64_t option_table_uint64(GHashTable *table, const char *id)
+{
+    if (!table || !id)
+        return 0;
+
+    GVariant *const value =
+        static_cast<GVariant *>(g_hash_table_lookup(table, id));
+    if (!value || !g_variant_is_of_type(value, G_VARIANT_TYPE_UINT64))
+        return 0;
+
+    return g_variant_get_uint64(value);
+}
+
+/**
  * Whether PXView may offer a libsigrok output module in the data-export dialog.
  *
  * StoreSession::export_exec() hands the module a QFile it opened itself and

@@ -986,6 +986,11 @@ bool SigSession::import_file(QString name, const QString &format_id,
   }
 
   const struct sr_input *input = sr_input_new(mod, use_options);
+  // Keep the confirmed sample rate for the device registration below: the table
+  // is freed right here when this call built it (own_options), or by the caller
+  // once this function returns, so `use_options` must not be read later.
+  const uint64_t import_rate =
+      data::sr_options::option_table_uint64(use_options, "samplerate");
   if (own_options)
     g_hash_table_destroy(own_options);
   if (!input) {
@@ -1056,6 +1061,15 @@ bool SigSession::import_file(QString name, const QString &format_id,
     sr_input_free(input);
     return false;
   }
+
+  // Publish the sample rate the user confirmed (or that was pre-filled) before
+  // any data flows: the SamplingBar and the sample-depth box are rebuilt right
+  // after the device goes active, while the module's SR_DF_META only arrives
+  // with the first chunk — and a driver-less input sdi cannot be asked for it.
+  // DataFeedParser::feed_in_meta() overwrites this later when the module reports
+  // a rate of its own (e.g. VCD or CSV with timestamp columns).
+  if (import_rate > 0)
+    _state->device_agent().set_file_samplerate(import_rate);
 
   if (!set_device(dev_handle)) {
     pxv_err("Import file error: set_device failed for input device");

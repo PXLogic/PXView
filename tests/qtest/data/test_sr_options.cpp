@@ -122,6 +122,10 @@ private slots:
     void widgetValuesAreCoercedToDeclaredTypes();
     void csvImportAcceptsWidgetTypedValues();
 
+    /* E) 导入时把"用户确认的采样率"发布给 DeviceAgent，靠的就是这个读取函数：
+     *    只认 uint64（samplerate 的声明类型），缺失/错型一律 0=未知，不猜。 */
+    void optionTableUint64ReadsOnlyDeclaredValues();
+
     /* C) binary 导入的通道数来自用户给的选项，不再是写死的 8。 */
     void binaryImportUsesUserChannelCount();
 
@@ -436,6 +440,41 @@ void TestSrOptions::csvImportAcceptsWidgetTypedValues()
         g_variant_type_free(entry.second);
     for (auto &entry : widget_values)
         g_variant_unref(entry.second);
+}
+
+void TestSrOptions::optionTableUint64ReadsOnlyDeclaredValues()
+{
+    const struct sr_input_module *module = sr_input_find("csv");
+    QVERIFY(module != nullptr);
+
+    sr_options::OptionsHandle handle = sr_options::OptionsHandle::for_input(module);
+    QVERIFY(!handle.empty());
+
+    QVariantMap prefill;
+    prefill.insert(QStringLiteral("samplerate"), QVariant::fromValue<qulonglong>(1000000));
+    prefill.insert(QStringLiteral("logic_channels"), 32);
+
+    GHashTable *table = sr_options::make_option_table(handle.options(), prefill);
+    handle.reset();  // 模块的静态选项数组已释放，表必须不受影响
+
+    // 采样率是唯一被 DeviceAgent 采纳的 uint64 选项。
+    QCOMPARE(sr_options::option_table_uint64(table, "samplerate"),
+             static_cast<uint64_t>(1000000));
+
+    // 类型把关：csv 的 logic_channels 声明是 uint32，不是采样率，必须返回 0
+    // （返回 32 会让 SamplingBar 把通道数当采样率显示）。
+    QCOMPARE(sr_options::option_table_uint64(table, "logic_channels"),
+             static_cast<uint64_t>(0));
+
+    // 未知键 / 空表 / 空 id：一律"未知"（0），绝不猜。
+    QCOMPARE(sr_options::option_table_uint64(table, "not_an_option"),
+             static_cast<uint64_t>(0));
+    QCOMPARE(sr_options::option_table_uint64(table, nullptr),
+             static_cast<uint64_t>(0));
+    QCOMPARE(sr_options::option_table_uint64(nullptr, "samplerate"),
+             static_cast<uint64_t>(0));
+
+    g_hash_table_destroy(table);
 }
 
 void TestSrOptions::binaryImportUsesUserChannelCount()

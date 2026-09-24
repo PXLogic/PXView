@@ -78,6 +78,9 @@ ds_device_handle DeviceAgent::set_file_device(struct sr_dev_inst *sdi, const QSt
     // (SR_CONF_SESSIONFILE is SET-only in the virtual-session driver), so we
     // store it here and publish it via _path in update().
     _file_path = name;
+    // A new file: its rate is unknown until the import publishes it (from the
+    // import options and/or the module's SR_DF_META).
+    _file_samplerate = 0;
 
     // Session-Centric 阶段2：文件设备以文件名命名（写入 sdi->model）。
     // virtual-session 驱动不设置 vendor/model/conn，get_device_list() 之前
@@ -95,6 +98,19 @@ ds_device_handle DeviceAgent::set_file_device(struct sr_dev_inst *sdi, const QSt
     // 递增序号，与列表位置解耦——位置式 handle 在 release 擦除活跃 sdi 后
     // 错位，曾导致关闭文件重开时选中越界/选错设备）。
     return _dev_mgr.register_file_device(sdi);
+}
+
+void DeviceAgent::set_file_samplerate(uint64_t samplerate)
+{
+    if (samplerate == 0 || samplerate == _file_samplerate)
+        return;
+
+    _file_samplerate = samplerate;
+
+    char *const s = sr_samplerate_string(samplerate);
+    pxv_info("DeviceAgent: file device samplerate = %s (%llu Hz)",
+             s ? s : "?", static_cast<unsigned long long>(samplerate));
+    g_free(s);
 }
 
 void DeviceAgent::remove_device(ds_device_handle handle)
@@ -1323,8 +1339,17 @@ GVariant* DeviceAgent::get_config(int key, const sr_channel *ch, const sr_channe
     }
 
     struct sr_dev_driver *drv = sr_dev_inst_driver_get(_di);
-    if (!drv)
+    if (!drv) {
+        // Imported file (libsigrok input module): the sdi was malloc'ed by the
+        // module and has no driver, so no driver can answer the key. Serve the
+        // sample rate published by the import (set_file_samplerate()) to keep
+        // get_sample_rate() -- and with it the SamplingBar's rate/depth boxes --
+        // working exactly as for a .pxl, where the virtual-session driver
+        // implements this key. Other keys stay unsupported (nullptr) as before.
+        if (key == SR_CONF_SAMPLERATE && _file_samplerate > 0)
+            return g_variant_new_uint64(_file_samplerate);
         return nullptr;
+    }
 
     GVariant *data = nullptr;
     int ret = sr_config_get(drv, _di, cg, static_cast<uint32_t>(key), &data);

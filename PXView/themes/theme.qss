@@ -1595,6 +1595,20 @@ QDoubleSpinBox
     min-width: 60px;
 }
 
+/* Unified input height: 28px on screen = content 22px + padding 2*2 + border
+ * 1*2. Both bounds are required, otherwise QSpinBox/QDoubleSpinBox stay at
+ * their up/down-button driven 31px sizeHint. Keep 28 in sync with the C++ side
+ * (ProtocolDock). */
+QLineEdit,
+QComboBox,
+QSpinBox,
+QDoubleSpinBox,
+QAbstractSpinBox
+{
+    min-height: 22px;
+    max-height: 22px;
+}
+
 QSpinBox::up-button,
 QDoubleSpinBox::up-button
 {

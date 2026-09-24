@@ -105,6 +105,21 @@ public:
     // Called by SigSession::close_file(). Removes a device by handle.
     void remove_device(ds_device_handle handle);
 
+    // Sample rate of an imported data file (libsigrok input module).
+    //
+    // Such an sdi has no driver (the input module mallocs it), so
+    // sr_config_get() cannot answer SR_CONF_SAMPLERATE and get_sample_rate()
+    // used to return 0 — which left the SamplingBar's rate/depth boxes empty for
+    // imports while .pxl files showed them (the virtual-session driver answers
+    // the key from the loaded session). The rate is published here instead:
+    // by SigSession::import_file() from the import options and by
+    // DataFeedParser::feed_in_meta() from the SR_DF_META the input module sends
+    // (binary.c, csv.c flush_samplerate(), ...). get_config() serves it while the
+    // active device has no driver, so every consumer (SamplingBar, ruler,
+    // DeviceOptions) sees the same value as for a .pxl.
+    void set_file_samplerate(uint64_t samplerate);
+    uint64_t file_samplerate() const { return _file_samplerate; }
+
     // Called by SigSession::get_device_list(). Returns file-loaded devices.
     std::vector<struct sr_dev_inst*> &file_devices() { return _dev_mgr.file_devices(); }
 
@@ -381,6 +396,8 @@ private:
     // here in set_file_device() and copied into _path by update() (which runs
     // after the device is opened). path() relies on this for file devices.
     QString     _file_path;
+    // Imported-file sample rate; see set_file_samplerate().
+    uint64_t    _file_samplerate = 0;
     bool        _is_new_device = false;
     struct sr_dev_inst  *_di = nullptr;
     struct sr_session   *_sr_session = nullptr;

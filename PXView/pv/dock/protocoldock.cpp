@@ -225,8 +225,9 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   match_layout->addWidget(_matchs_label, 0, Qt::AlignLeft);
   match_layout->addStretch(1);
 
-  _pro_keyword_edit->setFixedHeight(_pro_add_button->sizeHint().height());
-  _ann_search_edit->setFixedHeight(_pre_button->sizeHint().height());
+  // Keep in sync with the unified 28px input height in theme.qss.
+  _pro_keyword_edit->setFixedHeight(28);
+  _ann_search_edit->setFixedHeight(28);
 
   _table_view = new QTableView(bot_panel);
   // Use the proxy model as the table's model so that setFilterFixedString
@@ -1607,8 +1608,9 @@ void ProtocolDock::adjustPannelSize() {
 
   int lineHeight = rc.height() + 15;
   int btnHeight = _pro_add_button->sizeHint().height();
-  _pro_keyword_edit->setFixedHeight(btnHeight);
-  _ann_search_edit->setFixedHeight(_pre_button->sizeHint().height());
+  // Keep in sync with the unified 28px input height in theme.qss.
+  _pro_keyword_edit->setFixedHeight(28);
+  _ann_search_edit->setFixedHeight(28);
   int pannelHeight = lineHeight * _protocol_lay_items.size() + btnHeight;
 
   if (pannelHeight < 100) {

@@ -36,10 +36,31 @@ void DataFeedParser::feed_in_meta(const sr_dev_inst *sdi,
 
   for (const GSList *l = meta.config; l; l = l->next) {
     const sr_config *const src = reinterpret_cast<const sr_config*>(l->data);
+    if (!src || !src->data)
+      continue;
     switch (src->key) {
     case SR_CONF_SAMPLERATE:
-      /// @todo handle samplerate changes
-      /// samplerate = (uint64_t *)src->value;
+      // Data files report their rate here: binary.c sends it right after the
+      // first chunk, csv.c in flush_samplerate() (from the samplerate option or
+      // from in-row timestamps), VCD/saleae from their file header. An imported
+      // sdi has no driver, so DeviceAgent cannot ask anyone else -- publish it
+      // or the SamplingBar/ruler keep working with 0 (that was the reason
+      // imported files showed no sample rate while .pxl did).
+      if (g_variant_is_of_type(src->data, G_VARIANT_TYPE_UINT64)) {
+        const uint64_t rate = g_variant_get_uint64(src->data);
+        if (rate > 0) {
+          _state->device_agent().set_file_samplerate(rate);
+          // Paint scale of the current view (samples per pixel) follows the
+          // acquisition's rate; the rate just became known.
+          _coord->set_cur_snap_samplerate(rate);
+        }
+      } else {
+        // A future module handing over another numeric type should not be
+        // silently ignored (get_uint64() on a mistyped variant is an abort()).
+        pxv_warn("DataFeedParser: SR_CONF_SAMPLERATE payload type is '%s', "
+                 "expected 't'",
+                 g_variant_get_type_string(src->data));
+      }
       break;
     }
   }
