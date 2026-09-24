@@ -44,6 +44,7 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QPointer>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
@@ -950,7 +951,20 @@ void Viewport::clear_analog_measurement() {
 }
 
 void Viewport::configure_analog_measurement() {
-  QDialog dialog(this);
+  // Heap-allocated, exposed through a reference so the many uses below stay
+  // unchanged -- but there is NO stack object to destruct.
+  //
+  // The dialog is a child of this Viewport, which is destroyed together with
+  // its tab. If the tab is torn down while the modal loop below is running (an
+  // MCP/API call, or simply the user closing the application), ~QWidget's
+  // deleteChildren() deletes the dialog; exec() then returns normally (Qt's
+  // internal QPointer guard holds), and a stack object would have its
+  // destructor run on freed memory. The resulting heap corruption is reported
+  // later as 0xc0000374 in RtlFreeHeap. See pv/dock/protocoldock.cpp for the
+  // same pattern, with the guard on the post-exec work.
+  auto *dialog_heap = new QDialog(this);
+  QDialog &dialog = *dialog_heap;
+  QPointer<Viewport> self(this);
   dialog.setWindowTitle(QStringLiteral("模拟波形测量显示项"));
   auto *layout = new QVBoxLayout(&dialog);
 
@@ -1035,7 +1049,15 @@ void Viewport::configure_analog_measurement() {
   connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
 
-  if (dialog.exec() != QDialog::Accepted)
+  const int dlg_ret = dialog.exec();
+
+  // `dialog` (and this Viewport) may already be gone: the dialog is a child of
+  // this widget, so a tab teardown during the modal loop deleted it.
+  if (self.isNull())
+    return;
+  dialog_heap->deleteLater();
+
+  if (dlg_ret != QDialog::Accepted)
     return;
 
   _analog_measure_options.show_channel = show_channel->isChecked();

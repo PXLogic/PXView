@@ -50,6 +50,7 @@
 #include <QHeaderView>
 #include <QObject>
 #include <QPainter>
+#include <QPointer>
 #include <QScrollBar>
 #include <QSizePolicy>
 #include <QStandardItemModel>
@@ -888,10 +889,32 @@ void ProtocolDock::on_decoder_progress() {
 }
 
 void ProtocolDock::set_model() {
-  // Stack-allocated: the old "new + exec()" leaked the dialog every time the
-  // protocol list was opened. PxDialog does not set WA_DeleteOnClose.
-  pv::dialogs::ProtocolList protocollist_dlg(this, _session, _decoder_model);
-  protocollist_dlg.exec();
+  // Heap-allocated, NOT stack-allocated.
+  //
+  // The protocol list is a modal child of this dock. If this dock is destroyed
+  // while the dialog is inside exec() (dock rebuild / tab close / device
+  // switch), ~QWidget's deleteChildren() deletes the dialog. With a stack
+  // object that is fatal twice over: exec() returns normally (Qt's internal
+  // QPointer guard), and then the *stack destructor* runs on freed memory.
+  // Measured: the resulting heap corruption surfaces as 0xc0000374 in
+  // RtlFreeHeap -> _free_base -> <dialog dtor>, i.e. the very signature of the
+  // export-dialog crash. A heap object has no destructor to run, so that
+  // failure mode disappears.
+  //
+  // This does not reintroduce the leak the stack allocation was fixing:
+  //   * normal path   -> exec() returns, owner alive, deleteLater() disposes it
+  //   * owner died    -> the dialog already died with its parent, nothing to do
+  // The QPointer answers "is this dock still alive?" -- the post-exec work below
+  // dereferences `this`, so it must be skipped when the dock is gone.
+  QPointer<ProtocolDock> self(this);
+  auto *protocollist_dlg =
+      new pv::dialogs::ProtocolList(this, _session, _decoder_model);
+  protocollist_dlg->exec();
+
+  if (self.isNull())
+    return;
+  protocollist_dlg->deleteLater();
+
   resize_table_view(_decoder_model);
   _model_proxy.setSourceModel(_decoder_model);
   search_done();
@@ -1119,10 +1142,18 @@ void ProtocolDock::column_resize(int index, int old_size, int new_size) {
 }
 
 void ProtocolDock::export_table_view() {
-  // Stack-allocated: the old "new + exec()" leaked the dialog on every
-  // export. PxDialog does not set WA_DeleteOnClose, so this is safe.
-  pv::dialogs::ProtocolExp protocolexp_dlg(this, _session, _decoder_model);
-  protocolexp_dlg.exec();
+  // Heap-allocated for the same reason as set_model(): a stack object whose
+  // parent is destroyed during exec() would have its destructor run on freed
+  // memory (see the comment there). No post-exec work here, so the only thing
+  // to guard is the disposal itself.
+  QPointer<ProtocolDock> self(this);
+  auto *protocolexp_dlg =
+      new pv::dialogs::ProtocolExp(this, _session, _decoder_model);
+  protocolexp_dlg->exec();
+
+  if (self.isNull())
+    return; // dock (and therefore the dialog) is already gone
+  protocolexp_dlg->deleteLater();
 }
 
 void ProtocolDock::nav_table_view() {

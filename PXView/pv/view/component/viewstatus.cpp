@@ -24,6 +24,7 @@
 
 #include <QHBoxLayout>
 #include <QPainter>
+#include <QPointer>
 #include <QStyleOption>
 #include <QMouseEvent>
 #include <QBitmap>
@@ -215,8 +216,21 @@ void ViewStatus::mousePressEvent(QMouseEvent *event)
             const QRect rect = std::get<0>(_mrects[i]);
             if (rect.contains(event->position().toPoint())) {
                 _hit_rect = static_cast<int>(i);
-                pv::dialogs::DsoMeasure dsoMeasureDialog(_session, _view, i, _last_sig_index);
-                dsoMeasureDialog.exec();
+                // Heap + QPointer guard. DsoMeasure is parented to the View
+                // (see its ctor: PxDialog(reinterpret_cast<QWidget*>(&parent))),
+                // and the View is destroyed together with its tab. If that
+                // happens while the modal loop runs, deleteChildren() deletes
+                // the dialog; exec() returns normally, but a stack object would
+                // then have its destructor run on freed memory -- reported
+                // later as 0xc0000374 in RtlFreeHeap. See
+                // pv/dock/protocoldock.cpp for the same pattern.
+                QPointer<ViewStatus> self(this);
+                auto *dsoMeasureDialog = new pv::dialogs::DsoMeasure(
+                    _session, _view, i, _last_sig_index);
+                dsoMeasureDialog->exec();
+                if (self.isNull())
+                    return; // this widget is gone; the dialog died with it
+                dsoMeasureDialog->deleteLater();
                 break;
             }
         }
