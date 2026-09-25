@@ -479,8 +479,10 @@ private slots:
     void zoom_pan_sustained_throughput();
     // 通道高度敏感性：竖直边线段长 = 通道高，直接影响栅格化填充量。
     void channel_height_sensitivity();
-    // drawLines vs drawRects：同一几何、两种 Qt 原语的每帧绘制成本对照。
-    void draw_primitives_comparison();
+    // drawRects 与 drawLines 的像素等价性验证（合批不变性 + 矩形末端约定）。
+    void draw_primitives_pixel_parity();
+    // 调用形状/图元/合批的绘制成本矩阵。
+    void draw_batching_comparison();
 };
 
 void TestLogicRenderCost::edge_scan_scaling()
