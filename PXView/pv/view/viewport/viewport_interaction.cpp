@@ -43,6 +43,7 @@
 #include <QPainterPath>
 #include <QScrollBar>
 #include <QStyleOption>
+#include <QTimer>
 #include <QWheelEvent>
 #include <QDateTime>
 #include <cmath>
@@ -64,7 +65,7 @@ namespace pv {
 namespace view {
 
 ViewportInteraction::ViewportInteraction(Viewport *viewport)
-    : _viewport(viewport), _last_wheel_zoom_ms(0) {}
+    : _viewport(viewport) {}
 
 ViewportInteraction::~ViewportInteraction() {}
 
@@ -776,11 +777,10 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
   }
   bool isVertical = (angley != 0);
 
-  double zoom_scale = delta / 80.0;
-
-  if (ABS_VAL(delta) <= 80) {
-    zoom_scale = delta > 0 ? 1.5 : -1.5;
-  }
+  // 对齐 pulseview 的连续缩放手感: delta/120, 标准滚轮一格 = 1 步 = ×1.5。
+  // 旧代码 delta/80 并把 |delta|<=80 钳到 ±1.5 步: 每格实际 ×1.84 太猛,
+  // 且触控板/高分辨率滚轮的小 delta 被放大成固定跳档, 失去平滑渐变。
+  double zoom_scale = delta / 120.0;
 
   if (_viewport->type() == FFT_VIEW) {
     for (auto &t : _viewport->view().get_own_spectrum_traces()) {
@@ -793,9 +793,9 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
     static bool bLstTime = false;
 
     if (event->modifiers() & Qt::ControlModifier) {
-      double vsteps = delta / 80;
-      if (ABS_VAL(delta) <= 80)
-        vsteps = delta > 0 ? 1.5 : -1.5;
+      // 与主缩放同模型的连续步进 (旧代码 int 除法 delta/80 + 钳制, 与
+      // 横向缩放手感不一致)。
+      double vsteps = delta / 120.0;
       _viewport->view().zoom_vertical(vsteps);
       return;
     }
@@ -832,19 +832,28 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
           }
         }
       } else {
-        _viewport->view().zoom(-zoom_scale, x);
+        // 物理鼠标滚轮: 与 Windows/pulseview 同号 (delta>0 = 放大)。
+        // 旧代码取反导致 macOS 上鼠标滚轮方向颠倒; 触控板自然滚动的
+        // 反向 delta 走上面的合成事件路径, 不经过这里。
+        _viewport->view().zoom(zoom_scale, x);
       }
 #else
-      // 性能修复: Windows 路径加 16ms 节流 (60fps 上限)，合并高精度滚轮/触控板
-      // 的密集 tick。旧代码每个 wheel event 同步触发 zoom→viewport_update→重绘链路，
-      // 配合模拟通道逐样本绘制导致严重卡顿 (macOS 路径已有节流，Windows 被遗漏)。
-      // 16ms: 配合 envelope 优化后单帧已 <5ms, 60fps 既跟手又避免事件堆积。
-      // (旧值 50ms=20fps, 每 tick 1.5x 跳跃过大, 用户感觉 "卡在分界线")。
-      const int64_t cur_ms = QDateTime::currentMSecsSinceEpoch();
-      if (cur_ms - _last_wheel_zoom_ms > 16) {
-        _viewport->view().zoom(zoom_scale, x);
-        _last_wheel_zoom_ms = cur_ms;
+      // 垂直同步合帧: 不再按 16ms 墙钟丢 tick, 而是累积两次应用之间的
+      // 全部 delta, 挂一个 0ms 单次定时器, 在下一轮事件循环 (即下一帧
+      // 渲染前) 统一应用。Qt 的 QWidget 每轮事件循环至多产出一次重绘,
+      // 应用节奏因此自然贴合实际帧产出率 (60/120/144Hz 自适应), 且终
+      // 点缩放量精确 = 全部 delta 之和, 光标锚点不再因丢 tick 错位。
+      // 重负载时单次应用触发的重绘占住循环, 速率自动下降, 不会堆积。
+      _pending_zoom_steps += zoom_scale;
+      _pending_zoom_x = x;
+      if (!_pending_zoom_scheduled) {
+        _pending_zoom_scheduled = true;
+        // context = _viewport: Viewport 销毁时回调自动失效
+        QTimer::singleShot(0, _viewport,
+                           [this] { apply_pending_wheel_zoom(); });
       }
+      // 缩放与尾部工作 (auto_end/measure) 延后到本帧统一执行
+      return;
 #endif
     } else {
       bLstTime = false;
@@ -857,6 +866,39 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
     }
   }
 
+  post_wheel_update();
+}
+
+void ViewportInteraction::apply_pending_wheel_zoom() {
+  _pending_zoom_scheduled = false;
+
+  if (_pending_zoom_steps == 0.0)
+    return;
+
+  const double steps = _pending_zoom_steps;
+  _pending_zoom_steps = 0.0;
+
+  if (_viewport->view().get_work_mode() == DSO) {
+    // DSO: 一个滚轮格 = 一个时基档位, 而 ViewLayout::zoom 每次调用只走
+    // 一档 (hori_knob), 累积的多格必须逐档应用, 否则快滚会丢档。
+    int n = int(steps); // 向零截断, 每整格一档
+    while (n > 0) {
+      _viewport->view().zoom(1.0, _pending_zoom_x);
+      --n;
+    }
+    while (n < 0) {
+      _viewport->view().zoom(-1.0, _pending_zoom_x);
+      ++n;
+    }
+  } else {
+    // LOGIC/ANALOG: 连续缩放, 直接应用累积步数 (锚点取最后一次光标 x)。
+    _viewport->view().zoom(steps, _pending_zoom_x);
+  }
+
+  post_wheel_update();
+}
+
+void ViewportInteraction::post_wheel_update() {
   const auto &sigs = _viewport->view().get_own_signals();
   for (auto &s : sigs) {
     if (s->signal_type() == SR_CHANNEL_DSO) {

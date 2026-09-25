@@ -55,6 +55,7 @@
 !/logo-win.ico
 !/mac_appbundle_template.plist.in
 !/window_nisi.nsi
+!/FileAssociation.nsh
 !/windows.md
 !/更新说明.txt
 

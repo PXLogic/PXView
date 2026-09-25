@@ -25,6 +25,14 @@ SetCompressor zlib
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
+; --- Session file associations (.pxl / .sr / .srzip, PulseView-style) ---
+; FileAssociation.nsh must sit next to this script (makensis searches the
+; script directory first). Provided from sigrok-util's mingw packaging.
+!include "FileAssociation.nsh"
+!include "nsDialogs.nsh"
+!define SHCNE_ASSOCCHANGED 0x8000000
+!define SHCNF_IDLIST 0
+
 ; --- Compile-time detection of the PXView Agent (Tauri) binary ---
 ; Defines PXVIEW_AGENT only if package\PXView-Agent.exe exists when the installer
 ; is compiled. This keeps local builds working without an extra makensis flag;
@@ -52,6 +60,10 @@ SetCompressor zlib
 !insertmacro MUI_PAGE_DIRECTORY
 ; Installation progress page
 !insertmacro MUI_PAGE_INSTFILES
+; File association selection page (shown after installation, before Finish):
+; one checkbox per session file type, all default-checked. Registration runs
+; in the page-leave function so $INSTDIR is final and admin rights are held.
+Page custom AssocPageCreate AssocPageLeave
 ; Installation complete page
 !define MUI_FINISHPAGE_RUN "$INSTDIR\PXView.exe"
 !insertmacro MUI_PAGE_FINISH
@@ -78,6 +90,17 @@ LangString MsgPrevDetected ${LANG_SIMPCHINESE} "检测到旧版本 ${PRODUCT_NAM
 LangString MsgUninstPrepFailed ${LANG_ENGLISH} "Failed to prepare the old uninstaller. Please manually uninstall ${PRODUCT_NAME} from Control Panel and try again."
 LangString MsgUninstPrepFailed ${LANG_SIMPCHINESE} "准备卸载程序失败，请从控制面板手动卸载 ${PRODUCT_NAME} 后再试。"
 
+LangString AssocTitle ${LANG_ENGLISH} "File Associations"
+LangString AssocTitle ${LANG_SIMPCHINESE} "文件关联"
+LangString AssocSubtitle ${LANG_ENGLISH} "Which file types should be opened by PXView when double-clicked?"
+LangString AssocSubtitle ${LANG_SIMPCHINESE} "双击以下哪些文件类型时使用 PXView 打开？"
+LangString AssocPxl ${LANG_ENGLISH} "Associate .pxl files (PXView Data)"
+LangString AssocPxl ${LANG_SIMPCHINESE} "关联 .pxl 文件（PXView 数据文件）"
+LangString AssocSr ${LANG_ENGLISH} "Associate .sr files (Sigrok session)"
+LangString AssocSr ${LANG_SIMPCHINESE} "关联 .sr 文件（Sigrok 会话）"
+LangString AssocSrzip ${LANG_ENGLISH} "Associate .srzip files (Sigrok session archive)"
+LangString AssocSrzip ${LANG_SIMPCHINESE} "关联 .srzip 文件（Sigrok 会话归档）"
+
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "PXView-Windows-x86_64-Setup-${PRODUCT_VERSION}.exe"
 InstallDir "$PROGRAMFILES\PXView"
@@ -87,6 +110,13 @@ ShowUnInstDetails show
 
 Var PREV_UNINSTALLER
 Var NEED_REBOOT_AFTER_INSTALL
+
+; --- File association page controls ---
+Var AssocDlg
+Var AssocLbl
+Var ChkAssocPxl
+Var ChkAssocSr
+Var ChkAssocSrzip
 
 Section "MainSection" SEC01
   ; If PXView-Agent.exe (Tauri desktop wrapper) exists in package, check if it's running
@@ -156,9 +186,70 @@ Section -Post
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
+
+  ; --- Session file associations are registered by the AssocPageLeave page
+  ;     function right after this section (user picks .pxl/.sr/.srzip there).
+  ;     Silent installs (/S) never show that page, so register all three here
+  ;     as the documented default.
+  ${If} ${Silent}
+    Call RegisterAllAssociations
+  ${EndIf}
 SectionEnd
 
 # -- Per NSIS rules, all Function sections must be placed after Section sections. -- #
+
+; --- Session file association helpers ----------------------------------------
+
+; Register every supported session file type (used by silent installs).
+; Each extension gets its own ProgID (the description string), so
+; .sr/.srzip never share one key. RegisterExtension backs up any
+; pre-existing association into "backup_val" so Uninstall can restore it.
+; Requires admin — the installer already runs elevated for its HKLM writes.
+Function RegisterAllAssociations
+  ${RegisterExtension} "$INSTDIR\PXView.exe" ".pxl" "PXView Data"
+  ${RegisterExtension} "$INSTDIR\PXView.exe" ".sr" "Sigrok Session File"
+  ${RegisterExtension} "$INSTDIR\PXView.exe" ".srzip" "Sigrok Session Archive"
+  ; Force Windows to refresh icon/association caches so double-click works
+  ; and icons update without a reboot or explorer restart.
+  System::Call 'Shell32::SHChangeNotify(i ${SHCNE_ASSOCCHANGED}, i ${SHCNF_IDLIST}, i 0, i 0)'
+FunctionEnd
+
+; The "File Associations" page: shown after INSTFILES, before Finish.
+Function AssocPageCreate
+  !insertmacro MUI_HEADER_TEXT "$(AssocTitle)" "$(AssocSubtitle)"
+  nsDialogs::Create 1018
+  Pop $AssocDlg
+  ${NSD_CreateLabel} 0 0 100% 24u "$(AssocSubtitle)"
+  Pop $AssocLbl
+  ${NSD_CreateCheckbox} 10u 34u 100% 10u "$(AssocPxl)"
+  Pop $ChkAssocPxl
+  ${NSD_SetState} $ChkAssocPxl ${BST_CHECKED}
+  ${NSD_CreateCheckbox} 10u 50u 100% 10u "$(AssocSr)"
+  Pop $ChkAssocSr
+  ${NSD_SetState} $ChkAssocSr ${BST_CHECKED}
+  ${NSD_CreateCheckbox} 10u 66u 100% 10u "$(AssocSrzip)"
+  Pop $ChkAssocSrzip
+  ${NSD_SetState} $ChkAssocSrzip ${BST_CHECKED}
+  nsDialogs::Show
+FunctionEnd
+
+; "Next"/"Finish" from the association page: apply the picked associations.
+; $INSTDIR is final and the process is elevated here (post-install).
+Function AssocPageLeave
+  ${NSD_GetState} $ChkAssocPxl $0
+  ${If} $0 == ${BST_CHECKED}
+    ${RegisterExtension} "$INSTDIR\PXView.exe" ".pxl" "PXView Data"
+  ${EndIf}
+  ${NSD_GetState} $ChkAssocSr $0
+  ${If} $0 == ${BST_CHECKED}
+    ${RegisterExtension} "$INSTDIR\PXView.exe" ".sr" "Sigrok Session File"
+  ${EndIf}
+  ${NSD_GetState} $ChkAssocSrzip $0
+  ${If} $0 == ${BST_CHECKED}
+    ${RegisterExtension} "$INSTDIR\PXView.exe" ".srzip" "Sigrok Session Archive"
+  ${EndIf}
+  System::Call 'Shell32::SHChangeNotify(i ${SHCNE_ASSOCCHANGED}, i ${SHCNF_IDLIST}, i 0, i 0)'
+FunctionEnd
 
 ; --- Reject shared/system directories as the install target ------------------
 ; Section Uninstall does RMDir /r on $INSTDIR, so a mistyped target (drive
@@ -336,6 +427,14 @@ Section Uninstall
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKLM "${PRODUCT_DIR_REGKEY}"
   SetRegView 64
+
+  ; Unregister the session file associations (only touches extensions this
+  ; install owned; restores a backed-up previous association if there was
+  ; one) and refresh the shell caches.
+  ${un.UnRegisterExtension} ".pxl" "PXView Data"
+  ${un.UnRegisterExtension} ".sr" "Sigrok Session File"
+  ${un.UnRegisterExtension} ".srzip" "Sigrok Session Archive"
+  System::Call 'Shell32::SHChangeNotify(i ${SHCNE_ASSOCCHANGED}, i ${SHCNF_IDLIST}, i 0, i 0)'
   SetAutoClose true
 SectionEnd
 

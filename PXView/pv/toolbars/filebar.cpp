@@ -191,9 +191,12 @@ void FileBar::on_actionOpen_triggered()
         this, 
         L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OPEN_FILE), "Open File"), 
         app.userHistory.openDir,
+        // All Supported first: the native dialog defaults to the first filter,
+        // and .pxl is only one of the containers sr_session_load_file_device()
+        // understands -- defaulting to it hides .sr archives from the picker.
+        "All Supported (*.pxl *.sr *.srzip);;"
         "PXView Data (*.pxl);;"
-        "Sigrok Session (*.sr *.srzip);;"
-        "All Supported (*.pxl *.sr *.srzip)");
+        "Sigrok Session (*.sr *.srzip)");
 
     if (!file_name.isEmpty()) { 
         QString fname = path::GetDirectoryName(file_name);

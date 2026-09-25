@@ -69,11 +69,20 @@ private:
   LogicSignal *get_hovered_logic_signal(const QPoint &pos);
 
   Viewport *_viewport;
-  // 性能修复: 滚轮缩放节流时间戳 (毫秒)。
-  // Windows 高精度滚轮/触控板每秒可产生数十个 wheel event，每个都同步触发
-  // zoom→viewport_update→重绘链路，配合模拟通道逐样本绘制导致卡顿。
-  // 参照 macOS 路径的 50ms 节流，Windows 路径同样合并相邻 tick。
-  int64_t _last_wheel_zoom_ms;
+  // 滚轮缩放垂直同步合帧: 累积两次应用之间到达的全部 wheel delta,
+  // 由 apply_pending_wheel_zoom() 在下一轮事件循环(即下一帧渲染前)
+  // 一次性应用。旧实现按 16ms 墙钟丢弃 tick: 高分辨率滚轮/触控板的
+  // delta 被丢掉 → 快滚终点缩放量不足 → 光标锚点错位; 且 16ms 与
+  // 120/144Hz 屏的真实帧周期不匹配。累积方案不丢任何 delta, 节奏由
+  // 事件循环+重绘自然钳制在每帧一次。仅 GUI 线程访问, 无需原子。
+  double _pending_zoom_steps = 0.0;
+  int _pending_zoom_x = 0;
+  bool _pending_zoom_scheduled = false;
+
+  // 应用累积的缩放, 并执行 wheel 尾部工作 (DSO auto_end + measure)。
+  void apply_pending_wheel_zoom();
+  // wheel 尾部工作, 由 FFT 即时路径与合帧路径共用。
+  void post_wheel_update();
 };
 
 } // namespace view
