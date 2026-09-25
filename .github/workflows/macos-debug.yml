@@ -1,43 +1,56 @@
 #===============================================================================
-#= macOS 崩溃调试工作流 (lldb backtrace)
+#= macOS 崩溃诊断工作流 (lldb backtrace, 复用 build.yml 的 DMG)
 #-------------------------------------------------------------------------------
-# 目的: 在 macOS (arm64) 上构建,然后用 lldb 运行 headless 启动测试,
-#       在崩溃点自动抓取完整调用堆栈 (bt all + 崩溃帧符号化)。
+# 目的: 取回「PXView Build」最近一次构建出的 macOS DMG, 在本地(机器)挂载后
+#       用 lldb 跑 headless 启动测试, 在崩溃点自动抓取调用堆栈。
 #
 # 为什么用 lldb 而不是 gdb:
-#   - macOS 上 gdb 需要额外 codesign,且非 Apple 分发,基本不可用;
-#   - lldb 是 Apple 官方 (clang/LLVM) 调试器,macos-15 runner 自带。
+#   - macOS 上 gdb 需要额外 codesign, 且非 Apple 分发, 基本不可用;
+#   - lldb 是 Apple 官方 (clang/LLVM) 调试器, macos-15 runner 自带。
+#
+# 产物来源 (2026-09-26 重构):
+#   本工作流 **不再自行编译**, 而是复用 build.yml 的产物 —— 结构参照
+#   release-ci.yml 的 publish-nightly: 用 `gh run list --workflow build.yml`
+#   定位 run, 再用 actions/download-artifact@v8 拉取 macOS artifact。
+#   好处: 省掉 Homebrew + ninja + macdeployqt 的整套编译(约 40 分钟),
+#         job 只剩「下载 → 挂载 → lldb → 上传」。
+#
+#   ⚠️ 代价(务必知悉): build.yml 打包用的是 **Release** 编译, 二进制里没有
+#      DWARF 调试信息。因此 lldb 里:
+#        - 函数名靠 Mach-O 动态符号表仍能解析 (能定位到具体函数);
+#        - **没有**源码文件:行号, 也读不到局部变量 (frame variable 会是空);
+#        - 静态函数/匿名命名空间内的函数可能显示为无符号(裸地址)。
+#      这与本工作流原先自行 RelWithDebInfo 编译时的体验不同。如果某次崩溃
+#      必须精确到行号/局部变量, 请改用手动触发 build.yml 时指定带符号的构建,
+#      或临时恢复一个 RelWithDebInfo 编译分支。
 #
 # 触发方式:
-#   - 推荐: push 到 main 分支即自动构建并抓取崩溃堆栈(无需手动操作)
-#   - 也支持手动: Actions → 选本工作流 → Run workflow,可指定 ref/build_type
+#   - 手动: Actions → 选本工作流 → Run workflow
+#     run_id  : 留空 = 取 build.yml 最新一次 run; 也可填具体 run 的 ID
+#     ref     : 拉取产物时 checkout 的 ref (仅用于日志/比对, 不影响产物)
+#     wait_seconds: 不崩溃时等多久后 SIGTERM 收尾 (0 = 一直等)
 #===============================================================================
 
 name: macOS Debug (lldb backtrace)
 
-# 默认不自动构建：本工作流需在 macOS runner 上完整编译 PXView 再跑 lldb，
-# 成本高。改为仅 manual dispatch 时构建并上传 backtrace 产物；
-# push 到 main 不再自动触发（避免每次提交都占用 macos-15 runner）。
-# 如需恢复自动构建，把下面注释掉的 push 段恢复即可。
+# 默认不自动触发：本工作流会占用 macos-15 runner 跑 lldb（虽然不再编译，
+# 但下载 ~130MB DMG + 挂载 + 运行仍需数分钟）。需要时手动 dispatch。
+# 如需恢复 push 触发，把下面注释掉的 push 段恢复即可。
 on:
   # push:
   #   branches: [ main ]
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Branch/tag/commit SHA to build (empty = default branch)'
+      run_id:
+        description: 'build.yml 的 run ID (留空 = 最近一次 PXView Build)'
         required: false
         type: string
         default: ''
-      build_type:
-        description: 'CMake build type (symbols matter for a useful backtrace)'
+      ref:
+        description: 'Branch/tag/commit SHA to check out (empty = default branch)'
         required: false
-        type: choice
-        default: 'RelWithDebInfo'
-        options:
-          - RelWithDebInfo
-          - Release
-          - Debug
+        type: string
+        default: ''
       wait_seconds:
         description: 'Seconds to wait for the crash before SIGTERM (0 = wait forever)'
         required: false
@@ -47,187 +60,207 @@ on:
 jobs:
   macos-debug:
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read     # 读取 build.yml 的 run 与 artifacts
     steps:
-      - name: Resolve ref
-        id: ref
-        run: |
-          INPUT_REF="${{ github.event.inputs.ref }}"
-          if [ -n "$INPUT_REF" ]; then
-            echo "value=$INPUT_REF" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=${{ github.ref }}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "Resolved ref: $(cat "$GITHUB_OUTPUT" | grep value | cut -d= -f2)"
-
-      - name: Checkout PXView repo
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.ref.outputs.value }}
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Install dependencies via Homebrew
-        run: |
-          # Homebrew 6.0 起 tap trust 已是默认行为，HOMEBREW_NO_REQUIRE_TAP_TRUST
-          # 于 2027-12-11 移除；继续设置只会打 deprecation 警告。本项目安装的全部是
-          # homebrew/core 官方 formula（官方 tap 永远受信任），无需关闭任何信任校验。
-          #
-          # runner 镜像自带一些与构建无关的第三方 tap（历史上见过 aws/tap），
-          # `brew update` 会因此打印 "The following taps are not trusted" 噪音。
-          # 不要用 `brew trust <tap>` 去消音 —— 那等于把整个第三方 tap 交给 Homebrew
-          # 执行，比原来的全局开关更糟。直接 untap 掉即可（已装好的 formula 不受影响）。
-          # 将来若确实需要第三方 formula，用 `brew trust --formula user/repo/formula`
-          # 只信任该条目，而不是整个 tap。
-          for t in $(brew tap); do
-            case "$t" in
-              homebrew/*) continue ;;
-            esac
-            echo "Untapping unused third-party tap: $t"
-            brew untap "$t" || true
-          done
-          brew update
-          # 注意：不再安装 Homebrew 的 mimalloc —— 项目改用 vendored 子模块源码构建
-          # （CMake/deps.cmake，MIMALLOC_LIB=mimalloc-static，MI_OVERRIDE=OFF）。
-          # Homebrew 版 mimalloc.h 与子模块版本不一致时会污染 vendored 源码的编译。
-          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
-
-      - name: Build fx2lafw firmware
-        run: |
-          bash build_fx2lafw.sh || echo "WARNING: fx2lafw firmware build failed"
-
-      - name: Configure CMake
+      # ── 1. 定位 build.yml 的 run ────────────────────────────────
+      # 与 release-ci.yml 的 publish-nightly 同一套做法: 不 checkout 也能查,
+      # 但 gh 命令必须显式带 --repo (没有 git remote 可推断仓库)。
+      # 注意这里**不做**「等它跑完」的门槛: 本工作流是事后诊断, 只要产物存在
+      # 就能用; run 还没结束 / 失败了也无妨, 缺 artifact 时下一步会明确报错。
+      - name: Resolve source run
+        id: src
         env:
-          # push 触发时 github.event.inputs 为空,必须给默认值,否则
-          # CMAKE_BUILD_TYPE 为空 → 无 -g 调试信息 → lldb 全是 unnamed_symbol
-          BUILD_TYPE: ${{ github.event.inputs.build_type || 'RelWithDebInfo' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
         run: |
-          rm -rf build && mkdir -p build && cd build
-          export LDFLAGS="-L$(brew --prefix gettext)/lib"
-          export CPPFLAGS="-I$(brew --prefix gettext)/include"
-          # zlib 是 keg-only,zlib.pc 不在 pkgconf 默认搜索路径;libzip.pc 依赖 zlib,
-          # 不加此路径 pkgconf 解析 libzip 失败导致 CMake 配置报 "Please install libzip!"
-          export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix gettext)/lib/pkgconfig:$PKG_CONFIG_PATH"
-          echo "BUILD_TYPE=$BUILD_TYPE"
-          cmake .. -G Ninja \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
-            -DCMAKE_INSTALL_PREFIX=../install.dir
+          if [ -n "$INPUT_RUN_ID" ]; then
+            RUN_ID="$INPUT_RUN_ID"
+            echo "使用手动指定的 run: ${RUN_ID}"
+          else
+            # 默认按创建时间倒序 → 第一条即最近一次 PXView Build。
+            # 不过滤 conclusion: 失败的 run 也可能已经上传了 macOS artifact,
+            # 诊断时恰恰可能是想看它。
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" \
+                       --workflow build.yml --limit 1 \
+                       --json databaseId --jq '.[0].databaseId // empty')
+            if [ -z "$RUN_ID" ]; then
+              echo "ERROR: 找不到任何 PXView Build 的 run。" >&2
+              echo "       先跑一次 build.yml(至少完成 macOS 平台), 或手动填写 run_id。" >&2
+              exit 1
+            fi
+            echo "自动选中最近一次 build.yml run: ${RUN_ID}"
+          fi
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and Install
-        run: |
-          cd build
-          ninja -j 4
-          ninja install
+          # 附带输出该 run 的元信息, 方便在日志里核对「拿的到底是哪次构建」
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json displayTitle,headBranch,headSha,status,conclusion,createdAt \
+            --template '{{.displayTitle}}{{"\n"}}branch={{.headBranch}} sha={{.headSha}}{{"\n"}}status={{.status}} conclusion={{.conclusion}}{{"\n"}}created={{.createdAt}}{{"\n"}}' \
+            2>/dev/null || echo "(无法读取 run 元信息, 继续)"
 
-      - name: Package .app bundle (macdeployqt + Python stdlib)
-        # 与 build.yml 的 macOS 打包保持一致,保证崩溃场景可复现。
+      # ── 2. 取回 macOS artifact ──────────────────────────────────
+      # artifact 名形如 PXView-macOS-<arch>-<version> (见 build.yml 的
+      # "Upload DMG Artifact"), 内容是 install.dir/*.dmg 单文件。
+      # pattern 用 **-ARM64- 精确段**, 不写 PXView-macOS-*: 后者会把将来任何
+      # 以 PXView-macOS 开头的 artifact 一起拉下来(如新增 x86_64 矩阵项),
+      # 且下面对 DMG 的挑选就成了不确定的目录遍历顺序。
+      # merge-multiple=false(默认) → 每个 artifact 解到 dl/<artifact-name>/。
+      - name: Download macOS DMG from that run
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.src.outputs.run_id }}
+          pattern: PXView-macOS-ARM64-*
+          path: dl
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate DMG
+        id: dmg
         run: |
           set -e
-          MACDEPLOYQT="$(brew --prefix qt)/bin/macdeployqt"
-          APP="install.dir/PXView.app"
+          echo "=== 下载到的文件 ==="
+          find dl -type f -print | head -20
 
-          # Python framework 路径修正
-          PY_PREFIX="$(brew --prefix python3 2>/dev/null \
-                       || brew --prefix python@3.14 2>/dev/null \
-                       || brew --prefix python@3.13 2>/dev/null \
-                       || brew --prefix python@3.12 2>/dev/null)"
-          if [ -n "$PY_PREFIX" ]; then
-            mkdir -p "$PY_PREFIX/lib"
-            if [ ! -e "$PY_PREFIX/lib/Python.framework" ] && [ -e "$PY_PREFIX/Frameworks/Python.framework" ]; then
-              ln -s "$PY_PREFIX/Frameworks/Python.framework" "$PY_PREFIX/lib/Python.framework"
-            fi
+          # 收集全部 .dmg。矩阵扩了 arch 时这里会有多个 —— 与其静默取第一个
+          # (顺序不确定, 可能拿到非预期的架构), 不如直接报错让人显式指定 run。
+          # bash 3.2(macOS 自带) 没有 mapfile/readarray, 用 find 计数即可。
+          COUNT=$(find dl -type f -name '*.dmg' | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: 在 run ${{ steps.src.outputs.run_id }} 的 artifact 里没找到 .dmg。" >&2
+            echo "       可能那次 build 的 macOS 平台没跑、或失败在打包前。" >&2
+            echo "       已下载内容:" >&2
+            ls -R dl 2>/dev/null | head -50 >&2 || true
+            exit 1
+          fi
+          if [ "$COUNT" -gt 1 ]; then
+            echo "ERROR: 找到 ${COUNT} 个 .dmg, 无法确定用哪一个:" >&2
+            find dl -type f -name '*.dmg' >&2
+            echo "       请改用 workflow_dispatch 的 run_id 指定一次只含单个 arch 的构建。" >&2
+            exit 1
           fi
 
-          # macdeployqt 依赖收集 (把 Qt/Python dylib 打进 Frameworks)
-          # 参数取舍见 .github/workflows/build.yml 同名步骤的注释：
-          #   -no-strip    去掉默认对每个 Mach-O 的 `strip -x`
-          #   -executable= 让 macdeployqt 一并处理 pxviewd
-          #   -libpath=    显式给出 Homebrew 库搜索路径
-          # 与 build.yml / build_macos.sh 保持同一组参数，避免行为分叉。
-          "$MACDEPLOYQT" "$APP" \
-            -no-strip \
-            -executable="$APP/Contents/MacOS/pxviewd" \
-            -libpath="$(brew --prefix)/lib" \
-            || true
+          DMG=$(find dl -type f -name '*.dmg')
+          echo "DMG = ${DMG} ($(du -h "$DMG" | cut -f1))"
+          echo "path=${DMG}" >> "$GITHUB_OUTPUT"
 
-          # 复制 Python 标准库到 bundled Python.framework
-          BUNDLED_FW="$APP/Contents/Frameworks/Python.framework"
-          if [ -d "$BUNDLED_FW" ]; then
-            for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
-              [ -d "$ver_dir" ] || continue
-              py_ver=$(basename "$ver_dir")
-              # 实测（2026-09-26 CI）：macdeployqt 只搬 Python.framework 本体，
-              # **不会**带上 Versions/<ver>/lib/python<ver> 这份标准库 —— 它跑完后
-              # 这里仍然没有 encodings，所以下面这段拷贝是必需的，不能删。
-              # 保留存在性判断是为了让流程幂等。
-              if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
-                echo "Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
-                continue
-              fi
-              STDLIB_SRC=""
-              for fw_base in \
-                "$PY_PREFIX/Frameworks/Python.framework" \
-                "$PY_PREFIX/lib/Python.framework" \
-                "$(brew --prefix)/Frameworks/Python.framework"; do
-                if [ -d "$fw_base/Versions/$py_ver/lib/python$py_ver/encodings" ]; then
-                  STDLIB_SRC="$fw_base/Versions/$py_ver/lib/python$py_ver"
-                  break
-                fi
-              done
-              if [ -z "$STDLIB_SRC" ]; then
-                for candidate in "$(brew --prefix)/lib/python$py_ver" "$PY_PREFIX/lib/python$py_ver"; do
-                  if [ -d "$candidate/encodings" ]; then
-                    STDLIB_SRC="$candidate"
-                    break
-                  fi
-                done
-              fi
-              if [ -n "$STDLIB_SRC" ]; then
-                mkdir -p "$ver_dir/lib"
-                cp -R "$STDLIB_SRC" "$ver_dir/lib/"
-                echo "Copied Python stdlib (python$py_ver) to bundled framework"
-              else
-                echo "WARNING: Python stdlib not found for $py_ver"
-              fi
-            done
-            find "$BUNDLED_FW" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
-            if [ ! -e "$BUNDLED_FW/Versions/Current" ]; then
-              latest_ver=$(ls -d "$BUNDLED_FW"/Versions/3.* 2>/dev/null | sort -V | tail -1)
-              if [ -n "$latest_ver" ]; then
-                ln -s "$(basename "$latest_ver")" "$BUNDLED_FW/Versions/Current"
-                echo "Created Current symlink -> $(basename "$latest_ver")"
-              fi
-            fi
+      # ── 3. checkout（仅为拿到诊断辅助脚本/版本文件, 非必需构建）──
+      - name: Checkout PXView repo (for diagnostics only)
+        uses: actions/checkout@v7
+        continue-on-error: true
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          submodules: false
+          persist-credentials: false
+
+      # ── 4. 挂载 DMG, 取出 .app ─────────────────────────────────
+      - name: Mount DMG and extract .app
+        run: |
+          set -e
+          DMG="${{ steps.dmg.outputs.path }}"
+          MOUNT=/tmp/pxv-dmg-mount
+          APP_SRC=/tmp/PXView-dbg.app
+
+          # 同名卷残留会导致 "Resource busy" —— 先清理
+          if [ -d "$MOUNT" ]; then
+            hdiutil detach "$MOUNT" -force 2>/dev/null || true
+          fi
+          if [ -d "/Volumes/PXView" ]; then
+            hdiutil detach "/Volumes/PXView" -force 2>/dev/null || true
+          fi
+
+          rm -rf "$MOUNT" "$APP_SRC"
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT"
+
+          echo "=== DMG 内容 ==="
+          ls "$MOUNT"
+
+          if [ ! -d "$MOUNT/PXView.app" ]; then
+            echo "ERROR: DMG 里没有 PXView.app" >&2
+            ls -la "$MOUNT" >&2
+            hdiutil detach "$MOUNT" -force || true
+            exit 1
+          fi
+
+          # 拷到 /tmp 再 detach: 直接从挂载点跑会因镜像卸载而失败,
+          # 且 DMG 内的文件带 quarantine/只读属性, lldb 需要可写目录。
+          cp -R "$MOUNT/PXView.app" "$APP_SRC"
+          # detach 失败不该让 step 失败(后续步骤不依赖它, runner 用完即弃);
+          # 但失败的残留挂载会影响后面重跑, 所以打印出来。
+          if ! hdiutil detach "$MOUNT" -force; then
+            echo "WARNING: detach ${MOUNT} 失败(镜像可能仍挂载)" >&2
+          fi
+
+          if [ ! -x "$APP_SRC/Contents/MacOS/PXView" ]; then
+            echo "ERROR: 拷出的 bundle 里 PXView 不可执行 —— 拷贝不完整?" >&2
+            ls -la "$APP_SRC/Contents/MacOS/" >&2
+            exit 1
+          fi
+
+          # 去隔离标记 —— 从下载/挂载来的 app 不带这一步会在启动时被 Gatekeeper
+          # 拦掉; DMG 里的签名是 ad-hoc, xattr -cr 后仍可运行。
+          xattr -cr "$APP_SRC" 2>/dev/null || true
+
+          # 签名自检: 签名坏掉时 lldb 里会先刷一屏 dyld 错误才崩, 很难判读。
+          # 在这里先说清楚, 免得把「包是坏的」误诊成「程序有 bug」。
+          echo ""
+          echo "=== codesign 自检 ==="
+          if codesign --verify --strict "$APP_SRC" 2>&1; then
+            echo "  签名验证通过"
           else
-            echo "WARNING: Python.framework not found in bundle"
+            echo "  ⚠️ 签名验证未通过(ad-hoc/CI 打包常见, 不影响 lldb 断点;"
+            echo "     但若后续 lldb 里出现 dyld 库加载失败, 优先怀疑这里)"
+            codesign -dvvv "$APP_SRC" 2>&1 | head -20 || true
+          fi
+          echo "  Gateway 评估(仅供参考): $(spctl -a -vvv "$APP_SRC" 2>&1 | head -3 | tr '\n' ' ' || true)"
+
+          echo ""
+          echo "=== .app 结构 ==="
+          ls "$APP_SRC/Contents/MacOS/"
+          echo "--- Frameworks (前 20) ---"
+          ls "$APP_SRC/Contents/Frameworks/" 2>/dev/null | head -20
+          echo ""
+          echo "=== 二进制架构 ==="
+          file "$APP_SRC/Contents/MacOS/PXView"
+          lipo -info "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null || true
+
+          # 符号自查: 直接告诉用户这次能拿到多少信息, 免得对着一堆裸地址猜。
+          # 判据只有一条 —— `dwarfdump --debug-line` 里是否有 .debug_line 段:
+          #   * `dwarfdump --uuid` 不能用, 每个 Mach-O 都有 UUID, 恒为真;
+          #   * `grep -c` 计数为 0 时返回 1, 在 set -e 下会中止 step → 用 `|| true`
+          #     兜住(不要为此整段关 set -e, 那会放过真正的错误)。
+          echo ""
+          echo "=== 调试符号自查 ==="
+          if command -v dwarfdump >/dev/null 2>&1; then
+            DWARF_LINES=$( { dwarfdump --debug-line "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null \
+                             | grep -c '0x'; } || true )
+            DWARF_LINES=${DWARF_LINES:-0}
+            if [ "$DWARF_LINES" -gt 100 ] 2>/dev/null; then
+              echo "  含 DWARF 行号信息 (${DWARF_LINES} 条) —— 堆栈可显示源码位置"
+            else
+              echo "  ⚠️ 无/极少 DWARF 行号信息 (${DWARF_LINES} 条)"
+              echo "     预期如此: build.yml 用 Release 编译。堆栈只有函数名, 无行号/局部变量。"
+            fi
+            NL_SYMS=$( { nm -U "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null | grep -c ' T '; } || true )
+            echo "  文本段外部符号: ${NL_SYMS:-0} 个 (供函数名解析)"
+          else
+            echo "  ⚠️ 无 dwarfdump, 跳过自查"
           fi
 
-          # 清除隔离标记 + 临时 ad-hoc 签名 (runner 本地运行用)
-          xattr -cr "$APP" 2>/dev/null || true
-          codesign --force --sign - "$APP/Contents/MacOS/PXView" 2>/dev/null || true
-          codesign --force --sign - "$APP" 2>/dev/null || true
-          echo "=== .app 结构 ==="
-          ls "$APP/Contents/MacOS/"
-          ls "$APP/Contents/Frameworks/" | head -20
-
+      # ── 5. lldb batch 跑 headless, 崩溃即抓堆栈 ────────────────
       - name: Run headless under lldb and capture crash backtrace
         env:
-          # push 触发时 github.event.inputs 为空,给默认值
           WAIT_SECONDS: ${{ github.event.inputs.wait_seconds || 30 }}
         run: |
           set +e
-          APP_BIN="/private/tmp/PXView-dbg.app/Contents/MacOS/PXView"
-          rm -rf /private/tmp/PXView-dbg.app
-          cp -R install.dir/PXView.app /private/tmp/PXView-dbg.app
-          xattr -cr /private/tmp/PXView-dbg.app 2>/dev/null || true
-          file "$APP_BIN"
+          APP_BIN="/tmp/PXView-dbg.app/Contents/MacOS/PXView"
 
           echo "=== lldb (batch) headless 启动 + 崩溃堆栈采集 ==="
           echo "等待崩溃: ${WAIT_SECONDS}s (超过后 SIGTERM 收尾)"
 
-          # lldb batch 关键点:
+          # lldb batch 关键点 (与旧版一致, 都是有踩坑换来的):
           #  1. 用 `run <args>` 透传 argv (settings set target.run-args 对空格参数报错)
           #  2. 崩溃(signal stop)后,lldb batch 不会继续执行 -o 命令 —— 必须用
           #     -k (on-crash) 命令,它们只在进程崩溃时执行。
@@ -273,17 +306,21 @@ jobs:
           echo "=== 崩溃报告 .ips (若有) ==="
           ls -lt ~/Library/Logs/DiagnosticReports/PXView-*.ips 2>/dev/null | head -3 || echo "无 .ips 崩溃报告"
 
-          # 收集诊断产物
+          # 收集诊断产物。也把 .app 里的 PXView.log 一起收走 —— headless
+          # 启动失败的线索常常在应用日志里而不在 lldb 输出里。
           mkdir -p /tmp/diag
           cp /tmp/lldb-headless.log /tmp/diag/lldb-headless.log 2>/dev/null || true
           cp ~/Library/Logs/DiagnosticReports/PXView-*.ips /tmp/diag/ 2>/dev/null || true
+          cp "$HOME/Library/Logs/PXlogicV20/PXView/PXView.log" /tmp/diag/PXView.log 2>/dev/null || true
+          cp "$HOME/AppData/Roaming/PXlogicV20/PXView/PXView.log" /tmp/diag/PXView.log 2>/dev/null || true
           ls -la /tmp/diag/
 
+      # ── 6. 上传诊断产物 ────────────────────────────────────────
       - name: Upload lldb backtrace artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lldb-backtrace
+          name: lldb-backtrace-${{ steps.src.outputs.run_id }}
           path: |
             /tmp/diag/*.log
             /tmp/diag/*.ips
