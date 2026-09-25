@@ -113,8 +113,8 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>：
-              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              # dev 通道 = <基础版本>-rc.<序号>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
@@ -122,12 +122,13 @@ jobs:
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
               #     只会被发布一次（详见该作业的说明）。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
-              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
+              #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
+              #     位数就排错）。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}"
+              VER="${BASE}-rc.${RC_N:-0}"
             else
               VER="${BASE}"
             fi
@@ -139,8 +140,8 @@ jobs:
       #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
       #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
       #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
-      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
-      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc.0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc.0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
       - name: Stamp version into build files
         run: |
           PY="$(command -v python3 || command -v python)"
@@ -447,8 +448,8 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>：
-              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              # dev 通道 = <基础版本>-rc.<序号>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
@@ -456,12 +457,13 @@ jobs:
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
               #     只会被发布一次（详见该作业的说明）。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
-              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
+              #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
+              #     位数就排错）。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}"
+              VER="${BASE}-rc.${RC_N:-0}"
             else
               VER="${BASE}"
             fi
@@ -473,8 +475,8 @@ jobs:
       #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
       #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
       #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
-      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
-      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc.0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc.0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
       - name: Stamp version into build files
         run: |
           PY="$(command -v python3 || command -v python)"
@@ -939,8 +941,8 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>：
-              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              # dev 通道 = <基础版本>-rc.<序号>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
@@ -948,12 +950,13 @@ jobs:
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
               #     只会被发布一次（详见该作业的说明）。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
-              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
+              #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
+              #     位数就排错）。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}"
+              VER="${BASE}-rc.${RC_N:-0}"
             else
               VER="${BASE}"
             fi
@@ -965,8 +968,8 @@ jobs:
       #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
       #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
       #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
-      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
-      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc.0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc.0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
       - name: Stamp version into build files
         run: |
           PY="$(command -v python3 || command -v python)"

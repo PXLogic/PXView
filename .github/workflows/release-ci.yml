@@ -1144,7 +1144,7 @@ jobs:
   #   4. dev 的最新提交仍是本次提交 —— 被取代的提交不发 nightly（rc 序号唯一性
   #      依赖这一条，见下面「发布形态」）。
   #
-  # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0，
+  # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0，
   # 与正式版标签 PXView_v1.6.5 同前缀同格式）的 prerelease，旧 Release 一概不删
   # —— 资产下载量随 Release 永久累加，旧构建也能回溯下载（llama.cpp 同款做法）；
   # prerelease 标记保证 Latest 徽章仍归正式版。
@@ -1197,8 +1197,8 @@ jobs:
       # ── 2. dev 没有前进（rc 序号唯一性的前提）───────────────────
       # 只有 dev 最新提交的构建才发布 nightly，被取代的提交在这里跳过。
       # 这既是「只给 dev 最新状态留档」的策略，也是 rc 序号不撞号的前提：
-      # 序号是在构建阶段算出来的，相邻两次 push 可能算出同一个 rcN，但其中
-      # 被取代的那次会在这里被跳过，所以同一个 rcN 只会被发布一次。
+      # 序号是在构建阶段算出来的，相邻两次 push 可能算出同一个 rc.N，但其中
+      # 被取代的那次会在这里被跳过，所以同一个 rc.N 只会被发布一次。
       - name: Skip when dev has moved on
         id: tip
         if: steps.build.outputs.ready == 'true'
@@ -1228,7 +1228,7 @@ jobs:
       # 规则与 republish-release.yml 一致：单文件安装包直接拷贝，
       # Windows 便携包在 artifact 里是已解开的目录 → 重新压缩成 zip。
       # 版本号从安装包文件名里取，与 build.yml 解析出的完全一致
-      # （dev 上形如 1.6.6-rc0；发布时的标签是 PXView_v + 这个版本号）。
+      # （dev 上形如 1.6.6-rc.0；发布时的标签是 PXView_v + 这个版本号）。
       - name: Prepare nightly assets
         id: assets
         if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
@@ -1336,7 +1336,7 @@ jobs:
         if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          # 标签 = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0），与正式版标签
+          # 标签 = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0），与正式版标签
           # （PXView_v1.6.5）同前缀同格式；逐构建唯一。不用固定名字是因为
           # GitHub 的 Releases 页同日按标签的语义化版本倒序，非 semver 的标签
           # 会排到正式版后面。
