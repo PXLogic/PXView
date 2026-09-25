@@ -31,6 +31,14 @@ import re
 import sys
 from pathlib import Path
 
+# CI 的 Windows runner（MSYS2 的 python）stdout 默认是 cp1252，直接 print 中文会
+# UnicodeEncodeError（Linux/macOS 是 UTF-8 所以看不出问题）。这里统一强制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):  # 3.6- 没有 reconfigure；管道已关闭
+        pass
+
 # 必须改成功：会影响构建产物里的版本号
 REQUIRED = [
     'CMakeLists.txt',
