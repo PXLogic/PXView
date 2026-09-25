@@ -119,14 +119,14 @@ jobs:
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
               #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
-              #     构建可能算出同一个序号，带 SHA 才不会撞名。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
+              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
+              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
+              VER="${BASE}-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
@@ -441,14 +441,14 @@ jobs:
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
               #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
-              #     构建可能算出同一个序号，带 SHA 才不会撞名。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
+              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
+              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
+              VER="${BASE}-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
@@ -921,14 +921,14 @@ jobs:
               #     版本；标签短且一眼是候选版，不占正式版本号；
               #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
               #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
-              #     构建可能算出同一个序号，带 SHA 才不会撞名。
-              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
+              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
+              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
+              VER="${BASE}-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi

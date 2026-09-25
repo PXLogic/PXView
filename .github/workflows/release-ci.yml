@@ -32,8 +32,8 @@ name: PXView Release CI
 #
 # Job 5: publish-nightly（仅 dev 分支）
 #   门槛 = Job 1 全绿（needs）+ 同一提交的 build.yml（打包 + 安装包自检）成功，
-#   然后才把三平台安装包发布成 prerelease。标签 = 本次版本号，每个构建一个，
-#   旧的一概不删（下载量与旧构建都保留；llama.cpp 同款做法）。
+#   然后才把三平台安装包发布成 prerelease。标签 = PXView_v<本次版本号>，每个构建
+#   一个，旧的一概不删（下载量与旧构建都保留；llama.cpp 同款做法）。
 #   正文包含：开发版本号/提交/两个 run 链接、本次提交信息、自上个正式版以来的
 #   提交列表（含完整对比链接）、SHA256SUMS。
 #   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
@@ -1140,11 +1140,14 @@ jobs:
   #   1. 触发分支是 dev（main 上本 job 直接跳过）；
   #   2. Job 1（全量 E2E）全绿 —— 由 needs 保证，失败本 job 即被跳过；
   #      ASan / TSan / clang-tidy 不是 nightly 的门槛，dev push 上也不跑；
-  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功。
+  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功；
+  #   4. dev 的最新提交仍是本次提交 —— 被取代的提交不发 nightly（rc 序号唯一性
+  #      依赖这一条，见下面「发布形态」）。
   #
-  # 发布形态：每个构建各一个 tag = 本次版本号（1.6.6-rc<N>.<短SHA>）的
-  # prerelease，旧 Release 一概不删 —— 资产下载量随 Release 永久累加，旧构建也能
-  # 回溯下载（llama.cpp 同款做法）；prerelease 标记保证 Latest 徽章仍归正式版。
+  # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0，
+  # 与正式版标签 PXView_v1.6.5 同前缀同格式）的 prerelease，旧 Release 一概不删
+  # —— 资产下载量随 Release 永久累加，旧构建也能回溯下载（llama.cpp 同款做法）；
+  # prerelease 标记保证 Latest 徽章仍归正式版。
   # 正文列出自上个正式版（releases/latest）到本次提交的全部提交标题 + 完整对比
   # 链接，末尾附 SHA256SUMS。
   # 正式发布仍走 tag push → build.yml 的 Release 步骤。
@@ -1191,10 +1194,29 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── 2. 取回打包产物 ─────────────────────────────────────────
+      # ── 2. dev 没有前进（rc 序号唯一性的前提）───────────────────
+      # 只有 dev 最新提交的构建才发布 nightly，被取代的提交在这里跳过。
+      # 这既是「只给 dev 最新状态留档」的策略，也是 rc 序号不撞号的前提：
+      # 序号是在构建阶段算出来的，相邻两次 push 可能算出同一个 rcN，但其中
+      # 被取代的那次会在这里被跳过，所以同一个 rcN 只会被发布一次。
+      - name: Skip when dev has moved on
+        id: tip
+        if: steps.build.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
+          if [ "$TIP" != "$GITHUB_SHA" ]; then
+            echo "::notice::dev 已前进到 ${TIP:0:7}，本次 ${GITHUB_SHA:0:7} 的 nightly 跳过"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 3. 取回打包产物 ─────────────────────────────────────────
       # 每个 artifact 解到 dl/<artifact-name>/ 下。
       - name: Download installers from the PXView Build run
-        if: steps.build.outputs.ready == 'true'
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.build.outputs.run_id }}
@@ -1206,10 +1228,10 @@ jobs:
       # 规则与 republish-release.yml 一致：单文件安装包直接拷贝，
       # Windows 便携包在 artifact 里是已解开的目录 → 重新压缩成 zip。
       # 版本号从安装包文件名里取，与 build.yml 解析出的完全一致
-      # （dev 上形如 1.6.6-rc0.b2819bb）。
+      # （dev 上形如 1.6.6-rc0；发布时的标签是 PXView_v + 这个版本号）。
       - name: Prepare nightly assets
         id: assets
-        if: steps.build.outputs.ready == 'true'
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1311,13 +1333,16 @@ jobs:
       # 下载量都能一直累加，旧构建也能回溯下载（删掉的 Release 会连资产计数
       # 一起消失，且 GitHub 没有恢复接口）。
       - name: Publish nightly prerelease
-        if: steps.build.outputs.ready == 'true'
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          # 标签 = 本次版本号（如 1.6.6-rc0.b2819bb），逐构建唯一。
-          # 用版本号而不是固定名字，是因为 GitHub 的 Releases 页同日按标签的
-          # 语义化版本倒序：非 semver 的标签会排到正式版后面。
-          tag_name: ${{ steps.assets.outputs.version }}
+          # 标签 = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0），与正式版标签
+          # （PXView_v1.6.5）同前缀同格式；逐构建唯一。不用固定名字是因为
+          # GitHub 的 Releases 页同日按标签的语义化版本倒序，非 semver 的标签
+          # 会排到正式版后面。
+          # 这个前缀不会误触 build.yml 的 tag 触发器：它匹配的是 'v*'，而
+          # PXView_v… 以 P 开头。
+          tag_name: PXView_v${{ steps.assets.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: PXView Nightly ${{ steps.assets.outputs.version }}
           prerelease: true
