@@ -68,12 +68,24 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies via Homebrew
-        env:
-          # GitHub-runner 是临时环境,无需对第三方 tap 做信任校验。
-          # 关闭后可消除 "The following taps are not trusted: aws/tap"
-          # 这类由 Homebrew 新 tap-trust 机制产生的噪音警告。
-          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
+          # Homebrew 6.0 起 tap trust 已是默认行为，HOMEBREW_NO_REQUIRE_TAP_TRUST
+          # 于 2027-12-11 移除；继续设置只会打 deprecation 警告。本项目安装的全部是
+          # homebrew/core 官方 formula（官方 tap 永远受信任），无需关闭任何信任校验。
+          #
+          # runner 镜像自带一些与构建无关的第三方 tap（历史上见过 aws/tap），
+          # `brew update` 会因此打印 "The following taps are not trusted" 噪音。
+          # 不要用 `brew trust <tap>` 去消音 —— 那等于把整个第三方 tap 交给 Homebrew
+          # 执行，比原来的全局开关更糟。直接 untap 掉即可（已装好的 formula 不受影响）。
+          # 将来若确实需要第三方 formula，用 `brew trust --formula user/repo/formula`
+          # 只信任该条目，而不是整个 tap。
+          for t in $(brew tap); do
+            case "$t" in
+              homebrew/*) continue ;;
+            esac
+            echo "Untapping unused third-party tap: $t"
+            brew untap "$t" || true
+          done
           brew update
           # 注意：不再安装 Homebrew 的 mimalloc —— 项目改用 vendored 子模块源码构建
           # （CMake/deps.cmake，MIMALLOC_LIB=mimalloc-static，MI_OVERRIDE=OFF）。
@@ -129,7 +141,16 @@ jobs:
           fi
 
           # macdeployqt 依赖收集 (把 Qt/Python dylib 打进 Frameworks)
-          $MACDEPLOYQT "$APP" -always-overwrite -verbose=1 || true
+          # 参数取舍见 .github/workflows/build.yml 同名步骤的注释：
+          #   -no-strip    去掉默认对每个 Mach-O 的 `strip -x`
+          #   -executable= 让 macdeployqt 一并处理 pxviewd
+          #   -libpath=    显式给出 Homebrew 库搜索路径
+          # 与 build.yml / build_macos.sh 保持同一组参数，避免行为分叉。
+          "$MACDEPLOYQT" "$APP" \
+            -no-strip \
+            -executable="$APP/Contents/MacOS/pxviewd" \
+            -libpath="$(brew --prefix)/lib" \
+            || true
 
           # 复制 Python 标准库到 bundled Python.framework
           BUNDLED_FW="$APP/Contents/Frameworks/Python.framework"
@@ -137,6 +158,13 @@ jobs:
             for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
               [ -d "$ver_dir" ] || continue
               py_ver=$(basename "$ver_dir")
+              # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
+              # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
+              # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+              if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
+                echo "Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
+                continue
+              fi
               STDLIB_SRC=""
               for fw_base in \
                 "$PY_PREFIX/Frameworks/Python.framework" \

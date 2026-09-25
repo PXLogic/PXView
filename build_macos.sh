@@ -199,10 +199,21 @@ if [ "$BUILD_DMG" = true ]; then
     fi
 
     # ── macdeployqt: 依赖收集 ──
+    # 参数取舍的完整理由见 .github/workflows/build.yml 同名步骤的注释。要点：
+    #   -no-strip    去掉默认对每个 Mach-O 的 `strip -x`（后面要全量重签，收益≈0）
+    #   -executable= 让 macdeployqt 一并处理 pxviewd（此前靠下面那段手写循环）
+    #   -libpath=    显式给出 Homebrew 库搜索路径，便于解析传递依赖
+    # 本脚本与 CI 保持同一组参数，避免两条打包路径行为分叉。
     echo "   macdeployqt 依赖收集..."
+    SECS_MDQ=$SECONDS
+    echo "   运行前: $(find "$BUNDLE" -type f | wc -l | tr -d ' ') 个文件 / $(du -sh "$BUNDLE" | awk '{print $1}')"
     "$MACDEPLOYQT" "$BUNDLE" \
-        -always-overwrite -verbose=1 \
+        -no-strip \
+        -executable="$BUNDLE/Contents/MacOS/pxviewd" \
+        -libpath="$(brew --prefix)/lib" \
         || true
+    echo "   macdeployqt 耗时: $((SECONDS - SECS_MDQ))s"
+    echo "   运行后: $(find "$BUNDLE" -type f | wc -l | tr -d ' ') 个文件 / $(du -sh "$BUNDLE" | awk '{print $1}')"
 
     # ── 预先从 Homebrew 复制 macdeployqt 缺失的传递依赖 ──
     BREW_LIB="$(brew --prefix)/lib"
@@ -227,6 +238,13 @@ if [ "$BUILD_DMG" = true ]; then
         for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
             [ -d "$ver_dir" ] || continue
             py_ver=$(basename "$ver_dir")
+            # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
+            # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
+            # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+            if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
+                echo "   Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
+                continue
+            fi
             STDLIB_SRC=""
             for fw_base in \
                 "$PY_PREFIX/Frameworks/Python.framework" \
@@ -271,12 +289,13 @@ if [ "$BUILD_DMG" = true ]; then
         echo "   [警告] 未找到 Python.framework"
     fi
 
-    # ── pxviewd: 重写 Qt 库引用为 bundle 内 rpath ──
-    # pxviewd (console headless daemon) 安装在 Contents/MacOS/ 里，紧邻 GUI
-    # 主程序，但 macdeployqt 只重写主 bundle 可执行文件。这里把它指向
-    # Homebrew 的绝对 Qt 路径改成 @rpath，使其从 Contents/Frameworks 解析 ——
-    # 与 macdeployqt 处理 GUI 主程序后的形态一致。pxviewd 依赖的 Qt 组件是
-    # GUI 主程序依赖的子集，因此 Frameworks 里一定齐全。
+    # ── pxviewd: 校验 Qt 库引用已改为 bundle 内 rpath ──
+    # pxviewd (console headless daemon) 安装在 Contents/MacOS/ 里，紧邻 GUI 主程序。
+    # 上面的 macdeployqt 已经带 -executable= 处理它，正常情况下这段无事可做。
+    # 保留它的两个理由：(1) 万一某版 macdeployqt 的 -executable= 行为变化，这里能
+    # 兜底改写；(2) 末尾那句自检会在仍残留 Homebrew 绝对路径时报错，等于给
+    # -executable= 加了一道守卫。pxviewd 依赖的 Qt 组件是 GUI 主程序依赖的子集，
+    # 因此 Frameworks 里一定齐全。
     PXVIEWD_BIN="$BUNDLE/Contents/MacOS/pxviewd"
     if [ -f "$PXVIEWD_BIN" ]; then
         echo "   重写 pxviewd 的库引用 (otool/install_name_tool)..."

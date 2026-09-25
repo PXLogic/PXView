@@ -6,7 +6,7 @@
 
 `<版本号>` 可以是：
     * 发布版本，如 1.6.7
-    * 开发构建版本，如 1.6.6-rc.0（带后缀）
+    * 开发构建版本，如 1.6.6-rc0（带后缀）
 
 改写规则（为什么后缀不写进数字字段见文件末尾说明）：
     1. CMakeLists.txt
@@ -56,7 +56,7 @@ OPTIONAL = [
 
 
 def split_version(version: str) -> tuple[str, str]:
-    """→ (基础版本 X.Y.Z, 后缀 如 -rc.0 或空)。基础版本必须是三段数字。"""
+    """→ (基础版本 X.Y.Z, 后缀 如 -rc0 或空)。基础版本必须是三段数字。"""
     m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.\-]+)?', version.strip())
     if not m:
         sys.exit(f'ERROR: 版本号格式不合法：{version!r}（应为 X.Y.Z 或 X.Y.Z-<后缀>）')
@@ -98,7 +98,7 @@ class Result:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description='PXView 版本号统一改写')
-    ap.add_argument('version', help='版本号，如 1.6.7 或 1.6.6-rc.0')
+    ap.add_argument('version', help='版本号，如 1.6.7 或 1.6.6-rc0')
     ap.add_argument('--root', default=None, help='仓库根目录（默认取本脚本的上级目录）')
     args = ap.parse_args()
 
@@ -124,7 +124,7 @@ def main() -> int:
             _, _, eol = read_text(root / 'CMakeLists.txt')
             text, n4 = re.subn(
                 r'(?m)^(\s*set\(DS_VERSION_STRING\b)',
-                f'set(DS_VERSION_SUFFIX "{suffix}" CACHE STRING "开发构建的版本后缀，如 -rc.0；正式版留空"){eol}\\g<1>',
+                f'set(DS_VERSION_SUFFIX "{suffix}" CACHE STRING "开发构建的版本后缀，如 -rc0；正式版留空"){eol}\\g<1>',
                 text)
         return text, n1 + n2 + n3 + n4
     res.apply(root / 'CMakeLists.txt', cmake_sub)

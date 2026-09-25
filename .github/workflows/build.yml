@@ -483,12 +483,24 @@ jobs:
           "$PY" tools/bump_version.py "${{ steps.version.outputs.value }}"
 
       - name: Install dependencies via Homebrew
-        env:
-          # GitHub-runner 是临时环境,无需对第三方 tap 做信任校验。
-          # 关闭后可消除 "The following taps are not trusted: aws/tap"
-          # 这类由 Homebrew 新 tap-trust 机制产生的噪音警告。
-          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
+          # Homebrew 6.0 起 tap trust 已是默认行为，HOMEBREW_NO_REQUIRE_TAP_TRUST
+          # 于 2027-12-11 移除；继续设置只会打 deprecation 警告。本项目安装的全部是
+          # homebrew/core 官方 formula（官方 tap 永远受信任），无需关闭任何信任校验。
+          #
+          # runner 镜像自带一些与构建无关的第三方 tap（历史上见过 aws/tap），
+          # `brew update` 会因此打印 "The following taps are not trusted" 噪音。
+          # 不要用 `brew trust <tap>` 去消音 —— 那等于把整个第三方 tap 交给 Homebrew
+          # 执行，比原来的全局开关更糟。直接 untap 掉即可（已装好的 formula 不受影响）。
+          # 将来若确实需要第三方 formula，用 `brew trust --formula user/repo/formula`
+          # 只信任该条目，而不是整个 tap。
+          for t in $(brew tap); do
+            case "$t" in
+              homebrew/*) continue ;;
+            esac
+            echo "Untapping unused third-party tap: $t"
+            brew untap "$t" || true
+          done
           brew update
           # 注意：不再安装 Homebrew 的 mimalloc —— 项目改用 vendored 子模块源码构建
           # （CMake/deps.cmake，MIMALLOC_LIB=mimalloc-static，MI_OVERRIDE=OFF）。
@@ -561,13 +573,47 @@ jobs:
             fi
           fi
 
-          # macdeployqt 依赖收集
+          # ── macdeployqt 依赖收集 ──
+          # 参数取舍（选项名与语义以 Qt6 官方 macos-deployment 文档为准）：
+          #   -no-strip      macdeployqt 默认对每个部署的 Mach-O 跑 `strip -x`。
+          #                  Qt6Core/Gui 各 10~30MB，Python 的 `Python` dylib 也近 20MB；
+          #                  而本步骤之后脚本会对 Frameworks/PlugIns/主程序做全量
+          #                  ad-hoc 重签，strip 的收益≈0 —— 关掉，这是本步最大的一刀。
+          #   -executable=   让 macdeployqt 一并处理 Contents/MacOS/pxviewd。
+          #                  此前只有 build_macos.sh 手写 otool/install_name_tool 循环修它，
+          #                  CI 从来没修过 → CI 出的 DMG 里 pxviewd 仍指向
+          #                  /opt/homebrew/... 绝对路径，在用户机器上必崩。本步顺带修掉
+          #                  这个真实缺陷（下方 verify 步骤已加回归守卫）。
+          #   -libpath=      显式给出 Homebrew 库搜索路径，让 macdeployqt 能自己解析到
+          #                  libbrotlicommon/libsharpyuv/libwebp 这类传递依赖（此前它报
+          #                  warning 说找不到，靠下面那段手工兜底）。兜底保留不动：那是
+          #                  正确性保险，不占时间。
+          # 刻意不用的：
+          #   -verbose=N     默认就是 1（error/warning），写 `-verbose=1` 等于没写，删掉
+          #                  只为不误导后人（不是性能优化项）。
+          #   -always-overwrite  三处调用点都跑在全新目录上（CI 先 `rm -rf build
+          #                  install.dir`，build_macos.sh 步骤 5 也 rm -rf），它只会禁用
+          #                  "目标已存在就跳过"的短路，纯负收益。
+          #   -no-plugins    能再省掉几十个插件 dylib 的处理，但要手工部署 platforms/
+          #                  styles/imageformats 并自行修它们的 rpath，收益不确定、回归
+          #                  风险明确。留到有本步耗时明细之后再决定。
+          #   -no-codesign   macdeployqt 默认就会 ad-hoc 签名，关掉能省一遍；但它顺带签的
+          #                  pxviewd 与 Python.framework 内部二进制本脚本并没有补签，关掉
+          #                  会让 codesign --verify --strict 的结果变差，故不动。
           echo "=== macdeployqt (依赖收集) ==="
+          echo "--- 运行前规模 ---"
+          echo "  文件数 $(find install.dir/PXView.app -type f | wc -l | tr -d ' ') / $(du -sh install.dir/PXView.app | awk '{print $1}')"
           SECS_START=$SECONDS
-          $MACDEPLOYQT install.dir/PXView.app \
-            -always-overwrite -verbose=1 \
+          "$MACDEPLOYQT" install.dir/PXView.app \
+            -no-strip \
+            -executable=install.dir/PXView.app/Contents/MacOS/pxviewd \
+            -libpath="$(brew --prefix)/lib" \
             || true
           echo "macdeployqt 耗时: $((SECONDS - SECS_START))s"
+          echo "--- 运行后规模 ---"
+          echo "  文件数 $(find install.dir/PXView.app -type f | wc -l | tr -d ' ') / $(du -sh install.dir/PXView.app | awk '{print $1}')"
+          # 若本步仍偏慢，做一次一次性诊断：加 -verbose=3 并把输出重定向到文件，
+          # 再 `grep -c install_name_tool` / `grep -c codesign` 就能看到真实调用次数分布。
 
           # 预先从 Homebrew 复制 macdeployqt 报错说找不到的三个 dylib
           BREW_LIB="$(brew --prefix)/lib"
@@ -592,6 +638,13 @@ jobs:
             for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
               [ -d "$ver_dir" ] || continue
               py_ver=$(basename "$ver_dir")
+              # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
+              # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
+              # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+              if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
+                echo "Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
+                continue
+              fi
               STDLIB_SRC=""
               for fw_base in \
                 "$PY_PREFIX/Frameworks/Python.framework" \
@@ -746,21 +799,38 @@ jobs:
           lipo -info "$APP_BIN" 2>/dev/null || true
 
           echo ""
-          echo "=== 2. @rpath 依赖检查(主二进制) ==="
+          echo "=== 2. @rpath 依赖检查(PXView + pxviewd) ==="
           MISS=0
-          while IFS= read -r ln; do
-            lib=$(echo "$ln" | sed 's/^[[:space:]]*//' | awk '{print $1}')
-            nm="${lib#@rpath/}"
-            if [ ! -f "$FW/$nm" ]; then
-              echo "  缺失: $lib"
+          for BIN in "$APP_BIN" "/tmp/PXView-vrf.app/Contents/MacOS/pxviewd"; do
+            if [ ! -f "$BIN" ]; then
+              echo "  错误: 未找到 $BIN"
+              MISS=$((MISS+1))
+              continue
+            fi
+            echo "  -- $(basename "$BIN")"
+            # 2a. 不允许残留指向 Homebrew 的绝对路径。CI 曾经漏修 pxviewd 的这条
+            #     （macdeployqt 只处理 bundle 主可执行文件，pxviewd 要靠 -executable=），
+            #     这里固化成回归守卫。
+            if otool -L "$BIN" | grep -E '/opt/homebrew|/usr/local/opt' >/dev/null 2>&1; then
+              echo "     错误: 残留指向 Homebrew 的绝对路径:"
+              otool -L "$BIN" | grep -E '/opt/homebrew|/usr/local/opt' | sed 's/^/       /'
               MISS=$((MISS+1))
             fi
-          done < <(otool -L "$APP_BIN" | grep '@rpath/')
+            # 2b. 所有 @rpath 依赖必须能在 Frameworks 中解析
+            while IFS= read -r ln; do
+              lib=$(echo "$ln" | sed 's/^[[:space:]]*//' | awk '{print $1}')
+              nm="${lib#@rpath/}"
+              if [ ! -f "$FW/$nm" ]; then
+                echo "     缺失: $lib"
+                MISS=$((MISS+1))
+              fi
+            done < <(otool -L "$BIN" | grep '@rpath/')
+          done
           if [ "$MISS" -gt 0 ]; then
-            echo "错误: $MISS 个 @rpath 依赖未在 Frameworks 中找到"
+            echo "错误: $MISS 个依赖问题未解决"
             exit 1
           fi
-          echo "  主二进制所有 @rpath 依赖已解析"
+          echo "  PXView / pxviewd 的 @rpath 依赖均已解析，且无残留 Homebrew 绝对路径"
 
           echo ""
           echo "=== 3. Python stdlib 检查 ==="
