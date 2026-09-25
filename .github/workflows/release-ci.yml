@@ -32,7 +32,8 @@ name: PXView Release CI
 #
 # Job 5: publish-nightly（仅 dev 分支）
 #   门槛 = Job 1 全绿（needs）+ 同一提交的 build.yml（打包 + 安装包自检）成功，
-#   然后才把三平台安装包发布到固定标签 `nightly` 的 prerelease（滚动覆盖）。
+#   然后才把三平台安装包发布成 prerelease。标签 = 本次版本号，每个构建一个，
+#   旧的一概不删（下载量与旧构建都保留；llama.cpp 同款做法）。
 #   正文包含：开发版本号/提交/两个 run 链接、本次提交信息、自上个正式版以来的
 #   提交列表（含完整对比链接）、SHA256SUMS。
 #   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
@@ -1135,18 +1136,17 @@ jobs:
   # ============================================================
   # Job 5: Publish Nightly (dev only)
   #
-  # dev 分支的滚动 nightly 通道。发布需同时满足：
+  # dev 分支的 nightly 通道（每个构建留档，不滚动覆盖）。发布需同时满足：
   #   1. 触发分支是 dev（main 上本 job 直接跳过）；
   #   2. Job 1（全量 E2E）全绿 —— 由 needs 保证，失败本 job 即被跳过；
   #      ASan / TSan / clang-tidy 不是 nightly 的门槛，dev push 上也不跑；
-  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功；
-  #   4. dev 的最新提交仍是本次提交 —— 并发 push 时旧提交的产物不得
-  #      覆盖新 nightly。
+  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功。
   #
-  # 发布形态：固定标签 `nightly` 的 prerelease。每次先删旧 Release + 标签
-  # 再重建，所以 /releases/tag/nightly 恒指向最新一次全绿的 dev 提交，
-  # 资产也不会无限堆积。正文列出自上个正式版（releases/latest）到本次提交的
-  # 全部提交标题 + 完整对比链接，末尾附 SHA256SUMS。
+  # 发布形态：每个构建各一个 tag = 本次版本号（1.6.6-dev.<日期>.<分钟>.<短SHA>）的
+  # prerelease，旧 Release 一概不删 —— 资产下载量随 Release 永久累加，旧构建也能
+  # 回溯下载（llama.cpp 同款做法）；prerelease 标记保证 Latest 徽章仍归正式版。
+  # 正文列出自上个正式版（releases/latest）到本次提交的全部提交标题 + 完整对比
+  # 链接，末尾附 SHA256SUMS。
   # 正式发布仍走 tag push → build.yml 的 Release 步骤。
   # ============================================================
   publish-nightly:
@@ -1156,7 +1156,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: write   # 删除/创建 nightly Release 与标签
+      contents: write   # 创建 nightly Release 与标签
       actions: read     # 读取 build.yml 的 run 与 artifacts
 
     steps:
@@ -1191,25 +1191,10 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── 2. dev 没有前进 ─────────────────────────────────────────
-      - name: Skip when dev has moved on
-        id: tip
-        if: steps.build.outputs.ready == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
-          if [ "$TIP" != "$GITHUB_SHA" ]; then
-            echo "::notice::dev 已前进到 ${TIP:0:7}，本次 ${GITHUB_SHA:0:7} 的 nightly 跳过"
-            echo "current=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ── 3. 取回打包产物 ─────────────────────────────────────────
+      # ── 2. 取回打包产物 ─────────────────────────────────────────
       # 每个 artifact 解到 dl/<artifact-name>/ 下。
       - name: Download installers from the PXView Build run
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        if: steps.build.outputs.ready == 'true'
         uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.build.outputs.run_id }}
@@ -1224,7 +1209,7 @@ jobs:
       # （dev 上形如 1.6.5-dev.20260925.abc1234）。
       - name: Prepare nightly assets
         id: assets
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        if: steps.build.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1321,22 +1306,18 @@ jobs:
             echo "SUMS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # ── 5. 滚动覆盖 nightly Release ──────────────────────────────
-      - name: Delete previous rolling nightly release
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # 先删旧 Release 和标签，下面的创建步骤才能把 nightly 标签指向本次
-          # 提交。首次运行（或上一步已被清理）时 gh 返回非零，忽略即可。
-          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null \
-            || echo "（没有既有 nightly Release，跳过删除）"
-
+      # ── 5. 发布 nightly Release ──────────────────────────────────
+      # 不删任何旧 Release：每个构建各自一个 tag 永久保留，这样每个资产的
+      # 下载量都能一直累加，旧构建也能回溯下载（删掉的 Release 会连资产计数
+      # 一起消失，且 GitHub 没有恢复接口）。
       - name: Publish nightly prerelease
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        if: steps.build.outputs.ready == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: nightly
+          # 标签 = 本次版本号（如 1.6.6-dev.20260925.1435.231bdd2），逐构建唯一。
+          # 用版本号而不是固定名字，是因为 GitHub 的 Releases 页同日按标签的
+          # 语义化版本倒序：非 semver 的标签会排到正式版后面。
+          tag_name: ${{ steps.assets.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: PXView Nightly ${{ steps.assets.outputs.version }}
           prerelease: true
@@ -1344,7 +1325,8 @@ jobs:
           fail_on_unmatched_files: true
           files: release-assets/*
           body: |
-            dev 分支的自动构建（滚动 nightly），供尝鲜与回归验证使用，**不是正式版本**。
+            dev 分支每次提交的自动构建（nightly），供尝鲜与回归验证使用，**不是正式版本**。
+            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除。
 
             - 开发版本号：`${{ steps.assets.outputs.version }}`
             - 提交：`${{ github.sha }}`

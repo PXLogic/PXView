@@ -110,10 +110,14 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<短 SHA>。后缀让 nightly 的
-              # 安装包与正式版同名文件可区分；基础版本号高于已发布版本时，nightly
-              # 在 Releases 页也会排在正式版之前。
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}"
+              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
+              # 末段各有用处：
+              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
+              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
+              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
+              #   * 短 SHA 用来对回提交。
+              DEV_MIN=$((10#$(date -u +%H%M)))
+              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
@@ -419,10 +423,14 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<短 SHA>。后缀让 nightly 的
-              # 安装包与正式版同名文件可区分；基础版本号高于已发布版本时，nightly
-              # 在 Releases 页也会排在正式版之前。
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}"
+              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
+              # 末段各有用处：
+              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
+              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
+              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
+              #   * 短 SHA 用来对回提交。
+              DEV_MIN=$((10#$(date -u +%H%M)))
+              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
@@ -886,10 +894,14 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<短 SHA>。后缀让 nightly 的
-              # 安装包与正式版同名文件可区分；基础版本号高于已发布版本时，nightly
-              # 在 Releases 页也会排在正式版之前。
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}"
+              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
+              # 末段各有用处：
+              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
+              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
+              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
+              #   * 短 SHA 用来对回提交。
+              DEV_MIN=$((10#$(date -u +%H%M)))
+              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
