@@ -1024,16 +1024,19 @@ void TestLogicRenderCost::build_cost_lines_vs_rects()
                 g_sink += all.size();
             }
 
-            // 旧形状：一个交错 QLine 数组
+            // 旧形状：逐个 push_back 进**一个**交错 QLine 数组
+            // （与生产一致：每处跳变推入"水平段 + 竖直段"两条）
             const double t_old = best_of(ROUNDS, [&]() {
                 std::vector<QLine> all;
                 all.reserve(nh + nv);
                 for (const auto &g : ges)
-                    all.insert(all.end(), g.hv_lines.begin(), g.hv_lines.end());
+                    for (const auto &l : g.hv_lines)
+                        all.push_back(l);
                 g_sink += all.size();
             });
 
-            // 新形状：水平 QLine + 竖直 QRect 两个数组
+            // 新形状：逐个 push_back 进"水平 QLine + 竖直 QRect"**两个**数组，
+            // 竖直元素在推入时构造 1px 矩形（每处跳变仍是两次 push_back）
             const double t_new = best_of(ROUNDS, [&]() {
                 std::vector<QLine> hl;
                 std::vector<QRect> vr;

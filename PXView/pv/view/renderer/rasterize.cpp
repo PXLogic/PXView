@@ -31,6 +31,7 @@
 #include <QLine>
 #include <QPen>
 #include <QPointF>
+#include <QRect>
 #include <QRectF>
 #include <QVector>
 
@@ -114,16 +115,26 @@ void rasterize_logic_channel(
   // completely. Painting is single-threaded, so thread_local is sufficient and
   // needs no lock (a per-frame std::pmr arena would be the other option, but
   // this is smaller and has zero per-frame bookkeeping).
+  //
+  // 竖直跳变用 1px 宽填充矩形（wave_rects）而不是线段：同一批几何下
+  // drawRects 比 drawLines 快 ~1.8-2.0x（段长 = 通道高，dense 时占整帧填充量
+  // 的大头），且逐像素等价——QLine 含端点、QRect 半开，故矩形高/宽需 +1 补足
+  // 末端像素。dso/analog 的 min/max 分支同样用 drawRects 画每像素竖直填充。
+  // 等价性与成本由 tests/qtest/view/test_logic_render_cost.cpp 的
+  // production_parity / build_cost_lines_vs_rects 两个用例锁定。
   struct RasterizeScratch {
     std::vector<std::pair<bool, bool>> pulses;
     std::vector<std::pair<uint16_t, bool>> edges;
-    std::vector<QLine> wave_lines;
+    std::vector<QLine> wave_lines;   // 水平段（电平线）
+    std::vector<QRect> wave_rects;   // 竖直跳变（1px 宽填充矩形）
   };
   thread_local RasterizeScratch scratch;
   std::vector<std::pair<bool, bool>> &cur_pulses = scratch.pulses;
   std::vector<std::pair<uint16_t, bool>> &cur_edges = scratch.edges;
   std::vector<QLine> &wave_lines = scratch.wave_lines;
+  std::vector<QRect> &wave_rects = scratch.wave_rects;
   wave_lines.clear();
+  wave_rects.clear();
 
   const bool first_sample = snapshot->get_display_edges(
       cur_pulses, cur_edges, start_index, end_index, width, max_togs, offset,
@@ -139,7 +150,8 @@ void rasterize_logic_channel(
     for (i = cur_edges.begin() + 1; i != cur_edges.end() - 1; i++) {
       x = (*i).first;
       wave_lines.push_back(QLine(preX, preY, x, preY));
-      wave_lines.push_back(QLine(x, high_offset, x, low_offset));
+      wave_rects.push_back(
+          QRect(x, high_offset, 1, low_offset - high_offset + 1));
       preX = x;
       preY = (*i).second ? high_offset : low_offset;
     }
@@ -150,7 +162,8 @@ void rasterize_logic_channel(
     while (i != cur_pulses.end() - 1) {
       if ((*i).first) {
         wave_lines.push_back(QLine(preX, preY, x, preY));
-        wave_lines.push_back(QLine(x, high_offset, x, low_offset));
+        wave_rects.push_back(
+            QRect(x, high_offset, 1, low_offset - high_offset + 1));
         preX = x;
         preY = (*i).second ? high_offset : low_offset;
       }
@@ -162,8 +175,13 @@ void rasterize_logic_channel(
 
   // Original: p.setPen(_colour.isValid() ? _colour : fore). The caller passes
   // the FINAL colour (already computed as _colour.isValid() ? _colour : fore).
+  // 水平段用画笔描线；竖直跳变用实心画刷填充 1px 矩形（两批各一次调用）。
   p.setPen(colour);
+  p.setBrush(Qt::NoBrush);
   p.drawLines(wave_lines.data(), wave_lines.size());
+  p.setPen(Qt::NoPen);
+  p.setBrush(colour);
+  p.drawRects(wave_rects.data(), wave_rects.size());
 
   // === Glitch filter overlay (extracted from paint_mid_align Task 8) ===
   // Coordinate mapping: pixel x = sample_index / samples_per_pixel - offset
