@@ -82,7 +82,7 @@ DsoSignal::DsoSignal(data::DsoSnapshot *data,
                      std::shared_ptr<data::SignalModel> model,
                      data::DataSource *data_source)
     : Signal(model, data_source), _data(data),
-      _cached_hw_offset(model ? model->hw_offset() : 128),
+      _cached_hw_offset(static_cast<int>(model ? model->hw_offset() : 128)),
       _hover_point(QPointF(-1, -1)) {
   _vDial = nullptr;
   _period = 0;
@@ -145,7 +145,7 @@ DsoSignal::~DsoSignal() {
 }
 
 void DsoSignal::set_scale(int height) {
-  _scale = height / (_ref_max - _ref_min) * _stop_scale;
+  _scale = static_cast<float>(height / (_ref_max - _ref_min) * _stop_scale);
 }
 
 //============================== Phase G facades ==============================
@@ -214,7 +214,7 @@ bool DsoSignal::go_vDialPre(bool manul) {
     if (_data_source->is_running_status())
       _data_source->refresh(DsoSignal::RefreshShort);
 
-    const double pre_vdiv = _vDial->get_value();
+    const double pre_vdiv = static_cast<double>(_vDial->get_value());
     _vDial->set_sel(_vDial->get_sel() - 1);
 
     // Sync new vdiv to driver so that rebuild_signals() -> load_settings()
@@ -228,7 +228,7 @@ bool DsoSignal::go_vDialPre(bool manul) {
       dev->set_config_uint64(SR_CONF_PROBE_VDIV, _vDial->get_value(), probe);
 
     if (_data_source->is_stopped_status()) {
-      set_stop_scale(_stop_scale * (pre_vdiv / _vDial->get_value()));
+      set_stop_scale(static_cast<float>(_stop_scale * (pre_vdiv / static_cast<double>(_vDial->get_value()))));
       set_scale(get_view_rect().height());
     }
     if (probe)
@@ -258,7 +258,7 @@ bool DsoSignal::go_vDialNext(bool manul) {
     if (_data_source->is_running_status())
       _data_source->refresh(DsoSignal::RefreshShort);
 
-    const double pre_vdiv = _vDial->get_value();
+    const double pre_vdiv = static_cast<double>(_vDial->get_value());
     _vDial->set_sel(_vDial->get_sel() + 1);
 
     // Sync new vdiv to driver so that rebuild_signals() -> load_settings()
@@ -272,7 +272,7 @@ bool DsoSignal::go_vDialNext(bool manul) {
       dev->set_config_uint64(SR_CONF_PROBE_VDIV, _vDial->get_value(), probe);
 
     if (_data_source->is_stopped_status()) {
-      set_stop_scale(_stop_scale * (pre_vdiv / _vDial->get_value()));
+      set_stop_scale(static_cast<float>(_stop_scale * (pre_vdiv / static_cast<double>(_vDial->get_value()))));
       set_scale(get_view_rect().height());
     }
     if (probe)
@@ -373,8 +373,8 @@ bool DsoSignal::load_settings() {
       return false;
     }
   } else {
-    vdiv = _model ? _model->vdiv_mv() : 0;
-    vfactor = _model ? _model->vfactor() : 1;
+    vdiv = static_cast<unsigned long>(_model ? _model->vdiv_mv() : 0);
+    vfactor = static_cast<unsigned long>(_model ? _model->vfactor() : 1);
   }
 
   // Clamp vfactor to at least 1 — saved waveform files may have factor=0
@@ -495,7 +495,7 @@ int DsoSignal::commit_settings() {
 
 uint64_t DsoSignal::get_vDialValue() { return _vDial->get_value(); }
 
-uint16_t DsoSignal::get_vDialSel() { return _vDial->get_sel(); }
+uint16_t DsoSignal::get_vDialSel() { return static_cast<unsigned short>(_vDial->get_sel()); }
 
 void DsoSignal::set_acCoupling(uint8_t coupling) {
   pxv_info("[DSO-COUPLING] set_acCoupling(%u) called, enabled=%d",
@@ -511,11 +511,11 @@ void DsoSignal::set_acCoupling(uint8_t coupling) {
 }
 
 int DsoSignal::ratio2value(double ratio) {
-  return ratio * (_ref_max - _ref_min) + _ref_min;
+  return static_cast<int>(ratio * (_ref_max - _ref_min) + _ref_min);
 }
 
 int DsoSignal::ratio2pos(double ratio) {
-  return ratio * get_view_rect().height() + get_view_rect().top();
+  return static_cast<int>(ratio * get_view_rect().height() + get_view_rect().top());
 }
 
 double DsoSignal::value2ratio(int value) {
@@ -592,7 +592,7 @@ void DsoSignal::set_factor(uint64_t factor) {
         return;
       }
     } else {
-      prefactor = model ? model->vfactor() : 1;
+      prefactor = static_cast<unsigned long>(model ? model->vfactor() : 1);
     }
 
     if (prefactor != factor) {
@@ -625,7 +625,7 @@ void DsoSignal::set_factor(uint64_t factor) {
       if (_data_source->is_stopped_status()) {
         // factor 变化等效于 vdiv 变化, 调整 stop_scale 保持显示比例
         // 新_vdiv / 旧_vdiv = factor / prefactor
-        set_stop_scale(_stop_scale * (static_cast<double>(prefactor) / static_cast<double>(factor)));
+        set_stop_scale(static_cast<float>(_stop_scale * (static_cast<double>(prefactor) / static_cast<double>(factor))));
         set_scale(get_view_rect().height());
       }
 
@@ -643,7 +643,7 @@ uint64_t DsoSignal::get_factor() {
     uint64_t f = _vDial->get_factor();
     return f > 0 ? f : 1;
   }
-  return _model ? _model->vfactor() : 1;
+  return static_cast<unsigned long>(_model ? _model->vfactor() : 1);
 }
 
 // -- DsoTriggerConfig --
@@ -709,9 +709,9 @@ bool DsoSignal::mouse_press(int right, const QPoint pt) {
     } else if (_data_source->device()->is_file() == false &&
                acdc_rect.contains(pt)) {
       if (_data_source->device()->is_hardware_logic())
-        set_acCoupling((get_acCoupling() + 1) % 3);
+        set_acCoupling(static_cast<unsigned char>((get_acCoupling() + 1) % 3));
       else
-        set_acCoupling((get_acCoupling() + 1) % 3);
+        set_acCoupling(static_cast<unsigned char>((get_acCoupling() + 1) % 3));
     } else if (auto_rect.contains(pt)) {
       if (_data_source->device()->is_hardware())
         auto_start();

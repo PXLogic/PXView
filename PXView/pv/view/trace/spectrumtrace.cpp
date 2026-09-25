@@ -78,7 +78,7 @@ const double SpectrumTrace::VerticalRate = 1.0 / 2000.0;
 
 SpectrumTrace::SpectrumTrace(pv::SigSession *session,
     std::shared_ptr<pv::data::SpectrumStack> spectrum_stack, int index) :
-    Trace("FFT("+QString::number(index)+")", index, SR_CHANNEL_FFT),
+    Trace("FFT("+QString::number(index)+")", static_cast<unsigned short>(index), SR_CHANNEL_FFT),
     _data_source(session),
     _enable(false),
     _view_mode(0),
@@ -162,7 +162,7 @@ void SpectrumTrace::zoom(double steps, int offset)
     const int width = get_view_rect().width();
     double pre_offset = _offset + _scale*offset/width;
     _scale *= std::pow(3.0/2.0, -steps);
-    _scale = max(min(_scale, 1.0), 100.0/_spectrum_stack->get_sample_num());
+    _scale = max(min(_scale, 1.0), 100.0/static_cast<double>(_spectrum_stack->get_sample_num()));
     _offset = pre_offset - _scale*offset/width;
     _offset = max(min(_offset, 1-_scale), 0.0);
 
@@ -187,7 +187,7 @@ double SpectrumTrace::get_offset()
 
 void SpectrumTrace::set_scale(double scale)
 {
-    _scale = max(min(scale, 1.0), 100.0/_spectrum_stack->get_sample_num());
+    _scale = max(min(scale, 1.0), 100.0/static_cast<double>(_spectrum_stack->get_sample_num()));
 
     _view->set_update_viewport(_viewport, true);
     _view->request_repaint();
@@ -222,10 +222,10 @@ QString SpectrumTrace::format_freq(double freq, unsigned precision)
     if (freq <= 0) {
         return "0Hz";
     } else {
-        const int order = floor(log10f(freq));
+        const int order = static_cast<int>(floor(log10f(static_cast<float>(freq))));
         assert(order >= FirstSIPrefixPower);
         assert(order <= LastSIPrefixPower);
-        const int prefix = floor((order - FirstSIPrefixPower)/ 3.0f);
+        const int prefix = static_cast<int>(floor(static_cast<float>((order - FirstSIPrefixPower))/ 3.0f));
         const double divider = pow(10.0, max(prefix * 3.0 + FirstSIPrefixPower, 0.0));
 
         /*
@@ -262,11 +262,11 @@ bool SpectrumTrace::measure(const QPoint &p)
     if(samples.empty())
         return false;
 
-    const unsigned int full_size = (_spectrum_stack->get_sample_num()/2);
+    const unsigned int full_size = static_cast<unsigned int>((_spectrum_stack->get_sample_num()/2));
     const double view_off = full_size * _offset;
     const double view_size = full_size*_scale;
     const double sample_per_pixels = view_size/window.width();
-    _hover_index = std::round(p.x() * sample_per_pixels + view_off);
+    _hover_index = static_cast<unsigned long>(std::round(p.x() * sample_per_pixels + view_off));
 
     if (_hover_index < full_size)
         _hover_en = true;
@@ -313,10 +313,10 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
         trace_colour.setAlpha(IRenderView::ForeAlpha);
         p.setPen(trace_colour);
 
-        const int full_size = (_spectrum_stack->get_sample_num()/2);
+        const int full_size = static_cast<int>((_spectrum_stack->get_sample_num()/2));
         const double view_off = full_size * _offset;
-        const int view_start = floor(view_off);
-        const int view_size = full_size*_scale;
+        const int view_start = static_cast<int>(floor(view_off));
+        const int view_size = static_cast<int>(full_size*_scale);
         std::vector<QPointF> points(samples.size());
         QPointF *point = points.data();
 
@@ -333,8 +333,8 @@ void SpectrumTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QCo
                 if (s->signal_type() == SR_CHANNEL_DSO) {
                     view::DsoSignal *dsoSig = (view::DsoSignal*)s.get();
                     if(dsoSig->get_index() == _spectrum_stack->get_index()) {
-                        vdiv = dsoSig->get_vDialValue();
-                        vfactor = dsoSig->get_factor();
+                        vdiv = static_cast<double>(dsoSig->get_vDialValue());
+                        vfactor = static_cast<double>(dsoSig->get_factor());
                         break;
                     }
                 }
@@ -396,9 +396,9 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
     double blank_right = width;
 
     // horizontal ruler
-    const double NyFreq = _data_source->cur_snap_samplerate() / (2.0 * _spectrum_stack->get_sample_interval());
-    const double deltaFreq = _data_source->cur_snap_samplerate() * 1.0 /
-                            (_spectrum_stack->get_sample_num() * _spectrum_stack->get_sample_interval());
+    const double NyFreq = static_cast<double>(_data_source->cur_snap_samplerate()) / (2.0 * _spectrum_stack->get_sample_interval());
+    const double deltaFreq = static_cast<double>(_data_source->cur_snap_samplerate()) * 1.0 /
+                            static_cast<double>((_spectrum_stack->get_sample_num() * _spectrum_stack->get_sample_interval()));
     const double FreqRange = NyFreq * _scale;
     const double FreqOffset = NyFreq * _offset;
 
@@ -416,12 +416,12 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
             QString freq_str = format_freq(tick_freq);
             double typical_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
                 AlignLeft | AlignTop, freq_str).width() + 10;
-            p.drawLine(x, 1, x, TickHeight);
+            p.drawLine(static_cast<int>(x), 1, static_cast<int>(x), TickHeight);
             if (x > typical_width/2 && (width-x) > typical_width/2)
-                p.drawText(x-typical_width/2, TickHeight, typical_width, text_height,
+                p.drawText(static_cast<int>(x-typical_width/2), TickHeight, static_cast<int>(typical_width), text_height,
                            AlignCenter | AlignTop | TextDontClip, freq_str);
         } else {
-                p.drawLine(x, 1, x, TickHeight/2);
+                p.drawLine(static_cast<int>(x), 1, static_cast<int>(x), TickHeight/2);
         }
         tick_freq += multiplier/FreqMinorDivNum;
         division++;
@@ -431,7 +431,7 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
 
     // delta Frequency
     QString freq_str =  QString::fromWCharArray(L" \u0394") + "Freq: " + format_freq(deltaFreq,4);
-    p.drawText(0, 0, width, get_view_rect().height(),
+    p.drawText(0, 0, static_cast<int>(width), get_view_rect().height(),
                AlignRight | AlignBottom | TextDontClip, freq_str);
     double delta_left = width-p.boundingRect(0, 0, INT_MAX, INT_MAX,
                                              AlignLeft | AlignTop, freq_str).width();
@@ -452,8 +452,8 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
             QString vol_str = QString::number(tick_vol, 'f', Pricision) + unit;
             double vol_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
                 AlignLeft | AlignTop, vol_str).width();
-            p.drawLine(width, y, width-TickHeight/2, y);
-            p.drawText(width-TickHeight-vol_width, y-text_height/2, vol_width, text_height,
+            p.drawLine(static_cast<int>(width), static_cast<int>(y), static_cast<int>(width-TickHeight/2), static_cast<int>(y));
+            p.drawText(static_cast<int>(width-TickHeight-vol_width), static_cast<int>(y-text_height/2), static_cast<int>(vol_width), text_height,
                        AlignCenter | AlignTop | TextDontClip, vol_str);
             blank_right = min(width-TickHeight-vol_width, blank_right);
         }
@@ -466,12 +466,12 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
         const std::vector<double> samples(_spectrum_stack->get_fft_spectrum());
         if(samples.empty())
             return;
-        const int full_size = (_spectrum_stack->get_sample_num()/2);
+        const int full_size = static_cast<int>((_spectrum_stack->get_sample_num()/2));
         const double view_off = full_size * _offset;
-        const int view_size = full_size*_scale;
+        const int view_size = static_cast<int>(full_size*_scale);
         const double scale = height / (_vmax - _vmin);
         const double pixels_per_sample = width/view_size;
-        double x = (_hover_index-view_off)*pixels_per_sample;
+        double x = (static_cast<double>(_hover_index)-view_off)*pixels_per_sample;
         double min_mag = pow(10.0, _vmin/20);
         _hover_value = samples[_hover_index];
         if (_view_mode != 0) {
@@ -485,9 +485,9 @@ void SpectrumTrace::paint_fore(QPainter &p, int left, int right, QColor fore, QC
 
         p.setPen(QPen(fore, 1, Qt::DashLine));
         p.setBrush(Qt::NoBrush);
-        p.drawLine(_hover_point.x(), 0, _hover_point.x(), height);
+        p.drawLine(static_cast<int>(_hover_point.x()), 0, static_cast<int>(_hover_point.x()), static_cast<int>(height));
 
-        QString hover_str = QString::number(_hover_value, 'f', 4) + unit + "@" + format_freq(deltaFreq * _hover_index, 4);
+        QString hover_str = QString::number(_hover_value, 'f', 4) + unit + "@" + format_freq(deltaFreq * static_cast<double>(_hover_index), 4);
         const int hover_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
             AlignLeft | AlignTop, hover_str).width();
         const int hover_height = p.boundingRect(0, 0, INT_MAX, INT_MAX,

@@ -28,8 +28,8 @@ QString format_freq(double period, unsigned int precision)
     if (period <= 0) {
         return kUnknownStr;
     }
-    const int order = ceil(log10f(period));
-    const int prefix = ceil((order - kFirstSIPrefixPower) / 3.0f);
+    const int order = static_cast<int>(ceil(log10f(static_cast<float>(period))));
+    const int prefix = static_cast<int>(ceil(static_cast<float>((order - kFirstSIPrefixPower)) / 3.0f));
     const double multiplier = pow(10.0, std::max(-prefix * 3.0 - static_cast<double>(kFirstSIPrefixPower), 0.0));
 
     const int p = static_cast<int>(std::min(precision, 12u));
@@ -56,10 +56,14 @@ QString format_time(double t, int prefix, unsigned int precision)
 QString format_real_time(uint64_t delta_index, uint64_t sample_rate)
 {
     double v1 = static_cast<double>(std::pow(10, 12)) / static_cast<double>(sample_rate);
-    double delta_time_double = v1 * delta_index;
-    uint64_t delta_time = v1 * delta_index;
+    double delta_time_double = v1 * static_cast<double>(delta_index);
+    uint64_t delta_time = static_cast<unsigned long>(v1 * static_cast<double>(delta_index));
 
-    if (delta_time_double > UINT64_MAX) {
+    // static_cast, not a bare comparison against UINT64_MAX: the macro is a
+    // uint64_t, so `double > uint64_t` converts it to double anyway (2^64,
+    // since 2^64-1 is not representable) and gcc flags the silent value change.
+    // Making the conversion explicit keeps the existing behaviour.
+    if (delta_time_double > static_cast<double>(UINT64_MAX)) {
         return "INF";
     }
     if (delta_time == 0) {
@@ -67,20 +71,20 @@ QString format_real_time(uint64_t delta_index, uint64_t sample_rate)
     }
 
     int zero = 0;
-    int prefix = static_cast<int>(floor(log10(delta_time)));
+    int prefix = static_cast<int>(floor(log10(static_cast<double>(delta_time))));
     while (delta_time == (delta_time / 10 * 10)) {
         delta_time /= 10;
         zero++;
     }
 
-    return format_time(delta_time / std::pow(10.0, 12 - zero),
+    return format_time(static_cast<double>(delta_time) / std::pow(10.0, 12 - zero),
                        prefix / 3 + 1,
                        prefix / 3 * 3 > zero ? prefix / 3 * 3 - zero : 0);
 }
 
 QString format_real_freq(uint64_t delta_index, uint64_t sample_rate)
 {
-    const double delta_period = delta_index * 1.0 / sample_rate;
+    const double delta_period = static_cast<double>(delta_index) * 1.0 / static_cast<double>(sample_rate);
     return format_freq(delta_period);
 }
 

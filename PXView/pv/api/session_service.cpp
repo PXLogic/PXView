@@ -5041,7 +5041,7 @@ if (!root_decoder || !root_decoder->decoder())
                         else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("i")))
                             val = g_variant_new_int32(std::stoi(opt.second));
                         else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("u")))
-                            val = g_variant_new_uint32(std::stoul(opt.second));
+                            val = g_variant_new_uint32(static_cast<guint32>(std::stoul(opt.second)));
                         else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("t")))
                             val = g_variant_new_uint64(std::stoull(opt.second));
                         else
@@ -5067,7 +5067,7 @@ if (!root_decoder || !root_decoder->decoder())
                     else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("i")))
                         val = g_variant_new_int32(std::stoi(opt.second));
                     else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("u")))
-                        val = g_variant_new_uint32(std::stoul(opt.second));
+                        val = g_variant_new_uint32(static_cast<unsigned int>(std::stoul(opt.second)));
                     else if (g_variant_is_of_type(opt_def->def, G_VARIANT_TYPE("t")))
                         val = g_variant_new_uint64(std::stoull(opt.second));
                     else

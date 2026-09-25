@@ -119,9 +119,11 @@ inline QString apply(const QString &file_name, int channels, uint64_t samplerate
 
     // Split off the extension of the last path component (a '.' in a directory
     // name must not be taken for one).
-    const int separator = std::max(file_name.lastIndexOf(QLatin1Char('/')),
-                                   file_name.lastIndexOf(QLatin1Char('\\')));
-    const int dot = file_name.lastIndexOf(QLatin1Char('.'));
+    // qsizetype, not int: QString::lastIndexOf() returns qsizetype and a path
+    // longer than INT_MAX would otherwise be truncated here.
+    const qsizetype separator = std::max(file_name.lastIndexOf(QLatin1Char('/')),
+                                         file_name.lastIndexOf(QLatin1Char('\\')));
+    const qsizetype dot = file_name.lastIndexOf(QLatin1Char('.'));
     const bool has_extension = dot > separator + 1;
     const QString base = has_extension ? file_name.left(dot) : file_name;
     const QString extension = has_extension ? file_name.mid(dot) : QString();

@@ -39,7 +39,7 @@ namespace view {
 LissajousTrace::LissajousTrace(bool enable,
                      data::DsoSnapshot *data,
                      int xIndex, int yIndex, int percent):
-    Trace("Lissajous", xIndex, SR_CHANNEL_LISSAJOUS),
+    Trace("Lissajous", static_cast<unsigned short>(xIndex), SR_CHANNEL_LISSAJOUS),
     _data(data),
     _enable(enable),
     _xIndex(xIndex),
@@ -80,14 +80,14 @@ void LissajousTrace::paint_back(QPainter &p, int left, int right, QColor fore, Q
 
     for (int i = 1; i < DIV_NUM; i++) {
         const double posY = _border.top() + spanY * i;
-        p.drawLine(_border.left(), posY, _border.right(), posY);
+        p.drawLine(_border.left(), static_cast<int>(posY), _border.right(), static_cast<int>(posY));
     }
 
     const double spanX = square / DIV_NUM;
 
     for (int i = 1; i < DIV_NUM; i++) {
         const double posX = _border.left() + spanX * i;
-        p.drawLine(posX, _border.top(), posX, _border.bottom());
+        p.drawLine(static_cast<int>(posX), _border.top(), static_cast<int>(posX), _border.bottom());
     }
 
     fore.setAlpha(IRenderView::ForeAlpha);
@@ -126,7 +126,7 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
         int left = _border.left();
         int bottom = _border.bottom();
         double scale = _border.width() / 255.0;
-        uint64_t sample_count = _data->get_sample_count() * min(_percent / 100.0, 1.0);
+        uint64_t sample_count = static_cast<unsigned long>(static_cast<double>(_data->get_sample_count()) * min(_percent / 100.0, 1.0));
         if (sample_count == 0)
             return;
 

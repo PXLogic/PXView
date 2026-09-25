@@ -95,27 +95,27 @@ QRect Cursor::get_label_rect(const QRect &rect, bool &visible, bool has_hoff)
         return QRect(-1, -1, 0, 0);
     }
     const double samples_per_pixel =
-        src->cur_snap_samplerate() * _view.scale();
-    const double cur_offset = _index / samples_per_pixel;
+        static_cast<double>(src->cur_snap_samplerate()) * _view.scale();
+    const double cur_offset = static_cast<double>(_index) / samples_per_pixel;
     // Task 3.3: _view is the widget-free IRenderView; the visible-width
     // query (ex View::width()) goes through get_view_width().
-    if (cur_offset < _view.offset() ||
+    if (cur_offset < static_cast<double>(_view.offset()) ||
         cur_offset >
-            (_view.offset() + _view.get_view_width())) {
+            static_cast<double>((_view.offset() + _view.get_view_width()))) {
         visible = false;
         return QRect(-1, -1, 0, 0);
     }
-    const int64_t x = _view.index2pixel(_index, has_hoff);
+    const int64_t x = static_cast<long int>(_view.index2pixel(_index, has_hoff));
 
     const QSize label_size(
-		_text_size.width() + kLabelPadding.width() * 2,
-		_text_size.height() + kLabelPadding.height() * 2);
+		static_cast<int>(_text_size.width() + kLabelPadding.width() * 2),
+		static_cast<int>(_text_size.height() + kLabelPadding.height() * 2));
     const int top = rect.height() - label_size.height() -
-		Cursor::Offset - Cursor::ArrowSize - 0.5f;
+		static_cast<int>(static_cast<float>(Cursor::Offset - Cursor::ArrowSize) - 0.5f);
     const int height = label_size.height();
 
     visible = true;
-    return QRect(x - label_size.width() / 2, top, label_size.width(), height);
+    return QRect(static_cast<int>(x - label_size.width() / 2), top, label_size.width(), height);
 }
 
 QRect Cursor::get_close_rect(const QRect &rect)

@@ -167,7 +167,7 @@ void LogicSignal::paint_mid_align(QPainter &p, int left, int right, QColor fore,
   // View::get_preview_ranges and passed in as GlitchRange values; the
   // already-filtered (red) overlay is read from the snapshot inside the
   // rasterizer.
-  const int y = get_y() + _totalHeight * 0.5;
+  const int y = static_cast<int>(get_y() + _totalHeight * 0.5);
   const int64_t offset = ctx.offset;
 
   std::vector<GlitchRange> preview;
@@ -201,13 +201,13 @@ void LogicSignal::paint_caps(QPainter &p, QLineF *const lines,
            edges.begin();
        i != (edges.end() - 1); i++)
     if ((*i).second == level) {
-      curX = ((*i).first / samples_per_pixel - pixels_offset) + x_offset;
-      nxtX = ((*(i + 1)).first / samples_per_pixel - pixels_offset) + x_offset;
+      curX = static_cast<unsigned long>((static_cast<double>((*i).first) / samples_per_pixel - pixels_offset) + x_offset);
+      nxtX = static_cast<unsigned long>((static_cast<double>((*(i + 1)).first) / samples_per_pixel - pixels_offset) + x_offset);
       if (nxtX > curX)
-        *line++ = QLineF(curX, y_offset, nxtX, y_offset);
+        *line++ = QLineF(static_cast<double>(curX), y_offset, static_cast<double>(nxtX), y_offset);
     }
 
-  p.drawLines(lines, line - lines);
+  p.drawLines(lines, static_cast<int>(line - lines));
 }
 
 void LogicSignal::paint_type_options(QPainter &p, int right, const QPoint pt,
@@ -252,41 +252,41 @@ void LogicSignal::paint_type_options(QPainter &p, int right, const QPoint pt,
 
   p.setPen(QPen(fore, 2, Qt::SolidLine));
   p.setBrush(Qt::transparent);
-  p.drawLine(posTrig_rect.left() + 5, posTrig_rect.bottom() - 5,
-             posTrig_rect.center().x(), posTrig_rect.bottom() - 5);
-  p.drawLine(posTrig_rect.center().x(), posTrig_rect.bottom() - 5,
-             posTrig_rect.center().x(), posTrig_rect.top() + 5);
-  p.drawLine(posTrig_rect.center().x(), posTrig_rect.top() + 5,
-             posTrig_rect.right() - 5, posTrig_rect.top() + 5);
+  p.drawLine(static_cast<int>(posTrig_rect.left() + 5), static_cast<int>(posTrig_rect.bottom() - 5),
+             static_cast<int>(posTrig_rect.center().x()), static_cast<int>(posTrig_rect.bottom() - 5));
+  p.drawLine(static_cast<int>(posTrig_rect.center().x()), static_cast<int>(posTrig_rect.bottom() - 5),
+             static_cast<int>(posTrig_rect.center().x()), static_cast<int>(posTrig_rect.top() + 5));
+  p.drawLine(static_cast<int>(posTrig_rect.center().x()), static_cast<int>(posTrig_rect.top() + 5),
+             static_cast<int>(posTrig_rect.right() - 5), static_cast<int>(posTrig_rect.top() + 5));
 
-  p.drawLine(higTrig_rect.left() + 5, higTrig_rect.top() + 5,
-             higTrig_rect.right() - 5, higTrig_rect.top() + 5);
+  p.drawLine(static_cast<int>(higTrig_rect.left() + 5), static_cast<int>(higTrig_rect.top() + 5),
+             static_cast<int>(higTrig_rect.right() - 5), static_cast<int>(higTrig_rect.top() + 5));
 
-  p.drawLine(negTrig_rect.left() + 5, negTrig_rect.top() + 5,
-             negTrig_rect.center().x(), negTrig_rect.top() + 5);
-  p.drawLine(negTrig_rect.center().x(), negTrig_rect.top() + 5,
-             negTrig_rect.center().x(), negTrig_rect.bottom() - 5);
-  p.drawLine(negTrig_rect.center().x(), negTrig_rect.bottom() - 5,
-             negTrig_rect.right() - 5, negTrig_rect.bottom() - 5);
+  p.drawLine(static_cast<int>(negTrig_rect.left() + 5), static_cast<int>(negTrig_rect.top() + 5),
+             static_cast<int>(negTrig_rect.center().x()), static_cast<int>(negTrig_rect.top() + 5));
+  p.drawLine(static_cast<int>(negTrig_rect.center().x()), static_cast<int>(negTrig_rect.top() + 5),
+             static_cast<int>(negTrig_rect.center().x()), static_cast<int>(negTrig_rect.bottom() - 5));
+  p.drawLine(static_cast<int>(negTrig_rect.center().x()), static_cast<int>(negTrig_rect.bottom() - 5),
+             static_cast<int>(negTrig_rect.right() - 5), static_cast<int>(negTrig_rect.bottom() - 5));
 
-  p.drawLine(lowTrig_rect.left() + 5, lowTrig_rect.bottom() - 5,
-             lowTrig_rect.right() - 5, lowTrig_rect.bottom() - 5);
+  p.drawLine(static_cast<int>(lowTrig_rect.left() + 5), static_cast<int>(lowTrig_rect.bottom() - 5),
+             static_cast<int>(lowTrig_rect.right() - 5), static_cast<int>(lowTrig_rect.bottom() - 5));
 
-  p.drawLine(edgeTrig_rect.left() + 5, edgeTrig_rect.top() + 5,
-             edgeTrig_rect.center().x() - 2, edgeTrig_rect.top() + 5);
-  p.drawLine(edgeTrig_rect.center().x() + 2, edgeTrig_rect.top() + 5,
-             edgeTrig_rect.right() - 5, edgeTrig_rect.top() + 5);
-  p.drawLine(edgeTrig_rect.center().x(), edgeTrig_rect.top() + 7,
-             edgeTrig_rect.center().x(), edgeTrig_rect.bottom() - 7);
-  p.drawLine(edgeTrig_rect.left() + 5, edgeTrig_rect.bottom() - 5,
-             edgeTrig_rect.center().x() - 2, edgeTrig_rect.bottom() - 5);
-  p.drawLine(edgeTrig_rect.center().x() + 2, edgeTrig_rect.bottom() - 5,
-             edgeTrig_rect.right() - 5, edgeTrig_rect.bottom() - 5);
+  p.drawLine(static_cast<int>(edgeTrig_rect.left() + 5), static_cast<int>(edgeTrig_rect.top() + 5),
+             static_cast<int>(edgeTrig_rect.center().x() - 2), static_cast<int>(edgeTrig_rect.top() + 5));
+  p.drawLine(static_cast<int>(edgeTrig_rect.center().x() + 2), static_cast<int>(edgeTrig_rect.top() + 5),
+             static_cast<int>(edgeTrig_rect.right() - 5), static_cast<int>(edgeTrig_rect.top() + 5));
+  p.drawLine(static_cast<int>(edgeTrig_rect.center().x()), static_cast<int>(edgeTrig_rect.top() + 7),
+             static_cast<int>(edgeTrig_rect.center().x()), static_cast<int>(edgeTrig_rect.bottom() - 7));
+  p.drawLine(static_cast<int>(edgeTrig_rect.left() + 5), static_cast<int>(edgeTrig_rect.bottom() - 5),
+             static_cast<int>(edgeTrig_rect.center().x() - 2), static_cast<int>(edgeTrig_rect.bottom() - 5));
+  p.drawLine(static_cast<int>(edgeTrig_rect.center().x() + 2), static_cast<int>(edgeTrig_rect.bottom() - 5),
+             static_cast<int>(edgeTrig_rect.right() - 5), static_cast<int>(edgeTrig_rect.bottom() - 5));
 }
 
 bool LogicSignal::measure(const QPointF &p, uint64_t &index0, uint64_t &index1,
                           uint64_t &index2) {
-  const float gap = abs(p.y() - get_y());
+  const float gap = static_cast<float>(abs(p.y() - get_y()));
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
         !_data->has_data(_model ? _model->index() : 0)) {
@@ -301,7 +301,7 @@ bool LogicSignal::measure(const QPointF &p, uint64_t &index0, uint64_t &index1,
     }
     const uint64_t end = ring_count - 1;
     uint64_t index =
-        _data->samplerate() * _view->scale() * (_view->offset() + p.x());
+        static_cast<unsigned long>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
 
     if (index > end) {
       return false;
@@ -344,7 +344,7 @@ bool LogicSignal::measure(const QPointF &p, uint64_t &index0, uint64_t &index1,
 
 bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
   uint64_t pre_index, nxt_index;
-  const float gap = abs(p.y() - get_y());
+  const float gap = static_cast<float>(abs(p.y() - get_y()));
 
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
@@ -360,8 +360,8 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
     }
     const uint64_t end = ring_count - 1;
     const double pos =
-        _data->samplerate() * _view->scale() * (_view->offset() + p.x());
-    index = floor(pos + 0.5);
+        _data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x());
+    index = static_cast<unsigned long>(floor(pos + 0.5));
     if (index > end)
       return false;
 
@@ -387,7 +387,7 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
       return false;
 
     if (pre_index > 0 && nxt_index > 0) {
-      if (pos - pre_index > nxt_index - pos)
+      if (pos - static_cast<double>(pre_index) > static_cast<double>(nxt_index) - pos)
         index = nxt_index;
       else
         index = pre_index;
@@ -395,7 +395,7 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
       index = pre_index > 0 ? pre_index : nxt_index;
     }
 
-    if (radius > abs((index - pos) / _view->scale() / _data->samplerate()))
+    if (radius > abs((static_cast<double>(index) - pos) / _view->scale() / _data->samplerate()))
       return true;
   }
   return false;
@@ -403,7 +403,7 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
 
 bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
   uint64_t pre_index, nxt_index;
-  const float gap = abs(p.y() - get_y());
+  const float gap = static_cast<float>(abs(p.y() - get_y()));
 
   if (gap < get_totalHeight() * 0.5) {
     if (!_data || _data->empty() ||
@@ -419,8 +419,8 @@ bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
     }
     const uint64_t end = ring_count - 1;
     const double pos =
-        _data->samplerate() * _view->scale() * (_view->offset() + p.x());
-    index = floor(pos + 0.5);
+        _data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x());
+    index = static_cast<unsigned long>(floor(pos + 0.5));
     if (index > end)
       return false;
 
@@ -445,12 +445,12 @@ bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
     if (pre_index == 0 || nxt_index == 0)
       return false;
 
-    if (pos - pre_index > nxt_index - pos)
+    if (pos - static_cast<double>(pre_index) > static_cast<double>(nxt_index) - pos)
       index = nxt_index;
     else
       index = pre_index;
 
-    if (radius > abs((index - pos) / _view->scale() / _data->samplerate()))
+    if (radius > abs((static_cast<double>(index) - pos) / _view->scale() / _data->samplerate()))
       return true;
   }
   return false;
@@ -459,11 +459,11 @@ bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
 bool LogicSignal::edges(const QPointF &p, uint64_t start, uint64_t &rising,
                         uint64_t &falling) {
   uint64_t end;
-  const float gap = abs(p.y() - get_y());
+  const float gap = static_cast<float>(abs(p.y() - get_y()));
   if (gap < get_totalHeight() * 0.5) {
     if (!_data)
       return false;
-    end = _data->samplerate() * _view->scale() * (_view->offset() + p.x());
+    end = static_cast<unsigned long>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
     return edges(end, start, rising, falling);
   }
   return false;

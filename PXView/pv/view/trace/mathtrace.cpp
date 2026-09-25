@@ -42,7 +42,7 @@ namespace view {
 MathTrace::MathTrace(bool enable,std::shared_ptr<data::MathStack> math_stack,
                      view::DsoSignal *dsoSig1,
                      view::DsoSignal *dsoSig2):
-    Trace("M", dsoSig1->get_index(), SR_CHANNEL_MATH),
+    Trace("M", static_cast<unsigned short>(dsoSig1->get_index()), SR_CHANNEL_MATH),
     _math_stack(math_stack),
     _enable(enable),
     _show(true),
@@ -142,11 +142,12 @@ void MathTrace::go_vDialPre()
     if (enabled() && !_vDial->isMin()) {
         if (_view->session().is_running_status())
             _view->session().refresh(DsoSignal::RefreshShort);
-        const double pre_vdiv = _vDial->get_value();
+        const double pre_vdiv = static_cast<double>(_vDial->get_value());
         _vDial->set_sel(_vDial->get_sel() - 1);
 
         if (_view->session().is_stopped_status())
-            _scale *= pre_vdiv/_vDial->get_value();
+            _scale = static_cast<float>(
+                _scale * (pre_vdiv / static_cast<double>(_vDial->get_value())));
 
         _view->set_update_viewport(_viewport, true);
         _view->request_repaint();
@@ -158,11 +159,12 @@ void MathTrace::go_vDialNext()
     if (enabled() && !_vDial->isMax()) {
         if (_view->session().is_running_status())
             _view->session().refresh(DsoSignal::RefreshShort);
-        const double pre_vdiv = _vDial->get_value();
+        const double pre_vdiv = static_cast<double>(_vDial->get_value());
         _vDial->set_sel(_vDial->get_sel() + 1);
 
         if (_view->session().is_stopped_status())
-            _scale *= pre_vdiv/_vDial->get_value();
+            _scale = static_cast<float>(
+                _scale * (pre_vdiv / static_cast<double>(_vDial->get_value())));
 
         _view->set_update_viewport(_viewport, true);
         _view->request_repaint();
@@ -181,7 +183,7 @@ uint64_t MathTrace::get_vDialfactor()
 
 uint16_t MathTrace::get_vDialSel()
 {
-    return _vDial->get_sel();
+    return static_cast<unsigned short>(_vDial->get_sel());
 }
 
 double MathTrace::get_zero_ratio()
@@ -192,12 +194,12 @@ double MathTrace::get_zero_ratio()
 void MathTrace::set_zero_vrate(double rate)
 {
     _zero_vrate = rate;
-    _hw_offset = _zero_vrate * (_ref_max - _ref_min) + _ref_min;
+    _hw_offset = static_cast<float>(_zero_vrate * (_ref_max - _ref_min) + _ref_min);
 }
 
 int MathTrace::get_zero_vpos()
 {
-    return _zero_vrate * get_view_rect().height() + DsoSignal::UpMargin;
+    return static_cast<int>(_zero_vrate * get_view_rect().height() + DsoSignal::UpMargin);
 }
 
 void MathTrace::set_zero_vpos(int pos)
@@ -244,22 +246,22 @@ void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor 
     assert(right >= left);
 
     if (enabled()) {
-        const float top = get_view_rect().top();
+        const float top = static_cast<float>(get_view_rect().top());
         const int height = get_view_rect().height();
         const int width = right - left;
-        const float zeroY = _zero_vrate * height + top;
+        const float zeroY = static_cast<float>(_zero_vrate * height + top);
 
         const double scale = ctx.scale;
         if (scale <= 0)
             return;
         const int64_t offset = ctx.offset;
 
-        const double pixels_offset = offset;
+        const double pixels_offset = static_cast<double>(offset);
         //const double samplerate = _view->session().cur_snap_samplerate();
         const double samplerate = _math_stack->samplerate();
         const int64_t last_sample = max(static_cast<int64_t>((_math_stack->get_sample_num() - 1)), static_cast<int64_t>(0));
         const double samples_per_pixel = samplerate * scale;
-        const double start = offset * samples_per_pixel - ctx.trig_hoff;
+        const double start = static_cast<double>(offset) * samples_per_pixel - ctx.trig_hoff;
         const double end = start + samples_per_pixel * width;
 
         const int64_t start_sample = min(max(static_cast<int64_t>(floor(start)),
@@ -267,16 +269,16 @@ void MathTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor 
         const int64_t end_sample = min(max(static_cast<int64_t>(ceil(end)) + 1,
             static_cast<int64_t>(0)), last_sample);
 
-        _scale = get_view_rect().height() * _math_stack->get_math_scale() * 1000.0 / get_vDialValue();
+        _scale = static_cast<float>(get_view_rect().height() * _math_stack->get_math_scale() * 1000.0 / static_cast<double>(get_vDialValue()));
 
         if (samples_per_pixel < DsoSignal::EnvelopeThreshold) {
             _math_stack->enable_envelope(false);
-            paint_trace(p, zeroY, left,
+            paint_trace(p, static_cast<int>(zeroY), left,
                 start_sample, end_sample,
                 pixels_offset, samples_per_pixel, ctx.trig_hoff);
         } else {
             _math_stack->enable_envelope(true);
-            paint_envelope(p, zeroY, left,
+            paint_envelope(p, static_cast<int>(zeroY), left,
                 start_sample, end_sample,
                 pixels_offset, samples_per_pixel, ctx.trig_hoff);
         }
@@ -325,20 +327,20 @@ void MathTrace::paint_trace(QPainter &p,
 
         double top = get_view_rect().top();
         double bottom = get_view_rect().bottom();
-        float x = (start / samples_per_pixel - pixels_offset) + left + trig_hoff/samples_per_pixel;
+        float x = static_cast<float>((static_cast<double>(start) / samples_per_pixel - pixels_offset) + left + trig_hoff/samples_per_pixel);
         double  pixels_per_sample = 1.0/samples_per_pixel;
 
         for (int64_t index = 0; index < sample_count; index++) {
-            const float y = min(max(top, zeroY - (values[index] * _scale)), bottom);
-            if (x > get_view_rect().right()) {
+            const float y = static_cast<float>(min(max(top, zeroY - (values[index] * _scale)), bottom));
+            if (x > static_cast<float>(get_view_rect().right())) {
                 point--;
-                const float lastY = point->y() + (y - point->y()) / (x - point->x()) * (get_view_rect().right() - point->x());
+                const float lastY = static_cast<float>(point->y() + (y - point->y()) / (x - point->x()) * (get_view_rect().right() - point->x()));
                 point++;
                 *point++ = QPointF(get_view_rect().right(), lastY);
                 break;
             }
             *point++ = QPointF(x, y);
-            x += pixels_per_sample;
+            x = static_cast<float>(x + pixels_per_sample);
         }
 
         p.drawPolyline(points.data(), static_cast<int>(point - points.data()));
@@ -353,7 +355,7 @@ void MathTrace::paint_envelope(QPainter &p,
 	using namespace Qt;
 
     data::MathStack::EnvelopeSection e;
-    _math_stack->get_math_envelope_section(e, start, end, samples_per_pixel);
+    _math_stack->get_math_envelope_section(e, start, end, static_cast<float>(samples_per_pixel));
 
 	if (e.length < 2)
 		return;
@@ -372,19 +374,20 @@ void MathTrace::paint_envelope(QPainter &p,
     // 固定 1.0f 宽 → 矩形间留白 → 缩放到 spp∈[threshold, e.scale] 区间
     // 出现间断线条。改为 max(1, step) 使低密度时矩形横向铺满到下一个
     // 样本位置 → 连续。与 DsoSignal/AnalogSignal 的 paint_envelope 一致。
-    const float scale_pixels_per_samples = e.scale / samples_per_pixel;
+    const float scale_pixels_per_samples = static_cast<float>(e.scale / samples_per_pixel);
     const float rect_w = max(1.0f, scale_pixels_per_samples);
 
     for(uint64_t sample = 0; sample < e.length-1; sample++) {
-		const float x = ((e.scale * sample + e.start) /
-            samples_per_pixel - pixels_offset) + left + trig_hoff/samples_per_pixel;
+		const float x = static_cast<float>(
+            (static_cast<double>((e.scale * sample + e.start)) / samples_per_pixel -
+             pixels_offset) + left + trig_hoff / samples_per_pixel);
         const data::MathStack::EnvelopeSample *const s =
 			e.samples + sample;
 
 		// We overlap this sample with the next so that vertical
 		// gaps do not appear during steep rising or falling edges
-        const float b = min(max(top, zeroY - max(s->max, (s+1)->min) * _scale), bottom);
-        const float t = min(max(top, zeroY - min(s->min, (s+1)->max) * _scale), bottom);
+        const float b = static_cast<float>(min(max(top, zeroY - max(s->max, (s+1)->min) * _scale), bottom));
+        const float t = static_cast<float>(min(max(top, zeroY - min(s->min, (s+1)->max) * _scale), bottom));
 
 		float h = b - t;
 		if(h >= 0.0f && h <= 1.0f)
@@ -466,7 +469,7 @@ void MathTrace::paint_hover_measure(QPainter &p, QColor fore, QColor back)
 
         p.setPen(fore);
         p.setBrush(back);
-        p.drawRect(_hover_point.x()-1, _hover_point.y()-1,
+        p.drawRect(static_cast<int>(_hover_point.x()-1), static_cast<int>(_hover_point.y()-1),
                    DsoSignal::HoverPointSize, DsoSignal::HoverPointSize);
         p.drawText(hover_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip, hover_str);
     }
@@ -498,9 +501,9 @@ void MathTrace::paint_hover_measure(QPainter &p, QColor fore, QColor back)
         if (pt_rect.bottom() > get_view_rect().bottom())
             pt_rect.moveBottom(pt.y());
 
-        p.drawRect(pt.x()-1, pt.y()-1, 2, 2);
-        p.drawLine(pt.x()-2, pt.y()-2, pt.x()+2, pt.y()+2);
-        p.drawLine(pt.x()+2, pt.y()-2, pt.x()-2, pt.y()+2);
+        p.drawRect(static_cast<int>(pt.x()-1), static_cast<int>(pt.y()-1), 2, 2);
+        p.drawLine(static_cast<int>(pt.x()-2), static_cast<int>(pt.y()-2), static_cast<int>(pt.x()+2), static_cast<int>(pt.y()+2));
+        p.drawLine(static_cast<int>(pt.x()+2), static_cast<int>(pt.y()-2), static_cast<int>(pt.x()-2), static_cast<int>(pt.y()+2));
         p.drawText(pt_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip, pt_str);
     }
 }
@@ -537,13 +540,13 @@ QPointF MathTrace::get_point(uint64_t index, float &value, bool &out_Error)
         return pt;
     }
 
-    const float top = get_view_rect().top();
-    const float bottom = get_view_rect().bottom();
-    const float zeroP = _zero_vrate * get_view_rect().height() + top;
-    const float x = _view->index2pixel(index);
+    const float top = static_cast<float>(get_view_rect().top());
+    const float bottom = static_cast<float>(get_view_rect().bottom());
+    const float zeroP = static_cast<float>(_zero_vrate * get_view_rect().height() + top);
+    const float x = static_cast<float>(_view->index2pixel(index));
 
-    float v = *_math_stack->get_math(index);
-    value = v * get_vDialfactor();
+    float v = static_cast<float>(*_math_stack->get_math(index));
+    value = v * static_cast<float>(get_vDialfactor());
     float y = min(max(top, zeroP - (v * _scale)), bottom);
     pt = QPointF(x, y);
     return pt;

@@ -198,12 +198,12 @@ QPointF DsoMeasure::get_point(uint64_t index, float &value) {
   if (!sp.valid())
     return pt;
   value = sp.data[0];
-  const float top = _signal->get_view_rect().top();
-  const float bottom = _signal->get_view_rect().bottom();
+  const float top = static_cast<float>(_signal->get_view_rect().top());
+  const float bottom = static_cast<float>(_signal->get_view_rect().bottom());
   const int hw_offset = _signal->get_hw_offset();
-  const float x = _signal->_view->index2pixel(index);
+  const float x = static_cast<float>(_signal->_view->index2pixel(index));
   const float y =
-      min(max(top, _signal->get_zero_vpos() + (value - hw_offset) * _signal->_scale), bottom);
+      min(max(top, static_cast<float>(_signal->get_zero_vpos()) + (value - static_cast<float>(hw_offset)) * _signal->_scale), bottom);
   pt = QPointF(x, y);
 
   return pt;
@@ -229,7 +229,7 @@ double DsoMeasure::get_voltage(uint64_t index) {
   uint64_t k = _signal->_data->get_measure_voltage_factor(_signal->get_index());
   float data_scale = _signal->_data->get_data_scale(_signal->get_index());
 
-  return (hw_offset - value) * data_scale * k * _signal->_vDial->get_factor() *
+  return (hw_offset - value) * data_scale * static_cast<double>(k) * static_cast<double>(_signal->_vDial->get_factor()) *
          DS_CONF_DSO_VDIVS / _signal->get_view_rect().height();
 }
 
@@ -257,10 +257,10 @@ QString DsoMeasure::get_voltage(double v, int p, bool scaled) {
   //               formula. Upstream's /height only cancelled against
   //               DsoSignal::get_scale() inside data_scale. See §4.9.2.
   if (scaled)
-    v = v * k * _signal->_vDial->get_factor() * DS_CONF_DSO_VDIVS /
+    v = v * static_cast<double>(k) * static_cast<double>(_signal->_vDial->get_factor()) * DS_CONF_DSO_VDIVS /
         _signal->get_view_rect().height();
   else
-    v = v * data_scale * k * _signal->_vDial->get_factor() * DS_CONF_DSO_VDIVS;
+    v = v * data_scale * static_cast<double>(k) * static_cast<double>(_signal->_vDial->get_factor()) * DS_CONF_DSO_VDIVS;
 
   return abs(v) >= 1000 ? QString::number(v / 1000.0, 'f', p) + "V"
                         : QString::number(v, 'f', p) + "mV";
@@ -380,7 +380,7 @@ void DsoMeasure::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
   const int hw_offset = _signal->get_hw_offset();
   // Hover measure
   if (_signal->_hover_en && _signal->_hover_point != QPointF(-1, -1)) {
-    QString hover_str = _signal->get_voltage(hw_offset - _signal->_hover_value, 2);
+    QString hover_str = _signal->get_voltage(static_cast<float>(hw_offset) - _signal->_hover_value, 2);
     const int hover_width =
         p.boundingRect(0, 0, INT_MAX, INT_MAX, Qt::AlignLeft | Qt::AlignTop,
                        hover_str)
@@ -401,7 +401,7 @@ void DsoMeasure::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
 
     p.setPen(fore);
     p.setBrush(back);
-    p.drawRect(_signal->_hover_point.x() - 1, _signal->_hover_point.y() - 1, _signal->HoverPointSize,
+    p.drawRect(static_cast<int>(_signal->_hover_point.x() - 1), static_cast<int>(_signal->_hover_point.y() - 1), _signal->HoverPointSize,
                _signal->HoverPointSize);
     p.drawText(hover_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip,
                hover_str);
@@ -413,7 +413,7 @@ void DsoMeasure::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
   while (i != cursor_list.end()) {
     float pt_value;
 
-    int chan_index = (*i)->index();
+    int chan_index = static_cast<int>((*i)->index());
     if (!_signal->_data || _signal->_data->has_data(chan_index) == false) {
       i++;
       continue;
@@ -425,7 +425,7 @@ void DsoMeasure::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
       continue;
     }
 
-    QString pt_str = _signal->get_voltage(hw_offset - pt_value, 2);
+    QString pt_str = _signal->get_voltage(static_cast<float>(hw_offset) - pt_value, 2);
     const int pt_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
                                         Qt::AlignLeft | Qt::AlignTop, pt_str)
                              .width() +
@@ -441,9 +441,9 @@ void DsoMeasure::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
     if (pt_rect.bottom() > _signal->get_view_rect().bottom())
       pt_rect.moveBottom(pt.y());
 
-    p.drawRect(pt.x() - 1, pt.y() - 1, 2, 2);
-    p.drawLine(pt.x() - 2, pt.y() - 2, pt.x() + 2, pt.y() + 2);
-    p.drawLine(pt.x() + 2, pt.y() - 2, pt.x() - 2, pt.y() + 2);
+    p.drawRect(static_cast<int>(pt.x() - 1), static_cast<int>(pt.y() - 1), 2, 2);
+    p.drawLine(static_cast<int>(pt.x() - 2), static_cast<int>(pt.y() - 2), static_cast<int>(pt.x() + 2), static_cast<int>(pt.y() + 2));
+    p.drawLine(static_cast<int>(pt.x() + 2), static_cast<int>(pt.y() - 2), static_cast<int>(pt.x() - 2), static_cast<int>(pt.y() + 2));
     p.drawText(pt_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip,
                pt_str);
 

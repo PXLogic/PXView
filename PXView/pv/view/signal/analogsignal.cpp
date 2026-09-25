@@ -72,7 +72,7 @@ AnalogSignal::AnalogSignal(data::AnalogSnapshot *data,
                            std::shared_ptr<data::SignalModel> model,
                            data::DataSource *data_source)
     : Signal(model, data_source), _data(data),
-      _cached_hw_offset(model ? model->hw_offset() : 128), _hover_en(false),
+      _cached_hw_offset(static_cast<int>(model ? model->hw_offset() : 128)), _hover_en(false),
       _hover_index(0), _hover_point(QPointF(-1, -1)), _hover_value(0),
       _float_scale(1.0f) {
   _typeWidth = 5;
@@ -207,10 +207,10 @@ bool AnalogSignal::measure(const QPointF &p) {
   if (scale <= 0)
     return false;
   const int64_t pixels_offset = _view->offset();
-  const double samplerate = _data_source->cur_snap_samplerate();
+  const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
   const double samples_per_pixel = samplerate * scale;
 
-  _hover_index = floor((p.x() + pixels_offset) * samples_per_pixel + 0.5);
+  _hover_index = static_cast<unsigned long>(floor((p.x() + static_cast<double>(pixels_offset)) * samples_per_pixel + 0.5));
   if (_hover_index >= _data->get_sample_count())
     return false;
 
@@ -243,14 +243,14 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
   if (scale <= 0)
     return pt;
   const int64_t pixels_offset = _view->offset();
-  const double samplerate = _data_source->cur_snap_samplerate();
+  const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
   const double samples_per_pixel = samplerate * scale;
 
   if (index >= _data->get_sample_count())
     return pt;
 
   const uint64_t ring_index =
-      static_cast<uint64_t>((_data->get_ring_start() + floor(index))) %
+      static_cast<uint64_t>((static_cast<double>(_data->get_ring_start()) + floor(index))) %
       _data->get_sample_count();
   const uint8_t unit_bytes = _data->get_unit_bytes();
   const bool is_float = _data->is_float();
@@ -267,17 +267,17 @@ QPointF AnalogSignal::get_point(uint64_t index, float &value) {
     return pt;
 
   const int height = get_totalHeight();
-  const float top = get_y() - height * 0.5;
-  const float bottom = get_y() + height * 0.5;
+  const float top = static_cast<float>(get_y() - height * 0.5);
+  const float bottom = static_cast<float>(get_y() + height * 0.5);
   const int hw_offset = get_hw_offset();
-  const float x = (index / samples_per_pixel - pixels_offset);
+  const float x = static_cast<float>((static_cast<double>(index) / samples_per_pixel - static_cast<double>(pixels_offset)));
 
   float y;
   value = static_cast<float>(sp.analog_value_at(ring_index, is_float));
   if (is_float && unit_bytes == sizeof(float)) {
-    y = min(max(top, get_zero_vpos() - value * _float_scale), bottom);
+    y = min(max(top, static_cast<float>(get_zero_vpos()) - value * _float_scale), bottom);
   } else {
-    y = min(max(top, get_zero_vpos() + (value - hw_offset) * _scale), bottom);
+    y = min(max(top, static_cast<float>(get_zero_vpos()) + (value - static_cast<float>(hw_offset)) * _scale), bottom);
   }
   pt = QPointF(x, y);
 
@@ -343,13 +343,13 @@ uint64_t AnalogSignal::get_factor() {
 }
 
 int AnalogSignal::ratio2value(double ratio) {
-  return ratio * (_ref_max - _ref_min) + _ref_min;
+  return static_cast<int>(ratio * (_ref_max - _ref_min) + _ref_min);
 }
 
 int AnalogSignal::ratio2pos(double ratio) {
   const int height = get_totalHeight();
-  const int top = get_y() - height * 0.5;
-  return ratio * height + top;
+  const int top = static_cast<int>(get_y() - height * 0.5);
+  return static_cast<int>(ratio * height + top);
 }
 
 double AnalogSignal::value2ratio(int value) {
@@ -438,29 +438,29 @@ void AnalogSignal::paint_back(QPainter &p, int left, int right, QColor fore,
   double mapValue =
       get_mapMax() + (get_zero_ratio() - 0.5) * (get_mapMax() - get_mapMin());
   for (i = 0; i < DIVS; i++) {
-    p.drawLine(left, y, left + 10, y);
+    p.drawLine(left, static_cast<int>(y), left + 10, static_cast<int>(y));
     if (i == 0 || i == DIVS / 2)
       p.drawText(QRectF(left + 15, y - 10, 100, 20),
                  Qt::AlignLeft | Qt::AlignVCenter,
                  QString::number(mapValue, 'f', 2) + mapUnit);
-    p.drawLine(right, y, right - 10, y);
+    p.drawLine(right, static_cast<int>(y), right - 10, static_cast<int>(y));
     if (i == 0 || i == DIVS / 2)
       p.drawText(QRectF(right - 115, y - 10, 100, 20),
                  Qt::AlignRight | Qt::AlignVCenter,
                  QString::number(mapValue, 'f', 2) + mapUnit);
     for (j = 0; j < minDIVS - 1; j++) {
       y += STEPS;
-      p.drawLine(left, y, left + 5, y);
-      p.drawLine(right, y, right - 5, y);
+      p.drawLine(left, static_cast<int>(y), left + 5, static_cast<int>(y));
+      p.drawLine(right, static_cast<int>(y), right - 5, static_cast<int>(y));
     }
     y += STEPS;
     mapValue -= mapSteps;
   }
-  p.drawLine(left, y, left + 10, y);
+  p.drawLine(left, static_cast<int>(y), left + 10, static_cast<int>(y));
   p.drawText(QRectF(left + 15, y - 10, 100, 20),
              Qt::AlignLeft | Qt::AlignVCenter,
              QString::number(mapValue, 'f', 2) + mapUnit);
-  p.drawLine(right, y, right - 10, y);
+  p.drawLine(right, static_cast<int>(y), right - 10, static_cast<int>(y));
   p.drawText(QRectF(right - 115, y - 10, 100, 20),
              Qt::AlignRight | Qt::AlignVCenter,
              QString::number(mapValue, 'f', 2) + mapUnit);
@@ -480,11 +480,11 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   assert(right >= left);
 
   const int height = get_totalHeight();
-  const float top = get_y() - height * 0.5;
-  const float bottom = get_y() + height * 0.5;
+  const float top = static_cast<float>(get_y() - height * 0.5);
+  const float bottom = static_cast<float>(get_y() + height * 0.5);
   // zeroY 由 get_zero_ratio() 计算；float 数据路径已在 get_zero_ratio() 中
   // 处理 _zero_offset 超界情况 (返回中心 0.5)。
-  const float zeroY = ratio2pos(get_zero_ratio());
+  const float zeroY = static_cast<float>(ratio2pos(get_zero_ratio()));
   const int width = right - left + 1;
 
   const double scale = ctx.scale;
@@ -511,23 +511,24 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
     _data->get_float_min_max(fmin, fmax);
     const float max_abs = std::max(fabsf(fmin), fabsf(fmax));
     if (max_abs > 1e-6f) {
-      _float_scale = (height * 0.5f) / max_abs;
+      _float_scale = (static_cast<float>(height) * 0.5f) / max_abs;
     }
   }
 
-  const double pixels_offset = offset;
+  const double pixels_offset = static_cast<double>(offset);
   // Use document_snapshot_source samplerate for coordinate consistency
-  const double samplerate = _data_source->cur_snap_samplerate();
+  const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
   const int64_t cur_sample_count = _data->get_sample_count();
   const double samples_per_pixel = samplerate * scale;
   const uint64_t ring_start = _data->get_ring_start();
 
   uint64_t start_index;
   const double index_offset = pixels_offset * samples_per_pixel;
-  start_index = static_cast<uint64_t>((ring_start + floor(index_offset))) % cur_sample_count;
+  start_index = static_cast<uint64_t>((static_cast<double>(ring_start) + floor(index_offset))) % cur_sample_count;
 
-  int64_t show_length = min(floor(cur_sample_count - floor(index_offset)),
-                            ceil(width * samples_per_pixel + 1));
+  int64_t show_length = static_cast<int64_t>(
+      min(floor(static_cast<double>(cur_sample_count) - floor(index_offset)),
+          ceil(width * samples_per_pixel + 1)));
   if (show_length <= 0) {
     return;
   }
@@ -537,7 +538,7 @@ void AnalogSignal::paint_mid(QPainter &p, int left, int right, QColor fore,
   // paint_mid stays on the GUI thread and passes the prepare results
   // (zeroY / hw_offset / _scale / _float_scale / top / bottom / _colour) as
   // value parameters; the function reads only the snapshot + those values.
-  rasterize_analog_channel(p, _data, zeroY, left, right, start_index,
+  rasterize_analog_channel(p, _data, static_cast<int>(zeroY), left, right, start_index,
                            show_length, samples_per_pixel, get_index(), top,
                            bottom, get_hw_offset(), _scale, _float_scale,
                            _colour);
@@ -565,12 +566,12 @@ void AnalogSignal::paint_fore(QPainter &p, int left, int right, QColor fore,
 void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
   const int hw_offset = get_hw_offset();
   const int height = get_totalHeight();
-  const float top = get_y() - height * 0.5;
-  const float bottom = get_y() + height * 0.5;
+  const float top = static_cast<float>(get_y() - height * 0.5);
+  const float bottom = static_cast<float>(get_y() + height * 0.5);
 
   // Hover measure
   if (_hover_en && _hover_point != QPointF(-1, -1)) {
-    QString hover_str = get_voltage(hw_offset - _hover_value, 2);
+    QString hover_str = get_voltage(static_cast<float>(hw_offset) - _hover_value, 2);
     if (_hover_point.y() <= top || _hover_point.y() >= bottom)
       hover_str += "/out";
     const int hover_width =
@@ -593,7 +594,7 @@ void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
 
     p.setPen(fore);
     p.setBrush(back);
-    p.drawRect(_hover_point.x() - 1, _hover_point.y() - 1, HoverPointSize,
+    p.drawRect(static_cast<int>(_hover_point.x() - 1), static_cast<int>(_hover_point.y() - 1), HoverPointSize,
                HoverPointSize);
     p.drawText(hover_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip,
                hover_str);
@@ -610,7 +611,7 @@ void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
       continue;
     }
 
-    QString pt_str = get_voltage(hw_offset - pt_value, 2);
+    QString pt_str = get_voltage(static_cast<float>(hw_offset) - pt_value, 2);
     if (pt.y() <= top || pt.y() >= bottom)
       pt_str += "/out";
     const int pt_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
@@ -628,9 +629,9 @@ void AnalogSignal::paint_hover_measure(QPainter &p, QColor fore, QColor back) {
     if (pt_rect.bottom() > get_view_rect().bottom())
       pt_rect.moveBottom(pt.y());
 
-    p.drawRect(pt.x() - 1, pt.y() - 1, 2, 2);
-    p.drawLine(pt.x() - 2, pt.y() - 2, pt.x() + 2, pt.y() + 2);
-    p.drawLine(pt.x() + 2, pt.y() - 2, pt.x() - 2, pt.y() + 2);
+    p.drawRect(static_cast<int>(pt.x() - 1), static_cast<int>(pt.y() - 1), 2, 2);
+    p.drawLine(static_cast<int>(pt.x() - 2), static_cast<int>(pt.y() - 2), static_cast<int>(pt.x() + 2), static_cast<int>(pt.y() + 2));
+    p.drawLine(static_cast<int>(pt.x() + 2), static_cast<int>(pt.y() - 2), static_cast<int>(pt.x() - 2), static_cast<int>(pt.y() + 2));
     p.drawText(pt_rect, Qt::AlignCenter | Qt::AlignTop | Qt::TextDontClip,
                pt_str);
 

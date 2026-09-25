@@ -579,7 +579,7 @@ void CursorOverlayPass::render(QPainter &p, const RenderContext &ctx) {
   if (view->cursors_shown()) {
     auto &cursor_list = view->get_cursorList();
     for (auto &cursor : cursor_list) {
-      const int64_t cursorX = view->index2pixel(cursor->index());
+      const int64_t cursorX = static_cast<long int>(view->index2pixel(cursor->index()));
       if (xrect.contains(hover.x(), hover.y()) &&
           qAbs(cursorX - hover.x()) <= IRenderViewport::HitCursorMargin)
         cursor->paint(p, xrect, 1,
@@ -642,7 +642,7 @@ hover.y() < std::max(cursorY0, cursorY1)) {
   // 4. Search cursor
   if (view->search_cursor_shown()) {
     const int64_t searchX =
-        view->index2pixel(view->get_search_cursor()->index());
+        static_cast<long int>(view->index2pixel(view->get_search_cursor()->index()));
     if (xrect.contains(hover.x(), hover.y()) &&
         qAbs(searchX - hover.x()) <= IRenderViewport::HitCursorMargin)
       view->get_search_cursor()->paint(p, xrect, 1, -1);
@@ -732,7 +732,7 @@ void MeasureOverlayPass::draw_dso_hover_lines(QPainter &p,
       if (dsoSig->get_hover(index, hpoint, value)) {
         p.setPen(QPen(ctx.fore, 1, Qt::DashLine));
         p.setBrush(Qt::NoBrush);
-        p.drawLine(hpoint.x(), s->get_view_rect().top(), hpoint.x(),
+        p.drawLine(static_cast<int>(hpoint.x()), s->get_view_rect().top(), static_cast<int>(hpoint.x()),
                    s->get_view_rect().bottom());
       }
     } else if (auto *analogSig = s->as_analog()) {
@@ -742,7 +742,7 @@ void MeasureOverlayPass::draw_dso_hover_lines(QPainter &p,
       if (analogSig->get_hover(index, hpoint, value)) {
         p.setPen(QPen(ctx.fore, 1, Qt::DashLine));
         p.setBrush(Qt::NoBrush);
-        p.drawLine(hpoint.x(), s->get_view_rect().top(), hpoint.x(),
+        p.drawLine(static_cast<int>(hpoint.x()), s->get_view_rect().top(), static_cast<int>(hpoint.x()),
                    s->get_view_rect().bottom());
       }
     }
@@ -763,18 +763,18 @@ void MeasureOverlayPass::draw_dso_y_measure(QPainter &p,
         p.setPen(QPen(dsoSig->get_colour(), 1, Qt::DotLine));
         QFontMetrics fm(p.font());
         const int text_height = fm.height();
-        const int64_t x = m.view->index2pixel(vp->dso_ym_index());
-        p.drawLine(x - 10, vp->dso_ym_start(), x + 10,
+        const int64_t x = static_cast<long int>(m.view->index2pixel(vp->dso_ym_index()));
+        p.drawLine(static_cast<int>(x - 10), vp->dso_ym_start(), static_cast<int>(x + 10),
                    vp->dso_ym_start());
-        p.drawLine(x, vp->dso_ym_start(), x, vp->dso_ym_end());
+        p.drawLine(static_cast<int>(x), vp->dso_ym_start(), static_cast<int>(x), vp->dso_ym_end());
         p.drawLine(0, vp->dso_ym_end(),
                    m.view->get_view_width(),
                    vp->dso_ym_end());
 
-        double hrate = (vp->dso_ym_start() - vp->dso_ym_end()) *
-                       1.0f / m.view->get_view_height();
-        double value = hrate * dsoSig->get_vDialValue() *
-                       dsoSig->get_factor() * DS_CONF_DSO_VDIVS;
+        double hrate = static_cast<float>((vp->dso_ym_start() - vp->dso_ym_end())) *
+                       1.0f / static_cast<float>(m.view->get_view_height());
+        double value = hrate * static_cast<double>(dsoSig->get_vDialValue()) *
+                       static_cast<double>(dsoSig->get_factor()) * DS_CONF_DSO_VDIVS;
         QString value_str =
             abs(value) > 1000
                 ? QString::number(value / 1000.0, 'f', 2) + "V"
@@ -783,7 +783,7 @@ void MeasureOverlayPass::draw_dso_y_measure(QPainter &p,
                                     0, 0, INT_MAX, INT_MAX,
                                     Qt::AlignLeft | Qt::AlignVCenter, value_str)
                                     .width();
-        p.drawText(QRect(x + 10,
+        p.drawText(QRect(static_cast<int>(x + 10),
                          abs(vp->dso_ym_start() +
                               vp->dso_ym_end()) / 2,
                          value_rect_width, text_height),
@@ -802,7 +802,7 @@ void MeasureOverlayPass::draw_dso_y_measure(QPainter &p,
                                .width();
         int str_y = value > 0 ? vp->dso_ym_start()
                               : vp->dso_ym_start() - text_height;
-        p.drawText(QRect(x - 0.5 * value_rect_width, str_y,
+        p.drawText(QRect(static_cast<int>(static_cast<double>(x) - 0.5 * value_rect_width), str_y,
                          value_rect_width, text_height),
                    value_str);
 
@@ -816,7 +816,7 @@ void MeasureOverlayPass::draw_dso_y_measure(QPainter &p,
                                .width();
         str_y = value > 0 ? vp->dso_ym_end() - text_height
                           : vp->dso_ym_end();
-        p.drawText(QRect(x - 0.5 * value_rect_width, str_y,
+        p.drawText(QRect(static_cast<int>(static_cast<double>(x) - 0.5 * value_rect_width), str_y,
                          value_rect_width, text_height),
                    value_str);
         break;
@@ -856,18 +856,18 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
     dso_xm_stage = 3;
 
   for (int i = 0; i < dso_xm_stage; i++) {
-    x[i] = m.view->index2pixel(vp->dso_xm_indices()[i]);
+    x[i] = static_cast<long int>(m.view->index2pixel(vp->dso_xm_indices()[i]));
   }
   measure_line_count = 0;
   if (dso_xm_stage > 0) {
-    *line++ = QLine(x[0], vp->dso_xm_y() - 10, x[0],
+    *line++ = QLine(static_cast<int>(x[0]), vp->dso_xm_y() - 10, static_cast<int>(x[0]),
                     vp->dso_xm_y() + 10);
     measure_line_count += 1;
   }
   if (dso_xm_stage > 1) {
-    *line++ = QLine(x[1], vp->dso_xm_y() - 10, x[1],
+    *line++ = QLine(static_cast<int>(x[1]), vp->dso_xm_y() - 10, static_cast<int>(x[1]),
                     vp->dso_xm_y() + 10);
-    *line++ = QLine(x[0], vp->dso_xm_y(), x[1], vp->dso_xm_y());
+    *line++ = QLine(static_cast<int>(x[0]), vp->dso_xm_y(), static_cast<int>(x[1]), vp->dso_xm_y());
     vp->mm_width() = m.view->format_real_time(
         vp->dso_xm_indices()[1] - vp->dso_xm_indices()[0],
         sample_rate);
@@ -877,17 +877,17 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                            0, 0, INT_MAX, INT_MAX,
                            Qt::AlignLeft | Qt::AlignVCenter, w_ctr)
                            .width();
-    p.drawText(QRect(x[0] + 10, vp->dso_xm_y() - text_height,
+    p.drawText(QRect(static_cast<int>(x[0] + 10), vp->dso_xm_y() - text_height,
                      w_rect_width, text_height),
                w_ctr);
     measure_line_count += 2;
   }
   if (dso_xm_stage > 2) {
-    *line++ = QLineF(x[0], vp->dso_xm_y() + 20, x[0],
+    *line++ = QLineF(static_cast<double>(x[0]), vp->dso_xm_y() + 20, static_cast<double>(x[0]),
                      vp->dso_xm_y() + 40);
-    *line++ = QLineF(x[0], vp->dso_xm_y() + 30, x[2],
+    *line++ = QLineF(static_cast<double>(x[0]), vp->dso_xm_y() + 30, static_cast<double>(x[2]),
                      vp->dso_xm_y() + 30);
-    *line++ = QLineF(x[2], vp->dso_xm_y() + 20, x[2],
+    *line++ = QLineF(static_cast<double>(x[2]), vp->dso_xm_y() + 20, static_cast<double>(x[2]),
                      vp->dso_xm_y() + 40);
     vp->mm_period() = m.view->format_real_time(
         vp->dso_xm_indices()[2] - vp->dso_xm_indices()[0],
@@ -896,12 +896,11 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
         vp->dso_xm_indices()[2] - vp->dso_xm_indices()[0],
         sample_rate);
     vp->mm_duty() =
-        QString::number((vp->dso_xm_indices()[1] -
-                          vp->dso_xm_indices()[0]) *
-                             100.0 /
-                             (vp->dso_xm_indices()[2] -
-                              vp->dso_xm_indices()[0]),
-                         'f', 2) +
+        QString::number(
+            static_cast<double>(vp->dso_xm_indices()[1] - vp->dso_xm_indices()[0]) *
+                100.0 /
+                static_cast<double>(vp->dso_xm_indices()[2] - vp->dso_xm_indices()[0]),
+            'f', 2) +
         "%";
 
     const QString p_ctr = "P=" + vp->mm_period();
@@ -909,7 +908,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                            0, 0, INT_MAX, INT_MAX,
                            Qt::AlignLeft | Qt::AlignVCenter, p_ctr)
                            .width();
-    p.drawText(QRect(x[0] + 10, vp->dso_xm_y() + 30 - text_height,
+    p.drawText(QRect(static_cast<int>(x[0] + 10), vp->dso_xm_y() + 30 - text_height,
                      p_rect_width, text_height),
                p_ctr);
 
@@ -918,7 +917,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                            0, 0, INT_MAX, INT_MAX,
                            Qt::AlignLeft | Qt::AlignVCenter, f_ctr)
                            .width();
-    p.drawText(QRect(x[0] + 20 + p_rect_width,
+    p.drawText(QRect(static_cast<int>(x[0] + 20 + p_rect_width),
                      vp->dso_xm_y() + 30 - text_height, f_rect_width,
                      text_height),
                f_ctr);
@@ -928,7 +927,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
                            0, 0, INT_MAX, INT_MAX,
                            Qt::AlignLeft | Qt::AlignVCenter, d_ctr)
                            .width();
-    p.drawText(QRect(x[1] + 10, vp->dso_xm_y() - 0.5 * text_height,
+    p.drawText(QRect(static_cast<int>(x[1] + 10), static_cast<int>(vp->dso_xm_y() - 0.5 * text_height),
                      d_rect_width, text_height),
                d_ctr);
 
@@ -936,7 +935,7 @@ void MeasureOverlayPass::draw_dso_x_measure(QPainter &p,
   }
   p.drawLines(measure_lines, static_cast<int>(measure_line_count));
   if (dso_xm_stage < IRenderViewport::DsoMeasureStages) {
-    p.drawLine(x[dso_xm_stage - 1], vp->dso_xm_y(),
+    p.drawLine(static_cast<int>(x[dso_xm_stage - 1]), vp->dso_xm_y(),
                vp->mouse_point().x(), vp->dso_xm_y());
     p.drawLine(vp->mouse_point().x(), 0,
                vp->mouse_point().x(), vp->widget_height());
@@ -1181,7 +1180,7 @@ void MeasureOverlayPass::draw_decoder_analog_range(
 
     if (st.sample_count > 1 && sr > 0 && st.last_sample > st.first_sample) {
       const double decoded_rate =
-          (st.sample_count - 1.0) * static_cast<double>(sr) /
+          (static_cast<double>(st.sample_count) - 1.0) * static_cast<double>(sr) /
           static_cast<double>(st.last_sample - st.first_sample);
       if (decoded_rate > 0.0)
         rows.push_back({QStringLiteral("解码采样率"),

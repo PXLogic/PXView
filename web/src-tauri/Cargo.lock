@@ -2509,7 +2509,7 @@ dependencies = [
 
 [[package]]
 name = "pxview-agent"
-version = "1.5.7"
+version = "1.6.6"
 dependencies = [
  "env_logger",
  "log",

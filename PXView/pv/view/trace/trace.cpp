@@ -201,7 +201,7 @@ void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor bac
     pen.setStyle(Qt::DotLine);
     p.setPen(pen);
     const double sigY = get_y();
-    p.drawLine(left, sigY, right, sigY);
+    p.drawLine(left, static_cast<int>(sigY), right, static_cast<int>(sigY));
 }
 
 void Trace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
@@ -325,27 +325,27 @@ void Trace::paint_label(QPainter &p, int right, const QPoint pt, QColor fore)
 
         p.setPen(Qt::white);
         const QPointF arrow_points[] = {
-            QPoint(label_rect.right(), label_rect.center().y()),
-            QPoint(label_rect.right(), label_rect.center().y()-1),
-            QPoint(label_rect.right(), label_rect.center().y()+1),
-            QPoint(label_rect.right(), label_rect.center().y()-2),
-            QPoint(label_rect.right(), label_rect.center().y()+2),
-            QPoint(label_rect.right(), label_rect.center().y()-3),
-            QPoint(label_rect.right(), label_rect.center().y()+3),
-            QPoint(label_rect.right(), label_rect.center().y()-4),
-            QPoint(label_rect.right(), label_rect.center().y()+4),
-            QPoint(label_rect.right()-1, label_rect.center().y()-3),
-            QPoint(label_rect.right()-1, label_rect.center().y()+3),
-            QPoint(label_rect.right()+1, label_rect.center().y()-3),
-            QPoint(label_rect.right()+1, label_rect.center().y()+3),
-            QPoint(label_rect.right()-1, label_rect.center().y()-2),
-            QPoint(label_rect.right()-1, label_rect.center().y()+2),
-            QPoint(label_rect.right()+1, label_rect.center().y()-2),
-            QPoint(label_rect.right()+1, label_rect.center().y()+2),
-            QPoint(label_rect.right()-2, label_rect.center().y()-2),
-            QPoint(label_rect.right()-2, label_rect.center().y()+2),
-            QPoint(label_rect.right()+2, label_rect.center().y()-2),
-            QPoint(label_rect.right()+2, label_rect.center().y()+2),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y())),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()-1)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()+1)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()-2)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()+2)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()-3)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()+3)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()-4)),
+            QPoint(static_cast<int>(label_rect.right()), static_cast<int>(label_rect.center().y()+4)),
+            QPoint(static_cast<int>(label_rect.right()-1), static_cast<int>(label_rect.center().y()-3)),
+            QPoint(static_cast<int>(label_rect.right()-1), static_cast<int>(label_rect.center().y()+3)),
+            QPoint(static_cast<int>(label_rect.right()+1), static_cast<int>(label_rect.center().y()-3)),
+            QPoint(static_cast<int>(label_rect.right()+1), static_cast<int>(label_rect.center().y()+3)),
+            QPoint(static_cast<int>(label_rect.right()-1), static_cast<int>(label_rect.center().y()-2)),
+            QPoint(static_cast<int>(label_rect.right()-1), static_cast<int>(label_rect.center().y()+2)),
+            QPoint(static_cast<int>(label_rect.right()+1), static_cast<int>(label_rect.center().y()-2)),
+            QPoint(static_cast<int>(label_rect.right()+1), static_cast<int>(label_rect.center().y()+2)),
+            QPoint(static_cast<int>(label_rect.right()-2), static_cast<int>(label_rect.center().y()-2)),
+            QPoint(static_cast<int>(label_rect.right()-2), static_cast<int>(label_rect.center().y()+2)),
+            QPoint(static_cast<int>(label_rect.right()+2), static_cast<int>(label_rect.center().y()-2)),
+            QPoint(static_cast<int>(label_rect.right()+2), static_cast<int>(label_rect.center().y()+2)),
         };
         if (label_rect.contains(pt) || selected())
             p.drawPoints(arrow_points, countof(arrow_points));
@@ -426,8 +426,8 @@ int Trace::pt_in_rect(int y, int right, const QPoint &point)
 void Trace::compute_text_size(QPainter &p)
 {
     _text_size = QSize(
-        p.boundingRect(QRectF(), 0, "99").width(),
-        p.boundingRect(QRectF(), 0, "99").height());
+        static_cast<int>(p.boundingRect(QRectF(), 0, "99").width()),
+        static_cast<int>(p.boundingRect(QRectF(), 0, "99").height()));
 }
 
 QRect Trace::get_view_rect()

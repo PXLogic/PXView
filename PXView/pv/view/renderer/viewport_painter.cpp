@@ -416,11 +416,11 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
   const QPoint cenPos =
       QPoint(_viewport->view().get_view_width() / 2, _viewport->widget_height() / 2);
   const int radius =
-      min(0.3 * _viewport->view().get_view_width(), 0.3 * _viewport->widget_height());
+      static_cast<int>(min(0.3 * _viewport->view().get_view_width(), 0.3 * _viewport->widget_height()));
   p.drawEllipse(cenPos, radius - 2, radius - 2);
   p.setPen(QPen(_viewport->view().theme_green(), 4, Qt::SolidLine));
   p.drawArc(cenPos.x() - radius, cenPos.y() - radius, 2 * radius, 2 * radius,
-            180 * 16, progress);
+            180 * 16, static_cast<int>(progress));
 
   if (!_viewport->transfer_started()) {
     const int width = _viewport->view().get_view_width();
@@ -428,7 +428,7 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
         QPoint(static_cast<int>(width / 2.0 - 0.05 * width), _viewport->widget_height() / 2);
     const QPoint cenRightPos =
         QPoint(static_cast<int>(width / 2.0 + 0.05 * width), _viewport->widget_height() / 2);
-    const int trigger_radius = min(0.02 * width, 0.02 * _viewport->widget_height());
+    const int trigger_radius = static_cast<int>(min(0.02 * width, 0.02 * _viewport->widget_height()));
 
     QColor foreBack = fore;
     foreBack.setAlpha(IRenderView::BackAlpha);
@@ -450,8 +450,8 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
       p.setFont(font);
 
       QRect status_rect =
-          QRect(cenPos.x() - radius, cenPos.y() + radius * 0.4,
-                radius * 2, radius * 0.5);
+          QRect(cenPos.x() - radius, static_cast<int>(cenPos.y() + radius * 0.4),
+                radius * 2, static_cast<int>(radius * 0.5));
 
       if (triggered) {
         p.drawText(status_rect, Qt::AlignCenter | Qt::AlignVCenter,
@@ -490,7 +490,7 @@ void ViewportPainter::paintProgress(QPainter &p, QColor fore, QColor back) {
   const int int_radius = max(radius - 4, 0);
   p.drawArc(cenPos.x() - int_radius, cenPos.y() - int_radius,
             2 * int_radius, 2 * int_radius, 180 * 16,
-            -captured_progress * 3.6 * 16);
+            static_cast<int>(-captured_progress * 3.6 * 16));
   QFont font = _viewport->application_font();
   p.setFont(font);
 

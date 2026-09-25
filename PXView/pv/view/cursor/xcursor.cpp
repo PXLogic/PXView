@@ -174,16 +174,16 @@ void XCursor::paint(QPainter &p, const QRect &rect, XCur_type highlight)
     }
 
     const int arrow = 3;
-    const int x = rect.left() + _yvalue * rect.width();
-    const int y0 = rect.top() + _value0 * rect.height();
-    const int y1 = rect.top() + _value1 * rect.height();
+    const int x = static_cast<int>(rect.left() + _yvalue * rect.width());
+    const int y0 = static_cast<int>(rect.top() + _value0 * rect.height());
+    const int y1 = static_cast<int>(rect.top() + _value1 * rect.height());
     QColor color = get_color();
     const bool hit0 = (_grabbed == XCur_X0) | (_grabbed == XCur_None && (highlight == XCur_X0 || highlight == XCur_All));
     p.setPen(hit0 ? QPen(color.lighter(), 2, Qt::DashLine) : QPen(color, 1, Qt::DashLine));
-    p.drawLine(QPoint(0, y0), QPoint(rect.right()-_v0_size.width(), y0));
+    p.drawLine(QPoint(0, y0), QPoint(static_cast<int>(rect.right()-_v0_size.width()), y0));
     const bool hit1 = (_grabbed == XCur_X1) | (_grabbed == XCur_None && (highlight == XCur_X1 || highlight == XCur_All));
     p.setPen(hit1 ? QPen(color.lighter(), 2, Qt::DashLine) : QPen(color, 1, Qt::DashLine));
-    p.drawLine(QPoint(0, y1), QPoint(rect.right()-_v1_size.width(), y1));
+    p.drawLine(QPoint(0, y1), QPoint(static_cast<int>(rect.right()-_v1_size.width()), y1));
 
     if (_dsoSig) {
         if ((_grabbed == XCur_Y) | (_grabbed == XCur_None && (highlight == XCur_Y || highlight == XCur_All)))
@@ -225,8 +225,8 @@ void XCursor::paint(QPainter &p, const QRect &rect, XCur_type highlight)
 QRect XCursor::get_map_rect(const QRect &rect)
 {
     const int width = 10;
-    const int64_t y = rect.top() + _value0 * rect.height() - width/2;
-    return QRect(rect.right()+1, y, width, width);
+    const int64_t y = static_cast<long int>(rect.top() + _value0 * rect.height() - width/2);
+    return QRect(rect.right()+1, static_cast<int>(y), width, width);
 }
 
 /**
@@ -237,8 +237,8 @@ QRect XCursor::get_map_rect(const QRect &rect)
 QRect XCursor::get_close_rect(const QRect &rect)
 {
     const int width = 10;
-    const int64_t y = rect.top() + _value1 * rect.height() - width/2;
-    return QRect(rect.right()+1, y, width, width);
+    const int64_t y = static_cast<long int>(rect.top() + _value1 * rect.height() - width/2);
+    return QRect(rect.right()+1, static_cast<int>(y), width, width);
 }
 
 /**

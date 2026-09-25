@@ -91,11 +91,11 @@ void TimeMarker::set_index(int64_t index)
 
 void TimeMarker::paint(QPainter &p, const QRect &rect, const bool highlight, bool trig_hoff)
 {
-    const int64_t x = _view.index2pixel(_index, trig_hoff);
+    const int64_t x = static_cast<long int>(_view.index2pixel(_index, trig_hoff));
     if (x <= rect.right()) {
         QColor color = (_order < 1) ? _colour : pv::view::cursor_hsb_color(_order);
         p.setPen((_grabbed | highlight) ? QPen(color.lighter(), 2, Qt::DashLine) : QPen(color, 1, Qt::DashLine));
-        p.drawLine(QPoint(x, 0), QPoint(x, rect.bottom()));
+        p.drawLine(QPoint(static_cast<int>(x), 0), QPoint(static_cast<int>(x), rect.bottom()));
     }
 }
 

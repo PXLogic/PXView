@@ -67,18 +67,18 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
     p.translate(dialRect.center());
     p.rotate(270 - dialStartAngle/16);
     // draw pointer
-    p.rotate(-dialSpanAngle/16.0/(_div-1)*_sel);
+    p.rotate(-dialSpanAngle/16.0/static_cast<double>((_div-1))*static_cast<double>(_sel));
     p.drawEllipse(-3, -3, 6, 6);
-    p.drawLine(3, 0, 0, dialRect.width()/2-3);
-    p.drawLine(-3, 0, 0, dialRect.width()/2-3);
-    p.rotate(+dialSpanAngle/16.0/(_div-1)*_sel);
+    p.drawLine(3, 0, 0, static_cast<int>(dialRect.width()/2-3));
+    p.drawLine(-3, 0, 0, static_cast<int>(dialRect.width()/2-3));
+    p.rotate(+dialSpanAngle/16.0/static_cast<double>((_div-1))*static_cast<double>(_sel));
     for (uint64_t i = 0; i < _div; i++) {
         // draw major ticks
-        p.drawLine(0, dialRect.width()/2+3, 0, dialRect.width()/2+8);
+        p.drawLine(0, static_cast<int>(dialRect.width()/2+3), 0, static_cast<int>(dialRect.width()/2+8));
         // draw minor ticks
         for (uint64_t j = 0; (j < 5) && (i < _div - 1); j++) {
-            p.drawLine(0, dialRect.width()/2+3, 0, dialRect.width()/2+5);
-            p.rotate(-dialSpanAngle/16/5.0/(_div-1));
+            p.drawLine(0, static_cast<int>(dialRect.width()/2+3), 0, static_cast<int>(dialRect.width()/2+5));
+            p.rotate(-dialSpanAngle/16/5.0/static_cast<double>((_div-1)));
         }
     }
     p.restore();
@@ -115,8 +115,8 @@ void dslDial::paint(QPainter &p, QRectF dialRect, QColor dialColor, const QPoint
             p.rotate(270-(dialStartAngle/16 + dialSpanAngle/16/4 + dialSpanAngle/16/2));
         else
             p.rotate(270-(dialStartAngle/16 + dialSpanAngle/16/4));
-        p.drawLine(0, hoverRect.width()/2,
-                   inc ? 10 : -10, hoverRect.width()/2 + 4);
+        p.drawLine(0, static_cast<int>(hoverRect.width()/2),
+                   inc ? 10 : -10, static_cast<int>(hoverRect.width()/2 + 4));
         p.restore();
     }
 }
