@@ -3,7 +3,7 @@ name: PXView Release CI
 # ============================================================
 # Release 构建 + 多层测试工作流。
 #
-# 本工作流在 push 到 main 时运行，包含 4 个并行 job：
+# 本工作流在 push 到 main / dev 时运行，包含 5 个 job：
 #
 # Job 1: release-build-and-tests
 #   Release 编译 → 安装 → 全量 E2E 测试 (19 个测试套件)
@@ -26,12 +26,20 @@ name: PXView Release CI
 #   使用 .clang-tidy-ci 配置（clang-analyzer + bugprone + cert + concurrency）
 #   跳过 readability/modernize/misc/performance/cppcoreguidelines
 #   预计 15-20 分钟（vs 全量 57+ 分钟）
+#
+# Job 5: publish-nightly（仅 dev 分支）
+#   needs 上面 4 个 job，且要求同一提交的 build.yml（打包 + 安装包自检）也成功，
+#   然后才把三平台安装包发布到固定标签 `nightly` 的 prerelease（滚动覆盖）。
+#   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
 # ============================================================
 
 on:
   push:
     branches:
       - main
+      # dev = 集成/每夜构建通道：push 到 dev 跑全套测试，全绿后由
+      # 末尾的 publish-nightly 作业发布滚动 nightly（见文件头 Job 5）。
+      - dev
   workflow_dispatch:
 
 jobs:
@@ -1112,3 +1120,175 @@ jobs:
           name: clang-tidy-fast-report
           path: build/clang-tidy.log
           if-no-files-found: warn
+
+  # ============================================================
+  # Job 5: Publish Nightly (dev only)
+  #
+  # dev 分支的滚动 nightly 通道。发布需同时满足：
+  #   1. 触发分支是 dev（main 上本 job 直接跳过）；
+  #   2. 上面 4 个 job 全绿 —— 由 needs 保证，任一失败本 job 即被跳过；
+  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功；
+  #   4. dev 的最新提交仍是本次提交 —— 并发 push 时旧提交的产物不得
+  #      覆盖新 nightly。
+  #
+  # 发布形态：固定标签 `nightly` 的 prerelease。每次先删旧 Release + 标签
+  # 再重建，所以 /releases/tag/nightly 恒指向最新一次全绿的 dev 提交，
+  # 资产也不会无限堆积。正式发布仍走 tag push → build.yml 的 Release 步骤。
+  # ============================================================
+  publish-nightly:
+    name: Publish Nightly
+    needs: [release-build-and-tests, asan-core-tests, tsan-races, clang-tidy-fast]
+    if: ${{ github.ref == 'refs/heads/dev' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write   # 删除/创建 nightly Release 与标签
+      actions: read     # 读取 build.yml 的 run 与 artifacts
+
+    steps:
+      # ── 1. 同一提交的打包工作流必须成功 ──────────────────────────
+      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知。
+      # 本 job 要等 4 个重活（≥20 分钟）跑完才会开始，那时 build.yml 的 run
+      # 必然已存在，所以直接查、用 gh run watch 等结论即可。
+      # 打包/安装包自检没过 → 不发布，但不把本次 nightly 判为失败
+      # （build.yml 那边已经是红的，重复报错没有额外信息）。
+      # 注意：本 job 不 checkout，gh 没有 git remote 可推断仓库，所有
+      # gh 命令都要显式带 --repo。
+      - name: Require green PXView Build for this commit
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml \
+                     --commit "$GITHUB_SHA" --limit 1 \
+                     --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$RUN_ID" ]; then
+            echo "::warning::找不到 $GITHUB_SHA 对应的 PXView Build run，本次不发布 nightly"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "PXView Build run id = ${RUN_ID}"
+          if gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+               --exit-status --interval 30 >/dev/null; then
+            echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::PXView Build run ${RUN_ID} 未成功，本次不发布 nightly"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 2. dev 没有前进 ─────────────────────────────────────────
+      - name: Skip when dev has moved on
+        id: tip
+        if: steps.build.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
+          if [ "$TIP" != "$GITHUB_SHA" ]; then
+            echo "::notice::dev 已前进到 ${TIP:0:7}，本次 ${GITHUB_SHA:0:7} 的 nightly 跳过"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 3. 取回打包产物 ─────────────────────────────────────────
+      # 每个 artifact 解到 dl/<artifact-name>/ 下。
+      - name: Download installers from the PXView Build run
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.build.outputs.run_id }}
+          pattern: PXView-*
+          path: dl
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 4. 整理发布资产 ─────────────────────────────────────────
+      # 规则与 republish-release.yml 一致：单文件安装包直接拷贝，
+      # Windows 便携包在 artifact 里是已解开的目录 → 重新压缩成 zip。
+      # 版本号从安装包文件名里取，与 build.yml 解析出的完全一致
+      # （dev 上形如 1.6.5-dev.20260925.abc1234）。
+      - name: Prepare nightly assets
+        id: assets
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        run: |
+          mkdir -p release-assets
+          ASSETS="$PWD/release-assets"
+          VER=""
+          FOUND=0
+
+          for f in dl/*/PXView-Linux-x86_64-Installer-*.run; do
+            [ -f "$f" ] || continue
+            VER="${f##*Installer-}"; VER="${VER%.run}"
+            cp "$f" "$ASSETS/"
+            chmod +x "$ASSETS"/*.run
+            FOUND=$((FOUND+1)); echo "  OK: Linux installer (${VER})"
+          done
+
+          for f in dl/*/PXView-macOS-ARM64-*.dmg; do
+            [ -f "$f" ] || continue
+            VER="${f##*ARM64-}"; VER="${VER%.dmg}"
+            cp "$f" "$ASSETS/"
+            FOUND=$((FOUND+1)); echo "  OK: macOS DMG (${VER})"
+          done
+
+          for f in dl/*/PXView-Windows-x86_64-Setup-*.exe; do
+            [ -f "$f" ] || continue
+            VER="${f##*Setup-}"; VER="${VER%.exe}"
+            cp "$f" "$ASSETS/"
+            FOUND=$((FOUND+1)); echo "  OK: Windows installer (${VER})"
+          done
+
+          # 便携包的 artifact 内容是「解开的 package/ 目录」（不是单个带版本号的
+          # 文件），所以匹配的是目录本身：download-artifact 用 pattern 时每个
+          # artifact 解到 dl/<artifact-name>/，两种层级都兜住。
+          for d in dl/PXView-Windows-x86_64-Portable-* dl/*/PXView-Windows-x86_64-Portable-*; do
+            [ -d "$d" ] || continue
+            [ -n "$VER" ] || VER="${d##*Portable-}"
+            (cd "$d" && zip -r -q -9 "$ASSETS/PXView-Windows-x86_64-Portable-${VER}.zip" .)
+            FOUND=$((FOUND+1)); echo "  OK: Windows portable (re-zipped)"
+          done
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "ERROR: 在 build.yml 的 artifacts 里没找到任何安装包（pattern: PXView-*）" >&2
+            ls -R dl | head -50 >&2 || true
+            exit 1
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "=== release-assets ==="
+          ls -la "$ASSETS"
+
+      # ── 5. 滚动覆盖 nightly Release ──────────────────────────────
+      - name: Delete previous rolling nightly release
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 先删旧 Release 和标签，下面的创建步骤才能把 nightly 标签指向本次
+          # 提交。首次运行（或上一步已被清理）时 gh 返回非零，忽略即可。
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null \
+            || echo "（没有既有 nightly Release，跳过删除）"
+
+      - name: Publish nightly prerelease
+        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: PXView Nightly ${{ steps.assets.outputs.version }}
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          files: release-assets/*
+          body: |
+            dev 分支的自动构建（滚动 nightly），供尝鲜与回归验证使用，**不是正式版本**。
+
+            - 开发版本号：`${{ steps.assets.outputs.version }}`
+            - 提交：`${{ github.sha }}`
+            - 打包与安装包自检：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.build.outputs.run_id }})
+            - 测试：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            正式版本请到 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 里选择带版本号的发布。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

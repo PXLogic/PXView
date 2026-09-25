@@ -28,6 +28,10 @@ on:
     branches:
       - main
       - view_and_data
+      # dev = 集成/每夜构建通道。push 到 dev 只构建三平台安装包并自检，
+      # 不建 Release；nightly 发布由 release-ci.yml 的 publish-nightly 作业负责
+      # （它要求本工作流同一提交也全绿）。
+      - dev
   pull_request:
     branches:
       - main
@@ -85,6 +89,11 @@ jobs:
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          elif [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
+            # dev 通道版本号 = 1.6.5-dev.<UTC 日期>.<短 SHA>。
+            # 加后缀是为了让 nightly 的安装包与正式版同名文件区分开
+            # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
+            echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
             echo "value=1.6.5" >> $GITHUB_OUTPUT
           fi
@@ -373,6 +382,11 @@ jobs:
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          elif [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
+            # dev 通道版本号 = 1.6.5-dev.<UTC 日期>.<短 SHA>。
+            # 加后缀是为了让 nightly 的安装包与正式版同名文件区分开
+            # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
+            echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
             echo "value=1.6.5" >> $GITHUB_OUTPUT
           fi
@@ -819,6 +833,11 @@ jobs:
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "value=${TAG#v}" >> $GITHUB_OUTPUT
+          elif [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
+            # dev 通道版本号 = 1.6.5-dev.<UTC 日期>.<短 SHA>。
+            # 加后缀是为了让 nightly 的安装包与正式版同名文件区分开
+            # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
+            echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
             echo "value=1.6.5" >> $GITHUB_OUTPUT
           fi
