@@ -1142,7 +1142,7 @@ jobs:
   #      ASan / TSan / clang-tidy 不是 nightly 的门槛，dev push 上也不跑；
   #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功。
   #
-  # 发布形态：每个构建各一个 tag = 本次版本号（1.6.6-dev.<日期>.<分钟>.<短SHA>）的
+  # 发布形态：每个构建各一个 tag = 本次版本号（1.6.6-rc<N>.<短SHA>）的
   # prerelease，旧 Release 一概不删 —— 资产下载量随 Release 永久累加，旧构建也能
   # 回溯下载（llama.cpp 同款做法）；prerelease 标记保证 Latest 徽章仍归正式版。
   # 正文列出自上个正式版（releases/latest）到本次提交的全部提交标题 + 完整对比
@@ -1206,7 +1206,7 @@ jobs:
       # 规则与 republish-release.yml 一致：单文件安装包直接拷贝，
       # Windows 便携包在 artifact 里是已解开的目录 → 重新压缩成 zip。
       # 版本号从安装包文件名里取，与 build.yml 解析出的完全一致
-      # （dev 上形如 1.6.5-dev.20260925.abc1234）。
+      # （dev 上形如 1.6.6-rc0.b2819bb）。
       - name: Prepare nightly assets
         id: assets
         if: steps.build.outputs.ready == 'true'
@@ -1314,7 +1314,7 @@ jobs:
         if: steps.build.outputs.ready == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          # 标签 = 本次版本号（如 1.6.6-dev.20260925.1435.231bdd2），逐构建唯一。
+          # 标签 = 本次版本号（如 1.6.6-rc0.b2819bb），逐构建唯一。
           # 用版本号而不是固定名字，是因为 GitHub 的 Releases 页同日按标签的
           # 语义化版本倒序：非 semver 的标签会排到正式版后面。
           tag_name: ${{ steps.assets.outputs.version }}

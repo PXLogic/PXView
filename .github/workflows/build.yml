@@ -94,6 +94,9 @@ jobs:
       # 的版本号不变。
       - name: Resolve version
         id: version
+        env:
+          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -110,14 +113,20 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
-              # 末段各有用处：
-              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
-              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
-              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
-              #   * 短 SHA 用来对回提交。
-              DEV_MIN=$((10#$(date -u +%H%M)))
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
+              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
+              #     版本；标签短且一眼是候选版，不占正式版本号；
+              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
+              #     后自动重新从 0 计），取不到时退化为 0；
+              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
+              #     构建可能算出同一个序号，带 SHA 才不会撞名。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              RC_N=$(gh api --paginate \
+                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
+              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
@@ -407,6 +416,9 @@ jobs:
       # 的版本号不变。
       - name: Resolve version
         id: version
+        env:
+          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -423,14 +435,20 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
-              # 末段各有用处：
-              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
-              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
-              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
-              #   * 短 SHA 用来对回提交。
-              DEV_MIN=$((10#$(date -u +%H%M)))
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
+              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
+              #     版本；标签短且一眼是候选版，不占正式版本号；
+              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
+              #     后自动重新从 0 计），取不到时退化为 0；
+              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
+              #     构建可能算出同一个序号，带 SHA 才不会撞名。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              RC_N=$(gh api --paginate \
+                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
+              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
@@ -878,6 +896,9 @@ jobs:
       # 的版本号不变。
       - name: Resolve version
         id: version
+        env:
+          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -894,14 +915,20 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = 基础版本 + -dev.<UTC 日期>.<UTC 当日分钟>.<短 SHA>。
-              # 末段各有用处：
-              #   * 分钟数（0-1439，不含前导零 → 合法 semver 数字段）保证同一天的
-              #     多个 nightly 也按时间正序 —— GitHub 的 Releases 页同日按标签的
-              #     语义化版本倒序，若只放 sha 段会变成字母序，旧构建可能排到新的前面；
-              #   * 短 SHA 用来对回提交。
-              DEV_MIN=$((10#$(date -u +%H%M)))
-              VER="${BASE}-dev.$(date -u +%Y%m%d).${DEV_MIN}.${GITHUB_SHA:0:7}"
+              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
+              #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
+              #     版本；标签短且一眼是候选版，不占正式版本号；
+              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
+              #     后自动重新从 0 计），取不到时退化为 0；
+              #   * 短 SHA 保证唯一 —— 序号是在构建阶段算的，同一基础版本下并发/连续
+              #     构建可能算出同一个序号，带 SHA 才不会撞名。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
+              RC_N=$(gh api --paginate \
+                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
+              VER="${BASE}-rc${RC_N:-0}.${GITHUB_SHA:0:7}"
             else
               VER="${BASE}"
             fi
