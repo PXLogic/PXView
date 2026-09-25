@@ -32,7 +32,9 @@ name: PXView Release CI
 #
 # Job 5: publish-nightly（仅 dev 分支）
 #   门槛 = Job 1 全绿（needs）+ 同一提交的 build.yml（打包 + 安装包自检）成功，
-#   然后才把三平台安装包发布到固定标签 `nightly` 的 prerelease（滚动覆盖）。
+#   然后才把三平台安装包发成 prerelease（滚动覆盖：先删掉上一个 prerelease）。
+#   标签用版本号（如 1.6.6-dev.20260926.bbd77db）而不是固定名字 —— GitHub 的
+#   Releases 页同一天内按标签的语义化版本倒序，版本号高于正式版时 nightly 排最前。
 #   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
 # ============================================================
 
@@ -1141,9 +1143,10 @@ jobs:
   #   4. dev 的最新提交仍是本次提交 —— 并发 push 时旧提交的产物不得
   #      覆盖新 nightly。
   #
-  # 发布形态：固定标签 `nightly` 的 prerelease。每次先删旧 Release + 标签
-  # 再重建，所以 /releases/tag/nightly 恒指向最新一次全绿的 dev 提交，
-  # 资产也不会无限堆积。正式发布仍走 tag push → build.yml 的 Release 步骤。
+  # 发布形态：标签 = 本次版本号（如 1.6.6-dev.20260926.bbd77db）的 prerelease。
+  # 每次先删掉上一个 prerelease（连标签一起删）再重建，资产不会堆积；标签用版本号
+  # 是为了让 GitHub 在 Releases 页把它排到正式版之前（同一天内按 semver 倒序）。
+  # 正式发布仍走 tag push → build.yml 的 Release 步骤。
   # ============================================================
   publish-nightly:
     name: Publish Nightly
@@ -1298,16 +1301,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 先删旧 Release 和标签，下面的创建步骤才能把 nightly 标签指向本次
-          # 提交。首次运行（或上一步已被清理）时 gh 返回非零，忽略即可。
-          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null \
-            || echo "（没有既有 nightly Release，跳过删除）"
+          # 滚动覆盖：删掉既有的 prerelease（正常只有一个 = 上一轮 nightly，
+          # 用循环是为了兼容早期固定标签 `nightly` 留下的那个）。删标签是必须的，
+          # 否则下面的新标签会和旧的并存。
+          OLD=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+                  --json tagName,isPrerelease \
+                  --jq '.[] | select(.isPrerelease) | .tagName' || true)
+          if [ -z "$OLD" ]; then
+            echo "（没有既有 prerelease，跳过删除）"
+          fi
+          for TAG in $OLD; do
+            echo "删除旧 nightly: ${TAG}"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done
 
       - name: Publish nightly prerelease
         if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: nightly
+          # 标签直接用版本号（如 1.6.6-dev.20260926.bbd77db），不用固定的 `nightly`：
+          # GitHub 的 Releases 页在同一天内按标签的语义化版本倒序，非 semver 的
+          # 标签（`nightly`）会排到正式版后面；用版本号则版本高于正式版时排最前。
+          tag_name: ${{ steps.assets.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: PXView Nightly ${{ steps.assets.outputs.version }}
           prerelease: true
