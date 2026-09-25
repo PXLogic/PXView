@@ -1,4 +1,4 @@
-﻿name: PXView Build
+name: PXView Build
 
 on:
   workflow_dispatch:
@@ -28,8 +28,8 @@ on:
     branches:
       - main
       - view_and_data
-      # dev = 集成/每夜构建通道。push 到 dev 只构建三平台安装包并自检，
-      # 不建 Release；nightly 发布由 release-ci.yml 的 publish-nightly 作业负责
+      # dev = 集成/候选构建通道。push 到 dev 只构建三平台安装包并自检，
+      # 不建 Release；对外发布由 release-ci.yml 的 publish-rc 作业手动触发
       # （它要求本工作流同一提交也全绿）。
       - dev
   pull_request:
@@ -117,18 +117,27 @@ jobs:
               #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
-              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
-              #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
-              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。
+              #   * 序号取「已发布的 rc 里最大的那个 + 1」（首次为 rc.0；基础版本
+              #     bump 后自动重新从 0 计）。用「最大值+1」而不是「计数」：计数在
+              #     删掉某个 rc 后会重号（只剩 rc.1 时计数算出 rc.1，与现存条目撞名）。
+              #   * 标签必须带 PXView_v 前缀才数得到：发布标签形如 PXView_v1.6.6-rc.0，
+              #     只匹配 "^${BASE}-rc" 会永远命中 0 条（曾经的实际故障：序号恒为
+              #     rc.0，直到发布时因标签已存在而失败）。
+              #   * 序号在「构建时」分配，发布是 release-ci.yml 的 publish-rc 手动
+              #     触发；同一版本已被发布时那边会拒绝并提示重新构建。
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              RC_N=$(gh api --paginate \
+              TAGS=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc.${RC_N:-0}"
+                       --jq '.[].tag_name') || {
+                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+                exit 1
+              }
+              LAST=$(printf '%s\n' "$TAGS" \
+                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
+                       | sed 's/.*-rc\.//' | sort -n | tail -1)
+              VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
               VER="${BASE}"
             fi
@@ -452,18 +461,27 @@ jobs:
               #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
-              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
-              #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
-              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。
+              #   * 序号取「已发布的 rc 里最大的那个 + 1」（首次为 rc.0；基础版本
+              #     bump 后自动重新从 0 计）。用「最大值+1」而不是「计数」：计数在
+              #     删掉某个 rc 后会重号（只剩 rc.1 时计数算出 rc.1，与现存条目撞名）。
+              #   * 标签必须带 PXView_v 前缀才数得到：发布标签形如 PXView_v1.6.6-rc.0，
+              #     只匹配 "^${BASE}-rc" 会永远命中 0 条（曾经的实际故障：序号恒为
+              #     rc.0，直到发布时因标签已存在而失败）。
+              #   * 序号在「构建时」分配，发布是 release-ci.yml 的 publish-rc 手动
+              #     触发；同一版本已被发布时那边会拒绝并提示重新构建。
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              RC_N=$(gh api --paginate \
+              TAGS=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc.${RC_N:-0}"
+                       --jq '.[].tag_name') || {
+                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+                exit 1
+              }
+              LAST=$(printf '%s\n' "$TAGS" \
+                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
+                       | sed 's/.*-rc\.//' | sort -n | tail -1)
+              VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
               VER="${BASE}"
             fi
@@ -1056,18 +1074,27 @@ jobs:
               #   * 语义化版本上「上个正式版 < 1.6.6-rc.N < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
-              #   * 序号 = 该基础版本已有的 rc Release 数（从 0 开始；基础版本 bump
-              #     后自动重新从 0 计），取不到时退化为 0；
-              #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
-              #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。
+              #   * 序号取「已发布的 rc 里最大的那个 + 1」（首次为 rc.0；基础版本
+              #     bump 后自动重新从 0 计）。用「最大值+1」而不是「计数」：计数在
+              #     删掉某个 rc 后会重号（只剩 rc.1 时计数算出 rc.1，与现存条目撞名）。
+              #   * 标签必须带 PXView_v 前缀才数得到：发布标签形如 PXView_v1.6.6-rc.0，
+              #     只匹配 "^${BASE}-rc" 会永远命中 0 条（曾经的实际故障：序号恒为
+              #     rc.0，直到发布时因标签已存在而失败）。
+              #   * 序号在「构建时」分配，发布是 release-ci.yml 的 publish-rc 手动
+              #     触发；同一版本已被发布时那边会拒绝并提示重新构建。
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              RC_N=$(gh api --paginate \
+              TAGS=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
-              VER="${BASE}-rc.${RC_N:-0}"
+                       --jq '.[].tag_name') || {
+                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+                exit 1
+              }
+              LAST=$(printf '%s\n' "$TAGS" \
+                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
+                       | sed 's/.*-rc\.//' | sort -n | tail -1)
+              VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
               VER="${BASE}"
             fi

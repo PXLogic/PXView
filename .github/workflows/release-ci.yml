@@ -3,10 +3,10 @@ name: PXView Release CI
 # ============================================================
 # Release 构建 + 多层测试工作流。
 #
-# 本工作流在 push 到 main / dev 时运行，包含 5 个 job：
+# 本工作流在 push 到 main / dev 时自动运行（CI/CD），另可手动触发发布 rc。
 #
-#   push 到 dev（nightly 通道）只跑 Job 1：nightly 的门槛就是 Job 1 全绿，
-#   Job 2-4（ASan / TSan / clang-tidy）只跑 main push 与手动触发。
+#   push 到 dev（候选通道）只跑 Job 1（全量 E2E）；Job 2-4（ASan / TSan /
+#   clang-tidy）只跑 main push。Job 5（发布）只在手动触发时运行。
 #
 # Job 1: release-build-and-tests
 #   Release 编译 → 安装 → 全量 E2E 测试 (19 个测试套件)
@@ -30,23 +30,36 @@ name: PXView Release CI
 #   跳过 readability/modernize/misc/performance/cppcoreguidelines
 #   预计 15-20 分钟（vs 全量 57+ 分钟）
 #
-# Job 5: publish-nightly（仅 dev 分支）
-#   门槛 = Job 1 全绿（needs）+ 同一提交的 build.yml（打包 + 安装包自检）成功，
-#   然后才把三平台安装包发布成 prerelease。标签 = PXView_v<本次版本号>，每个构建
-#   一个，旧的一概不删（下载量与旧构建都保留；llama.cpp 同款做法）。
+# Job 5: publish-rc（仅手动触发）
+#   push 不发布：dev 上每次 push 只做构建 + 全量测试，候选包留在那次 run 的
+#   artifacts 里。要对外发布时手动 Run workflow 触发本工作流，可选填要发布的
+#   提交 SHA（留空 = dev 最新提交）。本 job 然后：
+#     1. 校验该提交在 dev 上（compare 状态 ahead/identical）；
+#     2. 校验同一提交的 build.yml（打包 + 安装包自检）与 release-ci.yml 的
+#        push run（全量 E2E）都是 success —— 这就是「CD 全绿」这道门槛；
+#     3. 取回那次 build.yml 的产物；版本号从安装包文件名解析（与包内一致，
+#        所以标签与包里的版本号永远对得上）；
+#     4. 该版本标签已存在则失败并提示重新构建（序号在构建时分配）；
+#     5. 发布 prerelease：标签/标题 = PXView_v<本次版本号>，每个构建一个，旧的
+#        一概不删（下载量与旧构建都保留；llama.cpp 同款做法）。
 #   正文包含：开发版本号/提交/两个 run 链接、本次提交信息、自上个正式版以来的
 #   提交列表（含完整对比链接）、SHA256SUMS。
-#   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
+#   正式发布仍走 tag push → build.yml 的 Release 步骤。
 # ============================================================
 
 on:
   push:
     branches:
       - main
-      # dev = 集成/每夜构建通道：push 到 dev 只跑 Job 1（全量 E2E），全绿后由
-      # 末尾的 publish-nightly 作业发布滚动 nightly（见文件头 Job 5）。
+      # dev = 集成/候选通道：push 到 dev 只跑 Job 1（全量 E2E），不发布；
+      # 发布由手动触发的 Job 5（publish-rc）完成，见文件头 Job 5。
       - dev
   workflow_dispatch:
+    inputs:
+      publish_sha:
+        description: '要发布的 dev 提交 SHA（留空 = dev 最新提交）'
+        required: false
+        default: ''
 
 jobs:
   # ============================================================
@@ -57,6 +70,9 @@ jobs:
   # ============================================================
   release-build-and-tests:
     name: Release Build + Full E2E Tests
+    # 只在 push 上跑。手动触发（发布 rc）走 Job 5：那边不重跑测试，只校验那次
+    # push run 的结论并复用它的产物，避免把一次发布变成又一轮 30 分钟测试。
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     # Raised 30 -> 60: the 3-way parallel E2E was being cancelled at the 30min
     # job timeout before the full suite finished (masking real results).
@@ -434,7 +450,7 @@ jobs:
   asan-core-tests:
     name: ASan Core Tests
     # dev push 不跑（nightly 的门槛只有 Job 1）；手动触发时仍可跑。
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
+    if: ${{ github.event_name == 'push' && github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -691,7 +707,7 @@ jobs:
   tsan-races:
     name: TSan Race Detection
     # dev push 不跑（同 Job 2）；手动触发时仍可跑。
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
+    if: ${{ github.event_name == 'push' && github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -1015,7 +1031,7 @@ jobs:
   clang-tidy-fast:
     name: Clang-Tidy (Fast)
     # dev push 不跑（同 Job 2）；手动触发时仍可跑。
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
+    if: ${{ github.event_name == 'push' && github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -1134,89 +1150,115 @@ jobs:
           if-no-files-found: warn
 
   # ============================================================
-  # Job 5: Publish Nightly (dev only)
+  # Job 5: Publish RC (manual)
   #
-  # dev 分支的 nightly 通道（每个构建留档，不滚动覆盖）。发布需同时满足：
-  #   1. 触发分支是 dev（main 上本 job 直接跳过）；
-  #   2. Job 1（全量 E2E）全绿 —— 由 needs 保证，失败本 job 即被跳过；
-  #      ASan / TSan / clang-tidy 不是 nightly 的门槛，dev push 上也不跑；
-  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功；
-  #   4. dev 的最新提交仍是本次提交 —— 被取代的提交不发 nightly（rc 序号唯一性
-  #      依赖这一条，见下面「发布形态」）。
+  # 手动触发的发布通道（每个构建一个 Release，不滚动覆盖）。发布需同时满足：
+  #   1. 触发方式是 workflow_dispatch（push 上本 job 直接跳过）；
+  #   2. 目标提交在 dev 上（compare 状态 ahead/identical）；
+  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）与 release-ci.yml 的
+  #      push run（全量 E2E）都 success —— 「CD 全绿」就是这道门槛；
+  #   4. 该版本标签尚未存在（序号在构建时分配，同一个序号只会被发布一次）。
   #
-  # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0，
-  # 与正式版标签 PXView_v1.6.5 同前缀同格式）的 prerelease，旧 Release 一概不删
-  # —— 资产下载量随 Release 永久累加，旧构建也能回溯下载（llama.cpp 同款做法）；
-  # prerelease 标记保证 Latest 徽章仍归正式版。
+  # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0，
+  # 与正式版标签 PXView_v1.6.5 同前缀同格式；版本号取自产物文件名，与包内一致）
+  # 的 prerelease，旧 Release 一概不删 —— 资产下载量随 Release 永久累加，旧构建
+  # 也能回溯下载（llama.cpp 同款做法）；prerelease 标记保证 Latest 徽章仍归正式版。
   # 正文列出自上个正式版（releases/latest）到本次提交的全部提交标题 + 完整对比
   # 链接，末尾附 SHA256SUMS。
   # 正式发布仍走 tag push → build.yml 的 Release 步骤。
   # ============================================================
-  publish-nightly:
-    name: Publish Nightly
-    needs: [release-build-and-tests]
-    if: ${{ github.ref == 'refs/heads/dev' }}
+  publish-rc:
+    name: Publish RC (manual)
+    # 不写 needs：手动触发时 Job 1 是跳过的，needs 会连带把本 job 跳过；
+    # 「全量 E2E 全绿」由下面第 2 步的 gh 校验保证（校验那次 push run 的结论）。
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: write   # 创建 nightly Release 与标签
+      contents: write   # 创建 rc Release 与标签
       actions: read     # 读取 build.yml 的 run 与 artifacts
 
     steps:
-      # ── 1. 同一提交的打包工作流必须成功 ──────────────────────────
-      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知。
-      # 本 job 要等 Job 1（≥20 分钟）跑完才会开始，那时 build.yml 的 run
-      # 必然已存在，所以直接查、用 gh run watch 等结论即可。
-      # 打包/安装包自检没过 → 不发布，但不把本次 nightly 判为失败
-      # （build.yml 那边已经是红的，重复报错没有额外信息）。
+      # ── 1. 确定要发布的提交 ──────────────────────────────────────
+      # 手动触发：publish_sha 留空 = dev 最新提交。要求该提交在 dev 上
+      # （compare <sha>...dev 的 ahead/identical 表示 sha 是 dev 的祖先），
+      # 避免把别处的提交发成候选版。
       # 注意：本 job 不 checkout，gh 没有 git remote 可推断仓库，所有
-      # gh 命令都要显式带 --repo。
-      - name: Require green PXView Build for this commit
+      # gh 命令都要显式带 --repo；输入值走 env 传入，不直接插进脚本。
+      - name: Resolve target commit
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_SHA: ${{ github.event.inputs.publish_sha }}
+        run: |
+          SHA="${PUBLISH_SHA}"
+          if [ -z "$SHA" ]; then
+            SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
+            echo "publish_sha 留空 → 取 dev 最新提交"
+          fi
+          STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${SHA}...dev" \
+                     --jq '.status' 2>/dev/null || true)
+          case "$STATUS" in
+            ahead|identical) ;;
+            *)
+              echo "ERROR: ${SHA} 不在 dev 分支上（compare 状态=${STATUS:-查询失败}）" >&2
+              exit 1
+              ;;
+          esac
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "目标提交：${SHA}（在 dev 上，状态 ${STATUS}）"
+
+      # ── 2. CD 门槛：同一提交的两套工作流都必须全绿 ────────────────
+      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知；
+      # 这里分别查它们的 push run 结论。查不到或非 success 就直接失败 ——
+      # 手动发布要明确告知"还不能发"，静默跳过只会让人以为已经发过了。
+      # --event push 是为了排除本 job 所在的那次手动 run。
+      - name: Require green PXView Build (packaging + installer self-test)
         id: build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SHA="${{ steps.target.outputs.sha }}"
           RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml \
-                     --commit "$GITHUB_SHA" --limit 1 \
+                     --commit "$SHA" --event push --limit 1 \
                      --json databaseId --jq '.[0].databaseId // empty')
           if [ -z "$RUN_ID" ]; then
-            echo "::warning::找不到 $GITHUB_SHA 对应的 PXView Build run，本次不发布 nightly"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "ERROR: 找不到 ${SHA} 的 PXView Build run（还没打包/自检过，不能发布）" >&2
+            exit 1
           fi
-          echo "PXView Build run id = ${RUN_ID}"
-          if gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-               --exit-status --interval 30 >/dev/null; then
-            echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::PXView Build run ${RUN_ID} 未成功，本次不发布 nightly"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          CONC=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                   --json conclusion --jq '.conclusion')
+          if [ "$CONC" != "success" ]; then
+            echo "ERROR: PXView Build run ${RUN_ID} 结论=${CONC}（要求 success）" >&2
+            exit 1
           fi
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "PXView Build ${RUN_ID}: ${CONC}"
 
-      # ── 2. dev 没有前进（rc 序号唯一性的前提）───────────────────
-      # 只有 dev 最新提交的构建才发布 nightly，被取代的提交在这里跳过。
-      # 这既是「只给 dev 最新状态留档」的策略，也是 rc 序号不撞号的前提：
-      # 序号是在构建阶段算出来的，相邻两次 push 可能算出同一个 rcN，但其中
-      # 被取代的那次会在这里被跳过，所以同一个 rcN 只会被发布一次。
-      - name: Skip when dev has moved on
-        id: tip
-        if: steps.build.outputs.ready == 'true'
+      - name: Require green PXView Release CI (full E2E)
+        id: e2e
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
-          if [ "$TIP" != "$GITHUB_SHA" ]; then
-            echo "::notice::dev 已前进到 ${TIP:0:7}，本次 ${GITHUB_SHA:0:7} 的 nightly 跳过"
-            echo "current=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=true" >> "$GITHUB_OUTPUT"
+          SHA="${{ steps.target.outputs.sha }}"
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release-ci.yml \
+                     --commit "$SHA" --event push --limit 1 \
+                     --json databaseId --jq '.[0].databaseId // empty')
+          CONC="missing"
+          if [ -n "$RUN_ID" ]; then
+            CONC=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                     --json conclusion --jq '.conclusion')
           fi
+          if [ "$CONC" != "success" ]; then
+            echo "ERROR: ${SHA} 的全量 E2E（release-ci.yml push run）结论=${CONC}（要求 success）" >&2
+            exit 1
+          fi
+          echo "e2e_run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "PXView Release CI ${RUN_ID}: ${CONC}"
 
       # ── 3. 取回打包产物 ─────────────────────────────────────────
       # 每个 artifact 解到 dl/<artifact-name>/ 下。
       - name: Download installers from the PXView Build run
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.build.outputs.run_id }}
@@ -1227,14 +1269,15 @@ jobs:
       # ── 4. 整理发布资产 ─────────────────────────────────────────
       # 规则与 republish-release.yml 一致：单文件安装包直接拷贝，
       # Windows 便携包在 artifact 里是已解开的目录 → 重新压缩成 zip。
-      # 版本号从安装包文件名里取，与 build.yml 解析出的完全一致
-      # （dev 上形如 1.6.6-rc0；发布时的标签是 PXView_v + 这个版本号）。
+      # 版本号从安装包文件名里取，与 build.yml 解析/烘焙进包里的完全一致
+      # （dev 上形如 1.6.6-rc.0；发布标签 = PXView_v + 这个版本号），
+      # 所以标签与包内版本号永远对得上，不在这里重新算序号。
       - name: Prepare nightly assets
         id: assets
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SHA="${{ steps.target.outputs.sha }}"
           mkdir -p release-assets
           ASSETS="$PWD/release-assets"
           VER=""
@@ -1289,7 +1332,7 @@ jobs:
 
           # 本次提交的信息，供 Release 正文展示。本 job 没有 checkout，
           # 所以走 API 取，不用 git log。
-          MSG=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+          MSG=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" \
                   --jq '.commit.message' 2>/dev/null || true)
 
           # 更新日志：上个正式版标签 → 本次提交 之间的全部提交。
@@ -1298,14 +1341,14 @@ jobs:
           BASE_TAG=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
                        --jq '.tag_name' 2>/dev/null || true)
           if [ -n "${BASE_TAG}" ]; then
-            RANGE="repos/${GITHUB_REPOSITORY}/compare/${BASE_TAG}...${GITHUB_SHA}"
+            RANGE="repos/${GITHUB_REPOSITORY}/compare/${BASE_TAG}...${SHA}"
             TOTAL=$(gh api "$RANGE" --jq '.total_commits' 2>/dev/null || echo 0)
             COMMITS=$(gh api "$RANGE" \
                         --jq '.commits[]? | "- " + (.commit.message | split("\n")[0]) + "  (" + (.sha[0:7]) + ")"' \
                         2>/dev/null || true)
             CHANGELOG=$(printf '基准 `%s`，共 %s 个提交（由旧到新）：\n\n%s\n\n[完整变更对比](%s/%s/compare/%s...%s)' \
                           "${BASE_TAG}" "${TOTAL}" "${COMMITS}" \
-                          "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${BASE_TAG}" "${GITHUB_SHA}")
+                          "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${BASE_TAG}" "${SHA}")
           else
             CHANGELOG=$(printf '（仓库还没有正式版发布，无法给出区间）\n\n[全部提交](%s/%s/commits/dev)' \
                           "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}")
@@ -1328,37 +1371,52 @@ jobs:
             echo "SUMS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # ── 5. 发布 nightly Release ──────────────────────────────────
+      # ── 5. 该版本是否已经发布过 ──────────────────────────────────
+      # 序号在构建时分配，而构建时看到的「已发布 rc 最大值」可能落后于当前状态
+      # （例如另一个构建先被发布，占用了同一个序号）。这里明确拒绝而不是硬发：
+      # GitHub 一个标签只能挂一个 Release，硬发只会得到一个难懂的报错；
+      # 正确的处理是重新触发一次 dev 构建（会分配到新序号）后再发布。
+      - name: Reject when this version is already released
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="PXView_v${{ steps.assets.outputs.version }}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "ERROR: ${TAG} 已存在，不能重复发布。请重新触发一次 dev 构建（会分配新的 rc 序号）后再发布。" >&2
+            exit 1
+          fi
+          echo "标签 ${TAG} 尚未占用，可以发布"
+
+      # ── 6. 发布 rc Release ───────────────────────────────────────
       # 不删任何旧 Release：每个构建各自一个 tag 永久保留，这样每个资产的
       # 下载量都能一直累加，旧构建也能回溯下载（删掉的 Release 会连资产计数
       # 一起消失，且 GitHub 没有恢复接口）。
-      - name: Publish nightly prerelease
-        if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+      - name: Publish rc prerelease
         uses: softprops/action-gh-release@v3
         with:
-          # 标签 = PXView_v<本次版本号>（如 PXView_v1.6.6-rc0），与正式版标签
-          # （PXView_v1.6.5）同前缀同格式；逐构建唯一。不用固定名字是因为
-          # GitHub 的 Releases 页同日按标签的语义化版本倒序，非 semver 的标签
-          # 会排到正式版后面。
+          # 标签 = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0），与正式版标签
+          # （PXView_v1.6.5）同前缀同格式；逐构建唯一，且与包内版本号一致
+          # （版本号取自安装包文件名）。不用固定名字是因为 GitHub 的 Releases
+          # 页同日按标签的语义化版本倒序，非 semver 的标签会排到正式版后面。
           # 这个前缀不会误触 build.yml 的 tag 触发器：它匹配的是 'v*'，而
           # PXView_v… 以 P 开头。
           tag_name: PXView_v${{ steps.assets.outputs.version }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.target.outputs.sha }}
           # 标题与正式版保持一致（正式版的标题就是它的标签 PXView_v1.6.5）。
-          # 是否 nightly 由标签里的 -rc.N、prerelease 标记和正文首行说明区分。
+          # 是否候选版由标签里的 -rc.N、prerelease 标记和正文首行说明区分。
           name: PXView_v${{ steps.assets.outputs.version }}
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           files: release-assets/*
           body: |
-            dev 分支每次提交的自动构建（nightly），供尝鲜与回归验证使用，**不是正式版本**。
-            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除。
+            dev 分支的候选构建（release candidate），供尝鲜与回归验证使用，**不是正式版本**。
+            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除；候选包由维护者手动发布。
 
             - 开发版本号：`${{ steps.assets.outputs.version }}`
-            - 提交：`${{ github.sha }}`
+            - 提交：`${{ steps.target.outputs.sha }}`
             - 打包与安装包自检：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.build.outputs.run_id }})
-            - 测试：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - 全量 E2E：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.e2e.outputs.e2e_run_id }})
 
             正式版本请到 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 里选择带版本号的发布。
 
