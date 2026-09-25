@@ -98,6 +98,7 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -113,7 +114,7 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              # dev 通道 = <基础版本>-rc<序号>：
               #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
@@ -121,17 +122,21 @@ jobs:
               #     后自动重新从 0 计），取不到时退化为 0；
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #     只会被发布一次（详见该作业的说明）。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
+              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
+              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
 
       - name: Install Python 3.14 via deadsnakes PPA
@@ -223,9 +228,12 @@ jobs:
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
+          # DS_VERSION_SUFFIX 来自 Resolve version（dev 上是 -rcN，正式版为空）：
+          # 只影响 App 内显示的版本串，数字字段与 macOS bundle 版本不受影响。
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
+            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
@@ -420,6 +428,7 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -435,7 +444,7 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              # dev 通道 = <基础版本>-rc<序号>：
               #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
@@ -443,17 +452,21 @@ jobs:
               #     后自动重新从 0 计），取不到时退化为 0；
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #     只会被发布一次（详见该作业的说明）。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
+              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
+              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
 
       - name: Install dependencies via Homebrew
@@ -506,6 +519,7 @@ jobs:
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
             -DENABLE_TAURI=ON \
+            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_INSTALL_PREFIX=../install.dir
@@ -900,6 +914,7 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -915,7 +930,7 @@ jobs:
             fi
             BASE="${MAJOR}.${MINOR}.${MICRO}"
             if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
-              # dev 通道 = <基础版本>-rc<序号>.<短 SHA>：
+              # dev 通道 = <基础版本>-rc<序号>：
               #   * 语义化版本上「上个正式版 < 1.6.6-rcN < 1.6.6 正式版」—— 既高于
               #     上个正式版（Releases 页同日也排在它前面），又低于将来发布的正式
               #     版本；标签短且一眼是候选版，不占正式版本号；
@@ -923,17 +938,21 @@ jobs:
               #     后自动重新从 0 计），取不到时退化为 0；
               #   * 序号唯一性靠 release-ci.yml 的 publish-nightly：那里有「dev 已
               #     前进则跳过」的门槛，被取代的提交不发 nightly，所以同一个 rc 序号
-              #     只会被发布一次（详见该作业的说明）。              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
+              #     只会被发布一次（详见该作业的说明）。
+              # 已知小瑕疵：不加点的 rc10 与 rc2 按字典序比较（"rc1" < "rc2"），序号过
               # 两位数后同一天内的相对顺序可能不符预期；跨天由"发布日倒序"决定，不受影响。
               RC_N=$(gh api --paginate \
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
+              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
+              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
 
       - name: Setup Node.js (for Web UI)
@@ -972,6 +991,7 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
+            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_INSTALL_PREFIX=../install.dir \
             -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd" \
             -DCARGO_EXECUTABLE="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin/cargo.exe" 2>/dev/null || echo /c/Users/runner/.cargo/bin/cargo.exe)" \

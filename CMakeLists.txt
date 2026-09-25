@@ -32,7 +32,12 @@ set(DS_DESCRIPTION "A GUI for instruments of PXTOOL")
 set(DS_VERSION_MAJOR 1)
 set(DS_VERSION_MINOR 6)
 set(DS_VERSION_MICRO 6)
-set(DS_VERSION_STRING  ${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO})
+# 开发构建（nightly）在配置时传 -DDS_VERSION_SUFFIX=-rc0：这样 App 内显示的版本号（About 对话框 / --version / MCP serverInfo / 启动日志）就是 1.6.6-rc0，
+# 而下面三个数字字段与 macOS bundle 版本保持纯数值。正式版（tag/main）后缀留空。
+set(DS_VERSION_SUFFIX "" CACHE STRING "开发构建的版本后缀，如 -rc0；正式版留空")
+set(DS_VERSION_STRING  ${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO}${DS_VERSION_SUFFIX})
+# 纯数值形式：CPack 与 macOS bundle 用（CFBundleVersion 只允许数字和点，不能带后缀）。
+set(DS_VERSION_NUMERIC ${DS_VERSION_MAJOR}.${DS_VERSION_MINOR}.${DS_VERSION_MICRO})
 
 configure_file (
 	${PROJECT_SOURCE_DIR}/PXView/config.h.in
@@ -408,8 +413,8 @@ if(APPLE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER com.pxlogic.${PROJECT_NAME}
         MACOSX_BUNDLE_BUNDLE_NAME ${PROJECT_NAME}
-        MACOSX_BUNDLE_BUNDLE_VERSION ${DS_VERSION_STRING}
-        MACOSX_BUNDLE_SHORT_VERSION_STRING ${DS_VERSION_STRING}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${DS_VERSION_NUMERIC}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${DS_VERSION_NUMERIC}
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac_appbundle_template.plist.in
         MACOSX_BUNDLE_ICON_FILE PXView.icns
         # Ensure the binary can find Qt frameworks bundled inside the .app
