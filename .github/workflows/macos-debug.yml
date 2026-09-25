@@ -1,47 +1,59 @@
 #===============================================================================
-#= macOS 崩溃诊断工作流 (lldb backtrace, 复用 build.yml 的 DMG)
+#= macOS E2E 测试 (针对 build.yml 打出的安装包)
 #-------------------------------------------------------------------------------
-# 目的: 取回「PXView Build」构建出的 macOS DMG, 挂载后直接用 lldb 跑 headless
-#       启动测试, 在崩溃点自动抓取调用堆栈。
+# 目的: 取回「PXView Build」构建出的 macOS DMG, 用**安装包里的** pxviewd 跑
+#       E2E 测试套件, 验证「用户实际拿到的包」能不能正常工作。
 #
-# 为什么用 lldb 而不是 gdb:
-#   - macOS 上 gdb 需要额外 codesign, 且非 Apple 分发, 基本不可用;
-#   - lldb 是 Apple 官方 (clang/LLVM) 调试器, macos-15 runner 自带。
+# 测的是包, 不是源码树 —— 这是本工作流与 release-ci.yml 的根本区别:
+#   release-ci 在 Linux 上编译后立刻测构建产物; 这里测的是经过 macdeployqt
+#   打包、逐层签名、装进 DMG 的那一份。之前 CI 出的 DMG 里 pxviewd 依赖未
+#   修复(指向构建机的 Homebrew 路径)、在用户机器上必然启动失败, 就是这类
+#   缺陷 —— 只有跑打包产物才能发现。
 #
-# 两个 job 的分工 (2026-09-26 重构):
+# 三个 job 的分工:
 #
 #   Job 1  await-build   (ubuntu-24.04, 便宜)
 #     定位 build.yml 的 run, 然后**轮询等待** macOS artifact 就绪。
 #     这一步刻意不放在 macOS runner 上: build.yml 的 mac job 含 fx2lafw 固件、
 #     全量编译、Web UI、Tauri(Rust) 构建、macdeployqt、签名、hdiutil, 整轮
 #     40~60 分钟; 在 macOS runner 上干等会把昂贵额度全烧在 sleep 上。
+#     等的是「artifact 就绪」而不是「整个 run 结束」—— build.yml 里 mac 与
+#     windows 并行, 等整个 run 会白等 windows 那几十分钟。
 #
-#   Job 2  macos-debug   (macos-15)
-#     拿到 run_id 后下载 artifact → 挂载 DMG → lldb 抓堆栈。只做这几件事,
-#     所以 timeout 可以压得很低。
+#   Job 2  prepare       (ubuntu-24.04, 便宜)
+#     checkout 该 run 的提交, 装 Python 与 pytest 依赖, 打包成一个 tar 传下去。
+#     放 ubuntu 同理: 装依赖不挑平台, 没必要占 macOS 额度。
 #
-# 等待的是「macOS artifact 就绪」而不是「整个 run 结束」: build.yml 里 mac 与
-# windows 是两个并行 job, 等整个 run 结束会白等 windows 那几十分钟。
-# artifact 一出现就开工; 若 run 已结束却没有该 artifact, 立即明确报错。
+#   Job 3  macos-e2e     (macos-15)
+#     挂载 DMG → 用包里的 pxviewd 跑 E2E 套件。
 #
-# ⚠️ 代价(务必知悉): build.yml 打包用的是 **Release** 编译, 二进制里没有
-#    DWARF 调试信息。因此 lldb 里:
-#      - 函数名靠 Mach-O 符号表仍能解析 (能定位到具体函数);
-#      - **没有**源码文件:行号, 也读不到局部变量 (frame variable 会是空);
-#      - 静态函数/匿名命名空间内的函数可能显示为裸地址。
-#    这与本工作流原先自行 RelWithDebInfo 编译时的体验不同。需要精确到行号/
-#    局部变量时, 请改用手动触发 build.yml 并选择带符号的构建。
+# 为什么测试代码要从仓库 checkout, 而不是从 DMG 里取:
+#   DMG 里只有二进制与运行时资源, 不含 tests/ 与 pxview-automation
+#   (MCP 客户端)。所以「被测的二进制」来自 DMG, 「测试代码」来自该 run 的
+#   提交 —— 用 headSha 而不是默认分支, 保证测的是同一次提交。
+#
+# ⚠️ 关于调试符号: build.yml 用 **Release** 编译, 二进制里没有 DWARF。
+#    因此崩溃时 lldb / .ips 只能给出函数名, **没有源码行号与局部变量**。
+#    需要精确到行号时, 请手动触发 build.yml 并选择带调试信息的构建。
+#    崩溃信息的两条来源(都会收集):
+#      1. 测试结束时从 ~/Library/Logs/DiagnosticReports/ 取 .ips
+#         —— macOS 自动为崩溃进程生成, 不占额外时间;
+#      2. lldb 附到仍然存活的 daemon 上抓实时栈 —— 用于「没崩但卡死」
+#         (MCP 端口能连上却不应答) 这种情况, .ips 不会生成。
 #
 # 触发方式:
 #   - 手动: Actions → 选本工作流 → Run workflow
 #     run_id           : 留空 = 取 build.yml 最近一次 run; 也可填具体 run 的 ID
 #     max_wait_minutes : 等待 artifact 出现的最长分钟数 (默认 90, 0 = 不等待)
-#     wait_seconds     : 程序不崩溃时等多久后 SIGTERM 收尾 (0 = 一直等)
+#     test_group       : core = release-ci 的 GROUP1(12 个套件, 默认)
+#                        smoke = 只跑 test_01(MCP 协议)
+#                        all   = 全部 32 个套件(慢)
+#     pytest_timeout   : 单个测试的超时秒数 (默认 300; 慢机器可调大)
 #===============================================================================
 
-name: macOS Debug (lldb backtrace)
+name: macOS E2E (packaged DMG)
 
-# 默认不自动触发：本工作流会在 macOS runner 上跑 lldb。需要时手动 dispatch。
+# 默认不自动触发：需要时手动 dispatch。
 # 如需恢复 push 触发，把下面注释掉的 push 段恢复即可。
 on:
   # push:
@@ -58,11 +70,20 @@ on:
         required: false
         type: number
         default: 90
-      wait_seconds:
-        description: 'Seconds to wait for the crash before SIGTERM (0 = wait forever)'
+      test_group:
+        description: '要跑的 E2E 套件范围'
+        required: false
+        type: choice
+        default: core
+        options:
+          - core
+          - smoke
+          - all
+      pytest_timeout:
+        description: '单测超时秒数 (慢机器/首次冷启动可调大)'
         required: false
         type: number
-        default: 30
+        default: 300
 
 jobs:
   # ============================================================
@@ -79,6 +100,8 @@ jobs:
       actions: read     # 读 build.yml 的 run 与 artifacts
     outputs:
       run_id: ${{ steps.await.outputs.run_id }}
+      head_sha: ${{ steps.await.outputs.head_sha }}
+      version: ${{ steps.await.outputs.version }}
     steps:
       # 不 checkout: 全程走 gh API, 不需要工作区。
       # 注意本 job 没有 git remote 可推断仓库, 所有 gh 命令都要显式 --repo。
@@ -122,6 +145,17 @@ jobs:
             --json displayTitle,headBranch,headSha,status,conclusion,createdAt \
             --template '{{.displayTitle}}{{"\n"}}  branch={{.headBranch}}  sha={{.headSha}}{{"\n"}}  status={{.status}}  conclusion={{.conclusion}}{{"\n"}}  created={{.createdAt}}{{"\n"}}' \
             2>/dev/null || echo "  (无法读取 run 元信息, 继续)"
+
+          # headSha 给 Job 2 用来 checkout 同一次提交 —— 测试代码必须与被测
+          # 二进制同源, 否则就是「新测试 + 旧包」的组合, 结果没有意义。
+          HEAD_SHA=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                       --json headSha --jq '.headSha // empty' 2>/dev/null || true)
+          if [ -z "$HEAD_SHA" ]; then
+            echo "ERROR: 读不到 run ${RUN_ID} 的 headSha, 无法确定用哪份测试代码。" >&2
+            exit 1
+          fi
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "  对应提交: ${HEAD_SHA}"
 
           # 写进 outputs 供 Job 2 下载用。放在这里而不是等完之后: 即使等待
           # 超时退出, 这个值也已可用(便于排查)。
@@ -195,29 +229,94 @@ jobs:
             sleep "$INTERVAL"
           done
 
+          # 从 artifact 名反解版本号: PXView-macOS-ARM64-<version>
+          # 只是为了在日志和 artifact 名里能一眼看出测的是哪个版本, 解不出
+          # 也不影响主流程。
+          # `|| true`: sed -n 's///p' 无匹配时返回 1, 在 set -euo pipefail
+          # 下会让整个脚本中止 —— 但「解不出版本号」不是错误。
+          VERSION=$( { echo "$ART_NAMES" | head -1 | sed -n 's/^PXView-macOS-ARM64-//p'; } || true )
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "  被测版本: ${VERSION:-<未知>}"
+
           echo ""
-          echo "=== 产物已就绪, 交给 macos-debug job ==="
+          echo "=== 产物已就绪, 交给 prepare / macos-e2e job ==="
 
   # ============================================================
-  # Job 2: 下载 DMG, 挂载后用 lldb 抓崩溃堆栈
+  # Job 2: 准备测试环境 (checkout 该 run 的提交 + Python 依赖)
   # ============================================================
-  macos-debug:
-    name: lldb backtrace
+  # 放 ubuntu 是刻意的: 装 pip 依赖不挑平台, 没必要占 macOS 额度。
+  # 产物打成 tar 交给 Job 3, 顺带让「测试代码」这个输入被固定下来 ——
+  # 用的是 Job 1 读到的 headSha, 与 DMG 同源。
+  prepare:
+    name: Prepare test env
     needs: await-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout the commit that produced the DMG
+        uses: actions/checkout@v7
+        with:
+          # headSha 而非默认分支: 被测二进制来自该 run, 测试代码也必须来自
+          # 同一次提交, 否则就是「新测试 + 旧包」, 结果没有意义。
+          ref: ${{ needs.await-build.outputs.head_sha }}
+          submodules: false          # 跑测试不需要 libsigrok 等子模块
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # 与 release-ci.yml 同一组依赖; timeout 用 thread 方法,
+          # reruns 用于消化 conftest 重启 daemon 后的偶发首连失败。
+          pip install pytest pytest-timeout pytest-rerunfailures
+          # 项目自己的 MCP/CLI 客户端, conftest 依赖它拉起并对话 daemon
+          pip install -e ./pxview-automation
+          python -c "import pxview_automation; print('pxview-automation OK', pxview_automation.__file__)"
+
+      - name: Pack test harness
+        run: |
+          set -euo pipefail
+          # 只带测试需要的东西。整个仓库很大(build/ 近 2000 文件), 全传过去纯浪费。
+          tar czf testharness.tar.gz \
+            tests \
+            pxview-automation/pyproject.toml \
+            pxview-automation/src
+          ls -lh testharness.tar.gz
+          echo "--- 内容概览 ---"
+          tar tzf testharness.tar.gz | head -15
+          echo "  ... 共 $(tar tzf testharness.tar.gz | wc -l) 项"
+
+      - name: Upload test harness
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-e2e-harness
+          path: testharness.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  # ============================================================
+  # Job 3: 在 macOS 上用打包出来的 pxviewd 跑 E2E
+  # ============================================================
+  macos-e2e:
+    name: E2E on packaged DMG
+    needs: [await-build, prepare]
     runs-on: macos-15
-    # 只做「下载 + 挂载 + lldb + 上传」, 不编译, 所以可以压得很低
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: read     # download-artifact 跨 run 下载需要
     steps:
-      # ── 1. 取回 macOS artifact ──────────────────────────────────
+      # ── 1. 取回 DMG 与测试脚手架 ────────────────
       # artifact 名形如 PXView-macOS-<arch>-<version> (见 build.yml 的
       # "Upload DMG Artifact"), 内容是 install.dir/*.dmg 单文件。
       # pattern 用 **-ARM64- 精确段**, 不写 PXView-macOS-*: 后者会把将来任何
       # 以 PXView-macOS 开头的 artifact 一起拉下来(如新增 x86_64 矩阵项),
       # 且下面对 DMG 的挑选就成了不确定的目录遍历顺序。
-      # merge-multiple=false(默认) → 每个 artifact 解到 dl/<artifact-name>/。
       - name: Download macOS DMG from the awaited run
         uses: actions/download-artifact@v8
         with:
@@ -226,22 +325,31 @@ jobs:
           path: dl
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Locate DMG
-        id: dmg
+      - name: Download test harness
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-e2e-harness
+          path: dl/harness
+
+      - name: Mount DMG and extract .app
+        id: app
         run: |
           set -e
           echo "=== 下载到的文件 ==="
-          find dl -type f -print | head -20
+          # 下面几处 find 都加了 `|| true`: dl/ 可能整个不存在(下载步骤静默
+          # 失败), 而 find 对不存在的目录返回非零 —— set -e 会让脚本在这里
+          # 就中止, 于是精心写的「没找到 .dmg」提示永远不会打印出来。
+          { find dl -type f -print | head -20; } || true
 
           # 收集全部 .dmg。矩阵扩了 arch 时这里会有多个 —— 与其静默取第一个
           # (顺序不确定, 可能拿到非预期的架构), 不如直接报错让人显式指定 run。
           # bash 3.2(macOS 自带) 没有 mapfile/readarray, 用 find 计数即可。
-          COUNT=$(find dl -type f -name '*.dmg' | wc -l | tr -d ' ')
+          COUNT=$( { find dl -type f -name '*.dmg' | wc -l | tr -d ' '; } || true )
+          COUNT=${COUNT:-0}
           if [ "$COUNT" -eq 0 ]; then
             echo "ERROR: 在 run ${{ needs.await-build.outputs.run_id }} 的 artifact 里没找到 .dmg。" >&2
             echo "       Job 1 已确认该 run 存在 macOS artifact —— 若这里为空," >&2
             echo "       说明下载环节出了问题(权限/网络), 或 artifact 已过期被清理。" >&2
-            echo "       已下载内容:" >&2
             ls -R dl 2>/dev/null | head -50 >&2 || true
             exit 1
           fi
@@ -251,18 +359,11 @@ jobs:
             echo "       请改用 workflow_dispatch 的 run_id 指定一次只含单个 arch 的构建。" >&2
             exit 1
           fi
-
           DMG=$(find dl -type f -name '*.dmg')
           echo "DMG = ${DMG} ($(du -h "$DMG" | cut -f1))"
-          echo "path=${DMG}" >> "$GITHUB_OUTPUT"
 
-      # ── 2. 挂载 DMG, 取出 .app ─────────────────────────────────
-      - name: Mount DMG and extract .app
-        run: |
-          set -e
-          DMG="${{ steps.dmg.outputs.path }}"
           MOUNT=/tmp/pxv-dmg-mount
-          APP_SRC=/tmp/PXView-dbg.app
+          APP_SRC=/tmp/PXView-e2e.app
 
           # 同名卷残留会导致 "Resource busy" —— 先清理
           if [ -d "$MOUNT" ]; then
@@ -278,7 +379,6 @@ jobs:
 
           echo "=== DMG 内容 ==="
           ls "$MOUNT"
-
           if [ ! -d "$MOUNT/PXView.app" ]; then
             echo "ERROR: DMG 里没有 PXView.app" >&2
             ls -la "$MOUNT" >&2
@@ -287,142 +387,238 @@ jobs:
           fi
 
           # 拷到 /tmp 再 detach: 直接从挂载点跑会因镜像卸载而失败,
-          # 且 DMG 内的文件带 quarantine/只读属性, lldb 需要可写目录。
+          # 且 DMG 内的文件带 quarantine/只读属性。
           cp -R "$MOUNT/PXView.app" "$APP_SRC"
-          # detach 失败不该让 step 失败(后续步骤不依赖它, runner 用完即弃);
-          # 但失败的残留挂载会影响后面重跑, 所以打印出来。
           if ! hdiutil detach "$MOUNT" -force; then
             echo "WARNING: detach ${MOUNT} 失败(镜像可能仍挂载)" >&2
           fi
 
-          if [ ! -x "$APP_SRC/Contents/MacOS/PXView" ]; then
-            echo "ERROR: 拷出的 bundle 里 PXView 不可执行 —— 拷贝不完整?" >&2
+          # 去隔离标记 —— 从下载/挂载来的 app 不带这一步会被 Gatekeeper 拦掉。
+          xattr -cr "$APP_SRC" 2>/dev/null || true
+
+          # pxviewd 是本次测试的主角。历史上 CI 出的 DMG 里它的依赖全指向
+          # 构建机的 Homebrew 路径, 一跑就崩 —— 那种情况会在这里就暴露。
+          DAEMON="$APP_SRC/Contents/MacOS/pxviewd"
+          if [ ! -x "$DAEMON" ]; then
+            echo "ERROR: 包里没有可执行的 pxviewd: ${DAEMON}" >&2
             ls -la "$APP_SRC/Contents/MacOS/" >&2
             exit 1
           fi
+          echo "app=${APP_SRC}" >> "$GITHUB_OUTPUT"
+          echo "daemon=${DAEMON}" >> "$GITHUB_OUTPUT"
 
-          # 去隔离标记 —— 从下载/挂载来的 app 不带这一步会在启动时被 Gatekeeper
-          # 拦掉; DMG 里的签名是 ad-hoc, xattr -cr 后仍可运行。
-          xattr -cr "$APP_SRC" 2>/dev/null || true
+          echo ""
+          echo "=== 二进制架构 ==="
+          file "$APP_SRC/Contents/MacOS/PXView" "$DAEMON"
+          lipo -info "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null || true
 
-          # 签名自检: 签名坏掉时 lldb 里会先刷一屏 dyld 错误才崩, 很难判读。
-          # 在这里先说清楚, 免得把「包是坏的」误诊成「程序有 bug」。
+          # 先直接跑一次 --version: 依赖没修好的包会在这里就以 dyld 报错退出,
+          # 比让 12 个测试套件集体超时要快得多, 也好判读得多。
+          # 注意不要 `| head` —— 管道会把退出码换成 head 的(恒 0),
+          # dyld 失败就被吞掉了。先落文件再取退出码。
+          echo ""
+          echo "=== pxviewd 冒烟: 依赖能否加载 ==="
+          "$DAEMON" --version > /tmp/pxviewd_version.txt 2>&1
+          SMOKE_RC=$?
+          head -20 /tmp/pxviewd_version.txt
+          if [ "$SMOKE_RC" -ne 0 ]; then
+            echo "ERROR: pxviewd 无法启动 (exit=${SMOKE_RC}) —— 依赖缺失或路径错误。" >&2
+            echo "       这是打包缺陷(不是测试失败), 请检查 macdeployqt 的 -executable= 是否生效。" >&2
+            otool -L "$DAEMON" | head -25 >&2 || true
+            exit 1
+          fi
+          echo "  pxviewd 可启动"
+
+          # 签名自检: 坏签名会让 dyld 先刷一屏错误, 难以与「程序有 bug」区分。
           echo ""
           echo "=== codesign 自检 ==="
           if codesign --verify --strict "$APP_SRC" 2>&1; then
             echo "  签名验证通过"
           else
-            echo "  ⚠️ 签名验证未通过(ad-hoc/CI 打包常见, 不影响 lldb 断点;"
-            echo "     但若后续 lldb 里出现 dyld 库加载失败, 优先怀疑这里)"
+            echo "  WARNING: 签名验证未通过(ad-hoc/CI 打包常见, 不影响运行;"
+            echo "      但若后面出现 dyld 库加载失败, 优先怀疑这里)"
             codesign -dvvv "$APP_SRC" 2>&1 | head -20 || true
           fi
-          echo "  Gateway 评估(仅供参考): $(spctl -a -vvv "$APP_SRC" 2>&1 | head -3 | tr '\n' ' ' || true)"
 
-          echo ""
-          echo "=== .app 结构 ==="
-          ls "$APP_SRC/Contents/MacOS/"
-          echo "--- Frameworks (前 20) ---"
-          ls "$APP_SRC/Contents/Frameworks/" 2>/dev/null | head -20
-          echo ""
-          echo "=== 二进制架构 ==="
-          file "$APP_SRC/Contents/MacOS/PXView"
-          lipo -info "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null || true
-
-          # 符号自查: 直接告诉用户这次能拿到多少信息, 免得对着一堆裸地址猜。
+          # 符号自查: 崩溃时能拿到多少信息, 先说清楚免得对着一堆裸地址猜。
           # 判据只有一条 —— `dwarfdump --debug-line` 里是否有 .debug_line 段:
           #   * `dwarfdump --uuid` 不能用, 每个 Mach-O 都有 UUID, 恒为真;
-          #   * `grep -c` 计数为 0 时返回 1, 在 set -e 下会中止 step → 用 `|| true`
-          #     兜住(不要为此整段关 set -e, 那会放过真正的错误)。
+          #   * `grep -c` 计数为 0 时返回 1, 在 set -e 下会中止 → 用 `|| true` 兜住。
           echo ""
           echo "=== 调试符号自查 ==="
           if command -v dwarfdump >/dev/null 2>&1; then
-            DWARF_LINES=$( { dwarfdump --debug-line "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null \
-                             | grep -c '0x'; } || true )
+            DWARF_LINES=$( { dwarfdump --debug-line "$DAEMON" 2>/dev/null | grep -c '0x'; } || true )
             DWARF_LINES=${DWARF_LINES:-0}
             if [ "$DWARF_LINES" -gt 100 ] 2>/dev/null; then
-              echo "  含 DWARF 行号信息 (${DWARF_LINES} 条) —— 堆栈可显示源码位置"
+              echo "  含 DWARF 行号信息 (${DWARF_LINES} 条) —— 崩溃栈可显示源码位置"
             else
-              echo "  ⚠️ 无/极少 DWARF 行号信息 (${DWARF_LINES} 条)"
-              echo "     预期如此: build.yml 用 Release 编译。堆栈只有函数名, 无行号/局部变量。"
+              echo "  WARNING: 无/极少 DWARF 行号信息 (${DWARF_LINES} 条)"
+              echo "     预期如此: build.yml 用 Release 编译。崩溃栈只有函数名, 无行号/局部变量。"
             fi
-            NL_SYMS=$( { nm -U "$APP_SRC/Contents/MacOS/PXView" 2>/dev/null | grep -c ' T '; } || true )
+            NL_SYMS=$( { nm -U "$DAEMON" 2>/dev/null | grep -c ' T '; } || true )
             echo "  文本段外部符号: ${NL_SYMS:-0} 个 (供函数名解析)"
           else
-            echo "  ⚠️ 无 dwarfdump, 跳过自查"
+            echo "  WARNING: 无 dwarfdump, 跳过自查"
           fi
 
-      # ── 3. lldb batch 跑 headless, 崩溃即抓堆栈 ────────────────
-      - name: Run headless under lldb and capture crash backtrace
+      # ── 2. 解出测试脚手架 ──────────────────────
+      # 同时把 harness 里的 tests/ 与 pxview-automation/ 铺到工作区,
+      # 并对齐 conftest 的启动路径(PXVIEW_EXE_PATH 已在 E2E 步显式给出)。
+      - name: Extract test harness
+        run: |
+          set -euo pipefail
+          tar xzf dl/harness/testharness.tar.gz
+          echo "=== 解出的内容 ==="
+          ls -la
+          echo "--- tests/suites 套件数 ---"
+          ls tests/suites/test_*.py | wc -l
+          echo "--- 记录: E2E 用的测试代码来自 run ${{ needs.await-build.outputs.run_id }} 的提交 ---"
+          echo "${{ needs.await-build.outputs.head_sha }}" > /tmp/head_sha.txt
+
+      - name: Install Python and test dependencies
+        run: |
+          set -euo pipefail
+          # runner 自带 python3。不在 macOS 上装特定版本, 是因为 pytest 对
+          # 解释器版本不敏感; 真要挑版本也该在 prepare job 里挑。
+          python3 --version
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest pytest-timeout pytest-rerunfailures
+          python3 -m pip install -e ./pxview-automation
+          python3 -c "import pxview_automation; print('pxview-automation OK', pxview_automation.__file__)"
+
+      # ── 3. 跑 E2E ──────────────────────────────
+      - name: Run E2E suites against the packaged pxviewd
+        id: e2e
         env:
-          WAIT_SECONDS: ${{ github.event.inputs.wait_seconds || 30 }}
+          # 打包里的 daemon。conftest 的 _resolve_exe() 候选列表只有 Linux
+          # 布局(install.dir/usr/bin/pxviewd), **没有 macOS 的 .app 路径**,
+          # 所以必须显式指定, 否则它会报「找不到可执行文件」。
+          PXVIEW_EXE_PATH: ${{ steps.app.outputs.daemon }}
+          TEST_GROUP: ${{ github.event.inputs.test_group || 'core' }}
+          PYTEST_TIMEOUT: ${{ github.event.inputs.pytest_timeout || 300 }}
         run: |
           set +e
-          APP_BIN="/tmp/PXView-dbg.app/Contents/MacOS/PXView"
+          export PXVIEW_MCP_PORT=10110
+          export PXVIEW_WS_PORT=10430
+          export PXVIEW_MCP_URL="http://127.0.0.1:10110/mcp"
+          # 首次冷启动要加载解码器与 Python 解释器, 给足时间
+          export PXVIEW_STARTUP_TIMEOUT=120
+          export PXVIEWD_LOG_FILE=/tmp/pxv_daemon.log
 
-          echo "=== lldb (batch) headless 启动 + 崩溃堆栈采集 ==="
-          echo "等待崩溃: ${WAIT_SECONDS}s (超过后 SIGTERM 收尾)"
+          # 分组照搬 release-ci.yml 的 GROUP1 —— 不依赖真实硬件与长时间采集,
+          # 是 macOS 上最可能跑通、也最能反映「包能不能用」的一组。
+          GROUP1="test_01_mcp_protocol.py test_02_device_management.py test_03_capture_basic.py test_05_data_integrity.py test_13_signal_data.py test_14_16_config.py test_21_error_handling.py test_27_cursor_export.py test_29_work_mode.py test_30_pxl_format.py test_34_demo_waveform_check.py test_35_trigger_e2e.py"
 
-          # lldb batch 关键点 (与旧版一致, 都是有踩坑换来的):
-          #  1. 用 `run <args>` 透传 argv (settings set target.run-args 对空格参数报错)
-          #  2. 崩溃(signal stop)后,lldb batch 不会继续执行 -o 命令 —— 必须用
-          #     -k (on-crash) 命令,它们只在进程崩溃时执行。
-          #  3. -k 命令出错会中断后续命令(stop-on-error),所以每条必须合法:
-          #     - 本 lldb 版本不支持 `bt all -s`,只能用 `bt all`
-          #  4. frame #0 是 static 函数时符号表无名,必须用 image lookup --address
-          #     (走 DWARF)解析真实函数名; $pc/$lr 分别给出崩溃函数与调用者。
-          lldb --batch \
-            -o "run --headless -l 4" \
-            -k "image lookup --address \$pc" \
-            -k "image lookup --address \$lr" \
-            -k "bt all" \
-            -k "register read pc lr x8 x9 x10 x11" \
-            -k "frame variable" \
-            -o "quit" \
-            "$APP_BIN" > /tmp/lldb-headless.log 2>&1 &
-          LLDB_PID=$!
-          KILLER_PID=""
+          echo "=== 测试范围: ${TEST_GROUP} ==="
+          cd tests/suites
+          # helpers 包在 tests/helpers, 加 tests/ 到 sys.path (与 release-ci 一致)
+          export PYTHONPATH="$PWD/..:$PYTHONPATH"
 
-          # 若应用不崩溃,到点后给 PXView 发 SIGTERM,让 lldb 的 run 返回
-          if [ "${WAIT_SECONDS:-30}" -gt 0 ] 2>/dev/null; then
-            (
-              sleep "$WAIT_SECONDS"
-              pkill -TERM -x PXView 2>/dev/null || true
-            ) &
-            KILLER_PID=$!
-          fi
-
-          wait "$LLDB_PID"
-          LLDB_RC=$?
-          if [ -n "$KILLER_PID" ]; then
-            kill "$KILLER_PID" 2>/dev/null || true
-          fi
-
-          echo "lldb exit code: $LLDB_RC"
+          # `all` 的列表必须在 cd 之后取 —— 文件名要相对当前目录, 否则
+          # pytest 收到 "tests/suites/x.py" 而 cwd 已在 suites 里, 会找不到文件。
+          case "$TEST_GROUP" in
+            smoke) TESTS="test_01_mcp_protocol.py" ;;
+            all)   TESTS=$(ls test_*.py | tr '\n' ' ') ;;
+            *)     TESTS="$GROUP1" ;;
+          esac
+          echo "$TESTS"
           echo ""
-          echo "=== lldb 输出 (含崩溃堆栈) ==="
-          cat /tmp/lldb-headless.log
-          echo ""
-          echo "=== 关键摘要 (帧/符号化/寄存器) ==="
-          grep -nE "frame #[0-9]|Summary:|Name:|stop reason|register read|General Purpose" /tmp/lldb-headless.log | head -120
-          echo ""
-          echo "=== 崩溃报告 .ips (若有) ==="
-          ls -lt ~/Library/Logs/DiagnosticReports/PXView-*.ips 2>/dev/null | head -3 || echo "无 .ips 崩溃报告"
 
-          # 收集诊断产物。也把 .app 里的 PXView.log 一起收走 —— headless
-          # 启动失败的线索常常在应用日志里而不在 lldb 输出里。
+          python3 -u -m pytest $TESTS -v \
+            --tb=short \
+            --timeout="$PYTEST_TIMEOUT" --timeout-method=thread \
+            --reruns 1 --reruns-delay 2 \
+            --junitxml=/tmp/e2e_report.xml \
+            2>&1 | tee /tmp/e2e_stdout.log
+          # 经 tee 后 $? 是 tee 的退出码(恒 0), 用 PIPESTATUS[0] 取 pytest 的
+          RC=${PIPESTATUS[0]}
+          echo "pytest exit code: ${RC}"
+          echo "rc=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # ── 4. 收诊断产物 ──────────────────────────
+      - name: Collect diagnostics (crash reports, daemon log)
+        if: always()
+        run: |
+          set +e
           mkdir -p /tmp/diag
-          cp /tmp/lldb-headless.log /tmp/diag/lldb-headless.log 2>/dev/null || true
-          cp ~/Library/Logs/DiagnosticReports/PXView-*.ips /tmp/diag/ 2>/dev/null || true
-          cp "$HOME/Library/Logs/PXlogicV20/PXView/PXView.log" /tmp/diag/PXView.log 2>/dev/null || true
+
+          # (1) macOS 为崩溃进程自动生成的 .ips —— 不占额外时间, 崩溃时必有。
+          echo "=== 系统崩溃报告 ==="
+          ls -lt ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -10
+          cp ~/Library/Logs/DiagnosticReports/*.ips /tmp/diag/ 2>/dev/null || true
+          for f in /tmp/diag/*.ips; do
+            [ -f "$f" ] || continue
+            echo "--- $(basename "$f") ---"
+            cat "$f"
+          done
+
+          # (2) daemon 的应用日志 —— 「没崩但卡死」「启动失败」的线索常在这里
+          cp /tmp/pxv_daemon.log /tmp/diag/daemon.log 2>/dev/null || true
+          if [ -f /tmp/diag/daemon.log ]; then
+            echo ""
+            echo "=== daemon 日志 (末 200 行) ==="
+            tail -200 /tmp/diag/daemon.log
+          fi
+
+          # (3) 应用自己的日志文件 (--headless 会写到这里)
+          for p in "$HOME/Library/Application Support/PXlogicV20/PXView/PXView.log" \
+                   "$HOME/Library/Logs/PXlogicV20/PXView/PXView.log"; do
+            if [ -f "$p" ]; then
+              cp "$p" /tmp/diag/PXView.log 2>/dev/null || true
+              echo ""
+              echo "=== 应用日志 (末 200 行): $p ==="
+              tail -200 "$p"
+            fi
+          done
+
+          cp /tmp/e2e_stdout.log /tmp/diag/ 2>/dev/null || true
+          cp /tmp/e2e_report.xml /tmp/diag/ 2>/dev/null || true
+          echo ""
           ls -la /tmp/diag/
 
-      # ── 4. 上传诊断产物 ────────────────────────────────────────
-      - name: Upload lldb backtrace artifact
+      # lldb 实时附栈: 用于「daemon 还活着但 MCP 不应答」(卡死) —— 这种情况
+      # 不会生成 .ips。daemon 存活时才做, 否则说明是崩溃, 看上面的 .ips。
+      - name: lldb attach if daemon still alive (hang diagnosis)
+        if: always()
+        run: |
+          set +e
+          DP=$(pgrep -f 'PXView-e2e.app/Contents/MacOS/pxviewd' | head -1)
+          if [ -z "$DP" ]; then
+            echo "没有存活的 pxviewd, 跳过 attach(此时崩溃信息应看 .ips)"
+            exit 0
+          fi
+          echo "=== pxviewd pid ${DP} 仍存活 —— 抓实时栈 ==="
+          lldb --batch -p "$DP" \
+            -o "thread apply all bt" \
+            -o "detach" \
+            -o "quit" > /tmp/diag/lldb-attach.log 2>&1 || true
+          cat /tmp/diag/lldb-attach.log
+          echo "(已写入 /tmp/diag/lldb-attach.log)"
+
+      - name: Upload E2E diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lldb-backtrace-${{ needs.await-build.outputs.run_id }}
+          name: macos-e2e-report-${{ needs.await-build.outputs.run_id }}
           path: |
-            /tmp/diag/*.log
-            /tmp/diag/*.ips
+            /tmp/diag/*
+            /tmp/e2e_stdout.log
           if-no-files-found: warn
+
+      # ── 5. 结论 ───────────────────────────────
+      - name: Fail if E2E failed
+        if: always()
+        env:
+          RC: ${{ steps.e2e.outputs.rc }}
+        run: |
+          set -e
+          if [ -z "${RC:-}" ]; then
+            echo "ERROR: 测试步骤没有产出退出码(可能整个 step 被跳过或提前中止)。" >&2
+            exit 1
+          fi
+          if [ "$RC" -ne 0 ]; then
+            echo "ERROR: E2E 失败 (pytest exit=${RC})。诊断产物见 macos-e2e-report-* artifact。" >&2
+            exit 1
+          fi
+          echo "E2E 全部通过 (被测对象: run ${{ needs.await-build.outputs.run_id }} 的 macOS DMG)"
