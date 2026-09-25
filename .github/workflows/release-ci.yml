@@ -5,6 +5,9 @@ name: PXView Release CI
 #
 # 本工作流在 push 到 main / dev 时运行，包含 5 个 job：
 #
+#   push 到 dev（nightly 通道）只跑 Job 1：nightly 的门槛就是 Job 1 全绿，
+#   Job 2-4（ASan / TSan / clang-tidy）只跑 main push 与手动触发。
+#
 # Job 1: release-build-and-tests
 #   Release 编译 → 安装 → 全量 E2E 测试 (19 个测试套件)
 #   使用 3 个 PXView 实例并行测试（端口 10110/10111/10112）
@@ -28,7 +31,7 @@ name: PXView Release CI
 #   预计 15-20 分钟（vs 全量 57+ 分钟）
 #
 # Job 5: publish-nightly（仅 dev 分支）
-#   needs 上面 4 个 job，且要求同一提交的 build.yml（打包 + 安装包自检）也成功，
+#   门槛 = Job 1 全绿（needs）+ 同一提交的 build.yml（打包 + 安装包自检）成功，
 #   然后才把三平台安装包发布到固定标签 `nightly` 的 prerelease（滚动覆盖）。
 #   main 分支上此 job 不会运行；正式发布走 tag push → build.yml 的 Release 步骤。
 # ============================================================
@@ -37,7 +40,7 @@ on:
   push:
     branches:
       - main
-      # dev = 集成/每夜构建通道：push 到 dev 跑全套测试，全绿后由
+      # dev = 集成/每夜构建通道：push 到 dev 只跑 Job 1（全量 E2E），全绿后由
       # 末尾的 publish-nightly 作业发布滚动 nightly（见文件头 Job 5）。
       - dev
   workflow_dispatch:
@@ -427,6 +430,8 @@ jobs:
   # ============================================================
   asan-core-tests:
     name: ASan Core Tests
+    # dev push 不跑（nightly 的门槛只有 Job 1）；手动触发时仍可跑。
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -682,6 +687,8 @@ jobs:
   # ============================================================
   tsan-races:
     name: TSan Race Detection
+    # dev push 不跑（同 Job 2）；手动触发时仍可跑。
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -1004,6 +1011,8 @@ jobs:
   # ============================================================
   clang-tidy-fast:
     name: Clang-Tidy (Fast)
+    # dev push 不跑（同 Job 2）；手动触发时仍可跑。
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -1126,7 +1135,8 @@ jobs:
   #
   # dev 分支的滚动 nightly 通道。发布需同时满足：
   #   1. 触发分支是 dev（main 上本 job 直接跳过）；
-  #   2. 上面 4 个 job 全绿 —— 由 needs 保证，任一失败本 job 即被跳过；
+  #   2. Job 1（全量 E2E）全绿 —— 由 needs 保证，失败本 job 即被跳过；
+  #      ASan / TSan / clang-tidy 不是 nightly 的门槛，dev push 上也不跑；
   #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）也成功；
   #   4. dev 的最新提交仍是本次提交 —— 并发 push 时旧提交的产物不得
   #      覆盖新 nightly。
@@ -1137,7 +1147,7 @@ jobs:
   # ============================================================
   publish-nightly:
     name: Publish Nightly
-    needs: [release-build-and-tests, asan-core-tests, tsan-races, clang-tidy-fast]
+    needs: [release-build-and-tests]
     if: ${{ github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -1148,7 +1158,7 @@ jobs:
     steps:
       # ── 1. 同一提交的打包工作流必须成功 ──────────────────────────
       # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知。
-      # 本 job 要等 4 个重活（≥20 分钟）跑完才会开始，那时 build.yml 的 run
+      # 本 job 要等 Job 1（≥20 分钟）跑完才会开始，那时 build.yml 的 run
       # 必然已存在，所以直接查、用 gh run watch 等结论即可。
       # 打包/安装包自检没过 → 不发布，但不把本次 nightly 判为失败
       # （build.yml 那边已经是红的，重复报错没有额外信息）。
