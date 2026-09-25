@@ -112,6 +112,9 @@ set(PXVIEW_RENDER_HEADERS
     PXView/pv/view/trace/selectableitem.h
     PXView/pv/view/trace/trace.h
     PXView/pv/view/trace/trace_visitor.h
+    # Pure drag "make-way" geometry — header-only, widget-free, unit-tested
+    # directly by tests/qtest/view/test_v_offset_animation.cpp.
+    PXView/pv/view/trace/make_way.h
     PXView/pv/view/trace/mathtrace.h
     PXView/pv/view/trace/spectrumtrace.h
     PXView/pv/view/trace/lissajoustrace.h

@@ -325,9 +325,12 @@ public:
    *
    * @param dragged the channel under the cursor; excluded from the animation
    *                because it follows the cursor directly.
+   * @param anchor_y the column's top row center captured when the drag began
+   *                (must stay constant for the whole drag). Pass INT_MAX to
+   *                fall back to deriving it from the current layout.
    * @return true if any channel got a new target (repaint is due).
    */
-  bool animate_make_way_for_drag(Trace *dragged);
+  bool animate_make_way_for_drag(Trace *dragged, int anchor_y);
 
   void show_trig_cursor(bool show = true);
 

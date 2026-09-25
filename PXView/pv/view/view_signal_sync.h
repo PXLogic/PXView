@@ -106,9 +106,14 @@ public:
    *
    * @param dragged  Trace currently under the cursor (must not be animated;
    *                 pass nullptr to animate every visible trace instead).
+   * @param anchor_y the column's top row center as captured at drag start.
+   *                 MUST stay constant for the whole drag: it is the fixed
+   *                 slot-grid origin, so the rows can exchange slots without
+   *                 the column drifting with the cursor. Pass INT_MAX to
+   *                 derive it from the current layout (non-drag callers).
    * @return true if any trace was given a new target (i.e. a repaint is due).
    */
-  bool animate_make_way_for_drag(Trace *dragged);
+  bool animate_make_way_for_drag(Trace *dragged, int anchor_y);
 
   // -- theme / colors (Phase J additional) ------------------------------
   void UpdateTheme();

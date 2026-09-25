@@ -66,6 +66,7 @@
 #include "pv/view/trace/lissajoustrace.h"
 #include "pv/view/signal/logicsignal.h"
 #include "pv/view/trace/mathtrace.h"
+#include "pv/view/trace/make_way.h"
 #include "pv/view/signal/signal.h"
 #include "pv/view/signal/signalfactory.h"
 #include "pv/view/trace/spectrumtrace.h"
@@ -1304,18 +1305,37 @@ bool ViewSignalSync::compare_trace_y(const Trace *a, const Trace *b) {
 // ============================================================================
 // 拖动让位动画
 // ----------------------------------------------------------------------------
-// 与 PulseView ViewWidget::drag_items() 中
-//   owner->restack_items();  for (i : items) i->animate_to_layout_v_offset();
-// 的角色对应（pv/views/trace/viewwidget.cpp:103-132），但实现方式不同：
+// 与 PulseView 的差异（重要，别再写错）：
 //
-// PulseView 靠 TraceTreeItemOwner 树重排 + restack_items()；PXView 保持扁平，
-// 直接用**纯算术**推算每个通道本应占据的 y，不碰 view_index / 分组 / 持久化。
-// 这样"拖动预览"与"松手落定"彻底解耦：动画期间不可能污染即将写入文档的顺序。
+// PulseView 在 TraceTreeItemOwner::restack_items() 里**自上而下**扫一遍，用一个
+// 累计游标 total_offset 从 0 开始逐个摆放：
+//     total_offset += -extents.first;          // 让到本项的上边缘
+//     if (!r->dragging()) r->set_layout_v_offset(total_offset);
+//     total_offset += extents.second;          // 越过本项
+// 被拖项**不重设 offset**，但它照样消耗 total_offset 的推进量 —— 也就是说被拖项
+// 在列表里是一块"**固定占位的障碍**"，其余通道按顺序绕着它排列。
 //
-// 算法：把可见通道（含被拖项）按当前 layout y 排序，再按拖动项的 y_snap 为锚点，
-// 自锚点起重新分配 y —— 相当于"如果现在松手，其余通道会排在哪儿"。
+// 关键点（两条，都是踩过的坑）：
+//
+// (A) 位置是**单向累积出来的**（每项的位置 = 前面所有项高度之和），不是"围着某个
+//     锚点对称展开"。早先的版本用锚点向上下两侧推算，等价于把所有通道围绕被拖项
+//     重新摊开：拖动一格时锚点整体平移一格 → 其余通道跟着整列平移，永远换不了位。
+//
+// (B) 锚点必须是**整个拖动期间恒定**的"槽位网格原点"。这是 (A) 容易被忽略的一半：
+//     就算改成累计布局，只要锚点取自"当前其它通道的最小 y"，被拖项离开/进入首槽时
+//     锚点就会跳一个 pitch，整列照样跟着手指平移（用户报的"拖上面的通道下面的也跟
+//     着平移"正是这个）。所以锚点在 mousePressEvent 里算一次（那时 layout 还是原值），
+//     经 Header::_drag_anchor_y 传进来，全程不变。
+//
+// 本实现保持 PXView 的扁平结构，因此不复用 restack_items 的 total_offset 游标
+// （那是渲染坐标，PXView 的 v_offset 是**行中心**语义），但照搬它的两条核心语义：
+//   (1) 被拖项按**当前绘制位置**插进顺序里 —— 它插到哪，哪一段就整体让开；
+//   (2) 其余通道保持相对顺序**依次**排布，不改变彼此的间隔。
+// 于是被拖项越过邻居时，邻居会被"挤"到被拖项原来的格位，形成真正的交换。
+//
+// 纯视觉预览：不碰 view_index / 分组 / 持久化，松手后仍由 Header 按最终 y 排序。
 // ============================================================================
-bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged) {
+bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   std::vector<Trace *> traces;
   _view->get_traces(ALL_VIEW, traces);
 
@@ -1334,53 +1354,54 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged) {
   if (visible.size() < 2)
     return false;
 
-  // --- 2. 按当前 layout y 排序，得到"拖动前的顺序" ---
-  // 用本类的 compare_trace_y（比较 get_v_offset()，即 layout 值）—— 被拖项
-  // 此刻的 layout 值已由 force_to_v_offset 设成 y_snap，故排序反映的是
-  // "如果把手指现在松开"的顺序。
-  std::stable_sort(visible.begin(), visible.end(), &ViewSignalSync::compare_trace_y);
+  // --- 2. 确定"被拖项应当插到第几位" ------------------------------------
+  // 不能用 get_v_offset() 直接排序：被拖项的 layout 值已被 force_to_v_offset
+  // 改写成跟手的 y_snap，等于拿"手指位置"和"其它通道的格位中心"比大小，插位会
+  // 抖。正确做法是把被拖项**摘出来**，用其余通道的原始顺序做基准，再看被拖项的
+  // 绘制位置落进了哪两个邻居之间。
+  Trace *drag = dragged;
+  if (!drag)
+    return false;
 
-  // --- 3. 找被拖项在当前顺序中的位置 ---
-  size_t drag_pos = visible.size();
-  if (dragged) {
-    for (size_t i = 0; i < visible.size(); i++) {
-      if (visible[i] == dragged) {
-        drag_pos = i;
-        break;
-      }
-    }
-    if (drag_pos == visible.size())
-      return false;  // 被拖项不可见，无需让位
-  }
+  std::vector<Trace *> others;
+  others.reserve(visible.size());
+  for (auto t : visible)
+    if (t != drag)
+      others.push_back(t);
 
-  // --- 4. 以被拖项的 y_snap 为锚点，重新分配 y ---
-  // 锚点即"被拖项现在画在哪儿"（force_to_v_offset 已把它设成 y_snap）。
-  // 其余通道保持原有的相对顺序，围绕锚点上下排列。
-  const int anchor_y = visible[drag_pos]->get_v_offset();
+  if (others.empty())
+    return false;
 
-  // 通道的 y 语义 = 行中心（与 layout_time_signals 一致）。相邻两行的中心
-  // 间距 = 上一行半高 + 下一行半高 + 2 * SignalMargin。
-  int cur = anchor_y;
+  std::stable_sort(others.begin(), others.end(),
+                   &ViewSignalSync::compare_trace_y);
+
+  // --- 3. 插位 + 自上而下依次排布（照搬 restack_items 的累积语义）--------
+  // 算法本体在 pv/view/trace/make_way.h（纯函数，可单测）。这里只负责把
+  // PXView 的行中心语义（row_gap = 2 * SignalMargin）与槽位锚点接进去。
+  //
+  // 锚点优先用调用方传进来的 _drag_anchor_y（拖动开始时算好的常量）。它必须
+  // **全程不变** —— 若退化成"当前其它通道的最小 y"（make_way::top_center），
+  // 被拖项离开/进入首槽时锚点会跳一个 pitch，整列就跟着手指平移、换不了位。
+  // 只有在锚点缺失（非拖动调用方传 INT_MAX）时才回退到现算。
+  const int anchor = make_way::resolve_anchor(anchor_y, visible);
+
+  std::vector<Trace *> ordered;
   std::vector<std::pair<Trace *, int>> new_targets;
+  make_way::layout(others, drag, anchor, 2 * View::SignalMargin, ordered,
+                   new_targets);
 
-  // 向下：紧跟被拖项的通道依次排下去
-  for (size_t i = drag_pos + 1; i < visible.size(); i++) {
-    Trace *prev = visible[i - 1];
-    cur += prev->get_totalHeight() / 2 +
-           visible[i]->get_totalHeight() / 2 + 2 * View::SignalMargin;
-    new_targets.emplace_back(visible[i], cur);
+  // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏。破坏了就是"某个通道
+  // 被让位逻辑弄丢/弄重"，表现为动画后整列错位，故显式校验。
+  pxv_assert(ordered.size() == visible.size(), "make-way order size mismatch");
+  {
+    std::vector<Trace *> sorted = ordered;
+    std::stable_sort(sorted.begin(), sorted.end());
+    std::vector<Trace *> expect = visible;
+    std::stable_sort(expect.begin(), expect.end());
+    pxv_assert(sorted == expect, "make-way order is not a permutation");
   }
 
-  // 向上：位于被拖项之前的通道依次排上去
-  cur = anchor_y;
-  for (size_t i = drag_pos; i-- > 0;) {
-    Trace *next = visible[i + 1];
-    cur -= next->get_totalHeight() / 2 +
-           visible[i]->get_totalHeight() / 2 + 2 * View::SignalMargin;
-    new_targets.emplace_back(visible[i], cur);
-  }
-
-  // --- 5. 落地：先写 layout 目标（不动 visual），再启动动画 ---
+  // --- 4. 落地：先写 layout 目标（不动 visual），再启动动画 ---
   // 必须用 set_v_offset_no_visual_sync：普通 set_v_offset 在"无动画在跑"时
   // 会把 visual 一起拉过去，通道就瞬移了、没有滑动的过程。
   bool changed = false;

@@ -74,6 +74,7 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
   _resize_upper_height = 0;
   _resize_lower_height = 0;
   _mouse_is_down = false;
+  _drag_anchor_y = INT_MAX;
   _foreColor = QColor();  // 无效色,UpdateTheme 会填充
 
   nameEdit = new PopupLineEdit(this);
@@ -95,6 +96,7 @@ void Header::clear_interaction_state() {
   // 信号重建后旧 Signal/Trace 已销毁,清空缓存的裸指针与拖拽/按下状态,
   // 避免后续 mouseMove/Release 或上下文菜单解引用悬垂指针。
   _drag_traces.clear();
+  _drag_anchor_y = INT_MAX;
   _context_trace = nullptr;
   _resize_trace_upper = nullptr;
   _resize_trace_lower = nullptr;
@@ -471,10 +473,18 @@ void Header::mousePressEvent(QMouseEvent *event) {
     _mouse_down_point = event->position().toPoint();
 
     // Save the offsets of any Traces which will be dragged
+    _drag_anchor_y = INT_MAX;
     for (auto t : traces) {
-      if (t->selected())
+      if (t->selected()) {
         _drag_traces.push_back(make_pair(t, t->get_v_offset()));
+        // 让位槽位锚点 = 拖动开始时整列的最高行（此刻 layout 都还是原值，
+        // 尚未被 force_to_v_offset 改写）。整个拖动期间保持不变。
+        if (t->get_v_offset() != INT_MAX)
+          _drag_anchor_y = min(_drag_anchor_y, t->get_v_offset());
+      }
     }
+    if (_drag_traces.empty())
+      _drag_anchor_y = INT_MAX;
 
     // Select the Trace if it has been clicked.
     // get_mTrace requires absolute coordinates (pt + vOffset) because
@@ -692,6 +702,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   if (_moveFlag) {
     pxv_info("Header::mouseReleaseEvent: MOVE FLAG set, persisting layout");
     _drag_traces.clear();
+    _drag_anchor_y = INT_MAX;
 
     // 落位动画：先记住各通道"现在画在哪儿"（visual），因为接下来的
     // signals_changed() → layout_time_signals() 会用新的 layout 目标改写
@@ -766,6 +777,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
     }
   } else if (!_drag_traces.empty()) {
     _drag_traces.clear();
+    _drag_anchor_y = INT_MAX;
   }
 
   _colorFlag = false;
@@ -988,7 +1000,7 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
     // 只在 LOGIC 渲染模式（分组 + view_index 语义生效）下启用，避免影响
     // DSO/ANALOG 的零位拖动语义。
     if (dragged_trace && _view.is_logic_rendering_mode()) {
-      if (_view.animate_make_way_for_drag(dragged_trace))
+      if (_view.animate_make_way_for_drag(dragged_trace, _drag_anchor_y))
         traces_moved();
     }
   }

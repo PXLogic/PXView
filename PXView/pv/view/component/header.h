@@ -125,6 +125,12 @@ private:
 	QPoint _mouse_down_point;
     PopupLineEdit *nameEdit;
     std::list<std::pair<Trace*, int> > _drag_traces;
+
+    // 让位动画的固定槽位锚点：拖动开始那一刻整列最高一行的 y。
+    // 必须**整个拖动期间保持不变**（故在 mousePressEvent 里算一次）。
+    // 若改用"当前其它通道的最小 y"当锚点，被拖项离开/进入首槽时锚点会跳变，
+    // 整列就会跟着手指平移、永远换不了位。INT_MAX 表示当前没有拖动。
+    int         _drag_anchor_y;
     Trace *_context_trace;
     Trace       *_resize_trace_upper;
     Trace       *_resize_trace_lower;
