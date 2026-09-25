@@ -612,16 +612,34 @@ jobs:
           echo "macdeployqt 耗时: $((SECONDS - SECS_START))s"
           echo "--- 运行后规模 ---"
           echo "  文件数 $(find install.dir/PXView.app -type f | wc -l | tr -d ' ') / $(du -sh install.dir/PXView.app | awk '{print $1}')"
+          # 明细：macdeployqt 的产物几乎全在 Frameworks（框架 + 传递依赖 dylib）
+          # 和 PlugIns（Qt 插件）这两处。这两个数字决定下一步该动哪里：
+          #   - Frameworks 占大头 → 只能减 Qt 模块闭包（Multimedia 是否拖进 QtQuick？）
+          #   - PlugIns 占大头     → 考虑 -no-plugins，但插件有自己的传递依赖
+          #                          （libwebp/libjpeg/libtiff/openssl），手拷会漏，
+          #                          必须先确认能覆盖它们的依赖再动。
+          echo "  明细 Frameworks: $(find install.dir/PXView.app/Contents/Frameworks -type f 2>/dev/null | wc -l | tr -d ' ') 文件 / $(du -sh install.dir/PXView.app/Contents/Frameworks 2>/dev/null | awk '{print $1}')"
+          echo "  明细 PlugIns:    $(find install.dir/PXView.app/Contents/PlugIns -type f 2>/dev/null | wc -l | tr -d ' ') 文件 / $(du -sh install.dir/PXView.app/Contents/PlugIns 2>/dev/null | awk '{print $1}')"
+          echo "  体积最大的 12 项:"
+          du -am install.dir/PXView.app 2>/dev/null | sort -rn | head -12 | awk '{printf "    %5d MB  %s\n", $1, $2}'
           # 若本步仍偏慢，做一次一次性诊断：加 -verbose=3 并把输出重定向到文件，
           # 再 `grep -c install_name_tool` / `grep -c codesign` 就能看到真实调用次数分布。
 
-          # 预先从 Homebrew 复制 macdeployqt 报错说找不到的三个 dylib
+          # 补拷 macdeployqt 可能漏掉的三个 dylib（它们是 imageformats 插件的传递依赖）。
+          # 注意：日志证明 macdeployqt 其实已经处理过这三个（能看到它对它们跑
+          # install_name_tool 并报签名失效 warning），所以只在**目标不存在**时才补拷。
+          # 无条件 cp -f 会把 macdeployqt 已经修好依赖路径的副本覆盖回 Homebrew 原件，
+          # 只修 -id 不修 -change，反而可能把绝对路径引用带回来。
           BREW_LIB="$(brew --prefix)/lib"
           mkdir -p install.dir/PXView.app/Contents/Frameworks
           for dep in libbrotlicommon.1.dylib libsharpyuv.0.dylib libwebp.7.dylib; do
             real_path="$(readlink -f "$BREW_LIB/$dep" 2>/dev/null || echo "$BREW_LIB/$dep")"
             if [ -f "$real_path" ]; then
               real_name="$(basename "$real_path")"
+              if [ -f "install.dir/PXView.app/Contents/Frameworks/$real_name" ]; then
+                echo "  $real_name 已由 macdeployqt 部署，跳过补拷"
+                continue
+              fi
               cp -f "$real_path" install.dir/PXView.app/Contents/Frameworks/"$real_name"
               if [ "$real_name" != "$dep" ]; then
                 rm -f install.dir/PXView.app/Contents/Frameworks/"$dep"
@@ -638,9 +656,11 @@ jobs:
             for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
               [ -d "$ver_dir" ] || continue
               py_ver=$(basename "$ver_dir")
-              # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
-              # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
-              # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+              # 实测（2026-09-26 CI）：macdeployqt 只搬 Python.framework 本体，
+              # **不会**带上 Versions/<ver>/lib/python<ver> 这份标准库 —— 它跑完后
+              # 这里仍然没有 encodings，所以下面这段拷贝是必需的，不能删。
+              # 保留存在性判断是为了让流程幂等：万一将来某版 macdeployqt 开始搬
+              # 标准库，这里会自动跳过，不会白拷一遍。
               if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
                 echo "Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
                 continue
@@ -831,6 +851,27 @@ jobs:
             exit 1
           fi
           echo "  PXView / pxviewd 的 @rpath 依赖均已解析，且无残留 Homebrew 绝对路径"
+
+          echo ""
+          echo "=== 2c. 全量扫描: Frameworks / PlugIns 残留 Homebrew 绝对路径 ==="
+          # warning 级，不卡发布。存在的意义：脚本里那段"补拷三个 dylib"曾无条件
+          # cp -f 覆盖 macdeployqt 修好的副本（只修 -id 不修 -change），可能把绝对
+          # 路径引用带回来；这类引用在用户机器（无 Homebrew）上会 dlopen 失败。
+          BREW_LEAK=0
+          while IFS= read -r f; do
+            if otool -L "$f" 2>/dev/null | grep -E '/opt/homebrew|/usr/local/opt' >/dev/null; then
+              BREW_LEAK=$((BREW_LEAK+1))
+              if [ "$BREW_LEAK" -le 20 ]; then
+                echo "    $f"
+              fi
+            fi
+          done < <(find "$FW" -type f \( -name '*.dylib' -o -name 'Python' \) 2>/dev/null; \
+                   find /tmp/PXView-vrf.app/Contents/PlugIns -type f -name '*.so' 2>/dev/null)
+          if [ "$BREW_LEAK" -gt 0 ]; then
+            echo "::warning::$BREW_LEAK 个库/插件仍引用 Homebrew 绝对路径（用户机器无 Homebrew 时会 dlopen 失败）"
+          else
+            echo "  通过: Frameworks / PlugIns 均无残留 Homebrew 绝对路径"
+          fi
 
           echo ""
           echo "=== 3. Python stdlib 检查 ==="

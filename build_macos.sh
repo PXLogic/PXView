@@ -215,13 +215,21 @@ if [ "$BUILD_DMG" = true ]; then
     echo "   macdeployqt 耗时: $((SECONDS - SECS_MDQ))s"
     echo "   运行后: $(find "$BUNDLE" -type f | wc -l | tr -d ' ') 个文件 / $(du -sh "$BUNDLE" | awk '{print $1}')"
 
-    # ── 预先从 Homebrew 复制 macdeployqt 缺失的传递依赖 ──
+    # ── 补拷 macdeployqt 可能漏掉的传递依赖 ──
+    # 注意：macdeployqt 通常已经处理过这三个（对它们跑过 install_name_tool），
+    # 所以只在**目标不存在**时才补拷。无条件 cp -f 会把 macdeployqt 已经修好依赖
+    # 路径的副本覆盖回 Homebrew 原件，只修 -id 不修 -change，反而可能把绝对路径
+    # 引用带回来。
     BREW_LIB="$(brew --prefix)/lib"
     mkdir -p "$BUNDLE/Contents/Frameworks"
     for dep in libbrotlicommon.1.dylib libsharpyuv.0.dylib libwebp.7.dylib; do
         real_path="$(readlink -f "$BREW_LIB/$dep" 2>/dev/null || echo "$BREW_LIB/$dep")"
         if [ -f "$real_path" ]; then
             real_name="$(basename "$real_path")"
+            if [ -f "$BUNDLE/Contents/Frameworks/$real_name" ]; then
+                echo "   $real_name 已由 macdeployqt 部署，跳过补拷"
+                continue
+            fi
             cp -f "$real_path" "$BUNDLE/Contents/Frameworks/$real_name"
             if [ "$real_name" != "$dep" ]; then
                 rm -f "$BUNDLE/Contents/Frameworks/$dep"
@@ -238,9 +246,10 @@ if [ "$BUILD_DMG" = true ]; then
         for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
             [ -d "$ver_dir" ] || continue
             py_ver=$(basename "$ver_dir")
-            # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
-            # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
-            # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+            # 实测（2026-09-26 CI）：macdeployqt 只搬 Python.framework 本体，
+            # **不会**带上 Versions/<ver>/lib/python<ver> 这份标准库 —— 它跑完后
+            # 这里仍然没有 encodings，所以下面这段拷贝是必需的，不能删。
+            # 保留存在性判断是为了让流程幂等。
             if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
                 echo "   Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
                 continue

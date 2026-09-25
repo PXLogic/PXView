@@ -158,9 +158,10 @@ jobs:
             for ver_dir in "$BUNDLED_FW"/Versions/3.*; do
               [ -d "$ver_dir" ] || continue
               py_ver=$(basename "$ver_dir")
-              # macdeployqt 是把整个 Python.framework 搬进来的，Homebrew 的 framework
-              # 里本就带 Versions/<ver>/lib/python<ver> 的完整 stdlib，所以这段在多数
-              # 情况下是重复拷贝。只有 macdeployqt 没搬全时才需要补。
+              # 实测（2026-09-26 CI）：macdeployqt 只搬 Python.framework 本体，
+              # **不会**带上 Versions/<ver>/lib/python<ver> 这份标准库 —— 它跑完后
+              # 这里仍然没有 encodings，所以下面这段拷贝是必需的，不能删。
+              # 保留存在性判断是为了让流程幂等。
               if [ -d "$ver_dir/lib/python$py_ver/encodings" ]; then
                 echo "Python stdlib (python$py_ver) 已随 framework 打包，跳过重复拷贝"
                 continue
