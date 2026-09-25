@@ -487,6 +487,8 @@ private slots:
     void build_cost_lines_vs_rects();
     // 变更门禁：真实 rasterize_logic_channel 的输出必须与旧线段形状逐像素一致。
     void production_parity();
+    // 纵向裁剪的预期收益：只画可见通道 vs 画全部启用通道。
+    void vertical_culling_expected_gain();
 };
 
 void TestLogicRenderCost::edge_scan_scaling()
@@ -1119,6 +1121,53 @@ void TestLogicRenderCost::production_parity()
     QVERIFY2(worst == 0,
              qPrintable(QString("rasterize_logic_channel 与旧线段形状不一致: "
                                 "%1 像素").arg(worst)));
+}
+
+// 纵向裁剪的预期收益。
+//
+// 裁剪发生在 SignalPixmapPass（View 层，需要 Trace/IRenderView，单测覆盖不到），
+// 但它的收益是"少画 (总通道数 − 屏内可见数) 条通道"，而每通道成本可由本测试
+// 直接量出——因此这里用"只画可见子集"来预测裁剪后的整帧成本。
+// 注：单通道成本与该通道在列表中的位置无关，故用"前 vis 条"等价于"散落的
+// vis 条可见通道"。
+void TestLogicRenderCost::vertical_culling_expected_gain()
+{
+    PackedFixture fx(CHANNELS);
+    LogicSnapshot snap;
+    std::vector<uint8_t> payload = fx.make_payload(patterns()[1].periods);
+    feed(snap, fx, payload);
+
+    const int CH_H = 40;          // 典型通道高
+    const double spp = 8738.0;    // 完全缩小（可见样本最多，成本最高）
+    const int viewport_hs[] = {160, 320, 480, 640};
+    const int total = CHANNELS;
+
+    QImage img(WIDTH, total * CH_H, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+
+    measure_frame_rebuild(snap, img, spp, total, 1, 0, CH_H);   // 预热
+    const double full = measure_frame_rebuild(snap, img, spp, total, ROUNDS, 0, CH_H);
+
+    qInfo("%s", "");
+    qInfo("==== 纵向裁剪预期收益 (%dch x %dpx = %dpx 全高, spp=%g) ====",
+          total, CH_H, total * CH_H, spp);
+    qInfo("%-12s %9s %12s %11s", "viewport/px", "visible", "culled/ms", "省");
+    for (int vp : viewport_hs) {
+        int vis = vp / CH_H;
+        if (vis < 1)
+            vis = 1;
+        if (vis > total)
+            vis = total;
+        const double culled =
+            measure_frame_rebuild(snap, img, spp, vis, ROUNDS, 0, CH_H);
+        qInfo("%-12d %9d %12.2f %10.0f%%", vp, vis, culled,
+              (1.0 - culled / full) * 100.0);
+        QVERIFY(culled > 0.0 && culled <= full * 1.05);
+    }
+    qInfo("全部启用通道都画（现状）: %.2f ms", full);
+    qInfo("结论：省下的比例 ≈ (总通道数 − 屏内可见数) / 总通道数；");
+    qInfo("      通道数不超过一屏时收益为 0（此时没有可裁的通道）。");
+    qInfo("%s", "");
 }
 
 QTEST_MAIN(TestLogicRenderCost)

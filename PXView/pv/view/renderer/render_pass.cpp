@@ -39,6 +39,7 @@
 #include <QPixmap>
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <list>
 #include <vector>
@@ -316,6 +317,26 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
 // the pixmap via paint_mid.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 纵向可见性裁剪：只栅格化与视口在纵向相交的通道。
+//
+// 画布尺寸 == widget 尺寸，且 painter 已 translate(0, -vOffset)，因此通道在
+// 屏幕上的纵向区间是 [get_y() - H/2 - vOffset, get_y() + H/2 - vOffset]
+// （与 rasterize_logic_channel 的 high/low_offset 推导一致，那里取
+// y = get_y() + H/2）。完全落在视口外的通道原本仍要走完"构建几何 + 发 draw
+// 调用"，最后才被画布边界裁掉——启用通道数大于屏内可见数时那部分全是白做。
+//
+// get_y() 返回实际绘制位置（visual_v_offset），未布局时是 INT_MAX 哨兵 →
+// 裁掉（此时它本来也被画到画布之外）。
+// ---------------------------------------------------------------------------
+static bool trace_band_visible(Trace *t, int v_offset, int widget_height) {
+  const int y = t->get_y();
+  if (y == INT_MAX)
+    return false;
+  const int half = t->get_totalHeight() / 2;
+  return (y + half - v_offset) >= 0 && (y - half - v_offset) < widget_height;
+}
+
 bool SignalPixmapPass::should_run(const RenderContext &ctx) const {
   return ctx.viewport && ctx.view && ctx.traces && !ctx.traces->empty();
 }
@@ -418,10 +439,13 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
       const int64_t offset = pctx.offset;
       uint64_t end_align_sample = 0;
       bool bFirst = true;
+      const int widget_h = ctx.viewport->widget_height();
       for (auto t : traces) {
         if (!t->enabled())
           continue;
         if (t->as_decode())
+          continue;
+        if (!trace_band_visible(t, ctx.vOffset, widget_h))
           continue;
         if (auto *logic_signal = t->as_logic()) {
           if (bFirst && logic_signal->data())
@@ -481,6 +505,8 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
           continue;
         if (isLissa && t->signal_type() == SR_CHANNEL_MATH)
           continue;
+        if (!trace_band_visible(t, ctx.vOffset, ctx.viewport->widget_height()))
+          continue;
         t->paint_mid(dbp, 0, t->get_view_rect().right(), ctx.fore,
                      ctx.back, ctx.pctx);
       }
@@ -514,8 +540,15 @@ void DecodeTracePass::render(QPainter &p, const RenderContext &ctx) {
   p.save();
   p.translate(0, -ctx.vOffset);
 
+  // 纵向裁剪同 SignalPixmapPass：解码轨的绘制区间同样是
+  // [get_y() - H/2, get_y() + H/2]（DecodeTrace 内部即
+  // `cur_y = get_y() - _totalHeight / 2` 起逐行累加），因此完全落在视口外的
+  // 解码轨不必进入"逐行扫描注解 + 提交文本"的开销。
+  const int widget_h = ctx.viewport ? ctx.viewport->widget_height() : 0;
   for (auto t : *ctx.traces) {
     if (t->enabled() && t->signal_type() == SR_CHANNEL_DECODER) {
+      if (ctx.viewport && !trace_band_visible(t, ctx.vOffset, widget_h))
+        continue;
       t->paint_mid(p, 0, t->get_view_rect().right(), ctx.fore, ctx.back, ctx.pctx);
     }
   }
