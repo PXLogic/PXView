@@ -1,4 +1,4 @@
-﻿name: PXView Build
+﻿﻿name: PXView Build
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       version:
         description: 'Version number for package naming (e.g. 1.5.4)'
         required: true
-        default: '1.6.5'
+        default: '1.6.6'
       targets:
         description: 'Which platforms to build (linux / mac / windows / both / all)'
         required: true
@@ -95,7 +95,7 @@ jobs:
             # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
             echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.5" >> $GITHUB_OUTPUT
+            echo "value=1.6.6" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -388,7 +388,7 @@ jobs:
             # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
             echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.5" >> $GITHUB_OUTPUT
+            echo "value=1.6.6" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
@@ -839,7 +839,7 @@ jobs:
             # （用户从 nightly Release 下载后能一眼看出这是开发构建）。
             echo "value=1.6.5-dev.$(date -u +%Y%m%d).${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           else
-            echo "value=1.6.5" >> $GITHUB_OUTPUT
+            echo "value=1.6.6" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout PXView repo
