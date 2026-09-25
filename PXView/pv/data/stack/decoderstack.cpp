@@ -216,7 +216,7 @@ void DecoderStack::build_row() {
     if (!decc->annotation_rows) {
       const Row row(decc);
       _rows[row] =
-          std::make_unique<decode::RowData>(_annotation_heap);
+          std::make_shared<decode::RowData>(_annotation_heap);
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
@@ -243,7 +243,7 @@ void DecoderStack::build_row() {
       const Row row(decc, ann_row, order);
 
       _rows[row] =
-          std::make_unique<decode::RowData>(_annotation_heap);
+          std::make_shared<decode::RowData>(_annotation_heap);
       std::map<const decode::Row, bool>::const_iterator iter =
           _rows_gshow.find(row);
       if (iter == _rows_gshow.end()) {
@@ -1418,22 +1418,32 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
   }
 #endif
 
-  // 只获取一次 _rows_mutex，把整批按行分组（组键用 row_iter 指针 = RowData*，
+  // 只获取一次 _rows_mutex，把整批按行分组（组键用行解析出的 RowData，
   // 避免复制 Row）。行查找按批内缓存：每个 ann_format 只解析一次 decc 与行
   // （"批内缓存行查找"），1024 条注解只需数次 map 查找而非逐条两次查找。
   std::unique_lock<std::shared_mutex> lk(d->_rows_mutex);
 
-  // ann_format -> RowData*（nullptr 表示该 format 没有已注册的行）。
-  std::map<int, decode::RowData *> row_cache;
-  // RowData* -> 该行的注解指针列表（指针只在回调期间有效，用完即弃）。
-  std::map<decode::RowData *, std::vector<const srd_ann_item *>> groups;
+  // ann_format -> RowData（nullptr 表示该 format 没有已注册的行）。
+  // 生命周期契约：这里必须持有 shared_ptr 而不是裸指针。落库发生在下面
+  // _rows_mutex 释放之后，而主线程的 build_row() / init() / 析构会在这期间
+  // 执行 _rows.clear()：裸指针那一段是 use-after-free —— 往已释放的 RowData
+  // 的 deque 里写注解（该 deque 从本栈的 mi_heap 分配，RowData 一死它的
+  // _heap_ref 也随之消失，mi_heap 可能已被 mi_heap_destroy），实测表现为
+  // "mi_free: invalid pointer" 崩溃或锁被破坏后的假死。
+  std::map<int, std::shared_ptr<decode::RowData>> row_cache;
+  struct RowBatch {
+    std::shared_ptr<decode::RowData> row; // 保活：整段落库期间不能释放
+    std::vector<const srd_ann_item *> items; // 注解指针只在回调期间有效
+  };
+  // 组键用裸指针（同一行只有一个对象、地址稳定），值里持 shared_ptr 保活。
+  std::map<decode::RowData *, RowBatch> groups;
   bool dropped_logged = false;
 
   for (size_t i = 0; i < batch->n; i++) {
     const srd_ann_item *it = &batch->items[i];
     const int ann_format = it->ann_class;
 
-    decode::RowData *rd = nullptr;
+    std::shared_ptr<decode::RowData> rd;
     const auto cit = row_cache.find(ann_format);
     if (cit != row_cache.end()) {
       rd = cit->second;
@@ -1447,11 +1457,11 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
         if (r != d->_class_rows.end()) {
           const auto row_iter = d->_rows.find((*r).second);
           if (row_iter != d->_rows.end())
-            rd = row_iter->second.get();
+            rd = row_iter->second;
         } else {
           const auto row_iter = d->_rows.find(Row(decc));
           if (row_iter != d->_rows.end())
-            rd = row_iter->second.get();
+            rd = row_iter->second;
         }
       }
       row_cache[ann_format] = rd;
@@ -1467,15 +1477,21 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
       d->_ann_dropped_row++;
       continue;
     }
-    groups[rd].push_back(it);
+    RowBatch &g = groups[rd.get()];
+    if (!g.row)
+      g.row = rd; // 首次见到该行：存一份 shared_ptr 保活到落库结束
+    g.items.push_back(it);
   }
 
   lk.unlock();
 
   // 释放 _rows_mutex 后再落库（RowData 内部有自己的 _visitor_mutex），
   // 与逐注解路径的锁序（先 _rows_mutex 后 _visitor_mutex）一致。
+  // groups 里的 shared_ptr 保证整段落库期间行对象与其注解堆都活着，即使
+  // 主线程此刻正在 build_row() / init() / 析构里清空 _rows。
   for (auto &g : groups) {
-    if (!g.first->emplace_annotations(g.second, d->_decoder_status.get())) {
+    if (!g.second.row->emplace_annotations(g.second.items,
+                                           d->_decoder_status.get())) {
       d->_no_memory = true;
       break;  // 停止剩余行的落库
     }

@@ -332,8 +332,19 @@ private:
     // the ctor, destroyed after _rows in the dtor. Reference-counted so a
     // published snapshot held by the GUI keeps it alive past the stack.
     decode::AnnotationHeapPtr _annotation_heap;
-    // TS-3 fix: _rows owns RowData via unique_ptr — no manual delete needed.
-    std::map<const decode::Row, std::unique_ptr<decode::RowData>>   _rows;
+    // _rows owns the row objects. Lifetime must be SHARED, not unique:
+    // annotation_callback_batch() resolves the RowData for a batch under
+    // _rows_mutex, releases the lock (lock order: _rows_mutex ->
+    // RowData::_visitor_mutex) and only then stores the batch. On the main
+    // thread build_row()/init()/the dtor can run _rows.clear() inside that
+    // window; with a raw pointer the store then wrote into a freed RowData —
+    // its deque allocates from the per-stack mi_heap, and the row's own
+    // _heap_ref had died with it, so the injury showed up as either
+    // "mi_free: invalid pointer" (mimalloc abort) or a corrupted lock state
+    // (wedged decode/main thread). The shared_ptr copy both keeps the row
+    // alive and keeps its annotation heap alive (the contract documented in
+    // annotation_heap.cpp).
+    std::map<const decode::Row, std::shared_ptr<decode::RowData>>   _rows;
     std::map<const decode::Row, bool>       _rows_gshow;
     std::map<const decode::Row, bool>       _rows_lshow;
     std::map<std::pair<const srd_decoder*, int>, decode::Row> _class_rows;
