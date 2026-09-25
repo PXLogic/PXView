@@ -419,6 +419,66 @@ void ViewSignalSync::normalize_view_indices() {
   for (auto t : sorted) {
     t->set_view_index(idx++);
   }
+
+  // 赋值完成后立即校验不变量。约定（"本函数先于 compute_signal_groups 调用"）
+  // 靠这条校验兜底 —— 一旦被打破，在这里就能立刻发现，而不是等到下游出现
+  // "通道顺序错乱"这类难以定位的静默软 bug。
+  validate_view_index_invariants();
+}
+
+bool ViewSignalSync::validate_view_index_invariants() const {
+  std::vector<Trace *> all_traces;
+  _view->get_traces(ALL_VIEW, all_traces);
+
+  if (all_traces.empty())
+    return true;
+
+  // --- 不变量 1：view_index 必须是 0..n-1 的排列（无重复、无空洞） ---
+  // 这里刻意不依赖 all_traces 的顺序，而是把 view_index 收集起来排序后
+  // 与 0..n-1 逐位比对，这样无论容器顺序如何都能检出重复/空洞。
+  std::vector<int> indices;
+  indices.reserve(all_traces.size());
+  for (auto t : all_traces) {
+    indices.push_back(t->get_view_index());
+  }
+  std::sort(indices.begin(), indices.end());
+
+  for (size_t i = 0; i < indices.size(); i++) {
+    if (indices[i] != static_cast<int>(i)) {
+      pxv_assert(false,
+                 "validate_view_index_invariants: view_index 不是 0..%d 的排列"
+                 "（第 %zu 位 = %d，期望 %zu）。"
+                 "normalize_view_indices() 与下游派生态已分叉。",
+                 static_cast<int>(indices.size()) - 1, i, indices[i], i);
+      return false;
+    }
+  }
+
+  // --- 不变量 2：每个 group 内的 view_index 必须连续 ---
+  // 分组连续性由 compute_signal_groups() 依赖（它按 view_index 排序后扫连续段）。
+  // 不连续说明分组逻辑与序号归一化之间存在分叉。
+  for (const auto &group : _signal_groups) {
+    if (group.traces.size() < 2)
+      continue;
+
+    std::vector<int> gi;
+    gi.reserve(group.traces.size());
+    for (auto *t : group.traces)
+      gi.push_back(t->get_view_index());
+    std::sort(gi.begin(), gi.end());
+
+    for (size_t i = 1; i < gi.size(); i++) {
+      if (gi[i] != gi[i - 1] + 1) {
+        pxv_assert(false,
+                   "validate_view_index_invariants: group %d 内 view_index 不连续"
+                   "（%d 后跟 %d）。",
+                   group.group_id, gi[i - 1], gi[i]);
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 void ViewSignalSync::classify_traces(std::vector<Trace *> &time_traces,
@@ -1239,6 +1299,107 @@ bool ViewSignalSync::compare_trace_y(const Trace *a, const Trace *b) {
   Trace *a1 = const_cast<Trace *>(a);
   Trace *b1 = const_cast<Trace *>(b);
   return a1->get_v_offset() < b1->get_v_offset();
+}
+
+// ============================================================================
+// 拖动让位动画
+// ----------------------------------------------------------------------------
+// 与 PulseView ViewWidget::drag_items() 中
+//   owner->restack_items();  for (i : items) i->animate_to_layout_v_offset();
+// 的角色对应（pv/views/trace/viewwidget.cpp:103-132），但实现方式不同：
+//
+// PulseView 靠 TraceTreeItemOwner 树重排 + restack_items()；PXView 保持扁平，
+// 直接用**纯算术**推算每个通道本应占据的 y，不碰 view_index / 分组 / 持久化。
+// 这样"拖动预览"与"松手落定"彻底解耦：动画期间不可能污染即将写入文档的顺序。
+//
+// 算法：把可见通道（含被拖项）按当前 layout y 排序，再按拖动项的 y_snap 为锚点，
+// 自锚点起重新分配 y —— 相当于"如果现在松手，其余通道会排在哪儿"。
+// ============================================================================
+bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged) {
+  std::vector<Trace *> traces;
+  _view->get_traces(ALL_VIEW, traces);
+
+  // --- 1. 收集参与布局的可见通道（与 layout_time_signals 同一套过滤语义）---
+  std::vector<Trace *> visible;
+  visible.reserve(traces.size());
+  for (auto t : traces) {
+    if (t->rows_size() == 0)
+      continue;
+    if (!t->as_dso() && (!t->visible() || !t->enabled()))
+      continue;
+    if (t->get_v_offset() == INT_MAX)  // 尚未布局，不参与
+      continue;
+    visible.push_back(t);
+  }
+  if (visible.size() < 2)
+    return false;
+
+  // --- 2. 按当前 layout y 排序，得到"拖动前的顺序" ---
+  // 用本类的 compare_trace_y（比较 get_v_offset()，即 layout 值）—— 被拖项
+  // 此刻的 layout 值已由 force_to_v_offset 设成 y_snap，故排序反映的是
+  // "如果把手指现在松开"的顺序。
+  std::stable_sort(visible.begin(), visible.end(), &ViewSignalSync::compare_trace_y);
+
+  // --- 3. 找被拖项在当前顺序中的位置 ---
+  size_t drag_pos = visible.size();
+  if (dragged) {
+    for (size_t i = 0; i < visible.size(); i++) {
+      if (visible[i] == dragged) {
+        drag_pos = i;
+        break;
+      }
+    }
+    if (drag_pos == visible.size())
+      return false;  // 被拖项不可见，无需让位
+  }
+
+  // --- 4. 以被拖项的 y_snap 为锚点，重新分配 y ---
+  // 锚点即"被拖项现在画在哪儿"（force_to_v_offset 已把它设成 y_snap）。
+  // 其余通道保持原有的相对顺序，围绕锚点上下排列。
+  const int anchor_y = visible[drag_pos]->get_v_offset();
+
+  // 通道的 y 语义 = 行中心（与 layout_time_signals 一致）。相邻两行的中心
+  // 间距 = 上一行半高 + 下一行半高 + 2 * SignalMargin。
+  int cur = anchor_y;
+  std::vector<std::pair<Trace *, int>> new_targets;
+
+  // 向下：紧跟被拖项的通道依次排下去
+  for (size_t i = drag_pos + 1; i < visible.size(); i++) {
+    Trace *prev = visible[i - 1];
+    cur += prev->get_totalHeight() / 2 +
+           visible[i]->get_totalHeight() / 2 + 2 * View::SignalMargin;
+    new_targets.emplace_back(visible[i], cur);
+  }
+
+  // 向上：位于被拖项之前的通道依次排上去
+  cur = anchor_y;
+  for (size_t i = drag_pos; i-- > 0;) {
+    Trace *next = visible[i + 1];
+    cur -= next->get_totalHeight() / 2 +
+           visible[i]->get_totalHeight() / 2 + 2 * View::SignalMargin;
+    new_targets.emplace_back(visible[i], cur);
+  }
+
+  // --- 5. 落地：先写 layout 目标（不动 visual），再启动动画 ---
+  // 必须用 set_v_offset_no_visual_sync：普通 set_v_offset 在"无动画在跑"时
+  // 会把 visual 一起拉过去，通道就瞬移了、没有滑动的过程。
+  bool changed = false;
+  for (auto &nt : new_targets) {
+    Trace *t = nt.first;
+    const int target = nt.second;
+    if (target < 0)
+      continue;  // 被推出了顶部之外，跳过以免整列上移出屏
+    if (t->get_v_offset() == target)
+      continue;
+    t->set_v_offset_no_visual_sync(target);
+    changed = true;
+  }
+
+  if (changed) {
+    for (auto &nt : new_targets)
+      nt.first->animate_to_layout_v_offset();
+  }
+  return changed;
 }
 
 void ViewSignalSync::normalize_layout() {

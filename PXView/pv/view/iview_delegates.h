@@ -293,6 +293,13 @@ public:
   virtual double trig_hoff() = 0;
   virtual void set_trig_hoff(double hoff) = 0;
 
+  // ---- Channel repositioning animation ----
+  // Called once per animation frame by Trace::on_visual_v_offset_changed().
+  // Implementations must force a full repaint (setting need_update so the
+  // viewport's cached signal pixmap is rebuilt — a plain update() would only
+  // blit the stale cache and the animation would appear frozen).
+  virtual void request_animation_repaint() = 0;
+
   // ---- Cursor visibility ----
   virtual bool cursors_shown() = 0;
   virtual bool trig_cursor_shown() = 0;

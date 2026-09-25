@@ -250,12 +250,15 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
     if (drawable.empty())
       continue;
 
+    // 卡片几何按 **visual**（实际绘制）坐标计算，与 header 及波形一致 ——
+    // 重排动画期间卡片才会跟着通道一起滑动。可见性过滤仍用 layout 值判断
+    // （是否已布局是布局状态，不是绘制状态）。
     double groupTop = 1e9;
     double groupBottom = -1e9;
     for (auto gt : drawable) {
-      double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
+      double traceTop = gt->visual_v_offset() - gt->get_totalHeight() * 0.5 -
                         IRenderView::SignalMargin;
-      double traceBottom = gt->get_v_offset() +
+      double traceBottom = gt->visual_v_offset() +
                            gt->get_totalHeight() * 0.5 + IRenderView::SignalMargin;
       groupTop = std::min(groupTop, traceTop);
       groupBottom = std::max(groupBottom, traceBottom);
@@ -279,9 +282,9 @@ void GroupCardBackgroundPass::render(QPainter &p, const RenderContext &ctx) {
 
       for (size_t i = 0; i < drawable.size(); i++) {
         auto gt = drawable[i];
-        double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
+        double tTop = gt->visual_v_offset() - gt->get_totalHeight() * 0.5 -
                       IRenderView::SignalMargin;
-        double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 +
+        double tBottom = gt->visual_v_offset() + gt->get_totalHeight() * 0.5 +
                          IRenderView::SignalMargin;
 
         if (i == 0)

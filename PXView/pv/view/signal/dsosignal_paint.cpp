@@ -60,7 +60,9 @@ QRect DsoSignal::get_view_rect() {
   // wrong position and ungrabbable when scrolled or when other traces
   // are above this DSO signal.
   if (_view && _view->is_logic_rendering_mode()) {
-    int top = get_v_offset() - get_totalHeight() / 2 - _view->get_vOffset();
+    // visual：这个 rect 决定 DSO 波形/触发游标画在哪儿，必须跟绘制位置一致，
+    // 否则重排动画期间触发游标会画在别处且抓不到。
+    int top = visual_v_offset() - get_totalHeight() / 2 - _view->get_vOffset();
     return QRect(0, top, _viewport->widget_width() - RightMargin, get_totalHeight());
   }
   return QRect(0, UpMargin, _viewport->widget_width() - RightMargin,

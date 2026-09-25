@@ -1000,7 +1000,8 @@ LogicSignal *ViewportInteraction::get_hovered_logic_signal(const QPoint &pos) {
   int mouseY = pos.y() + _viewport->view().get_vOffset();
   for (auto &s : _viewport->view().get_own_signals()) {
     if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
-      int sigY = s->get_v_offset();
+      // visual: 悬停命中跟随屏幕上实际绘制的位置
+      int sigY = s->visual_v_offset();
       int halfH = s->get_totalHeight() / 2 + View::SignalMargin;
       if (abs(mouseY - sigY) < halfH) {
         return reinterpret_cast<LogicSignal*>(s.get());
@@ -1033,7 +1034,8 @@ void ViewportInteraction::update_edge_nav_buttons() {
   _viewport->hover_logic_signal() = sig;
 
   // Position buttons vertically centered on the signal row
-  int sigY = sig->get_v_offset() - _viewport->view().get_vOffset();
+  // visual: 边缘导航按钮贴着实际绘制的通道行
+  int sigY = sig->visual_v_offset() - _viewport->view().get_vOffset();
   int halfH = sig->get_totalHeight() / 2;
   int btnY = sigY - halfH +
              (sig->get_totalHeight() - _viewport->prev_edge_btn()->height()) / 2;

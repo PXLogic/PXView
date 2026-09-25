@@ -267,6 +267,16 @@ public:
    */
   inline void set_trig_hoff(double hoff) { _trig_hoff = hoff; }
 
+  /**
+   * @brief Force a full repaint during a channel repositioning animation.
+   *
+   * Called once per animation frame by Trace::on_visual_v_offset_changed().
+   * Must set the viewport's need_update flag so the cached signal pixmap is
+   * rebuilt — a bare update() would only blit the stale cache, freezing the
+   * animation. The header repaints unconditionally (it draws labels live).
+   */
+  void request_animation_repaint() override;
+
   int64_t get_min_offset();
   int64_t get_max_offset();
   int64_t get_logic_lst_data_offset();
@@ -307,6 +317,17 @@ public:
   inline QPoint& hover_point() { return _hover_point; }
 
   void normalize_layout();
+
+  /**
+   * Slide the non-dragged channels aside while a channel drag is in flight
+   * (see ViewSignalSync::animate_make_way_for_drag). Purely a visual preview:
+   * it never touches view_index, grouping or the saved layout.
+   *
+   * @param dragged the channel under the cursor; excluded from the animation
+   *                because it follows the cursor directly.
+   * @return true if any channel got a new target (repaint is due).
+   */
+  bool animate_make_way_for_drag(Trace *dragged);
 
   void show_trig_cursor(bool show = true);
 

@@ -37,6 +37,7 @@
 #include "pv/view/trace/trace_visitor.h"
 
 class QFormLayout;
+class QPropertyAnimation;
 
 namespace pv {
 namespace view {
@@ -55,6 +56,13 @@ class LissajousTrace;
 class Trace : public SelectableItem
 {
 	Q_OBJECT
+
+    // 双层 y 坐标的可动画属性（PulseView TraceTreeItem 同构设计）。
+    // QPropertyAnimation 写这个属性即可驱动"让位"动画；QPropertyAnimation 属于
+    // Qt6::Core，本类所在的 pxview-render 只链 Qt6::Gui，层约束不受影响。
+    Q_PROPERTY(int visual_v_offset
+        READ visual_v_offset
+        WRITE set_visual_v_offset)
 
 protected:
     static const int SquareNum = 5;
@@ -116,10 +124,96 @@ public:
 
 	/**
 	 * Sets the vertical layout offset of this signal.
+	 *
+	 * This is the **layout** coordinate (target position). The visual
+	 * coordinate follows it immediately *unless* a repositioning animation
+	 * is in flight — which is exactly the drag-reorder case, where the
+	 * layout target must move ahead of the painted position so the
+	 * animation has something to chase.
+	 *
+	 * Consequences to keep in mind:
+	 *  - Normal layout passes (layout_time_signals, config restore, FFT
+	 *    placement) call this outside any animation, so both coordinates
+	 *    stay in lockstep and behaviour is unchanged.
+	 *  - Code that wants an explicit animation must call this first, then
+	 *    animate_to_layout_v_offset().
+	 *  - Code that wants an instant, animation-free jump (drag follow) must
+	 *    call force_to_v_offset() instead of this.
 	 */
 	inline void set_v_offset(int v_offset){
         _v_offset = v_offset;
+        if (!is_v_offset_animating())
+            _visual_v_offset = v_offset;
     }
+
+    /**
+     * Sets **only** the layout offset (target), leaving the visual offset
+     * untouched. Used when staging an animation: the target must move before
+     * animate_to_layout_v_offset() runs, otherwise set_v_offset() would
+     * snap the visual coordinate and there would be nothing left to animate.
+     */
+    inline void set_v_offset_no_visual_sync(int v_offset) {
+        _v_offset = v_offset;
+    }
+
+    // ======================================================================
+    // 双层 y 坐标（PulseView TraceTreeItem 同构设计）
+    // ----------------------------------------------------------------------
+    // _v_offset        = layout 目标位置（"应该在哪儿"）—— 布局算法写它
+    // _visual_v_offset = 实际绘制位置（"现在在哪儿"）—— 绘制读它
+    //
+    // 拖动/落位时布局只改 layout 值，再调 animate_to_layout_v_offset() 把
+    // visual 值平滑推过去。这样"被拖项跟手 + 其余项滑动让位"才成立：
+    // 若只有单层坐标，其余项只能瞬间跳变（本项目改造前的行为）。
+    //
+    // 约定：**布局 / 命中测试 / 排序** 读 get_v_offset()；
+    //       **绘制** 读 get_y()（已切到 visual 值）。
+    // ======================================================================
+
+    /**
+     * Gets the visual (actually painted) vertical offset.
+     */
+    inline int visual_v_offset() const {
+        return _visual_v_offset;
+    }
+
+    /**
+     * Sets the visual vertical offset. Normally driven by
+     * QPropertyAnimation; call force_to_v_offset() instead to set both
+     * coordinates at once without animating.
+     */
+    inline void set_visual_v_offset(int v_offset) {
+        _visual_v_offset = v_offset;
+    }
+
+    /**
+     * Hard-sets both the layout and the visual offset, cancelling any
+     * running animation. Use while dragging (follow the cursor with no
+     * animation delay) and to reset the two coordinates in lockstep.
+     */
+    void force_to_v_offset(int v_offset);
+
+    /**
+     * Animates the visual offset towards the current layout offset
+     * (100ms, OutQuad). No-op when already there, or when an animation
+     * towards the same target is already running.
+     */
+    void animate_to_layout_v_offset();
+
+    /**
+     * Stops a running visual-offset animation, leaving the visual offset
+     * at its current (intermediate) value.
+     */
+    void stop_v_offset_animation();
+
+    /**
+     * @return true while the visual offset is still chasing the layout
+     * offset (i.e. a repositioning animation is in flight).
+     */
+    bool is_v_offset_animating() const;
+
+    /** Repositioning animation duration (ms). Mirrors PulseView. */
+    static const int kVOffsetAnimationMs = 100;
 
     /**
      * Gets trace type
@@ -268,9 +362,14 @@ public:
 
 	/**
 	 * Gets the y-offset of the axis.
+	 *
+	 * Returns the **visual** offset (actually painted position), so that
+	 * waveforms, labels and overlay layers all move together during a
+	 * repositioning animation. Layout/hit-test code must use
+	 * get_v_offset() / get_zero_vpos() instead.
 	 */
 	inline int get_y(){
-        return _v_offset;
+        return _visual_v_offset;
     }
 
     /**
@@ -384,6 +483,8 @@ private slots:
 	void on_text_changed(const QString &text);
 	void on_colour_changed(const QColor &colour);
     virtual void resize();
+    // 动画每帧回调：把"绘制位置变了"通知给所属 View。
+    void on_visual_v_offset_changed();
 
 signals:
 	void visibility_changed();
@@ -401,6 +502,9 @@ protected:
 	QString _name;
 	QColor _colour;
 	int _v_offset;
+    // 实际绘制位置。动画期间与 _v_offset 不等；静止时两者相等。
+    // 用 INT_MAX 作为"尚未布局"哨兵，与 _v_offset 保持一致。
+    int _visual_v_offset = INT_MAX;
     int _type;
     std::list<int> _index_list;
     int _sec_index;
@@ -412,6 +516,10 @@ protected:
     bool _visible = true;
 
     QSizeF _text_size;  
+
+    // 驱动 _visual_v_offset 的动画。懒创建（首次 animate 时 new 并以 this 为父），
+    // 避免为一堆从不做动画的 Trace 付构造开销。以 this 为父对象，故随 Trace 析构。
+    QPropertyAnimation *_v_offset_animation = nullptr;
 };
 
 } // namespace view

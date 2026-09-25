@@ -261,6 +261,29 @@ pv_add_qtest(test_trace_visitor
     view/test_trace_visitor.cpp
 )
 
+# ==== 通道拖动动画：双层 y 坐标契约 ====
+# 直接测试 Trace 的双层 y 坐标（_v_offset / _visual_v_offset）与动画入口。
+# 无 Widget / 数据源依赖: 测试内 MockRenderView + ProbeTrace 承接 repaint 回调
+# 与 IRenderView 抽象接口。锁死"无动画时两层同步 / 有动画时 visual 不被拽走 /
+# 哨兵不插值"这几条只在运行时才会被违反、且破坏了就是"通道瞬移"的不变量。
+#
+# 链接 pxview-render（而不是像 test_rasterize 那样只编 trace.cpp）：
+#   Trace / SelectableItem 都是 QObject，二者的 moc 由 pxview-render 统一持有
+#   （"moc follows impl"，见 CMake/render_sources.cmake 的 PXVIEW_RENDER_HEADERS_MOC）。
+#   若让本目标自行 AUTOMOC，只会为 trace.h 生成 moc，而它引用的
+#   SelectableItem::staticMetaObject / qt_metacall 无处解析 —— 链接期报出无字的
+#   `collect2: ld returned 5`（ld 的真实诊断被 collect2 吞掉）。
+#   --no-as-needed 保底：本目标对象很少引 QtGui，MinGW 可能在静态库需要前就丢弃它。
+pv_add_qtest(test_v_offset_animation
+    view/test_v_offset_animation.cpp
+)
+target_include_directories(test_v_offset_animation PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_v_offset_animation PRIVATE pxview-render Qt6::Gui)
+target_link_options(test_v_offset_animation PRIVATE -Wl,--no-as-needed)
+
 # ==== 波形光栅化纯函数直测 (modernize-thread-model Task 2.6) ====
 # 直接编译 rasterize.cpp + 三个快照数据层源文件, 内部 stub xlog。
 # 无 View/QWidget 依赖: 直接构造 snapshot + 值参数, 用 QImage 承载 QPainter
@@ -283,6 +306,34 @@ target_include_directories(test_rasterize PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
     ${CMAKE_SOURCE_DIR}/common
 )
+
+# ==== logic 模式渲染成本量化（决策门禁：先量化再改代码）====
+# 直接调用 rasterize_logic_channel / LogicSnapshot::get_display_edges 的纯路径,
+# 矩阵化测量 {缩放级别 × 数据密度 × 通道数} 下的每通道与整帧重建耗时, 用于判定
+# logic 模式低帧率的瓶颈在「mipmap 边沿扫描」还是「绘制/整帧重建」, 而不是靠
+# 静态阅读猜测。依赖链同 test_rasterize（纯数据层 + QtGui, 无 QWidget）。
+# 强制 -O2: 成本数据必须反映 Release 行为, 否则 DEBUG(-O0) 的绝对耗时会被放大
+# 数倍而失去决策价值（相对缩放趋势不受构建类型影响）。
+pv_add_qtest(test_logic_render_cost
+    view/test_logic_render_cost.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/view/renderer/rasterize.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    # rasterize.cpp 同时定义 dso/analog 栅格化, 链接需要这两个快照的符号
+    # (本测试只调用 logic 路径, 但目标文件整体链接)。
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/dsosnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/analogsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_logic_render_cost PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_compile_options(test_logic_render_cost PRIVATE -O2)
 
 # ==== LogicSnapshot raw 存储路径 (P5 diff+ctz 毛刺滤波) ====
 # 直接编译 raw 数据层源文件 (不链接 pxview-data), 内部 stub xlog.

@@ -89,6 +89,27 @@ public:
   void zoom_vertical(double steps);
   int headerWidth();
 
+  /**
+   * Slide the non-dragged traces aside while a channel drag is in progress.
+   *
+   * This is the "让位" (make-way) half of the drag-reorder UX: the dragged
+   * trace follows the cursor with no animation (Header calls
+   * Trace::force_to_v_offset), while every *other* visible trace is given a
+   * new layout target — the position it would occupy if the drag were
+   * released now — and animates towards it over ~100ms.
+   *
+   * Deliberately does NOT touch view_index, the group structure, or
+   * persistence: those stay the release-time responsibility of
+   * Header::mouseReleaseEvent (which re-sorts by Y and saves the layout).
+   * Keeping the preview purely arithmetic means the animation can never
+   * corrupt the ordering that gets written to the document.
+   *
+   * @param dragged  Trace currently under the cursor (must not be animated;
+   *                 pass nullptr to animate every visible trace instead).
+   * @return true if any trace was given a new target (i.e. a repaint is due).
+   */
+  bool animate_make_way_for_drag(Trace *dragged);
+
   // -- theme / colors (Phase J additional) ------------------------------
   void UpdateTheme();
   QColor get_group_card_color();
@@ -115,7 +136,22 @@ private:
   bool _rebuild_in_progress = false;
 
   // --- signals_changed() split helpers (was 300-line God-method) ---
+
   void normalize_view_indices();
+
+  // 不变量校验：view_index 必须构成 0..n-1 的连续序列（无重复、无空洞），
+  // 且每个 group 内的 view_index 必须连续。
+  //
+  // 为什么需要显式校验：`_signal_groups` 是从 `view_index` 派生出来的**第二次
+  // 独立遍历**，两者靠"normalize_view_indices() 先于 compute_signal_groups()
+  // 调用"这个**约定**保持一致，而不是靠类型系统保证。compute_signal_groups()
+  // 的注释自证了该契约，且历史上已踩过坑（重复 view_index → std::sort 不稳定
+  // → 通道顺序错乱）。任何新增路径若直接改 view_index 却不重跑归一化，就会
+  // 静默重现该 bug。本函数把这个隐式约定变成显式校验（Release 下仅记日志，
+  // 见 pxv_assert 的 NDEBUG 分支）。
+  //
+  // 只在 logic 渲染模式（分组生效）时校验分组连续性。
+  bool validate_view_index_invariants() const;
   void classify_traces(std::vector<Trace *> &time_traces,
                         std::vector<Trace *> &fft_traces,
                         std::vector<Trace *> &logic_traces,

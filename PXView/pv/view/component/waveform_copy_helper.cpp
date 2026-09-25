@@ -357,7 +357,8 @@ LogicSignal* WaveformCopyHelper::hit_test_signal(View &view, int click_x, int cl
         if (!s)
             continue;
         if (s->signal_type() == SR_CHANNEL_LOGIC && s->enabled()) {
-            int sigY = s->get_v_offset();
+            // visual: 命中测试跟随屏幕上实际绘制的位置
+            int sigY = s->visual_v_offset();
             int halfH = s->get_totalHeight() / 2 + View::SignalMargin;
             if (std::abs(mouseY - sigY) < halfH)
                 return s->as_logic();
@@ -373,7 +374,8 @@ DecodeTrace* WaveformCopyHelper::hit_test_decode_trace(View &view, int click_x, 
     for (auto &t : view.get_own_decode_traces()) {
         if (!t || !t->enabled())
             continue;
-        int sigY = t->get_v_offset();
+        // visual: 命中测试跟随屏幕上实际绘制的位置
+        int sigY = t->visual_v_offset();
         int halfH = t->get_totalHeight() / 2 + View::SignalMargin;
         if (std::abs(mouseY - sigY) < halfH)
             return t.get();

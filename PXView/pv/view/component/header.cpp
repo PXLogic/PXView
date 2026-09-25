@@ -195,6 +195,9 @@ void Header::paintEvent(QPaintEvent *) {
         const auto &group = groups[group_indices[idx]];
         if (group.traces.empty())
           continue;
+        // 卡片几何按 **visual** 坐标算（与 render_pass 的
+        // GroupCardBackgroundPass 及波形保持一致），重排动画期间卡片才能
+        // 跟着通道一起滑动。可见性/是否已布局仍按 layout 值判断。
         double groupTop = 1e9;
         double groupBottom = -1e9;
         for (auto gt : group.traces) {
@@ -204,9 +207,9 @@ void Header::paintEvent(QPaintEvent *) {
           if ((!gt->enabled() && !gt->as_dso()) ||
               gt->get_v_offset() == INT_MAX)
             continue;
-          double traceTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 -
-                            View::SignalMargin;
-          double traceBottom = gt->get_v_offset() +
+          double traceTop = gt->visual_v_offset() -
+                            gt->get_totalHeight() * 0.5 - View::SignalMargin;
+          double traceBottom = gt->visual_v_offset() +
                                gt->get_totalHeight() * 0.5 + View::SignalMargin;
           groupTop = min(groupTop, traceTop);
           groupBottom = max(groupBottom, traceBottom);
@@ -250,8 +253,10 @@ void Header::paintEvent(QPaintEvent *) {
             if ((!gt->enabled() && !gt->as_dso()) ||
                 gt->get_v_offset() == INT_MAX)
               continue;
-            double tTop = gt->get_v_offset() - gt->get_totalHeight() * 0.5 - View::SignalMargin;
-            double tBottom = gt->get_v_offset() + gt->get_totalHeight() * 0.5 + View::SignalMargin;
+            double tTop = gt->visual_v_offset() -
+                          gt->get_totalHeight() * 0.5 - View::SignalMargin;
+            double tBottom = gt->visual_v_offset() +
+                             gt->get_totalHeight() * 0.5 + View::SignalMargin;
             
             if (static_cast<int>(i) == firstEnabled) tTop -= View::GroupGap * 0.5;
             if (static_cast<int>(i) == lastEnabled) tBottom += View::GroupGap * 0.5;
@@ -312,8 +317,9 @@ void Header::paintEvent(QPaintEvent *) {
       continue;
     if (t == lastEnabledTrace)
       continue;
+    // 分隔线画在 **visual** 位置，否则重排动画期间线的位置与卡片/波形不一致。
     int traceBottom =
-        t->get_v_offset() + t->get_totalHeight() / 2 + View::SignalMargin;
+        t->visual_v_offset() + t->get_totalHeight() / 2 + View::SignalMargin;
     painter.drawLine(35, traceBottom, w, traceBottom);
   }
 
@@ -686,8 +692,43 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   if (_moveFlag) {
     pxv_info("Header::mouseReleaseEvent: MOVE FLAG set, persisting layout");
     _drag_traces.clear();
+
+    // 落位动画：先记住各通道"现在画在哪儿"（visual），因为接下来的
+    // signals_changed() → layout_time_signals() 会用新的 layout 目标改写
+    // 坐标；若不同步恢复 visual，通道会先瞬移到终点，动画就没得滑了。
+    std::vector<Trace *> settle_traces;
+    _view.get_traces(ALL_VIEW, settle_traces);
+    std::vector<std::pair<Trace *, int>> settle_from;
+    settle_from.reserve(settle_traces.size());
+    for (auto t : settle_traces) {
+      if (t->get_v_offset() == t->visual_v_offset())
+        continue;  // 已经静止在目标上，跳过：避免每次单击都空跑一次动画
+      settle_from.emplace_back(t, t->visual_v_offset());
+    }
+
     _view.signals_changed(mTrace);
     _view.set_all_update(true);
+
+    // 恢复拖动结束时的 visual 位置，再让它们滑向新算出的 layout 目标 ——
+    // 这一段就是"松手后所有通道归位"的动画。
+    //
+    // 但 **零位拖动**（DSO / Analog / Math 调 set_zero_vpos 挪波形基线）必须
+    // 排除在外：那类通道的 get_zero_vpos() 走的是自己的 ratio2pos()，其参考
+    // 原点就是 get_y()；本轮落位动画若把这批通道的 visual 拉回拖动起点，
+    // 它们的基线会先瞬移回原位再滑过去 —— 观感就是"松开后波形跳一下"。
+    // 通道排序拖动（LOGIC 逻辑通道）才需要这段归位动画。
+    for (auto &sf : settle_from) {
+      Trace *t = sf.first;
+      if (t->as_dso() || t->as_analog() || t->as_math())
+        continue;
+      const int from = sf.second;
+      // INT_MAX = 尚未布局，或本来就静止在目标上：无需动画。
+      if (from == INT_MAX || t->get_v_offset() == INT_MAX)
+        continue;
+      if (from != t->get_v_offset())
+        t->set_visual_v_offset(from);
+      t->animate_to_layout_v_offset();
+    }
 
     std::vector<Trace *> traces;
     _view.get_traces(ALL_VIEW, traces);
@@ -903,6 +944,10 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
   if (!_drag_traces.empty()) {
     const int delta = event->position().toPoint().y() - _mouse_down_point.y();
 
+    // 让位动画的锚点：正在被拖动的那个通道（_drag_traces 可能含多选，
+    // 但让位只按第一个/当前跟随鼠标的那个来算）。
+    Trace *dragged_trace = nullptr;
+
     for (auto i = _drag_traces.begin(); i != _drag_traces.end(); i++) {
       const auto t = (*i).first;
       if (t) {
@@ -926,12 +971,25 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
                                View::SignalSnapGridSize;
             if (y_snap != t->get_v_offset()) {
               _moveFlag = true;
-              t->set_v_offset(y_snap);
+              // 拖动项必须【跟手】而不是动画：硬设两个坐标、不给动画延迟。
+              // 被拖项若也走动画，手指与通道之间会始终差一段距离。
+              t->force_to_v_offset(y_snap);
               traces_moved();
             }
+            // 其余通道滑开让位（纯视觉预览，不碰 view_index / 持久化）。
+            if (!dragged_trace)
+              dragged_trace = t;
           }
         }
       }
+    }
+
+    // 让位：在拖动项的新位置处重排其余通道，并让它们动画滑过去。
+    // 只在 LOGIC 渲染模式（分组 + view_index 语义生效）下启用，避免影响
+    // DSO/ANALOG 的零位拖动语义。
+    if (dragged_trace && _view.is_logic_rendering_mode()) {
+      if (_view.animate_make_way_for_drag(dragged_trace))
+        traces_moved();
     }
   }
   update();
@@ -1065,7 +1123,9 @@ void Header::contextMenuEvent(QContextMenuEvent *event) {
     std::vector<Trace *> traces;
     _view.get_traces(ALL_VIEW, traces);
     for (auto tr : traces) {
-      const int y = tr->get_v_offset();
+      // 命中测试按 **visual** 坐标：用户点的是屏幕上看到的位置，
+      // 动画期间该位置由 visual 值决定（与 get_mTrace/pt_in_rect 一致）。
+      const int y = tr->visual_v_offset();
       const int halfH = tr->get_totalHeight() / 2 + View::SignalMargin;
       if (clickY >= y - halfH && clickY <= y + halfH) {
         target = tr;

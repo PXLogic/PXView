@@ -26,6 +26,11 @@
 #include <cmath>
 #include <typeinfo>
 
+#include <QAbstractAnimation>
+#include <QEasingCurve>
+#include <QPropertyAnimation>
+#include <QVariant>
+
 #include "pv/view/trace/trace.h"
 #include "pv/session/sigsession.h"
 #include "pv/base/pxvdef.h"
@@ -107,6 +112,9 @@ Trace::Trace(const Trace &t) :
     _visible(t._visible),
     _text_size(t._text_size)
 {
+    // 双层坐标必须成对复制：只复制 layout 值而让 visual 留在默认哨兵，
+    // 会让副本停在"未布局"位置 —— 渲染时整条波形消失。
+    _visual_v_offset = t._visual_v_offset;
     _view_index = -1;
 }
 
@@ -146,7 +154,11 @@ void Trace::set_index_list(const std::list<int> &index_list)
 
 int Trace::get_zero_vpos()
 {
-    return _v_offset;
+    // Must return the same coordinate space as get_y() (both feed the
+    // hit-test rects in pt_in_rect), otherwise the clickable region and the
+    // painted region drift apart during a repositioning animation — the user
+    // would have to click where the channel *will* be, not where it is.
+    return _visual_v_offset;
 }
 
 void Trace::resize()
@@ -486,6 +498,76 @@ QRectF Trace::get_rect(const char *s, int y, int right)
             12,
             y - SquareWidth / 2.0,
             SquareWidth, SquareWidth);
+}
+
+// ============================================================================
+// 双层 y 坐标：拖动跟手 + 落位动画
+// ----------------------------------------------------------------------------
+// 语义与 PulseView TraceTreeItem 的 force_to_v_offset /
+// animate_to_layout_v_offset 同构（pv/views/trace/tracetreeitem.cpp:73-96）：
+//   - force_to_v_offset()  ：拖动中跟手，硬设两个坐标，无动画延迟
+//   - animate_to_layout_v_offset()：100ms OutQuad 把 visual 推向 layout，
+//     这就是"被挤开的通道滑过去让位"的来源
+// ============================================================================
+
+void Trace::force_to_v_offset(int v_offset) {
+  stop_v_offset_animation();
+  _v_offset = _visual_v_offset = v_offset;
+}
+
+void Trace::animate_to_layout_v_offset() {
+  // 已在目标位置：无需动画（这也是绝大多数帧的情况，避免无谓的动画对象分配）。
+  if (_visual_v_offset == _v_offset)
+    return;
+
+  // INT_MAX 是"尚未布局"哨兵。从/到哨兵值做插值会产生天文数字的中间帧，
+  // 且哨兵值本身不是有效坐标 —— 直接硬设，不做动画。
+  if (_visual_v_offset == INT_MAX || _v_offset == INT_MAX) {
+    _visual_v_offset = _v_offset;
+    return;
+  }
+
+  // 懒创建动画对象（以 this 为父，随 Trace 析构）。
+  if (!_v_offset_animation) {
+    auto *anim = new QPropertyAnimation(this, "visual_v_offset", this);
+    anim->setDuration(kVOffsetAnimationMs);
+    anim->setEasingCurve(QEasingCurve::OutQuad);
+    // 每帧把变化通知出去：View 侧据此设置 need_update 并触发重绘。
+    // 不用 QPropertyAnimation 默认的自动 update()，因为绘制链路由
+    // Viewport/Header 驱动，必须走它们的刷新入口。
+    connect(anim, &QPropertyAnimation::valueChanged, this,
+            [this](const QVariant &) { on_visual_v_offset_changed(); });
+    _v_offset_animation = anim;
+  }
+
+  // 目标未变且正在跑：不要重启，否则会不断从当前位置重新计 100ms，
+  // 拖动中频繁调用会让动画永远到不了终点（PulseView 同款守卫）。
+  if (_v_offset_animation->endValue().toInt() == _v_offset &&
+      _v_offset_animation->state() == QAbstractAnimation::Running)
+    return;
+
+  _v_offset_animation->stop();
+  _v_offset_animation->setStartValue(_visual_v_offset);
+  _v_offset_animation->setEndValue(_v_offset);
+  _v_offset_animation->start();
+}
+
+void Trace::stop_v_offset_animation() {
+  if (_v_offset_animation &&
+      _v_offset_animation->state() != QAbstractAnimation::Stopped)
+    _v_offset_animation->stop();
+}
+
+bool Trace::is_v_offset_animating() const {
+  return _v_offset_animation &&
+         _v_offset_animation->state() == QAbstractAnimation::Running;
+}
+
+void Trace::on_visual_v_offset_changed() {
+  // 动画每帧到达这里：通知所属 View 重绘。_view 可能为空（未绑定视图的
+  // Trace，或视图正在拆除），此时静默跳过 —— 动画本身仍会把值推到终点。
+  if (_view)
+    _view->request_animation_repaint();
 }
 
 } // namespace view

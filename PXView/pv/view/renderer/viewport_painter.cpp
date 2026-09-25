@@ -181,8 +181,9 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
       continue;
     if (t == lastEnabledTrace)
       continue;
+    // 分隔线按 **visual** 绘制，与波形/卡片在动画期间保持同步。
     int traceBottom =
-        t->get_v_offset() + t->get_totalHeight() / 2 + IRenderView::SignalMargin;
+        t->visual_v_offset() + t->get_totalHeight() / 2 + IRenderView::SignalMargin;
     p.drawLine(0, traceBottom, _viewport->view().get_view_width(),
                traceBottom);
   }
