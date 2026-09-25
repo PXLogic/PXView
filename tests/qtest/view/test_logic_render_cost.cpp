@@ -483,6 +483,10 @@ private slots:
     void draw_primitives_pixel_parity();
     // 调用形状/图元/合批的绘制成本矩阵。
     void draw_batching_comparison();
+    // 装配成本对照：交错 QLine（旧形状）vs 水平 QLine + 竖直 QRect（新形状）。
+    void build_cost_lines_vs_rects();
+    // 变更门禁：真实 rasterize_logic_channel 的输出必须与旧线段形状逐像素一致。
+    void production_parity();
 };
 
 void TestLogicRenderCost::edge_scan_scaling()
@@ -848,6 +852,9 @@ void TestLogicRenderCost::draw_primitives_pixel_parity()
 // 回答两个问题：
 //   * 把所有通道的图元拼成大数组、每类只发 1 次调用，能否省下调用开销？
 //   * 竖直段能否用 1 次 drawRects 画完（甚至整帧只用 1 次 drawRects）？
+//
+// 关键方法学：**所有数组装配都在计时外完成**，计时区里只有 QPainter 的 draw
+// 调用。否则"合批"会因为把装配（分配 + 拷贝）也算进去而被人为放大。
 void TestLogicRenderCost::draw_batching_comparison()
 {
     PackedFixture fx(CHANNELS);
@@ -857,17 +864,21 @@ void TestLogicRenderCost::draw_batching_comparison()
 
     const int heights[] = {40, 80};
     const double spps[] = {8.0, 512.0, 8738.0};
-    const int ext = 0;   // 与像素对拍结论保持一致（见 draw_primitives_pixel_parity）
+    // 像素对拍的结论：矩形必须含端点（QLine 含端点、QRect 半开）。
+    const int ext = 1;
 
     qInfo("%s", "");
-    qInfo("==== 绘制调用形状对照 (16ch, 宽=%d, best-of-%d) ====", WIDTH, ROUNDS);
-    qInfo("%-7s %-8s %10s %11s %11s %11s %11s",
-          "height", "spp", "prod/ms", "h|v 1c/ms", "rects/ch/ms",
-          "rects 1c/ms", "allrect 1c/ms");
+    qInfo("==== 绘制调用形状对照 (16ch, 宽=%d, best-of-%d, 只计 draw 调用) ====",
+          WIDTH, ROUNDS);
+    qInfo("%-7s %-8s %10s %10s %11s %11s %11s",
+          "height", "spp", "prod/ms", "h1+v1/ms", "rects/ch/ms",
+          "rects 1c/ms", "allrect1c/ms");
 
     for (int h : heights) {
         QImage img(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
         img.fill(Qt::transparent);
+        const QPen pen(QColor(255, 255, 255));
+        const QBrush brush(QColor(255, 255, 255));
 
         for (double spp : spps) {
             std::vector<FrameGeometry> ges;
@@ -880,38 +891,231 @@ void TestLogicRenderCost::draw_batching_comparison()
             if (n == 0)
                 continue;
 
-            // 预热
-            render_frame_production(img, ges);
-            render_frame(img, ges, Repr::AllRects, true, ext);
+            // ---- 计时外：装配各变体所需数组 ----
+            std::vector<QLine> hv_all;                        // 全通道交错
+            std::vector<QLine> h_all, v_all;                  // 分流
+            std::vector<std::vector<QLine>> h_ch(CHANNELS);   // 逐通道（生产形状）
+            std::vector<std::vector<QRect>> v_rects_ch(CHANNELS);
+            std::vector<QRect> h_rects_all, v_rects_all;
+            for (int c = 0; c < CHANNELS; ++c) {
+                const auto &g = ges[(size_t)c];
+                hv_all.insert(hv_all.end(), g.hv_lines.begin(), g.hv_lines.end());
+                h_all.insert(h_all.end(), g.h_lines.begin(), g.h_lines.end());
+                v_all.insert(v_all.end(), g.v_lines.begin(), g.v_lines.end());
+                h_ch[(size_t)c] = g.h_lines;
+                v_rects_ch[(size_t)c].reserve(g.v_lines.size());
+                for (const auto &l : g.v_lines)
+                    v_rects_ch[(size_t)c].push_back(vline_to_rect(l, ext));
+                for (const auto &l : g.h_lines)
+                    h_rects_all.push_back(hline_to_rect(l, ext));
+                for (const auto &l : g.v_lines)
+                    v_rects_all.push_back(vline_to_rect(l, ext));
+            }
+            std::vector<QRect> all_rects = h_rects_all;
+            all_rects.insert(all_rects.end(), v_rects_all.begin(), v_rects_all.end());
 
-            const double t_prod =
-                best_of(ROUNDS, [&]() { render_frame_production(img, ges); });
+            // ---- 计时区：只有 draw 调用 ----
+            const double t_prod = best_of(ROUNDS, [&]() {
+                QPainter p(&img);
+                p.setPen(pen);
+                p.setBrush(Qt::NoBrush);
+                for (const auto &g : ges)
+                    p.drawLines(g.hv_lines.data(), (int)g.hv_lines.size());
+                p.end();
+            });
             const double t_hv1 = best_of(ROUNDS, [&]() {
-                render_frame(img, ges, Repr::LinesAll, true, ext);
+                QPainter p(&img);
+                p.setPen(pen);
+                p.setBrush(Qt::NoBrush);
+                p.drawLines(h_all.data(), (int)h_all.size());
+                p.drawLines(v_all.data(), (int)v_all.size());
+                p.end();
             });
             const double t_rch = best_of(ROUNDS, [&]() {
-                render_frame(img, ges, Repr::H_Lines_V_Rects, false, ext);
+                QPainter p(&img);
+                for (int c = 0; c < CHANNELS; ++c) {
+                    const auto &hl = h_ch[(size_t)c];
+                    p.setPen(pen);
+                    p.setBrush(Qt::NoBrush);
+                    p.drawLines(hl.data(), (int)hl.size());
+                    const auto &vr = v_rects_ch[(size_t)c];
+                    p.setPen(Qt::NoPen);
+                    p.setBrush(brush);
+                    p.drawRects(vr.data(), (int)vr.size());
+                }
+                p.end();
             });
             const double t_r1 = best_of(ROUNDS, [&]() {
-                render_frame(img, ges, Repr::H_Lines_V_Rects, true, ext);
+                QPainter p(&img);
+                p.setPen(pen);
+                p.setBrush(Qt::NoBrush);
+                p.drawLines(h_all.data(), (int)h_all.size());
+                p.setPen(Qt::NoPen);
+                p.setBrush(brush);
+                p.drawRects(v_rects_all.data(), (int)v_rects_all.size());
+                p.end();
             });
             const double t_a1 = best_of(ROUNDS, [&]() {
-                render_frame(img, ges, Repr::AllRects, true, ext);
+                QPainter p(&img);
+                p.setPen(Qt::NoPen);
+                p.setBrush(brush);
+                p.drawRects(all_rects.data(), (int)all_rects.size());
+                p.end();
             });
 
             g_sink += n;
-            qInfo("%-7d %-8g %10.3f %11.3f %11.3f %11.3f %11.3f",
+            qInfo("%-7d %-8g %10.3f %10.3f %11.3f %11.3f %11.3f",
                   h, spp, t_prod, t_hv1, t_rch, t_r1, t_a1);
             QVERIFY(t_prod > 0.0 && t_a1 > 0.0);
         }
     }
     qInfo("%s", "");
     qInfo("prod     = 生产现状：每通道 1 次 drawLines(交错 h+v)，共 16 次调用");
-    qInfo("h|v 1c   = 所有水平段合 1 次 drawLines + 所有竖直段合 1 次，共 2 次");
-    qInfo("rects/ch = 竖直改 1px 填充矩形，逐通道调用");
+    qInfo("h1+v1    = 所有水平段合 1 次 drawLines + 所有竖直段合 1 次，共 2 次");
+    qInfo("rects/ch = 竖直改 1px 填充矩形（ext=1），逐通道调用（= 生产调用形状）");
     qInfo("rects 1c = 竖直改矩形且合批：1×drawLines(全 h) + 1×drawRects(全 v)");
     qInfo("allrect1c= 水平也改 1px 高矩形：整帧只发 1×drawRects");
     qInfo("%s", "");
+}
+
+// 装配成本对照。
+//
+// rects/ch 方案把生产里"一个交错 QLine 数组"改成"水平 QLine 数组 + 竖直 QRect
+// 数组"两个数组。绘制侧已证明更快，但装配侧多了一次 vector 与一次 push_back，
+// 必须确认不是把收益吃回去。两者都 reserve 到精确大小（与生产一致）。
+void TestLogicRenderCost::build_cost_lines_vs_rects()
+{
+    PackedFixture fx(CHANNELS);
+    LogicSnapshot snap;
+    std::vector<uint8_t> payload = fx.make_payload(patterns()[1].periods);
+    feed(snap, fx, payload);
+
+    const int heights[] = {40, 80};
+    const double spps[] = {8.0, 512.0, 8738.0};
+
+    qInfo("%s", "");
+    qInfo("==== 装配成本：交错 QLine vs (水平 QLine + 竖直 QRect) ====");
+    qInfo("%-7s %-8s %12s %12s %12s %10s",
+          "height", "spp", "old(1 vec)", "new(2 vecs)", "lines", "new/old");
+
+    for (int h : heights) {
+        QImage img(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
+
+        for (double spp : spps) {
+            std::vector<FrameGeometry> ges;
+            ges.reserve(CHANNELS);
+            for (int ch = 0; ch < CHANNELS; ++ch)
+                ges.push_back(build_geometry(snap, ch, spp, WIDTH, (ch + 1) * h, h));
+            size_t nh = 0, nv = 0;
+            for (const auto &g : ges) {
+                nh += g.h_lines.size();
+                nv += g.v_lines.size();
+            }
+            if (nh == 0)
+                continue;
+            const int ext = 1;
+
+            // 预热
+            {
+                std::vector<QLine> all;
+                all.reserve(nh + nv);
+                for (const auto &g : ges)
+                    all.insert(all.end(), g.hv_lines.begin(), g.hv_lines.end());
+                g_sink += all.size();
+            }
+
+            // 旧形状：一个交错 QLine 数组
+            const double t_old = best_of(ROUNDS, [&]() {
+                std::vector<QLine> all;
+                all.reserve(nh + nv);
+                for (const auto &g : ges)
+                    all.insert(all.end(), g.hv_lines.begin(), g.hv_lines.end());
+                g_sink += all.size();
+            });
+
+            // 新形状：水平 QLine + 竖直 QRect 两个数组
+            const double t_new = best_of(ROUNDS, [&]() {
+                std::vector<QLine> hl;
+                std::vector<QRect> vr;
+                hl.reserve(nh);
+                vr.reserve(nv);
+                for (const auto &g : ges) {
+                    for (const auto &l : g.h_lines)
+                        hl.push_back(l);
+                    for (const auto &l : g.v_lines)
+                        vr.push_back(vline_to_rect(l, ext));
+                }
+                g_sink += hl.size() + vr.size();
+            });
+
+            qInfo("%-7d %-8g %12.3f %12.3f %12zu %10.2f",
+                  h, spp, t_old, t_new, nh + nv,
+                  t_old > 0.0 ? t_new / t_old : 0.0);
+            QVERIFY(t_old > 0.0 && t_new > 0.0);
+        }
+    }
+    qInfo("%s", "");
+    qInfo("判据：new/old 接近 1（>1.5 才算把绘制收益吃回去）。");
+    qInfo("%s", "");
+}
+
+// 变更门禁：真实 rasterize_logic_channel 的一帧输出，必须与"旧线段形状"的
+// 独立参考逐像素一致。
+//
+// 参考不是复制生产代码，而是本文件按 get_display_edges 输出独立重建的
+// 交错 QLine 一帧（render_frame_production）——生产改完后仍应与其完全一致。
+void TestLogicRenderCost::production_parity()
+{
+    PackedFixture fx(CHANNELS);
+    LogicSnapshot snap;
+    std::vector<uint8_t> payload = fx.make_payload(patterns()[1].periods);
+    feed(snap, fx, payload);
+
+    const int heights[] = {20, 40, 80};
+    const double spps[] = {0.5, 8.0, 512.0, 8738.0};
+
+    qInfo("%s", "");
+    qInfo("==== 生产函数像素门禁 rasterize_logic_channel vs 旧线段形状 ====");
+    qInfo("%-7s %-9s %10s  %s", "height", "spp", "mismatch", "first");
+
+    size_t worst = 0;
+    for (int h : heights) {
+        QImage ref(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
+        QImage got(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
+
+        for (double spp : spps) {
+            std::vector<FrameGeometry> ges;
+            ges.reserve(CHANNELS);
+            for (int ch = 0; ch < CHANNELS; ++ch)
+                ges.push_back(build_geometry(snap, ch, spp, WIDTH, (ch + 1) * h, h));
+
+            render_frame_production(ref, ges);
+
+            const double scale = spp / SAMPLERATE;
+            const pv::view::PaintContext ctx = make_ctx(scale);
+            got.fill(Qt::transparent);
+            {
+                QPainter p(&got);
+                for (int ch = 0; ch < CHANNELS; ++ch)
+                    pv::view::rasterize_logic_channel(
+                        p, &snap, ch, 0, WIDTH, (ch + 1) * h, h,
+                        QColor(255, 255, 255), scale, 0, SAMPLES - 1, ctx,
+                        nullptr);
+                p.end();
+            }
+
+            QString first;
+            const size_t m = first_pixel_mismatches(ref, got, first);
+            worst = std::max(worst, m);
+            qInfo("%-7d %-9g %10zu  %s", h, spp, m, qPrintable(first));
+        }
+    }
+    qInfo("%s", "");
+    qInfo("最大不一致: %zu（必须为 0 —— 否则生产改动破坏了像素等价）", worst);
+    qInfo("%s", "");
+    QVERIFY2(worst == 0,
+             qPrintable(QString("rasterize_logic_channel 与旧线段形状不一致: "
+                                "%1 像素").arg(worst)));
 }
 
 QTEST_MAIN(TestLogicRenderCost)
