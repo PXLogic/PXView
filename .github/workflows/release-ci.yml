@@ -1211,6 +1211,8 @@ jobs:
       - name: Prepare nightly assets
         id: assets
         if: steps.build.outputs.ready == 'true' && steps.tip.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
           ASSETS="$PWD/release-assets"
@@ -1254,9 +1256,31 @@ jobs:
             ls -R dl | head -50 >&2 || true
             exit 1
           fi
+
+          # 校验和：既随资产发布（files: release-assets/* 会带上它），
+          # 内容也贴进 Release 正文。在四个安装包都就位后才生成。
+          (cd "$ASSETS" && sha256sum -- * > SHA256SUMS.txt)
+          cat "$ASSETS/SHA256SUMS.txt"
+
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "=== release-assets ==="
           ls -la "$ASSETS"
+
+          # 本次提交的信息，供 Release 正文展示。本 job 没有 checkout，
+          # 所以走 API 取，不用 git log。
+          MSG=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+                  --jq '.commit.message' 2>/dev/null || true)
+          # 多行值必须用 begin/end 定界符写进 $GITHUB_OUTPUT。
+          {
+            echo "commit_msg<<MSG_EOF"
+            printf '%s\n' "$MSG"
+            echo "MSG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "sums<<SUMS_EOF"
+            cat "$ASSETS/SHA256SUMS.txt"
+            echo "SUMS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # ── 5. 滚动覆盖 nightly Release ──────────────────────────────
       - name: Delete previous rolling nightly release
@@ -1289,6 +1313,18 @@ jobs:
             - 测试：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
             正式版本请到 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 里选择带版本号的发布。
+
+            ### 本次提交
+
+            ```
+            ${{ steps.assets.outputs.commit_msg }}
+            ```
+
+            ### SHA256SUMS
+
+            ```
+            ${{ steps.assets.outputs.sums }}
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
