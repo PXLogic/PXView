@@ -1329,9 +1329,15 @@ bool ViewSignalSync::compare_trace_y(const Trace *a, const Trace *b) {
 //
 // 本实现保持 PXView 的扁平结构，因此不复用 restack_items 的 total_offset 游标
 // （那是渲染坐标，PXView 的 v_offset 是**行中心**语义），但照搬它的两条核心语义：
-//   (1) 被拖项按**当前绘制位置**插进顺序里 —— 它插到哪，哪一段就整体让开；
+//   (1) 被拖项按**当前 layout 位置**插进顺序里 —— 它插到哪，哪一段就整体让开；
 //   (2) 其余通道保持相对顺序**依次**排布，不改变彼此的间隔。
 // 于是被拖项越过邻居时，邻居会被"挤"到被拖项原来的格位，形成真正的交换。
+//
+// (C) 被拖项 layout 与邻居 layout **撞值**时必须按行进方向破并结。因为 header
+//     用 y_snap 调 force_to_v_offset，而邻居正好坐在格位中心，手指逐格挪动时
+//     被拖项的 layout 会精确等于某个邻居的 layout。stable_sort 的插入序在
+//     "向下"方向碰巧正确、在"向上"方向必然错（邻居不让位）→ 这就是"只能单方向
+//     交换"的真因，详见 make_way::order_by_layout_offset 的注释。
 //
 // 纯视觉预览：不碰 view_index / 分组 / 持久化，松手后仍由 Header 按最终 y 排序。
 // ============================================================================
@@ -1354,11 +1360,13 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   if (visible.size() < 2)
     return false;
 
-  // --- 2. 确定"被拖项应当插到第几位" ------------------------------------
-  // 不能用 get_v_offset() 直接排序：被拖项的 layout 值已被 force_to_v_offset
-  // 改写成跟手的 y_snap，等于拿"手指位置"和"其它通道的格位中心"比大小，插位会
-  // 抖。正确做法是把被拖项**摘出来**，用其余通道的原始顺序做基准，再看被拖项的
-  // 绘制位置落进了哪两个邻居之间。
+  // --- 2. 收集"除被拖项以外"的可见通道 --------------------------------
+  // 注意：这里**不再**由调用方排序。排序交给 make_way::layout() 内部的
+  // order_by_painted_center()：它按"当前绘制中心"对**全部**行（含被拖项）
+  // 统一排序，被拖项用 visual 值参与比较。若在这里先按 layout 排好再插位，
+  // 由于 force_to_v_offset 会把被拖项的 layout 也改写成跟手值，"被拖项"和
+  // "它正在越过的邻居"可能带着**相同**的 layout 值 → 先后关系分不清 →
+  // 其中一行永远不移动 → 列里留洞、看起来就是整列平移。
   Trace *drag = dragged;
   if (!drag)
     return false;
@@ -1372,9 +1380,6 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   if (others.empty())
     return false;
 
-  std::stable_sort(others.begin(), others.end(),
-                   &ViewSignalSync::compare_trace_y);
-
   // --- 3. 插位 + 自上而下依次排布（照搬 restack_items 的累积语义）--------
   // 算法本体在 pv/view/trace/make_way.h（纯函数，可单测）。这里只负责把
   // PXView 的行中心语义（row_gap = 2 * SignalMargin）与槽位锚点接进去。
@@ -1385,9 +1390,14 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   // 只有在锚点缺失（非拖动调用方传 INT_MAX）时才回退到现算。
   const int anchor = make_way::resolve_anchor(anchor_y, visible);
 
+  // 行进方向：用于在"被拖项 layout 恰好等于某邻居格位"时破并结（详见
+  // make_way::order_by_layout_offset 的注释）。必须来自锚点而不是上一次的
+  // drag 位置 —— 每帧独立判定，不引入跨帧状态。
+  const bool downward = drag->get_v_offset() >= anchor;
+
   std::vector<Trace *> ordered;
   std::vector<std::pair<Trace *, int>> new_targets;
-  make_way::layout(others, drag, anchor, 2 * View::SignalMargin, ordered,
+  make_way::layout(others, drag, anchor, 2 * View::SignalMargin, downward, ordered,
                    new_targets);
 
   // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏。破坏了就是"某个通道

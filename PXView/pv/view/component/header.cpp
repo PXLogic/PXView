@@ -472,19 +472,15 @@ void Header::mousePressEvent(QMouseEvent *event) {
     // the wrong direction when vertically scrolled.
     _mouse_down_point = event->position().toPoint();
 
-    // Save the offsets of any Traces which will be dragged
+    // Save the offsets of any Traces which will be dragged.
+    // 注意：这里 `t->selected()` 还是**上一次**的选中态（本次点击的选中发生在
+    // 下方的 NAME/LABEL 分支里），所以这个循环通常什么都不收；让位锚点也因此
+    // 不能在这里算（见下方 ★ 注释）。
     _drag_anchor_y = INT_MAX;
     for (auto t : traces) {
-      if (t->selected()) {
+      if (t->selected())
         _drag_traces.push_back(make_pair(t, t->get_v_offset()));
-        // 让位槽位锚点 = 拖动开始时整列的最高行（此刻 layout 都还是原值，
-        // 尚未被 force_to_v_offset 改写）。整个拖动期间保持不变。
-        if (t->get_v_offset() != INT_MAX)
-          _drag_anchor_y = min(_drag_anchor_y, t->get_v_offset());
-      }
     }
-    if (_drag_traces.empty())
-      _drag_anchor_y = INT_MAX;
 
     // Select the Trace if it has been clicked.
     // get_mTrace requires absolute coordinates (pt + vOffset) because
@@ -553,6 +549,21 @@ void Header::mousePressEvent(QMouseEvent *event) {
 
       _drag_traces.push_back(make_pair(mTrace, mTrace->get_zero_vpos()));
       mTrace->set_old_v_offset(mTrace->get_v_offset());
+    }
+
+    // ★ 让位槽位锚点必须在**这里**采集，不能在上面那个 `if (t->selected())`
+    // 循环里：那个循环跑在 `mTrace->select(true)` 之前，此刻用户点的那一项
+    // 还没被选中 → `_drag_traces` 仍为空 → 锚点被置成 INT_MAX，整个拖动期间
+    // 都退化成"每帧现算"，于是被拖通道一离开首槽锚点就跟着漂，整列平移。
+    // （2026-09-26 实机日志证实：每一次调用传进来的都是 2147483647。）
+    // 此刻 `_drag_traces` 已就绪、且各通道 layout 尚未被 force_to_v_offset 改写，
+    // 取全列最高行的 y 即为恒定的"槽位网格原点"。
+    if (!_drag_traces.empty()) {
+      for (auto t : traces) {
+        const int v = t->get_v_offset();
+        if (v != INT_MAX)
+          _drag_anchor_y = min(_drag_anchor_y, v);
+      }
     }
 
     // DsoSignal::mouse_press internally uses get_y() (absolute content

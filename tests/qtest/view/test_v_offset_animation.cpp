@@ -494,19 +494,39 @@ int target_of(const std::vector<std::pair<Trace *, int>> &targets, Trace *t) {
   return INT_MIN;
 }
 
+/**
+ * 按**生产契约**驱动一次让位布局，返回 full order：
+ *
+ *   1. 被拖项跟手：`force_to_v_offset(hand_y)`（同时改写 layout + visual，
+ *      与 Header::mouseMoveEvent 一致 —— 注意不是 set_visual_v_offset，
+ *      那只改 visual，被拖项的 layout 仍停在原槽，排不出真实顺序）；
+ *   2. 行进方向 = 手指相对锚点的位置（与 view_signal_sync.cpp 同一判据）；
+ *   3. layout() 统一排序 + 破并结。
+ */
+std::vector<Trace *> layout_prod(const std::vector<std::unique_ptr<ProbeTrace>> &rows,
+                                 Trace *drag, int hand_y, int anchor,
+                                 std::vector<std::pair<Trace *, int>> &targets) {
+  drag->force_to_v_offset(hand_y);
+  const bool downward = drag->get_v_offset() >= anchor;
+  std::vector<Trace *> order;
+  pv::view::make_way::layout(others_of(rows, drag), drag, anchor, kRowGap, downward,
+                             order, targets);
+  return order;
+}
+
 } // namespace
 
 void TestVOffsetAnimation::MakeWayInsertsDraggedBelowNeighbor() {
   auto rows = make_rows(3);
-  Trace *drag = rows[0].get();      // 拖第 0 行
-  drag->set_visual_v_offset(ProbeTrace::rowPitch()); // 拖到第 1 行的位置上
+  Trace *drag = rows[0].get();          // 拖第 0 行往下
+  const int top = rows[0]->get_v_offset();
 
-  std::vector<Trace *> order;
+  // 手指落到第 1 行的格位中心（= 邻居 layout）→ 撞值，靠**方向**破并结。
   std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others_of(rows, drag), drag,
-                                rows[0]->get_v_offset(), kRowGap, order, targets);
+  std::vector<Trace *> order = layout_prod(rows, drag, top + ProbeTrace::rowPitch(),
+                                           top, targets);
 
-  // 顺序应为 rows[1], rows[0], rows[2]（被拖项插到原第 1 行之前）
+  // 顺序应为 rows[1], rows[0], rows[2]（被拖项越过邻居后排在它之后）
   QCOMPARE(order.size(), size_t(3));
   QCOMPARE(order[0], rows[1].get());
   QCOMPARE(order[1], drag);
@@ -515,37 +535,33 @@ void TestVOffsetAnimation::MakeWayInsertsDraggedBelowNeighbor() {
 
 void TestVOffsetAnimation::MakeWayInsertsDraggedAboveNeighbor() {
   auto rows = make_rows(3);
-  Trace *drag = rows[2].get();                        // 拖第 2 行
-  // 插位探针是严格的 `>`：只有视觉位置**小于**第 1 行的中心，才算"插入其上方"。
-  // 正好相等时被拖项还排在第 1 行之后（它尚未越过邻居），那是正确语义。
-  drag->set_visual_v_offset(ProbeTrace::rowPitch() - 1);
+  Trace *drag = rows[2].get();          // 拖第 2 行往上
+  const int top = rows[0]->get_v_offset();
 
-  std::vector<Trace *> order;
+  // 手指落到第 1 行的格位中心（撞值）→ 向上方向必须把被拖项排在邻居**之后**。
   std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others_of(rows, drag), drag,
-                                rows[0]->get_v_offset(), kRowGap, order, targets);
+  std::vector<Trace *> order =
+      layout_prod(rows, drag, top + ProbeTrace::rowPitch(), top, targets);
 
-  // 顺序应为 rows[0], rows[2], rows[1]（被拖项插到原第 1 行之前）
+  // 顺序应为 rows[0], rows[1], rows[2]（被拖项还没越过第 1 行）
   QCOMPARE(order.size(), size_t(3));
   QCOMPARE(order[0], rows[0].get());
-  QCOMPARE(order[1], drag);
-  QCOMPARE(order[2], rows[1].get());
+  QCOMPARE(order[1], rows[1].get());
+  QCOMPARE(order[2], drag);
 }
 
 void TestVOffsetAnimation::MakeWaySwapsTwoRowsExactly() {
   // 两行互换是最小可复现：把第 0 行拖过第 1 行。
   auto rows = make_rows(2);
   Trace *drag = rows[0].get();
-  drag->set_visual_v_offset(ProbeTrace::rowPitch());
+  const int top = drag->get_v_offset();
 
-  std::vector<Trace *> order;
   std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others_of(rows, drag), drag,
-                                rows[0]->get_v_offset(), kRowGap, order, targets);
+  layout_prod(rows, drag, top + ProbeTrace::rowPitch(), top, targets);
 
   // ★ 核心断言：第 1 行必须被移到"第 0 行原来的格位"，也就是 0 号中心。
   // 旧实现下这一项会保持不动（整列平移），或被推到更远 —— 两种情况都失败。
-  QCOMPARE(target_of(targets, rows[1].get()), 0);
+  QCOMPARE(target_of(targets, rows[1].get()), top);
   // 被拖项继续跟手，所以**不该**有目标。
   QCOMPARE(target_of(targets, drag), INT_MIN);
 }
@@ -553,21 +569,18 @@ void TestVOffsetAnimation::MakeWaySwapsTwoRowsExactly() {
 void TestVOffsetAnimation::MakeWayDoesNotTranslateWholeColumn() {
   // 三行：拖第 0 行到第 1 行的位置上。
   //
-  // 物理上此刻的绘制顺序是 rows[1] / rows[0]（跟手，y=54）/ rows[2]：被拖项**仍然
-  // 占着一个槽位**（它没有消失，只是下移了一格），所以第 2 行理应留在槽 2（y=108）
+  // 物理上此刻的绘制顺序是 rows[1] / rows[0]（跟手）/ rows[2]：被拖项**仍然
+  // 占着一个槽位**（它没有消失，只是下移了一格），所以第 2 行理应留在槽 2
   // 不动。判据是"谁动了、谁没动"：
   //   - rows[1] 从 54 顶到 0（让出了上面一格）
   //   - rows[2] **原地不动**（整列没有被平移）
   // 旧实现下 rows[2] 会跟着挪到 54，即"整列平移" —— 那才是用户报的缺陷。
   auto rows = make_rows(3);
   Trace *drag = rows[0].get();
-  drag->set_visual_v_offset(ProbeTrace::rowPitch());
-
-  std::vector<Trace *> order;
-  std::vector<std::pair<Trace *, int>> targets;
   const int top = rows[0]->get_v_offset();
-  pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap,
-                                order, targets);
+
+  std::vector<std::pair<Trace *, int>> targets;
+  layout_prod(rows, drag, top + ProbeTrace::rowPitch(), top, targets);
 
   const int pitch = ProbeTrace::rowPitch();
   // 第 1 行顶到第 0 行原位。
@@ -577,35 +590,27 @@ void TestVOffsetAnimation::MakeWayDoesNotTranslateWholeColumn() {
 }
 
 void TestVOffsetAnimation::MakeWayRealSwapNeedsOvershoot() {
-  // 说明插位阈值：探针是 `others[i]->get_v_offset() > drag_visual`，即**行中心连
-  // 线**就是阈值。
-  //   - 被拖项中心仍在邻居中心**之上**（严格小于）→ 排邻居之前，不交换；
-  //   - 一旦到达/越过邻居中心（>=）→ 插到邻居之后，邻居被顶上去 → 交换成立。
-  // 也就是说交换不需要"拖过整整一格再多"，到达邻居中心线即触发。
+  // 说明交换阈值（按 layout 值判定，与"插位探针"一致）：手指中心仍在邻居中心
+  // **之上**（严格小于）→ 排邻居之前，不交换；一旦到达/越过邻居中心（>=）→
+  // 插到邻居之后，邻居被顶上去 → 交换成立。即到达邻居中心线即触发。
   auto rows = make_rows(2);
   const int pitch = ProbeTrace::rowPitch();
   Trace *drag = rows[0].get();
   const int top = drag->get_v_offset();
 
-  // (a) 中心仍在邻居中心之上（差 1px）→ 尚未到达中心线，顺序不变、谁都不动。
-  drag->set_visual_v_offset(pitch - 1);
+  // (a) 手指仍在邻居中心之上（差 1px）→ 尚未到达中心线，顺序不变、谁都不动。
   {
-    std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap, order,
-                               targets);
+    std::vector<Trace *> order = layout_prod(rows, drag, pitch - 1, top, targets);
     QCOMPARE(order[0], drag);                                 // 仍排第一
     QCOMPARE(target_of(targets, rows[1].get()), top + pitch); // 原位不动
     QCOMPARE(target_of(targets, drag), INT_MIN);
   }
 
   // (b) 到达邻居中心线 → rows[1] 被顶到槽 0，被拖项排到其后 → 真正的交换。
-  drag->set_visual_v_offset(pitch);
   {
-    std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap, order,
-                               targets);
+    std::vector<Trace *> order = layout_prod(rows, drag, pitch, top, targets);
     QCOMPARE(order[0], rows[1].get());
     QCOMPARE(order[1], drag);
     QCOMPARE(target_of(targets, rows[1].get()), top);
@@ -630,12 +635,10 @@ void TestVOffsetAnimation::MakeWayAnchorMustStayFixedDuringDrag() {
 
   Trace *drag = rows[0].get();
   for (int step = 0; step <= 3; step++) { // 逐帧：拖过 0、1、2、3 格
-    drag->set_visual_v_offset(step * pitch + (step > 0 ? 1 : 0)); // 严格越过
-
-    std::vector<Trace *> order;
+    // 手指逐格下移；被拖项 layout 会精确落在邻居格位中心（撞值），由方向破并结。
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag, anchor, kRowGap,
-                               order, targets);
+    std::vector<Trace *> order =
+        layout_prod(rows, drag, anchor + step * pitch, anchor, targets);
 
     // 被拖项插到了索引 step 处（越过 step 个邻居之后）。
     QCOMPARE(order[static_cast<size_t>(step)], drag);
@@ -660,12 +663,10 @@ void TestVOffsetAnimation::MakeWayAnchorMustStayFixedDuringDrag() {
 void TestVOffsetAnimation::MakeWayGivesDraggedNoTarget() {
   auto rows = make_rows(4);
   Trace *drag = rows[1].get();
-  drag->set_visual_v_offset(2 * ProbeTrace::rowPitch());
+  const int top = rows[0]->get_v_offset();
 
-  std::vector<Trace *> order;
   std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others_of(rows, drag), drag,
-                                rows[0]->get_v_offset(), kRowGap, order, targets);
+  layout_prod(rows, drag, top + 2 * ProbeTrace::rowPitch(), top, targets);
 
   // 被拖项必须始终由 force_to_v_offset 跟手，绝不能出现在动画目标里。
   QCOMPARE(target_of(targets, drag), INT_MIN);
@@ -674,14 +675,12 @@ void TestVOffsetAnimation::MakeWayGivesDraggedNoTarget() {
 
 void TestVOffsetAnimation::MakeWayKeepsOthersContiguousAndOrdered() {
   auto rows = make_rows(4);
-  Trace *drag = rows[3].get();                    // 从最底拖到最顶
-  drag->set_visual_v_offset(-ProbeTrace::rowPitch());
-
-  std::vector<Trace *> order;
-  std::vector<std::pair<Trace *, int>> targets;
   const int top = rows[0]->get_v_offset();
-  pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap,
-                                order, targets);
+  Trace *drag = rows[3].get();                    // 从最底拖到最顶
+
+  std::vector<std::pair<Trace *, int>> targets;
+  std::vector<Trace *> order =
+      layout_prod(rows, drag, top - ProbeTrace::rowPitch(), top, targets);
 
   // 其余通道按顺序排在 top, top+pitch, top+2*pitch —— 间隔恒定 = 真让位。
   const int pitch = ProbeTrace::rowPitch();
@@ -696,26 +695,20 @@ void TestVOffsetAnimation::MakeWayAtTopAndBottomEdges() {
   const int pitch = ProbeTrace::rowPitch();
   const int top = rows[0]->get_v_offset();
 
-  // 边界 1：拖过头顶（visual 远在顶部之上）→ 插到最前。
+  // 边界 1：拖过头顶（手远远在顶部之上）→ 插到最前。
   {
     Trace *drag = rows[1].get();
-    drag->set_visual_v_offset(-10000);
-    std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap,
-                                    order, targets);
+    std::vector<Trace *> order = layout_prod(rows, drag, -10000, top, targets);
     QCOMPARE(order[0], drag);
     QCOMPARE(target_of(targets, rows[0].get()), top + pitch);
   }
 
-  // 边界 2：拖过底部（visual 远在底部之下）→ 插到最后。
+  // 边界 2：拖过底部（手远远在底部之下）→ 插到最后。
   {
     Trace *drag = rows[1].get();
-    drag->set_visual_v_offset(10000);
-    std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag, top, kRowGap,
-                                    order, targets);
+    std::vector<Trace *> order = layout_prod(rows, drag, 10000, top, targets);
     QCOMPARE(order.back(), drag);
     QCOMPARE(target_of(targets, rows[2].get()), top + pitch);
   }
@@ -725,15 +718,12 @@ void TestVOffsetAnimation::MakeWayIsPermutation() {
   // 无论插到哪，结果都必须是"输入集合的一个排列"：不丢项、不重复。
   auto rows = make_rows(5);
   const int pitch = ProbeTrace::rowPitch();
+  const int top = rows[0]->get_v_offset();
   for (int k = -2; k <= 6; k++) {
     Trace *drag = rows[2].get();
-    drag->set_visual_v_offset(k * pitch);
 
-    std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others_of(rows, drag), drag,
-                                    rows[0]->get_v_offset(), kRowGap, order,
-                                    targets);
+    std::vector<Trace *> order = layout_prod(rows, drag, top + k * pitch, top, targets);
 
     QCOMPARE(order.size(), rows.size());
     auto sorted = order;
@@ -789,7 +779,8 @@ void TestVOffsetAnimation::MakeWayAnchorResolutionIgnoresDraggedRow() {
     // 用生产锚点布局：槽位网格不动，整列不会随 step 平移。
     std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others, drag, anchor, kRowGap, order, targets);
+    pv::view::make_way::layout(others, drag, anchor, kRowGap, /*downward=*/true,
+                               order, targets);
 
     std::vector<int> slot_y;
     for (auto &p : targets)

@@ -284,6 +284,19 @@ target_include_directories(test_v_offset_animation PRIVATE
 target_link_libraries(test_v_offset_animation PRIVATE pxview-render Qt6::Gui)
 target_link_options(test_v_offset_animation PRIVATE -Wl,--no-as-needed)
 
+# ==== 让位拖动"整列平移"复现器 ====
+# 按生产代码的真实调用顺序（mousePress 采锚点 → mouseMove 逐帧 force + 让位）
+# 串起来跑一次拖动，验证"其余通道的槽位集合不随被拖项移动而整体平移"。
+pv_add_qtest(test_make_way_drag_sim
+    view/test_make_way_drag_sim.cpp
+)
+target_include_directories(test_make_way_drag_sim PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_make_way_drag_sim PRIVATE pxview-render Qt6::Gui)
+target_link_options(test_make_way_drag_sim PRIVATE -Wl,--no-as-needed)
+
 # ==== 波形光栅化纯函数直测 (modernize-thread-model Task 2.6) ====
 # 直接编译 rasterize.cpp + 三个快照数据层源文件, 内部 stub xlog。
 # 无 View/QWidget 依赖: 直接构造 snapshot + 值参数, 用 QImage 承载 QPainter
@@ -314,6 +327,16 @@ target_include_directories(test_rasterize PRIVATE
 # 静态阅读猜测。依赖链同 test_rasterize（纯数据层 + QtGui, 无 QWidget）。
 # 强制 -O2: 成本数据必须反映 Release 行为, 否则 DEBUG(-O0) 的绝对耗时会被放大
 # 数倍而失去决策价值（相对缩放趋势不受构建类型影响）。
+#
+# 【默认不构建/不注册】本用例断言的是**墙钟耗时预算**：并行跑全量 ctest 时 CPU
+# 争用会让它超预算而必然误报失败（单独跑约 25s 可过）。它只是当初定位瓶颈用的
+# 一次性量化工具，不是回归门禁 —— 每次都误报会淹没真正的失败信号。
+# 需要测量时用：cmake -DPXVIEW_BUILD_RENDER_COST_TEST=ON .. && ninja test_logic_render_cost
+option(PXVIEW_BUILD_RENDER_COST_TEST
+    "构建墙钟耗时的渲染成本量化用例 test_logic_render_cost（默认关闭，见上方说明）"
+    OFF)
+
+if(PXVIEW_BUILD_RENDER_COST_TEST)
 pv_add_qtest(test_logic_render_cost
     view/test_logic_render_cost.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/view/renderer/rasterize.cpp
@@ -334,6 +357,7 @@ target_include_directories(test_logic_render_cost PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 target_compile_options(test_logic_render_cost PRIVATE -O2)
+endif()
 
 # ==== LogicSnapshot raw 存储路径 (P5 diff+ctz 毛刺滤波) ====
 # 直接编译 raw 数据层源文件 (不链接 pxview-data), 内部 stub xlog.
