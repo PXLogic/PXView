@@ -98,7 +98,6 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -129,15 +128,23 @@ jobs:
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
-              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
-              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
-          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
+
+      # 把解析出的版本号写进构建文件（工具：tools/bump_version.py）：
+      #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
+      #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
+      #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      - name: Stamp version into build files
+        run: |
+          PY="$(command -v python3 || command -v python)"
+          "$PY" tools/bump_version.py "${{ steps.version.outputs.value }}"
 
       - name: Install Python 3.14 via deadsnakes PPA
         run: |
@@ -228,12 +235,9 @@ jobs:
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
-          # DS_VERSION_SUFFIX 来自 Resolve version（dev 上是 -rcN，正式版为空）：
-          # 只影响 App 内显示的版本串，数字字段与 macOS bundle 版本不受影响。
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
-            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
@@ -428,7 +432,6 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -459,15 +462,23 @@ jobs:
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
-              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
-              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
-          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
+
+      # 把解析出的版本号写进构建文件（工具：tools/bump_version.py）：
+      #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
+      #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
+      #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      - name: Stamp version into build files
+        run: |
+          PY="$(command -v python3 || command -v python)"
+          "$PY" tools/bump_version.py "${{ steps.version.outputs.value }}"
 
       - name: Install dependencies via Homebrew
         env:
@@ -519,7 +530,6 @@ jobs:
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
             -DENABLE_TAURI=ON \
-            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_INSTALL_PREFIX=../install.dir
@@ -914,7 +924,6 @@ jobs:
           # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SUFFIX=""
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -945,15 +954,23 @@ jobs:
                        "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                        --jq '.[].tag_name' 2>/dev/null | grep -c "^${BASE}-rc" || true)
               VER="${BASE}-rc${RC_N:-0}"
-              # 同一后缀也传给 CMake，让 App 内显示的版本号一致（正式版为空）。
-              SUFFIX="-rc${RC_N:-0}"
             else
               VER="${BASE}"
             fi
           fi
           echo "value=${VER}" >> "$GITHUB_OUTPUT"
-          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${VER}"
+
+      # 把解析出的版本号写进构建文件（工具：tools/bump_version.py）：
+      #   CMakeLists 的数字字段（进 config.h / CPack，必须是数字）、
+      #   DS_VERSION_SUFFIX（App 内显示的版本串：About / --version / MCP / 日志）、
+      #   window_nisi.nsi 默认值、web/package.json、web/src-tauri 的 Cargo.toml 与
+      #   tauri.conf.json。dev 上版本号形如 1.6.6-rc0，脚本会拆成“数字 1.6.6 + 后缀
+      #   -rc0”，所以 CPack 与 macOS CFBundleVersion 仍是纯数字（详见脚本头部）。
+      - name: Stamp version into build files
+        run: |
+          PY="$(command -v python3 || command -v python)"
+          "$PY" tools/bump_version.py "${{ steps.version.outputs.value }}"
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v6
@@ -991,7 +1008,6 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
-            -DDS_VERSION_SUFFIX="${{ steps.version.outputs.suffix }}" \
             -DCMAKE_INSTALL_PREFIX=../install.dir \
             -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd" \
             -DCARGO_EXECUTABLE="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin/cargo.exe" 2>/dev/null || echo /c/Users/runner/.cargo/bin/cargo.exe)" \

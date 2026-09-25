@@ -203,7 +203,7 @@ sync_opensource.ps1
 migrate_to_worktree.ps1
 
 # 版本/生成/迁移辅助脚本(开发辅助,不入库)
-bump_version.ps1
+# 注: 版本号脚本已改为 tools/bump_version.py, 由 CI 调用, 因此纳入 git 跟踪(不再忽略)
 generate_8b10b.py
 scripts/migrate_driver.py
 
