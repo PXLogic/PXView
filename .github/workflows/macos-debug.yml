@@ -1,40 +1,47 @@
 #===============================================================================
 #= macOS 崩溃诊断工作流 (lldb backtrace, 复用 build.yml 的 DMG)
 #-------------------------------------------------------------------------------
-# 目的: 取回「PXView Build」最近一次构建出的 macOS DMG, 在本地(机器)挂载后
-#       用 lldb 跑 headless 启动测试, 在崩溃点自动抓取调用堆栈。
+# 目的: 取回「PXView Build」构建出的 macOS DMG, 挂载后直接用 lldb 跑 headless
+#       启动测试, 在崩溃点自动抓取调用堆栈。
 #
 # 为什么用 lldb 而不是 gdb:
 #   - macOS 上 gdb 需要额外 codesign, 且非 Apple 分发, 基本不可用;
 #   - lldb 是 Apple 官方 (clang/LLVM) 调试器, macos-15 runner 自带。
 #
-# 产物来源 (2026-09-26 重构):
-#   本工作流 **不再自行编译**, 而是复用 build.yml 的产物 —— 结构参照
-#   release-ci.yml 的 publish-nightly: 用 `gh run list --workflow build.yml`
-#   定位 run, 再用 actions/download-artifact@v8 拉取 macOS artifact。
-#   好处: 省掉 Homebrew + ninja + macdeployqt 的整套编译(约 40 分钟),
-#         job 只剩「下载 → 挂载 → lldb → 上传」。
+# 两个 job 的分工 (2026-09-26 重构):
 #
-#   ⚠️ 代价(务必知悉): build.yml 打包用的是 **Release** 编译, 二进制里没有
-#      DWARF 调试信息。因此 lldb 里:
-#        - 函数名靠 Mach-O 动态符号表仍能解析 (能定位到具体函数);
-#        - **没有**源码文件:行号, 也读不到局部变量 (frame variable 会是空);
-#        - 静态函数/匿名命名空间内的函数可能显示为无符号(裸地址)。
-#      这与本工作流原先自行 RelWithDebInfo 编译时的体验不同。如果某次崩溃
-#      必须精确到行号/局部变量, 请改用手动触发 build.yml 时指定带符号的构建,
-#      或临时恢复一个 RelWithDebInfo 编译分支。
+#   Job 1  await-build   (ubuntu-24.04, 便宜)
+#     定位 build.yml 的 run, 然后**轮询等待** macOS artifact 就绪。
+#     这一步刻意不放在 macOS runner 上: build.yml 的 mac job 含 fx2lafw 固件、
+#     全量编译、Web UI、Tauri(Rust) 构建、macdeployqt、签名、hdiutil, 整轮
+#     40~60 分钟; 在 macOS runner 上干等会把昂贵额度全烧在 sleep 上。
+#
+#   Job 2  macos-debug   (macos-15)
+#     拿到 run_id 后下载 artifact → 挂载 DMG → lldb 抓堆栈。只做这几件事,
+#     所以 timeout 可以压得很低。
+#
+# 等待的是「macOS artifact 就绪」而不是「整个 run 结束」: build.yml 里 mac 与
+# windows 是两个并行 job, 等整个 run 结束会白等 windows 那几十分钟。
+# artifact 一出现就开工; 若 run 已结束却没有该 artifact, 立即明确报错。
+#
+# ⚠️ 代价(务必知悉): build.yml 打包用的是 **Release** 编译, 二进制里没有
+#    DWARF 调试信息。因此 lldb 里:
+#      - 函数名靠 Mach-O 符号表仍能解析 (能定位到具体函数);
+#      - **没有**源码文件:行号, 也读不到局部变量 (frame variable 会是空);
+#      - 静态函数/匿名命名空间内的函数可能显示为裸地址。
+#    这与本工作流原先自行 RelWithDebInfo 编译时的体验不同。需要精确到行号/
+#    局部变量时, 请改用手动触发 build.yml 并选择带符号的构建。
 #
 # 触发方式:
 #   - 手动: Actions → 选本工作流 → Run workflow
-#     run_id  : 留空 = 取 build.yml 最新一次 run; 也可填具体 run 的 ID
-#     ref     : 拉取产物时 checkout 的 ref (仅用于日志/比对, 不影响产物)
-#     wait_seconds: 不崩溃时等多久后 SIGTERM 收尾 (0 = 一直等)
+#     run_id           : 留空 = 取 build.yml 最近一次 run; 也可填具体 run 的 ID
+#     max_wait_minutes : 等待 artifact 出现的最长分钟数 (默认 90, 0 = 不等待)
+#     wait_seconds     : 程序不崩溃时等多久后 SIGTERM 收尾 (0 = 一直等)
 #===============================================================================
 
 name: macOS Debug (lldb backtrace)
 
-# 默认不自动触发：本工作流会占用 macos-15 runner 跑 lldb（虽然不再编译，
-# 但下载 ~130MB DMG + 挂载 + 运行仍需数分钟）。需要时手动 dispatch。
+# 默认不自动触发：本工作流会在 macOS runner 上跑 lldb。需要时手动 dispatch。
 # 如需恢复 push 触发，把下面注释掉的 push 段恢复即可。
 on:
   # push:
@@ -46,11 +53,11 @@ on:
         required: false
         type: string
         default: ''
-      ref:
-        description: 'Branch/tag/commit SHA to check out (empty = default branch)'
+      max_wait_minutes:
+        description: '等待 macOS artifact 出现的最长分钟数 (0 = 不等待，只看当前状态)'
         required: false
-        type: string
-        default: ''
+        type: number
+        default: 90
       wait_seconds:
         description: 'Seconds to wait for the crash before SIGTERM (0 = wait forever)'
         required: false
@@ -58,31 +65,39 @@ on:
         default: 30
 
 jobs:
-  macos-debug:
-    runs-on: macos-15
-    timeout-minutes: 60
+  # ============================================================
+  # Job 1: 定位 build.yml 的 run, 等它的 macOS artifact 就绪
+  # ============================================================
+  await-build:
+    name: Await macOS artifact
+    runs-on: ubuntu-24.04
+    # 必须大于 max_wait_minutes 的上限(默认 90), 否则 job 会被先杀掉;
+    # 若把 max_wait_minutes 调到 100 以上, 这里要一起调。
+    timeout-minutes: 120
     permissions:
       contents: read
-      actions: read     # 读取 build.yml 的 run 与 artifacts
+      actions: read     # 读 build.yml 的 run 与 artifacts
+    outputs:
+      run_id: ${{ steps.await.outputs.run_id }}
     steps:
-      # ── 1. 定位 build.yml 的 run ────────────────────────────────
-      # 与 release-ci.yml 的 publish-nightly 同一套做法: 不 checkout 也能查,
-      # 但 gh 命令必须显式带 --repo (没有 git remote 可推断仓库)。
-      # 注意这里**不做**「等它跑完」的门槛: 本工作流是事后诊断, 只要产物存在
-      # 就能用; run 还没结束 / 失败了也无妨, 缺 artifact 时下一步会明确报错。
-      - name: Resolve source run
-        id: src
+      # 不 checkout: 全程走 gh API, 不需要工作区。
+      # 注意本 job 没有 git remote 可推断仓库, 所有 gh 命令都要显式 --repo。
+      - name: Resolve run and await its macOS artifact
+        id: await
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
+          MAX_WAIT_MIN: ${{ github.event.inputs.max_wait_minutes }}
         run: |
-          if [ -n "$INPUT_RUN_ID" ]; then
-            RUN_ID="$INPUT_RUN_ID"
+          set -euo pipefail
+
+          # ── 1. 定位 run ──────────────────────────────────────────────
+          if [ -n "${INPUT_RUN_ID:-}" ]; then
+            RUN_ID="${INPUT_RUN_ID}"
             echo "使用手动指定的 run: ${RUN_ID}"
           else
             # 默认按创建时间倒序 → 第一条即最近一次 PXView Build。
-            # 不过滤 conclusion: 失败的 run 也可能已经上传了 macOS artifact,
-            # 诊断时恰恰可能是想看它。
+            # 不过滤 conclusion: 失败的 run 也可能已上传 macOS artifact。
             RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" \
                        --workflow build.yml --limit 1 \
                        --json databaseId --jq '.[0].databaseId // empty')
@@ -93,25 +108,120 @@ jobs:
             fi
             echo "自动选中最近一次 build.yml run: ${RUN_ID}"
           fi
-          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
 
-          # 附带输出该 run 的元信息, 方便在日志里核对「拿的到底是哪次构建」
+          # 立刻验证 run 存在 —— 否则后面轮询会一直拿不到状态, 白等到超时
+          if ! gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json status >/dev/null 2>&1; then
+            echo "ERROR: run ${RUN_ID} 不存在, 或当前 token 无权访问。" >&2
+            echo "       检查 run_id 是否正确(纯数字), 以及它是否属于本仓库。" >&2
+            exit 1
+          fi
+
+          # 该 run 的基本信息, 方便在日志里核对「等的是哪次构建」
+          echo "--- 目标 run 信息 ---"
           gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --json displayTitle,headBranch,headSha,status,conclusion,createdAt \
-            --template '{{.displayTitle}}{{"\n"}}branch={{.headBranch}} sha={{.headSha}}{{"\n"}}status={{.status}} conclusion={{.conclusion}}{{"\n"}}created={{.createdAt}}{{"\n"}}' \
-            2>/dev/null || echo "(无法读取 run 元信息, 继续)"
+            --template '{{.displayTitle}}{{"\n"}}  branch={{.headBranch}}  sha={{.headSha}}{{"\n"}}  status={{.status}}  conclusion={{.conclusion}}{{"\n"}}  created={{.createdAt}}{{"\n"}}' \
+            2>/dev/null || echo "  (无法读取 run 元信息, 继续)"
 
-      # ── 2. 取回 macOS artifact ──────────────────────────────────
+          # 写进 outputs 供 Job 2 下载用。放在这里而不是等完之后: 即使等待
+          # 超时退出, 这个值也已可用(便于排查)。
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+          # ── 2. 轮询等待 macOS artifact ───────────────────────────────
+          MAX_WAIT_MIN="${MAX_WAIT_MIN:-90}"
+          # 非数字会让下面的 $(( )) 算术展开直接报错退出(set -e 下不是条件
+          # 上下文), 所以先兜成默认值。number 类型输入理论上给的一定是数字,
+          # 但 dispatch 的 YAML 空值可能变成空串。
+          case "$MAX_WAIT_MIN" in
+            ''|*[!0-9]*) MAX_WAIT_MIN=90 ;;
+          esac
+          MAX_WAIT=$(( MAX_WAIT_MIN * 60 ))
+          INTERVAL=60          # 秒; 60s 兼顾及时性与 API 调用量
+          PATTERN='PXView-macOS-ARM64-'
+          START=$SECONDS
+
+          echo ""
+          echo "=== 等待 macOS artifact (pattern: ${PATTERN}*, 上限 ${MAX_WAIT_MIN} 分钟) ==="
+
+          while :; do
+            # 先看 artifact —— 这是唯一真正的开工条件
+            ART_NAMES=$( { gh api --paginate \
+                             "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+                             --jq '.artifacts[].name' 2>/dev/null \
+                           | grep "^${PATTERN}"; } || true )
+            if [ -n "$ART_NAMES" ]; then
+              echo "✅ macOS artifact 已就绪 (等待 $(( SECONDS - START ))s):"
+              echo "$ART_NAMES" | sed 's/^/     /'
+              break
+            fi
+
+            # 没有 artifact 时看 run 是否已结束 —— 结束了就永远不会再有
+            INFO=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                     --json status,conclusion \
+                     --jq '.status + " " + (.conclusion // "-")' 2>/dev/null \
+                   || echo "unknown -")
+            ST="${INFO%% *}"
+            CON="${INFO##* }"
+            if [ "$ST" = "completed" ]; then
+              echo "" >&2
+              echo "ERROR: build.yml run ${RUN_ID} 已结束 (conclusion=${CON})," >&2
+              echo "       但没有 ${PATTERN}* 的 artifact。" >&2
+              echo "       常见原因: 那次构建没勾 mac 平台 / macOS job 在打包前就失败了。" >&2
+              echo "       该 run 现有的 artifacts:" >&2
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+                --jq '.artifacts[] | "         " + .name' >&2 2>/dev/null \
+                || echo "         (读取失败或无 artifact)" >&2
+              echo "       可改填其它 run_id, 或先跑一次 build.yml 的 mac 平台。" >&2
+              exit 1
+            fi
+
+            # max_wait_minutes=0 → 不等待, 只看当前状态
+            if [ "$MAX_WAIT_MIN" -eq 0 ] 2>/dev/null; then
+              echo "" >&2
+              echo "ERROR: max_wait_minutes=0(不等待), 且当前尚无 macOS artifact。" >&2
+              echo "       run 状态: ${ST}; 稍后重跑, 或给一个正的等待分钟数。" >&2
+              exit 1
+            fi
+
+            if [ $(( SECONDS - START )) -ge "$MAX_WAIT" ]; then
+              echo "" >&2
+              echo "ERROR: 等待 ${MAX_WAIT_MIN} 分钟后仍未出现 macOS artifact。" >&2
+              echo "       run 状态: ${ST} (仍在进行中)。" >&2
+              echo "       若构建确实更慢, 请调大 max_wait_minutes(同时注意 Job 1 的 timeout-minutes)。" >&2
+              exit 1
+            fi
+
+            echo "[$(( SECONDS - START ))s] run=${RUN_ID} status=${ST} — 尚无 macOS artifact, ${INTERVAL}s 后重试"
+            sleep "$INTERVAL"
+          done
+
+          echo ""
+          echo "=== 产物已就绪, 交给 macos-debug job ==="
+
+  # ============================================================
+  # Job 2: 下载 DMG, 挂载后用 lldb 抓崩溃堆栈
+  # ============================================================
+  macos-debug:
+    name: lldb backtrace
+    needs: await-build
+    runs-on: macos-15
+    # 只做「下载 + 挂载 + lldb + 上传」, 不编译, 所以可以压得很低
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read     # download-artifact 跨 run 下载需要
+    steps:
+      # ── 1. 取回 macOS artifact ──────────────────────────────────
       # artifact 名形如 PXView-macOS-<arch>-<version> (见 build.yml 的
       # "Upload DMG Artifact"), 内容是 install.dir/*.dmg 单文件。
       # pattern 用 **-ARM64- 精确段**, 不写 PXView-macOS-*: 后者会把将来任何
       # 以 PXView-macOS 开头的 artifact 一起拉下来(如新增 x86_64 矩阵项),
       # 且下面对 DMG 的挑选就成了不确定的目录遍历顺序。
       # merge-multiple=false(默认) → 每个 artifact 解到 dl/<artifact-name>/。
-      - name: Download macOS DMG from that run
+      - name: Download macOS DMG from the awaited run
         uses: actions/download-artifact@v8
         with:
-          run-id: ${{ steps.src.outputs.run_id }}
+          run-id: ${{ needs.await-build.outputs.run_id }}
           pattern: PXView-macOS-ARM64-*
           path: dl
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -128,8 +238,9 @@ jobs:
           # bash 3.2(macOS 自带) 没有 mapfile/readarray, 用 find 计数即可。
           COUNT=$(find dl -type f -name '*.dmg' | wc -l | tr -d ' ')
           if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: 在 run ${{ steps.src.outputs.run_id }} 的 artifact 里没找到 .dmg。" >&2
-            echo "       可能那次 build 的 macOS 平台没跑、或失败在打包前。" >&2
+            echo "ERROR: 在 run ${{ needs.await-build.outputs.run_id }} 的 artifact 里没找到 .dmg。" >&2
+            echo "       Job 1 已确认该 run 存在 macOS artifact —— 若这里为空," >&2
+            echo "       说明下载环节出了问题(权限/网络), 或 artifact 已过期被清理。" >&2
             echo "       已下载内容:" >&2
             ls -R dl 2>/dev/null | head -50 >&2 || true
             exit 1
@@ -145,16 +256,7 @@ jobs:
           echo "DMG = ${DMG} ($(du -h "$DMG" | cut -f1))"
           echo "path=${DMG}" >> "$GITHUB_OUTPUT"
 
-      # ── 3. checkout（仅为拿到诊断辅助脚本/版本文件, 非必需构建）──
-      - name: Checkout PXView repo (for diagnostics only)
-        uses: actions/checkout@v7
-        continue-on-error: true
-        with:
-          ref: ${{ github.event.inputs.ref }}
-          submodules: false
-          persist-credentials: false
-
-      # ── 4. 挂载 DMG, 取出 .app ─────────────────────────────────
+      # ── 2. 挂载 DMG, 取出 .app ─────────────────────────────────
       - name: Mount DMG and extract .app
         run: |
           set -e
@@ -249,7 +351,7 @@ jobs:
             echo "  ⚠️ 无 dwarfdump, 跳过自查"
           fi
 
-      # ── 5. lldb batch 跑 headless, 崩溃即抓堆栈 ────────────────
+      # ── 3. lldb batch 跑 headless, 崩溃即抓堆栈 ────────────────
       - name: Run headless under lldb and capture crash backtrace
         env:
           WAIT_SECONDS: ${{ github.event.inputs.wait_seconds || 30 }}
@@ -312,15 +414,14 @@ jobs:
           cp /tmp/lldb-headless.log /tmp/diag/lldb-headless.log 2>/dev/null || true
           cp ~/Library/Logs/DiagnosticReports/PXView-*.ips /tmp/diag/ 2>/dev/null || true
           cp "$HOME/Library/Logs/PXlogicV20/PXView/PXView.log" /tmp/diag/PXView.log 2>/dev/null || true
-          cp "$HOME/AppData/Roaming/PXlogicV20/PXView/PXView.log" /tmp/diag/PXView.log 2>/dev/null || true
           ls -la /tmp/diag/
 
-      # ── 6. 上传诊断产物 ────────────────────────────────────────
+      # ── 4. 上传诊断产物 ────────────────────────────────────────
       - name: Upload lldb backtrace artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lldb-backtrace-${{ steps.src.outputs.run_id }}
+          name: lldb-backtrace-${{ needs.await-build.outputs.run_id }}
           path: |
             /tmp/diag/*.log
             /tmp/diag/*.ips
