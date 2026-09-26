@@ -53,6 +53,14 @@ jobs:
       - name: Run config key type audit
         run: python3 tools/audit_config_types.py
 
+      # 可移植整数类型闸门：禁止 static_cast<unsigned long> / (unsigned long)。
+      # `unsigned long` 在 LP64(Linux) 是 64 位、在 LLP64(Windows) 只有 32 位；
+      # 2026-09 的 ruler_format.cpp 事故（皮秒数在 Windows 上被按 2^32 截断，光标
+      # 时间错乱）就是这类"消 -Wconversion 警告式"的显式窄化造成的。编译器/
+      # clang-tidy/UBSan 都不报显式 cast，只能源码级拦。详见脚本头注释。
+      - name: Run portable integer type audit
+        run: python3 tools/audit_portable_int_types.py
+
   linux:
     name: Linux Installer (x86_64)
     if: ${{ github.event.inputs.targets == 'linux' || github.event.inputs.targets == 'both' || github.event.inputs.targets == 'all' || github.event_name == 'push' }}
