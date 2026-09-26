@@ -95,15 +95,13 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
+          # rc 序号经 GitHub REST API（curl）取得既有标签（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
-          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
-          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
-          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
-          # export 无害；三份 Resolve version 步骤保持逐字节一致。
-          export PATH="/c/Program Files/GitHub CLI:$PATH"
+          # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
+          #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
+          # PXView_v<base>-rc.N 标签后取最大值 +1。
+
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -134,14 +132,20 @@ jobs:
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              TAGS=$(gh api --paginate \
-                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name') || {
-                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+              _TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+              _AUTH=()
+              if [ -n "$_TOKEN" ]; then
+                _AUTH=(-H "Authorization: Bearer $_TOKEN")
+              fi
+              _BODY=$(curl -fsSL "${_AUTH[@]}" \
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              TAGS=$(printf '%s\n' "$_BODY" \
+                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
+                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
               LAST=$(printf '%s\n' "$TAGS" \
-                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
@@ -445,15 +449,13 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
+          # rc 序号经 GitHub REST API（curl）取得既有标签（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
-          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
-          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
-          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
-          # export 无害；三份 Resolve version 步骤保持逐字节一致。
-          export PATH="/c/Program Files/GitHub CLI:$PATH"
+          # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
+          #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
+          # PXView_v<base>-rc.N 标签后取最大值 +1。
+
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -484,14 +486,20 @@ jobs:
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              TAGS=$(gh api --paginate \
-                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name') || {
-                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+              _TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+              _AUTH=()
+              if [ -n "$_TOKEN" ]; then
+                _AUTH=(-H "Authorization: Bearer $_TOKEN")
+              fi
+              _BODY=$(curl -fsSL "${_AUTH[@]}" \
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              TAGS=$(printf '%s\n' "$_BODY" \
+                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
+                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
               LAST=$(printf '%s\n' "$TAGS" \
-                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
@@ -1092,15 +1100,13 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
+          # rc 序号经 GitHub REST API（curl）取得既有标签（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
-          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
-          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
-          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
-          # export 无害；三份 Resolve version 步骤保持逐字节一致。
-          export PATH="/c/Program Files/GitHub CLI:$PATH"
+          # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
+          #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
+          # PXView_v<base>-rc.N 标签后取最大值 +1。
+
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -1131,14 +1137,20 @@ jobs:
               #   * 「-rc.」这个点是必须的：点让序号成为独立的数字标识符、按数值比较
               #     （rc.2 < rc.10）；不加点会退化成字典序（"rc10" < "rc2"，序号过两
               #     位数就排错）。
-              TAGS=$(gh api --paginate \
-                       "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                       --jq '.[].tag_name') || {
-                echo "ERROR: 查询既有 Release 标签失败，无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
+              _TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+              _AUTH=()
+              if [ -n "$_TOKEN" ]; then
+                _AUTH=(-H "Authorization: Bearer $_TOKEN")
+              fi
+              _BODY=$(curl -fsSL "${_AUTH[@]}" \
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              TAGS=$(printf '%s\n' "$_BODY" \
+                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
+                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
               LAST=$(printf '%s\n' "$TAGS" \
-                       | grep -oE "^PXView_v${BASE}-rc\.[0-9]+$" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
             else
