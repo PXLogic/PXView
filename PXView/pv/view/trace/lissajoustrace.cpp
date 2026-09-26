@@ -126,7 +126,7 @@ void LissajousTrace::paint_mid(QPainter &p, int left, int right, QColor fore, QC
         int left = _border.left();
         int bottom = _border.bottom();
         double scale = _border.width() / 255.0;
-        uint64_t sample_count = static_cast<unsigned long>(static_cast<double>(_data->get_sample_count()) * min(_percent / 100.0, 1.0));
+        uint64_t sample_count = static_cast<uint64_t>(static_cast<double>(_data->get_sample_count()) * min(_percent / 100.0, 1.0));
         if (sample_count == 0)
             return;
 

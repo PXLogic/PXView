@@ -260,7 +260,7 @@ bool SpectrumTrace::measure(const QPoint &p)
     const double view_off = full_size * _offset;
     const double view_size = full_size*_scale;
     const double sample_per_pixels = view_size/window.width();
-    _hover_index = static_cast<unsigned long>(std::round(p.x() * sample_per_pixels + view_off));
+    _hover_index = static_cast<uint64_t>(std::round(p.x() * sample_per_pixels + view_off));
 
     if (_hover_index < full_size)
         _hover_en = true;

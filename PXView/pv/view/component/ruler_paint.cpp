@@ -76,7 +76,7 @@ void paint_logic_tick_mark(QPainter &p, IRenderView &view, const QRect &rect,
     double tick_period = 0;
     int64_t offset = view.offset();
 
-    const uint64_t cur_period_scale = static_cast<unsigned long>(ceil((scale * min_width) / abs_min_period));
+    const uint64_t cur_period_scale = static_cast<uint64_t>(ceil((scale * min_width) / abs_min_period));
 
     min_period = static_cast<double>(cur_period_scale) * abs_min_period;
 

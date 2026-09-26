@@ -201,8 +201,8 @@ void LogicSignal::paint_caps(QPainter &p, QLineF *const lines,
            edges.begin();
        i != (edges.end() - 1); i++)
     if ((*i).second == level) {
-      curX = static_cast<unsigned long>((static_cast<double>((*i).first) / samples_per_pixel - pixels_offset) + x_offset);
-      nxtX = static_cast<unsigned long>((static_cast<double>((*(i + 1)).first) / samples_per_pixel - pixels_offset) + x_offset);
+      curX = static_cast<uint64_t>((static_cast<double>((*i).first) / samples_per_pixel - pixels_offset) + x_offset);
+      nxtX = static_cast<uint64_t>((static_cast<double>((*(i + 1)).first) / samples_per_pixel - pixels_offset) + x_offset);
       if (nxtX > curX)
         *line++ = QLineF(static_cast<double>(curX), y_offset, static_cast<double>(nxtX), y_offset);
     }
@@ -301,7 +301,7 @@ bool LogicSignal::measure(const QPointF &p, uint64_t &index0, uint64_t &index1,
     }
     const uint64_t end = ring_count - 1;
     uint64_t index =
-        static_cast<unsigned long>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
+        static_cast<uint64_t>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
 
     if (index > end) {
       return false;
@@ -361,7 +361,7 @@ bool LogicSignal::is_by_edge(const QPointF &p, uint64_t &index, int radius) {
     const uint64_t end = ring_count - 1;
     const double pos =
         _data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x());
-    index = static_cast<unsigned long>(floor(pos + 0.5));
+    index = static_cast<uint64_t>(floor(pos + 0.5));
     if (index > end)
       return false;
 
@@ -420,7 +420,7 @@ bool LogicSignal::edge(const QPointF &p, uint64_t &index, int radius) {
     const uint64_t end = ring_count - 1;
     const double pos =
         _data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x());
-    index = static_cast<unsigned long>(floor(pos + 0.5));
+    index = static_cast<uint64_t>(floor(pos + 0.5));
     if (index > end)
       return false;
 
@@ -463,7 +463,7 @@ bool LogicSignal::edges(const QPointF &p, uint64_t start, uint64_t &rising,
   if (gap < get_totalHeight() * 0.5) {
     if (!_data)
       return false;
-    end = static_cast<unsigned long>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
+    end = static_cast<uint64_t>(_data->samplerate() * _view->scale() * (static_cast<double>(_view->offset()) + p.x()));
     return edges(end, start, rising, falling);
   }
   return false;

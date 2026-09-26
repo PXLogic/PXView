@@ -210,7 +210,7 @@ bool AnalogSignal::measure(const QPointF &p) {
   const double samplerate = static_cast<double>(_data_source->cur_snap_samplerate());
   const double samples_per_pixel = samplerate * scale;
 
-  _hover_index = static_cast<unsigned long>(floor((p.x() + static_cast<double>(pixels_offset)) * samples_per_pixel + 0.5));
+  _hover_index = static_cast<uint64_t>(floor((p.x() + static_cast<double>(pixels_offset)) * samples_per_pixel + 0.5));
   if (_hover_index >= _data->get_sample_count())
     return false;
 

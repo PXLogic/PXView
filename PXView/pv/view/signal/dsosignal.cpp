@@ -373,8 +373,8 @@ bool DsoSignal::load_settings() {
       return false;
     }
   } else {
-    vdiv = static_cast<unsigned long>(_model ? _model->vdiv_mv() : 0);
-    vfactor = static_cast<unsigned long>(_model ? _model->vfactor() : 1);
+    vdiv = static_cast<uint64_t>(_model ? _model->vdiv_mv() : 0);
+    vfactor = static_cast<uint64_t>(_model ? _model->vfactor() : 1);
   }
 
   // Clamp vfactor to at least 1 — saved waveform files may have factor=0
@@ -592,7 +592,7 @@ void DsoSignal::set_factor(uint64_t factor) {
         return;
       }
     } else {
-      prefactor = static_cast<unsigned long>(model ? model->vfactor() : 1);
+      prefactor = static_cast<uint64_t>(model ? model->vfactor() : 1);
     }
 
     if (prefactor != factor) {
@@ -643,7 +643,7 @@ uint64_t DsoSignal::get_factor() {
     uint64_t f = _vDial->get_factor();
     return f > 0 ? f : 1;
   }
-  return static_cast<unsigned long>(_model ? _model->vfactor() : 1);
+  return static_cast<uint64_t>(_model ? _model->vfactor() : 1);
 }
 
 // -- DsoTriggerConfig --
