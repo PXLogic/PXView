@@ -288,7 +288,11 @@ jobs:
             pxview-automation/src
           ls -lh testharness.tar.gz
           echo "--- 内容概览 ---"
-          tar tzf testharness.tar.gz | head -15
+          # 用 sed 而不是 head：head 数够行数就退出，tar 往已关闭的管道继续写
+          # 会得到 "stdout: write error"(退出码 2)，在 set -o pipefail 下把整个
+          # 步骤弄红（SIGPIPE 是竞态，CI 上真实发生过）。sed -n '1,15p' 读到
+          # EOF 才退出，写方结构上不可能拿到 EPIPE。wc 同理读整个输入，安全。
+          tar tzf testharness.tar.gz | sed -n '1,15p'
           echo "  ... 共 $(tar tzf testharness.tar.gz | wc -l) 项"
 
       - name: Upload test harness
