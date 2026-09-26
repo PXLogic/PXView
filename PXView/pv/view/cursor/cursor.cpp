@@ -110,7 +110,7 @@ QRect Cursor::get_label_rect(const QRect &rect, bool &visible, bool has_hoff)
 		static_cast<int>(_text_size.width() + kLabelPadding.width() * 2),
 		static_cast<int>(_text_size.height() + kLabelPadding.height() * 2));
     const int top = rect.height() - label_size.height() -
-		static_cast<int>(static_cast<float>(Cursor::Offset - Cursor::ArrowSize) - 0.5f);
+		static_cast<int>(static_cast<float>(Cursor::Offset + Cursor::ArrowSize) - 0.5f);
     const int height = label_size.height();
 
     visible = true;
