@@ -518,10 +518,13 @@ jobs:
           # 于 2027-12-11 移除；继续设置只会打 deprecation 警告。本项目安装的全部是
           # homebrew/core 官方 formula（官方 tap 永远受信任），无需关闭任何信任校验。
           #
-          # runner 镜像自带一些与构建无关的第三方 tap（历史上见过 aws/tap），
-          # `brew update` 会因此打印 "The following taps are not trusted" 噪音。
-          # 不要用 `brew trust <tap>` 去消音 —— 那等于把整个第三方 tap 交给 Homebrew
-          # 执行，比原来的全局开关更糟。直接 untap 掉即可（已装好的 formula 不受影响）。
+          # runner 镜像自带一些与构建无关的第三方 tap（见过 aws/tap、hashicorp/tap、
+          # azure/bicep），`brew update` 会因此打印 "The following taps are not
+          # trusted" 噪音。不要用 `brew trust <tap>` 去消音 —— 那等于把整个第三方
+          # tap 交给 Homebrew 执行，比原来的全局开关更糟。直接 untap 掉即可。
+          # 需要 --force：有的 tap 在镜像上已装了 formula（packer、bicep），普通
+          # untap 会 "Refusing to untap" 拒绝退出。--force 只删 tap 索引，已装的
+          # formula 在 Cellar 里原样保留，不影响本次构建。
           # 将来若确实需要第三方 formula，用 `brew trust --formula user/repo/formula`
           # 只信任该条目，而不是整个 tap。
           for t in $(brew tap); do
@@ -529,7 +532,7 @@ jobs:
               homebrew/*) continue ;;
             esac
             echo "Untapping unused third-party tap: $t"
-            brew untap "$t" || true
+            brew untap --force "$t" || true
           done
           brew update
           # 注意：不再安装 Homebrew 的 mimalloc —— 项目改用 vendored 子模块源码构建
@@ -734,6 +737,31 @@ jobs:
                 echo "Created Current symlink -> $(basename "$latest_ver")"
               fi
             fi
+
+            # ── 修 Python.app 存根的 Homebrew 绝对路径 ──
+            # Framework 里嵌套的 Resources/Python.app/Contents/MacOS/Python 是个
+            # 存根二进制，macdeployqt 不处理它，其对 libpython 的引用还是构建机上
+            # 的 /opt/homebrew/... 绝对路径 —— 用户机器（无 Homebrew）上一旦加载
+            # 就是 dlopen 失败（自检 2c 抓到的正是这一个文件）。把绝对引用改成
+            # @executable_path 相对引用（存根在 Versions/<ver>/Resources/Python.app/
+            # Contents/MacOS/ 下，往上 4 级就是 libpython 所在的 Versions/<ver>/），
+            # 然后 ad-hoc 重签（install_name_tool 会作废原签名；后面的逐层签名只
+            # 签 .dylib 和 .framework 主二进制，覆盖不到这个嵌套存根）。
+            while IFS= read -r stub; do
+              [ -n "$stub" ] || continue
+              LEAK_DEPS=$(otool -L "$stub" 2>/dev/null \
+                          | awk '/\/opt\/homebrew|\/usr\/local\/opt/ {print $1}')
+              [ -n "$LEAK_DEPS" ] || continue
+              echo "Fixing Homebrew absolute paths in stub: $stub"
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                install_name_tool -change "$dep" \
+                  "@executable_path/../../../../$(basename "$dep")" "$stub"
+                echo "  $dep -> @executable_path/../../../../$(basename "$dep")"
+              done <<< "$LEAK_DEPS"
+              codesign --force --sign - "$stub" 2>/dev/null || true
+            done < <(find "$BUNDLED_FW" -path '*/Python.app/Contents/MacOS/Python' \
+                       -type f 2>/dev/null)
           else
             echo "WARNING: Python.framework not found in bundle"
           fi
