@@ -292,6 +292,9 @@ public:
   bool zoom_animated(double steps, int anchor_px);
   // 是否正在跑缩放动画（motion-LOD 降精度栅格化的判定输入）。
   bool is_zoom_animating();
+  // 是否有通道正在跑 v_offset（让位/拖动）动画；用于让 motion-LOD 在拖动期间
+  // 也降精度栅格化，压低每帧重建 pixmap 的成本，对齐 PulseView 的跟手度。
+  bool is_v_offset_animating() override;
 
   /**
    * Sets the scale and offset.

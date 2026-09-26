@@ -992,16 +992,23 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
             const int y_snap = ((y + View::SignalSnapGridSize / 2) /
                                 View::SignalSnapGridSize) *
                                View::SignalSnapGridSize;
+            // 被拖通道【逐像素跟手】：visual 直接用光标连续位置 y，消除原本按
+            // SignalSnapGridSize(=10) 量化带来的"网格对齐"离散感，对齐 PulseView
+            // 的像素级平滑跟随。layout 目标仍量化到网格——make-way 重排与滚动刷新
+            // 只在量化值变化时才触发；但被拖通道的 visual 已写入缓存 pixmap，必须
+            // 每像素重建一次信号 pixmap 才能把它画到新位置（拖动动画帧走
+            // motion-LOD，已将每帧重建成本压低）。
+            t->set_visual_v_offset(y);
             if (y_snap != t->get_v_offset()) {
               _moveFlag = true;
-              // 拖动项必须【跟手】而不是动画：硬设两个坐标、不给动画延迟。
-              // 被拖项若也走动画，手指与通道之间会始终差一段距离。
-              t->force_to_v_offset(y_snap);
-              traces_moved();
+              // 拖动项 layout 目标硬设为量化值、不给动画延迟（视觉跟随由
+              // set_visual_v_offset 单独连续驱动）。
+              t->set_v_offset_no_visual_sync(y_snap);
+              // 其余通道滑开让位（纯视觉预览，不碰 view_index / 持久化）。
+              if (!dragged_trace)
+                dragged_trace = t;
             }
-            // 其余通道滑开让位（纯视觉预览，不碰 view_index / 持久化）。
-            if (!dragged_trace)
-              dragged_trace = t;
+            traces_moved();
           }
         }
       }

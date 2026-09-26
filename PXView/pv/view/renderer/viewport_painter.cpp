@@ -116,8 +116,10 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();
   pctx.show_glitch_overlay = _viewport->view().session().show_glitch_filter_overlay();
   pctx.hover_point = _viewport->view().hover_point();
-  // motion-LOD：与 paintSignals 同一判定（见该处注释）。
-  pctx.motion_frame = _viewport->view().is_zoom_animating();
+  // motion-LOD：与 paintSignals 同一判定（见该处注释）。除缩放动画外，让位/拖动
+  // 的 v_offset 动画期间也降精度栅格化，把每帧重建 pixmap 的成本压下来。
+  pctx.motion_frame = _viewport->view().is_zoom_animating() ||
+                      _viewport->view().is_v_offset_animating();
 
   p.save();
   p.translate(0, -_viewport->view().get_vOffset());
@@ -302,9 +304,10 @@ void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
   pctx.dso_trig_moved = _viewport->view().get_dso_trig_moved();
   pctx.show_glitch_overlay = _viewport->view().session().show_glitch_filter_overlay();
   pctx.hover_point = _viewport->view().hover_point();
-  // motion-LOD：缩放动画帧降低 toggle 上限，把每帧重建 pixmap 的栅格化成本
-  // 压下来。收尾帧 is_zoom_animating() 已为 false，走全精度。
-  pctx.motion_frame = _viewport->view().is_zoom_animating();
+  // motion-LOD：缩放/让位拖动动画帧降低 toggle 上限，把每帧重建 pixmap 的栅格化
+  // 成本压下来。收尾帧对应动画标志已为 false，走全精度。
+  pctx.motion_frame = _viewport->view().is_zoom_animating() ||
+                      _viewport->view().is_v_offset_animating();
 
   // P2: consume the viewport's decode-only paint flag (self-clearing). When
   // set, SignalPixmapPass skips the signal-pixmap rebuild and only blits the

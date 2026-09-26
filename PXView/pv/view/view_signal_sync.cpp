@@ -1400,8 +1400,11 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   make_way::layout(others, drag, anchor, 2 * View::SignalMargin, downward, ordered,
                    new_targets);
 
-  // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏。破坏了就是"某个通道
-  // 被让位逻辑弄丢/弄重"，表现为动画后整列错位，故显式校验。
+  // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏（见上）。该校验含
+  // 2×stable_sort + vector 全比较，挂在每帧跨网格的输入热路径上；Release（NDEBUG）
+  // 下关闭，避免把 O(n log n) 校验留在拖动热路径上拖累跟手度。Debug 仍保留以便
+  // 捕获"整列错位"类回归。
+#ifndef NDEBUG
   pxv_assert(ordered.size() == visible.size(), "make-way order size mismatch");
   {
     std::vector<Trace *> sorted = ordered;
@@ -1410,6 +1413,7 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
     std::stable_sort(expect.begin(), expect.end());
     pxv_assert(sorted == expect, "make-way order is not a permutation");
   }
+#endif
 
   // --- 4. 落地：先写 layout 目标（不动 visual），再启动动画 ---
   // 必须用 set_v_offset_no_visual_sync：普通 set_v_offset 在"无动画在跑"时

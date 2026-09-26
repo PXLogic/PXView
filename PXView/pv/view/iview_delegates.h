@@ -300,6 +300,9 @@ public:
   // final frame rebuilds at full quality. Defaults to false so a front-end
   // without the animation needs no implementation.
   virtual bool is_zoom_animating() { return false; }
+  // 是否有通道正在跑 v_offset（让位/拖动）动画；用于让 motion-LOD 在拖动期间
+  // 也降精度栅格化，压低每帧重建 pixmap 的成本。默认 false，前端无动画时无需实现。
+  virtual bool is_v_offset_animating() { return false; }
 
   // ---- Channel repositioning animation ----
   // Called once per animation frame by Trace::on_visual_v_offset_changed().

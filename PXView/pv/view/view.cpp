@@ -118,14 +118,14 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _device_agent = session->device();
 
   // Phase E: initialise the three delegate classes. Must happen before any
-  // call that forwards through the inline facades (e.g. headerWidth() �?
-  // get_traces() �? get_derived->_own_decode_traces() �? sync_derived_traces()).
+  // call that forwards through the inline facades (e.g. headerWidth() →
+  // get_traces() → get_derived->_own_decode_traces() → sync_derived_traces()).
   _layout = std::make_unique<ViewLayout>(this);
   _cursors = std::make_unique<ViewCursors>(this);
   _derived = std::make_unique<ViewDerivedTraces>(this);
   // Phase J: initialise the three new delegate classes (signal-sync /
   // glitch-filter / data-sync). Must happen before any call that forwards
-  // through the inline facades (e.g. signals_changed �? _signal_sync).
+  // through the inline facades (e.g. signals_changed → _signal_sync).
   _signal_sync = std::make_unique<ViewSignalSync>(this);
   _glitch_filter = std::make_unique<ViewGlitchFilter>(this);
   _data_sync = std::make_unique<ViewDataSync>(this);
@@ -146,7 +146,7 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
 connect(_viewport_change_timer, &QTimer::timeout, this,
 [this]() { emit visible_range_changed(); });
 
-// P1-A: Delayed view-update coalescing timer �? merges bursts of
+// P1-A: Delayed view-update coalescing timer — merges bursts of
 // viewport_update() calls into a single repaint at most once per 16ms
 // (~60 FPS).  This prevents UI stutter when the decode thread fires
 // many new_decode_data signals in rapid succession.
@@ -155,7 +155,7 @@ _delayed_view_update_timer->setSingleShot(true);
 _delayed_view_update_timer->setInterval(MaxViewAutoUpdateRateMs);
 connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
   if (_delayed_view_update_pending) {
-    // A full update was requested (e.g. zoom/scroll/resize/decode-done) �?
+    // A full update was requested (e.g. zoom/scroll/resize/decode-done) —
     // it supersedes any pending decode-only repaint.
     _delayed_view_update_pending = false;
     _decode_only_repaint_pending = false;
@@ -164,7 +164,7 @@ connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
 #endif
     viewport_update();
   } else if (_decode_only_repaint_pending) {
-    // P2: decode-growth repaint �? decode trace layer only, no signal-pixmap
+    // P2: decode-growth repaint — decode trace layer only, no signal-pixmap
     // rebuild (skips set_decode_dirty()).
     _decode_only_repaint_pending = false;
 #ifdef PXVIEW_DECODE_PERF
@@ -188,7 +188,7 @@ connect(_zoom_anim_timer, &QTimer::timeout, this, &View::on_zoom_anim_tick);
 // recorded in the perf log (EVENT_LAG_MAX). This distinguishes "main thread
 // blocked" from "decode threads busy" as the cause of perceived freezing.
 // P3-D6: also samples the whole-process CPU utilisation per tick (CPU_UTIL_MAX
-// in cores) �? high util alongside a large EVENT_LAG_MAX means the decode
+// in cores) → high util alongside a large EVENT_LAG_MAX means the decode
 // threads saturate the machine and starve the GUI thread.
 _event_lag_timer = new QTimer(this);
 _event_lag_timer->setInterval(100);
@@ -397,7 +397,7 @@ void View::set_data_source(pv::data::DataSource *source) {
   // Task C2.7: reconcile the View's rendering cursor list with the Core
   // CursorRegistry. This handles the headless -> GUI transition where MCP
   // added cursors to Core before the View existed. Safe to call on every
-  // data-source binding (idempotent �? only adds cursors that are missing).
+  // data-source binding (idempotent — only adds cursors that are missing).
   sync_cursors_from_core();
 }
 
@@ -463,17 +463,20 @@ void View::set_all_update(bool need_update) {
   _fft_viewport->set_need_update(need_update);
 }
 
-// ͨ�����Ŷ�����ÿ֡ˢ����ڣ�Trace::on_visual_v_offset_changed ���ã���
+// 通道重排动画的每帧刷新入口（Trace::on_visual_v_offset_changed 调用）。
 //
-// Ϊʲô�������� update()��SignalPixmapPass ���ź� pixmap �л��棬�ؽ�����
-// ���� viewport �� need_update ��־���� render_pass.cpp �� rebuild �ж�����
-// �����ڼ� scale/offset/signalHeight/vOffset ��û�䣬������ need_update��
-// �� pass ����"ֻ blit �ɻ���"�Ŀ�·�� ���� ����ͣ��ԭλ����������������������
-// ����������� set_all_update(true) ǿ���ؽ������� viewport �� header �ػ档
+// 为什么不能用裸 update()：SignalPixmapPass 对信号 pixmap 有缓存，重建条件
+// 包含 viewport 的 need_update 标志（见 render_pass.cpp 的 rebuild 判定）。
+// 动画期间 scale/offset/signalHeight/vOffset 都没变，若不置 need_update，
+// 该 pass 会走"只 blit 旧缓存"的快路径 —— 波形停在原位不动，动画看起来卡死。
+// 所以这里必须 set_all_update(true) 强制重建，再让 viewport 与 header 重绘。
 //
-// header ������ͨ����Ƭ���ǩ������������ pixmap ���棬������ update() ���ɡ�
+// header 画的是通道卡片与标签，且自身不做 pixmap 缓存，无条件 update() 即可。
 void View::request_animation_repaint() {
-  set_all_update(true);
+  // 拖动/让位动画只改 time 通道的 visual 偏移（逻辑波形像素未变），只让 time
+  // viewport 失效即可；不要再 set_all_update(true) 把 fft 也强制全量重建，否则
+  // 每帧都要顺带重光栅化 fft 通道，是相比 PulseView 卡顿的次因之一。
+  _time_viewport->set_need_update(true);
   if (_time_viewport)
     _time_viewport->update(UpdateEventType::UPDATE_EV_MS_MOVE);
   if (_header)
@@ -572,16 +575,16 @@ void View::mode_changed() { _data_sync->mode_changed(); }
 
 void View::signals_changed(const Trace *eventTrace) {
 #ifdef PXVIEW_DECODE_PERF
-  // P3-D5: timing candidate for the EVENT_LAG_MAX block �? full signal
+  // P3-D5: timing candidate for the EVENT_LAG_MAX block — full signal
   // relayout (normalize + group + layout_time_signals).
   const auto _op_t0 = std::chrono::steady_clock::now();
 #endif
 
-  // 防御性清�?:模式切换/加载文件/采集结束等路径会重建 _own_signals,
-  // �? Signal/Trace 对象被销毁后, Header/Viewport 缓存的拖�?/悬停/右键
-  // 上下文裸指针会悬�?,打开的毛刺滤波浮窗也可能引用�? LogicSignal�?
-  // 注意:通道高度拖拽(�? Header 命中)期间 mouseMove 也会调用本函数做增量
-  // 重排,此时必须保留活动拖拽状�?,故用 Header::mouse_is_down() 守卫�?
+  // 防御性清理:模式切换/加载文件/采集结束等路径会重建 _own_signals,
+  // 旧 Signal/Trace 对象被销毁后, Header/Viewport 缓存的拖拽/悬停/右键
+  // 上下文裸指针会悬垂,打开的毛刺滤波浮窗也可能引用旧 LogicSignal。
+  // 注意:通道高度拖拽(仅 Header 命中)期间 mouseMove 也会调用本函数做增量
+  // 重排,此时必须保留活动拖拽状态,故用 Header::mouse_is_down() 守卫。
   if (_header && !_header->mouse_is_down()) {
     _header->clear_interaction_state();
     if (auto *gfp = _glitch_filter->glitch_filter_popup()) {
@@ -711,9 +714,9 @@ int View::get_work_mode() const {
 
 bool View::is_logic_rendering_mode() const {
   // MSO (Mixed Signal Oscilloscope) = LOGIC + analog channels.
-  // Core �? SigSession 已将 LOGIC �? MSO 合并处理（sigsession.cpp:1605/1612），
-  // View 层所有原 `get_work_mode() == LOGIC` 的渲�?/交互分支应统一改用本谓词，
-  // �? MSO 模式继承 LOGIC 的全部行为（主题色板注入、滤波浮窗、信号分组等）�?
+  // Core 层 SigSession 已将 LOGIC 与 MSO 合并处理（sigsession.cpp:1605/1612），
+  // View 层所有原 `get_work_mode() == LOGIC` 的渲染/交互分支应统一改用本谓词，
+  // 让 MSO 模式继承 LOGIC 的全部行为（主题色板注入、滤波浮窗、信号分组等）。
   const int mode = get_work_mode();
   return mode == LOGIC || mode == MSO;
 }
@@ -806,7 +809,7 @@ viewport->update();
 
 void View::request_delayed_update() {
   // P1-A: If the timer is already running, the pending request will be
-  // serviced when it fires �? no need to restart it.  This naturally
+  // serviced when it fires — no need to restart it.  This naturally
   // coalesces all calls within a 16ms window into a single repaint.
   if (!_delayed_view_update_timer->isActive()) {
     _delayed_view_update_pending = true;
@@ -869,8 +872,8 @@ void View::reload() {
 void View::clear() {
   show_trig_cursor(false);
 
-  // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能�? nullptr�?
-  // 此时 work_mode 查询会失败。用 document 配置或默认值（�? DSO）避免警告刷屏�?
+  // 设备切换早期（CurrentDeviceChangePrev 阶段）_dev_handle 可能为 nullptr，
+  // 此时 work_mode 查询会失败。用 document 配置或默认值（非 DSO）避免警告刷屏。
   int mode = LOGIC;
   if (_data_sync->document_ptr() && _data_sync->document_ptr()->has_signal_config()) {
     mode = _data_sync->document_ptr()->get_signal_config().work_mode;
@@ -886,7 +889,7 @@ void View::clear() {
 }
 
 void View::reconstruct() {
-  // 同上：设备切换早期避免查询设�?
+  // 同上：设备切换早期避免查询设备
   int mode = LOGIC;
   if (_data_sync->document_ptr() && _data_sync->document_ptr()->has_signal_config()) {
     mode = _data_sync->document_ptr()->get_signal_config().work_mode;
@@ -1060,6 +1063,15 @@ bool View::zoom_animated(double steps, int anchor_px) {
 }
 
 bool View::is_zoom_animating() { return _layout->zoom_animating(); }
+
+bool View::is_v_offset_animating() {
+  std::vector<Trace *> all;
+  get_traces(ALL_VIEW, all);
+  for (auto t : all)
+    if (t && t->is_v_offset_animating())
+      return true;
+  return false;
+}
 
 void View::on_zoom_anim_tick() {
   // tick 内部完成一帧的 scale/offset 落地与重绘（走 zoom() 同一条收尾路径，
