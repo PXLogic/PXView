@@ -95,9 +95,15 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
+          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
+          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
+          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
+          # export 无害；三份 Resolve version 步骤保持逐字节一致。
+          export PATH="/c/Program Files/GitHub CLI:$PATH"
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -439,9 +445,15 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
+          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
+          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
+          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
+          # export 无害；三份 Resolve version 步骤保持逐字节一致。
+          export PATH="/c/Program Files/GitHub CLI:$PATH"
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -1052,9 +1064,15 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          # gh 列 Release 要用；只为数一下该基础版本已有多少 rc（见下面的 RC_N）。
+          # gh 取既有 rc Release 的标签序号（见下面 dev 分支的处理）。
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Windows job 的 shell 是 msys2：setup-msys2 建的是干净 MSYS 环境，不
+          # 继承 runner 的 Windows PATH，而 GitHub 托管 runner 的 gh 装在
+          # C:\Program Files\GitHub CLI（msys 路径 /c/Program Files/GitHub CLI），
+          # 不加进 PATH 会 "gh: command not found"。Linux/macOS 上该路径不存在，
+          # export 无害；三份 Resolve version 步骤保持逐字节一致。
+          export PATH="/c/Program Files/GitHub CLI:$PATH"
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
