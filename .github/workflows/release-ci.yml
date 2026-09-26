@@ -1195,6 +1195,22 @@ jobs:
           if [ -z "$SHA" ]; then
             SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
             echo "publish_sha 留空 → 取 dev 最新提交"
+          else
+            # gh run list 的 --commit 过滤器只认 40 位完整 SHA：短 SHA 不做
+            # 展开，静默返回空列表（退出码 0），下游会误报「找不到该提交的
+            # Build run」——而 REST API 恰恰接受短 SHA，于是本步能过、第 2 步
+            # 却失败。用户从 UI 或 git log --oneline 抄来的多是短 SHA，所以
+            # 这里用 REST 统一解析成完整 SHA，后续步骤一概使用全量值。
+            RESOLVED=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" \
+                         --jq '.sha' 2>/dev/null || true)
+            if [ -z "$RESOLVED" ]; then
+              echo "ERROR: 无法解析提交 ${SHA}（仓库 ${GITHUB_REPOSITORY} 里没有这个提交）" >&2
+              exit 1
+            fi
+            if [ "$RESOLVED" != "$SHA" ]; then
+              echo "输入 ${SHA} → 解析为完整 SHA ${RESOLVED}"
+            fi
+            SHA="$RESOLVED"
           fi
           STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${SHA}...dev" \
                      --jq '.status' 2>/dev/null || true)
@@ -1219,17 +1235,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SHA="${{ steps.target.outputs.sha }}"
+          # SHA 已由上一步规整为 40 位全量：gh run list 的 --commit 只认全量
+          # SHA，短 SHA 会静默返回空列表（见 Resolve target commit 的注释）。
           RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml \
                      --commit "$SHA" --event push --limit 1 \
                      --json databaseId --jq '.[0].databaseId // empty')
           if [ -z "$RUN_ID" ]; then
-            echo "ERROR: 找不到 ${SHA} 的 PXView Build run（还没打包/自检过，不能发布）" >&2
+            echo "ERROR: 找不到 ${SHA} 的 PXView Build push run。" >&2
+            echo "       该提交尚未触发过 build.yml（未推送到 dev / 未打包自检），不能发布。" >&2
+            echo "       确认：gh run list --repo ${GITHUB_REPOSITORY} --workflow build.yml --limit 5" >&2
             exit 1
           fi
           CONC=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
                    --json conclusion --jq '.conclusion')
           if [ "$CONC" != "success" ]; then
             echo "ERROR: PXView Build run ${RUN_ID} 结论=${CONC}（要求 success）" >&2
+            echo "       查看：gh run view ${RUN_ID} --repo ${GITHUB_REPOSITORY} --log-failed" >&2
             exit 1
           fi
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
@@ -1250,7 +1271,14 @@ jobs:
                      --json conclusion --jq '.conclusion')
           fi
           if [ "$CONC" != "success" ]; then
-            echo "ERROR: ${SHA} 的全量 E2E（release-ci.yml push run）结论=${CONC}（要求 success）" >&2
+            # CONC=missing 表示该提交没有 release-ci.yml 的 push run（不是"失败"）。
+            if [ "$CONC" = "missing" ]; then
+              echo "ERROR: 找不到 ${SHA} 的 release-ci.yml push run（全量 E2E 从未跑过）" >&2
+              echo "       确认：gh run list --repo ${GITHUB_REPOSITORY} --workflow release-ci.yml --limit 5" >&2
+            else
+              echo "ERROR: ${SHA} 的全量 E2E（release-ci.yml push run ${RUN_ID}）结论=${CONC}（要求 success）" >&2
+              echo "       查看：gh run view ${RUN_ID} --repo ${GITHUB_REPOSITORY} --log-failed" >&2
+            fi
             exit 1
           fi
           echo "e2e_run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
