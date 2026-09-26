@@ -13,26 +13,20 @@ namespace core {
 /**
  * SharedState — reusable promise/future shared state primitive.
  *
- * Modeled after Logic2's Saleae::Tasks::Detail::SharedState
- * (graph_dll/core/task_executor/include/task_executor.h), which uses
- * mutex + condition_variable + atomic flags to provide thread-safe
- * synchronous waits WITHOUT depending on any event queue (Qt, GLib,
- * etc.).
+ * Implementation: 一个 mutex + 一个 condition_variable + 两个 atomic<bool>
+ * （_ready / _broken）。生产者置位后用 notify_all() 唤醒；消费者在 wait() 里
+ * 以 _ready 为谓词做 cv.wait / cv.wait_for。这样得到的是"线程安全的同步等待"，
+ * 完全不依赖任何事件队列（Qt 事件循环、GLib main loop 等）——因此在主线程被
+ * 模态循环占住、或工作线程还没有回到事件循环时，等待方照样能被立刻唤醒。
  *
- * ── Logic2 architecture comparison ──
+ * ── 接口语义 ──
  *
- *   Logic2 SharedState        |  PXView SharedState
- *   --------------------------+--------------------------
- *   SetResult()               |  set_result()
- *   SetBroken()               |  set_broken()
- *   WaitOnState()             |  wait(uint64_t timeout_ms = 0)
- *   ready (atomic<bool>)      |  _ready (atomic<bool>)
- *   broken (atomic<bool>)     |  _broken (atomic<bool>)
- *
- * Logic2's SharedState is the internal state of a std::promise/future
- * pair, used by TaskExecutor::Schedule and Mailbox::SendSync. PXView
- * uses it as a standalone primitive for any "wait for async operation
- * to complete" pattern, completely bypassing the Qt event queue.
+ *   set_result()               标记操作成功完成，唤醒所有等待者
+ *   set_broken()               标记操作失败，is_broken() 之后返回 true，
+ *                              让等待方能区分"成功"与"失败"
+ *   wait(timeout_ms = 0)       阻塞到完成或超时；0 = 无限等待
+ *   is_ready() / is_broken()   无锁查询（atomic 读）
+ *   reset()                    复用前清零（只能由持有者在开新操作前调用）
  *
  * ── Usage pattern ──
  *

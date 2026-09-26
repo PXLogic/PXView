@@ -27,6 +27,7 @@
 #include <cstdint>
 
 #include "pv/view/iview_delegates.h"
+#include "pv/view/zoom_animation.h"
 
 namespace pv {
 namespace view {
@@ -84,6 +85,24 @@ public:
   // if the DSO horizontal resolution could not be changed.
   bool zoom(double steps, int offset);
 
+  // -- animated zoom (滚轮缩放动画) --------------------------------------
+  // 启动 / 重定目标一次缩放动画（物理滚轮路径）。返回 true = 动画已启动
+  // （调用方需驱动 tick_zoom_animation）。DSO 的水平分辨率是离散时基档位，
+  // 插值会经过并不存在的档位，因此不走动画：直接执行一次 zoom() 并返回 false。
+  bool zoom_animated(double steps, int anchor_px, int64_t now_ms);
+
+  // 推进动画一帧并落地 scale/offset。返回 true = 动画仍在进行。
+  bool tick_zoom_animation(int64_t now_ms);
+
+  // 取消在跑的动画（即时操作抢占：滚动、拖拽、程序化跳转、文档重载）。
+  // 非 inline：需要通知诊断日志（zoom trace）收尾。
+  void cancel_zoom_animation();
+  bool zoom_animating() const { return _zoom_anim.active(); }
+
+  // 当前视图可见的时间跨度（毫秒）= 秒/像素 * 视口宽度像素 * 1000。
+  // 用于缩放诊断日志（"zoom 的总共视图 ms 数范围"）。
+  double visible_time_ms();
+
   // -- scroll ------------------------------------------------------------
   void h_scroll_value_changed(int value);
   void update_scroll();
@@ -96,6 +115,14 @@ public:
 
 private:
   View *_view;
+
+  // 滚轮缩放动画状态机（见 zoom_animation.h）。缩放动画只改 _scale/_offset，
+  // 每帧走 apply_scale_offset_epilogue() 复用 zoom() 的收尾路径。
+  ZoomAnimation _zoom_anim;
+
+  // scale/offset 变化的统一收尾（header/ruler/viewport 重绘 + 滚动条同步 +
+  // 可见范围通知）。由 zoom() 与 tick_zoom_animation() 共用，避免两处重复。
+  void apply_scale_offset_epilogue();
 
   // ---- Scale / offset state (migrated from View) ----
   double _scale = 10;

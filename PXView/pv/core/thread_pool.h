@@ -29,9 +29,9 @@ namespace core {
  *     threads survive after the pool is destroyed.
  *   - Non-blocking submit: submit() never blocks (queue is unbounded).
  *
- * Not modeled after Logic2's TaskExecutor (which has full task lifecycle
- * management with TaskHandle/Cancel/Status). PXView doesn't need that
- * complexity — the current usage is fire-and-forget with join-on-stop.
+ * 不做任务生命周期管理：没有任务句柄、没有取消、没有状态回查。当前用法就是
+ * "提交后不管 + 停止时 join"，因此只保留 submit() + wait_for_idle() 两个
+ * 入口；等到真的需要按任务取消/查状态时再扩，而不是现在就把复杂度背上。
  */
 class ThreadPool {
 public:

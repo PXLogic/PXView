@@ -182,8 +182,8 @@ public:
 private:
     // ---- Session-Centric 阶段8：bind(ctx) 语义链 ----
     // activate() = 依次执行以下阶段，即"View 换绑到本 tab 的 SessionContext"
-    // 的完整语义（对应参考项目：PulseView 换窗 / Logic2 setActiveSession 换
-    // 指针——换绑零全局副作用）：
+    // 的完整语义（与 PulseView 换窗同构：换绑只是把 View 的上下文指针切到本
+    // tab 的 SessionContext，不产生全局副作用）：
     //   1) restore_device_for_this_tab()  恢复本 tab 绑定的设备（TabSwitch）
     //   2) claim_active_document()        认领 active document 归属
     //   3) apply_device_intent()          应用设备意图（配置→模型→布局）

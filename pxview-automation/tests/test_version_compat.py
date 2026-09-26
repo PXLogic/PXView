@@ -2,8 +2,10 @@
 
 These tests verify that the Python client remains compatible with
 the PXView MCP server across different versions of the protocol
-and API.  They are inspired by logic2-automation's
-``test_version_matrix.py``.
+and API.  They follow the usual version-matrix approach: check the
+advertised protocol/package versions for consistency, then (when a
+server is reachable) check the live schema against the expected
+tool set.
 
 There are two modes:
 

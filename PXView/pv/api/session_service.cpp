@@ -1057,8 +1057,7 @@ Result<void> SessionService::wait_for_decode_complete(uint64_t timeout_ms) {
     // inside SharedState::set_result(), with no dependency on event queue
     // pumping.
     //
-    // Mirrors Logic2's SharedState::WaitOnState() pattern
-    // (task_executor.h:209-224).
+    // 即：等待方阻塞在 cv 上，由解码线程直接唤醒，超时也由 cv.wait_for 判定。
     bool ok = _session->get_state()->wait_for_decode_complete(timeout_ms);
     if (ok)
         return Result<void>::Success();

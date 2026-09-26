@@ -293,6 +293,14 @@ public:
   virtual double trig_hoff() = 0;
   virtual void set_trig_hoff(double hoff) = 0;
 
+  // ---- Zoom animation state (motion-LOD) ----
+  // True while a wheel-zoom animation is in flight. Render passes read this to
+  // coarsen rasterization on animation frames (each frame re-rasterizes the
+  // whole pixmap, and dense edge detail is imperceptible mid-motion); the
+  // final frame rebuilds at full quality. Defaults to false so a front-end
+  // without the animation needs no implementation.
+  virtual bool is_zoom_animating() { return false; }
+
   // ---- Channel repositioning animation ----
   // Called once per animation frame by Trace::on_visual_v_offset_changed().
   // Implementations must force a full repaint (setting need_update so the

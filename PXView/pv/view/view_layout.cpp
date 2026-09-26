@@ -36,6 +36,7 @@
 #include <QDebug>
 #include <QScrollBar>
 #include "pv/base/log.h"
+#include "pv/base/perflog.h"
 
 #include "pv/view/view.h"
 #include "pv/view/viewport/viewport.h"
@@ -52,6 +53,10 @@ namespace pv {
 namespace view {
 
 void ViewLayout::set_scale_offset(double scale, int64_t offset) {
+  // 即时操作抢占：滚动、Alt+滚轮、程序化跳转都必须立刻生效，不能被在跑的
+  // 缩放动画继续覆盖。取消后本函数写下的值就是终值。
+  _zoom_anim.cancel();
+
   // Bidirectional clamping: both _scale and _offset are clamped to their
   // valid ranges. Without the upper-bound clamp on _offset, trigger cursor
   // positioning (set_trig_cursor_posistion) can scroll past the data end.
@@ -171,6 +176,8 @@ void ViewLayout::set_scale(double scale) {
     scale = _maxscale;
 
   if (_scale != scale) {
+    // 程序化设 scale 同样是即时操作，抢占在跑的缩放动画。
+    _zoom_anim.cancel();
     _scale = scale;
     _view->header_widget()->update();
     _view->get_ruler()->update();
@@ -192,6 +199,10 @@ bool ViewLayout::zoom(double steps, int offset) {
   if (width == 0) {
     return false;
   }
+
+  // 离散跳档也是一次即时操作：抢占在跑的缩放动画（例如 DSO 档位切换、
+  // 采样条旋钮、SmartZoom）。动画路径本身走 zoom_animated()，不经过这里。
+  _zoom_anim.cancel();
 
   bool ret = true;
   _preScale = _scale;
@@ -246,9 +257,102 @@ bool ViewLayout::zoom(double steps, int offset) {
   return ret;
 }
 
+void ViewLayout::apply_scale_offset_epilogue() {
+  // _preScale/_preOffset 由调用方在改 _scale/_offset 之前写入。只有真正变化
+  // 时才重绘三个 widget；滚动条同步与可见范围通知则总要执行。
+  if (_scale != _preScale || _offset != _preOffset) {
+    _view->header_widget()->update();
+    _view->get_ruler()->update();
+    _view->viewport_update();
+    update_scroll();
+  }
+  _view->schedule_visible_range_notify();
+}
+
+bool ViewLayout::zoom_animated(double steps, int anchor_px, int64_t now_ms) {
+  const int width = _view->get_view_width();
+  if (width == 0)
+    return false;
+
+  // DSO 的水平分辨率是离散时基档位（hori_knob），线性插值会经过并不存在的
+  // 中间档位，因此这里禁用缩放动画：直接走一次离散跳档。
+  if (_view->get_work_mode() == DSO) {
+    zoom(steps, anchor_px);
+    return false;
+  }
+
+  // 复合目标（实现见 ZoomAnimation::retarget_compound）。
+  // 关键：基准是**尚未到达的旧目标**，不是当前显示值 —— 否则每次滚轮都会丢弃
+  // 上一格没走完的行程（实测交付率仅 26%）。
+  //
+  // 每格比例取 √2：物理滚轮一格是 120 单位的 angleDelta，取
+  // zoom_factor = √2^steps，于是视图可见跨度按 2^(k/2) 成阶梯变化
+  // （10ms → 14 → 20 → 28 → 40 → 56 → 79 → 112ms …），每格视觉增量一致。
+  constexpr double kWheelZoomPerNotch = 1.4142135623730951;  // sqrt(2)
+
+  if (!_zoom_anim.active())
+    pv::base::perf::zoom_trace_begin(now_ms, visible_time_ms());
+
+  _zoom_anim.retarget_compound(
+      _scale, static_cast<double>(anchor_px), _offset,
+      std::pow(kWheelZoomPerNotch, -steps), _minscale, _maxscale, now_ms,
+      ZoomAnimation::DurationMs);
+  return true;
+}
+
+double ViewLayout::visible_time_ms() {
+  // _scale 的单位是"秒/像素"（见 get_scroll_layout: length = sampletime/_scale
+  // 得到的是像素数），故可见时间跨度 = _scale * 视口宽度，换算成毫秒再 ×1000。
+  return _scale * static_cast<double>(_view->get_view_width()) * 1000.0;
+}
+
+void ViewLayout::cancel_zoom_animation() {
+  if (!_zoom_anim.active())
+    return;
+  _zoom_anim.cancel();
+  pv::base::perf::zoom_trace_end("cancel", visible_time_ms());
+}
+
+bool ViewLayout::tick_zoom_animation(int64_t now_ms) {
+  double new_scale = _scale;
+  const bool more = _zoom_anim.sample(now_ms, new_scale);
+
+  const double pre_scale = _scale;
+  const int64_t pre_offset = _offset;
+  _scale = new_scale;
+
+  // offset 一律以**手势参照系**（retarget 时记下的 initial_scale/anchor_offset）
+  // 直接算出，而不是逐帧从上一帧递推。逐帧递推每帧都要 floor 取整，误差同向
+  // 累积 —— 实测 4 帧就能让锚点漂移超过 1 像素，表现为缩放时鼠标下的波形滑动。
+  // 固定参照系的漂移恒 < 1 像素（推导见 ZoomAnimation::offset_for）。
+  const int64_t raw = _zoom_anim.offset_for(_scale);
+  const int64_t clamped = max(min(raw, get_max_offset()), get_min_offset());
+  if (clamped != raw) {
+    // 已顶到数据边界：重设参照系，避免后续帧与夹取结果"较劲"产生回弹。
+    _zoom_anim.reanchor(_scale, clamped);
+  }
+  _offset = clamped;
+
+  _preScale = pre_scale;
+  _preOffset = pre_offset;
+  apply_scale_offset_epilogue();
+
+  // 诊断：必须在 _scale 落地之后再取 view_ms（本帧的可见跨度）。
+  const double view_ms = visible_time_ms();
+  pv::base::perf::zoom_trace_frame(now_ms, _zoom_anim.progress(now_ms), view_ms);
+  if (!more)
+    pv::base::perf::zoom_trace_end("done", view_ms);
+
+  return more;
+}
+
 void ViewLayout::h_scroll_value_changed(int value) {
+  // _updating_scroll 期间是动画/缩放的收尾在同步滚动条，不能当作用户拖动。
   if (_updating_scroll)
     return;
+
+  // 用户拖动横向滚动条 = 即时操作，取消在跑的缩放动画。
+  _zoom_anim.cancel();
 
   _preOffset = _offset;
 

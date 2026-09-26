@@ -35,8 +35,10 @@ name: PXView Release CI
 #   artifacts 里。要对外发布时手动 Run workflow 触发本工作流，可选填要发布的
 #   提交 SHA（留空 = dev 最新提交）。本 job 然后：
 #     1. 校验该提交在 dev 上（compare 状态 ahead/identical）；
-#     2. 校验同一提交的 build.yml（打包 + 安装包自检）与 release-ci.yml 的
-#        push run（全量 E2E）都是 success —— 这就是「CD 全绿」这道门槛；
+#     2. 轮询等待同一提交的 build.yml（打包 + 安装包自检）与 release-ci.yml 的
+#        push run（全量 E2E）跑完并都是 success —— 这就是「CD 全绿」这道门槛。
+#        两套 run 由同一次 push 触发、与本 job 并行，手动发布时往往还在排队或
+#        运行中，所以这里是「等」而不是「查不到/没跑完就失败」；
 #     3. 取回那次 build.yml 的产物；版本号从安装包文件名解析（与包内一致，
 #        所以标签与包里的版本号永远对得上）；
 #     4. 该版本标签已存在则失败并提示重新构建（序号在构建时分配）；
@@ -60,6 +62,10 @@ on:
         description: '要发布的 dev 提交 SHA（留空 = dev 最新提交）'
         required: false
         default: ''
+      max_wait_minutes:
+        description: '等待 build.yml / release-ci.yml 跑绿的最长时间（分钟，1-150）'
+        required: false
+        default: '120'
 
 jobs:
   # ============================================================
@@ -1156,7 +1162,10 @@ jobs:
   #   1. 触发方式是 workflow_dispatch（push 上本 job 直接跳过）；
   #   2. 目标提交在 dev 上（compare 状态 ahead/identical）；
   #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）与 release-ci.yml 的
-  #      push run（全量 E2E）都 success —— 「CD 全绿」就是这道门槛；
+  #      push run（全量 E2E）都跑完且 success —— 「CD 全绿」就是这道门槛。
+  #      这两套 run 由同一次 push 触发、与本 job 并行，手动点发布时通常还在
+  #      排队/运行，所以本 job 会轮询等待它们结束（上限 max_wait_minutes，
+  #      默认 120 分钟），而不是「检测到没跑完就失败」；
   #   4. 该版本标签尚未存在（序号在构建时分配，同一个序号只会被发布一次）。
   #
   # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0，
@@ -1170,10 +1179,13 @@ jobs:
   publish-rc:
     name: Publish RC (manual)
     # 不写 needs：手动触发时 Job 1 是跳过的，needs 会连带把本 job 跳过；
-    # 「全量 E2E 全绿」由下面第 2 步的 gh 校验保证（校验那次 push run 的结论）。
+    # 「CD 全绿」由下面第 2 步轮询等待那两次 push run 保证。
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # 60 → 180：第 2 步现在会真的等 CD 跑完（默认预算 120 分钟，
+    # max_wait_minutes 上限 150），再加取产物 / 生成正文 / 发布的时间；
+    # 60 分钟会在等待途中被 job 超时砍掉，等待结果就白等了。
+    timeout-minutes: 180
     permissions:
       contents: write   # 创建 rc Release 与标签
       actions: read     # 读取 build.yml 的 run 与 artifacts
@@ -1257,72 +1269,122 @@ jobs:
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "目标提交：${SHA}（在 dev 上，状态 ${STATUS}）"
 
-      # ── 2. CD 门槛：同一提交的两套工作流都必须全绿 ────────────────
-      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知；
-      # 这里分别查它们的 push run 结论。查不到或非 success 就直接失败 ——
-      # 手动发布要明确告知"还不能发"，静默跳过只会让人以为已经发过了。
+      # ── 2. CD 门槛：等同一提交的两套工作流跑完并全绿 ──────────────
+      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知，也
+      # 与本 job 并行 —— 刚 push 完就手动点发布时，两套 run 通常还在排队或
+      # 运行中。以前这里「查不到 / 结论不是 success 就立刻失败」，发布只能
+      # 被打回，用户盯着页面等半小时再点一次；现在改为轮询等待：
+      #   · 还没有 run（push 事件尚未调度出来）            → 等；
+      #   · 有 run 但 status != completed（queued/in_progress/waiting）→ 等；
+      #   · completed 且 success                           → 记下 run id，放行；
+      #   · completed 但结论非 success                     → 再给 GRACE_MINUTES
+      #     分钟宽限（「Re-run failed jobs」复用同一个 run id，新的尝试会覆盖
+      #     conclusion，立刻失败会错过刚点的重跑），宽限内变绿即放行；
+      #   · 总预算 MAX_WAIT_MINUTES 用尽仍未绿             → 失败，并把最后
+      #     观测到的状态打出来（该失败就明确失败，不静默跳过 —— 静默跳过只会
+      #     让人以为已经发过了）。
       # --event push 是为了排除本 job 所在的那次手动 run。
-      - name: Require green PXView Build (packaging + installer self-test)
-        id: build
+      - name: Wait for green CD (PXView Build + Release CI)
+        id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # SHA 已由「Resolve target commit」规整为 40 位全量：gh run list 的
+          # --commit 只认全量 SHA，短 SHA 会静默返回空列表。
           SHA="${{ steps.target.outputs.sha }}"
-          # SHA 已由上一步规整为 40 位全量：gh run list 的 --commit 只认全量
-          # SHA，短 SHA 会静默返回空列表（见 Resolve target commit 的注释）。
-          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml \
-                     --commit "$SHA" --event push --limit 1 \
-                     --json databaseId --jq '.[0].databaseId // empty')
-          if [ -z "$RUN_ID" ]; then
-            echo "ERROR: 找不到 ${SHA} 的 PXView Build push run。" >&2
-            echo "       该提交尚未触发过 build.yml（未推送到 dev / 未打包自检），不能发布。" >&2
-            echo "       确认：gh run list --repo ${GITHUB_REPOSITORY} --workflow build.yml --limit 5" >&2
-            exit 1
-          fi
-          CONC=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-                   --json conclusion --jq '.conclusion')
-          if [ "$CONC" != "success" ]; then
-            echo "ERROR: PXView Build run ${RUN_ID} 结论=${CONC}（要求 success）" >&2
-            echo "       查看：gh run view ${RUN_ID} --repo ${GITHUB_REPOSITORY} --log-failed" >&2
-            exit 1
-          fi
-          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "PXView Build ${RUN_ID}: ${CONC}"
+          REPO="$GITHUB_REPOSITORY"
+          MAX_WAIT_MINUTES="${{ github.event.inputs.max_wait_minutes }}"
+          POLL_SECONDS=60
+          GRACE_MINUTES=15
 
-      - name: Require green PXView Release CI (full E2E)
-        id: e2e
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          SHA="${{ steps.target.outputs.sha }}"
-          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release-ci.yml \
-                     --commit "$SHA" --event push --limit 1 \
-                     --json databaseId --jq '.[0].databaseId // empty')
-          CONC="missing"
-          if [ -n "$RUN_ID" ]; then
-            CONC=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-                     --json conclusion --jq '.conclusion')
-          fi
-          if [ "$CONC" != "success" ]; then
-            # CONC=missing 表示该提交没有 release-ci.yml 的 push run（不是"失败"）。
-            if [ "$CONC" = "missing" ]; then
-              echo "ERROR: 找不到 ${SHA} 的 release-ci.yml push run（全量 E2E 从未跑过）" >&2
-              echo "       确认：gh run list --repo ${GITHUB_REPOSITORY} --workflow release-ci.yml --limit 5" >&2
-            else
-              echo "ERROR: ${SHA} 的全量 E2E（release-ci.yml push run ${RUN_ID}）结论=${CONC}（要求 success）" >&2
-              echo "       查看：gh run view ${RUN_ID} --repo ${GITHUB_REPOSITORY} --log-failed" >&2
-            fi
+          if ! printf '%s' "$MAX_WAIT_MINUTES" | grep -Eq '^[0-9]+$' \
+             || [ "$MAX_WAIT_MINUTES" -lt 1 ] || [ "$MAX_WAIT_MINUTES" -gt 150 ]; then
+            echo "ERROR: max_wait_minutes 必须是 1..150 的整数（当前值：${MAX_WAIT_MINUTES}）" >&2
+            echo "       本 job 的 timeout-minutes=180，再大的等待预算也只会被 job 超时砍掉。" >&2
             exit 1
           fi
-          echo "e2e_run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "PXView Release CI ${RUN_ID}: ${CONC}"
+
+          # 两套 run 共享一个总预算，避免「等 build 用光预算、e2e 没得等」。
+          # 它们本来并行跑，共享预算等于等两者里较慢的那个，符合预期。
+          DEADLINE=$(( $(date +%s) + MAX_WAIT_MINUTES * 60 ))
+          echo "等待预算 ${MAX_WAIT_MINUTES} 分钟，轮询间隔 ${POLL_SECONDS}s，目标提交 ${SHA}"
+
+          stamp() { date -u +%H:%M:%S; }
+
+          # $1 = workflow 文件名  $2 = 日志里的展示名  $3 = 输出的 run id 名
+          wait_for_workflow() {
+            local wf="$1" label="$2" out="$3"
+            local grace_deadline="" run_id="" conclusion="" url="" seen=0
+            while :; do
+              local now left runs row status
+              now=$(date +%s)
+              left=$(( DEADLINE - now ))
+              if [ "$left" -le 0 ]; then
+                if [ "$seen" -eq 0 ]; then
+                  echo "ERROR: 等了 ${MAX_WAIT_MINUTES} 分钟，${label}（${wf}）始终没有针对 ${SHA} 的 push run。" >&2
+                  echo "       该提交没有触发过 ${wf}（未推送到 dev？），不能发布。" >&2
+                  echo "       确认：gh run list --repo ${REPO} --workflow ${wf} --limit 5" >&2
+                else
+                  echo "ERROR: 等了 ${MAX_WAIT_MINUTES} 分钟，${label} run ${run_id} 仍未 success（最后状态：${conclusion:-未结束}）" >&2
+                  echo "       查看：${url}" >&2
+                  echo "       日志：gh run view ${run_id} --repo ${REPO} --log-failed" >&2
+                fi
+                return 1
+              fi
+              if [ -n "$grace_deadline" ] && [ "$now" -ge "$grace_deadline" ]; then
+                echo "ERROR: ${label} run ${run_id} 结论=${conclusion}，${GRACE_MINUTES} 分钟重跑宽限内仍未变绿。" >&2
+                echo "       查看：${url}" >&2
+                echo "       日志：gh run view ${run_id} --repo ${REPO} --log-failed" >&2
+                return 1
+              fi
+
+              # 取该提交最新的那条 run（按 createdAt 排序取最后一条）：同一提交
+              # 可能有多次 run（重跑 / 重复推送同一 SHA），旧的不能代表当前状态。
+              runs=$(gh run list --repo "$REPO" --workflow "$wf" --commit "$SHA" \
+                       --event push --limit 10 \
+                       --json databaseId,status,conclusion,createdAt,url 2>/dev/null || true)
+              row=$(printf '%s' "$runs" | jq -c 'sort_by(.createdAt) | last // empty' 2>/dev/null || true)
+
+              if [ -z "$row" ]; then
+                echo "[$(stamp)] ${label}：还没有 ${wf} 的 push run（剩余等待 ${left}s）"
+              else
+                seen=1
+                run_id=$(printf '%s' "$row" | jq -r '.databaseId')
+                status=$(printf '%s' "$row" | jq -r '.status')
+                conclusion=$(printf '%s' "$row" | jq -r '.conclusion // ""')
+                url=$(printf '%s' "$row" | jq -r '.url')
+                if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+                  echo "[$(stamp)] ${label} run ${run_id}：success —— 放行"
+                  echo "${out}=${run_id}" >> "$GITHUB_OUTPUT"
+                  return 0
+                fi
+                if [ "$status" != "completed" ]; then
+                  echo "[$(stamp)] ${label} run ${run_id}：${status}（剩余等待 ${left}s） ${url}"
+                else
+                  if [ -z "$grace_deadline" ]; then
+                    grace_deadline=$(( now + GRACE_MINUTES * 60 ))
+                    if [ "$grace_deadline" -gt "$DEADLINE" ]; then
+                      grace_deadline="$DEADLINE"
+                    fi
+                  fi
+                  echo "[$(stamp)] ${label} run ${run_id}：已结束但结论=${conclusion} —— 再等至多 ${GRACE_MINUTES} 分钟（Re-run 的新尝试会覆盖这个结论） ${url}"
+                fi
+              fi
+              sleep "$POLL_SECONDS"
+            done
+          }
+
+          # 显式 || exit 1：任一等待失败就停在这里，绝不带着空的 run id 往下走
+          # （run-on 默认 bash -e 本已会中断，这里不依赖这个默认行为）。
+          wait_for_workflow build.yml "PXView Build（打包 + 安装包自检）" build_run_id || exit 1
+          wait_for_workflow release-ci.yml "PXView Release CI（全量 E2E）" e2e_run_id || exit 1
 
       # ── 3. 取回打包产物 ─────────────────────────────────────────
       # 每个 artifact 解到 dl/<artifact-name>/ 下。
       - name: Download installers from the PXView Build run
         uses: actions/download-artifact@v8
         with:
-          run-id: ${{ steps.build.outputs.run_id }}
+          run-id: ${{ steps.gate.outputs.build_run_id }}
           pattern: PXView-*
           path: dl
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1501,8 +1563,8 @@ jobs:
 
             - 开发版本号：`${{ steps.assets.outputs.version }}`
             - 提交：`${{ steps.target.outputs.sha }}`
-            - 打包与安装包自检：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.build.outputs.run_id }})
-            - 全量 E2E：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.e2e.outputs.e2e_run_id }})
+            - 打包与安装包自检：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.build_run_id }})
+            - 全量 E2E：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.e2e_run_id }})
 
             正式版本请到 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 里选择带版本号的发布。
 

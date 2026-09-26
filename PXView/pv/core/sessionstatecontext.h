@@ -301,8 +301,8 @@ public:
 
   // --- Plan B Phase 4: atomic state snapshot ---
   // Returns a consistent snapshot of the capture-related state. All fields
-  // are read from atomics, so the snapshot is thread-safe.
-  // Modeled after Logic2's DigitalStore::GetState() pattern (Pull).
+  // are read from atomics, so the snapshot is thread-safe (pull 模型：调用方
+  // 主动取一次快照，而不是订阅状态变更事件）。
   struct CaptureStateSnapshot {
     bool is_working;
     int device_status;      // ST_INIT / ST_RUNNING / ST_STOPPED
@@ -320,8 +320,8 @@ public:
   // wait_for_capture_complete() (called on the main thread by the API /
   // RPC layer) is woken immediately, without depending on the Qt event queue.
   //
-  // Mirrors Logic2's SharedState::SetResult() pattern
-  // (task_executor.h:191-196).
+  // 落地方式：置 _is_working=false 后调用 SharedState::set_result()
+  // （mutex 置位 + cv.notify_all()）。
   void notify_capture_complete() {
     _is_working.store(false, std::memory_order_release);
     _capture_complete_state.set_result();
@@ -331,8 +331,9 @@ public:
   // QEventLoop::exec() — the wakeup comes directly from the worker thread's
   // notify_capture_complete() via SharedState.
   //
-  // Mirrors Logic2's SharedState::WaitOnState() pattern
-  // (task_executor.h:209-224).
+  // 落地方式：先无锁快路径查 _is_working，已经在跑完态就直接返回；否则交给
+  // SharedState::wait(timeout_ms)，内部是 cv.wait_for + _ready 谓词，
+  // 带超时且能区分超时与完成。
   bool wait_for_capture_complete(uint64_t timeout_ms) {
     // Fast path: already complete
     if (!_is_working.load(std::memory_order_acquire))
@@ -431,8 +432,8 @@ private:
 
   // --- Phase 3: SharedState instances for sync waits ---
   // Replaces Phase 1's inline mutex + cv with the reusable SharedState
-  // primitive (pv/core/shared_state.h), modeled after Logic2's
-  // Saleae::Tasks::Detail::SharedState.
+  // primitive (pv/core/shared_state.h): mutex + condition_variable +
+  // 两个 atomic<bool>（ready / broken），唤醒走 cv.notify_all()。
   //
   // _capture_complete_state: signaled by notify_capture_complete() on the
   //   worker thread, waited on by wait_for_capture_complete() on the main

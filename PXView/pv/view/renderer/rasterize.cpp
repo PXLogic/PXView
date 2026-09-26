@@ -49,6 +49,14 @@ namespace view {
 // Kept local so this pure function has no dependency on the Signal class.
 static constexpr uint16_t kRasterizeTogMaxScale = 10;
 
+// Motion-LOD: 缩放动画帧使用的 toggle 上限除数。比静止期的 10 更粗 ——
+// 每像素允许记录的 toggle 数上限 = width / divisor，除数越大画的竖线越少。
+// 动画的每一帧都要重建整个信号 pixmap（view_params_changed 强制 rebuild），
+// 而栅格化成本与绘制出的 toggle 数成正比；缩放运动中的密集边沿本就不可辨，
+// 降精度能把单帧成本压下一半以上。动画结束帧（t>=1）need_update 触发一次
+// 全精度重建，用户最终看到的仍是完整细节。
+static constexpr uint16_t kRasterizeMotionTogDivisor = 4;
+
 void rasterize_logic_channel(
     QPainter &p, data::LogicSnapshot *snapshot, int channel_index,
     int left, int right, int y, int total_height, const QColor &colour,
@@ -104,7 +112,9 @@ void rasterize_logic_channel(
 
   width =
       min(width, static_cast<uint16_t>(ceil(static_cast<double>((end_index + 1)) / samples_per_pixel - static_cast<double>(offset))));
-  const uint16_t max_togs = width / kRasterizeTogMaxScale;
+  const uint16_t max_togs =
+      width / (ctx.motion_frame ? kRasterizeMotionTogDivisor
+                               : kRasterizeTogMaxScale);
 
   // Scratch buffers (were LogicSignal::_cur_pulses/_cur_edges members).
   //

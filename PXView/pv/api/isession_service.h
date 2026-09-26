@@ -105,7 +105,7 @@ public:
     virtual int get_current_capture_id() const = 0;
     virtual Result<void> close_capture() = 0;
     // Phase 3: Synchronously wait for decode to complete, bypassing the Qt
-    // event queue. Uses SharedState (modeled after Logic2's SharedState pattern)
+    // event queue. Uses SharedState (mutex + condition_variable + atomic flags)
     // for thread-safe wakeup from the decode thread.
     virtual Result<void> wait_for_decode_complete(uint64_t timeout_ms = 300000) = 0;
 

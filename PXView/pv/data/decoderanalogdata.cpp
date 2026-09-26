@@ -343,9 +343,8 @@ bool DecoderAnalogData::get_range_cycle_metrics(
     if (rising50.size() < 2)
         return false;
 
-    // Logic 2-style range measurements summarize all complete cycles that
-    // fall inside the selected annotation. Partial cycles at either edge do
-    // not influence pulse widths, duty cycle, or edge timing.
+    // 区间统计只汇总完全落在所选 annotation 内的完整周期；两端不完整的
+    // 半周期不计入脉宽、占空比和边沿时序。
     long double period_sum = 0.0L;
     long double positive_width_sum = 0.0L;
     long double negative_width_sum = 0.0L;

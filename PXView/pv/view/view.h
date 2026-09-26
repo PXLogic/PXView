@@ -287,6 +287,12 @@ public:
   void zoom(double steps);
   bool zoom(double steps, int offset);
 
+  // 滚轮缩放动画：物理滚轮只提交目标态，由 _zoom_anim_timer
+  // 在 ZoomAnimation::DurationMs 内逐帧线性逼近。返回 true = 动画已启动。
+  bool zoom_animated(double steps, int anchor_px);
+  // 是否正在跑缩放动画（motion-LOD 降精度栅格化的判定输入）。
+  bool is_zoom_animating();
+
   /**
    * Sets the scale and offset.
    * @param scale The new view scale in seconds per pixel.
@@ -751,6 +757,10 @@ signals:
 private slots:
   void h_scroll_value_changed(int value);
 
+  // 缩放动画帧驱动：每帧把 ViewLayout 的 scale/offset 推向目标，动画结束时
+  // 自行停表。
+  void on_zoom_anim_tick();
+
   void on_traces_moved();
   void on_measure_updated();
 
@@ -887,6 +897,13 @@ private:
   QTimer *_delayed_view_update_timer = nullptr;
   bool _delayed_view_update_pending = false;
   static constexpr int MaxViewAutoUpdateRateMs = 16; // ~60 FPS
+
+  // ---- 滚轮缩放动画 ----
+  // 复用的 16ms 帧定时器 + 单调时钟。时钟用 QElapsedTimer（单调）而非墙钟，
+  // 使系统时间被改动不会影响动画进度。定时器只在动画期间运行。
+  QTimer *_zoom_anim_timer = nullptr;
+  QElapsedTimer _zoom_anim_clock;
+  static constexpr int ZoomAnimFrameMs = 16; // ~60 FPS 的逐帧节奏
 
   // P2: decode-only repaint pending flag. When set, the coalescing timer
   // drains via viewport_update_decode_only() (skips set_decode_dirty) instead

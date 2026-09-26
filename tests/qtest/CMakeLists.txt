@@ -284,6 +284,15 @@ target_include_directories(test_v_offset_animation PRIVATE
 target_link_libraries(test_v_offset_animation PRIVATE pxview-render Qt6::Gui)
 target_link_options(test_v_offset_animation PRIVATE -Wl,--no-as-needed)
 
+# ==== 滚轮缩放动画状态机：复合目标累计契约 ====
+# 纯逻辑、零依赖（zoom_animation.h 只依赖 <cstdint>），因此不需要链接任何
+# 静态库，也不会拖入 Widget / 数据源。锁死的核心不变量是"连续快速滚动 N 格，
+# 交付缩放量必须恰为 zoom_factor^N"——实测缺陷版本（基准取当前显示值而非旧
+# 目标）在 29 个手势上只交付了 26% 的缩放量，表现就是"缩放明显跟不上滚轮"。
+pv_add_qtest(test_zoom_animation
+    view/test_zoom_animation.cpp
+)
+
 # ==== 让位拖动"整列平移"复现器 ====
 # 按生产代码的真实调用顺序（mousePress 采锚点 → mouseMove 逐帧 force + 让位）
 # 串起来跑一次拖动，验证"其余通道的槽位集合不随被拖项移动而整体平移"。

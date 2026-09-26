@@ -2,6 +2,7 @@
 #define PXVIEW_PV_BASE_PERFLOG_H
 
 #include <chrono>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
@@ -242,7 +243,23 @@ inline void record_event_lag() {
   }
   g_event_lag_last = now;
 }
-inline void record_frame_viewport(double ms) { g_frame_viewport.add(ms); }
+// ---- Zoom animation trace: globals (定义在文件末尾 zoom_trace_* 处) ----
+inline double g_last_frame_ms = 0;            // 最近一帧整帧耗时
+inline Agg    g_zoom_frame;                   // 仅"缩放动画帧"的整帧耗时
+inline bool   g_zoom_frame_pending = false;   // 下一次整帧绘制是否属于缩放动画
+
+inline void record_frame_viewport(double ms) {
+  g_frame_viewport.add(ms);
+  // 供缩放动画追踪读取：把"最近一帧的整帧耗时"暴露出去，动画 tick 才能判断
+  // 上一帧是否吃满了 16ms 帧预算（见 zoom_trace_frame）。同时，若上一 tick
+  // 标记了"这一帧属于动画"，则计入动画专属聚合（与正常帧分离，避免被
+  // 普通重绘稀释）。
+  g_last_frame_ms = ms;
+  if (g_zoom_frame_pending) {
+    g_zoom_frame.add(ms);
+    g_zoom_frame_pending = false;
+  }
+}
 inline void record_vrange_snap(double ms)    { g_vrange_snap.add(ms); }
 inline void record_vrange_live(double ms)    { g_vrange_live.add(ms); }
 inline void record_publish()                 { g_window_publish_calls++; }
@@ -254,6 +271,137 @@ inline void frame_add_rows(size_t dense, size_t mid, uint64_t ann) {
   g_frame_dense_rows += dense;
   g_frame_mid_rows   += mid;
   g_frame_ann_sum    += ann;
+}
+
+// ---------------------------------------------------------------------------
+// Zoom animation trace — 滚轮缩放动画（ZoomAnimation）
+// ---------------------------------------------------------------------------
+// 诊断目标："滚轮缩放手感迟钝"到底来自哪一条：
+//   (1) 每帧重建信号 pixmap 的成本吃满帧预算
+//       → 看 FRAME 行的 dt 与 prev_frame_ms：若 prev_frame_ms 接近或超过 dt，
+//         说明每帧都在"画上一帧"，动画被绘制成本拖住。
+//   (2) QTimer 的 16ms 量化 + 一帧调度延迟
+//       → 看 dt_min 是否恒 ≈16ms（量化）而 dt_max 远大于它（偶发丢帧）；
+//         若 dt_avg 明显小于 16ms 说明定时器不是瓶颈。
+//   (3) 设备分流错误（触摸板被当成物理滚轮而走了 100ms 动画）
+//       → 看 WHEEL 行的 physical= 判定与 pixel= 取值。
+//
+// 输出 %TEMP%/pxv_zoom_trace.log，每个滚轮手势一段 FRAME 行 + 一行 GESTURE
+// 汇总（含 view_ms 范围 = 该手势期间视图可见时间跨度的最小/最大值）。
+// 只在 PXVIEW_DECODE_PERF 下编译，正常构建零成本。
+//
+// ⚠ 所有 now_ms 必须来自同一个时钟（View::_zoom_anim_clock，QElapsedTimer），
+//   否则 dt 计算会被污染。
+inline size_t   g_zoom_gestures = 0;
+inline size_t   g_zoom_ticks_total = 0;
+inline double   g_zoom_tick_sum = 0, g_zoom_tick_max = 0, g_zoom_tick_min = 1e9;
+inline double   g_zoom_viewms_min = 0, g_zoom_viewms_max = 0;
+inline bool     g_zoom_viewms_seen = false;
+
+struct ZoomTrace {
+  bool    active = false;
+  int     frames = 0;
+  int64_t start_ms = 0, last_ms = 0;
+  double  dt_sum = 0, dt_max = 0, dt_min = 1e9;
+  double  frame_ms_sum = 0, frame_ms_max = 0;
+  double  view_ms_min = 0, view_ms_max = 0;
+};
+inline ZoomTrace g_zoom_trace;
+
+inline FILE *zoom_trace_file() {
+  // 保持打开、逐行写入 + flush：手势很短（100~300ms，6~20 帧），且只在滚轮
+  // 期间产生，I/O 开销可忽略；好处是短手势的日志不会被窗口 flush 节流丢掉。
+  static FILE *f = nullptr;
+  if (!f) {
+    const QString p = QDir::temp().filePath("pxv_zoom_trace.log");
+    f = fopen(p.toUtf8().constData(), "a");
+  }
+  return f;
+}
+
+// 一次滚轮手势开始（首次 retarget 时）。view_ms = 手势起点的可见时间跨度。
+inline void zoom_trace_begin(int64_t now_ms, double view_ms) {
+  ZoomTrace &z = g_zoom_trace;
+  z = ZoomTrace{};
+  z.active = true;
+  z.start_ms = z.last_ms = now_ms;
+  z.view_ms_min = z.view_ms_max = view_ms;
+  if (FILE *f = zoom_trace_file())
+    fprintf(f, "---- GESTURE BEGIN t=%lldms view_ms=%.3f ----\n",
+            static_cast<long long>(now_ms), view_ms);
+}
+
+// 每个动画帧。progress = 线性进度 t(0..1)，view_ms = 本帧可见时间跨度。
+inline void zoom_trace_frame(int64_t now_ms, double progress, double view_ms) {
+  ZoomTrace &z = g_zoom_trace;
+  if (!z.active)
+    return;
+  const double dt = static_cast<double>(now_ms - z.last_ms);
+  z.last_ms = now_ms;
+  z.frames++;
+  z.dt_sum += dt;
+  if (dt > z.dt_max) z.dt_max = dt;
+  if (dt < z.dt_min) z.dt_min = dt;
+  z.frame_ms_sum += g_last_frame_ms;
+  if (g_last_frame_ms > z.frame_ms_max) z.frame_ms_max = g_last_frame_ms;
+  if (view_ms < z.view_ms_min) z.view_ms_min = view_ms;
+  if (view_ms > z.view_ms_max) z.view_ms_max = view_ms;
+  // 标记"下一次整帧绘制属于动画"，由 record_frame_viewport 消费。
+  g_zoom_frame_pending = true;
+  if (FILE *f = zoom_trace_file())
+    fprintf(f,
+            "FRAME n=%d dt=%.1fms t=%.2f view_ms=%.3f prev_frame_ms=%.2f\n",
+            z.frames, dt, progress, view_ms, g_last_frame_ms);
+}
+
+// 手势结束。now_ms 取 z.last_ms（与 dt 同源），故 wall 即"首帧到末帧"的真实
+// 墙钟跨度，cancel 时略有低估（末帧之后才被取消）。
+inline void zoom_trace_end(const char *reason, double view_ms) {
+  ZoomTrace &z = g_zoom_trace;
+  if (!z.active)
+    return;
+  z.active = false;
+  if (view_ms < z.view_ms_min) z.view_ms_min = view_ms;
+  if (view_ms > z.view_ms_max) z.view_ms_max = view_ms;
+
+  g_zoom_gestures++;
+  g_zoom_ticks_total += static_cast<size_t>(z.frames);
+  g_zoom_tick_sum += z.dt_sum;
+  if (z.dt_max > g_zoom_tick_max) g_zoom_tick_max = z.dt_max;
+  if (z.frames > 0 && z.dt_min < g_zoom_tick_min) g_zoom_tick_min = z.dt_min;
+  if (!g_zoom_viewms_seen) {
+    g_zoom_viewms_min = z.view_ms_min;
+    g_zoom_viewms_max = z.view_ms_max;
+    g_zoom_viewms_seen = true;
+  } else {
+    if (z.view_ms_min < g_zoom_viewms_min) g_zoom_viewms_min = z.view_ms_min;
+    if (z.view_ms_max > g_zoom_viewms_max) g_zoom_viewms_max = z.view_ms_max;
+  }
+
+  if (FILE *f = zoom_trace_file()) {
+    fprintf(f,
+            "GESTURE reason=%s frames=%d wall=%.1fms"
+            " dt[min=%.1f avg=%.1f max=%.1f]"
+            " frame_ms[avg=%.2f max=%.2f]"
+            " view_ms=[%.3f..%.3f] range=%.3fms\n",
+            reason, z.frames, static_cast<double>(z.last_ms - z.start_ms),
+            z.frames > 0 ? z.dt_min : 0.0,
+            z.frames > 0 ? z.dt_sum / z.frames : 0.0, z.dt_max,
+            z.frames > 0 ? z.frame_ms_sum / z.frames : 0.0, z.frame_ms_max,
+            z.view_ms_min, z.view_ms_max, z.view_ms_max - z.view_ms_min);
+    fflush(f);
+  }
+}
+
+// 滚轮事件分流诊断（viewport_interaction wheelEvent）。
+inline void wheel_route_log(int angle_x, int angle_y, int pixel_x, int pixel_y,
+                            bool physical, bool synthesized, const char *path) {
+  if (FILE *f = zoom_trace_file())
+    fprintf(f,
+            "WHEEL angleX=%d angleY=%d pixel=(%d,%d) physical=%d synth=%d"
+            " path=%s\n",
+            angle_x, angle_y, pixel_x, pixel_y, physical ? 1 : 0,
+            synthesized ? 1 : 0, path);
 }
 
 inline void flush() {
@@ -379,6 +527,30 @@ inline void flush() {
   g_copy_export_bytes  = 0;
 #endif
 
+  // Zoom animation (滚轮缩放动画): 动画帧的整帧耗时与 tick 节奏。
+  // anim_frame 只统计"缩放动画进行中"的帧（普通重绘不进这个聚合），
+  // 因此它的 avg/max 就是"动画每帧要花多少 ms"；把它和 tick avg 比：
+  //   anim_frame.avg 接近 tick.avg  -> 绘制吃满帧预算，动画被拖慢（要降 LOD）
+  //   anim_frame.avg 远小于 tick.avg -> 瓶颈在定时器量化/调度，不在绘制
+  fprintf(lf,
+          "ZOOM_ANIM      gestures=%zu ticks=%zu anim_frame[calls=%zu avg=%.2fms"
+          " max=%.2fms] tick[min=%.1f avg=%.1f max=%.1f]ms"
+          " view_ms=[%.3f..%.3f] range=%.3fms\n",
+          g_zoom_gestures, g_zoom_ticks_total, g_zoom_frame.calls,
+          g_zoom_frame.avg(), g_zoom_frame.max_ms,
+          (g_zoom_ticks_total && g_zoom_tick_min < 1e9) ? g_zoom_tick_min : 0.0,
+          g_zoom_ticks_total ? g_zoom_tick_sum / g_zoom_ticks_total : 0.0,
+          g_zoom_tick_max, g_zoom_viewms_min, g_zoom_viewms_max,
+          g_zoom_viewms_max - g_zoom_viewms_min);
+  g_zoom_gestures = 0;
+  g_zoom_ticks_total = 0;
+  g_zoom_tick_sum = 0;
+  g_zoom_tick_max = 0;
+  g_zoom_tick_min = 1e9;
+  g_zoom_viewms_min = 0;
+  g_zoom_viewms_max = 0;
+  g_zoom_viewms_seen = false;
+
   // P3-D6: max process CPU util per 100ms tick this window (1.0 = one core).
   // High util (~n cores) alongside a large EVENT_LAG_MAX ⇒ decode threads
   // saturating the machine starve the GUI thread (not a main-thread op).
@@ -499,6 +671,19 @@ struct _PerfScope {
   } while (0)
 
 #else  // !PXVIEW_DECODE_PERF
+
+// Zoom trace: 关闭插桩时全部退化为空操作，调用点无需 #ifdef。
+namespace pv {
+namespace base {
+namespace perf {
+inline void zoom_trace_begin(int64_t, double) {}
+inline void zoom_trace_frame(int64_t, double, double) {}
+inline void zoom_trace_end(const char *, double) {}
+inline void wheel_route_log(int, int, int, int, bool, bool, const char *) {}
+}  // namespace perf
+}  // namespace base
+}  // namespace pv
+
 #define PXV_PERF_SCOPE_VIEWPORT() \
   do {                            \
   } while (0)

@@ -170,7 +170,6 @@ class PXViewProcess:
         # On Windows, assign the child process to a Job Object so that
         # it is automatically killed when this (parent) process exits,
         # even on abnormal termination (crash, SIGKILL, etc.).
-        # This mirrors the approach used by Saleae's logic2-automation.
         if sys.platform == "win32":
             self._assign_to_job_object()
 

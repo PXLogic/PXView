@@ -62,6 +62,13 @@ struct PaintContext {
     bool dso_trig_moved = false;          // DSO trigger was moved
     bool show_glitch_overlay = false;     // glitch filter overlay visible
 
+    // --- motion-LOD (缩放动画降精度) ---
+    // 缩放/平移动画进行中。动画的每一帧都要重建整个信号 pixmap，而栅格化成本
+    // 与"每通道绘制的 toggle 数"成正比；运动过程中的密集边沿本就不可辨，
+    // 故动画帧降低 toggle 上限（见 rasterize.cpp），动画收尾帧恢复正常精度
+    // （t>=1 时 need_update 会触发一次全精度重建）。
+    bool motion_frame = false;
+
     // --- Mouse position (from View) ---
     QPointF hover_point;
 };

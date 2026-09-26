@@ -50,6 +50,7 @@
 #include <set>
 
 #include "pv/config/appconfig.h"
+#include "pv/base/perflog.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
@@ -815,6 +816,23 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
     }
 
     if (isVertical) {
+      // 物理滚轮 vs 触摸板分流：物理滚轮给出的是**离散整格**（angleDelta 为
+      // 120 的整数倍、且没有 pixelDelta），离散 tick 必须靠逐帧插值才有"滑动"感；
+      // 触摸板本身连续（带 pixelDelta），把它合帧后直接落地即可。
+      // 判定就是这一条：无 pixelDelta 且 delta 是 120 的整数倍。
+      // 仅非 macOS 分支使用（macOS 用 event->source() 判定），故标记 maybe_unused。
+      [[maybe_unused]] const bool is_physical_wheel =
+          event->pixelDelta().isNull() && (delta % 120) == 0 && delta != 0;
+
+      // 诊断：确认分流判定是否符合预期（触摸板若被误判为物理滚轮，就会被迫走
+      // 100ms 动画路径，手感会比直接落地明显迟钝）。写 %TEMP%/pxv_zoom_trace.log。
+      pv::base::perf::wheel_route_log(anglex, angley,
+                                      event->pixelDelta().x(),
+                                      event->pixelDelta().y(), is_physical_wheel,
+                                      event->source() ==
+                                          Qt::MouseEventSynthesizedBySystem,
+                                      is_physical_wheel ? "anim" : "coalesce");
+
       // Vertical scrolling is interpreted as zooming in/out
 #ifdef Q_OS_DARWIN
       static int64_t last_time;
@@ -835,15 +853,30 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
         // 物理鼠标滚轮: 与 Windows/pulseview 同号 (delta>0 = 放大)。
         // 旧代码取反导致 macOS 上鼠标滚轮方向颠倒; 触控板自然滚动的
         // 反向 delta 走上面的合成事件路径, 不经过这里。
-        _viewport->view().zoom(zoom_scale, x);
+        _viewport->view().zoom_animated(zoom_scale, x);
       }
 #else
-      // 垂直同步合帧: 不再按 16ms 墙钟丢 tick, 而是累积两次应用之间的
-      // 全部 delta, 挂一个 0ms 单次定时器, 在下一轮事件循环 (即下一帧
-      // 渲染前) 统一应用。Qt 的 QWidget 每轮事件循环至多产出一次重绘,
-      // 应用节奏因此自然贴合实际帧产出率 (60/120/144Hz 自适应), 且终
-      // 点缩放量精确 = 全部 delta 之和, 光标锚点不再因丢 tick 错位。
-      // 重负载时单次应用触发的重绘占住循环, 速率自动下降, 不会堆积。
+      // 物理滚轮：走动画路径（ZoomAnimation，100ms 定长线性插值）。
+      // 动画自身负责逐帧推进，因此这里不再走 0ms 合帧累积 —— 每次 tick 都
+      // 触发一次 retarget，动画平滑接管并合并多次滚动（就是不回跳的来源）。
+      if (is_physical_wheel) {
+        if (_viewport->view().zoom_animated(zoom_scale, x)) {
+          // 动画已接管，丢弃可能残留的合帧累积，避免两套路径互相覆盖。
+          _pending_zoom_steps = 0.0;
+          post_wheel_update();
+          return;
+        }
+        // DSO 等不支持动画的模式：zoom_animated() 内部已执行离散跳档。
+        post_wheel_update();
+        return;
+      }
+
+      // 触摸板 / 高分辨率平滑滚动：保持原有的 0ms 合帧即时路径。
+      // 不再按 16ms 墙钟丢 tick, 而是累积两次应用之间的全部 delta, 挂一个
+      // 0ms 单次定时器, 在下一轮事件循环 (即下一帧渲染前) 统一应用。Qt 的
+      // QWidget 每轮事件循环至多产出一次重绘, 应用节奏因此自然贴合实际帧
+      // 产出率 (60/120/144Hz 自适应), 且终点缩放量精确 = 全部 delta 之和,
+      // 光标锚点不再因丢 tick 错位。
       _pending_zoom_steps += zoom_scale;
       _pending_zoom_x = x;
       if (!_pending_zoom_scheduled) {
@@ -1099,8 +1132,8 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
   }
   uint64_t end = ring_count - 1;
 
-  // Start searching from the viewport edge (consistent with Logic 2:
-  // next edge searches from right edge, previous edge searches from left edge)
+  // Start searching from the viewport edge: "next edge" starts at the right
+  // edge, "previous edge" starts at the left edge.
   uint64_t searchIdx;
   if (dir == EdgeNavButton::Direction::Next) {
     searchIdx = _viewport->view().pixel2index(_viewport->view().get_view_width());
