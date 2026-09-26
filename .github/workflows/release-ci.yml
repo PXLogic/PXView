@@ -1185,6 +1185,23 @@ jobs:
       # 避免把别处的提交发成候选版。
       # 注意：本 job 不 checkout，gh 没有 git remote 可推断仓库，所有
       # gh 命令都要显式带 --repo；输入值走 env 传入，不直接插进脚本。
+      #
+      # 先检查 RELEASE_PAT 是否存在：发布步骤要用它为「旧提交」新建 tag，
+      # 而 GITHUB_TOKEN 做不到（见发布步骤的注释）。没配就早失败、给出可
+      # 操作的提示，别让用户拿到一个原始 403 去猜。
+      - name: Require RELEASE_PAT secret
+        env:
+          PAT_PRESENT: ${{ secrets.RELEASE_PAT != '' }}
+        run: |
+          if [ "$PAT_PRESENT" != "true" ]; then
+            echo "ERROR: 未配置仓库 secret RELEASE_PAT。" >&2
+            echo "       发布候选版需要 PAT：GITHUB_TOKEN 无法为旧提交创建 tag（403）。" >&2
+            echo "       请在仓库 Settings → Secrets and variables → Actions 里添加 RELEASE_PAT" >&2
+            echo "       （classic PAT 需 repo scope；fine-grained 需 Contents: Read and write）。" >&2
+            exit 1
+          fi
+          echo "RELEASE_PAT 已配置"
+
       - name: Resolve target commit
         id: target
         env:
@@ -1463,6 +1480,14 @@ jobs:
             ```
             ${{ steps.assets.outputs.sums }}
             ```
+          # ★ 必须显式传 PAT，不能用默认的 GITHUB_TOKEN。
+          # 本步骤要用 target_commitish 为一个「旧提交」新建 tag；GitHub 的
+          # GITHUB_TOKEN 不允许为比当前 workflow 运行更早的提交创建 ref，
+          # 会报 403 Resource not accessible by integration（action 自己的
+          # action.yml 在 target_commitish 说明里也点明了这一点）。PAT 没有
+          # 这个限制。发布旧提交都会踩到，发布 dev 最新提交时恰好不踩 ——
+          # 早期 rc 能发成功纯属「发布的就是当时最新提交」的巧合。
+          token: ${{ secrets.RELEASE_PAT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
