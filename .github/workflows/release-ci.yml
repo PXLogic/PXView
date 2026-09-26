@@ -1189,18 +1189,29 @@ jobs:
       # 先检查 RELEASE_PAT 是否存在：发布步骤要用它为「旧提交」新建 tag，
       # 而 GITHUB_TOKEN 做不到（见发布步骤的注释）。没配就早失败、给出可
       # 操作的提示，别让用户拿到一个原始 403 去猜。
+      # 存在则顺带验证一次它确实能访问本仓库：fine-grained PAT 若没勾选
+      # PXView 仓库，GitHub 对无权访问的资源一律回 404（而不是 403），
+      # 到发布那一步只会看到一句含糊的 Not Found —— 这里提前把原因说清。
       - name: Require RELEASE_PAT secret
         env:
-          PAT_PRESENT: ${{ secrets.RELEASE_PAT != '' }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
-          if [ "$PAT_PRESENT" != "true" ]; then
+          if [ -z "${GH_TOKEN}" ]; then
             echo "ERROR: 未配置仓库 secret RELEASE_PAT。" >&2
             echo "       发布候选版需要 PAT：GITHUB_TOKEN 无法为旧提交创建 tag（403）。" >&2
             echo "       请在仓库 Settings → Secrets and variables → Actions 里添加 RELEASE_PAT" >&2
             echo "       （classic PAT 需 repo scope；fine-grained 需 Contents: Read and write）。" >&2
             exit 1
           fi
-          echo "RELEASE_PAT 已配置"
+          # 用 PAT 本身探一次仓库可见性；失败时报清楚是哪一类问题。
+          if ! REPO_JSON=$(gh api "repos/${GITHUB_REPOSITORY}" 2>/dev/null); then
+            echo "ERROR: RELEASE_PAT 无法访问仓库 ${GITHUB_REPOSITORY}。" >&2
+            echo "       GitHub 对无权访问的资源返回 404，最常见的原因是 fine-grained PAT" >&2
+            echo "       创建时 Resource owner 没选对、或 Repository access 没勾选本仓库。" >&2
+            echo "       classic PAT 需 repo scope；fine-grained 需把本仓库加入并给 Contents: Read and write。" >&2
+            exit 1
+          fi
+          echo "RELEASE_PAT 已配置，且可访问 ${GITHUB_REPOSITORY}"
 
       - name: Resolve target commit
         id: target
