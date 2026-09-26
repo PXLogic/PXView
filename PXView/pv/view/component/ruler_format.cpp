@@ -53,7 +53,12 @@ QString format_real_time(uint64_t delta_index, uint64_t sample_rate)
 {
     double v1 = static_cast<double>(std::pow(10, 12)) / static_cast<double>(sample_rate);
     double delta_time_double = v1 * static_cast<double>(delta_index);
-    uint64_t delta_time = static_cast<unsigned long>(v1 * static_cast<double>(delta_index));
+    // 必须转 uint64_t：delta_time 是皮秒数（1e6 样本@1MHz 即 3e11），
+    // 而 Windows(LLP64) 下 `unsigned long` 仅 32 位，static_cast<unsigned long>
+    // 会把 64 位值按 2^32 截断（297050000000 → 697256576），导致光标时间/
+    // 测量读数严重错误且随 index 非单调跳动。此前的隐式 double→uint64_t 转换
+    // 是正确的，重构显式化时误用了 unsigned long。
+    uint64_t delta_time = static_cast<uint64_t>(v1 * static_cast<double>(delta_index));
 
     // static_cast, not a bare comparison against UINT64_MAX: the macro is a
     // uint64_t, so `double > uint64_t` converts it to double anyway (2^64,

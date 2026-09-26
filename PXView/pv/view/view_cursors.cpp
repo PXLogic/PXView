@@ -299,10 +299,6 @@ QString ViewCursors::get_cm_time(int index) {
   uint64_t sampleIndex = get_cursor_samples(index);
   auto *src = _view->document_snapshot_source(); // 可为 null（外来采集）
   uint64_t sampleRate = src ? src->cur_snap_samplerate() : 0;
-  // [PX1-DEBUG] 问题1排查：光标读数时间 = index/samplerate。
-  pxv_info("[PX1-DEBUG] get_cm_time: idx=%d sample=%llu samplerate=%llu",
-           index, (unsigned long long)sampleIndex,
-           (unsigned long long)sampleRate);
   return _view->get_ruler()->format_real_time(sampleIndex, sampleRate);
 }
 
