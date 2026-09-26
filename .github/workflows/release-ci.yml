@@ -1186,9 +1186,9 @@ jobs:
       # 注意：本 job 不 checkout，gh 没有 git remote 可推断仓库，所有
       # gh 命令都要显式带 --repo；输入值走 env 传入，不直接插进脚本。
       #
-      # 先检查 RELEASE_PAT 是否存在：发布步骤要用它为「旧提交」新建 tag，
-      # 而 GITHUB_TOKEN 做不到（见发布步骤的注释）。没配就早失败、给出可
-      # 操作的提示，别让用户拿到一个原始 403 去猜。
+      # 先检查 RELEASE_PAT 是否存在：发布阶段要用它显式创建 tag ref（见
+      # 「Create tag ref」步骤的注释）。没配就早失败、给出可操作的提示，
+      # 别让用户到发布那一步才拿到一个含糊的 404 去猜。
       # 存在则顺带验证一次它确实能访问本仓库：fine-grained PAT 若没勾选
       # PXView 仓库，GitHub 对无权访问的资源一律回 404（而不是 403），
       # 到发布那一步只会看到一句含糊的 Not Found —— 这里提前把原因说清。
@@ -1198,7 +1198,7 @@ jobs:
         run: |
           if [ -z "${GH_TOKEN}" ]; then
             echo "ERROR: 未配置仓库 secret RELEASE_PAT。" >&2
-            echo "       发布候选版需要 PAT：GITHUB_TOKEN 无法为旧提交创建 tag（403）。" >&2
+            echo "       发布候选版需要 PAT：用于为目标提交显式创建 tag ref。" >&2
             echo "       请在仓库 Settings → Secrets and variables → Actions 里添加 RELEASE_PAT" >&2
             echo "       （classic PAT 需 repo scope；fine-grained 需 Contents: Read and write）。" >&2
             exit 1
@@ -1211,11 +1211,6 @@ jobs:
             echo "       classic PAT 需 repo scope；fine-grained 需把本仓库加入并给 Contents: Read and write。" >&2
             exit 1
           fi
-          # 打印令牌形态（长度 / 前缀 / 是否混入空白），只用于诊断，不泄露值：
-          # 粘贴 secret 时首尾混入空格或换行会让令牌失效，而 GitHub 对无效
-          # 令牌的写操作回 404（不是 401），从发布步骤的报错里根本看不出来。
-          echo "RELEASE_PAT: len=${#GH_TOKEN} prefix=${GH_TOKEN:0:4}"
-          printf '%s' "$GH_TOKEN" | od -An -c | tail -2
           echo "RELEASE_PAT 已配置，且可访问 ${GITHUB_REPOSITORY}"
 
       - name: Resolve target commit
@@ -1448,7 +1443,30 @@ jobs:
           fi
           echo "标签 ${TAG} 尚未占用，可以发布"
 
-      # ── 6. 发布 rc Release ───────────────────────────────────────
+      # ── 6. 先用 PAT 显式建立 tag ref ─────────────────────────────
+      # 关键：不能用 action 的 target_commitish 去建这个 tag。
+      # 实测（本仓库 rc.0 → rc.1 的对比）：target_commitish 等于本次 run 的
+      # 自身提交时 GITHUB_TOKEN 能建 ref；指向任何「别的提交」时，GitHub 对
+      # 该 ref 的创建一律回 404 Not Found —— 换成 PAT 也一样（PAT 对同一个
+      # 提交直接 POST /git/refs 是成功的，说明不是权限问题，而是 action 那条
+      # 路径在 workflow_dispatch 下不走 ref 创建通道）。所以这里自己用 API
+      # 建 ref：`POST /git/refs` 在 PAT 下稳定工作，建好后 release 只需挂上去。
+      # ref 已存在（重跑/并发）时忽略 422，交给下一步的正常发布流程处理。
+      - name: Create tag ref for the target commit
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          TAG="PXView_v${{ steps.assets.outputs.version }}"
+          SHA="${{ steps.target.outputs.sha }}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "标签 ${TAG} 已存在，跳过创建"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" >/dev/null
+            echo "已创建标签 ${TAG} → ${SHA}"
+          fi
+
+      # ── 7. 发布 rc Release ───────────────────────────────────────
       # 不删任何旧 Release：每个构建各自一个 tag 永久保留，这样每个资产的
       # 下载量都能一直累加，旧构建也能回溯下载（删掉的 Release 会连资产计数
       # 一起消失，且 GitHub 没有恢复接口）。
@@ -1461,8 +1479,10 @@ jobs:
           # 页同日按标签的语义化版本倒序，非 semver 的标签会排到正式版后面。
           # 这个前缀不会误触 build.yml 的 tag 触发器：它匹配的是 'v*'，而
           # PXView_v… 以 P 开头。
+          #
+          # 不传 target_commitish：tag ref 已由上一步用 PAT 建好，这里只需把
+          # Release 挂到那个已存在的 tag 上（GitHub 会沿用 tag 指向的提交）。
           tag_name: PXView_v${{ steps.assets.outputs.version }}
-          target_commitish: ${{ steps.target.outputs.sha }}
           # 标题与正式版保持一致（正式版的标题就是它的标签 PXView_v1.6.5）。
           # 是否候选版由标签里的 -rc.N、prerelease 标记和正文首行说明区分。
           name: PXView_v${{ steps.assets.outputs.version }}
@@ -1496,13 +1516,8 @@ jobs:
             ```
             ${{ steps.assets.outputs.sums }}
             ```
-          # ★ 必须显式传 PAT，不能用默认的 GITHUB_TOKEN。
-          # 本步骤要用 target_commitish 为一个「旧提交」新建 tag；GitHub 的
-          # GITHUB_TOKEN 不允许为比当前 workflow 运行更早的提交创建 ref，
-          # 会报 403 Resource not accessible by integration（action 自己的
-          # action.yml 在 target_commitish 说明里也点明了这一点）。PAT 没有
-          # 这个限制。发布旧提交都会踩到，发布 dev 最新提交时恰好不踩 ——
-          # 早期 rc 能发成功纯属「发布的就是当时最新提交」的巧合。
+          # 传 PAT：本步骤要为已建好的 tag 挂 Release 并上传资产。tag ref 由
+          # 上一步用同一个 PAT 创建，这里保持一致，避免两套令牌权限差异。
           token: ${{ secrets.RELEASE_PAT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
