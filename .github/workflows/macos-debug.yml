@@ -479,11 +479,19 @@ jobs:
           echo "--- 记录: E2E 用的测试代码来自 run ${{ needs.await-build.outputs.run_id }} 的提交 ---"
           echo "${{ needs.await-build.outputs.head_sha }}" > /tmp/head_sha.txt
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # 不能用 runner 自带的 python3: 那是 Homebrew Python (PEP 668
+          # externally-managed), pip install 直接被拒 -> 16 秒红掉整个 job。
+          # setup-python 的解释器在 PATH 最前, 下面与 pytest 步骤的 python3
+          # 都解析到它, 与 prepare job 同版本 (3.12)。
+          python-version: '3.12'
+
       - name: Install Python and test dependencies
         run: |
           set -euo pipefail
-          # runner 自带 python3。不在 macOS 上装特定版本, 是因为 pytest 对
-          # 解释器版本不敏感; 真要挑版本也该在 prepare job 里挑。
+          # 解释器来自上一步 setup-python; 与 prepare job 用同一版本。
           python3 --version
           python3 -m pip install --upgrade pip
           python3 -m pip install pytest pytest-timeout pytest-rerunfailures
