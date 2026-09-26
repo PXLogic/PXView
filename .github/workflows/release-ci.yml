@@ -1219,7 +1219,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISH_SHA: ${{ github.event.inputs.publish_sha }}
         run: |
-          SHA="${PUBLISH_SHA}"
+          # trim：GitHub 对 workflow_dispatch 的字符串输入原样传递，不做首尾
+          # 空白清理。从 UI / 终端复制提交号时常带上尾随空格或 Tab，若直接拼进
+          # URL，API 会当成提交号的一部分而回 422「No commit found for SHA: abc 」，
+          # 报错里那个空格极易被忽略（看起来就是「找不到这个提交」，实则语法问题）。
+          # 用参数展开去掉首尾的空白与换行，不调用外部命令，也不怕 set -u。
+          SHA="${PUBLISH_SHA#"${PUBLISH_SHA%%[![:space:]]*}"}"
+          SHA="${SHA%"${SHA##*[![:space:]]}"}"
           if [ -z "$SHA" ]; then
             SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
             echo "publish_sha 留空 → 取 dev 最新提交"
@@ -1229,10 +1235,16 @@ jobs:
             # Build run」——而 REST API 恰恰接受短 SHA，于是本步能过、第 2 步
             # 却失败。用户从 UI 或 git log --oneline 抄来的多是短 SHA，所以
             # 这里用 REST 统一解析成完整 SHA，后续步骤一概使用全量值。
+            # 保留 gh 的错误原文：422（提交号格式/内容无效，常见于尾随空格或
+            # 不存在的提交）与 404（仓库/权限问题）指向完全不同的方向，吞掉
+            # 就只有一句「无法解析」可看。这里把原始响应一并打出来。
             RESOLVED=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" \
-                         --jq '.sha' 2>/dev/null || true)
+                         --jq '.sha' 2>"$RUNNER_TEMP/resolve.err" || true)
             if [ -z "$RESOLVED" ]; then
               echo "ERROR: 无法解析提交 ${SHA}（仓库 ${GITHUB_REPOSITORY} 里没有这个提交）" >&2
+              if [ -s "$RUNNER_TEMP/resolve.err" ]; then
+                echo "       API 响应：$(cat "$RUNNER_TEMP/resolve.err")" >&2
+              fi
               exit 1
             fi
             if [ "$RESOLVED" != "$SHA" ]; then
