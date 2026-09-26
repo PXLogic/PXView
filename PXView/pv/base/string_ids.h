@@ -23,15 +23,15 @@
 #ifndef STRING_IDS_H
 #define STRING_IDS_H
 
-#define     STR_PAGE_MSG        1
-#define     STR_PAGE_TOOLBAR    2
-#define     STR_PAGE_DLG        3
-#define     STR_PAGE_DSL        100
-#define     STR_PAGE_DECODER    101
-#define     STR_PAGE_SIGNAL_PROC  102
+inline constexpr int STR_PAGE_MSG = 1;
+inline constexpr int STR_PAGE_TOOLBAR = 2;
+inline constexpr int STR_PAGE_DLG = 3;
+inline constexpr int STR_PAGE_DSL = 100;
+inline constexpr int STR_PAGE_DECODER = 101;
+inline constexpr int STR_PAGE_SIGNAL_PROC = 102;
 /* libsigrok 输入/输出模块选项（导入/导出选项对话框里的标签与说明）。
  * 这些字符串由模块自己声明（英文），按选项 id 在 input_output.json 里翻译。 */
-#define     STR_PAGE_INPUT_OUTPUT 103
+inline constexpr int STR_PAGE_INPUT_OUTPUT = 103;
 
 #define IDS_MSG_LOG_LEVEL
 #endif

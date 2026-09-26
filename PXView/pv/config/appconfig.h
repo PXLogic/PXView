@@ -35,9 +35,9 @@
 // P2-A: Setting key constants — use these instead of bare string literals.
 #include "pv/config/appconfig_keys.h"
 
-#define LAN_CN  25
-#define LAN_TRADITIONAL  26
-#define LAN_EN  31
+inline constexpr int LAN_CN = 25;
+inline constexpr int LAN_TRADITIONAL = 26;
+inline constexpr int LAN_EN = 31;
 
 #define THEME_STYLE_DARK   "dark"
 #define THEME_STYLE_LIGHT  "light"

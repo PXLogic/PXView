@@ -485,7 +485,7 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           // per-frame cost bounded until decoding completes.
           const uint64_t row_frontier = srow.data->get_max_sample();
           const uint64_t screen_samples = static_cast<uint64_t>(std::max(
-              1.0, (double)(right - left) * samples_per_pixel));
+              1.0, static_cast<double>(right - left) * samples_per_pixel));
           const bool near_frontier =
               decoding && (row_frontier >= start_sample) &&
               (row_frontier <= end_sample + screen_samples);

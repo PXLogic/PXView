@@ -1136,7 +1136,7 @@ void Viewport::export_decoder_audio_wav() {
     if (span > 0) {
       double interval = static_cast<double>(span) / static_cast<double>((samples.size() - 1));
       if (interval >= 1.0 && logic_rate > 0) {
-        derived_rate = static_cast<uint32_t>(((double)logic_rate / interval));
+        derived_rate = static_cast<uint32_t>(static_cast<double>(logic_rate) / interval);
         break;
       }
     }
@@ -1369,7 +1369,7 @@ void Viewport::play_decoder_audio() {
     if (span > 0) {
       double interval = static_cast<double>(span) / static_cast<double>((samples.size() - 1));
       if (interval >= 1.0 && logic_rate > 0) {
-        derived_rate = static_cast<uint32_t>(((double)logic_rate / interval));
+        derived_rate = static_cast<uint32_t>(static_cast<double>(logic_rate) / interval);
         break;
       }
     }

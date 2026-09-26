@@ -504,8 +504,8 @@ void rasterize_analog_channel(
 
     // Pass 1: compute min/max Y for each pixel column.
     for (int x = 0; x < pixel_width; x++) {
-      uint64_t s_start_off = static_cast<uint64_t>(floor((double)x * spp));
-      uint64_t s_end_off = static_cast<uint64_t>(floor((double)(x + 1) * spp));
+      uint64_t s_start_off = static_cast<uint64_t>(floor(static_cast<double>(x) * spp));
+      uint64_t s_end_off = static_cast<uint64_t>(floor(static_cast<double>(x + 1) * spp));
       if (s_end_off <= s_start_off)
         s_end_off = s_start_off + 1;
       if (s_end_off > static_cast<uint64_t>(sample_count))

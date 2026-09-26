@@ -18,6 +18,7 @@
  */
 
 #include "pv/api/session_service.h"
+#include <memory>
 
 #include "pv/interface/events_json.h"  // Phase 3: event serialization (to_json overloads)
 #include "pv/session/sigsession.h"
@@ -2856,9 +2857,8 @@ Result<std::string> SessionService::add_decoder(
                             for (const GSList *v = opt_def->values; v; v = v->next) {
                                 auto *enum_val = static_cast<GVariant*>(v->data);
                                 if (!enum_val) continue;
-                                gchar *enum_str = g_variant_print(enum_val, false);
-                                std::string cmp_str = enum_str ? enum_str : "";
-                                g_free(enum_str);
+                                auto enum_str = std::unique_ptr<gchar, decltype(&g_free)>(g_variant_print(enum_val, false), &g_free);
+                                std::string cmp_str = enum_str ? enum_str.get() : "";
                                 if (cmp_str.size() >= 2 && cmp_str.front() == '\'' && cmp_str.back() == '\'')
                                     cmp_str = cmp_str.substr(1, cmp_str.size() - 2);
                                 if (cmp_str == opt.second) {
@@ -3072,9 +3072,8 @@ Result<std::string> SessionService::add_decoder(
                     for (const GSList *v = opt_def->values; v; v = v->next) {
                         auto *enum_val = static_cast<GVariant*>(v->data);
                         if (!enum_val) continue;
-                        gchar *enum_str = g_variant_print(enum_val, false);
-                        std::string cmp_str = enum_str ? enum_str : "";
-                        g_free(enum_str);
+                        auto enum_str = std::unique_ptr<gchar, decltype(&g_free)>(g_variant_print(enum_val, false), &g_free);
+                        std::string cmp_str = enum_str ? enum_str.get() : "";
                         if (cmp_str.size() >= 2 && cmp_str.front() == '\'' && cmp_str.back() == '\'')
                             cmp_str = cmp_str.substr(1, cmp_str.size() - 2);
                         if (cmp_str == opt.second) {
@@ -4992,9 +4991,8 @@ if (!root_decoder || !root_decoder->decoder())
                     for (const GSList *v = opt_def->values; v; v = v->next) {
                         auto *enum_val = static_cast<GVariant*>(v->data);
                         if (!enum_val) continue;
-                        gchar *enum_str = g_variant_print(enum_val, false);
-                        std::string cmp_str = enum_str ? enum_str : "";
-                        g_free(enum_str);
+                        auto enum_str = std::unique_ptr<gchar, decltype(&g_free)>(g_variant_print(enum_val, false), &g_free);
+                        std::string cmp_str = enum_str ? enum_str.get() : "";
                         if (cmp_str.size() >= 2 && cmp_str.front() == '\'' && cmp_str.back() == '\'')
                             cmp_str = cmp_str.substr(1, cmp_str.size() - 2);
                         if (cmp_str == opt.second) {
@@ -5260,11 +5258,10 @@ Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
         _session->refresh_device_list();
         int count = 0;
         int actived_index = -1;
-        struct ds_device_base_info *array = _session->get_device_list(count, actived_index);
+        auto array = std::unique_ptr<ds_device_base_info[], decltype(&free)>(
+            _session->get_device_list(count, actived_index), &free);
         std::vector<DeviceInfo> result;
         if (!array || count <= 0) {
-            if (array)
-                free(array);
             return Result<std::vector<DeviceInfo>>::Success(result);
         }
         DeviceAgent *agent = _session->get_device();
@@ -5318,8 +5315,6 @@ Result<std::vector<DeviceInfo>> SessionService::refresh_device_list() {
 
         result.push_back(info);
     }
-
-        free(array);
 
         broadcast_event(ServiceEvent::DeviceListUpdated);
         return Result<std::vector<DeviceInfo>>::Success(result);

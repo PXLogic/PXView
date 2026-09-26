@@ -408,7 +408,7 @@ void AnalogSnapshot::append_data_partial(const sr_datafeed_analog &analog,
                 ch_ring = 0;
             }
             uint8_t *dst = _data.get() + ch_ring * dst_stride + order * _unit_bytes;
-            memcpy(dst, src_ch + i * src_stride, _unit_bytes);
+            std::copy_n(src_ch + i * src_stride, static_cast<size_t>(_unit_bytes), dst);
             ch_ring++;
         }
 
@@ -461,15 +461,16 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             _sample_count = _total_sample_count;
 
         if (_ring_sample_count + samples >= _total_sample_count) {
-            memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
-                data, (_total_sample_count - _ring_sample_count) * bytes_per_sample);
+            std::copy_n(reinterpret_cast<const uint8_t*>(data),
+                static_cast<size_t>(_total_sample_count - _ring_sample_count) * bytes_per_sample,
+                _data.get() + _ring_sample_count * bytes_per_sample);
             data = reinterpret_cast<uint8_t*>(data) + (_total_sample_count - _ring_sample_count) * bytes_per_sample;
             _ring_sample_count = (samples + _ring_sample_count - _total_sample_count) % _total_sample_count;
-            memcpy(_data.get(),
-                data, _ring_sample_count * bytes_per_sample);
+            std::copy_n(static_cast<const uint8_t*>(data), static_cast<size_t>(_ring_sample_count) * bytes_per_sample,
+                _data.get());
         } else {
-            memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
-                data, samples * bytes_per_sample);
+            std::copy_n(static_cast<const uint8_t*>(data), static_cast<size_t>(samples) * bytes_per_sample,
+                _data.get() + _ring_sample_count * bytes_per_sample);
             _ring_sample_count += samples;
         }
     }
@@ -478,8 +479,8 @@ void AnalogSnapshot::append_data(void *data, uint64_t samples, uint16_t pitch)
             if (_unit_pitch == 0) {
                 if (_sample_count < _total_sample_count)
                     _sample_count++;
-                memcpy(_data.get() + _ring_sample_count * bytes_per_sample,
-                    data, bytes_per_sample);
+                std::copy_n(static_cast<const uint8_t*>(data), static_cast<size_t>(bytes_per_sample),
+                    _data.get() + _ring_sample_count * bytes_per_sample);
                 data = reinterpret_cast<uint8_t*>(data) + bytes_per_sample*pitch;
                 _ring_sample_count = (_ring_sample_count + 1) % _total_sample_count;
                 _unit_pitch = pitch;

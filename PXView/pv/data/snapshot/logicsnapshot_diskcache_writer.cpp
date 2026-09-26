@@ -179,7 +179,7 @@ uint8_t *LogicSnapshotDiskCacheWriter::SlotPool::acquire()
     // 懒增长：只在真正需要时分配，稳态下只保留"实际并发在飞数"个槽位，
     // 而不是一上来就吃掉 slot_bytes * max_slots 的常驻内存。
     if (_storage.size() < static_cast<size_t>(_max_slots)) {
-        _storage.emplace_back(new uint8_t[static_cast<size_t>(_slot_bytes)]);
+        _storage.emplace_back(std::make_unique<uint8_t[]>(static_cast<size_t>(_slot_bytes)));
         ++_in_use;
         if (_in_use > _peak_in_use) _peak_in_use = _in_use;
         return _storage.back().get();
@@ -237,7 +237,7 @@ void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
             // 归还并 notify_one）。上界等价于 max_slots 个在飞 payload。
             _async_drain_cv.wait_for(lock, std::chrono::milliseconds(50));
         }
-        std::memcpy(slot, data, static_cast<size_t>(length));
+        std::copy_n(data, static_cast<size_t>(length), slot);
         // P1-e 拷贝审计（仅在 ENABLE_DECODE_PERF 构建下计数，见 pv/base/perflog.h）
         PXV_PERF_COPY_STAGING(length);
         payload.slot = slot;

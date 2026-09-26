@@ -25,6 +25,7 @@
 #include <libusb.h>
 #include <libsigrok/libsigrok.h>
 #include <glib.h>
+#include <memory>
 
 #include "pv/session/sigsession.h"
 
@@ -515,11 +516,10 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
   // Use the device list to pick the best device.
   int count = 0;
   int actived_index = -1;
-  struct ds_device_base_info *array = get_device_list(count, actived_index);
+  auto array = std::unique_ptr<ds_device_base_info[], decltype(&free)>(
+      get_device_list(count, actived_index), &free);
   if (count < 1 || array == nullptr) {
     pxv_err("Error! Device list is empty, can't set default device.");
-    if (array)
-      free(array);
     return false;
   }
 
@@ -558,7 +558,7 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
     break;
   }
   if (!dev_handle)
-    dev_handle = (array + count - 1)->handle; // ultimate fallback
+    dev_handle = (array.get() + count - 1)->handle; // ultimate fallback
 
   if (!devOpt.lastDeviceDriver.isEmpty()) {
     bool found = false;
@@ -600,8 +600,6 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
                devOpt.lastDeviceDriver.toUtf8().constData());
     }
   }
-
-  free(array);
 
   if (set_device(dev_handle, reason)) {
     return true;
@@ -1279,8 +1277,8 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
 
   // Allocate (count + 1) entries; last entry is a sentinel with handle=0.
   int count = static_cast<int>(all_sdi.size());
-  struct ds_device_base_info *array = (struct ds_device_base_info *)
-      calloc(count + 1, sizeof(struct ds_device_base_info));
+  auto array = std::unique_ptr<ds_device_base_info[], decltype(&free)>(
+      static_cast<ds_device_base_info *>(calloc(count + 1, sizeof(ds_device_base_info))), &free);
   if (!array) {
     return nullptr;
   }
@@ -1331,7 +1329,7 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
     }
   }
 
-  return array;
+  return array.release();
 }
 
 void SigSession::refresh_device_list() {

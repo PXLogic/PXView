@@ -31,8 +31,8 @@
 
 #include "pv/utility/atomic_shared_ptr.h"
 
-#define DECODER_MAX_DATA_BLOCK_LEN 256
-#define CONVERT_STR_MAX_LEN 150
+inline constexpr int DECODER_MAX_DATA_BLOCK_LEN = 256;
+inline constexpr int CONVERT_STR_MAX_LEN = 150;
 
 // 注意：AnnotationText / AnnotationResTable 与 DecoderStatus 一样是**全局
 // 作用域**类型（annotation.h 中的前向声明也在全局作用域），不要给它们套

@@ -288,8 +288,8 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
           }
           const size_t old_size = prev.bytes.size();
           prev.bytes.resize(old_size + static_cast<size_t>(add));
-          memcpy(prev.bytes.data() + old_size, reinterpret_cast<const uint8_t*>(lbp) + prev_hi,
-                 static_cast<size_t>(add));
+          std::copy_n(reinterpret_cast<const uint8_t*>(lbp) + prev_hi,
+                 static_cast<size_t>(add), prev.bytes.data() + old_size);
           _edit_bytes += add;
         }
         return;
@@ -314,7 +314,7 @@ void LogicSnapshotGlitchFilter::record_edit(unsigned int order, uint64_t idx0,
   e.byte_lo = byte_lo;
   e.allocated = false;
   e.bytes.resize(static_cast<size_t>(len));
-  memcpy(e.bytes.data(), reinterpret_cast<const uint8_t*>(lbp) + byte_lo, static_cast<size_t>(len));
+  std::copy_n(reinterpret_cast<const uint8_t*>(lbp) + byte_lo, static_cast<size_t>(len), e.bytes.data());
   _edit_bytes += len;
   _edits.push_back(std::move(e));
 }
@@ -499,16 +499,16 @@ bool LogicSnapshotGlitchFilter::revert_all_edits(
           return false;   // this record could not be restored
         }
         if (const_val)
-          memset(ptr, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
+          std::fill_n(reinterpret_cast<uint8_t*>(ptr), LogicSnapshot::LeafBlockSamples / 8, static_cast<uint8_t>(0xFF));
         else
-          memset(ptr, 0, LogicSnapshot::LeafBlockSamples / 8);
-        memset(reinterpret_cast<uint8_t*>(ptr) + LogicSnapshot::LeafBlockSamples / 8, 0,
+          std::fill_n(reinterpret_cast<uint8_t*>(ptr), LogicSnapshot::LeafBlockSamples / 8, 0);
+        std::fill_n(reinterpret_cast<uint8_t*>(ptr) + LogicSnapshot::LeafBlockSamples / 8,
                LogicSnapshot::LeafBlockSpace -
-                   LogicSnapshot::LeafBlockSamples / 8);
+                   LogicSnapshot::LeafBlockSamples / 8, 0);
         rn.lbp[e.idx1] = ptr;
       }
       if (ptr && !e.bytes.empty())
-        memcpy(reinterpret_cast<uint8_t*>(ptr) + e.byte_lo, e.bytes.data(), e.bytes.size());
+        std::copy_n(e.bytes.data(), e.bytes.size(), reinterpret_cast<uint8_t*>(ptr) + e.byte_lo);
       return true;
     }
   };
@@ -636,8 +636,8 @@ void LogicSnapshotGlitchFilter::recalc_mipmap(unsigned int order,
     _host->_last_sample[order] = 0;
   }
 
-  memset(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8, 0,
-         LogicSnapshot::LeafBlockSpace - LogicSnapshot::LeafBlockSamples / 8);
+  std::fill_n(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8,
+         LogicSnapshot::LeafBlockSpace - LogicSnapshot::LeafBlockSamples / 8, 0);
 
   _host->_ch_data[order][index0].tog &= ~(1ULL << index1);
   _host->_ch_data[order][index0].first &= ~(1ULL << index1);
@@ -821,12 +821,12 @@ void LogicSnapshotGlitchFilter::apply_glitch_filter(
             return;
           }
           if (const_val)
-            memset(lbp, 0xFF, LogicSnapshot::LeafBlockSamples / 8);
+            std::fill_n(reinterpret_cast<uint8_t*>(lbp), LogicSnapshot::LeafBlockSamples / 8, static_cast<uint8_t>(0xFF));
           else
-            memset(lbp, 0, LogicSnapshot::LeafBlockSamples / 8);
-          memset(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8, 0,
+            std::fill_n(reinterpret_cast<uint8_t*>(lbp), LogicSnapshot::LeafBlockSamples / 8, 0);
+          std::fill_n(reinterpret_cast<uint8_t*>(lbp) + LogicSnapshot::LeafBlockSamples / 8,
                  LogicSnapshot::LeafBlockSpace -
-                     LogicSnapshot::LeafBlockSamples / 8);
+                     LogicSnapshot::LeafBlockSamples / 8, 0);
           _host->_ch_data[order][idx0].lbp[idx1] = lbp;
           materialised = true;
         }
@@ -1146,7 +1146,7 @@ void apply_glitch_filter_one_pass(const uint8_t *in, uint8_t *out,
     return;
 
   // 先用输入填充输出，未判定为毛刺的样本保持原电平
-  memcpy(out, in, static_cast<size_t>(sample_count));
+  std::copy_n(in, static_cast<size_t>(sample_count), out);
 
   bool accepted_level = in[0] != 0;
   uint64_t scan_pos = 0;

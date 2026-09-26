@@ -27,7 +27,7 @@
 #include <QtWidgets>
 #include <windows.h>
 
-#define SHADOW_BORDER_WIDTH 11
+inline constexpr int SHADOW_BORDER_WIDTH = 11;
 
 namespace pv {
 

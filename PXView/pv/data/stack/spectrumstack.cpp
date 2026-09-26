@@ -27,7 +27,7 @@
 #include "pv/data/isignal_model_source.h"
 
 
-#define PI 3.1415
+inline constexpr double PI = 3.1415;
 
 using namespace std;
 

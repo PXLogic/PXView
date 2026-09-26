@@ -199,7 +199,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
 
     // Find the two histogram peaks by scanning left/right of the mid value.
     // The mid value is approximated as (max + min) / 2.
-    const uint8_t mid_adc = (uint8_t)((static_cast<int>(r.max) + static_cast<int>(r.min)) / 2);
+    const uint8_t mid_adc = static_cast<uint8_t>((static_cast<int>(r.max) + static_cast<int>(r.min)) / 2);
 
     // Scan lower half (ADC values 0..mid_adc) for the most frequent value
     // → this is the high-voltage steady-state → stored in `low`.

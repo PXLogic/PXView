@@ -447,7 +447,7 @@ void LogicSnapshot::first_payload(const sr_datafeed_logic &logic,
           rn.tog = 0;
           rn.first = 0;
           rn.last = 0;
-          memset(rn.lbp, 0, sizeof(rn.lbp));
+          std::fill(std::begin(rn.lbp), std::end(rn.lbp), nullptr);
           root_vector.push_back(rn);
         }
 
@@ -751,12 +751,12 @@ void* LogicSnapshot::allocate_block(uint16_t channel, uint64_t index0, uint64_t 
     if (from_mmap) {
         // mmap 首次分配：OS 懒加载零填充，跳过 memset；复用槽位（wrap）需清零残留。
         if (!is_mmap_slot_fresh(channel, global_block_seq)) {
-            memset(lbp, 0, LeafBlockSpace);
+            std::fill_n(reinterpret_cast<uint8_t*>(lbp), LeafBlockSpace, 0);
         }
         mark_mmap_slot_written(channel, global_block_seq);
     } else {
         // LeafBlockPool 回收块：可能含脏数据，必须清零。
-        memset(lbp, 0, LeafBlockSpace);
+        std::fill_n(reinterpret_cast<uint8_t*>(lbp), LeafBlockSpace, 0);
     }
     return lbp;
 }
@@ -1688,7 +1688,7 @@ void LogicSnapshot::capture_ended() {
       } else {
         // ONLY clear the signal data part, NOT the mipmaps! Mipmaps start at LeafBlockSamples / 8.
         if (offset < LeafBlockSamples / 8) {
-            memset(lbp + offset, 0, (LeafBlockSamples / 8) - offset);
+            std::fill_n(reinterpret_cast<uint8_t*>(lbp) + offset, (LeafBlockSamples / 8) - offset, 0);
         }
         calc_mipmap(chan, static_cast<uint8_t>(index0), static_cast<uint8_t>(index1), offset * 8, true);
       }
@@ -1961,7 +1961,7 @@ const uint8_t *LogicSnapshot::get_samples(uint64_t start_sample,
     static thread_local std::vector<uint8_t> s_const_buf;
     if (s_const_buf.size() < need) s_const_buf.resize(need);
     uint8_t fill = const_val ? 0xFF : 0x00;
-    memset(s_const_buf.data(), fill, need);
+    std::fill_n(s_const_buf.data(), static_cast<size_t>(need), fill);
     if (lbp != nullptr)
       *lbp = nullptr;
     if (looped) {

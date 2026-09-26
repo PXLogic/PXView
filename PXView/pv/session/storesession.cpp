@@ -48,6 +48,8 @@
 #include <cmath>
 #include <QTextStream>
 #include <list>
+#include <format>
+#include <algorithm>
 
 
 
@@ -285,7 +287,6 @@ bool StoreSession::save_start()
 
 void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
 {
-    char chunk_name[20] = {0};
     uint16_t to_save_probes = 0;
     bool sample;
     int ret = SR_ERR;
@@ -366,6 +367,7 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                 uint8_t *buf = logic_snapshot->get_block_buf(i, ch_index, sample);
                 uint64_t size = logic_snapshot->get_block_size(i);
                 bool need_malloc = (buf == nullptr);
+                std::vector<uint8_t> owned_block;
 
                 if (i == end_block && end_offset / 8 < size && end_offset > 0){
                     size = end_offset / 8;
@@ -377,23 +379,21 @@ void StoreSession::save_logic(pv::data::LogicSnapshot *logic_snapshot)
                     }
                     size -= start_offset / 8;
                 }
-                
-                if (need_malloc) {
-                    buf = reinterpret_cast<uint8_t*>(malloc(size));
-                    if (buf == nullptr) {
-                        _has_error.store(true);
+
+                if (need_malloc && size > 0) {
+                    owned_block.assign(static_cast<size_t>(size), sample ? 0xFF : 0x00);
+                    buf = owned_block.data();
+                }
+                if (need_malloc && size > 0 && buf == nullptr) {
+                    _has_error.store(true);
 set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
             "Failed to create zip file. Malloc error."));
-                    } else {
-                        memset(buf, sample ? 0xff : 0x0, size);
-                    }
                 }
-                
-                MakeChunkName(chunk_name, i - start_block, ch_index, static_cast<int>(ch_type), HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
+
+                std::string chunk_name = MakeChunkName(i - start_block, ch_index, static_cast<int>(ch_type), HEADER_FORMAT_VERSION);
+                ret = m_zipDoc.AddFromBuffer(chunk_name.c_str(), reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
 
                 if (ret != SR_OK) {
-                    if (need_malloc && buf) { free(buf); buf = nullptr; }
                     if (!_has_error.load()) {
                         _has_error.store(true);
 set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
@@ -406,15 +406,13 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
                 }
                 _units_stored.fetch_add(size);
 
-                if (_units_stored.load() > _unit_count.load() 
+                if (_units_stored.load() > _unit_count.load()
                         && start_index == 0
                         && end_index == 0){
                     pxv_err("Read block data error!");
                     break;
                 }
 
-                if (need_malloc)
-                    free(buf);
                 progress_updated();
             }
         }
@@ -428,7 +426,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
 
 void StoreSession::save_analog(pv::data::AnalogSnapshot *analog_snapshot)
 {
-    char chunk_name[20] = {0};
+    std::string chunk_name;
     int num = 0;
     int ret = SR_ERR;
 
@@ -467,18 +465,13 @@ _unit_count.store(analog_snapshot->get_sample_count() *
         for (int i = 0; !_canceled && i < num; i++) {
             const uint64_t size = analog_snapshot->get_block_size(i);
             if ((buf + size) > buf_end) {
-                uint8_t *tmp = reinterpret_cast<uint8_t*>(malloc(size));
-                if (tmp == nullptr) {
-                    _has_error.store(true);
-set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
-            "Failed to create zip file. Malloc error."));
-                } else {
-                    memcpy(tmp, buf, buf_end-buf);
-                    memcpy(tmp+(buf_end-buf), buf_start, buf+size-buf_end);
-                } 
+                std::vector<uint8_t> tmp(static_cast<size_t>(size));
+                std::copy_n(buf, static_cast<size_t>(buf_end - buf), tmp.data());
+                std::copy_n(buf_start, static_cast<size_t>((buf + size) - buf_end),
+                            tmp.data() + static_cast<size_t>(buf_end - buf));
 
-                MakeChunkName(chunk_name, i, 0, ch_type, HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(tmp), size) ? SR_OK : -1;
+                chunk_name = MakeChunkName(i, 0, ch_type, HEADER_FORMAT_VERSION);
+                ret = m_zipDoc.AddFromBuffer(chunk_name.c_str(), reinterpret_cast<const char*>(tmp.data()), size) ? SR_OK : -1;
 
                 /* Wrap-around: buf should now point to the start of the
                  * wrapped data in buf_start. The number of bytes that
@@ -487,12 +480,10 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR1),
                  * caused unsigned underflow (size < _unit_count normally),
                  * making buf point to invalid memory. */
                 buf = buf_start + (buf + size - buf_end);
-                if (tmp)
-                    free(tmp);
-            } 
-            else { 
-                MakeChunkName(chunk_name, i, 0, ch_type, HEADER_FORMAT_VERSION);
-                ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
+            }
+            else {
+                chunk_name = MakeChunkName(i, 0, ch_type, HEADER_FORMAT_VERSION);
+                ret = m_zipDoc.AddFromBuffer(chunk_name.c_str(), reinterpret_cast<const char*>(buf), size) ? SR_OK : -1;
 
                 buf += size;
             }
@@ -520,7 +511,7 @@ set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_SAVEPROC_ERROR2),
 
 void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
 {
-    char chunk_name[20] = {0};
+    std::string chunk_name;
     int ret = SR_ERR; 
  
     uint64_t size = dso_snapshot->get_sample_count();
@@ -544,8 +535,8 @@ void StoreSession::save_dso(pv::data::DsoSnapshot *dso_snapshot)
             const uint8_t *data_buffer =
                 dso_snapshot->span(static_cast<uint32_t>(ch_index), 0, size).data;
         
-            snprintf(chunk_name, 19, "O-%d/0", ch_index);
-            ret = m_zipDoc.AddFromBuffer(chunk_name, reinterpret_cast<const char*>(data_buffer), size) ? SR_OK : -1;
+            chunk_name = std::format("O-{}/0", ch_index);
+            ret = m_zipDoc.AddFromBuffer(chunk_name.c_str(), reinterpret_cast<const char*>(data_buffer), size) ? SR_OK : -1;
             // P1-e 拷贝审计：.pxc 保存时写入 zip 的整通道拷贝
             PXV_PERF_COPY_EXPORT(size);
 
@@ -662,17 +653,16 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
     GSList *l;
     struct sr_channel *probe;
     char *s;
-    char meta[300] = {0};
   
-    snprintf(meta, sizeof(meta), "%s", "[version]\n"); str += meta;
-    snprintf(meta, sizeof(meta), "version = %d\n", HEADER_FORMAT_VERSION); str += meta;
-    snprintf(meta, sizeof(meta), "%s", "[header]\n"); str += meta;
+    str += "[version]\n";
+    str += std::format("version = {}\n", HEADER_FORMAT_VERSION);
+    str += "[header]\n";
 
     int mode = _session->get_device()->get_work_mode();
 
     if (true) {
-        snprintf(meta, sizeof(meta), "driver = %s\n", _session->get_device()->driver_name().toLocal8Bit().data()); str += meta;
-        snprintf(meta, sizeof(meta), "device mode = %d\n", mode); str += meta;
+        str += std::format("driver = {}\n", _session->get_device()->driver_name().toStdString());
+        str += std::format("device mode = {}\n", mode);
     }
  
     // 光标范围保存：header 中的 "total samples" 必须与实际写入文件的数据长度一致，
@@ -722,8 +712,8 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         }
     }
 
-    snprintf(meta, sizeof(meta), "capturefile = data\n"); str += meta;
-    snprintf(meta, sizeof(meta), "total samples = %" PRIu64 "\n", saved_samples); str += meta;
+    str += "capturefile = data\n";
+    str += std::format("total samples = {}\n", saved_samples);
 
     // MSO 架构修复：按通道类型分别统计 logic/analog 通道数。
     // session_file.c 解析时：total probes → 创建 SR_CHANNEL_LOGIC，
@@ -777,23 +767,23 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
             block_count = end_block + 1;
         }
 
-        snprintf(meta, sizeof(meta), "total probes = %d\n", to_save_probes); str += meta;
-        snprintf(meta, sizeof(meta), "total blocks = %d\n", block_count); str += meta;
+        str += std::format("total probes = {}\n", to_save_probes);
+        str += std::format("total blocks = {}\n", block_count);
     }
     else {
         // 非 LOGIC 模式（ANALOG/DSO）：logic_count 可能为 0，analog_count > 0
-        snprintf(meta, sizeof(meta), "total probes = %d\n", logic_count); str += meta;
-        snprintf(meta, sizeof(meta), "total blocks = %d\n", snapshot->get_block_num()); str += meta;
+        str += std::format("total probes = {}\n", logic_count);
+        str += std::format("total blocks = {}\n", snapshot->get_block_num());
     }
 
     // MSO 架构修复：写入 total analog，让 session_file.c 创建 SR_CHANNEL_ANALOG 通道。
     if (analog_count > 0) {
-        snprintf(meta, sizeof(meta), "total analog = %d\n", analog_count); str += meta;
+        str += std::format("total analog = {}\n", analog_count);
     }
 
     s = sr_samplerate_string(_session->cur_snap_samplerate());
 
-    snprintf(meta, sizeof(meta), "samplerate = %s\n", s); str += meta;
+    str += std::format("samplerate = {}\n", s);
 
     uint64_t tmp_u64;
     int tmp_u8;
@@ -801,19 +791,19 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
 
     if (mode == DSO) {
         if (_session->get_device()->get_config_uint64(SR_CONF_TIMEBASE, tmp_u64)) {
-            snprintf(meta, sizeof(meta), "hDiv = %" PRIu64 "\n", tmp_u64); str += meta;
+            str += std::format("hDiv = {}\n", tmp_u64);
         }
 
         if (_session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, tmp_u8)) {
-            snprintf(meta, sizeof(meta), "bits = %d\n", tmp_u8); str += meta;
+            str += std::format("bits = {}\n", tmp_u8);
         }
  
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MIN, tmp_u32)) {
-            snprintf(meta, sizeof(meta), "ref min = %d\n", tmp_u32); str += meta;
+            str += std::format("ref min = {}\n", tmp_u32);
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MAX, tmp_u32)) {
-            snprintf(meta, sizeof(meta), "ref max = %d\n", tmp_u32); str += meta;
+            str += std::format("ref max = {}\n", tmp_u32);
         }
     }
     else if (mode == ANALOG) {
@@ -821,23 +811,23 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         analog_snapshot = dynamic_cast<data::AnalogSnapshot*>(snapshot);
         if (analog_snapshot) {
             uint8_t tmp_u8 = analog_snapshot->get_unit_bytes();
-            snprintf(meta, sizeof(meta), "bits = %d\n", tmp_u8*8); str += meta;
+            str += std::format("bits = {}\n", tmp_u8 * 8);
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MIN, tmp_u32)) {
-            snprintf(meta, sizeof(meta), "ref min = %d\n", tmp_u32); str += meta;
+            str += std::format("ref min = {}\n", tmp_u32);
         }
 
         if (_session->get_device()->get_config_uint32(SR_CONF_REF_MAX, tmp_u32)) {
-            snprintf(meta, sizeof(meta), "ref max = %d\n", tmp_u32); str += meta;
+            str += std::format("ref max = {}\n", tmp_u32);
         }
     }
-    snprintf(meta, sizeof(meta), "trigger pos = %" PRIu64 "\n", saved_trig_pos); str += meta;
+    str += std::format("trigger pos = {}\n", saved_trig_pos);
 
     /* trigger time: written in ALL modes (not just LOGIC) so the frontend
      * can restore the original capture timestamp when reopening a .pxl file.
      * Format: milliseconds since Unix epoch (int64). */
-    snprintf(meta, sizeof(meta), "trigger time = %lld\n", static_cast<long long>(_session->get_session_time().toMSecsSinceEpoch())); str += meta;
+    str += std::format("trigger time = {}\n", static_cast<long long>(_session->get_session_time().toMSecsSinceEpoch()));
 
     int analogcnt = 0;
 
@@ -895,11 +885,10 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
                 // either source.
                 const std::string safe_name = sanitize_meta_value(ch_name);
                 if (is_logic) {
-                    snprintf(meta, sizeof(meta), "probe%d = %s\n", probe->index, safe_name.c_str());
+                    str += std::format("probe{} = {}\n", probe->index, safe_name);
                 } else {
-                    snprintf(meta, sizeof(meta), "analog%d = %s\n", analogcnt, safe_name.c_str());
+                    str += std::format("analog{} = {}\n", analogcnt, safe_name);
                 }
-                str += meta;
             }
         }
 
@@ -910,43 +899,30 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
              * because probecnt only counts logic channels and stays 0
              * in DSO/ANALOG mode, causing all channels to write to
              * index 0 and overwrite each other. */
-            snprintf(meta, sizeof(meta), " enable%d = %d\n", analogcnt, probe->enabled);
-            str += meta;
+            str += std::format(" enable{} = {}\n", analogcnt, probe->enabled);
             int coupling = matched_model ? matched_model->coupling() : 0;
             double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double vfactor = matched_model ? matched_model->vfactor() : 1;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
             double trig_value = matched_model ? matched_model->trig_value() : 0;
-            snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
-            str += meta;
-            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vdiv));
-            str += meta;
-            snprintf(meta, sizeof(meta), " vFactor%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vfactor));
-            str += meta;
-            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, static_cast<int>(hw_offset));
-            str += meta;
-            snprintf(meta, sizeof(meta), " vTrig%d = %d\n", analogcnt, static_cast<int>(trig_value));
-            str += meta;
+            str += std::format(" coupling{} = {}\n", analogcnt, coupling);
+            str += std::format(" vDiv{} = {}\n", analogcnt, static_cast<uint64_t>(vdiv));
+            str += std::format(" vFactor{} = {}\n", analogcnt, static_cast<uint64_t>(vfactor));
+            str += std::format(" vOffset{} = {}\n", analogcnt, static_cast<int>(hw_offset));
+            str += std::format(" vTrig{} = {}\n", analogcnt, static_cast<int>(trig_value));
         }
         else if (mode == ANALOG)
         {
-            snprintf(meta, sizeof(meta), " enable%d = %d\n", analogcnt, probe->enabled);
-            str += meta;
+            str += std::format(" enable{} = {}\n", analogcnt, probe->enabled);
             int coupling = matched_model ? matched_model->coupling() : 0;
             double vdiv = matched_model ? matched_model->vdiv_mv() : 0;
             double hw_offset = matched_model ? matched_model->hw_offset() : 0;
-            snprintf(meta, sizeof(meta), " coupling%d = %d\n", analogcnt, coupling);
-            str += meta;
-            snprintf(meta, sizeof(meta), " vDiv%d = %" PRIu64 "\n", analogcnt, static_cast<uint64_t>(vdiv));
-            str += meta;
-            snprintf(meta, sizeof(meta), " vOffset%d = %d\n", analogcnt, static_cast<int>(hw_offset));
-            str += meta;
-            snprintf(meta, sizeof(meta), " mapUnit%d = %s\n", analogcnt, "");
-            str += meta;
-            snprintf(meta, sizeof(meta), " mapMax%d = %lf\n", analogcnt, 0.0);
-            str += meta;
-            snprintf(meta, sizeof(meta), " mapMin%d = %lf\n", analogcnt, 0.0);
-            str += meta;
+            str += std::format(" coupling{} = {}\n", analogcnt, coupling);
+            str += std::format(" vDiv{} = {}\n", analogcnt, static_cast<uint64_t>(vdiv));
+            str += std::format(" vOffset{} = {}\n", analogcnt, static_cast<int>(hw_offset));
+            str += std::format(" mapUnit{} = {}\n", analogcnt, "");
+            str += std::format(" mapMax{} = {}\n", analogcnt, 0.0);
+            str += std::format(" mapMin{} = {}\n", analogcnt, 0.0);
         }
 
         if (!is_logic)
@@ -960,10 +936,8 @@ bool StoreSession::meta_gen(data::Snapshot *snapshot, std::string &str)
         analog_snap_for_meta = dynamic_cast<data::AnalogSnapshot*>(snap_analog);
     }
     if (analog_snap_for_meta) {
-        snprintf(meta, sizeof(meta), "analog bytes = %d\n", analog_snap_for_meta->get_unit_bytes());
-        str += meta;
-        snprintf(meta, sizeof(meta), "analog float = %d\n", analog_snap_for_meta->is_float() ? 1 : 0);
-        str += meta;
+        str += std::format("analog bytes = {}\n", analog_snap_for_meta->get_unit_bytes());
+        str += std::format("analog float = {}\n", analog_snap_for_meta->is_float() ? 1 : 0);
     }
 
     return true;
@@ -1491,13 +1465,14 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 if(buf_sample_num - i < usize)
                     // size is a per-chunk byte count bounded by usize (8192).
                     size = static_cast<unsigned int>(buf_sample_num - i);
-                uint8_t *xbuf = reinterpret_cast<uint8_t*>(malloc((size_t)size * unitsize));
-                if (xbuf == nullptr) {
+                std::vector<uint8_t> xbuf;
+                try {
+                    xbuf.resize(static_cast<size_t>(size) * unitsize);
+                } catch (const std::bad_alloc&) {
                     _has_error.store(true);
                     set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2), "xbuffer malloc failed."));
                     return;
-                }                
-                memset(xbuf, 0, static_cast<size_t>(size) * unitsize);
+                }
 
                 for (uint64_t j = 0; j < size; j++) {
                     for (unsigned int k = 0; k < buf_vec.size(); k++) {
@@ -1508,7 +1483,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                     }
                 }
 
-                lp.data = xbuf;
+                lp.data = xbuf.data();
                 lp.length = static_cast<uint64_t>(size) * unitsize;
                 lp.unitsize = unitsize;
                 p.type = SR_DF_LOGIC;
@@ -1516,8 +1491,6 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 send_packet("a logic data packet");
 
                 _units_stored.fetch_add(size);
-                if (xbuf)
-                    free(xbuf);
                 progress_updated();
             }
         }
@@ -1526,19 +1499,17 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         _unit_count.store(snapshot->get_sample_count()); 
         unsigned int usize = 8192;
         unsigned int size = usize;
-        struct sr_datafeed_dso dp;
+        struct sr_datafeed_dso dp{};
 
-        uint8_t *ch_data_buffer = reinterpret_cast<uint8_t*>(malloc(usize * dso_snapshot->get_channel_num() + 1));
-        if (ch_data_buffer == nullptr){
+        std::vector<uint8_t> ch_data_buffer;
+        try {
+            ch_data_buffer.resize(usize * dso_snapshot->get_channel_num() + 1);
+        } catch (const std::bad_alloc&) {
             pxv_err("StoreSession::export_proc, malloc failed.");
-            // PulseView RAII pattern: ensure all resources are cleaned up
-            // on early return. Previously this path jumped directly to
-            // return, leaking sr_output and GHashTable. Match the cleanup
-            // pattern already used by the file-open failure path above.
+            // `guard` releases the module instance and the option table.
             _has_error.store(true);
             set_error(L_S(STR_PAGE_DLG, S_ID(IDS_MSG_STORESESS_EXPORTPROC_ERROR2),
                 "Failed to allocate memory for DSO export."));
-            // `guard` releases the module instance and the option table.
             return;
         }
 
@@ -1546,7 +1517,6 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
 
         /* Initialize DSO packet fields. Previously dp was uninitialized,
          * causing sample_bits/en_ch_num/trig_flag to contain garbage. */
-        memset(&dp, 0, sizeof(dp));
         dp.en_ch_num = static_cast<uint8_t>(ch_num);
         int bits = 0;
         _session->get_device()->get_config_byte(SR_CONF_UNIT_BITS, bits);
@@ -1566,7 +1536,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 if (!dso_snapshot->has_data(m->index()))
                     continue;
 
-                uint8_t *wr = ch_data_buffer + ch;
+                uint8_t *wr = ch_data_buffer.data() + ch;
                 ch++;
                 // P1-c（统一读取抽象）：从第 i 个样本起读 size 个。
                 // 外层循环保证 i + size <= _unit_count == get_sample_count()，
@@ -1592,7 +1562,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
                 PXV_PERF_COPY_EXPORT(size);
             }
 
-            dp.data = ch_data_buffer;
+            dp.data = ch_data_buffer.data();
             dp.num_samples = size;
             p.type = SR_DF_DSO;
             p.payload = &dp;
@@ -1602,20 +1572,15 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             progress_updated();
         }
 
-        if (ch_data_buffer){
-            free(ch_data_buffer);
-            ch_data_buffer = nullptr;
-        }
-
     } else if (channel_type == SR_CHANNEL_ANALOG) {
         _unit_count.store(snapshot->get_sample_count());
         uint64_t unit_count = _unit_count.load();
         void* data_buffer = analog_snapshot->get_data();
         unsigned int usize = 8192;        
-        struct sr_datafeed_analog ap;
-        struct sr_analog_encoding encoding;
-        struct sr_analog_meaning meaning;
-        struct sr_analog_spec spec;
+        struct sr_datafeed_analog ap{};
+        struct sr_analog_encoding encoding{};
+        struct sr_analog_meaning meaning{};
+        struct sr_analog_spec spec{};
 
         const uint64_t ring_start = analog_snapshot->get_ring_start();
  
@@ -1639,10 +1604,6 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
         /* sr_analog_init is SR_PRIV (internal-only), not exported in the
          * public libsigrok API. Manually initialize the analog structs here.
          * This replicates what sr_analog_init() does (see analog.c). */
-        memset(&ap, 0, sizeof(ap));
-        memset(&encoding, 0, sizeof(encoding));
-        memset(&meaning, 0, sizeof(meaning));
-        memset(&spec, 0, sizeof(spec));
         ap.encoding = &encoding;
         ap.meaning = &meaning;
         ap.spec = &spec;
@@ -2425,21 +2386,19 @@ bool StoreSession::IsLogicDataType()
     return false;
 }
 
-void StoreSession::MakeChunkName(char *chunk_name, int chunk_num, int index, int type, int version)
-{ 
-    chunk_name[0] = 0;
-
+std::string StoreSession::MakeChunkName(int chunk_num, int index, int type, int version)
+{
     if (version >= 2)
     {
         const char *type_name = nullptr;
         type_name = (type == SR_CHANNEL_LOGIC) ? "L" : (type == SR_CHANNEL_DSO)  ? "O"
                                                    : (type == SR_CHANNEL_ANALOG) ? "A"
                                                                                  : "U";
-        snprintf(chunk_name, 15, "%s-%d/%d", type_name, index, chunk_num);
+        return std::format("{}-{}/{}", type_name, index, chunk_num);
     }
     else
     {
-        snprintf(chunk_name, 15, "data");
+        return "data";
     }
 }
 
