@@ -228,6 +228,17 @@ void TestSrzipLoad::srzipArchiveLoadsThroughSessionLoader()
     QCOMPARE(g_variant_get_uint64(gvar), kSamplerate);
     g_variant_unref(gvar);
 
+    // srzip metadata has no "total samples" key (upstream sigrok format), so
+    // sr_session_load must compute the sample count from the capture data
+    // size (256 samples / unitsize 1). Without this the device reports
+    // limit_samples=0 and the frontend falls back to its default sample
+    // limit (1M), truncating larger captures (e.g. 5s → 1s).
+    GVariant *limit = nullptr;
+    QCOMPARE(sr_config_get(driver, loaded, NULL, SR_CONF_LIMIT_SAMPLES, &limit), SR_OK);
+    QVERIFY(limit != nullptr);
+    QCOMPARE(g_variant_get_uint64(limit), static_cast<uint64_t>(kSamples));
+    g_variant_unref(limit);
+
     sr_dev_inst_free(loaded);
 }
 
