@@ -101,6 +101,13 @@ jobs:
           # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
           #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
           # PXView_v<base>-rc.N 标签后取最大值 +1。
+          #
+          # 【重要】Actions 用 `bash -e -o pipefail` 执行 run: 步骤：任何命令的
+          # 非零退出码都会让脚本「当场静默退出」——不打印自己的 echo、不写
+          # GITHUB_OUTPUT，日志里只剩一句 Process completed with exit code 1。
+          # 最常见的两个坑：grep 无匹配时退出码 1；head 提前关闭管道让上游拿到
+          # SIGPIPE（141）。因此本步骤里所有「可能无输出」的管道都必须自带兜底：
+          # 用 sed（恒返回 0）替代 grep，或给管道补 `|| true`。
 
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -108,9 +115,12 @@ jobs:
             VER="${GITHUB_REF#refs/tags/}"
             VER="${VER#v}"
           else
-            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
+            # `|| true`：CMakeLists.txt 缺失（sed 退出 2）或 sed 因 head -1 提前
+            # 关闭管道而收到 SIGPIPE（141）时，pipefail 会把管道判为失败并让脚本
+            # 静默退出，下面的 ERROR 提示永远不会打印。兜底后错误才「可见」。
+            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
             if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || [ -z "$MICRO" ]; then
               echo "ERROR: 无法从 CMakeLists.txt 解析 DS_VERSION_MAJOR/MINOR/MICRO" >&2
               exit 1
@@ -138,13 +148,27 @@ jobs:
                 _AUTH=(-H "Authorization: Bearer $_TOKEN")
               fi
               _BODY=$(curl -fsSL "${_AUTH[@]}" \
-                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/PXView_v${BASE}-rc.?per_page=100" 2>/dev/null) || {
                 echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              # 接口用 git/matching-refs 的「前缀查询」：路径里直接带上
+              # <base>-rc. 前缀，服务端只返回这些引用，因此天然没有「/tags 第一页
+              # 100 条上限、大的 rc 被挤到第二页而漏掉」的问题——这原本是 gh
+              # --paginate 的唯一好处，现在不依赖 gh 也能等价获得。
+              # 用 sed 而不是 grep 提取标签：grep 在「无匹配」时退出码为 1，在
+              # `bash -e -o pipefail` 下会让 TAGS=$(...) 整体失败、脚本尚未执行到
+              # 任何 echo 就静默退出。而「当前还没有任何 rc 标签」是完全合法的状态
+              # （首次构建、或发布后把 rc 标签删掉重来），此时必须得到 rc.0 而不是
+              # 让步骤崩掉。sed 无匹配时只输出空行、恒返回 0。
+              # tr -d '\r'：上游输出若来自 Windows 原生程序会带 CRLF，\r 会留在
+              # 捕获值里污染标签名（并能让 ^...$ 这类锚定匹配全部失效）。
               TAGS=$(printf '%s\n' "$_BODY" \
-                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
-                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
+                       | tr -d '\r' \
+                       | sed -nE 's/.*"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/(PXView_v'"${BASE}"'-rc\.[0-9]+)".*/\1/p') || {
+                echo "WARN: 解析既有 rc 标签失败，按「尚无 rc 标签」处理（序号从 0 起）" >&2
+                TAGS=""
+              }
               LAST=$(printf '%s\n' "$TAGS" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
@@ -241,7 +265,10 @@ jobs:
 
       - name: Verify fx2lafw firmware
         run: |
-          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          # `|| true`：通配符无匹配时 ls 退出 2，在 `bash -e -o pipefail` 下会让
+          # $() 赋值整体失败、脚本静默退出——而下面「少于 15 个就只警告」的逻辑
+          # 本意正是要允许 0 个文件；兜底后 FW_COUNT=0 的告警才打得出来。
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l || true)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
             # WARNING, not error: the build step above is deliberately
@@ -455,6 +482,13 @@ jobs:
           # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
           #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
           # PXView_v<base>-rc.N 标签后取最大值 +1。
+          #
+          # 【重要】Actions 用 `bash -e -o pipefail` 执行 run: 步骤：任何命令的
+          # 非零退出码都会让脚本「当场静默退出」——不打印自己的 echo、不写
+          # GITHUB_OUTPUT，日志里只剩一句 Process completed with exit code 1。
+          # 最常见的两个坑：grep 无匹配时退出码 1；head 提前关闭管道让上游拿到
+          # SIGPIPE（141）。因此本步骤里所有「可能无输出」的管道都必须自带兜底：
+          # 用 sed（恒返回 0）替代 grep，或给管道补 `|| true`。
 
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -462,9 +496,12 @@ jobs:
             VER="${GITHUB_REF#refs/tags/}"
             VER="${VER#v}"
           else
-            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
+            # `|| true`：CMakeLists.txt 缺失（sed 退出 2）或 sed 因 head -1 提前
+            # 关闭管道而收到 SIGPIPE（141）时，pipefail 会把管道判为失败并让脚本
+            # 静默退出，下面的 ERROR 提示永远不会打印。兜底后错误才「可见」。
+            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
             if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || [ -z "$MICRO" ]; then
               echo "ERROR: 无法从 CMakeLists.txt 解析 DS_VERSION_MAJOR/MINOR/MICRO" >&2
               exit 1
@@ -492,13 +529,27 @@ jobs:
                 _AUTH=(-H "Authorization: Bearer $_TOKEN")
               fi
               _BODY=$(curl -fsSL "${_AUTH[@]}" \
-                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/PXView_v${BASE}-rc.?per_page=100" 2>/dev/null) || {
                 echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              # 接口用 git/matching-refs 的「前缀查询」：路径里直接带上
+              # <base>-rc. 前缀，服务端只返回这些引用，因此天然没有「/tags 第一页
+              # 100 条上限、大的 rc 被挤到第二页而漏掉」的问题——这原本是 gh
+              # --paginate 的唯一好处，现在不依赖 gh 也能等价获得。
+              # 用 sed 而不是 grep 提取标签：grep 在「无匹配」时退出码为 1，在
+              # `bash -e -o pipefail` 下会让 TAGS=$(...) 整体失败、脚本尚未执行到
+              # 任何 echo 就静默退出。而「当前还没有任何 rc 标签」是完全合法的状态
+              # （首次构建、或发布后把 rc 标签删掉重来），此时必须得到 rc.0 而不是
+              # 让步骤崩掉。sed 无匹配时只输出空行、恒返回 0。
+              # tr -d '\r'：上游输出若来自 Windows 原生程序会带 CRLF，\r 会留在
+              # 捕获值里污染标签名（并能让 ^...$ 这类锚定匹配全部失效）。
               TAGS=$(printf '%s\n' "$_BODY" \
-                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
-                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
+                       | tr -d '\r' \
+                       | sed -nE 's/.*"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/(PXView_v'"${BASE}"'-rc\.[0-9]+)".*/\1/p') || {
+                echo "WARN: 解析既有 rc 标签失败，按「尚无 rc 标签」处理（序号从 0 起）" >&2
+                TAGS=""
+              }
               LAST=$(printf '%s\n' "$TAGS" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
@@ -562,7 +613,10 @@ jobs:
 
       - name: Verify fx2lafw firmware
         run: |
-          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          # `|| true`：通配符无匹配时 ls 退出 2，在 `bash -e -o pipefail` 下会让
+          # $() 赋值整体失败、脚本静默退出——而下面「少于 15 个就只警告」的逻辑
+          # 本意正是要允许 0 个文件；兜底后 FW_COUNT=0 的告警才打得出来。
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l || true)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
             # WARNING, not error: the build step above is deliberately
@@ -739,7 +793,7 @@ jobs:
             done
             find "$BUNDLED_FW" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
             if [ ! -e "$BUNDLED_FW/Versions/Current" ]; then
-              latest_ver=$(ls -d "$BUNDLED_FW"/Versions/3.* 2>/dev/null | sort -V | tail -1)
+              latest_ver=$(ls -d "$BUNDLED_FW"/Versions/3.* 2>/dev/null | sort -V | tail -1 || true)
               if [ -n "$latest_ver" ]; then
                 ln -s "$(basename "$latest_ver")" "$BUNDLED_FW/Versions/Current"
                 echo "Created Current symlink -> $(basename "$latest_ver")"
@@ -1106,6 +1160,13 @@ jobs:
           # 三份 Resolve version 步骤保持逐字节一致。rc 序号经 GitHub REST API
           #（curl：msys2/Linux/macOS 通用，无需 gh、无需 PATH 注入）列举既有
           # PXView_v<base>-rc.N 标签后取最大值 +1。
+          #
+          # 【重要】Actions 用 `bash -e -o pipefail` 执行 run: 步骤：任何命令的
+          # 非零退出码都会让脚本「当场静默退出」——不打印自己的 echo、不写
+          # GITHUB_OUTPUT，日志里只剩一句 Process completed with exit code 1。
+          # 最常见的两个坑：grep 无匹配时退出码 1；head 提前关闭管道让上游拿到
+          # SIGPIPE（141）。因此本步骤里所有「可能无输出」的管道都必须自带兜底：
+          # 用 sed（恒返回 0）替代 grep，或给管道补 `|| true`。
 
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
@@ -1113,9 +1174,12 @@ jobs:
             VER="${GITHUB_REF#refs/tags/}"
             VER="${VER#v}"
           else
-            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
-            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1)
+            # `|| true`：CMakeLists.txt 缺失（sed 退出 2）或 sed 因 head -1 提前
+            # 关闭管道而收到 SIGPIPE（141）时，pipefail 会把管道判为失败并让脚本
+            # 静默退出，下面的 ERROR 提示永远不会打印。兜底后错误才「可见」。
+            MAJOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MAJOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MINOR=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MINOR[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
+            MICRO=$(sed -n 's/^[[:space:]]*set(DS_VERSION_MICRO[[:space:]]*\([0-9]*\).*/\1/p' CMakeLists.txt | head -1 || true)
             if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || [ -z "$MICRO" ]; then
               echo "ERROR: 无法从 CMakeLists.txt 解析 DS_VERSION_MAJOR/MINOR/MICRO" >&2
               exit 1
@@ -1143,13 +1207,27 @@ jobs:
                 _AUTH=(-H "Authorization: Bearer $_TOKEN")
               fi
               _BODY=$(curl -fsSL "${_AUTH[@]}" \
-                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags?per_page=100" 2>/dev/null) || {
+                       "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/PXView_v${BASE}-rc.?per_page=100" 2>/dev/null) || {
                 echo "ERROR: 查询既有标签失败（GitHub API），无法确定 rc 序号（不退化成 rc.0，以免与已发布标签撞名）" >&2
                 exit 1
               }
+              # 接口用 git/matching-refs 的「前缀查询」：路径里直接带上
+              # <base>-rc. 前缀，服务端只返回这些引用，因此天然没有「/tags 第一页
+              # 100 条上限、大的 rc 被挤到第二页而漏掉」的问题——这原本是 gh
+              # --paginate 的唯一好处，现在不依赖 gh 也能等价获得。
+              # 用 sed 而不是 grep 提取标签：grep 在「无匹配」时退出码为 1，在
+              # `bash -e -o pipefail` 下会让 TAGS=$(...) 整体失败、脚本尚未执行到
+              # 任何 echo 就静默退出。而「当前还没有任何 rc 标签」是完全合法的状态
+              # （首次构建、或发布后把 rc 标签删掉重来），此时必须得到 rc.0 而不是
+              # 让步骤崩掉。sed 无匹配时只输出空行、恒返回 0。
+              # tr -d '\r'：上游输出若来自 Windows 原生程序会带 CRLF，\r 会留在
+              # 捕获值里污染标签名（并能让 ^...$ 这类锚定匹配全部失效）。
               TAGS=$(printf '%s\n' "$_BODY" \
-                       | grep -oE "\"name\":[[:space:]]*\"PXView_v${BASE}-rc\.[0-9]+\"" \
-                       | grep -oE "PXView_v${BASE}-rc\.[0-9]+")
+                       | tr -d '\r' \
+                       | sed -nE 's/.*"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/(PXView_v'"${BASE}"'-rc\.[0-9]+)".*/\1/p') || {
+                echo "WARN: 解析既有 rc 标签失败，按「尚无 rc 标签」处理（序号从 0 起）" >&2
+                TAGS=""
+              }
               LAST=$(printf '%s\n' "$TAGS" \
                        | sed 's/.*-rc\.//' | sort -n | tail -1)
               VER="${BASE}-rc.$(( ${LAST:--1} + 1 ))"
@@ -1185,7 +1263,10 @@ jobs:
 
       - name: Verify fx2lafw firmware
         run: |
-          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l)
+          # `|| true`：通配符无匹配时 ls 退出 2，在 `bash -e -o pipefail` 下会让
+          # $() 赋值整体失败、脚本静默退出——而下面「少于 15 个就只警告」的逻辑
+          # 本意正是要允许 0 个文件；兜底后 FW_COUNT=0 的告警才打得出来。
+          FW_COUNT=$(ls sigrok-firmware-fx2lafw/hw/*/fx2lafw-*.fw 2>/dev/null | wc -l || true)
           echo "fx2lafw firmware files: ${FW_COUNT} (expected 15)"
           if [ "${FW_COUNT}" -ne 15 ]; then
             # WARNING, not error: the build step above is deliberately
@@ -1253,10 +1334,12 @@ jobs:
         run: |
           echo "=== Verifying Python runtime in package/ ==="
           # Check for MinGW Python DLL (libpython3.XX.dll — correct naming)
-          PY_DLL=$(ls package/libpython3*.dll 2>/dev/null | head -1)
+          # `|| true`：ls 因通配符无匹配而退出 2，pipefail 会让赋值整体失败、脚本
+          # 在 `-e` 下静默退出，下面这些刻意写好的 ERROR 提示将永远打不出来。
+          PY_DLL=$(ls package/libpython3*.dll 2>/dev/null | head -1 || true)
           if [ -z "$PY_DLL" ]; then
             # Check for python.org MSVC Python DLL (python3XX.dll — wrong)
-            MSVC_DLL=$(ls package/python3*.dll 2>/dev/null | grep -v python3._pth | head -1)
+            MSVC_DLL=$(ls package/python3*.dll 2>/dev/null | grep -v python3._pth | head -1 || true)
             if [ -n "$MSVC_DLL" ]; then
               echo "ERROR: Found python.org MSVC Python DLL: $MSVC_DLL"
               echo "       PXView.exe was linked against MSVC Python, not MinGW Python."
@@ -1265,13 +1348,16 @@ jobs:
             fi
             echo "ERROR: No Python DLL found in package/"
             echo "Available DLLs:"
-            ls package/*.dll 2>/dev/null | head -20
+            # 诊断输出，本身无匹配时 ls 退出 2；兜底以免它抢在下面 `exit 1` 前
+            # 让脚本以「神秘退出码 2」收场（报错信息都打不全）。
+            ls package/*.dll 2>/dev/null | head -20 || true
             exit 1
           fi
           echo "OK: Python DLL found: $(basename $PY_DLL)"
 
           # Check for Python stdlib (encodings module is required for startup)
-          PY_VER=$(echo "$PY_DLL" | grep -oE '3\.[0-9]+')
+          # 同上：grep 无匹配时退出 1，会静默中断，下面 stdlib 的报错就看不到了。
+          PY_VER=$(echo "$PY_DLL" | grep -oE '3\.[0-9]+' || true)
           if [ -d "package/lib/python${PY_VER}/encodings" ]; then
             echo "OK: Python stdlib found (lib/python${PY_VER}/encodings/ exists)"
           else
