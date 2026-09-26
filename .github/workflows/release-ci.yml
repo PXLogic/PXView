@@ -1186,12 +1186,12 @@ jobs:
       # 注意：本 job 不 checkout，gh 没有 git remote 可推断仓库，所有
       # gh 命令都要显式带 --repo；输入值走 env 传入，不直接插进脚本。
       #
-      # 先检查 RELEASE_PAT 是否存在：发布阶段要用它显式创建 tag ref（见
+      # 先检查 RELEASE_PAT 是否已配置：发布阶段要用它显式创建 tag ref（见
       # 「Create tag ref」步骤的注释）。没配就早失败、给出可操作的提示，
       # 别让用户到发布那一步才拿到一个含糊的 404 去猜。
-      # 存在则顺带验证一次它确实能访问本仓库：fine-grained PAT 若没勾选
-      # PXView 仓库，GitHub 对无权访问的资源一律回 404（而不是 403），
-      # 到发布那一步只会看到一句含糊的 Not Found —— 这里提前把原因说清。
+      # 注意：这里只能验证「secret 非空」，验证不了写权限 —— 公共仓库的读
+      # 请求本就允许匿名，带着无 repo scope 的令牌照样 200。写权限由后续的
+      # Create tag ref 步骤实际建 ref 时验证（缺权限会明确回 404）。
       - name: Require RELEASE_PAT secret
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
@@ -1201,17 +1201,10 @@ jobs:
             echo "       发布候选版需要 PAT：用于为目标提交显式创建 tag ref。" >&2
             echo "       请在仓库 Settings → Secrets and variables → Actions 里添加 RELEASE_PAT" >&2
             echo "       （classic PAT 需 repo scope；fine-grained 需 Contents: Read and write）。" >&2
+            echo "       若组织开启了 SAML SSO，还要在 token 页面点 Configure SSO 授权给 PXLogic。" >&2
             exit 1
           fi
-          # 用 PAT 本身探一次仓库可见性；失败时报清楚是哪一类问题。
-          if ! REPO_JSON=$(gh api "repos/${GITHUB_REPOSITORY}" 2>/dev/null); then
-            echo "ERROR: RELEASE_PAT 无法访问仓库 ${GITHUB_REPOSITORY}。" >&2
-            echo "       GitHub 对无权访问的资源返回 404，最常见的原因是 fine-grained PAT" >&2
-            echo "       创建时 Resource owner 没选对、或 Repository access 没勾选本仓库。" >&2
-            echo "       classic PAT 需 repo scope；fine-grained 需把本仓库加入并给 Contents: Read and write。" >&2
-            exit 1
-          fi
-          echo "RELEASE_PAT 已配置，且可访问 ${GITHUB_REPOSITORY}"
+          echo "RELEASE_PAT 已配置（写权限由后续建 tag 步骤验证）"
 
       - name: Resolve target commit
         id: target
@@ -1263,29 +1256,6 @@ jobs:
           esac
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "目标提交：${SHA}（在 dev 上，状态 ${STATUS}）"
-
-      # 诊断：验证 RELEASE_PAT 是否具备「写」权限。
-      # 上面的只读探测（gh api repos/…）对「有效但无 repo scope 的 classic PAT」
-      # 也会成功 —— 公共仓库的读请求本就允许匿名，带着无权限的令牌照样 200。
-      # 真正决定建标签成败的是写权限，必须单独验；否则发布步骤只会给出一句
-      # 与权限无关的 404，把排查引向仓库/提交号等错误方向。
-      - name: Probe RELEASE_PAT write capability
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-        run: |
-          echo "--- 令牌自述（GET /user）---"
-          gh api user --jq '{login,type}' 2>&1 || echo "GET /user 失败"
-          echo "--- 令牌作用域（classic PAT 才有此响应头）---"
-          gh api -i user 2>&1 | grep -i '^x-oauth-scopes' || echo "(无 x-oauth-scopes 头 → fine-grained 令牌)"
-          echo "--- 写权限探测：建一个临时 ref 再删掉 ---"
-          PROBE="refs/tags/_pat_write_probe"
-          if gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-               -f "ref=${PROBE}" -f "sha=${{ steps.target.outputs.sha }}"; then
-            echo "写权限：OK"
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/_pat_write_probe" >/dev/null 2>&1 || true
-          else
-            echo "写权限：失败（上面即 GitHub 的原始响应）" >&2
-          fi
 
       # ── 2. CD 门槛：同一提交的两套工作流都必须全绿 ────────────────
       # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知；
