@@ -1211,6 +1211,11 @@ jobs:
             echo "       classic PAT 需 repo scope；fine-grained 需把本仓库加入并给 Contents: Read and write。" >&2
             exit 1
           fi
+          # 打印令牌形态（长度 / 前缀 / 是否混入空白），只用于诊断，不泄露值：
+          # 粘贴 secret 时首尾混入空格或换行会让令牌失效，而 GitHub 对无效
+          # 令牌的写操作回 404（不是 401），从发布步骤的报错里根本看不出来。
+          echo "RELEASE_PAT: len=${#GH_TOKEN} prefix=${GH_TOKEN:0:4}"
+          printf '%s' "$GH_TOKEN" | od -An -c | tail -2
           echo "RELEASE_PAT 已配置，且可访问 ${GITHUB_REPOSITORY}"
 
       - name: Resolve target commit
