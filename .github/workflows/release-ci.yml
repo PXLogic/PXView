@@ -1264,6 +1264,29 @@ jobs:
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "目标提交：${SHA}（在 dev 上，状态 ${STATUS}）"
 
+      # 诊断：验证 RELEASE_PAT 是否具备「写」权限。
+      # 上面的只读探测（gh api repos/…）对「有效但无 repo scope 的 classic PAT」
+      # 也会成功 —— 公共仓库的读请求本就允许匿名，带着无权限的令牌照样 200。
+      # 真正决定建标签成败的是写权限，必须单独验；否则发布步骤只会给出一句
+      # 与权限无关的 404，把排查引向仓库/提交号等错误方向。
+      - name: Probe RELEASE_PAT write capability
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          echo "--- 令牌自述（GET /user）---"
+          gh api user --jq '{login,type}' 2>&1 || echo "GET /user 失败"
+          echo "--- 令牌作用域（classic PAT 才有此响应头）---"
+          gh api -i user 2>&1 | grep -i '^x-oauth-scopes' || echo "(无 x-oauth-scopes 头 → fine-grained 令牌)"
+          echo "--- 写权限探测：建一个临时 ref 再删掉 ---"
+          PROBE="refs/tags/_pat_write_probe"
+          if gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+               -f "ref=${PROBE}" -f "sha=${{ steps.target.outputs.sha }}"; then
+            echo "写权限：OK"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/_pat_write_probe" >/dev/null 2>&1 || true
+          else
+            echo "写权限：失败（上面即 GitHub 的原始响应）" >&2
+          fi
+
       # ── 2. CD 门槛：同一提交的两套工作流都必须全绿 ────────────────
       # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知；
       # 这里分别查它们的 push run 结论。查不到或非 success 就直接失败 ——
