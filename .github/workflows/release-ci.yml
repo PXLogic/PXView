@@ -1521,9 +1521,15 @@ jobs:
             ```
             ${{ steps.assets.outputs.sums }}
             ```
-          # 传 PAT：本步骤要为已建好的 tag 挂 Release 并上传资产。tag ref 由
-          # 上一步用同一个 PAT 创建，这里保持一致，避免两套令牌权限差异。
-          token: ${{ secrets.RELEASE_PAT }}
+          # Release 本体用 GITHUB_TOKEN 创建：作者显示为 github-actions[bot]，
+          # 而不是 PAT 所有者的个人账号（用 PAT 建的 Release，Releases 页会显示
+          # 「<PAT 账号> released this」）。tag ref 仍由上一步用 PAT 建，这里
+          # 只是往已存在的 tag 上挂 Release，GITHUB_TOKEN 的 Contents 写权限
+          # 足够（建 ref 才是当初需要 PAT 的唯一原因，见上一步注释）。
+          # 注意：GITHUB_TOKEN 创建的 Release 不会触发 release 事件 workflow
+          # （GitHub 防递归），本仓库没有依赖 release 事件的 workflow
+          # （republish-release.yml 是 workflow_dispatch 手动触发），故安全。
+          token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
