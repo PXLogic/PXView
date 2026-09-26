@@ -750,7 +750,7 @@ void TitleBar::mouseMoveEvent(QMouseEvent *event) {
     int y = _oldPos.y() + datY;
 
     if (!_moving) {
-      if (ABS_VAL(datX) >= 2 || ABS_VAL(datY) >= 2) {
+      if (abs_val(datX) >= 2 || abs_val(datY) >= 2) {
         _moving = true;
       } else {
         return;

@@ -98,7 +98,7 @@ struct ViewContext
     {
         const double spp = samplerate * scale;
         const double float_start = static_cast<double>(offset) * spp;
-        return std::floor(static_cast<double>(((int64_t)index - float_start)) / spp);
+        return std::floor(static_cast<double>((static_cast<int64_t>(index) - float_start)) / spp);
     }
 
     /// 跳变样本的精确像素位置(公式A 浮点,不截断)。

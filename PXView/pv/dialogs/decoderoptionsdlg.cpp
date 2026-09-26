@@ -650,8 +650,8 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
     ui->binding = binding;
     _tdm_fast_ui.push_back(ui);
 
-    auto opt_int = [binding](const char *id, qint64 fallback) -> qint64 {
-        GVariant *v = binding->getter(id);
+    auto opt_int = [binding](const QString &id, qint64 fallback) -> qint64 {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v)
             return fallback;
         qint64 value = fallback;
@@ -660,8 +660,8 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         g_variant_unref(v);
         return value;
     };
-    auto opt_double = [binding](const char *id, double fallback) -> double {
-        GVariant *v = binding->getter(id);
+    auto opt_double = [binding](const QString &id, double fallback) -> double {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v)
             return fallback;
         double value = fallback;
@@ -670,8 +670,8 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         g_variant_unref(v);
         return value;
     };
-    auto opt_bool = [binding](const char *id, bool fallback) -> bool {
-        GVariant *v = binding->getter(id);
+    auto opt_bool = [binding](const QString &id, bool fallback) -> bool {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v)
             return fallback;
         bool value = fallback;
@@ -680,8 +680,8 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         g_variant_unref(v);
         return value;
     };
-    auto opt_string = [binding](const char *id, const char *fallback) -> QString {
-        GVariant *v = binding->getter(id);
+    auto opt_string = [binding](const QString &id, const char *fallback) -> QString {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v)
             return QString::fromUtf8(fallback);
         QString value = QString::fromUtf8(fallback);
@@ -797,7 +797,7 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
     trigger_group->setExclusive(true);
 
     for (int ch = 0; ch < 8; ++ch) {
-        char key[64];
+        QString key;
 
         ui->select_button[ch] = new QToolButton(matrix_group);
         ui->select_button[ch]->setText(QStringLiteral("CH%1").arg(ch));
@@ -807,7 +807,7 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         ui->select_button[ch]->setToolTip(QStringLiteral("编辑 CH%1 高级参数").arg(ch));
         select_group->addButton(ui->select_button[ch], ch);
 
-        std::snprintf(key, sizeof(key), "ch%d_enable", ch);
+        key = QString::asprintf("ch%d_enable", ch);
         ui->wave_enable[ch] = new QCheckBox(matrix_group);
         ui->wave_enable[ch]->setChecked(opt_int(key, 1) != 0);
         ui->wave_enable[ch]->setToolTip(QStringLiteral("显示 CH%1 模拟波形").arg(ch));
@@ -816,12 +816,12 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         ui->text_enable[ch]->setChecked(text_visible[ch]);
         ui->text_enable[ch]->setToolTip(QStringLiteral("显示 CH%1 解码文字").arg(ch));
 
-        std::snprintf(key, sizeof(key), "ch%d_vzoom", ch);
+        key = QString::asprintf("ch%d_vzoom", ch);
         const double saved_zoom = opt_double(key, 1.0);
         ui->zoom_summary[ch] = new QLabel(QString::number(saved_zoom, 'f', 2), matrix_group);
         ui->zoom_summary[ch]->setAlignment(Qt::AlignCenter);
 
-        std::snprintf(key, sizeof(key), "ch%d_vpos", ch);
+        key = QString::asprintf("ch%d_vpos", ch);
         const double saved_pos = opt_double(key, 1.0);
         ui->pos_summary[ch] = new QLabel(QString::number(saved_pos, 'f', 2), matrix_group);
         ui->pos_summary[ch]->setAlignment(Qt::AlignCenter);
@@ -863,7 +863,7 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
     advanced_layout->addWidget(ui->advanced_stack);
 
     for (int ch = 0; ch < 8; ++ch) {
-        char key[64];
+        QString key;
         auto *page = new QWidget(ui->advanced_stack);
         auto *grid = new QGridLayout(page);
         grid->setContentsMargins(0, 0, 0, 0);
@@ -876,7 +876,7 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         ui->vzoom[ch]->setSingleStep(0.05);
         ui->vzoom[ch]->setSuffix(QStringLiteral(" x"));
         ui->vzoom[ch]->setMaximumWidth(120);
-        std::snprintf(key, sizeof(key), "ch%d_vzoom", ch);
+        key = QString::asprintf("ch%d_vzoom", ch);
         ui->vzoom[ch]->setValue(opt_double(key, 1.0));
 
         ui->vpos[ch] = new QDoubleSpinBox(page);
@@ -884,14 +884,14 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         ui->vpos[ch]->setRange(-800.0, 800.0);
         ui->vpos[ch]->setSingleStep(0.05);
         ui->vpos[ch]->setMaximumWidth(120);
-        std::snprintf(key, sizeof(key), "ch%d_vpos", ch);
+        key = QString::asprintf("ch%d_vpos", ch);
         ui->vpos[ch]->setValue(opt_double(key, 1.0));
 
         ui->range_mode[ch] = new DsComboBox(page);
         ui->range_mode[ch]->addItem(QStringLiteral("Bipolar / 双极性"), QStringLiteral("bipolar"));
         ui->range_mode[ch]->addItem(QStringLiteral("Unipolar / 单极性"), QStringLiteral("unipolar"));
         ui->range_mode[ch]->addItem(QStringLiteral("Custom / 自定义"), QStringLiteral("custom"));
-        std::snprintf(key, sizeof(key), "ch%d_range_mode", ch);
+        key = QString::asprintf("ch%d_range_mode", ch);
         set_combo_data(ui->range_mode[ch], opt_string(key, "bipolar"));
         ui->range_mode[ch]->setMaximumWidth(150);
 
@@ -899,20 +899,20 @@ void DecoderOptionsDlg::create_tdm_audio_fast_options(
         ui->eng_min[ch]->setDecimals(6);
         ui->eng_min[ch]->setRange(-1.0e12, 1.0e12);
         ui->eng_min[ch]->setMaximumWidth(120);
-        std::snprintf(key, sizeof(key), "ch%d_eng_min", ch);
+        key = QString::asprintf("ch%d_eng_min", ch);
         ui->eng_min[ch]->setValue(opt_double(key, -1.0));
 
         ui->eng_max[ch] = new QDoubleSpinBox(page);
         ui->eng_max[ch]->setDecimals(6);
         ui->eng_max[ch]->setRange(-1.0e12, 1.0e12);
         ui->eng_max[ch]->setMaximumWidth(120);
-        std::snprintf(key, sizeof(key), "ch%d_eng_max", ch);
+        key = QString::asprintf("ch%d_eng_max", ch);
         ui->eng_max[ch]->setValue(opt_double(key, 1.0));
 
         ui->unit[ch] = new QLineEdit(page);
         ui->unit[ch]->setMaxLength(16);
         ui->unit[ch]->setMaximumWidth(100);
-        std::snprintf(key, sizeof(key), "ch%d_unit", ch);
+        key = QString::asprintf("ch%d_unit", ch);
         ui->unit[ch]->setText(opt_string(key, "V"));
 
         grid->addWidget(new QLabel(QStringLiteral("V-Zoom"), page), 0, 0);
@@ -1208,9 +1208,9 @@ void DecoderOptionsDlg::commit_tdm_audio_fast_options()
             continue;
 
         auto *binding = ui->binding;
-        auto set_string = [binding](const char *id, const QString &value) {
+        auto set_string = [binding](const QString &id, const QString &value) {
             const QByteArray bytes = value.toUtf8();
-            binding->setter(id, g_variant_new_string(bytes.constData()));
+            binding->setter(id.toUtf8().constData(), g_variant_new_string(bytes.constData()));
         };
         auto combo_value = [](QComboBox *combo) -> QString {
             return combo ? combo->currentData().toString() : QString();
@@ -1227,21 +1227,21 @@ void DecoderOptionsDlg::commit_tdm_audio_fast_options()
         bool any_text = false;
         bool any_wave = false;
         for (int ch = 0; ch < 8; ++ch) {
-            char key[64];
-            std::snprintf(key, sizeof(key), "ch%d_enable", ch);
-            binding->setter(key, g_variant_new_int64(ui->wave_enable[ch]->isChecked() ? 1 : 0));
+            QString key;
+            key = QString::asprintf("ch%d_enable", ch);
+            binding->setter(key.toUtf8().constData(), g_variant_new_int64(ui->wave_enable[ch]->isChecked() ? 1 : 0));
 
-            std::snprintf(key, sizeof(key), "ch%d_vzoom", ch);
-            binding->setter(key, g_variant_new_double(ui->vzoom[ch]->value()));
-            std::snprintf(key, sizeof(key), "ch%d_vpos", ch);
-            binding->setter(key, g_variant_new_double(ui->vpos[ch]->value()));
-            std::snprintf(key, sizeof(key), "ch%d_range_mode", ch);
+            key = QString::asprintf("ch%d_vzoom", ch);
+            binding->setter(key.toUtf8().constData(), g_variant_new_double(ui->vzoom[ch]->value()));
+            key = QString::asprintf("ch%d_vpos", ch);
+            binding->setter(key.toUtf8().constData(), g_variant_new_double(ui->vpos[ch]->value()));
+            key = QString::asprintf("ch%d_range_mode", ch);
             set_string(key, combo_value(ui->range_mode[ch]));
-            std::snprintf(key, sizeof(key), "ch%d_eng_min", ch);
-            binding->setter(key, g_variant_new_double(ui->eng_min[ch]->value()));
-            std::snprintf(key, sizeof(key), "ch%d_eng_max", ch);
-            binding->setter(key, g_variant_new_double(ui->eng_max[ch]->value()));
-            std::snprintf(key, sizeof(key), "ch%d_unit", ch);
+            key = QString::asprintf("ch%d_eng_min", ch);
+            binding->setter(key.toUtf8().constData(), g_variant_new_double(ui->eng_min[ch]->value()));
+            key = QString::asprintf("ch%d_eng_max", ch);
+            binding->setter(key.toUtf8().constData(), g_variant_new_double(ui->eng_max[ch]->value()));
+            key = QString::asprintf("ch%d_unit", ch);
             set_string(key, ui->unit[ch]->text().trimmed().isEmpty()
                                 ? QStringLiteral("V") : ui->unit[ch]->text().trimmed());
 
@@ -1306,32 +1306,32 @@ void DecoderOptionsDlg::create_pwm_fast_options(
     ui->binding = binding;
     _pwm_fast_ui.push_back(ui);
 
-    auto opt_int = [binding](const char *id, qint64 fallback) -> qint64 {
-        GVariant *v = binding->getter(id);
+    auto opt_int = [binding](const QString &id, qint64 fallback) -> qint64 {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v) return fallback;
         qint64 r = fallback;
         if (g_variant_is_of_type(v, G_VARIANT_TYPE_INT64)) r = g_variant_get_int64(v);
         g_variant_unref(v);
         return r;
     };
-    auto opt_double = [binding](const char *id, double fallback) -> double {
-        GVariant *v = binding->getter(id);
+    auto opt_double = [binding](const QString &id, double fallback) -> double {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v) return fallback;
         double r = fallback;
         if (g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE)) r = g_variant_get_double(v);
         g_variant_unref(v);
         return r;
     };
-    auto opt_bool = [binding](const char *id, bool fallback) -> bool {
-        GVariant *v = binding->getter(id);
+    auto opt_bool = [binding](const QString &id, bool fallback) -> bool {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v) return fallback;
         bool r = fallback;
         if (g_variant_is_of_type(v, G_VARIANT_TYPE_BOOLEAN)) r = g_variant_get_boolean(v);
         g_variant_unref(v);
         return r;
     };
-    auto opt_string = [binding](const char *id, const char *fallback) -> QString {
-        GVariant *v = binding->getter(id);
+    auto opt_string = [binding](const QString &id, const char *fallback) -> QString {
+        GVariant *v = binding->getter(id.toUtf8().constData());
         if (!v) return QString::fromUtf8(fallback);
         QString r = QString::fromUtf8(fallback);
         if (g_variant_is_of_type(v, G_VARIANT_TYPE_STRING))
@@ -1456,18 +1456,18 @@ void DecoderOptionsDlg::create_pwm_fast_options(
     const int saved_trig = std::max(0, std::min(3, static_cast<int>(opt_int("display_trigger_channel", 0))));
 
     for (int ch = 0; ch < 4; ++ch) {
-        char key[64];
+        QString key;
         ui->select_button[ch] = new QToolButton(matrix_group);
         ui->select_button[ch]->setText(QStringLiteral("CH%1").arg(ch));
         ui->select_button[ch]->setCheckable(true);
         ui->select_button[ch]->setMaximumWidth(52);
         select_group->addButton(ui->select_button[ch], ch);
         ui->wave_enable[ch] = new QCheckBox(matrix_group);
-        std::snprintf(key, sizeof(key), "ch%d_enable", ch);
+        key = QString::asprintf("ch%d_enable", ch);
         ui->wave_enable[ch]->setChecked(opt_int(key, ch == 0 ? 1 : 0) != 0);
-        std::snprintf(key, sizeof(key), "ch%d_vzoom", ch);
+        key = QString::asprintf("ch%d_vzoom", ch);
         ui->zoom_summary[ch] = new QLabel(QString::number(opt_double(key, 1.0), 'f', 3), matrix_group);
-        std::snprintf(key, sizeof(key), "ch%d_vpos", ch);
+        key = QString::asprintf("ch%d_vpos", ch);
         ui->pos_summary[ch] = new QLabel(QString::number(opt_double(key, -2.0 * ch), 'f', 3), matrix_group);
         ui->trigger_channel[ch] = new QRadioButton(matrix_group);
         trig_group->addButton(ui->trigger_channel[ch], ch);
@@ -1496,25 +1496,25 @@ void DecoderOptionsDlg::create_pwm_fast_options(
     adv_layout->addWidget(head); adv_layout->addWidget(ui->advanced_stack);
 
     for (int ch = 0; ch < 4; ++ch) {
-        char key[64];
+        QString key;
         auto *page = new QWidget(ui->advanced_stack);
         auto *g = new QGridLayout(page); g->setContentsMargins(0,0,0,0); g->setHorizontalSpacing(6);
         ui->vzoom[ch] = new QDoubleSpinBox(page); ui->vzoom[ch]->setDecimals(3);
         ui->vzoom[ch]->setRange(0.01, 100.0); ui->vzoom[ch]->setSingleStep(0.05); ui->vzoom[ch]->setSuffix(QStringLiteral(" x")); ui->vzoom[ch]->setMaximumWidth(120);
-        std::snprintf(key,sizeof(key),"ch%d_vzoom",ch); ui->vzoom[ch]->setValue(opt_double(key,1.0));
+        key = QString::asprintf("ch%d_vzoom",ch); ui->vzoom[ch]->setValue(opt_double(key,1.0));
         ui->vpos[ch] = new QDoubleSpinBox(page); ui->vpos[ch]->setDecimals(3); ui->vpos[ch]->setRange(-800.0,800.0); ui->vpos[ch]->setSingleStep(0.05); ui->vpos[ch]->setMaximumWidth(120);
-        std::snprintf(key,sizeof(key),"ch%d_vpos",ch); ui->vpos[ch]->setValue(opt_double(key,-2.0*ch));
+        key = QString::asprintf("ch%d_vpos",ch); ui->vpos[ch]->setValue(opt_double(key,-2.0*ch));
         ui->range_mode[ch] = new DsComboBox(page);
         ui->range_mode[ch]->addItem(QStringLiteral("单极性"),QStringLiteral("unipolar"));
         ui->range_mode[ch]->addItem(QStringLiteral("双极性"),QStringLiteral("bipolar"));
         ui->range_mode[ch]->addItem(QStringLiteral("自定义"),QStringLiteral("custom"));
-        std::snprintf(key,sizeof(key),"ch%d_range_mode",ch); set_combo_data(ui->range_mode[ch],opt_string(key,"unipolar")); ui->range_mode[ch]->setMaximumWidth(120);
+        key = QString::asprintf("ch%d_range_mode",ch); set_combo_data(ui->range_mode[ch],opt_string(key,"unipolar")); ui->range_mode[ch]->setMaximumWidth(120);
         ui->eng_min[ch] = new QDoubleSpinBox(page); ui->eng_min[ch]->setDecimals(6); ui->eng_min[ch]->setRange(-1e12,1e12); ui->eng_min[ch]->setMaximumWidth(120);
-        std::snprintf(key,sizeof(key),"ch%d_eng_min",ch); ui->eng_min[ch]->setValue(opt_double(key,0.0));
+        key = QString::asprintf("ch%d_eng_min",ch); ui->eng_min[ch]->setValue(opt_double(key,0.0));
         ui->eng_max[ch] = new QDoubleSpinBox(page); ui->eng_max[ch]->setDecimals(6); ui->eng_max[ch]->setRange(-1e12,1e12); ui->eng_max[ch]->setMaximumWidth(120);
-        std::snprintf(key,sizeof(key),"ch%d_eng_max",ch); ui->eng_max[ch]->setValue(opt_double(key,100.0));
+        key = QString::asprintf("ch%d_eng_max",ch); ui->eng_max[ch]->setValue(opt_double(key,100.0));
         ui->unit[ch] = new QLineEdit(page); ui->unit[ch]->setMaxLength(16); ui->unit[ch]->setMaximumWidth(90);
-        std::snprintf(key,sizeof(key),"ch%d_unit",ch); ui->unit[ch]->setText(opt_string(key,"%"));
+        key = QString::asprintf("ch%d_unit",ch); ui->unit[ch]->setText(opt_string(key,"%"));
         g->addWidget(new QLabel(QStringLiteral("V-Zoom"),page),0,0); g->addWidget(ui->vzoom[ch],0,1);
         g->addWidget(new QLabel(QStringLiteral("V-Pos"),page),0,2); g->addWidget(ui->vpos[ch],0,3);
         g->addWidget(new QLabel(QStringLiteral("量程"),page),1,0); g->addWidget(ui->range_mode[ch],1,1);
@@ -1642,9 +1642,9 @@ void DecoderOptionsDlg::commit_pwm_fast_options()
     for (auto *ui : _pwm_fast_ui) {
         if (!ui || !ui->binding) continue;
         auto *b = ui->binding;
-        auto set_string = [b](const char *id, QComboBox *c) {
+        auto set_string = [b](const QString &id, QComboBox *c) {
             const QByteArray bytes = c->currentData().toString().toUtf8();
-            b->setter(id, g_variant_new_string(bytes.constData()));
+            b->setter(id.toUtf8().constData(), g_variant_new_string(bytes.constData()));
         };
         set_string("polarity", ui->polarity_a);
         set_string("polarity_b", ui->polarity_b);
@@ -1658,14 +1658,14 @@ void DecoderOptionsDlg::commit_pwm_fast_options()
         b->setter("freq_decimals", g_variant_new_int64(ui->freq_decimals->currentData().toInt()));
         b->setter("realtime_decode", g_variant_new_boolean(ui->realtime_decode->isChecked()));
         for (int ch=0; ch<4; ++ch) {
-            char key[64];
-            std::snprintf(key,sizeof(key),"ch%d_enable",ch); b->setter(key,g_variant_new_int64(ui->wave_enable[ch]->isChecked()?1:0));
-            std::snprintf(key,sizeof(key),"ch%d_vzoom",ch); b->setter(key,g_variant_new_double(ui->vzoom[ch]->value()));
-            std::snprintf(key,sizeof(key),"ch%d_vpos",ch); b->setter(key,g_variant_new_double(ui->vpos[ch]->value()));
-            std::snprintf(key,sizeof(key),"ch%d_range_mode",ch); set_string(key,ui->range_mode[ch]);
-            std::snprintf(key,sizeof(key),"ch%d_eng_min",ch); b->setter(key,g_variant_new_double(ui->eng_min[ch]->value()));
-            std::snprintf(key,sizeof(key),"ch%d_eng_max",ch); b->setter(key,g_variant_new_double(ui->eng_max[ch]->value()));
-            std::snprintf(key,sizeof(key),"ch%d_unit",ch); {QByteArray x=ui->unit[ch]->text().trimmed().toUtf8(); if(x.isEmpty())x="%"; b->setter(key,g_variant_new_string(x.constData()));}
+            QString key;
+            key = QString::asprintf("ch%d_enable",ch); b->setter(key.toUtf8().constData(),g_variant_new_int64(ui->wave_enable[ch]->isChecked()?1:0));
+            key = QString::asprintf("ch%d_vzoom",ch); b->setter(key.toUtf8().constData(),g_variant_new_double(ui->vzoom[ch]->value()));
+            key = QString::asprintf("ch%d_vpos",ch); b->setter(key.toUtf8().constData(),g_variant_new_double(ui->vpos[ch]->value()));
+            key = QString::asprintf("ch%d_range_mode",ch); set_string(key,ui->range_mode[ch]);
+            key = QString::asprintf("ch%d_eng_min",ch); b->setter(key.toUtf8().constData(),g_variant_new_double(ui->eng_min[ch]->value()));
+            key = QString::asprintf("ch%d_eng_max",ch); b->setter(key.toUtf8().constData(),g_variant_new_double(ui->eng_max[ch]->value()));
+            key = QString::asprintf("ch%d_unit",ch); {QByteArray x=ui->unit[ch]->text().trimmed().toUtf8(); if(x.isEmpty())x="%"; b->setter(key.toUtf8().constData(),g_variant_new_string(x.constData()));}
         }
         int tch=0; for(int ch=0;ch<4;++ch)if(ui->trigger_channel[ch]->isChecked()){tch=ch;break;}
         b->setter("display_trigger_enable",g_variant_new_boolean(ui->trigger_enable->isChecked()));

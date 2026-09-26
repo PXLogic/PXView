@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <utility>
 #include <QByteArray>
 #include "pv/base/log.h"
@@ -185,7 +186,7 @@ const char *format_to_string(const char *hex_str, int fmt,
 	if (fmt == DecoderDataFormat::dec && len * 4 <= 64){
 		long long lv = bin2long_string(buf, len * 4);
 		num_buf[0] = 0;
-		snprintf(num_buf, num_buf_len, "%lld", lv);
+		std::snprintf(num_buf, num_buf_len, "%lld", lv);
 		return num_buf;
 	}
 	
@@ -195,13 +196,13 @@ const char *format_to_string(const char *hex_str, int fmt,
 			int lv = static_cast<int>(bin2long_string(buf, len * 4));
 			//can display chars
 			if (lv >= 33 && lv <= 126){
-				snprintf(num_buf, num_buf_len, "%c", static_cast<char>(lv));
+				std::snprintf(num_buf, num_buf_len, "%c", static_cast<char>(lv));
 				return num_buf;
 			}
 		}
 		// "[hex]"：num_buf 至少 30 字节，len <= 26 时 len+3 <= 29 不会越界。
 		num_buf[0] = '[';
-		memcpy(num_buf + 1, data, static_cast<size_t>(len));
+		std::copy_n(data, static_cast<size_t>(len), num_buf + 1);
 		num_buf[len + 1] = ']';
 		num_buf[len + 2] = 0;
 		return num_buf;
@@ -257,7 +258,7 @@ QString format_numeric_string(const QString &hex, int fmt)
 		if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') ||
 		    (c >= 'a' && c <= 'f')){
 			if (sub_wr == sub_end){
-				printf("conver error,sub string length is too long!\n");
+				pxv_err("conver error,sub string length is too long!");
 				return hex;
 			}
 
@@ -276,18 +277,18 @@ QString format_numeric_string(const QString &hex, int fmt)
 			unsigned int sublen = static_cast<unsigned int>(strlen(sub_str));
 
 			if ((all_wr - all_buf) + sublen > CONVERT_STR_MAX_LEN){
-				printf("convert error,write buffer is full!\n");
+				pxv_err("convert error,write buffer is full!");
 				return hex;
 			}
 
-			memcpy(all_wr, sub_str, sublen);
+			std::copy_n(sub_str, sublen, all_wr);
 			all_wr += sublen;
 			sub_wr = sub_buf; //reset write buffer
 		}
 
 		//the split letter
 		if ((all_wr - all_buf) + 1 > CONVERT_STR_MAX_LEN){
-			printf("convert error,write buffer is full!\n");
+			pxv_err("convert error,write buffer is full!");
 			return hex;
 		}
 
@@ -306,11 +307,11 @@ QString format_numeric_string(const QString &hex, int fmt)
 		unsigned int sublen = static_cast<unsigned int>(strlen(sub_str));
 
 		if ((all_wr - all_buf) + sublen > CONVERT_STR_MAX_LEN){
-			printf("convert error,write buffer is full!\n");
+			pxv_err("convert error,write buffer is full!");
 			return hex;
 		}
 
-		memcpy(all_wr, sub_str, sublen);
+		std::copy_n(sub_str, sublen, all_wr);
 		all_wr[sublen] = '\0';
 		all_wr += sublen;
 	}

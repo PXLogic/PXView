@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <shared_mutex>
 #include <chrono>
+#include <format>
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
@@ -1516,43 +1517,42 @@ void DecoderStack::analog_callback(srd_proto_data *pdata, void *self) {
     if (ad && ad->channel() == pda->channel) { ch_data = ad; break; }
   }
   if (!ch_data) {
-    char label[32];
-    std::snprintf(label, sizeof(label), "CH%d", pda->channel);
+    std::string label = std::format("CH{}", pda->channel);
     ch_data = std::make_shared<DecoderAnalogData>(pda->channel, pda->num_channels, label);
     d->_analog_data.push_back(ch_data);
     srd_decoder_inst *di = pdata->pdo->di;
     if (di && di->c_options) {
-      char key[40]; GVariant *v = nullptr;
-      std::snprintf(key, sizeof(key), "ch%d_enable", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      std::string key; GVariant *v = nullptr;
+      key = std::format("ch{}_enable", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_INT64))
         ch_data->set_visible(g_variant_get_int64(v) != 0);
-      std::snprintf(key, sizeof(key), "ch%d_vpos", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_vpos", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE))
         ch_data->set_v_offset(static_cast<float>(g_variant_get_double(v)));
-      std::snprintf(key, sizeof(key), "ch%d_vzoom", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_vzoom", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE))
         ch_data->set_v_scale(static_cast<float>(g_variant_get_double(v)));
       DecoderAnalogRangeMode range_mode = DecoderAnalogRangeMode::Bipolar;
       double eng_min = -1.0, eng_max = 1.0;
       std::string unit = "V";
-      std::snprintf(key, sizeof(key), "ch%d_range_mode", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_range_mode", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_STRING)) {
         const char *mode = g_variant_get_string(v, nullptr);
         if (mode && std::strcmp(mode, "unipolar") == 0) range_mode = DecoderAnalogRangeMode::Unipolar;
         else if (mode && std::strcmp(mode, "custom") == 0) range_mode = DecoderAnalogRangeMode::Custom;
       }
-      std::snprintf(key, sizeof(key), "ch%d_eng_min", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_eng_min", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE)) eng_min = g_variant_get_double(v);
-      std::snprintf(key, sizeof(key), "ch%d_eng_max", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_eng_max", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_DOUBLE)) eng_max = g_variant_get_double(v);
-      std::snprintf(key, sizeof(key), "ch%d_unit", pda->channel);
-      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key));
+      key = std::format("ch{}_unit", pda->channel);
+      v = static_cast<GVariant *>(g_hash_table_lookup(di->c_options, key.c_str()));
       if (v && g_variant_is_of_type(v, G_VARIANT_TYPE_STRING)) unit = g_variant_get_string(v, nullptr);
       ch_data->set_engineering_config(range_mode, eng_min, eng_max, unit);
     }

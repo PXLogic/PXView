@@ -1525,7 +1525,7 @@ void Viewport::play_decoder_audio() {
       on->setChecked(saved_row->enabled);
       for (int output = 0; output < 8; ++output) {
         gains[static_cast<size_t>(output)]->setValue(
-            static_cast<int>((saved_row->outputs[(size_t)output] * 100.0f)));
+            static_cast<int>((saved_row->outputs[static_cast<size_t>(output)] * 100.0f)));
       }
     } else {
       const int initial_outputs = qBound(1, ch_mode_combo->currentData().toInt(), 8);

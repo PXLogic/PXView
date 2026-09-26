@@ -350,13 +350,11 @@ bool AppControl::Init()
 #endif
     
     //the python script path of decoder
-    char path[256] = {0};
-    QString dir = GetDecodeScriptDir();   
-    snprintf(path, sizeof(path), "%s", dir.toUtf8().constData());
+    const std::string path = GetDecodeScriptDir().toStdString();
 
     // Initialise libsigrokdecode
-    pxv_info("DBG: before srd_init, path=%s", path);
-    if (srd_init(path) != SRD_OK)
+    pxv_info("DBG: before srd_init, path=%s", path.c_str());
+    if (srd_init(path.c_str()) != SRD_OK)
     {
         pxv_err("ERROR: libsigrokdecode init failed.");
         return false;

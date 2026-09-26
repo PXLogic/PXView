@@ -33,11 +33,9 @@ QString format_freq(double period, unsigned int precision)
     const double multiplier = pow(10.0, std::max(-prefix * 3.0 - static_cast<double>(kFirstSIPrefixPower), 0.0));
 
     const int p = static_cast<int>(std::min(precision, 12u));
-    char buffer[50] = {0};
     QString units = FreqPrefixes[prefix] + "Hz";
-    snprintf(buffer, sizeof(buffer), "%.*f%s", p, 1 / (period * multiplier),
-             units.toUtf8().constData());
-    return QString(buffer);
+    return QString::asprintf("%.*f%s", p, 1 / (period * multiplier),
+                             units.toUtf8().constData());
 }
 
 QString format_time(double t, int prefix, unsigned int precision)
@@ -45,12 +43,10 @@ QString format_time(double t, int prefix, unsigned int precision)
     const double multiplier = pow(10.0, -prefix * 3 - kFirstSIPrefixPower + 6.0);
 
     const int p = static_cast<int>(std::min(precision, 12u));
-    char buffer[50];
     QString units = SIPrefixes[prefix] + "s";
     double v = (t * multiplier) / 1000000.0;
-    snprintf(buffer, sizeof(buffer), "%c%.*f%s", v >= 0 ? '+' : '-', p, v,
-             units.toUtf8().constData());
-    return QString(buffer);
+    return QString::asprintf("%c%.*f%s", v >= 0 ? '+' : '-', p, v,
+                             units.toUtf8().constData());
 }
 
 QString format_real_time(uint64_t delta_index, uint64_t sample_rate)

@@ -344,7 +344,7 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
       // try to quick scroll view...
       int curX = event->position().toPoint().x();
       int clickX = _viewport->mouse_down_point().x();
-      int moveLong = ABS_VAL(curX - clickX);
+      int moveLong = abs_val(curX - clickX);
       int maxWidth = _viewport->geometry().width();
       float mvk = static_cast<float>(moveLong) / static_cast<float>(maxWidth);
 
@@ -770,7 +770,7 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
   const int anglex = ad.x();
   const int angley = ad.y();
   int delta;
-  if (anglex == 0 || ABS_VAL(angley) >= ABS_VAL(anglex)) {
+  if (anglex == 0 || abs_val(angley) >= abs_val(anglex)) {
     delta = angley;
   } else {
     delta = anglex;

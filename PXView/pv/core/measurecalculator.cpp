@@ -191,8 +191,7 @@ void MeasureCalculator::compute_level_measurements(const uint8_t *samples,
     // prominent peaks. The peak at smaller ADC values = high-voltage
     // steady-state (= `low` field), the peak at larger ADC values =
     // low-voltage steady-state (= `high` field).
-    uint32_t hist[256];
-    memset(hist, 0, sizeof(hist));
+    uint32_t hist[256]{};
     for (uint64_t i = 0; i < sample_count; i++) {
         hist[samples[i]]++;
     }

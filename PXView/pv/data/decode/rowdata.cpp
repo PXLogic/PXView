@@ -465,8 +465,8 @@ bool RowData::emplace_annotations(
       pda.ann_type = it->ann_type;
       pda.ann_text = const_cast<char**>(it->ann_text);
       pda.numberic_value = it->numberic_value;
-      memcpy(pda.str_number_hex, it->str_number_hex,
-             sizeof(pda.str_number_hex));
+      std::copy_n(it->str_number_hex, sizeof(pda.str_number_hex),
+                  pda.str_number_hex);
 
       _annotations.emplace_back(&pdata, status);
       apply_annotation_stats(_annotations.back());

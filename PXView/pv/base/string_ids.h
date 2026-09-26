@@ -33,5 +33,4 @@ inline constexpr int STR_PAGE_SIGNAL_PROC = 102;
  * 这些字符串由模块自己声明（英文），按选项 id 在 input_output.json 里翻译。 */
 inline constexpr int STR_PAGE_INPUT_OUTPUT = 103;
 
-#define IDS_MSG_LOG_LEVEL
 #endif

@@ -62,7 +62,6 @@
 #include <QRect>
 #include <QRectF>
 #include <cassert>
-#include <stdio.h>
 #include "pv/base/pxvdef.h"
 
 namespace pv {

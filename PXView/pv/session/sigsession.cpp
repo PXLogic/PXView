@@ -64,6 +64,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <cstdarg>
@@ -290,42 +291,48 @@ static int sigrok_log_callback(void *cb_data, int loglevel,
                                const char *format, va_list args)
 {
   (void)cb_data;
-  char buf[1024];
-  vsnprintf(buf, sizeof(buf), format, args);
+  std::string buf;
+  buf.resize(1024);
+  const int len = std::vsnprintf(&buf[0], buf.size(), format, args);
+  if (len > 0)
+    buf.resize(static_cast<size_t>(len));
+  else
+    buf.clear();
   // Strip trailing newline added by sr_log_v_printf to keep xlog format clean.
-  size_t n = strlen(buf);
-  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
-    buf[--n] = 0;
+  while (!buf.empty() && (buf.back() == '\n' || buf.back() == '\r'))
+    buf.pop_back();
 
   // 过滤 libsigrok hwdriver.c 中 "Option 'xxx' not available" 的 sr_err 噪音。
   // 上游 sr_config_get/sr_config_set 在 key 不被设备支持时返回 SR_ERR_ARG 并
   // 打印此 sr_err，属于正常情况（PXView 的 get_config/set_config 已静默处理
   // SR_ERR_ARG），但 libsigrok 内部的 sr_err 仍会输出到日志。降级为 debug。
-  if (loglevel == SR_LOG_ERR && strstr(buf, "not available for this device instance")) {
-    pxv_dbg("sr: %s", buf);
+  if (loglevel == SR_LOG_ERR &&
+      buf.find("not available for this device instance") != std::string::npos) {
+    pxv_dbg("sr: %s", buf.c_str());
     return 0;
   }
 
   // 过滤 asix-omega-rtm-cli 驱动扫描时的外部进程执行失败噪音
   // （该驱动尝试执行 omegartmcli 外部进程，不存在时正常失败）
-  if (loglevel == SR_LOG_ERR && strstr(buf, "Cannot execute RTM CLI process")) {
-    pxv_dbg("sr: %s", buf);
+  if (loglevel == SR_LOG_ERR &&
+      buf.find("Cannot execute RTM CLI process") != std::string::npos) {
+    pxv_dbg("sr: %s", buf.c_str());
     return 0;
   }
 
   switch (loglevel) {
     case SR_LOG_ERR:
-      pxv_err("sr: %s", buf);
+      pxv_err("sr: %s", buf.c_str());
       break;
     case SR_LOG_WARN:
-      pxv_warn("sr: %s", buf);
+      pxv_warn("sr: %s", buf.c_str());
       break;
     case SR_LOG_INFO:
-      pxv_info("sr: %s", buf);
+      pxv_info("sr: %s", buf.c_str());
       break;
     case SR_LOG_DBG:
     case SR_LOG_SPEW:
-      pxv_dbg("sr: %s", buf);
+      pxv_dbg("sr: %s", buf.c_str());
       break;
     default:
       break;
@@ -356,17 +363,14 @@ extern "C" void pxv_hotplug_log_cb(int level, const char *msg)
   if (level == 0)
     return;
   // Strip trailing newline (xlog adds its own).
-  char buf[600];
-  size_t n = strlen(msg);
-  if (n >= sizeof(buf))
-    n = sizeof(buf) - 1;
-  memcpy(buf, msg, n);
-  buf[n] = 0;
-  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
-    buf[--n] = 0;
+  std::string buf(msg);
+  if (buf.size() > 599)
+    buf.resize(599);
+  while (!buf.empty() && (buf.back() == '\n' || buf.back() == '\r'))
+    buf.pop_back();
   switch (level) {
-    case 2: pxv_err("libusb-hotplug: %s", buf); break;
-    case 1: pxv_warn("libusb-hotplug: %s", buf); break;
+    case 2: pxv_err("libusb-hotplug: %s", buf.c_str()); break;
+    case 1: pxv_warn("libusb-hotplug: %s", buf.c_str()); break;
     default: break;
   }
 }
@@ -386,26 +390,23 @@ extern "C" void pxv_libusb_log_cb(libusb_context *ctx,
   if (!str)
     return;
   // Strip trailing newline (xlog adds its own).
-  char buf[700];
-  size_t n = strlen(str);
-  if (n >= sizeof(buf))
-    n = sizeof(buf) - 1;
-  memcpy(buf, str, n);
-  buf[n] = 0;
-  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
-    buf[--n] = 0;
+  std::string buf(str);
+  if (buf.size() > 699)
+    buf.resize(699);
+  while (!buf.empty() && (buf.back() == '\n' || buf.back() == '\r'))
+    buf.pop_back();
   switch (level) {
     case LIBUSB_LOG_LEVEL_ERROR:
-      pxv_err("libusb: %s", buf);
+      pxv_err("libusb: %s", buf.c_str());
       break;
     case LIBUSB_LOG_LEVEL_WARNING:
-      pxv_warn("libusb: %s", buf);
+      pxv_warn("libusb: %s", buf.c_str());
       break;
     case LIBUSB_LOG_LEVEL_INFO:
-      pxv_info("libusb: %s", buf);
+      pxv_info("libusb: %s", buf.c_str());
       break;
     default:
-      pxv_info("libusb-dbg: %s", buf);
+      pxv_info("libusb-dbg: %s", buf.c_str());
       break;
   }
 }
@@ -1307,8 +1308,10 @@ struct ds_device_base_info *SigSession::get_device_list(int &out_count,
     } else {
       name_buf = "device-" + std::to_string(i);
     }
-    snprintf(entry->name, sizeof(entry->name), "%s", name_buf.c_str());
-    entry->name[sizeof(entry->name) - 1] = '\0';
+    const size_t name_cap = sizeof(entry->name) - 1;
+    const size_t name_n = name_buf.size() < name_cap ? name_buf.size() : name_cap;
+    std::copy_n(name_buf.data(), name_n, entry->name);
+    entry->name[name_n] = '\0';
   }
 
   // Sentinel.

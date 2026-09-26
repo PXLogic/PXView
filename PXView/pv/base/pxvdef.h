@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <type_traits>
 
 // ---------------------------------------------------------------------------
 // PXView local definitions — formerly pxvdef.h, modernized to C++20.
@@ -42,9 +43,6 @@
 
 template <typename T, std::size_t N>
 constexpr std::size_t countof(T (&)[N]) noexcept { return N; }
-
-#define begin_element(x) (&x[0])
-#define end_element(x)   (&x[countof(x)])
 
 // --- View types ---
 
@@ -78,7 +76,7 @@ enum DEVICE_STATUS_TYPE {
 // --- PXView-local device handle types ---
 
 using ds_device_handle = uint64_t;
-#define NULL_HANDLE ((ds_device_handle)0)
+inline constexpr ds_device_handle NULL_HANDLE = ds_device_handle{0};
 
 // Device list entry returned by SigSession::get_device_list().
 struct ds_device_base_info {
@@ -162,10 +160,12 @@ struct ds_trigger_pos {
 inline constexpr int DS_MAX_DSO_PROBES_NUM    = 16;
 inline constexpr int DS_MAX_ANALOG_PROBES_NUM = 16;
 
-// --- min/max helper macros (C++20: prefer std::min/std::max in new code) ---
+// --- min/max helpers (C++20: prefer std::min/std::max in new code) ---
 
-#define ds_min(a, b)  (((a) < (b)) ? (a) : (b))
-#define ds_max(a, b)  (((a) > (b)) ? (a) : (b))
+template <typename T, typename U>
+constexpr std::common_type_t<T, U> ds_min(T a, U b) noexcept { return a < b ? a : b; }
+template <typename T, typename U>
+constexpr std::common_type_t<T, U> ds_max(T a, U b) noexcept { return a > b ? a : b; }
 
 // --- Channel type extensions ---
 // PXView-local channel types for non-hardware signal categories.
@@ -225,17 +225,17 @@ inline constexpr int SR_AC_COUPLING  = 2;
 
 // --- SI unit multipliers ---
 
-#define SR_Kn(x)  (static_cast<uint64_t>((x)) * 1000ULL)
-#define SR_KB(x)  (static_cast<uint64_t>((x)) * 1000ULL)
-#define SR_Mn(x)  (static_cast<uint64_t>((x)) * 1000000ULL)
-#define SR_GB(x)  (static_cast<uint64_t>((x)) * 1000000000ULL)
+inline constexpr uint64_t SR_Kn(uint64_t x) noexcept { return x * 1000ULL; }
+inline constexpr uint64_t SR_KB(uint64_t x) noexcept { return x * 1000ULL; }
+inline constexpr uint64_t SR_Mn(uint64_t x) noexcept { return x * 1000000ULL; }
+inline constexpr uint64_t SR_GB(uint64_t x) noexcept { return x * 1000000000ULL; }
 
-// --- Time unit macros (duration in nanoseconds) ---
+// --- Time unit helpers (duration in nanoseconds) ---
 
-#define SR_SEC(x)  (static_cast<uint64_t>((x)) * 1000000000ULL)
-#define SR_MIN(x)  (static_cast<uint64_t>((x)) * 60ULL * 1000000000ULL)
-#define SR_HOUR(x) (static_cast<uint64_t>((x)) * 3600ULL * 1000000000ULL)
-#define SR_DAY(x)  (static_cast<uint64_t>((x)) * 86400ULL * 1000000000ULL)
+inline constexpr uint64_t SR_SEC(uint64_t x) noexcept { return x * 1000000000ULL; }
+inline constexpr uint64_t SR_MIN(uint64_t x) noexcept { return x * 60ULL * 1000000000ULL; }
+inline constexpr uint64_t SR_HOUR(uint64_t x) noexcept { return x * 3600ULL * 1000000000ULL; }
+inline constexpr uint64_t SR_DAY(uint64_t x) noexcept { return x * 86400ULL * 1000000000ULL; }
 
 // --- Time string formatter ---
 // Stub implementation in deviceagent.cpp formats duration (nanoseconds)
@@ -294,7 +294,8 @@ extern const sr_dev_mode kDevModeMso;
 
 #define RELEASE_ARRAY(a) do { for (auto ptr : (a)) { delete ptr; } (a).clear(); } while (0)
 
-#define ABS_VAL(x) ((x) > 0 ? (x) : -(x))
+template <typename T>
+constexpr T abs_val(T x) noexcept { return x > 0 ? x : -x; }
 
 // --- Format versions ---
 

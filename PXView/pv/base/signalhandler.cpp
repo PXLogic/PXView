@@ -18,6 +18,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <format>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -57,11 +59,11 @@ static void write_stack_trace_win(int sig)
 {
     std::lock_guard<std::mutex> lock(g_crash_mutex);
 
-    char buf[512];
-    snprintf(buf, sizeof(buf), "PXView crashed: %s (signal %d)\n",
-             signal_name(sig), sig);
+    std::string buf;
+    buf = std::format("PXView crashed: {} (signal {})\n",
+                     signal_name(sig), sig);
     g_crash_info = buf;
-    fputs(buf, stderr);
+    fputs(buf.c_str(), stderr);
 
     // Use SymCapture / CaptureStackBackTrace for a basic backtrace
     void *stack[64];
@@ -74,36 +76,35 @@ static void write_stack_trace_win(int sig)
         HANDLE process = GetCurrentProcess();
         SymInitialize(process, nullptr, TRUE);
 
-        SYMBOL_INFO *symbol = reinterpret_cast<SYMBOL_INFO*>(malloc(sizeof(SYMBOL_INFO) + 256));
+        std::unique_ptr<char[]> symbol_buf(new char[sizeof(SYMBOL_INFO) + 256]);
+        SYMBOL_INFO *symbol = reinterpret_cast<SYMBOL_INFO*>(symbol_buf.get());
         if (symbol) {
             symbol->MaxNameLen = 255;
             symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 
             for (USHORT i = 0; i < frames; i++) {
-                DWORD64 address = (DWORD64)stack[i];
+                DWORD64 address = static_cast<DWORD64>(stack[i]);
                 DWORD displacement = 0;
                 IMAGEHLP_LINE64 line = {};
                 line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
                 if (SymFromAddr(process, address, nullptr, symbol)) {
                     if (SymGetLineFromAddr64(process, address, &displacement, &line)) {
-                        snprintf(buf, sizeof(buf), "  [%3d] %s (%s:%lu+0x%lx)\n",
+                        buf = std::format("  [{:3}] {} ({}:{}+0x{:x})\n",
                                  i, symbol->Name, line.FileName,
                                  static_cast<unsigned long>(line.LineNumber),
                                  static_cast<unsigned long>(displacement));
                     } else {
-                        snprintf(buf, sizeof(buf), "  [%3d] %s (0x%llx)\n",
-                                 i, symbol->Name,
-                                 (unsigned long long)address);
+                        buf = std::format("  [{:3}] {} (0x{:x})\n",
+                                 i, symbol->Name, address);
                     }
                 } else {
-                    snprintf(buf, sizeof(buf), "  [%3d] 0x%llx\n",
-                             i, (unsigned long long)address);
+                    buf = std::format("  [{:3}] 0x{:x}\n",
+                             i, address);
                 }
                 g_crash_info += buf;
-                fputs(buf, stderr);
+                fputs(buf.c_str(), stderr);
             }
-            free(symbol);
         }
     }
 }
@@ -112,11 +113,11 @@ static void write_stack_trace_unix(int sig)
 {
     std::lock_guard<std::mutex> lock(g_crash_mutex);
 
-    char buf[512];
-    snprintf(buf, sizeof(buf), "PXView crashed: %s (signal %d)\n",
-             signal_name(sig), sig);
+    std::string buf;
+    buf = std::format("PXView crashed: {} (signal {})\n",
+                     signal_name(sig), sig);
     g_crash_info = buf;
-    fputs(buf, stderr);
+    fputs(buf.c_str(), stderr);
 
     void *stack[64];
     int frames = backtrace(stack, 64);
@@ -124,9 +125,9 @@ static void write_stack_trace_unix(int sig)
         char **symbols = backtrace_symbols(stack, frames);
         if (symbols) {
             for (int i = 0; i < frames; i++) {
-                snprintf(buf, sizeof(buf), "  [%3d] %s\n", i, symbols[i]);
+                buf = std::format("  [{:3}] {}\n", i, symbols[i]);
                 g_crash_info += buf;
-                fputs(buf, stderr);
+                fputs(buf.c_str(), stderr);
             }
             free(symbols);
         }

@@ -817,7 +817,7 @@ void Header::wheelEvent(QWheelEvent *event) {
   pos.setX(x);
   pos.setY(y);
 
-  if (anglex == 0 || ABS_VAL(angley) >= ABS_VAL(anglex)) {
+  if (anglex == 0 || abs_val(angley) >= abs_val(anglex)) {
     delta = angley;
     isVertical = true;
   } else {

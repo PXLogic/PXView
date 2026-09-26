@@ -79,8 +79,7 @@ WinNativeWidget::WinNativeWidget(const int x, const int y, const int width,
     int b = backColor.blue();
 
     HINSTANCE hInstance = GetModuleHandle(nullptr);
-    WNDCLASSEX wcx;
-    memset(&wcx, 0, sizeof(WNDCLASSEXW));
+    WNDCLASSEXW wcx{};
 
     wcx.cbSize = sizeof(WNDCLASSEX);
     wcx.style = CS_HREDRAW | CS_VREDRAW;
@@ -501,8 +500,7 @@ RECT WinNativeWidget::GetMonitorArea(HMONITOR hMonitor, bool isPhysics)
     }
     assert(hMonitor);
 
-    MONITORINFO monitorInfo;
-    memset(&monitorInfo, 0, sizeof(MONITORINFO));
+    MONITORINFO monitorInfo{};
     monitorInfo.cbSize = sizeof(MONITORINFO);
     GetMonitorInfo(hMonitor, &monitorInfo); 
 
@@ -789,8 +787,7 @@ bool WinNativeWidget::getWinSysVersion(DWORD *major_version, DWORD *minor_versio
 
     if (pRtlGetVersion)
     {
-        OSVERSIONINFOEXW os_info;
-        memset(&os_info, 0, sizeof(OSVERSIONINFOEXW));
+        OSVERSIONINFOEXW os_info{};
         os_info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
         NTSTATUS status = pRtlGetVersion(&os_info);
 
