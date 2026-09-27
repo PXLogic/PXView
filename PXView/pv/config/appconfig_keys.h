@@ -46,6 +46,10 @@ namespace App {
     static const QString fontSize            = "fontSize";
     static const QString autoScrollLatestData= "autoScrollLatestData";
     static const QString promptSaveOnExit    = "promptSaveOnExit";
+    // 全局通道高度（视图密度，Ctrl+滚轮缩放）的应用级持久化。0 = 未设置，
+    // 回退主题「新通道默认高度」。独立于 .pxc：设备 profile 可能因
+    // TabSwitch / 未加载而不参与恢复，高度作为"视图偏好"不能绑在那条路径上。
+    static const QString logicChannelHeightScale = "logicChannelHeightScale";
     static const QString version             = "version";
     static const QString protocalFormats     = "protocalFormats";
 }

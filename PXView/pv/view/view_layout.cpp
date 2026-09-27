@@ -46,11 +46,34 @@
 #include "pv/data/datasource.h"
 #include "pv/session/sigsession.h"
 #include "pv/toolbars/samplingbar.h"
+#include "pv/config/appconfig.h"
 
 using namespace std;
 
 namespace pv {
 namespace view {
+
+ViewLayout::ViewLayout(View *view) : _view(view) {
+  // 视图密度的恢复优先级（由低到高）：
+  //   1) 主题「新通道默认高度」token —— 出厂/换主题的默认值；
+  //   2) 应用级偏好 AppOptions::logicChannelHeightScale —— 用户上次 Ctrl+滚轮
+  //      缩放后的值。放在 AppConfig 而非 .pxc，是因为 .pxc 只在"设备 profile
+  //      加载"或"载入配置文件"时参与恢复，而 TabSwitch 启动路径按约定不加载
+  //      profile —— 高度作为通用视图偏好，不能绑在那条时序上。
+  //   3) .pxc 的 uiLayout.signalHeightScale —— per-设备/tab 的精确覆盖，由
+  //      MainWindowConfigIO::load_config_from_json() 稍后通过
+  //      set_signalHeightScale() 应用（会置 explicit，压过 1 和 2）。
+  auto &app = AppConfig::Instance();
+  const int saved = app.appOptions.logicChannelHeightScale;
+  if (saved > 0) {
+    _signalHeightScale = saved;
+    // 用户显式设置过：主题默认值不得再覆盖它
+    // （见 apply_default_signal_height_scale）。
+    _signalHeightScaleExplicit = true;
+  } else {
+    _signalHeightScale = app.logic_channel_default_height();
+  }
+}
 
 void ViewLayout::set_scale_offset(double scale, int64_t offset) {
   // 即时操作抢占：滚动、Alt+滚轮、程序化跳转都必须立刻生效，不能被在跑的

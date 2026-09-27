@@ -45,6 +45,7 @@
 #include "pv/base/log.h"
 #include "pv/mainwindow/mainwindow.h"
 #include "pv/mainwindow/dock_manager.h"
+#include "pv/mainwindow/workspace_io.h"
 #include "pv/session/sessionmanager.h"
 #include "pv/session/sigsession.h"
 #include "pv/session/tabcontext.h"
@@ -250,6 +251,17 @@ void TabManager::add_tab(pv::TabContext *ctx) {
   _tab_contexts.append(ctx);
   _tab_widget->addTab(view, ctx->title());
   _tab_widget->setCurrentIndex(_tab_widget->count() - 1);
+  update_tab_style(_tab_widget->count() - 1);
+}
+
+void TabManager::add_tab_silent(pv::TabContext *ctx) {
+  // 恢复 workspace 时使用：只登记，不切当前页。add_tab() 会
+  // setCurrentIndex()，逐个添加会反复激活（activate() 切设备 / 重放数据），
+  // 而且最终停在最后一个 tab —— 恢复必须由调用方在末尾统一 setCurrentIndex。
+  if (!ctx)
+    return;
+  _tab_contexts.append(ctx);
+  _tab_widget->addTab(ctx->view(), ctx->title());
   update_tab_style(_tab_widget->count() - 1);
 }
 
@@ -633,6 +645,150 @@ void TabManager::on_tab_attached_extended(QWidget *widget,
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace (跨会话 tab 会话持久化)
+// 契约见 AGENT_CONTRACTS.md "Workspace (tab session) persistence"。
+// ---------------------------------------------------------------------------
+
+void TabManager::save_workspace() {
+  Workspace ws;
+  ws.activeTab = _current_tab_index;
+
+  // 驱动名只作日志 / 将来的精确匹配线索：跨会话的 ds_device_handle 不可
+  // 持久化，恢复时按当前设备列表重新解析（见 restore_workspace）。
+  DeviceAgent *da = _wnd ? _wnd->device_agent() : nullptr;
+  const QString cur_driver = da ? da->driver_name() : QString();
+
+  for (pv::TabContext *ctx : _tab_contexts) {
+    if (!ctx)
+      continue;
+    WorkspaceTab t;
+    t.title = ctx->title();
+    t.filePath = ctx->file_path();
+    t.driver = cur_driver;
+    if (ctx->document()) {
+      t.session = ctx->document()->signal_config_to_json();
+      t.workMode = ctx->document()->get_signal_config().work_mode;
+    }
+    // 视图密度是 per-tab 状态：随 tab 会话走，不进 .pxc（.pxc 的自然键是
+    // (driver, workMode)，同一设备同模式的多个 tab 会互相覆盖）。
+    capture_session_ui_layout(ctx->view(), t.session);
+    ws.tabs.push_back(t);
+  }
+
+  write_workspace_file(ws);
+}
+
+int TabManager::restore_workspace() {
+  Workspace ws;
+  if (!read_workspace_file(ws))
+    return 0;  // 无 workspace / 解析失败 / 版本不支持 → 保持单 tab 行为
+
+  SigSession *session = _wnd ? _wnd->session() : nullptr;
+  if (!session)
+    return 0;
+  DeviceAgent *da = session->get_device();
+  if (!da || !da->have_instance()) {
+    pxv_warn("restore_workspace: no active device instance, skipping restore");
+    return 0;
+  }
+
+  const int cur_mode = da->get_work_mode();
+  // 恢复的 tab 绑定"当前设备列表里第一个可用设备"：handle 是进程内句柄，
+  // 重启后一定不同，旧值不可复用（契约 logical restore only）。
+  const ds_device_handle h = default_capture_handle(session);
+
+  // 恢复期间屏蔽 QTabWidget 的 currentChanged：addTab 期间若触发切换会反复
+  // activate()（切设备 / 重放数据）。末尾再统一 setCurrentIndex(activeTab)。
+  const bool blocked = _tab_widget->blockSignals(true);
+
+  // --- tabs[0] → 已初始化的初始 tab ---
+  // 仅当 workMode 一致时覆盖 FirstInit 的 profile 结果：模式不同说明当前设备
+  // 与保存时不是同一语境，apply_signal_config() 会切换设备模式，超出
+  // "FirstInit 已完成"的既有语义（契约 mode guard）。
+  pv::TabContext *ctx0 = current_context();
+  if (ctx0 && ctx0->document() && !ws.tabs.empty()) {
+    const WorkspaceTab &t0 = ws.tabs.front();
+    if (t0.workMode == cur_mode && !t0.session.isEmpty()) {
+      ctx0->document()->signal_config_from_json(t0.session);
+      ctx0->document()->apply_signal_config();
+      if (auto *v = ctx0->view()) {
+        v->rebuild_signals();
+        apply_session_ui_layout(v, t0.session);
+      }
+      if (!t0.title.isEmpty()) {
+        ctx0->set_title(t0.title);
+        _tab_widget->setTabText(0, t0.title);
+      }
+      pxv_info("restore_workspace: applied session to initial tab '%s'",
+               t0.title.toUtf8().constData());
+    } else {
+      pxv_info("restore_workspace: initial tab session skipped "
+               "(saved mode=%d, current=%d) — keeping profile result",
+               t0.workMode, cur_mode);
+    }
+  }
+
+  // --- tabs[1..] → 新建 tab（不激活） ---
+  int restored = 0;
+  for (size_t i = 1; i < ws.tabs.size(); ++i) {
+    const WorkspaceTab &t = ws.tabs[i];
+
+    auto *view = new pv::view::View(session, _wnd->sampling_bar(), _wnd);
+    size_t doc_idx = session->document_registry()->take_document(
+        std::make_unique<pv::data::SessionDocument>(session->get_device()));
+    pv::data::SessionDocument *doc =
+        session->document_registry()->get_document_by_index(doc_idx);
+    if (!doc) {
+      delete view;
+      pxv_warn("restore_workspace: document registry refused tab %d",
+               static_cast<int>(i));
+      continue;
+    }
+
+    if (!t.session.isEmpty())
+      doc->signal_config_from_json(t.session);
+
+    pv::TabContext *ctx = SessionManager::instance()->create_context(
+        view, session, doc, doc_idx, session->document_registry());
+    if (!ctx) {
+      pxv_warn("restore_workspace: create_context failed for tab %d",
+               static_cast<int>(i));
+      continue;
+    }
+
+    ctx->set_title(
+        t.title.isEmpty()
+            ? QString::fromUtf8(
+                  L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1"))
+                  .arg(static_cast<int>(i) + 1)
+            : t.title);
+    ctx->set_file_path(t.filePath);
+    ctx->set_device_handle(h);
+    doc->set_device_handle(h);
+    // per-tab 视图密度先落到 ViewLayout；切换到该 tab 时的 rebuild 会用上它。
+    apply_session_ui_layout(view, t.session);
+
+    add_tab_silent(ctx);
+    ++restored;
+  }
+
+  _tab_widget->blockSignals(blocked);
+
+  // 统一切到保存时的活动 tab（触发 on_tab_changed → activate()）。
+  const int target =
+      (ws.activeTab >= 0 && ws.activeTab < static_cast<int>(_tab_contexts.size()))
+          ? ws.activeTab
+          : 0;
+  if (_tab_widget->currentIndex() != target)
+    _tab_widget->setCurrentIndex(target);
+  _current_tab_index = target;
+
+  pxv_info("restore_workspace: restored %d extra tab(s), active=%d",
+           restored, target);
+  return restored;
 }
 
 } // namespace pv

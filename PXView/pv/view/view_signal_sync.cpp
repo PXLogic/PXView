@@ -1475,34 +1475,23 @@ void ViewSignalSync::zoom_vertical(double steps) {
   _view->layout_delegate()->set_signalHeightScale(max(View::MinSignalHeight,
           min(_view->layout_delegate()->signalHeightScale(), View::MaxSignalHeight)));
 
-  bool heightScaleChanged = (_view->layout_delegate()->signalHeightScale() != oldHeight);
-  double scale = (oldHeight > 0)
-                     ? static_cast<double>(_view->layout_delegate()->signalHeightScale()) / oldHeight
-                     : 1.0;
+  // 全局缩放只作用于"跟随全局高度"的通道（own_height <= 0）。显式设过高度的
+  // 通道（拖分隔条 / 右键设置通道高度）保持不动 —— 旧实现在这里按比例改写所有
+  // own_height > 0 的通道，造成两个问题：
+  //   1) 用户没动它、缩放却改了它，per-channel 设置被静默覆盖；
+  //   2) 被改写的值顺带持久化进 .pxc，退出后这些通道高度与用户的认知不一致。
+  // 需要单独调整某通道高度时用分隔条或右键菜单，两条语义不再互相污染。
+  const bool heightScaleChanged =
+      (_view->layout_delegate()->signalHeightScale() != oldHeight);
 
-  // When _signalHeightScale is clamped at minimum (i.e. it didn't change),
-  // use a fixed shrink factor to continue shrinking traces that have
-  // own_height > MinSignalHeight. Without this, once _signalHeightScale
-  // hits MinSignalHeight, zoom_vertical returns early and traces with
-  // custom own_height can never be shrunk to the minimum.
-  if (!heightScaleChanged && steps < 0)
-    scale = 0.9;
+  if (heightScaleChanged) {
+    // 记为应用级偏好：高度是"视图密度"偏好，独立于设备 profile 持久化。
+    // 这样即便某次启动路径没有加载 .pxc（例如 TabSwitch），高度依然能恢复。
+    auto &app = AppConfig::Instance();
+    app.appOptions.logicChannelHeightScale =
+        _view->layout_delegate()->signalHeightScale();
+    app.SaveApp();  // 2s 防抖；退出时 aboutToQuit → flushPendingSaves
 
-  std::vector<Trace *> traces;
-  _view->get_traces(ALL_VIEW, traces);
-  bool ownHeightChanged = false;
-  for (auto t : traces) {
-    if (t->get_own_height() > 0) {
-      int newH =
-          max(View::MinSignalHeight, static_cast<int>((t->get_own_height() * scale)));
-      if (newH != t->get_own_height()) {
-        t->set_own_height(newH);
-        ownHeightChanged = true;
-      }
-    }
-  }
-
-  if (heightScaleChanged || ownHeightChanged) {
     _view->signals_changed(nullptr);
     _view->update_scroll();
     _view->viewport_update();
@@ -1554,25 +1543,20 @@ if (!logicSig || logicSig->get_index_list().empty())
     logicSig->set_colour(themeColor);
   }
 
-  QString heightStr =
-      AppConfig::Instance().GetThemeTokenValue("@logic-channel-height");
-  bool ok;
-  int h = heightStr.toInt(&ok);
-  if (ok && h > 0) {
-    _view->layout_delegate()->set_signalHeightScale(h);
-    _view->layout_delegate()->set_signalHeight(h);
-
-    std::vector<Trace *> traces;
-    _view->get_traces(ALL_VIEW, traces);
-    for (Trace *t : traces) {
-      if (t && (t->get_type() == SR_CHANNEL_LOGIC ||
-                t->get_type() == SR_CHANNEL_GROUP)) {
-        t->set_totalHeight(h);
-        t->set_own_height(h);
-      }
-    }
+  // 主题「通道高度」= 新通道的默认高度。这里只把它当"默认值"喂给布局状态：
+  // apply_default_signal_height_scale 在 pxc 已恢复、或用户手动缩放
+  // (Ctrl+滚轮) 过高度时不生效 —— 换主题不得改写用户已确定的视图密度。
+  //
+  // 旧实现在这里无条件遍历所有 Logic/Group 通道 set_totalHeight/set_own_height
+  // (h)，把用户按通道设置的高度整片刷成主题值，且让这些本不该持久化的值被
+  // 顺带写进 .pxc —— 这是"改过的高度莫名丢失/回退"的一个来源，已移除。
+  // 已有通道的高度只由两处决定：per-channel own_height、以及 pxc 恢复的
+  // 全局 signalHeightScale。
+  const int h = AppConfig::Instance().logic_channel_default_height();
+  const int oldHeightScale = _view->layout_delegate()->signalHeightScale();
+  _view->layout_delegate()->apply_default_signal_height_scale(h);
+  if (_view->layout_delegate()->signalHeightScale() != oldHeightScale)
     _view->update_all_trace_postion();
-  }
 
   _view->viewport_update();
 }

@@ -48,7 +48,7 @@ class View;
 // class (enabling mock-based unit testing).
 class ViewLayout : public IViewLayout {
 public:
-  explicit ViewLayout(View *view) : _view(view) {}
+  explicit ViewLayout(View *view);
 
   // ---- Public state accessors (for other delegates) ----
   inline double scale() const override { return _scale; }
@@ -69,7 +69,21 @@ public:
   inline int vOffset() const { return _vOffset; }
   inline void set_vOffset(int offset) { _vOffset = offset; }
   inline void set_signalHeight(int h) { _signalHeight = h; }
-  inline void set_signalHeightScale(int h) { _signalHeightScale = h; }
+  // 显式设置：pxc 恢复 / 用户手动缩放（Ctrl+滚轮）。一旦显式设置过，主题默认值
+  // 不再覆盖它（见 apply_default_signal_height_scale），因为换主题不该改用户
+  // 已经确定的视图密度。
+  inline void set_signalHeightScale(int h) {
+    _signalHeightScale = h;
+    _signalHeightScaleExplicit = true;
+  }
+  // 主题默认值入口：仅在用户/pxc 尚未显式设置过时生效。
+  inline void apply_default_signal_height_scale(int h) {
+    if (!_signalHeightScaleExplicit)
+      _signalHeightScale = h;
+  }
+  inline bool signalHeightScaleExplicit() const {
+    return _signalHeightScaleExplicit;
+  }
   inline void set_spanY(int s) { _spanY = s; }
 
   // -- scale / offset mutators -------------------------------------------
@@ -140,6 +154,8 @@ private:
   int _spanY = 0;
   int _signalHeight = 0;
   int _signalHeightScale = 24;  // default = View::MaxHeightUnit
+  // true = _signalHeightScale 由 pxc 恢复或用户手动缩放决定，主题默认值不得覆盖。
+  bool _signalHeightScaleExplicit = false;
 
 public:
   // ---- Additional setters for delegate classes (Phase 2: friend elimination) ----

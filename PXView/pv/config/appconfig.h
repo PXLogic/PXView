@@ -82,6 +82,12 @@ struct AppOptions
     bool  autoScrollLatestData;
     bool  promptSaveOnExit;
 
+    // 全局通道高度（视图密度）：用户 Ctrl+滚轮缩放后的值。0 = 从未设置过，
+    // 此时回退主题「新通道默认高度」（AppConfig::logic_channel_default_height）。
+    // 只在"用户显式缩放"时写入；pxc 的 uiLayout 段是 per-设备/tab 的覆盖值，
+    // 两者分工见 ViewLayout 构造函数与 ViewLayout::set_signalHeightScale。
+    int   logicChannelHeightScale = 0;
+
     // TDM realtime decode and analog display-trigger UI persistence.
     bool  tdmRealtimeDecode = false;
 
@@ -250,6 +256,13 @@ public:
   void SetThemeTokens(const QHash<QString, QString> &tokens);
   QColor GetThemeColor(const QString &tokenName) const;
   QString GetThemeTokenValue(const QString &tokenName) const;
+
+  // 主题「通道高度」token 的唯一解析入口（原逻辑在 logicsignal.cpp 与
+  // ViewSignalSync::UpdateTheme() 各解析一遍）。语义：新创建通道的默认高度。
+  // 已有通道的高度由 per-channel own_height 与 pxc 恢复的 signalHeightScale
+  // 决定，不由此值影响。token 缺失/非法时回退 kDefaultLogicChannelHeight。
+  static constexpr int kDefaultLogicChannelHeight = 24;
+  int logic_channel_default_height() const;
 
   // P2-A: Setting change listener registration.
   void register_setting_listener(SettingChangeListener *listener);

@@ -76,6 +76,29 @@ public:
     /** Close all detached tab windows (called during shutdown). */
     void close_detached_windows();
 
+    // ---- Workspace (跨会话 tab 会话持久化) ----
+    // 见 AGENT_CONTRACTS.md "Workspace (tab session) persistence"：
+    // `.pxc` 是设备 profile（自然键 = (driver, workMode)），承载不了 per-tab
+    // 状态（同设备同模式的 N 个 tab 会互相覆盖）；tab 会话集合由 workspace.json
+    // 承载。
+
+    /** 收集所有 tab 的工作状态并写入 workspace.json（退出时调用）。 */
+    void save_workspace();
+
+    /**
+     * 从 workspace.json 恢复 tab 集合。必须在 FirstInit 的 profile 加载完成
+     * 之后调用一次（见 SessionEventDispatcher::on_current_device_changed 尾部）。
+     * 返回新建的额外 tab 数；0 表示无 workspace / 解析失败 / 设备不可用 ——
+     * 此时保持现有的单 tab 行为不变。
+     */
+    int restore_workspace();
+
+    /**
+     * 只追加 tab 而不激活它（恢复期间使用；末尾由调用方统一切到 activeTab）。
+     * add_tab() 会 setCurrentIndex()，逐个添加会反复激活并最终停在最后一个。
+     */
+    void add_tab_silent(pv::TabContext *ctx);
+
     // ---- Accessors ----
 
     pv::ui::DraggableTabWidget *tab_widget() { return _tab_widget; }

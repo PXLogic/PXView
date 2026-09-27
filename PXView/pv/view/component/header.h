@@ -99,6 +99,13 @@ private slots:
     void on_reset_all_row_height();
     void on_set_channel_height();
     void on_batch_set_height();
+
+    // 布局（view_index / v_offset / own_height）持久化的唯一出口。
+    // 调用时机必须是"用户显式改变了布局"：拖动分隔条松手、右键菜单设置/重置
+    // 行高。绝不要在退出保存、设备/选项变更事件里用 View 的瞬时快照覆盖文档中
+    // 的布局 —— 那些时机 View 可能处在 reload()/rebuild 重建窗口内（own_height
+    // 还是默认 -1），会把正确的持久化值抹掉。
+    void persist_channel_layout();
     void on_filter_glitches_triggered();
     void on_clear_channel_filter_triggered();
     void on_clear_all_filter_triggered();

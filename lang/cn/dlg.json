@@ -1437,7 +1437,7 @@
     },
     {
         "id": "IDS_STYLE_LOGIC_CH_HEIGHT",
-        "text": "通道高度"
+        "text": "新通道默认高度"
     },
     {
         "id": "IDS_STYLE_DEC_CH0",

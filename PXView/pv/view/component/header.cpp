@@ -601,31 +601,9 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   _mouse_is_down = false;
 
   if (_resize_trace_upper || _resize_trace_lower) {
-    // Height adjustment completed - persist the new layout to SessionDocument
+    // 高度拉伸完成：持久化布局（显式布局动作 → 唯一出口）。
     pxv_info("Header::mouseReleaseEvent: HEIGHT ADJUSTMENT completed, persisting layout");
-    auto &session = _view.session();
-    auto *dev = _view.data_source()->device();
-    auto *doc = session.get_active_document();
-    if (doc && dev && dev->have_instance()) {
-      std::map<int, pv::data::ChannelLayoutState> channel_layout;
-      for (auto &sig : _view.get_own_signals()) {
-        pv::data::ChannelLayoutState layout;
-        layout.view_index = sig->get_view_index();
-        layout.v_offset = sig->get_v_offset();
-        layout.own_height = sig->get_own_height();
-        channel_layout[sig->get_index()] = layout;
-        pxv_info("  sig index=%d, view_index=%d, v_offset=%d, own_height=%d",
-                 sig->get_index(), layout.view_index, layout.v_offset,
-                 layout.own_height);
-      }
-      doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
-      pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
-               static_cast<int>(channel_layout.size()));
-    } else {
-      pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
-               doc, dev,
-               dev ? dev->have_instance() : 0);
-    }
+    persist_channel_layout();
     _resize_trace_upper = nullptr;
     _resize_trace_lower = nullptr;
     if (QWidget::mouseGrabber() == this)
@@ -759,33 +737,8 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
       t->select(false);
     }
 
-    // Persist channel layout (view_index/v_offset/own_height) to
-    // SessionDocument so that subsequent capture-triggered rebuilds can
-    // restore the user's custom layout. Without this, every reload() wipes
-    // the layout state and resets to default.
-    auto &session = _view.session();
-    auto *dev = _view.data_source()->device();
-    auto *doc = session.get_active_document();
-    if (doc && dev && dev->have_instance()) {
-      std::map<int, pv::data::ChannelLayoutState> channel_layout;
-      for (auto &sig : _view.get_own_signals()) {
-        pv::data::ChannelLayoutState layout;
-        layout.view_index = sig->get_view_index();
-        layout.v_offset = sig->get_v_offset();
-        layout.own_height = sig->get_own_height();
-        channel_layout[sig->get_index()] = layout;
-        pxv_info("  sig index=%d, view_index=%d, v_offset=%d, own_height=%d",
-                 sig->get_index(), layout.view_index, layout.v_offset,
-                 layout.own_height);
-      }
-      doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
-      pxv_info("Header::mouseReleaseEvent: save_signal_config called, saved %d channels",
-               static_cast<int>(channel_layout.size()));
-    } else {
-      pxv_info("Header::mouseReleaseEvent: SKIPPED save_signal_config (doc=%p, device=%p, have_instance=%d)",
-               doc, dev,
-               dev ? dev->have_instance() : 0);
-    }
+    // 排序拖动完成：持久化布局（显式布局动作 → 唯一出口）。
+    persist_channel_layout();
   } else if (!_drag_traces.empty()) {
     _drag_traces.clear();
     _drag_anchor_y = INT_MAX;
@@ -1291,11 +1244,44 @@ void Header::on_change_color_triggered() {
   }
 }
 
+// 布局持久化的唯一出口。调用时机必须是"用户显式改变了布局"：
+// 拖动分隔条松手、右键菜单设置/重置行高。
+//
+// 不要在退出保存或设备/选项变更事件里用 View 的瞬时快照覆盖文档中的布局 ——
+// 那些时机 View 可能正处在 reload()/rebuild 的重建窗口内（own_height 还是默认
+// -1），一写就把正确的持久化值抹成 -1，表现为"退出后高度丢失、下次打开加载到
+// 空值"。
+void Header::persist_channel_layout() {
+  auto &session = _view.session();
+  auto *dev = _view.data_source()->device();
+  auto *doc = session.get_active_document();
+  if (!doc || !dev || !dev->have_instance()) {
+    pxv_info("Header::persist_channel_layout: SKIPPED (doc=%p, device=%p, "
+             "have_instance=%d)",
+             static_cast<const void *>(doc), static_cast<const void *>(dev),
+             dev ? dev->have_instance() : 0);
+    return;
+  }
+
+  std::map<int, pv::data::ChannelLayoutState> channel_layout;
+  for (auto &sig : _view.get_own_signals()) {
+    pv::data::ChannelLayoutState layout;
+    layout.view_index = sig->get_view_index();
+    layout.v_offset = sig->get_v_offset();
+    layout.own_height = sig->get_own_height();
+    channel_layout[sig->get_index()] = layout;
+  }
+  doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
+  pxv_info("Header::persist_channel_layout: saved %d channels",
+           static_cast<int>(channel_layout.size()));
+}
+
 void Header::on_reset_row_height() {
   if (!_context_trace)
     return;
   _context_trace->set_own_height(-1);
   _view.signals_changed(nullptr);
+  persist_channel_layout();
 }
 
 void Header::on_reset_all_row_height() {
@@ -1305,6 +1291,7 @@ void Header::on_reset_all_row_height() {
     t->set_own_height(-1);
   }
   _view.signals_changed(nullptr);
+  persist_channel_layout();
 }
 
 void Header::on_set_channel_height() {
@@ -1327,6 +1314,7 @@ void Header::on_set_channel_height() {
   h = max(View::MinSignalHeight, min(h, View::MaxSignalHeight));
   _context_trace->set_own_height(h);
   _view.signals_changed(nullptr);
+  persist_channel_layout();
 }
 
 void Header::on_batch_set_height() {
@@ -1353,6 +1341,7 @@ void Header::on_batch_set_height() {
     t->set_own_height(h);
   }
   _view.signals_changed(nullptr);
+  persist_channel_layout();
 }
 
 void Header::on_action_set_name_triggered() {

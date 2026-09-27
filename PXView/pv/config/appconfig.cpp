@@ -145,6 +145,7 @@ static void _loadApp(AppOptions &o, QSettings &st)
     getFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize, 9.0);
     getFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData, true);
     getFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit, true);
+    getFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale, 0);
     getFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode, false);
 
     getFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid, false);
@@ -201,6 +202,7 @@ static void _saveApp(AppOptions &o, QSettings &st)
     setFiled(keys::App::fontSize.toUtf8().constData(), st, o.fontSize);
     setFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData);
     setFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit);
+    setFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale);
     setFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode);
 
     setFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid);
@@ -762,6 +764,16 @@ void AppConfig::SetThemeTokens(const QHash<QString, QString> &tokens)
 QString AppConfig::GetThemeTokenValue(const QString &tokenName) const
 {
     return _themeTokens.value(tokenName, QString());
+}
+
+int AppConfig::logic_channel_default_height() const
+{
+    QString val = GetThemeTokenValue("@logic-channel-height").trimmed();
+    if (val.endsWith("px", Qt::CaseInsensitive))
+        val.chop(2);
+    bool ok = false;
+    const int h = val.toInt(&ok);
+    return (ok && h > 0) ? h : kDefaultLogicChannelHeight;
 }
 
 QColor AppConfig::GetThemeColor(const QString &tokenName) const

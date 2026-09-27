@@ -181,6 +181,11 @@ public:
     bool able_to_close();
     QWidget* GetBodyView();
 
+    // 跨会话 tab 会话持久化（见 AGENT_CONTRACTS.md "Workspace (tab session)
+    // persistence"）：save 由 able_to_close() 在退出流程里自动调用；restore 由
+    // SessionEventDispatcher 在 FirstInit 的 profile 加载完成后调用一次。
+    int restore_workspace();
+
     // Phase 2: exposed for SessionEventDispatcher
     std::map<int, pv::data::ChannelLayoutState> build_channel_layout(pv::view::View *view);
     

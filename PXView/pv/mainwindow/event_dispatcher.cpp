@@ -436,6 +436,13 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
   }
   _window->dock_manager()->protocol_widget()->rebuild_protocol_layers();
 
+  // 跨会话 tab 会话恢复：必须晚于 FirstInit 的 profile 加载（上方
+  // load_device_config() 已同步完成）。恢复的 tab 只从 workspace 文档取配置，
+  // 绝不再次进入 profile 路径（契约 "Workspace (tab session) persistence" /
+  // restore placement）。UserSelection / TabSwitch 不触发。
+  if (ev.reason == pv::interface::DeviceChangeReason::FirstInit)
+    _window->restore_workspace();
+
   _window->calc_min_height();
 
   if (_window->device_agent()->is_hardware() && _window->device_agent()->is_new_device()) {

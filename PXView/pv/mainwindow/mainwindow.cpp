@@ -167,23 +167,6 @@ namespace pv {
 namespace {
 QString tmp_file;
 
-/** Build a channel-index → ChannelLayoutState map from the View's signal list.
- * Task 7 (unify-signal-layout-state): persists per-signal UI layout so the
- * session can restore view_index / v_offset / own_height after reload. */
-std::map<int, pv::data::ChannelLayoutState>
-make_channel_layout(pv::view::View *view) {
-  std::map<int, pv::data::ChannelLayoutState> layout;
-  if (view) {
-    for (auto &sig : view->get_own_signals()) {
-      pv::data::ChannelLayoutState s;
-      s.view_index = sig->get_view_index();
-      s.v_offset = sig->get_v_offset();
-      s.own_height = sig->get_own_height();
-      layout[sig->get_index()] = s;
-    }
-  }
-  return layout;
-}
 } // namespace
 
 MainWindow::MainWindow(toolbars::TitleBar *title_bar, QWidget *parent)
@@ -412,6 +395,8 @@ void MainWindow::on_session_error() { _event_dispatcher->handle_session_error();
 
 void MainWindow::save_config() { _config_io->save_config(); }
 
+int MainWindow::restore_workspace() { return _tab_manager->restore_workspace(); }
+
 QString MainWindow::gen_config_file_path(bool isNewFormat) { return _config_io->gen_config_file_path(isNewFormat); }
 
 bool MainWindow::able_to_close() {
@@ -427,6 +412,11 @@ bool MainWindow::able_to_close() {
   _tab_manager->close_detached_windows();
 
   save_config();
+
+  // 跨会话 tab 会话持久化：.pxc 只承载"设备 profile"（自然键 =
+  // (driver, workMode)），打开着哪些 tab / 每个 tab 的状态由 workspace 承载。
+  // 必须无条件写（不依赖 have_instance —— 那只是 .pxc 的前置条件）。
+  _tab_manager->save_workspace();
 
   // Check if the user has disabled the save prompt on exit
   if (!AppConfig::Instance().appOptions.promptSaveOnExit) {
@@ -565,8 +555,9 @@ void MainWindow::on_frame_ended() {
     // MainWindow previously did a DUPLICATE synchronous copy here, which raced
     // with the background copy thread and never released the CaptureOwnerGuard,
     // causing wait_capture_complete to time out forever.
-    ctx->document()->save_signal_config(
-        _session->get_signal_models(), make_channel_layout(current_view()));
+    // 只收割设备/通道元数据；布局不在此处写入（见
+    // MainWindow::build_channel_layout 与 Header::persist_channel_layout）。
+    ctx->document()->save_signal_config(_session->get_signal_models());
   }
   current_view()->receive_end();
 }
@@ -839,7 +830,18 @@ void MainWindow::update_toolbar_view_status() {
 // Phase 2: Public wrapper for SessionEventDispatcher
 std::map<int, pv::data::ChannelLayoutState>
 MainWindow::build_channel_layout(pv::view::View *view) {
-  return make_channel_layout(view);
+  (void)view;
+  // 布局（view_index / v_offset / own_height）不由"事件时机的瞬时快照"写入。
+  // 那些时机（设备切换、模式变更、选项更新、采集结束）View 可能正处在
+  // reload()/rebuild 的重建窗口内，own_height 还是默认 -1 —— 一写就把文档里
+  // 正确的持久化值抹成 -1，表现为"退出后高度丢失、下次打开加载到空值"。
+  //
+  // 布局的唯一写入点是 Header::persist_channel_layout()（用户显式拖动分隔条 /
+  // 右键菜单设置高度/重置行高的动作）。
+  //
+  // 返回空 map：save_signal_config 对通道走"继承旧值"分支，布局保持不变；其余
+  // 通道元数据（enabled / name / type / trig_type / colour）照常收割。
+  return {};
 }
 
 // ---------------------------------------------------------------------------

@@ -68,24 +68,6 @@
 
 namespace {
 
-/** Build a channel-index → ChannelLayoutState map from the View's signal list.
- * Duplicated from mainwindow.cpp's anonymous namespace (small helper, not
- * worth a shared header). */
-std::map<int, pv::data::ChannelLayoutState>
-build_channel_layout(pv::view::View *view) {
-  std::map<int, pv::data::ChannelLayoutState> layout;
-  if (view) {
-    for (auto &sig : view->get_own_signals()) {
-      pv::data::ChannelLayoutState s;
-      s.view_index = sig->get_view_index();
-      s.v_offset = sig->get_v_offset();
-      s.own_height = sig->get_own_height();
-      layout[sig->get_index()] = s;
-    }
-  }
-  return layout;
-}
-
 /** Build a channel-index → colour-string map from the View's signal list. */
 std::map<int, std::string>
 build_channel_colours(pv::view::View *view) {
@@ -305,8 +287,19 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
   pv::TabContext *ctx = _wnd->current_context();
   pv::data::SessionDocument *doc = ctx ? ctx->document() : nullptr;
   if (doc) {
+    // 布局（view_index/v_offset/own_height）的权威副本是 SessionDocument 中由
+    // "用户显式布局动作"（Header 拖动松手 / 右键菜单设置高度/重置行高）写入的
+    // 那一份，见 Header::persist_channel_layout()。
+    //
+    // 这里**不要**用 View 的瞬时快照去覆盖它：View 可能尚未从配置恢复，或正处
+    // 在 reload()/rebuild 的重建窗口内，此时它的 own_height 仍是默认 -1 —— 一旦
+    // 写入就把正确的持久化值抹成 -1。这正是"退出后通道高度丢失、且下次打开加载
+    // 到空值"的直接机制。
+    //
+    // 传空 layout 时 save_signal_config 对通道走"继承旧值"分支，布局保持不变；
+    // 颜色仍从 View 收割（颜色是 View 概念，无独立持久化时机）。
     doc->save_signal_config(_wnd->session()->get_signal_models_snapshot(),
-                            build_channel_layout(_wnd->current_view()),
+                            {},
                             build_channel_colours(_wnd->current_view()));
     QJsonObject sig_cfg = doc->signal_config_to_json();
     sessionVar["channel"] = sig_cfg["channels"].toArray();
@@ -315,6 +308,12 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
              "channel array");
     sessionVar["channel"] = QJsonArray();
   }
+
+  // 视图密度（signalHeightScale）不再写入 .pxc：它的自然键是"tab 实例"，而
+  // .pxc 的自然键是 (driver, workMode) —— 同一设备同模式的多个 tab 会互相
+  // 覆盖。per-tab 值随 tab 会话走（workspace.json 的 session.uiLayout），
+  // 全局兜底值在 AppOptions::logicChannelHeightScale。
+  // 旧文件里的 uiLayout 仍然**读取**兼容，见 load_config_from_json()。
 
   if (_wnd->device_agent()->get_work_mode() == LOGIC) {
     sessionVar["trigger"] = _wnd->session()->trigger_config().to_json();
@@ -687,6 +686,28 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
   // 硬件设备切换时才需要 reload() 重建 models。
   if (!_wnd->device_agent()->is_file()) {
     _wnd->session()->reload();
+  }
+
+  // 恢复全局通道高度（视图密度）。放在信号建立之后应用：
+  //   - 非文件设备：上面的 reload() 已重建信号；
+  //   - 文件设备：信号在后续 start_capture 回放时才建立。
+  // 两种情况本值都早于下一次 layout 计算，故对二者都生效。
+  // 走 set_signalHeightScale()（标记为"显式设置"）→ 优先于主题默认值，
+  // 此后切换主题不会覆盖用户恢复出来的视图密度。
+  if (sessionObj.contains("uiLayout")) {
+    const QJsonObject uiLayout = sessionObj["uiLayout"].toObject();
+    const int shs = uiLayout.value("signalHeightScale").toInt(0);
+    if (shs > 0) {
+      if (auto *cv = _wnd->current_view()) {
+        cv->layout_delegate()->set_signalHeightScale(shs);
+        cv->layout_delegate()->set_signalHeight(shs);
+        cv->update_all_trace_postion();
+        pxv_info("load_config_from_json: restored signalHeightScale=%d", shs);
+      }
+    } else {
+      pxv_warn("load_config_from_json: uiLayout.signalHeightScale invalid (%d), "
+               "keeping theme default", shs);
+    }
   }
 
   // Glitch filter config restore

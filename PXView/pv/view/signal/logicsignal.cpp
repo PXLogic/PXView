@@ -50,13 +50,13 @@ LogicSignal::LogicSignal(data::LogicSnapshot *data,
   _trig = NONTRIG;
   _paint_align_sample_count = 0;
 
-  QString heightStr =
-      AppConfig::Instance().GetThemeTokenValue("@logic-channel-height");
-  bool ok;
-  int h = heightStr.toInt(&ok);
-  if (ok && h > 0) {
-    set_totalHeight(h);
-  }
+  // 新通道默认高度：主题 token 的唯一解析入口（AppConfig）。语义上是"新建
+  // 通道时的默认行高"——已有通道的高度由 per-channel own_height 与 pxc 恢复
+  // 的全局 signalHeightScale 决定，本值不参与覆盖（旧实现在 UpdateTheme 里
+  // 遍历改写所有通道，把用户设置刷掉，已移除）。
+  // 只设 _totalHeight，不动 _ownHeight：后者保持 -1（"跟随全局高度"），
+  // 由布局阶段按 signalHeight * rows_size() 计算。
+  set_totalHeight(AppConfig::Instance().logic_channel_default_height());
 }
 
 LogicSignal::LogicSignal(view::LogicSignal *s, data::LogicSnapshot *data,
@@ -65,13 +65,13 @@ LogicSignal::LogicSignal(view::LogicSignal *s, data::LogicSnapshot *data,
     : Signal(*s, model, data_source), _data(data), _trig(s->get_trig()) {
   _paint_align_sample_count = 0;
 
-  QString heightStr =
-      AppConfig::Instance().GetThemeTokenValue("@logic-channel-height");
-  bool ok;
-  int h = heightStr.toInt(&ok);
-  if (ok && h > 0) {
-    set_totalHeight(h);
-  }
+  // 新通道默认高度：主题 token 的唯一解析入口（AppConfig）。语义上是"新建
+  // 通道时的默认行高"——已有通道的高度由 per-channel own_height 与 pxc 恢复
+  // 的全局 signalHeightScale 决定，本值不参与覆盖（旧实现在 UpdateTheme 里
+  // 遍历改写所有通道，把用户设置刷掉，已移除）。
+  // 只设 _totalHeight，不动 _ownHeight：后者保持 -1（"跟随全局高度"），
+  // 由布局阶段按 signalHeight * rows_size() 计算。
+  set_totalHeight(AppConfig::Instance().logic_channel_default_height());
 }
 
 LogicSignal *LogicSignal::clone() const {

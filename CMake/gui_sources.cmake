@@ -11,6 +11,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/mainwindow/topwindowtracker.cpp
     PXView/pv/mainwindow/mainwindow.cpp
     PXView/pv/mainwindow/config_io.cpp
+    PXView/pv/mainwindow/workspace_io.cpp
     PXView/pv/mainwindow/event_dispatcher.cpp
     PXView/pv/mainwindow/dock_manager.cpp
     PXView/pv/mainwindow/tab_manager.cpp
@@ -321,6 +322,7 @@ set(PXView_HEADERS_NO_MOC
     PXView/pv/data/document/sessiondocument.h
     PXView/pv/config/appconfig.h
     PXView/pv/mainwindow/topwindowtracker.h
+    PXView/pv/mainwindow/workspace_io.h
     PXView/pv/base/ZipMaker.h
     PXView/pv/data/decode/annotationrestable.h
     PXView/pv/data/decode/decoderstatus.h
