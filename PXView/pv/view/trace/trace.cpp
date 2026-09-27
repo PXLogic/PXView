@@ -193,15 +193,16 @@ void Trace::paint_prepare()
 
 void Trace::paint_back(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
 {
-    (void)back;
-    (void)ctx;
-
-    fore.setAlpha(IRenderView::BackAlpha);
-    QPen pen(fore);
-    pen.setStyle(Qt::DotLine);
-    p.setPen(pen);
-    const double sigY = get_y();
-    p.drawLine(left, static_cast<int>(sigY), right, static_cast<int>(sigY));
+	// Base implementation intentionally empty: logic-mode signals used to draw
+	// a horizontal dot line at the channel centre Y here, which was removed.
+	// Other trace types (DSO/Analog/Decode/...) override paint_back with their
+	// own background painting.
+	(void)p;
+	(void)left;
+	(void)right;
+	(void)fore;
+	(void)back;
+	(void)ctx;
 }
 
 void Trace::paint_mid(QPainter &p, int left, int right, QColor fore, QColor back, const PaintContext &ctx)
