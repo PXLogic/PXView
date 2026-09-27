@@ -121,6 +121,26 @@ DeviceOptions::DeviceOptions(SigSession *session)
             bind_int(name, label, key, "%", pair<int64_t, int64_t>(0, 100));
 			break;
 
+		case SR_CONF_ADC_PRECISION:
+            /* WCH CH32H417 HSADC 精度：8 或 10 bit。
+             * 驱动声明 SR_T_UINT64（hwdriver.c），Int 属性会保留 getter 返回的
+             * variant 类型（int.cpp 的 UINT64 分支），因此 set 路径类型匹配。 */
+            bind_int(name, label, key, "bit", pair<int64_t, int64_t>(8, 10));
+			break;
+
+		case SR_CONF_ADC_CHANNEL:
+            /* HSADC 通道选择：硬件同时只支持 1 个模拟通道（0 或 1）。 */
+            bind_int(name, label, key, "", pair<int64_t, int64_t>(0, 1));
+			break;
+
+		case SR_CONF_THRESHOLD_VALUE_1:
+            /* WCH CH32H417 逻辑输入阈值。
+             * 驱动编码：DAC 值 0..1024（0≈3.3V，1024≈1.2V）；若置 bit15 则为
+             * "输入电平"模式（低字节 10..33）。此处以 DAC 值呈现；
+             * 电平模式留给后续专用控件。 */
+            bind_int(name, label, key, "", pair<int64_t, int64_t>(0, 1024));
+			break;
+
 		case SR_CONF_MAX_HEIGHT:
 		case SR_CONF_MAX_HEIGHT_VALUE:
 		case SR_CONF_INSTANT:
