@@ -28,7 +28,6 @@
 #include <cstdint>
 #include <vector>
 
-#include <QLine>
 #include <QPen>
 #include <QPointF>
 #include <QRect>
@@ -126,24 +125,31 @@ void rasterize_logic_channel(
   // needs no lock (a per-frame std::pmr arena would be the other option, but
   // this is smaller and has zero per-frame bookkeeping).
   //
-  // 竖直跳变用 1px 宽填充矩形（wave_rects）而不是线段：同一批几何下
-  // drawRects 比 drawLines 快 ~1.8-2.0x（段长 = 通道高，dense 时占整帧填充量
-  // 的大头），且逐像素等价——QLine 含端点、QRect 半开，故矩形高/宽需 +1 补足
-  // 末端像素。dso/analog 的 min/max 分支同样用 drawRects 画每像素竖直填充。
-  // 等价性与成本由 tests/qtest/view/test_logic_render_cost.cpp 的
-  // production_parity / build_cost_lines_vs_rects 两个用例锁定。
+  // 水平电平段与竖直跳变段**统一用 1px 填充矩形**（wave_rects），一批 drawRects
+  // 画完。两个理由：
+  //
+  // (1) 性能：同一批几何下 drawRects 比 drawLines 快 ~1.8-2.0x（竖直段长 = 通道高，
+  //     dense 时占整帧填充量的大头），且水平段并入后整帧只剩一次绘制调用。
+  //     dso/analog 的 min/max 分支同样用 drawRects 画每像素竖直填充。
+  //
+  // (2) 正确性（HiDPI 角点错位）：QLine 是"描边"图元，笔画以路径为中心。当画笔
+  //     宽度为**偶数**（= 1 逻辑px × dpr，即 dpr=2/1.5 时）光栅化覆盖 y-1..y，而
+  //     QRect 填充从 y 开始 —— 两者在角点恒定错开 1 个设备像素，横竖线接不上
+  //     （dpr=1 时画笔宽=1 为奇数，恰好对齐，所以此前只在 125%/150%/200% 缩放下
+  //     暴露）。全部改用 QRect 后所有图元都是原点对齐填充，角点在任意 DPR 下严丝
+  //     合缝。QLine 含端点、QRect 半开，故矩形的宽/高需 +1 补足末端像素。
+  //
+  // 等价性（dpr=1 与旧线段形状逐像素一致 + 任意 DPR 下与全矩形参考一致）由
+  // tests/qtest/view/test_rasterize.cpp 与 test_logic_render_cost.cpp 锁定。
   struct RasterizeScratch {
     std::vector<std::pair<bool, bool>> pulses;
     std::vector<std::pair<uint16_t, bool>> edges;
-    std::vector<QLine> wave_lines;   // 水平段（电平线）
-    std::vector<QRect> wave_rects;   // 竖直跳变（1px 宽填充矩形）
+    std::vector<QRect> wave_rects;   // 水平段 + 竖直跳变（统一 1px 填充矩形）
   };
   thread_local RasterizeScratch scratch;
   std::vector<std::pair<bool, bool>> &cur_pulses = scratch.pulses;
   std::vector<std::pair<uint16_t, bool>> &cur_edges = scratch.edges;
-  std::vector<QLine> &wave_lines = scratch.wave_lines;
   std::vector<QRect> &wave_rects = scratch.wave_rects;
-  wave_lines.clear();
   wave_rects.clear();
 
   const bool first_sample = snapshot->get_display_edges(
@@ -159,19 +165,19 @@ void rasterize_logic_channel(
     std::vector<std::pair<uint16_t, bool>>::const_iterator i;
     for (i = cur_edges.begin() + 1; i != cur_edges.end() - 1; i++) {
       x = (*i).first;
-      wave_lines.push_back(QLine(preX, preY, x, preY));
+      wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
       wave_rects.push_back(
           QRect(x, high_offset, 1, low_offset - high_offset + 1));
       preX = x;
       preY = (*i).second ? high_offset : low_offset;
     }
     x = (*i).first;
-    wave_lines.push_back(QLine(preX, preY, x, preY));
+    wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
   } else if (cur_pulses.size() > 0) {
     std::vector<std::pair<bool, bool>>::const_iterator i = cur_pulses.begin();
     while (i != cur_pulses.end() - 1) {
       if ((*i).first) {
-        wave_lines.push_back(QLine(preX, preY, x, preY));
+        wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
         wave_rects.push_back(
             QRect(x, high_offset, 1, low_offset - high_offset + 1));
         preX = x;
@@ -180,15 +186,12 @@ void rasterize_logic_channel(
       x++;
       i++;
     }
-    wave_lines.push_back(QLine(preX, preY, x, preY));
+    wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
   }
 
   // Original: p.setPen(_colour.isValid() ? _colour : fore). The caller passes
   // the FINAL colour (already computed as _colour.isValid() ? _colour : fore).
-  // 水平段用画笔描线；竖直跳变用实心画刷填充 1px 矩形（两批各一次调用）。
-  p.setPen(colour);
-  p.setBrush(Qt::NoBrush);
-  p.drawLines(wave_lines.data(), static_cast<int>(wave_lines.size()));
+  // 水平段与竖直跳变都是 1px 填充矩形，一批 drawRects 画完（见上方注释）。
   p.setPen(Qt::NoPen);
   p.setBrush(colour);
   p.drawRects(wave_rects.data(), static_cast<int>(wave_rects.size()));

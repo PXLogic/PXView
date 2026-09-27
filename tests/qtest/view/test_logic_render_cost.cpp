@@ -6,8 +6,8 @@
  * logic 模式（TimeView + is_logic_rendering_mode）每帧要重建整幅信号位图：
  * SignalPixmapPass::render 对每个启用的 logic 通道调用
  * rasterize_logic_channel()（render_pass.cpp:455），后者内部经
- * LogicSnapshot::get_display_edges() 走 mipmap 边沿扫描 + 构建 wave_lines +
- * drawLines。
+ * LogicSnapshot::get_display_edges() 走 mipmap 边沿扫描 + 构建 wave_rects +
+ * 一批 drawRects（水平段与竖直跳变统一为 1px 填充矩形，见 rasterize.cpp）。
  *
  * 在改任何代码之前，先把这条纯路径的耗时量化出来，回答两个问题：
  *   1) 每通道耗时随「缩放级别（samples_per_pixel）」和「数据密度」怎么变？
@@ -263,13 +263,14 @@ double measure_frame_rebuild(LogicSnapshot &snap, QImage &img, double spp,
 // ---- drawLines vs drawRects / 分批对照用的几何 -----------------------------
 // 用与 rasterize_logic_channel **完全相同**的循环从 get_display_edges 的输出
 // 构建几何，同时准备三种视图：
-//   hv_lines —— 与生产完全一致的交错数组（水平段、竖直段依次 push，最后
-//               **一次** drawLines 画完），见 rasterize.cpp 的 wave_lines
+//   hv_lines —— F2 之前的旧生产形状：交错数组（水平段、竖直段依次 push，最后
+//               **一次** drawLines 画完）。保留它作为历史对照与 dpr=1 下的
+//               等价基线；当前生产的对应物是 Repr::AllRects(ext=1)。
 //   h_lines  —— 仅水平段（电平线）
 //   v_lines  —— 仅竖直段（跳变）
 // 竖直段另可用 1px 宽填充矩形表示（dso/analog 的 min/max 分支正是这么做的）。
 struct FrameGeometry {
-    std::vector<QLine> hv_lines;   // 生产的交错数组
+    std::vector<QLine> hv_lines;   // 旧生产形状（交错 QLine）
     std::vector<QLine> h_lines;    // 仅水平
     std::vector<QLine> v_lines;    // 仅竖直
 };
@@ -312,8 +313,9 @@ FrameGeometry build_geometry(LogicSnapshot &snap, int ch, double spp,
     int preY = first ? high_offset : low_offset;
     int x = 0;
 
-    // 与 rasterize.cpp 一致：先 push 水平段，再 push 竖直跳变（交错），
-    // 最后收一条水平段；生产把它们放进同一个数组一次 drawLines。
+    // 与 rasterize.cpp 一致：先 push 水平段，再 push 竖直跳变，最后收一条
+    // 水平段。生产把它们（以及竖直段）统一放进 wave_rects 一次 drawRects；
+    // 这里额外保留旧形状的 QLine 视图供历史对照（见 FrameGeometry）。
     auto push_h = [&](int xa, int xb, int yy) {
         const QLine l(xa, yy, xb, yy);
         g.hv_lines.push_back(l);
@@ -356,7 +358,7 @@ FrameGeometry build_geometry(LogicSnapshot &snap, int ch, double spp,
 
 // ---- 一帧的图元表示方式 -----------------------------------------------------
 enum class Repr {
-    LinesAll,        // 水平、竖直都用 QLine（生产现状）
+    LinesAll,        // 水平、竖直都用 QLine（F2 之前的旧生产形状）
     H_Lines_V_Rects, // 水平 QLine + 竖直 1px 填充矩形
     AllRects,        // 全部用矩形（水平 1px 高、竖直 1px 宽）
 };
@@ -428,7 +430,8 @@ void render_frame(QImage &img, const std::vector<FrameGeometry> &ges, Repr repr,
     p.end();
 }
 
-// 生产形状：每通道一次 drawLines(交错数组)。
+// F2 之前的旧生产形状：每通道一次 drawLines(交错数组)。在 dpr=1 下与当前生产
+// （全矩形）逐像素等价，故仍作为 dpr=1 的等价基线与图元对拍的参考。
 void render_frame_production(QImage &img, const std::vector<FrameGeometry> &ges)
 {
     img.fill(Qt::transparent);
@@ -1064,11 +1067,15 @@ void TestLogicRenderCost::build_cost_lines_vs_rects()
     qInfo("%s", "");
 }
 
-// 变更门禁：真实 rasterize_logic_channel 的一帧输出，必须与"旧线段形状"的
-// 独立参考逐像素一致。
+// 变更门禁：真实 rasterize_logic_channel 的一帧输出，必须与"全矩形（含端点）"
+// 的独立参考逐像素一致 —— 并且必须在 **dpr > 1** 的离屏位图上一并验证。
 //
-// 参考不是复制生产代码，而是本文件按 get_display_edges 输出独立重建的
-// 交错 QLine 一帧（render_frame_production）——生产改完后仍应与其完全一致。
+// 为什么必须扫 DPR：生产曾用"水平段 QLine + 竖直段 QRect"的混合图元。dpr=1 时
+// 二者逐像素等价（画笔宽 = 1 为奇数，笔画恰好落在路径行），但 dpr=2/1.5 时画笔宽
+// 变成偶数、笔画以路径为中心覆盖 y-1..y，而 1px QRect 填充从 y 开始 —— 角点恒定
+// 错开 1 个设备像素（横竖线接不上）。旧用例只在 dpr=1 画布上比对，所以从未覆盖到
+// 这个缺陷。现在生产把水平段也改成 1px QRect，参考 = render_frame(AllRects,
+// batched, ext=1)，两边在任意 DPR 下都必须零差异。
 void TestLogicRenderCost::production_parity()
 {
     PackedFixture fx(CHANNELS);
@@ -1078,48 +1085,57 @@ void TestLogicRenderCost::production_parity()
 
     const int heights[] = {20, 40, 80};
     const double spps[] = {0.5, 8.0, 512.0, 8738.0};
+    const double dprs[] = {1.0, 1.25, 1.5, 2.0};
 
     qInfo("%s", "");
-    qInfo("==== 生产函数像素门禁 rasterize_logic_channel vs 旧线段形状 ====");
-    qInfo("%-7s %-9s %10s  %s", "height", "spp", "mismatch", "first");
+    qInfo("==== 生产函数像素门禁 rasterize_logic_channel vs 全矩形参考 (含 DPR) ====");
+    qInfo("%-7s %-9s %-6s %10s  %s", "height", "spp", "dpr", "mismatch", "first");
 
     size_t worst = 0;
     for (int h : heights) {
-        QImage ref(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
-        QImage got(WIDTH, CHANNELS * h, QImage::Format_ARGB32_Premultiplied);
+        for (double dpr : dprs) {
+            const int dw = (int)std::lround(WIDTH * dpr);
+            const int dh = (int)std::lround(CHANNELS * h * dpr);
+            QImage ref(dw, dh, QImage::Format_ARGB32_Premultiplied);
+            QImage got(dw, dh, QImage::Format_ARGB32_Premultiplied);
+            ref.setDevicePixelRatio(dpr);   // 与 SignalPixmapPass 的 pixmap 同形
+            got.setDevicePixelRatio(dpr);
 
-        for (double spp : spps) {
-            std::vector<FrameGeometry> ges;
-            ges.reserve(CHANNELS);
-            for (int ch = 0; ch < CHANNELS; ++ch)
-                ges.push_back(build_geometry(snap, ch, spp, WIDTH, (ch + 1) * h, h));
-
-            render_frame_production(ref, ges);
-
-            const double scale = spp / SAMPLERATE;
-            const pv::view::PaintContext ctx = make_ctx(scale);
-            got.fill(Qt::transparent);
-            {
-                QPainter p(&got);
+            for (double spp : spps) {
+                std::vector<FrameGeometry> ges;
+                ges.reserve(CHANNELS);
                 for (int ch = 0; ch < CHANNELS; ++ch)
-                    pv::view::rasterize_logic_channel(
-                        p, &snap, ch, 0, WIDTH, (ch + 1) * h, h,
-                        QColor(255, 255, 255), scale, 0, SAMPLES - 1, ctx,
-                        nullptr);
-                p.end();
-            }
+                    ges.push_back(build_geometry(snap, ch, spp, WIDTH, (ch + 1) * h, h));
 
-            QString first;
-            const size_t m = first_pixel_mismatches(ref, got, first);
-            worst = std::max(worst, m);
-            qInfo("%-7d %-9g %10zu  %s", h, spp, m, qPrintable(first));
+                // 参考：全部图元都是 1px 矩形（含端点），合批一次 drawRects。
+                render_frame(ref, ges, Repr::AllRects, true, 1);
+
+                const double scale = spp / SAMPLERATE;
+                const pv::view::PaintContext ctx = make_ctx(scale);
+                got.fill(Qt::transparent);
+                {
+                    QPainter p(&got);
+                    for (int ch = 0; ch < CHANNELS; ++ch)
+                        pv::view::rasterize_logic_channel(
+                            p, &snap, ch, 0, WIDTH, (ch + 1) * h, h,
+                            QColor(255, 255, 255), scale, 0, SAMPLES - 1, ctx,
+                            nullptr);
+                    p.end();
+                }
+
+                QString first;
+                const size_t m = first_pixel_mismatches(ref, got, first);
+                worst = std::max(worst, m);
+                qInfo("%-7d %-9g %-6.2f %10zu  %s", h, spp, dpr, m,
+                      qPrintable(first));
+            }
         }
     }
     qInfo("%s", "");
     qInfo("最大不一致: %zu（必须为 0 —— 否则生产改动破坏了像素等价）", worst);
     qInfo("%s", "");
     QVERIFY2(worst == 0,
-             qPrintable(QString("rasterize_logic_channel 与旧线段形状不一致: "
+             qPrintable(QString("rasterize_logic_channel 与全矩形参考不一致: "
                                 "%1 像素").arg(worst)));
 }
 

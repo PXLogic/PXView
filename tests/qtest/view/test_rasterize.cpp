@@ -205,6 +205,8 @@ class TestRasterize : public QObject
 private slots:
     // Logic: square wave draws non-transparent pixels in the channel band.
     void logic_waveform_draws_pixels();
+    // Logic: 任意 DPR 下竖直跳变与水平电平线在角点严丝合缝（HiDPI 回归门禁）。
+    void logic_corner_alignment_dpr();
     // Logic: glitch live-preview ranges draw the full-band overlay.
     void logic_glitch_preview_overlay();
     // Logic: no preview -> the overlay region stays transparent.
@@ -258,6 +260,96 @@ void TestRasterize::logic_waveform_draws_pixels()
     // ch0 is low for samples 20..39 => horizontal line at low_offset (y=25).
     QVERIFY2(img.pixelColor(30, low_offset).alpha() > 0,
              "pixel on the low-level row must be drawn");
+}
+
+void TestRasterize::logic_corner_alignment_dpr()
+{
+    // 单次跳变方波：s < 100 为高，其后为低。spp=1（samplerate 1000 × scale
+    // 0.001）时跳变落在逻辑像素列 100。
+    const size_t N = 200;
+    LogicFixture fx(1, N);
+    LogicSnapshot snap;
+    fx.feed(snap, N, [](size_t s, int ch) {
+        (void)ch;
+        return s < 100;
+    });
+
+    const int left = 0, right = 200, y = 25, total_height = 20;
+    const int edge_x = 100;   // 跳变所在逻辑像素列
+
+    const double dprs[] = {1.0, 1.25, 1.5, 2.0};
+    for (double dpr : dprs) {
+        const int img_w = (int)std::lround(right * dpr);
+        const int img_h = (int)std::lround(total_height * 2 * dpr);
+        QImage img(img_w, img_h, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        img.setDevicePixelRatio(dpr);   // 与 SignalPixmapPass 的离屏 pixmap 同形
+
+        QPainter p(&img);
+        pv::view::PaintContext ctx;
+        ctx.scale = 0.001;   // spp = 1
+        ctx.offset = 0;
+        pv::view::rasterize_logic_channel(
+            p, &snap, 0, left, right, y, total_height, QColor(255, 255, 255),
+            ctx.scale, 0, N - 1, ctx, nullptr);
+        p.end();
+
+        // 某一设备列内被绘制的行区间（全透明则返回 false）。
+        auto row_span = [&img](int x, int &top, int &bottom) {
+            top = -1;
+            bottom = -1;
+            if (x < 0 || x >= img.width())
+                return false;
+            for (int yy = 0; yy < img.height(); ++yy) {
+                if (img.pixelColor(x, yy).alpha() > 0) {
+                    if (top < 0)
+                        top = yy;
+                    bottom = yy;
+                }
+            }
+            return top >= 0;
+        };
+
+        // 高/低电平线各取一列（逻辑 50 / 150，远离跳变）。
+        int hi_top = -1, hi_bot = -1, lo_top = -1, lo_bot = -1;
+        QVERIFY2(row_span((int)std::lround(50 * dpr), hi_top, hi_bot),
+                 "high-level line must be drawn");
+        QVERIFY2(row_span((int)std::lround(150 * dpr), lo_top, lo_bot),
+                 "low-level line must be drawn");
+
+        // 跳变列：在 edge_x 附近的设备列里取行数最多的一列（= 贯穿两电平的竖线）。
+        int bar_col = std::max(0, (int)std::floor(edge_x * dpr) - 2);
+        int bar_top = -1, bar_bot = -1, best = -1;
+        const int scan_end =
+            std::min(img.width() - 1, (int)std::ceil((edge_x + 1) * dpr) + 2);
+        for (int xc = bar_col; xc <= scan_end; ++xc) {
+            int t = -1, b = -1;
+            if (!row_span(xc, t, b))
+                continue;
+            if (b - t + 1 > best) {
+                best = b - t + 1;
+                bar_col = xc;
+                bar_top = t;
+                bar_bot = b;
+            }
+        }
+        QVERIFY2(bar_top >= 0, "vertical transition must be drawn");
+
+        // 竖线的上下端必须分别落在高/低电平线的同一行上；错位 1 设备像素即失败。
+        QVERIFY2(bar_top == hi_top,
+                 qPrintable(QString("dpr=%1: 竖线顶部 %2 != 高电平线顶部 %3 "
+                                    "(角点错位 %4 设备px)")
+                                .arg(dpr).arg(bar_top).arg(hi_top)
+                                .arg(bar_top - hi_top)));
+        QVERIFY2(bar_bot == lo_bot,
+                 qPrintable(QString("dpr=%1: 竖线底部 %2 != 低电平线底部 %3 "
+                                    "(角点错位 %4 设备px)")
+                                .arg(dpr).arg(bar_bot).arg(lo_bot)
+                                .arg(bar_bot - lo_bot)));
+        // 竖线列必须位于跳变附近（防止上面误选到别的列）。
+        QVERIFY(bar_col >= (int)std::floor(edge_x * dpr) - 1 &&
+                bar_col <= (int)std::ceil((edge_x + 1) * dpr));
+    }
 }
 
 void TestRasterize::logic_glitch_preview_overlay()
