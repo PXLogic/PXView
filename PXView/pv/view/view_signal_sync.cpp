@@ -871,9 +871,11 @@ _own_signals.clear();
       signal->set_enabled(ch.enabled);
       // Task 7 (purify-architecture-concepts): visible is no longer a
       // Core-serialized field. In-memory visible state across rebuilds is
-      // preserved by SignalFactory::save_ui_state/restore_ui_state. Persistence
-      // will be handled by View-layer DockUiState (Task 17) writing the
-      // uiLayout section of .pxc.
+      // preserved by SignalFactory::save_ui_state/restore_ui_state ONLY — it is
+      // NOT persisted across sessions: neither through .pxc (which carries the
+      // per-(driver, workMode) device profile) nor through workspace.json
+      // (which carries per-tab session state). Making it persistent would mean
+      // a new per-tab field in workspace.json, never a .pxc one.
 
       // UI 布局状态从 ChannelConfig 恢复（单一持久化状态源）：
       // - view_index: 配置值 >= 0 时使用，否则保持 -1，由下游归一化处理

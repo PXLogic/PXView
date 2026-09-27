@@ -309,11 +309,12 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
     sessionVar["channel"] = QJsonArray();
   }
 
-  // 视图密度（signalHeightScale）不再写入 .pxc：它的自然键是"tab 实例"，而
+  // 视图密度（signalHeightScale）不写入 .pxc：它的自然键是"tab 实例"，而
   // .pxc 的自然键是 (driver, workMode) —— 同一设备同模式的多个 tab 会互相
   // 覆盖。per-tab 值随 tab 会话走（workspace.json 的 session.uiLayout），
   // 全局兜底值在 AppOptions::logicChannelHeightScale。
-  // 旧文件里的 uiLayout 仍然**读取**兼容，见 load_config_from_json()。
+  // 读取侧同样不处理 .pxc 里残留的 uiLayout 段 —— 原因见
+  // load_config_from_json() 中 "视图密度**不**从 .pxc 恢复" 的说明。
 
   if (_wnd->device_agent()->get_work_mode() == LOGIC) {
     sessionVar["trigger"] = _wnd->session()->trigger_config().to_json();
@@ -688,27 +689,16 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
     _wnd->session()->reload();
   }
 
-  // 恢复全局通道高度（视图密度）。放在信号建立之后应用：
-  //   - 非文件设备：上面的 reload() 已重建信号；
-  //   - 文件设备：信号在后续 start_capture 回放时才建立。
-  // 两种情况本值都早于下一次 layout 计算，故对二者都生效。
-  // 走 set_signalHeightScale()（标记为"显式设置"）→ 优先于主题默认值，
-  // 此后切换主题不会覆盖用户恢复出来的视图密度。
-  if (sessionObj.contains("uiLayout")) {
-    const QJsonObject uiLayout = sessionObj["uiLayout"].toObject();
-    const int shs = uiLayout.value("signalHeightScale").toInt(0);
-    if (shs > 0) {
-      if (auto *cv = _wnd->current_view()) {
-        cv->layout_delegate()->set_signalHeightScale(shs);
-        cv->layout_delegate()->set_signalHeight(shs);
-        cv->update_all_trace_postion();
-        pxv_info("load_config_from_json: restored signalHeightScale=%d", shs);
-      }
-    } else {
-      pxv_warn("load_config_from_json: uiLayout.signalHeightScale invalid (%d), "
-               "keeping theme default", shs);
-    }
-  }
+  // 视图密度（signalHeightScale）**不**从 .pxc 恢复：
+  //   1) 自然键不匹配 —— 它是 per-tab 的，而 .pxc 是 per (driver, workMode)；
+  //   2) 更关键的是，set_signalHeightScale() 会把值标记为"显式设置"，从而压住
+  //      主题默认值与 workspace 的 per-tab 值。历史上被污染过的 .pxc
+  //      （signalHeightScale=24）会因此长期锁住错误密度 —— 保留这段兼容读取
+  //      等于延长污染，而不是保护用户。
+  // per-tab 视图密度由 workspace.json 的 session.uiLayout 承载
+  // （TabManager::restore_workspace），全局兜底在
+  // AppOptions::logicChannelHeightScale（ViewLayout 构造时恢复）。
+  // .pxc 中残留的 uiLayout 段（仅可能来自未发布的中间构建）一律忽略。
 
   // Glitch filter config restore
   if (sessionObj.contains("glitch_filter")) {

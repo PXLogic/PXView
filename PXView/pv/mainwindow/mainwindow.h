@@ -186,6 +186,11 @@ public:
     // SessionEventDispatcher 在 FirstInit 的 profile 加载完成后调用一次。
     int restore_workspace();
 
+    // 文件设备 tab 的懒加载重开：workspace 恢复出来的文件 tab 不在启动时读
+    // 文件（会触发整条采集/回放管线），首次切到它时由 TabManager::on_tab_changed
+    // 调来这里按 filePath 重开。
+    bool reopen_recovered_file_tab(pv::TabContext *ctx);
+
     // Phase 2: exposed for SessionEventDispatcher
     std::map<int, pv::data::ChannelLayoutState> build_channel_layout(pv::view::View *view);
     

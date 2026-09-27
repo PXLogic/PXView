@@ -134,6 +134,54 @@ void MainWindowFileOps::on_load_file(QString file_name) {
   }
 }
 
+bool MainWindowFileOps::reload_file_into_context(pv::TabContext *ctx) {
+  if (!ctx || ctx->file_path().isEmpty())
+    return false;
+
+  const QString path = ctx->file_path();
+  QFileInfo fi(path);
+  if (!fi.exists()) {
+    pxv_warn("reload_file_into_context: '%s' no longer exists — tab keeps its "
+             "config but will not be replayed as a file device",
+             path.toUtf8().constData());
+    ctx->set_file_path(QString());  // 不再重试
+    return false;
+  }
+
+  try {
+    if (!_wnd->session()->set_file(path)) {
+      QString strMsg(
+          L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
+      strMsg += path;
+      MsgBox::Show(strMsg);
+      ctx->set_file_path(QString());  // 避免每次切到该 tab 都重试一次失败加载
+      return false;
+    }
+
+    // 同 on_load_file：set_file() 建出的虚拟设备属于本 tab，记录 handle 供
+    // activate() 日后恢复；文档自描述（关闭 tab 时释放自己的设备）。
+    ctx->set_device_handle(_wnd->session()->get_device()->handle());
+    if (ctx->document()) {
+      ctx->document()->set_device_handle(ctx->device_handle());
+      ctx->document()->set_file_device_slot(true);
+    }
+    ctx->make_live();
+    ctx->activate();
+    _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));
+    pxv_info("reload_file_into_context: reopened '%s' for tab '%s'",
+             path.toUtf8().constData(), ctx->title().toUtf8().constData());
+    return true;
+  } catch (QString e) {
+    QString strMsg(
+        L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
+    strMsg += path;
+    MsgBox::Show(strMsg);
+    _wnd->session()->set_default_device();
+    ctx->set_file_path(QString());
+    return false;
+  }
+}
+
 void MainWindowFileOps::on_import_file(QString file_name, QString format_id,
                                        GHashTable *input_options) {
   // The option table arrives with transferred ownership, but this function has

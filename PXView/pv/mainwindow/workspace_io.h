@@ -29,10 +29,6 @@
 
 namespace pv {
 
-namespace view {
-class View;
-}
-
 /**
  * One tab's cross-session work state.
  *
@@ -40,12 +36,22 @@ class View;
  * ("Workspace (tab session) persistence"): `.pxc` carries the *device profile*
  * (natural key = `(driver, workMode)`) and cannot carry per-tab state — doing so
  * made N tabs of the same device/mode silently overwrite each other.
+ *
+ * Deliberately free of any View/widget dependency so it can be unit-tested
+ * on its own; the per-tab view density helpers live in `tab_manager.cpp`.
  */
 struct WorkspaceTab {
   QString title;        // tab title (user-renamable)
   QString filePath;     // source file of a file-device tab (.pxl, ...); else empty
-  QString driver;       // device driver name; a matching hint / log aid only
+  // Device identity. `ds_device_handle` is process-local and never persisted;
+  // `(driver, connid)` is the stable cross-session key (see
+  // SigSession::resolve_device_handle_by_identity).
+  QString driver;
+  QString connid;
   int workMode = 0;     // work mode (LOGIC / DSO / ANALOG / MSO)
+  // File-device tabs are NOT replayed at startup (reading a .pxl triggers the
+  // whole capture/replay pipeline); they are reopened lazily on first switch.
+  bool isFileDevice = false;
   // Exactly SessionDocument::signal_config_to_json(), plus a "uiLayout"
   // sub-object holding the per-tab view density.
   QJsonObject session;
@@ -62,6 +68,13 @@ struct Workspace {
 QString workspace_file_path();
 
 /**
+ * Test hook: override the workspace path (empty string restores the default
+ * GetProfileDir() location). Without this a unit test would write into — and
+ * read back from — the real user profile directory.
+ */
+void set_workspace_path_override(const QString &path);
+
+/**
  * Atomically write the workspace (QSaveFile: temp file + rename).
  * Returns false on any failure; callers keep running (degradation is never fatal).
  */
@@ -72,14 +85,6 @@ bool write_workspace_file(const Workspace &ws);
  * `Version` is unsupported — the caller then keeps today's single-tab behaviour.
  */
 bool read_workspace_file(Workspace &out);
-
-/**
- * Per-tab view density (signalHeightScale) lives INSIDE the tab session, not in
- * `.pxc` — capturing / applying it here keeps the JSON layout knowledge in one
- * place so TabManager never assembles raw JSON.
- */
-void capture_session_ui_layout(pv::view::View *view, QJsonObject &session);
-void apply_session_ui_layout(pv::view::View *view, const QJsonObject &session);
 
 } // namespace pv
 

@@ -246,6 +246,21 @@ pv_add_qtest(test_binary_codec
     ${PXVIEW_INCLUDE_DIR}/pv/api/binary_codec.cpp
 )
 
+# ==== workspace 序列化往返 + 降级分支（tab 会话持久化）====
+# 直接编译 workspace_io.cpp —— 它被刻意设计成零 View/QWidget 依赖，正是为了能
+# 这样单测（per-tab 视图密度的 ViewLayout 转换留在 tab_manager.cpp）。路径经
+# set_workspace_path_override 注入 QTemporaryDir，绝不触碰真实用户 profile；
+# config 层只 stub 一个 GetProfileDir()。
+# 覆盖：往返保真（含 connid / isFileDevice / session 内嵌 uiLayout）、文件缺失 /
+# JSON 损坏 / 版本不支持 / tabs 为空 → 一律 false（降级不致命）。
+pv_add_qtest(test_workspace_io
+    mainwindow/test_workspace_io.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/mainwindow/workspace_io.cpp
+)
+target_include_directories(test_workspace_io PRIVATE
+    ${CMAKE_SOURCE_DIR}/common
+)
+
 # ==== View layer tests (header-only mocks) ====
 pv_add_qtest(test_view_layout
     view/test_view_layout.cpp

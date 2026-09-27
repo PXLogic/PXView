@@ -31,6 +31,7 @@
 namespace pv {
 
 class MainWindow;
+class TabContext;
 
 /**
  * @brief File operations delegate for MainWindow.
@@ -45,6 +46,18 @@ public:
     explicit MainWindowFileOps(MainWindow *wnd) : _wnd(wnd) {}
 
     void on_load_file(QString file_name);
+
+    /**
+     * 把一个"已存在但数据尚未重放"的文件设备 tab 按 filePath 重新打开。
+     *
+     * workspace 恢复出来的文件设备 tab 不在启动时读文件（读 .pxl 会触发整条
+     * 采集/回放管线），而是在用户首次切到该 tab 时才调用本方法（懒加载）。
+     * 不新建 tab —— 复用调用方传入的 ctx。
+     *
+     * @return 重开成功（虚拟设备已绑定并激活）返回 true；文件不存在或
+     *         set_file 失败返回 false（调用方保留该 tab，仅清掉 filePath）。
+     */
+    bool reload_file_into_context(pv::TabContext *ctx);
 
     /**
      * Import an external data file.

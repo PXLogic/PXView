@@ -29,6 +29,8 @@
 #include <QVBoxLayout>
 #include <QObject>
 #include <QDebug>
+#include <QJsonObject>
+#include <QTimer>
 #include <cstdio>
 
 #include "pv/core/documentregistry.h"
@@ -83,10 +85,60 @@ static ds_device_handle default_capture_handle(SigSession *session)
 }
 
 // ---------------------------------------------------------------------------
+// per-tab 视图密度（随 tab 会话走，不进 .pxc）
+// ---------------------------------------------------------------------------
+
+// 视图密度是 per-tab 状态：.pxc 的自然键是 (driver, workMode)，同设备同模式的
+// 多个 tab 会互相覆盖（见 AGENT_CONTRACTS.md "Workspace (tab session)
+// persistence"）。这里是 ViewLayout 与 JSON 的唯一转换点 —— 刻意放在
+// tab_manager 而不是 workspace_io，让后者保持零 View 依赖、可独立单测。
+static void capture_session_ui_layout(pv::view::View *view,
+                                      QJsonObject &session) {
+  if (!view)
+    return;
+  QJsonObject ui = session.value("uiLayout").toObject();
+  ui["signalHeightScale"] = view->layout_delegate()->signalHeightScale();
+  session["uiLayout"] = ui;
+}
+
+static void apply_session_ui_layout(pv::view::View *view,
+                                    const QJsonObject &session) {
+  if (!view || !session.contains("uiLayout"))
+    return;
+  const QJsonObject ui = session.value("uiLayout").toObject();
+  const int shs = ui.value("signalHeightScale").toInt(0);
+  if (shs <= 0) {
+    pxv_warn("apply_session_ui_layout: invalid signalHeightScale (%d), "
+             "keeping current view density", shs);
+    return;
+  }
+  // set_signalHeightScale() 会把该值标记为"显式设置" → 主题默认值不再覆盖
+  // 这个恢复出来的 per-tab 密度。
+  view->layout_delegate()->set_signalHeightScale(shs);
+  view->layout_delegate()->set_signalHeight(shs);
+  view->update_all_trace_postion();
+  pxv_info("apply_session_ui_layout: restored signalHeightScale=%d", shs);
+}
+
+// ---------------------------------------------------------------------------
 // TabManager — construction / destruction
 // ---------------------------------------------------------------------------
 
-TabManager::TabManager(MainWindow *wnd) : _wnd(wnd) {}
+TabManager::TabManager(MainWindow *wnd) : _wnd(wnd) {
+  // workspace 的事件驱动写入（2s 防抖）。只在退出时写会在崩溃/强杀时丢掉整个
+  // tab 结构；退出路径仍会立即写一次（MainWindow::able_to_close）。
+  if (wnd) {
+    _ws_save_timer = new QTimer(wnd);
+    _ws_save_timer->setSingleShot(true);
+    QObject::connect(_ws_save_timer, &QTimer::timeout, wnd,
+                     [this]() { save_workspace(); });
+  }
+}
+
+void TabManager::schedule_workspace_save() {
+  if (_ws_save_timer && !_ws_save_timer->isActive())
+    _ws_save_timer->start(2000);
+}
 
 TabManager::~TabManager() {
   // TabContexts are owned by SessionManager; we do not delete them here.
@@ -411,6 +463,9 @@ void TabManager::update_tab_style(int index) {
   if (ctx->is_borrowing())
     text += QString::fromUtf8("  ⇢ ") + ctx->borrow_label();
   _tab_widget->setTabText(index, text);
+
+  // tab 状态变化（增删 / 切换 / 改名 / 借用角标）的统一出口 → 防抖写 workspace。
+  schedule_workspace_save();
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +495,19 @@ void TabManager::on_tab_changed(int index) {
   // 列表末尾的 VCD/文件设备（有通道）而把 demo 标签"两通道化"。
   _tab_contexts[index]->activate();
   update_tab_style(index);
+
+  // 恢复自 workspace 的文件设备 tab：启动时不批量读文件（那会触发整条采集 /
+  // 回放管线），首次切到它时才按 filePath 懒加载重开。
+  // 判据 = 有 filePath 但尚未绑定设备句柄（普通 tab 在创建时即已绑定）。
+  if (!_reopening_file_tab) {
+    pv::TabContext *ctx = _tab_contexts[index];
+    if (ctx && ctx->device_handle() == NULL_HANDLE &&
+        !ctx->file_path().isEmpty()) {
+      _reopening_file_tab = true;
+      _wnd->reopen_recovered_file_tab(ctx);
+      _reopening_file_tab = false;
+    }
+  }
 
   pv::view::View *view = current_view();
   _wnd->update_sample_period();
@@ -656,10 +724,7 @@ void TabManager::save_workspace() {
   Workspace ws;
   ws.activeTab = _current_tab_index;
 
-  // 驱动名只作日志 / 将来的精确匹配线索：跨会话的 ds_device_handle 不可
-  // 持久化，恢复时按当前设备列表重新解析（见 restore_workspace）。
-  DeviceAgent *da = _wnd ? _wnd->device_agent() : nullptr;
-  const QString cur_driver = da ? da->driver_name() : QString();
+  SigSession *session = _wnd ? _wnd->session() : nullptr;
 
   for (pv::TabContext *ctx : _tab_contexts) {
     if (!ctx)
@@ -667,7 +732,14 @@ void TabManager::save_workspace() {
     WorkspaceTab t;
     t.title = ctx->title();
     t.filePath = ctx->file_path();
-    t.driver = cur_driver;
+    t.isFileDevice = !t.filePath.isEmpty();
+
+    // 设备身份用 (driver, connid)：ds_device_handle 是进程内句柄，跨会话无意义
+    // （契约 "Workspace (tab session) persistence"）。
+    if (session && ctx->device_handle() != NULL_HANDLE)
+      session->device_identity_of_handle(ctx->device_handle(), &t.driver,
+                                         &t.connid);
+
     if (ctx->document()) {
       t.session = ctx->document()->signal_config_to_json();
       t.workMode = ctx->document()->get_signal_config().work_mode;
@@ -696,22 +768,22 @@ int TabManager::restore_workspace() {
   }
 
   const int cur_mode = da->get_work_mode();
-  // 恢复的 tab 绑定"当前设备列表里第一个可用设备"：handle 是进程内句柄，
-  // 重启后一定不同，旧值不可复用（契约 logical restore only）。
-  const ds_device_handle h = default_capture_handle(session);
+  const QString cur_driver = da->driver_name();
 
   // 恢复期间屏蔽 QTabWidget 的 currentChanged：addTab 期间若触发切换会反复
   // activate()（切设备 / 重放数据）。末尾再统一 setCurrentIndex(activeTab)。
   const bool blocked = _tab_widget->blockSignals(true);
 
   // --- tabs[0] → 已初始化的初始 tab ---
-  // 仅当 workMode 一致时覆盖 FirstInit 的 profile 结果：模式不同说明当前设备
-  // 与保存时不是同一语境，apply_signal_config() 会切换设备模式，超出
-  // "FirstInit 已完成"的既有语义（契约 mode guard）。
+  // 双重守卫：workMode 一致 + driver 一致（老 workspace 无 driver 信息时放行）。
+  // 模式不同时 apply_signal_config() 会切换设备模式，超出"FirstInit 已完成"的
+  // 既有语义（契约 mode guard）；driver 不同说明当前设备与保存时不是同一台，
+  // 套用会把别的设备（甚至别的通道数）的配置写进当前设备。
   pv::TabContext *ctx0 = current_context();
   if (ctx0 && ctx0->document() && !ws.tabs.empty()) {
     const WorkspaceTab &t0 = ws.tabs.front();
-    if (t0.workMode == cur_mode && !t0.session.isEmpty()) {
+    const bool driver_ok = t0.driver.isEmpty() || t0.driver == cur_driver;
+    if (t0.workMode == cur_mode && driver_ok && !t0.session.isEmpty()) {
       ctx0->document()->signal_config_from_json(t0.session);
       ctx0->document()->apply_signal_config();
       if (auto *v = ctx0->view()) {
@@ -726,8 +798,9 @@ int TabManager::restore_workspace() {
                t0.title.toUtf8().constData());
     } else {
       pxv_info("restore_workspace: initial tab session skipped "
-               "(saved mode=%d, current=%d) — keeping profile result",
-               t0.workMode, cur_mode);
+               "(saved mode=%d/driver=%s, current=%d/%s) — keeping profile result",
+               t0.workMode, t0.driver.toUtf8().constData(), cur_mode,
+               cur_driver.toUtf8().constData());
     }
   }
 
@@ -735,6 +808,18 @@ int TabManager::restore_workspace() {
   int restored = 0;
   for (size_t i = 1; i < ws.tabs.size(); ++i) {
     const WorkspaceTab &t = ws.tabs[i];
+
+    // 设备句柄按 (driver, connid) 重新解析：ds_device_handle 是进程内句柄，
+    // 旧值跨会话无效（契约 logical restore only）。解析不到时降级为"当前设备
+    // 列表里第一个可用设备"。
+    ds_device_handle h = NULL_HANDLE;
+    if (!t.isFileDevice) {
+      h = session->resolve_device_handle_by_identity(t.driver, t.connid);
+      if (h == NULL_HANDLE)
+        h = default_capture_handle(session);
+    }
+    // 文件设备 tab 故意保持未绑定（h == NULL_HANDLE）：不在启动时读文件，
+    // 首次切到该 tab 时由 on_tab_changed 按 filePath 懒加载重开。
 
     auto *view = new pv::view::View(session, _wnd->sampling_bar(), _wnd);
     size_t doc_idx = session->document_registry()->take_document(
@@ -766,9 +851,11 @@ int TabManager::restore_workspace() {
                   .arg(static_cast<int>(i) + 1)
             : t.title);
     ctx->set_file_path(t.filePath);
-    ctx->set_device_handle(h);
-    doc->set_device_handle(h);
-    // per-tab 视图密度先落到 ViewLayout；切换到该 tab 时的 rebuild 会用上它。
+    if (h != NULL_HANDLE) {
+      ctx->set_device_handle(h);
+      doc->set_device_handle(h);
+    }
+    // per-tab 视图密度先落到 ViewLayout；切到该 tab 时的 rebuild 会用上它。
     apply_session_ui_layout(view, t.session);
 
     add_tab_silent(ctx);

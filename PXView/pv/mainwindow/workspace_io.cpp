@@ -31,20 +31,26 @@
 
 #include "pv/base/log.h"
 #include "pv/config/appconfig.h"
-#include "pv/view/view.h"
-#include "pv/view/view_layout.h"
 
 namespace pv {
 
 namespace {
 constexpr const char *kFileTag = "workspace";
 
-// uiLayout keys
-constexpr const char *kUiLayout = "uiLayout";
-constexpr const char *kSignalHeightScale = "signalHeightScale";
+// Test hook: non-empty → used instead of the GetProfileDir() location.
+QString g_workspace_path_override;
 } // namespace
 
+void set_workspace_path_override(const QString &path) {
+  g_workspace_path_override = path;
+  pxv_info("%s: path override %s", kFileTag,
+           path.isEmpty() ? "(cleared)" : path.toUtf8().constData());
+}
+
 QString workspace_file_path() {
+  if (!g_workspace_path_override.isEmpty())
+    return g_workspace_path_override;
+
   const QString dir = GetProfileDir();
   if (dir.isEmpty())
     return QString();
@@ -52,32 +58,6 @@ QString workspace_file_path() {
   if (!d.exists())
     d.mkpath(".");
   return d.absolutePath() + "/workspace.json";
-}
-
-void capture_session_ui_layout(pv::view::View *view, QJsonObject &session) {
-  if (!view)
-    return;
-  QJsonObject ui = session.value(kUiLayout).toObject();
-  ui[kSignalHeightScale] = view->layout_delegate()->signalHeightScale();
-  session[kUiLayout] = ui;
-}
-
-void apply_session_ui_layout(pv::view::View *view, const QJsonObject &session) {
-  if (!view || !session.contains(kUiLayout))
-    return;
-  const QJsonObject ui = session.value(kUiLayout).toObject();
-  const int shs = ui.value(kSignalHeightScale).toInt(0);
-  if (shs <= 0) {
-    pxv_warn("apply_session_ui_layout: invalid signalHeightScale (%d), "
-             "keeping current view density", shs);
-    return;
-  }
-  // set_signalHeightScale() marks the value as explicitly set, so the theme
-  // default never overrides the restored per-tab density.
-  view->layout_delegate()->set_signalHeightScale(shs);
-  view->layout_delegate()->set_signalHeight(shs);
-  view->update_all_trace_postion();
-  pxv_info("apply_session_ui_layout: restored signalHeightScale=%d", shs);
 }
 
 bool write_workspace_file(const Workspace &ws) {
@@ -98,7 +78,9 @@ bool write_workspace_file(const Workspace &ws) {
     o["filePath"] = t.filePath;
     QJsonObject dev;
     dev["driver"] = t.driver;
+    dev["connid"] = t.connid;
     dev["workMode"] = t.workMode;
+    dev["isFileDevice"] = t.isFileDevice;
     o["device"] = dev;
     o["session"] = t.session;
     tabs.append(o);
@@ -179,7 +161,9 @@ bool read_workspace_file(Workspace &out) {
     t.filePath = o.value("filePath").toString();
     const QJsonObject dev = o.value("device").toObject();
     t.driver = dev.value("driver").toString();
+    t.connid = dev.value("connid").toString();
     t.workMode = dev.value("workMode").toInt(0);
+    t.isFileDevice = dev.value("isFileDevice").toBool(false);
     t.session = o.value("session").toObject();
     out.tabs.push_back(t);
   }

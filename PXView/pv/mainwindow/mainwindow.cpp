@@ -397,6 +397,10 @@ void MainWindow::save_config() { _config_io->save_config(); }
 
 int MainWindow::restore_workspace() { return _tab_manager->restore_workspace(); }
 
+bool MainWindow::reopen_recovered_file_tab(pv::TabContext *ctx) {
+  return _file_ops->reload_file_into_context(ctx);
+}
+
 QString MainWindow::gen_config_file_path(bool isNewFormat) { return _config_io->gen_config_file_path(isNewFormat); }
 
 bool MainWindow::able_to_close() {
@@ -409,14 +413,19 @@ bool MainWindow::able_to_close() {
     _sampling_bar->commit_settings();
   }
 
-  _tab_manager->close_detached_windows();
-
-  save_config();
-
   // 跨会话 tab 会话持久化：.pxc 只承载"设备 profile"（自然键 =
   // (driver, workMode)），打开着哪些 tab / 每个 tab 的状态由 workspace 承载。
   // 必须无条件写（不依赖 have_instance —— 那只是 .pxc 的前置条件）。
+  //
+  // 顺序要求：必须早于 close_detached_windows()。后者逐个 close() 脱离窗口，
+  // 触发 onDetachedWindowClosed → setCurrentIndex(idx) 把 tab 收回主窗口并
+  // **设为当前**，最后一个被收回的 tab 会成为 current —— 若在其后再收集，
+  // activeTab 记的就不是用户真正的最后活动 tab。
   _tab_manager->save_workspace();
+
+  _tab_manager->close_detached_windows();
+
+  save_config();
 
   // Check if the user has disabled the save prompt on exit
   if (!AppConfig::Instance().appOptions.promptSaveOnExit) {

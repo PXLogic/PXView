@@ -99,6 +99,12 @@ public:
      */
     void add_tab_silent(pv::TabContext *ctx);
 
+    /**
+     * 事件驱动的 workspace 写入（2s 防抖）。tab 增删/切换/改名都会触发，
+     * 避免只在退出时写 —— 崩溃或强杀会丢掉整个 tab 结构。
+     */
+    void schedule_workspace_save();
+
     // ---- Accessors ----
 
     pv::ui::DraggableTabWidget *tab_widget() { return _tab_widget; }
@@ -143,6 +149,10 @@ private:
     pv::ui::DraggableTabWidget *_tab_widget = nullptr;
     QList<pv::TabContext *> _tab_contexts;
     int _current_tab_index = -1;
+    // workspace 防抖写入定时器（parent = MainWindow，随窗口销毁）。
+    QTimer *_ws_save_timer = nullptr;
+    // 文件设备 tab 懒加载重开的防重入闸（见 on_tab_changed）。
+    bool _reopening_file_tab = false;
 };
 
 } // namespace pv

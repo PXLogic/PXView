@@ -608,6 +608,64 @@ bool SigSession::set_default_device(interface::DeviceChangeReason reason) {
   return false;
 }
 
+ds_device_handle SigSession::resolve_device_handle_by_identity(
+    const QString &driver, const QString &connid) {
+  if (driver.isEmpty())
+    return NULL_HANDLE;
+
+  int count = 0;
+  int actived_index = -1;
+  auto array = std::unique_ptr<ds_device_base_info[], decltype(&free)>(
+      get_device_list(count, actived_index), &free);
+  if (count < 1 || array == nullptr)
+    return NULL_HANDLE;
+
+  for (int i = 0; i < count; ++i) {
+    const ds_device_handle h = array[i].handle;
+    struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
+    if (!sdi)
+      continue;
+    struct sr_dev_driver *drv = sr_dev_inst_driver_get(sdi);
+    if (!drv || !drv->name)
+      continue;  // input-module / 虚拟文件设备：不可作为 tab 的设备身份
+    if (QString::fromLocal8Bit(drv->name) != driver)
+      continue;
+
+    const char *cid = sr_dev_inst_connid_get(sdi);
+    const QString cur_conn = cid ? QString::fromLocal8Bit(cid) : QString();
+    if (!connid.isEmpty() && cur_conn != connid)
+      continue;  // 同型号的另一台设备
+
+    pxv_info("resolve_device_handle_by_identity: driver=%s conn=%s -> handle=%llu",
+             driver.toUtf8().constData(), cur_conn.toUtf8().constData(),
+             (unsigned long long)h);
+    return h;
+  }
+
+  pxv_warn("resolve_device_handle_by_identity: no available device for "
+           "driver=%s conn=%s",
+           driver.toUtf8().constData(), connid.toUtf8().constData());
+  return NULL_HANDLE;
+}
+
+bool SigSession::device_identity_of_handle(ds_device_handle h, QString *driver,
+                                           QString *connid) {
+  if (h == NULL_HANDLE)
+    return false;
+  struct sr_dev_inst *sdi = _state->device_agent().find_sdi_by_handle(h);
+  if (!sdi)
+    return false;
+
+  struct sr_dev_driver *drv = sr_dev_inst_driver_get(sdi);
+  if (driver)
+    *driver = (drv && drv->name) ? QString::fromLocal8Bit(drv->name) : QString();
+  if (connid) {
+    const char *cid = sr_dev_inst_connid_get(sdi);
+    *connid = cid ? QString::fromLocal8Bit(cid) : QString();
+  }
+  return true;
+}
+
 bool SigSession::set_device(ds_device_handle dev_handle,
                             interface::DeviceChangeReason reason) {
   assert(!_state->is_saving());

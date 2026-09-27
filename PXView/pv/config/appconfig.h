@@ -84,8 +84,8 @@ struct AppOptions
 
     // 全局通道高度（视图密度）：用户 Ctrl+滚轮缩放后的值。0 = 从未设置过，
     // 此时回退主题「新通道默认高度」（AppConfig::logic_channel_default_height）。
-    // 只在"用户显式缩放"时写入；pxc 的 uiLayout 段是 per-设备/tab 的覆盖值，
-    // 两者分工见 ViewLayout 构造函数与 ViewLayout::set_signalHeightScale。
+    // 只在"用户显式缩放"时写入；workspace.json 的 session.uiLayout 是 per-tab
+    // 的覆盖值，两者分工见 ViewLayout 构造函数与 TabManager::restore_workspace()。
     int   logicChannelHeightScale = 0;
 
     // TDM realtime decode and analog display-trigger UI persistence.

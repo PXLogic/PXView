@@ -405,6 +405,21 @@ public:
   void auto_end() override { _capture_manager->auto_end(); }
   bool have_hardware_data();
   struct ds_device_base_info *get_device_list(int &out_count, int &actived_index);
+
+  // --- 设备身份的跨会话解析（workspace tab 恢复用）---
+  // ds_device_handle 是进程内句柄，跨会话无意义；tab 会话层只能持久化
+  // (driver, connid) 这样的稳定身份，恢复时再解析回一个可用 handle。
+  // 匹配规则与 set_default_device() 的"最后使用设备"一致（driver 必配，
+  // connid 非空时再精确匹配同型号多台设备），但**不产生任何设备切换副作用**。
+  // 无匹配返回 NULL_HANDLE。
+  ds_device_handle resolve_device_handle_by_identity(const QString &driver,
+                                                     const QString &connid);
+
+  // 反向查询：某 handle 的 (driver, connid)。返回 false 表示 handle 无效或
+  // 对应 sdi 已释放（此时 *driver / *connid 不被写入）。workspace 保存时用。
+  bool device_identity_of_handle(ds_device_handle h, QString *driver,
+                                 QString *connid);
+
   // 强制重新扫描所有驱动（热插拔检测场景）。get_device_list 默认复用缓存，
   // 避免在设备已 dev_open 后重复 sr_driver_scan 导致 LIBUSB_ERROR_ACCESS。
 void refresh_device_list();
