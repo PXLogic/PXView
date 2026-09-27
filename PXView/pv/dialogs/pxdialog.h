@@ -33,8 +33,9 @@
 #include "pv/interface/icallbacks.h"
 
 class QDialogButtonBox;
+class QShowEvent;
  
- 
+
 namespace pv {
 namespace dialogs {
 
@@ -76,6 +77,9 @@ protected:
     void accept();
     void reject();
 
+    void showEvent(QShowEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
+
 private:
     void build_base(bool hasClose); 
 
@@ -93,6 +97,7 @@ private:
     QWidget             *_titleSpaceLine;
 
     IDlgCallback        *m_callback;
+    bool                _nativeFrameApplied;
 };
 
 } // namespace dialogs

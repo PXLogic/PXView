@@ -23,6 +23,7 @@
 
 #include "pv/dialogs/pxdialog.h"
 #include "pv/dialogs/shadow.h"
+#include "pv/platform/winframeless.h"
 
 #include <QObject>
 #include <QEvent>
@@ -73,8 +74,15 @@ PxDialog::PxDialog(QWidget *parent, bool hasClose, bool bBaseButton) :
 
     m_callback = nullptr; 
     _clickYes = false;
+    _nativeFrameApplied = false;
     
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
+
+#ifndef _WIN32
+    // Outside Windows there is no DWM shadow, so the shadow is drawn by Qt
+    // (see build_base()) and needs transparent space around the content.
+    setAttribute(Qt::WA_TranslucentBackground);
+#endif
 
     build_base(hasClose); 
 }
@@ -162,12 +170,24 @@ void PxDialog::build_base(bool hasClose)
     _main_layout = new QVBoxLayout(_main_widget);
     _main_widget->setLayout(_main_layout);
 
-    _shadow  = new Shadow(this);
+    _main_widget->setAutoFillBackground(true);
+
+#ifdef _WIN32
+    // Windows: WinFrameless::apply() gives the HWND back a frame so DWM draws
+    // its native shadow. The frame itself is removed again in WM_NCCALCSIZE,
+    // so there is no visible border. A QGraphicsEffect on the top-level window
+    // would be clipped by the window rectangle, which is why no shadow was
+    // ever visible before.
+#else
+    // Other platforms: draw shadow and frame ourselves. The effect must live
+    // on the inner widget, and the outer layout has to leave room for it
+    // (blurRadius 10 + distance 3 = 13px).
+    _shadow = new Shadow(this);
     _shadow->setBlurRadius(10.0);
     _shadow->setDistance(3.0);
     _shadow->setColor(QColor(0, 0, 0, 80));
-    _main_widget->setAutoFillBackground(true); 
-    this->setGraphicsEffect(_shadow);
+    _main_widget->setGraphicsEffect(_shadow);
+#endif
 
     _titlebar = new toolbars::TitleBar(false, this, nullptr,hasClose, false);
     _main_layout->addWidget(_titlebar);
@@ -177,6 +197,10 @@ void PxDialog::build_base(bool hasClose)
     _main_layout->addWidget(_titleSpaceLine);
 
     _base_layout = new QVBoxLayout(this);   
+#ifndef _WIN32
+    // Room for the self-drawn shadow, see build_base().
+    _base_layout->setContentsMargins(14, 14, 14, 14);
+#endif
     _base_layout->addWidget(_main_widget);
     setLayout(_base_layout); 
 
@@ -199,6 +223,32 @@ void PxDialog::show()
     update_font();
     
     QWidget::show();
+}
+
+void PxDialog::showEvent(QShowEvent *event)
+{
+    if (!_nativeFrameApplied){
+        _nativeFrameApplied = true;
+        // Only now the HWND exists. Doing this in the constructor would force
+        // the native window to be created too early.
+        // No border, shadow only: WM_NCCALCSIZE removes the non-client area
+        // (see WinFrameless), so nothing is drawn around the content.
+        WinFrameless::apply(this);
+
+        // Safety net: paint the frame in the window background color, so any
+        // line the system still draws around the window stays invisible.
+        WinFrameless::setBorderColor(this, AppConfig::Instance().GetStyleColor());
+    }
+
+    QDialog::showEvent(event);
+}
+
+bool PxDialog::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+    if (WinFrameless::handleMessage(message, result, this))
+        return true;
+
+    return QDialog::nativeEvent(eventType, message, result);
 }
 
 } // namespace dialogs

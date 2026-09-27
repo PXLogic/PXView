@@ -21,6 +21,7 @@
  */
 #include "pv/dialogs/dsmessagebox.h"
 #include "pv/dialogs/shadow.h"
+#include "pv/platform/winframeless.h"
 
 #include <QObject>
 #include <QEvent>
@@ -53,24 +54,38 @@ DSMessageBox::DSMessageBox(QWidget *parent,const QString title) :
     _main_layout = nullptr;
 
     _bClickYes = false;
+    _nativeFrameApplied = false;
 
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
+
+#ifndef _WIN32
+    // Outside Windows there is no DWM shadow, so the shadow is drawn by Qt and
+    // needs transparent space around the content.
+    setAttribute(Qt::WA_TranslucentBackground);
+#endif
 
     _main_widget = new QWidget(this);
     _main_layout = new QVBoxLayout(_main_widget);
     _main_widget->setLayout(_main_layout);
 
-    _shadow = new Shadow(this);
     _msg = new QMessageBox(this);
     _titlebar = new toolbars::TitleBar(false, this, nullptr, false, false);
     _layout = new QVBoxLayout(this);
 
+    _main_widget->setAutoFillBackground(true);
+
+#ifdef _WIN32
+    // Windows: WinFrameless::apply() gives the HWND back a frame so DWM draws
+    // its native shadow. The frame itself is removed again in WM_NCCALCSIZE,
+    // so there is no visible border. A QGraphicsEffect on the top-level window
+    // would be clipped by the window rectangle and never be visible.
+#else
+    _shadow = new Shadow(this);
     _shadow->setBlurRadius(10.0);
     _shadow->setDistance(3.0);
     _shadow->setColor(QColor(0, 0, 0, 80));
-
-    _main_widget->setAutoFillBackground(true);
-    this->setGraphicsEffect(_shadow);
+    _main_widget->setGraphicsEffect(_shadow);
+#endif
 
     _msg->setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
 
@@ -83,6 +98,11 @@ DSMessageBox::DSMessageBox(QWidget *parent,const QString title) :
 
     _main_layout->addWidget(_titlebar);
     _main_layout->addWidget(_msg);
+
+#ifndef _WIN32
+    // Room for the self-drawn shadow.
+    _layout->setContentsMargins(14, 14, 14, 14);
+#endif
     _layout->addWidget(_main_widget);
 
     setLayout(_layout);
@@ -146,6 +166,32 @@ int DSMessageBox::exec()
     PopupDlgList::AddDlgTolist(this);
 
     return QDialog::exec();
+}
+
+void DSMessageBox::showEvent(QShowEvent *event)
+{
+    if (!_nativeFrameApplied){
+        _nativeFrameApplied = true;
+        // Only now the HWND exists. Doing this in the constructor would force
+        // the native window to be created too early.
+        // No border, shadow only: WM_NCCALCSIZE removes the non-client area
+        // (see WinFrameless), so nothing is drawn around the content.
+        WinFrameless::apply(this);
+
+        // Safety net: paint the frame in the window background color, so any
+        // line the system still draws around the window stays invisible.
+        WinFrameless::setBorderColor(this, AppConfig::Instance().GetStyleColor());
+    }
+
+    QDialog::showEvent(event);
+}
+
+bool DSMessageBox::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+    if (WinFrameless::handleMessage(message, result, this))
+        return true;
+
+    return QDialog::nativeEvent(eventType, message, result);
 }
 
 } // namespace dialogs

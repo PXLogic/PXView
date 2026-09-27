@@ -166,6 +166,13 @@ if(WIN32)
 	)
 	endif ()
 
+# Frameless-window decoration: native DWM shadow on Windows, no-op elsewhere.
+# Built on every platform; the Windows code is guarded by #ifdef _WIN32 inside
+# the source file.
+list(APPEND PXVIEW_GUI_SOURCES
+	PXView/pv/platform/winframeless.cpp
+)
+
 set(PXView_HEADERS
     PXView/mystyle.h
     PXView/pv/base/log.h
@@ -326,6 +333,7 @@ set(PXView_HEADERS_NO_MOC
     PXView/pv/ui/fn.h
     PXView/pv/ui/iconcache.h
     PXView/pv/session/tabcontext.h
+    PXView/pv/platform/winframeless.h
 )
 
 if(WIN32)

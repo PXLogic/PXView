@@ -28,6 +28,8 @@
 #include <QVBoxLayout>
 #include "pv/toolbars/titlebar.h"
 
+class QShowEvent;
+
 namespace pv {
 namespace dialogs {
 
@@ -52,6 +54,9 @@ protected:
     void accept();
     void reject();
 
+    void showEvent(QShowEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
+
 private slots:
     void on_button(QAbstractButton* btn);
 
@@ -65,6 +70,7 @@ private:
 
     QPoint              _startPos;
     bool                _bClickYes;
+    bool                _nativeFrameApplied;
 };
 
 } // namespace dialogs
