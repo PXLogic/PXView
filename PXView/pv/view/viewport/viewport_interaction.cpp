@@ -23,6 +23,7 @@
 
 #include "pv/view/viewport/viewport_interaction.h"
 #include "pv/view/viewport/viewport.h"
+#include "pv/view/viewport/viewport_drag.h"
 #include "pv/view/component/ruler.h"
 #include "pv/view/component/viewstatus.h"
 
@@ -110,7 +111,8 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
 
   _viewport->mouse_down_point() = event->position().toPoint();
   _viewport->mouse_down_offset() = _viewport->view().offset();
-  _viewport->drag_strength() = 0;
+  // 新的一次按压：结束在跑的惯性滚动（抓住视图即停），并清空速度采样。
+  _viewport->drag()->reset_drag_samples();
   _viewport->elapsed_time().restart();
 
   // 通道高度拉伸的判定区只在 Header（左侧通道面板）内，Viewport 不再命中
@@ -297,6 +299,10 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
   if (is_drag_action) {
     _viewport->drag_last_pos() = event->position().toPoint();
     _viewport->drag_buttons() = event->buttons();
+    // 按原始鼠标事件记录速度样本，高频、不被渲染帧合并；释放末段速度才准。
+    // 仅 TIME_VIEW 平移需要。
+    if (_viewport->type() == TIME_VIEW && _viewport->action_type() == NO_ACTION)
+      _viewport->drag()->record_drag_sample();
     if (!_viewport->drag_frame_pending()) {
       _viewport->drag_frame_pending() = true;
       _viewport->applyDragFrame();
@@ -334,47 +340,21 @@ void ViewportInteraction::mouseMoveEvent(QMouseEvent *event) {
 
 void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
   bool quickScroll = AppConfig::Instance().appOptions.quickScroll;
-  QWidget *topWin = _viewport->view().window();
-  bool isMaxWindow = topWin ? topWin->isMaximized() : false;
 
   switch (_viewport->action_type()) {
   case NO_ACTION: {
     if (event->button() == Qt::LeftButton &&
         _viewport->view().session().is_stopped_status()) {
-      // priority 1
-      // try to quick scroll view...
-      int curX = event->position().toPoint().x();
-      int clickX = _viewport->mouse_down_point().x();
-      int moveLong = abs_val(curX - clickX);
-      int maxWidth = _viewport->geometry().width();
-      float mvk = static_cast<float>(moveLong) / static_cast<float>(maxWidth);
-
+      // priority 1: 甩动惯性滚动。
+      // 只看**释放速度**（拖拽末段最近 100ms 窗口的实时速度），不看拖拽总
+      // 距离：轻轻一甩距离很短但末段速度快，同样要滑出；慢拖即使拖过半个
+      // 视口，速度低也不会滑。（若保留"总距离 ≥ 视口 25%/40%"的距离门槛，
+      // 小幅快甩会被完全挡死，惯性对手感最关键的小甩场景失效。）
+      // appOptions.quickScroll 是用户设置的总开关。
       if (quickScroll) {
-        quickScroll = false;
-        if (isMaxWindow && mvk > 0.4f) {
-          quickScroll = true;
-        } else if (!isMaxWindow && mvk > 0.25f) {
-          quickScroll = true;
-        }
-      }
-
-      if (_viewport->action_type() == NO_ACTION && quickScroll) {
-        const double strength = _viewport->drag_strength() *
-                                Viewport::DragTimerInterval * 1.0 /
-                                _viewport->elapsed_time().elapsed();
-        if (_viewport->elapsed_time().elapsed() < 200 &&
-            abs(_viewport->drag_strength()) < Viewport::MinorDragOffsetUp &&
-            abs(strength) > Viewport::MinorDragRateUp) {
-          _viewport->drag_timer().start(Viewport::DragTimerInterval);
+        if (_viewport->drag()->start_pan_decay())
           _viewport->set_action(LOGIC_MOVE);
-        } else if (_viewport->elapsed_time().elapsed() < 200 &&
-                   abs(strength) > Viewport::DragTimerInterval) {
-          _viewport->drag_strength() = strength * 5;
-          _viewport->drag_timer().start(Viewport::DragTimerInterval);
-          _viewport->set_action(LOGIC_MOVE);
-        }
       }
-
       // priority 2
       if (_viewport->action_type() == NO_ACTION) {
         if (_viewport->mouse_down_point().x() ==
@@ -440,26 +420,13 @@ void ViewportInteraction::onLogicMouseRelease(QMouseEvent *event) {
   }
   case LOGIC_MOVE: {
     if (_viewport->mouse_down_point() == event->position().toPoint()) {
-      _viewport->drag_strength() = 0;
-      _viewport->drag_timer().stop();
+      // 原地松手：无滑动意图，直接停。
+      _viewport->drag()->cancel_pan_decay();
       _viewport->set_action(NO_ACTION);
-    } else {
-      const double strength = _viewport->drag_strength() *
-                              Viewport::DragTimerInterval * 1.0 /
-                              _viewport->elapsed_time().elapsed();
-      if (_viewport->elapsed_time().elapsed() < 200 &&
-          abs(_viewport->drag_strength()) < Viewport::MinorDragOffsetUp &&
-          abs(strength) > Viewport::MinorDragRateUp) {
-        _viewport->drag_timer().start(Viewport::DragTimerInterval);
-      } else if (_viewport->elapsed_time().elapsed() < 200 &&
-                 abs(strength) > Viewport::DragTimerInterval) {
-        _viewport->drag_strength() = strength * 5;
-        _viewport->drag_timer().start(Viewport::DragTimerInterval);
-      } else {
-        _viewport->drag_strength() = 0;
-        _viewport->drag_timer().stop();
-        _viewport->set_action(NO_ACTION);
-      }
+    } else if (!_viewport->drag()->start_pan_decay()) {
+      // 释放速度低于阈值（慢拖或按住末段已静止）：不滑出。
+      _viewport->drag()->cancel_pan_decay();
+      _viewport->set_action(NO_ACTION);
     }
     break;
   }
@@ -623,6 +590,9 @@ void ViewportInteraction::mouseReleaseEvent(QMouseEvent *event) {
     _viewport->drag_frame_pending() = false;
     _viewport->drag_last_pos() = event->position().toPoint();
     _viewport->drag_buttons() = event->buttons();
+    // 补记释放瞬间的最终点，保证 recent_velocity 的窗口 newest 样本即松手位置。
+    if (_viewport->type() == TIME_VIEW && _viewport->action_type() == NO_ACTION)
+      _viewport->drag()->record_drag_sample();
     _viewport->applyDragFrame();
   }
 
@@ -762,6 +732,9 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
   if (_viewport->view().header_is_draging()) {
     return;
   }
+
+  // 滚轮输入抢占在跑的惯性滚动：两种视图运动不能互相覆盖 offset。
+  _viewport->drag()->cancel_pan_decay();
 
   int x = event->position().toPoint().x();
   // Windows 把 Shift+滚轮 转成水平滚动事件 (angleDelta().y()==0,
@@ -979,8 +952,7 @@ void ViewportInteraction::leaveEvent(QEvent *) {
     _viewport->edge_falling() = 0;
     _viewport->set_action(NO_ACTION);
   } else if (_viewport->action_type() == LOGIC_MOVE) {
-    _viewport->drag_strength() = 0;
-    _viewport->drag_timer().stop();
+    _viewport->drag()->cancel_pan_decay();
     _viewport->set_action(NO_ACTION);
   } else if (_viewport->action_type() == DSO_XM_STEP1 ||
              _viewport->action_type() == DSO_XM_STEP2) {

@@ -154,9 +154,6 @@ static void save_analog_measurement_options(
   settings.sync();
 }
 
-const double Viewport::DragDamping = 1.05;
-const double Viewport::MinorDragRateUp = 10;
-
 const QColor Viewport::PROBE_COLORS[8] = {
 
     QColor(0x75, 0x50, 0x7B), // Violet
@@ -209,8 +206,7 @@ _edge_hit = false;
   _lst_wait_tigger_time = high_resolution_clock::now();
   _tigger_wait_times = 0;
 
-  // drag inertial
-  _drag_strength = 0;
+  // drag inertial: 状态与物理在 ViewportDrag（采样窗口 + PanDecay 衰减）
   _drag_timer.setSingleShot(true);
 
   _cmenu = new QMenu(this);

@@ -293,6 +293,14 @@ pv_add_qtest(test_zoom_animation
     view/test_zoom_animation.cpp
 )
 
+# ==== 拖拽释放惯性滚动积分器：指数衰减位移契约 ====
+# 纯逻辑、零依赖（pan_decay.h 只依赖 <cmath>/<cstdint>）。锁死"帧位移之和
+# 必须精确等于解析值 v0·τ"（积分是精确的，不是每帧 v·dt 的近似累加）、逐帧
+# 减速单调、停止阈值结算尾差、时钟跳跃一帧收敛这几条惯性手感的不变量。
+pv_add_qtest(test_pan_decay
+    view/test_pan_decay.cpp
+)
+
 # ==== 让位拖动"整列平移"复现器 ====
 # 按生产代码的真实调用顺序（mousePress 采锚点 → mouseMove 逐帧 force + 让位）
 # 串起来跑一次拖动，验证"其余通道的槽位集合不随被拖项移动而整体平移"。

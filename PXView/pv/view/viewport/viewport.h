@@ -93,11 +93,7 @@ public:
   // keep the Viewport:: names for the GUI layer.
   static constexpr int HitCursorMargin = IRenderViewport::HitCursorMargin;
   static const double HitCursorTimeMargin;
-  static const int DragTimerInterval = 100;
-  static const int MinorDragOffsetUp = 100;
   static constexpr int DsoMeasureStages = IRenderViewport::DsoMeasureStages;
-  static const double MinorDragRateUp;
-  static const double DragDamping;
   static const int SnapMinSpace = 10;
   static const int WaitLoopTime = 400;
   static const QColor PROBE_COLORS[8];
@@ -108,6 +104,8 @@ public:
 
   // Public static constant (needed by ViewportInteraction)
   static constexpr int DragFrameInterval = 16;
+  // 惯性滚动的帧步进间隔（≈60FPS）。singleShot 自续，节奏贴合实际帧产出率。
+  static constexpr int PanFrameMs = 16;
 
   QColor panelBgColor() const { return _panelBgColor; }
   void setPanelBgColor(QColor c) { _panelBgColor = c; }
@@ -264,7 +262,6 @@ public:
   QPoint& drag_last_pos() { return _drag_last_pos; }
   bool& drag_frame_pending() { return _drag_frame_pending; }
   Qt::MouseButtons& drag_buttons() { return _drag_buttons; }
-  int& drag_strength() { return _drag_strength; }
   QElapsedTimer& elapsed_time() { return _elapsed_time; }
   QTimer& drag_timer() { return _drag_timer; }
 
@@ -436,7 +433,6 @@ private:
 
   QElapsedTimer _elapsed_time;
   QTimer _drag_timer;
-  int _drag_strength;
   bool _dso_xm_valid;
   int _dso_xm_y;
   uint64_t _dso_xm_index[DsoMeasureStages];

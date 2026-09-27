@@ -41,6 +41,14 @@
 using std::max;
 using std::min;
 
+// 惯性"轻重"旋钮：甩出距离 = v0 * τ（τ = PanDecay::TimeConstantMs）。
+// 该系数作用于释放初速 v0（默认减半）：拖拽跟踪速度通常高于手感上"应该滑出去"
+// 的距离，直接用会滑过头。
+//   0.5 = 减半（默认）；
+//   1.0 = 不减半 = 滑行距离翻倍；
+//   0.6~0.8 = 介于两者之间。
+constexpr double kPanDecayVelocityScale = 0.5;
+
 namespace pv {
 namespace view {
 
@@ -66,8 +74,6 @@ void ViewportDrag::applyDragFrame() {
                         .x();
         _viewport->view().set_scale_offset(_viewport->view().scale(), x);
       }
-      _viewport->drag_strength() =
-          (_viewport->mouse_down_point() - _viewport->drag_last_pos()).x();
     }
   } else if (_viewport->type() == FFT_VIEW) {
     if (_viewport->drag_buttons() & Qt::LeftButton) {
@@ -194,27 +200,103 @@ void ViewportDrag::applyDragFrame() {
   _viewport->update(UpdateEventType::UPDATE_EV_MS_MOVE);
 }
 
-void ViewportDrag::on_drag_timer() {
-  const int64_t offset = _viewport->view().offset();
-  const double scale = _viewport->view().scale();
+void ViewportDrag::reset_drag_samples() {
+  _samples.clear();
+  _pan.cancel();
+  _pan_remainder = 0.0;
+}
 
-  if (_viewport->view().session().is_stopped_status() &&
-      _viewport->drag_strength() != 0 &&
-      offset < _viewport->view().get_max_offset() &&
-      offset > _viewport->view().get_min_offset()) {
-    _viewport->view().set_scale_offset(scale, offset + _viewport->drag_strength());
-    _viewport->drag_strength() /= Viewport::DragDamping;
-    if (_viewport->drag_strength() != 0)
-      _viewport->drag_timer().start(Viewport::DragTimerInterval);
-  } else if (offset == _viewport->view().get_max_offset() ||
-             offset == _viewport->view().get_min_offset()) {
-    _viewport->drag_strength() = 0;
+void ViewportDrag::record_drag_sample() {
+  DragSample s;
+  s.t = _viewport->elapsed_time().elapsed();
+  s.x = _viewport->drag_last_pos().x();
+  _samples.push_back(s);
+  // 只保留最近 MaxSamples 帧；鼠标静止时重复帧也保留 —— 它们让窗口内的
+  // 平均速度自然趋向 0，"按住不动再松手"就不会产生惯性。
+  if (_samples.size() > static_cast<size_t>(MaxSamples))
+    _samples.erase(_samples.begin());
+}
+
+double ViewportDrag::recent_velocity() const {
+  if (_samples.size() < 2)
+    return 0.0;
+  const DragSample &newest = _samples.back();
+  // 只看最近 VelocityWindowMs 窗口：拖拽早期的慢速移动不应稀释释放速度。
+  const int64_t t_min = newest.t - VelocityWindowMs;
+  size_t first = 0;
+  while (first + 1 < _samples.size() && _samples[first].t < t_min)
+    first++;
+  const DragSample &oldest = _samples[first];
+  const double dt = static_cast<double>(newest.t - oldest.t);
+  if (dt < 1.0)
+    return 0.0;
+  return static_cast<double>(newest.x - oldest.x) / dt;
+}
+
+bool ViewportDrag::start_pan_decay() {
+  const double v = recent_velocity();
+  // 给初速乘缩放系数控制"滑多远"（见 kPanDecayVelocityScale）。
+  // 注意符号：拖拽时 offset = mouse_down_offset + (mouse_down_point.x -
+  // drag_last_pos.x)，即 offset 随鼠标右移而减小。释放速度 v 是"鼠标空间"
+  // 速度（右移为正），惯性必须沿同方向继续，换算到"offset 空间"要取反：
+  // offset 速度 = -v。漏掉这个负号会让视图朝反方向弹回（回弹）。
+  const double v0 = -v * kPanDecayVelocityScale;
+  if (std::fabs(v0) <= PanDecay::StartMinVelocityPxPerMs)
+    return false;
+  _pan.start(v0, _viewport->elapsed_time().elapsed());
+  // 启动衰减步进定时器：on_drag_timer 每帧推进后自行续期（singleShot）。
+  // 注意：_drag_timer 仅由自身续期启动，若这里不首次 start，整段惯性滚动
+  // 永远不会被驱动——这正是"小甩看不出来滑动"的根因（定时器从未启动）。
+  _viewport->drag_timer().start(Viewport::PanFrameMs);
+  return true;
+}
+
+void ViewportDrag::cancel_pan_decay() {
+  _pan.cancel();
+  _viewport->drag_timer().stop();
+}
+
+void ViewportDrag::on_drag_timer() {
+  if (!_pan.active()) {
     _viewport->drag_timer().stop();
     _viewport->set_action(NO_ACTION);
-  } else if (_viewport->action_type() == NO_ACTION) {
-    _viewport->drag_strength() = 0;
-    _viewport->drag_timer().stop();
+    return;
   }
+
+  // 采集进行中禁止惯性滚动（数据在持续增长，滚动基准每帧都在变）。
+  if (!_viewport->view().session().is_stopped_status()) {
+    _pan.cancel();
+    _viewport->drag_timer().stop();
+    _viewport->set_action(NO_ACTION);
+    return;
+  }
+
+  const int64_t now = _viewport->elapsed_time().elapsed();
+  double dx = 0.0;
+  const bool more = _pan.sample(now, dx);
+
+  // 亚像素累加：把本帧精确位移并入余数，只提交整数部分，避免尾部位移被
+  // llround 丢弃，也避免"每帧移动 <1px"被下面的贴边判定误判为已停。
+  _pan_remainder += dx;
+  const int64_t step = static_cast<int64_t>(llround(_pan_remainder));
+  _pan_remainder -= static_cast<double>(step);
+
+  // 位移落地；set_scale_offset 内部会把 offset 夹到有效范围（顶到数据边界时
+  // new_offset 与 offset 相等，此时 step 恒为 0、余数不再增长 → 真正停住）。
+  const int64_t offset = _viewport->view().offset();
+  const int64_t new_offset = offset + step;
+  _viewport->view().set_scale_offset(_viewport->view().scale(), new_offset);
+
+  // 速度衰减到阈值以下（PanDecay 已结算剩余位移）或顶到数据边界 → 结束。
+  if (!more) {
+    _pan.cancel();
+    _viewport->drag_timer().stop();
+    _viewport->set_action(NO_ACTION);
+    return;
+  }
+
+  // singleShot 自续：节奏贴合实际事件循环/帧产出率，而不是固定 10Hz。
+  _viewport->drag_timer().start(Viewport::PanFrameMs);
 }
 
 } // namespace view
