@@ -208,6 +208,10 @@
         "text": "更新"
     },
     {
+        "id": "IDS_TOOLBAR_HELP_FIRMWARE",
+        "text": "固件升级..."
+    },
+    {
         "id": "IDS_TOOLBAR_HELP_LOG",
         "text": "日志选项"
     },

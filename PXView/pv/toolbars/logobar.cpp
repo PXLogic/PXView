@@ -31,6 +31,7 @@
 
 #include "pv/config/appconfig.h"
 #include "pv/dialogs/about.h"
+#include "pv/dialogs/iapdialog.h"
 #include "pv/ui/fn.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/iconcache.h"
@@ -84,6 +85,11 @@ LogoBar::LogoBar(SigSession *session, QWidget *parent)
 
   _update = new QAction(this);
 
+  // CH32H417 固件升级(IAP)：仅由 MainWindowThemeManager 挂进顶部「帮助」菜单，
+  // 不再出现在 logo 下拉菜单里（该 _menu 本就未挂载到控件上）。
+  _iap = new QAction(this);
+  _iap->setObjectName(QString::fromUtf8("actionIap"));
+
   _menu = new QMenu(this);
   _menu->addMenu(_language);
   _menu->addAction(_about);
@@ -115,6 +121,7 @@ LogoBar::LogoBar(SigSession *session, QWidget *parent)
   connect(_issue, &QAction::triggered, this,
           &LogoBar::on_actionIssue_triggered);
   connect(_update, &QAction::triggered, this, &LogoBar::on_action_update);
+  connect(_iap, &QAction::triggered, this, &LogoBar::on_action_iap_triggered);
 
   ADD_UI(this);
 }
@@ -141,6 +148,8 @@ void LogoBar::retranslateUi() {
       L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_BUG), "&Bug Report"));
   _update->setText(
       L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_UPDATE), "&Update"));
+  _iap->setText(L_S(STR_PAGE_TOOLBAR, S_ID(IDS_TOOLBAR_HELP_FIRMWARE),
+                    "&Firmware Upgrade..."));
 
   reStyle();
 }
@@ -176,6 +185,7 @@ void LogoBar::reStyle() {
   _manual->setIcon(getIcon("/manual.svg"));
   _issue->setIcon(getIcon("/bug.svg"));
   _update->setIcon(getIcon("/update.svg"));
+  _iap->setIcon(getIcon("/update.svg"));
 
   // if (_connected)
   //     _logo_button.setIcon(QIcon(iconPath+"/logo_color.svg"));
@@ -239,6 +249,13 @@ void LogoBar::on_action_update() {
     QDesktopServices::openUrl(
         QUrl(QLatin1String("https://github.com/PXLogic/PXView")));
   }
+}
+
+void LogoBar::on_action_iap_triggered() {
+  // CH32H417 固件升级：独立对话框 + 后台 IAPWorker
+  // （libusb 发 0xAE 进 IAP + CDC 串口烧写，见 pv/dialogs/iapdialog.*）。
+  pv::dialogs::IAPDialog dlg(this);
+  dlg.exec();
 }
 
 void LogoBar::enable_toggle(bool enable) { (void)enable; }

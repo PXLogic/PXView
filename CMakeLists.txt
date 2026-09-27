@@ -304,6 +304,12 @@ target_link_libraries(${PROJECT_NAME}
 	${QT_GUI_LIBS}
 	${MIMALLOC_LIB}
 )
+
+# CH32H417 IAP 固件升级（PXView/pv/dialogs/iapdialog.cpp）走 CDC 虚拟串口：
+#   APP  = 1A86:5537 (USB2) / 1A86:5538 (USB3)  → 需 WinUSB，供 libusb 采集
+#   IAP  = 1A86:5539                            → USB CDC ACM，系统自带 usbser 免驱
+# 找口/收发用 Qt6::SerialPort（见 cmake/deps.cmake），进 IAP 用已有 libusb。
+# 不需要 hidapi：那是旧 1v0 固件（IAP=HID 1A86:FE17）才用的通道。
 if(WIN32)
 	target_link_libraries(${PROJECT_NAME}
 		"-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")

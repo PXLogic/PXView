@@ -139,7 +139,7 @@ jobs:
         run: |
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
-            -m qtwebsockets qtmultimedia --outputdir ${{ env.QT_PREFIX }}
+            -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
 
       - name: Build qtwayland platform plugin
         run: |
@@ -513,7 +513,7 @@ jobs:
         run: |
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
-            -m qtwebsockets qtmultimedia --outputdir ${{ env.QT_PREFIX }}
+            -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
 
       - name: Build qtwayland platform plugin
         run: |
@@ -770,7 +770,7 @@ jobs:
         run: |
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
-            -m qtwebsockets qtmultimedia --outputdir ${{ env.QT_PREFIX }}
+            -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
 
       - name: Build qtwayland platform plugin
         run: |
@@ -1092,7 +1092,7 @@ jobs:
         run: |
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
-            -m qtwebsockets qtmultimedia --outputdir ${{ env.QT_PREFIX }}
+            -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
 
       - name: Build qtwayland platform plugin
         run: |

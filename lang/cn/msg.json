@@ -409,5 +409,189 @@
     {
         "id": "IDS_TAB_NEW_TAB",
         "text": "新建标签页"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_PORT_FAILED",
+        "text": "打开串口 %1 失败: %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_PORT_OPENED",
+        "text": "已打开 IAP 串口 %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_BAD_FRAME_LEN",
+        "text": "帧长度非法: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_FAILED",
+        "text": "串口写入失败: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_TIMEOUT",
+        "text": "串口写入超时"
+    },
+    {
+        "id": "IDS_MSG_IAP_ACK_TIMEOUT",
+        "text": "等待应答超时 (%1 ms)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ALREADY_IN_IAP",
+        "text": "设备已在 IAP 模式（CDC 串口就绪），跳过 0xAE"
+    },
+    {
+        "id": "IDS_MSG_IAP_SEEK_APP",
+        "text": "查找 APP 设备 (1A86:5537/5538) 并发送进入 IAP 命令 (EP1 0xAE)..."
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP",
+        "text": "未发现 APP 设备 (1A86:5537/5538)，也未发现 IAP 串口 (1A86:5539)。"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROBE_RESULT",
+        "text": "探测结果: 0x5537 → %1；0x5538 → %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP_HINT",
+        "text": "请检查：设备是否已被本程序打开（正在采集 → 先停止采集）；USB 线缆/接口是否正常；若设备已在 IAP 模式却看不到串口，请确认系统已为 1A86:5539 加载 usbser 驱动。"
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_ENUM",
+        "text": "等待设备切换到 IAP(CDC) 并枚举串口..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ENTERED",
+        "text": "已进入 IAP 模式"
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_TIMEOUT",
+        "text": "等待 IAP 串口超时 (18s)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_START",
+        "text": "擦除 FLASH（设备自 FLASH_Base 起擦；镜像起始地址 0x%1）"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASING",
+        "text": "擦除 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_SEND_FAILED",
+        "text": "擦除命令发送失败"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_TIMEOUT",
+        "text": "擦除响应超时"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_FAILED",
+        "text": "擦除失败, 错误码 %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_OK",
+        "text": "擦除成功"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_START",
+        "text": "编程 FLASH, 共 %1 字节"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROGRAMMING",
+        "text": "编程 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_PROGRESS",
+        "text": "编程 FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_FAILED",
+        "text": "编程失败 (偏移 %1, 错误码 %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_DONE",
+        "text": "编程完成"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_START",
+        "text": "校验 FLASH（设备自 FLASH_Base 起比对；镜像起始地址 0x%1）"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFYING",
+        "text": "校验 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_PROGRESS",
+        "text": "校验 FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_FAILED",
+        "text": "校验失败 (偏移 %1, 错误码 %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_OK",
+        "text": "校验成功"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_SENDING",
+        "text": "发送升级结束命令..."
+    },
+    {
+        "id": "IDS_MSG_IAP_FINISHING",
+        "text": "完成升级..."
+    },
+    {
+        "id": "IDS_MSG_IAP_END_FAILED",
+        "text": "发送结束命令失败"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_ACK",
+        "text": "设备确认结束 (status=%1)"
+    },
+    {
+        "id": "IDS_MSG_IAP_DEVICE_RESET",
+        "text": "设备已复位（无应答为正常情况）"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_FILE_FAILED",
+        "text": "无法打开固件文件: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_FILE_EMPTY",
+        "text": "固件文件为空"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DETECTED",
+        "text": "检测到 HEX 文件，正在转换为二进制..."
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_FAILED",
+        "text": "HEX 转换失败"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DONE",
+        "text": "HEX 转换完成: 起始地址 0x%1, %2 字节"
+    },
+    {
+        "id": "IDS_MSG_IAP_BIN_READ",
+        "text": "读取 BIN 文件: %1 字节"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_SUM_ERROR",
+        "text": "HEX 校验和错误"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_NO_DATA",
+        "text": "HEX 中没有有效数据记录"
+    },
+    {
+        "id": "IDS_MSG_IAP_CONNECTING",
+        "text": "连接设备..."
+    },
+    {
+        "id": "IDS_MSG_IAP_DONE",
+        "text": "升级完成"
+    },
+    {
+        "id": "IDS_MSG_IAP_FAILED",
+        "text": "升级失败或已取消"
     }
 ]

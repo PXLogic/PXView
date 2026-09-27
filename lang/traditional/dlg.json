@@ -1954,5 +1954,85 @@
     {
         "id": "IDS_DLG_SELECT_ALL",
         "text": "全選"
+    },
+    {
+        "id": "IDS_DLG_IAP_TITLE",
+        "text": "韌體升級"
+    },
+    {
+        "id": "IDS_DLG_IAP_ENTER_IAP",
+        "text": "進入 IAP"
+    },
+    {
+        "id": "IDS_DLG_IAP_HINT",
+        "text": "1. 若裝置正在擷取，可先點「進入 IAP」切到升級串列埠\n2. 選擇韌體檔案（.bin 或 .hex）\n3. 點「開始升級」\n提示：僅空片/首次使用才需先用 WCH-Link 燒錄 IAP 引導；已有 IAP 的板子可直接升級。"
+    },
+    {
+        "id": "IDS_DLG_IAP_FIRMWARE_FILE",
+        "text": "韌體檔案:"
+    },
+    {
+        "id": "IDS_DLG_IAP_PATH_HINT",
+        "text": "請選擇 .bin 或 .hex 韌體"
+    },
+    {
+        "id": "IDS_DLG_IAP_BROWSE",
+        "text": "瀏覽..."
+    },
+    {
+        "id": "IDS_DLG_IAP_READY",
+        "text": "就緒"
+    },
+    {
+        "id": "IDS_DLG_IAP_START",
+        "text": "開始升級"
+    },
+    {
+        "id": "IDS_DLG_IAP_CLOSE",
+        "text": "關閉"
+    },
+    {
+        "id": "IDS_DLG_IAP_MSG_TITLE",
+        "text": "韌體升級"
+    },
+    {
+        "id": "IDS_DLG_IAP_CANCEL_CONFIRM",
+        "text": "升級正在進行中，確定要取消並退出嗎？"
+    },
+    {
+        "id": "IDS_DLG_IAP_SELECT_FILE",
+        "text": "選擇韌體檔案"
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_FILTER",
+        "text": "韌體檔案 (*.bin *.BIN *.hex *.HEX);;所有檔案 (*)"
+    },
+    {
+        "id": "IDS_DLG_IAP_NO_FILE",
+        "text": "請先選擇韌體檔案。"
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_MISSING",
+        "text": "韌體檔案不存在。"
+    },
+    {
+        "id": "IDS_DLG_IAP_STARTING",
+        "text": "開始升級..."
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_LABEL",
+        "text": "韌體: %1"
+    },
+    {
+        "id": "IDS_DLG_IAP_STATUS_FAILED",
+        "text": "升級失敗"
+    },
+    {
+        "id": "IDS_DLG_IAP_DONE_MSG",
+        "text": "韌體升級完成，裝置將重新列舉。"
+    },
+    {
+        "id": "IDS_DLG_IAP_FAIL_MSG",
+        "text": "韌體升級失敗，詳見日誌。"
     }
 ]

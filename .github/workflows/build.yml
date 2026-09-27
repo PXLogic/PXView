@@ -247,7 +247,7 @@ jobs:
         run: |
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
-            -m qtwebsockets qtmultimedia --outputdir ${{ env.QT_PREFIX }}
+            -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
           echo "=== Platform plugins before qtwayland build ==="
           ls -la ${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64/plugins/platforms/ || true
 
@@ -1116,6 +1116,7 @@ jobs:
             mingw-w64-ucrt-x86_64-qt6-svg
             mingw-w64-ucrt-x86_64-qt6-websockets
             mingw-w64-ucrt-x86_64-qt6-multimedia
+            mingw-w64-ucrt-x86_64-qt6-serialport
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-mimalloc
             mingw-w64-ucrt-x86_64-boost

@@ -82,6 +82,8 @@ private slots:
     void on_actionManual_triggered();
     void on_actionIssue_triggered();
     void on_action_update();
+    // CH32H417 固件升级(IAP)：打开 IAPDialog
+    void on_action_iap_triggered();
 
 // private:
 public:
@@ -103,6 +105,7 @@ public:
     QAction *_manual;
     QAction *_issue;
     QAction *_update;
+    QAction *_iap;
 
     IMainForm *_mainForm;
 };

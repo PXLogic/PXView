@@ -1968,6 +1968,25 @@ QFrame#mcpCmdFrame
     border-radius: 4px;
 }
 
+/* IAP 固件升级对话框：路径框与日志框共用同一套边框（与上面 mcpCmdFrame 一致）。
+ * 内层控件必须显式去掉自身边框并透明：只调 setFrameShape(NoFrame) 不够——
+ * 全局 QLineEdit / QTextEdit 规则里的 border 会覆盖它，导致"框里还有一圈框"，
+ * 而且 hover 时内层那圈会变成 @accent（亮蓝），看起来像"一个 active 一个默认"。 */
+QFrame#iapFileFrame,
+QFrame#iapLogFrame
+{
+    background-color: @bg-base;
+    border: 1px solid @border-strong;
+    border-radius: 4px;
+}
+
+QFrame#iapFileFrame QLineEdit,
+QFrame#iapLogFrame QTextEdit
+{
+    background: transparent;
+    border: none;
+}
+
 QPlainTextEdit#log_view
 {
     background-color: @input-bg;

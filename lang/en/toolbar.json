@@ -208,6 +208,10 @@
         "text": "&Update"
     },
     {
+        "id": "IDS_TOOLBAR_HELP_FIRMWARE",
+        "text": "&Firmware Upgrade..."
+    },
+    {
         "id": "IDS_TOOLBAR_HELP_LOG",
         "text": "L&og Options"
     },

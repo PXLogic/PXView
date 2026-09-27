@@ -410,5 +410,189 @@
     {
         "id": "IDS_TAB_NEW_TAB",
         "text": "New Tab"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_PORT_FAILED",
+        "text": "Failed to open port %1: %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_PORT_OPENED",
+        "text": "Opened IAP port %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_BAD_FRAME_LEN",
+        "text": "Invalid frame length: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_FAILED",
+        "text": "Serial write failed: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_TIMEOUT",
+        "text": "Serial write timed out"
+    },
+    {
+        "id": "IDS_MSG_IAP_ACK_TIMEOUT",
+        "text": "Timed out waiting for reply (%1 ms)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ALREADY_IN_IAP",
+        "text": "Device is already in IAP mode (CDC port ready), skipping 0xAE"
+    },
+    {
+        "id": "IDS_MSG_IAP_SEEK_APP",
+        "text": "Looking for APP device (1A86:5537/5538) and sending enter-IAP command (EP1 0xAE)..."
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP",
+        "text": "No APP device (1A86:5537/5538) and no IAP port (1A86:5539) were found."
+    },
+    {
+        "id": "IDS_MSG_IAP_PROBE_RESULT",
+        "text": "Probe result: 0x5537 -> %1; 0x5538 -> %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP_HINT",
+        "text": "Check whether the device is already open in this app (stop capture first), whether the USB cable/port is fine, and — if the device is in IAP mode but shows no serial port — whether 1A86:5539 has its usbser driver loaded."
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_ENUM",
+        "text": "Waiting for the device to switch to IAP (CDC) and enumerate the port..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ENTERED",
+        "text": "Entered IAP mode"
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_TIMEOUT",
+        "text": "Timed out waiting for the IAP port (18s)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_START",
+        "text": "Erase FLASH (device erases from FLASH_Base; image start 0x%1)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASING",
+        "text": "Erasing FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_SEND_FAILED",
+        "text": "Failed to send the erase command"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_TIMEOUT",
+        "text": "Erase reply timed out"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_FAILED",
+        "text": "Erase failed, error code %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_OK",
+        "text": "Erase succeeded"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_START",
+        "text": "Programming FLASH, %1 bytes in total"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROGRAMMING",
+        "text": "Programming FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_PROGRESS",
+        "text": "Programming FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_FAILED",
+        "text": "Programming failed (offset %1, error code %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_DONE",
+        "text": "Programming done"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_START",
+        "text": "Verify FLASH (device compares from FLASH_Base; image start 0x%1)"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFYING",
+        "text": "Verifying FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_PROGRESS",
+        "text": "Verifying FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_FAILED",
+        "text": "Verify failed (offset %1, error code %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_OK",
+        "text": "Verify succeeded"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_SENDING",
+        "text": "Sending the end-of-upgrade command..."
+    },
+    {
+        "id": "IDS_MSG_IAP_FINISHING",
+        "text": "Finishing upgrade..."
+    },
+    {
+        "id": "IDS_MSG_IAP_END_FAILED",
+        "text": "Failed to send the end command"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_ACK",
+        "text": "Device confirmed the end (status=%1)"
+    },
+    {
+        "id": "IDS_MSG_IAP_DEVICE_RESET",
+        "text": "Device has reset (no reply is normal)"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_FILE_FAILED",
+        "text": "Cannot open the firmware file: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_FILE_EMPTY",
+        "text": "The firmware file is empty"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DETECTED",
+        "text": "HEX file detected, converting to binary..."
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_FAILED",
+        "text": "HEX conversion failed"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DONE",
+        "text": "HEX conversion done: start address 0x%1, %2 bytes"
+    },
+    {
+        "id": "IDS_MSG_IAP_BIN_READ",
+        "text": "Read BIN file: %1 bytes"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_SUM_ERROR",
+        "text": "HEX checksum error"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_NO_DATA",
+        "text": "No valid data record in the HEX file"
+    },
+    {
+        "id": "IDS_MSG_IAP_CONNECTING",
+        "text": "Connecting to the device..."
+    },
+    {
+        "id": "IDS_MSG_IAP_DONE",
+        "text": "Upgrade completed"
+    },
+    {
+        "id": "IDS_MSG_IAP_FAILED",
+        "text": "Upgrade failed or was cancelled"
     }
 ]

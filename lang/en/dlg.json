@@ -1958,5 +1958,85 @@
     {
         "id": "IDS_DLG_SELECT_ALL",
         "text": "Select All"
+    },
+    {
+        "id": "IDS_DLG_IAP_TITLE",
+        "text": "Firmware Upgrade"
+    },
+    {
+        "id": "IDS_DLG_IAP_ENTER_IAP",
+        "text": "Enter IAP"
+    },
+    {
+        "id": "IDS_DLG_IAP_HINT",
+        "text": "1. If the device is capturing, click \"Enter IAP\" first\n2. Select the firmware file (.bin or .hex)\n3. Click \"Start Upgrade\"\nNote: only a blank chip needs the IAP bootloader flashed once via WCH-Link; a board that already has IAP can be upgraded directly."
+    },
+    {
+        "id": "IDS_DLG_IAP_FIRMWARE_FILE",
+        "text": "Firmware file:"
+    },
+    {
+        "id": "IDS_DLG_IAP_PATH_HINT",
+        "text": "Select a .bin or .hex firmware"
+    },
+    {
+        "id": "IDS_DLG_IAP_BROWSE",
+        "text": "Browse..."
+    },
+    {
+        "id": "IDS_DLG_IAP_READY",
+        "text": "Ready"
+    },
+    {
+        "id": "IDS_DLG_IAP_START",
+        "text": "Start Upgrade"
+    },
+    {
+        "id": "IDS_DLG_IAP_CLOSE",
+        "text": "Close"
+    },
+    {
+        "id": "IDS_DLG_IAP_MSG_TITLE",
+        "text": "Firmware Upgrade"
+    },
+    {
+        "id": "IDS_DLG_IAP_CANCEL_CONFIRM",
+        "text": "Upgrade is in progress. Cancel and quit?"
+    },
+    {
+        "id": "IDS_DLG_IAP_SELECT_FILE",
+        "text": "Select Firmware File"
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_FILTER",
+        "text": "Firmware (*.bin *.BIN *.hex *.HEX);;All Files (*)"
+    },
+    {
+        "id": "IDS_DLG_IAP_NO_FILE",
+        "text": "Please select a firmware file first."
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_MISSING",
+        "text": "Firmware file does not exist."
+    },
+    {
+        "id": "IDS_DLG_IAP_STARTING",
+        "text": "Starting upgrade..."
+    },
+    {
+        "id": "IDS_DLG_IAP_FILE_LABEL",
+        "text": "Firmware: %1"
+    },
+    {
+        "id": "IDS_DLG_IAP_STATUS_FAILED",
+        "text": "Upgrade failed"
+    },
+    {
+        "id": "IDS_DLG_IAP_DONE_MSG",
+        "text": "Firmware upgrade finished; the device will re-enumerate."
+    },
+    {
+        "id": "IDS_DLG_IAP_FAIL_MSG",
+        "text": "Firmware upgrade failed. See the log for details."
     }
 ]

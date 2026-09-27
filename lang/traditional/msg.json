@@ -409,5 +409,189 @@
     {
         "id": "IDS_TAB_NEW_TAB",
         "text": "新建標籤頁"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_PORT_FAILED",
+        "text": "開啟串列埠 %1 失敗: %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_PORT_OPENED",
+        "text": "已開啟 IAP 串列埠 %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_BAD_FRAME_LEN",
+        "text": "幀長度非法: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_FAILED",
+        "text": "串列埠寫入失敗: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_WRITE_TIMEOUT",
+        "text": "串列埠寫入逾時"
+    },
+    {
+        "id": "IDS_MSG_IAP_ACK_TIMEOUT",
+        "text": "等待回應逾時 (%1 ms)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ALREADY_IN_IAP",
+        "text": "裝置已在 IAP 模式（CDC 串列埠就緒），跳過 0xAE"
+    },
+    {
+        "id": "IDS_MSG_IAP_SEEK_APP",
+        "text": "尋找 APP 裝置 (1A86:5537/5538) 並傳送進入 IAP 命令 (EP1 0xAE)..."
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP",
+        "text": "未發現 APP 裝置 (1A86:5537/5538)，也未發現 IAP 串列埠 (1A86:5539)。"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROBE_RESULT",
+        "text": "探測結果: 0x5537 → %1；0x5538 → %2"
+    },
+    {
+        "id": "IDS_MSG_IAP_NO_APP_HINT",
+        "text": "請檢查：裝置是否已被本程式開啟（正在擷取 → 先停止擷取）；USB 線材/埠是否正常；若裝置已在 IAP 模式卻看不到串列埠，請確認系統已為 1A86:5539 載入 usbser 驅動。"
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_ENUM",
+        "text": "等待裝置切換到 IAP(CDC) 並列舉串列埠..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ENTERED",
+        "text": "已進入 IAP 模式"
+    },
+    {
+        "id": "IDS_MSG_IAP_WAIT_TIMEOUT",
+        "text": "等待 IAP 串列埠逾時 (18s)"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_START",
+        "text": "抹除 FLASH（裝置自 FLASH_Base 起抹除；映像起始位址 0x%1）"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASING",
+        "text": "抹除 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_SEND_FAILED",
+        "text": "抹除命令傳送失敗"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_TIMEOUT",
+        "text": "抹除回應逾時"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_FAILED",
+        "text": "抹除失敗, 錯誤碼 %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_ERASE_OK",
+        "text": "抹除成功"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_START",
+        "text": "燒錄 FLASH, 共 %1 位元組"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROGRAMMING",
+        "text": "燒錄 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_PROGRESS",
+        "text": "燒錄 FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_FAILED",
+        "text": "燒錄失敗 (位移 %1, 錯誤碼 %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_PROM_DONE",
+        "text": "燒錄完成"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_START",
+        "text": "驗證 FLASH（裝置自 FLASH_Base 起比對；映像起始位址 0x%1）"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFYING",
+        "text": "驗證 FLASH..."
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_PROGRESS",
+        "text": "驗證 FLASH... %1%"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_FAILED",
+        "text": "驗證失敗 (位移 %1, 錯誤碼 %2)"
+    },
+    {
+        "id": "IDS_MSG_IAP_VERIFY_OK",
+        "text": "驗證成功"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_SENDING",
+        "text": "傳送升級結束命令..."
+    },
+    {
+        "id": "IDS_MSG_IAP_FINISHING",
+        "text": "完成升級..."
+    },
+    {
+        "id": "IDS_MSG_IAP_END_FAILED",
+        "text": "傳送結束命令失敗"
+    },
+    {
+        "id": "IDS_MSG_IAP_END_ACK",
+        "text": "裝置確認結束 (status=%1)"
+    },
+    {
+        "id": "IDS_MSG_IAP_DEVICE_RESET",
+        "text": "裝置已重置（無回應為正常情況）"
+    },
+    {
+        "id": "IDS_MSG_IAP_OPEN_FILE_FAILED",
+        "text": "無法開啟韌體檔案: %1"
+    },
+    {
+        "id": "IDS_MSG_IAP_FILE_EMPTY",
+        "text": "韌體檔案為空"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DETECTED",
+        "text": "偵測到 HEX 檔案，正在轉換為二進位..."
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_FAILED",
+        "text": "HEX 轉換失敗"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_DONE",
+        "text": "HEX 轉換完成: 起始位址 0x%1, %2 位元組"
+    },
+    {
+        "id": "IDS_MSG_IAP_BIN_READ",
+        "text": "讀取 BIN 檔案: %1 位元組"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_SUM_ERROR",
+        "text": "HEX 校驗和錯誤"
+    },
+    {
+        "id": "IDS_MSG_IAP_HEX_NO_DATA",
+        "text": "HEX 中沒有有效資料記錄"
+    },
+    {
+        "id": "IDS_MSG_IAP_CONNECTING",
+        "text": "連接裝置..."
+    },
+    {
+        "id": "IDS_MSG_IAP_DONE",
+        "text": "升級完成"
+    },
+    {
+        "id": "IDS_MSG_IAP_FAILED",
+        "text": "升級失敗或已取消"
     }
 ]

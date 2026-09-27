@@ -98,6 +98,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/dialogs/applicationpardlg.cpp
     PXView/pv/dialogs/decoderoptionsdlg.cpp
     PXView/pv/dialogs/inputoutputoptions.cpp
+    PXView/pv/dialogs/iapdialog.cpp
     # Custom widgets
     PXView/pv/widgets/border.cpp
     PXView/pv/widgets/slidingdrawer.cpp
@@ -272,6 +273,7 @@ PXView/pv/view/component/decoderaudioplayer.h
     PXView/pv/ui/intspinbox.h
     PXView/pv/base/pxvdef.h
     PXView/pv/dialogs/inputoutputoptions.h
+    PXView/pv/dialogs/iapdialog.h
     PXView/pv/prop/binding/inputoutput.h
     PXView/pv/dialogs/applicationpardlg.h
     PXView/pv/dock/keywordlineedit.h
