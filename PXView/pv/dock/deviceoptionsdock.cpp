@@ -832,15 +832,41 @@ void DeviceOptionsDock::channel_check() {
     pxv_warn("%s", "DeviceOptionsDock::channel_check: mode_index is empty");
     return;
   }
+
+  // Qt 对每次点击都发 clicked（含点击已选中的那一项），而"点同一个通道模式"
+  // 并不是一次状态变更：此时既不该 apply_device_options()（内部 reload() 会
+  // 重建 SignalModel → signals_changed → View 全量重排），也不该刷新通道面板/
+  // 勾选态 —— 直接返回，否则会出现"没改任何东西却整片重画"的抖动。
+  // 判定用驱动返回的当前模式字符串（与 logic_probes() 预勾选单选钮同源）。
+  QString cur_mode;
+  _device_agent->get_config_string(SR_CONF_CHANNEL_MODE, cur_mode);
+  if (cur_mode == mode_index) {
+    pxv_info("channel_check: '%s' already active, ignoring",
+             mode_index.toUtf8().constData());
+    return;
+  }
+
   _device_agent->set_config_string(SR_CONF_CHANNEL_MODE,
                                   mode_index.toUtf8().constData());
-
-  build_dynamic_panel();
-  try_resize_scroll();
 
   QTimer::singleShot(0, this, [this]() {
     // 命令阶段：显式触发 Core 状态收敛（命令/通知拆分约定）。
     _session->apply_device_options();
+
+    // 命令收敛后只刷新勾选态 —— 绝不重建面板。
+    //  - 时机：切换通道模式时驱动只翻转 ch->enabled（demo 的 sdi->channels
+    //    恒为 scan() 建好的那批），SignalModel 要等 reload() 才按新集合重建
+    //    （reload 只为 enabled 的逻辑通道建模）。命令之前刷新会命中切换前
+    //    的旧模型，方块勾选态停留在旧通道数（16→8 仍亮 16 个）。
+    //  - 手段：通道面板的结构（通道列表 / 列数）与模式无关，
+    //    ChannelLabel::paintEvent 又是绘制时实时读 _box->isChecked()，
+    //    且 checkStateChanged 已接到 update()（deviceoptions.cpp），所以
+    //    setCheckState() 足以让亮/暗正确同步。
+    //    用 build_dynamic_panel() 刷新会 delete/new 整个 _dynamic_panel：
+    //    滚动位置丢失（回顶）+ 多次布局重排 → 可见抖动（参见 update_view()
+    //    对滚动位置的保存/恢复）。
+    refresh_channel_checks();
+
     // 通知阶段：dock 重读驱动 / API 客户端推送。
     _session->broadcast_async<interface::DeviceOptionsUpdated>({});
     // 提交收尾命令：demo pattern 转移（信号直连，原 EndDeviceOptions
@@ -848,6 +874,40 @@ void DeviceOptionsDock::channel_check() {
     emit device_options_committed();
     emit settings_applied();
   });
+}
+
+void DeviceOptionsDock::refresh_channel_checks() {
+  // 把现有 ChannelLabel 的勾选态对齐到当前 Core/驱动状态 —— 纯状态同步，
+  // 不触碰控件树（不 delete/new、不改布局），因此不会引起滚动回顶或布局抖动。
+  //
+  // ChannelLabel::paintEvent 在绘制时实时读 _box->isChecked()/isEnabled()，
+  // 且构造函数已把 checkStateChanged 接到 update()（deviceoptions.cpp），
+  // 所以 setCheckState() 会立刻触发重绘，亮/暗随之同步。
+  //
+  // 索引对齐规则与 commit_channels() 保持一致：
+  //   LOGIC/MSO — logic_probes() 为每个通道各推一个复选框（DSO 通道为隐藏
+  //               复选框），_probes_checkBox_list 与 get_channels() 1:1。
+  //   ANALOG    — analog_probes() 只推 ANALOG 通道，需跳过其它类型
+  //               （否则会错位到别的通道上）。
+  const int mode = _device_agent->get_work_mode();
+  int index = 0;
+  for (const GSList *l = _device_agent->get_channels(); l; l = l->next) {
+    sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
+    if (!probe)
+      continue;
+    if (mode == ANALOG && channel_type(probe) != SR_CHANNEL_ANALOG)
+      continue;
+    if (index >= static_cast<int>(_probes_checkBox_list.size()))
+      break;
+
+    QCheckBox *const box = _probes_checkBox_list.at(index++);
+    if (box == nullptr)
+      continue;
+
+    const bool on = channel_enabled(probe);
+    if (box->isChecked() != on)
+      box->setCheckState(on ? Qt::Checked : Qt::Unchecked);
+  }
 }
 
 void DeviceOptionsDock::analog_channel_check() {

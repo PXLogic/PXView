@@ -89,6 +89,7 @@ QString dynamic_widget(QLayout *lay);
   void rebuild_bindings();
   void build_mode_section();
   void try_resize_scroll();
+  void refresh_channel_checks();
   void channel_checkbox_clicked(QCheckBox *sc);
   void ChannelChecked(int index, QObject *object);
 
