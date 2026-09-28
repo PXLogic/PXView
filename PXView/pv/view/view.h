@@ -451,7 +451,11 @@ public:
 
   QString get_measure(QString option);
 
-  void viewport_update();
+  // P0: decode_dirty=false skips set_decode_dirty() — used by the pure
+  // vertical-scroll path (v_scroll_value_changed), where the signal content is
+  // unchanged and SignalPixmapPass handles the offset shift via its scroll
+  // fast-path instead of a full channel re-rasterization.
+  void viewport_update(bool decode_dirty = true);
 
   // P1-A: Coalesce multiple viewport update requests into a single repaint
   // within a 16ms window (~60 FPS). Prevents UI stutter when the decode

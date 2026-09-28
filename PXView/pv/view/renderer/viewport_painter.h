@@ -61,7 +61,10 @@ public:
   void paintEvent(QPaintEvent *event);
   void doPaint(const QRect &dirtyRect = QRect());
   void paintCursors(QPainter &p);
-  void paintSignals(QPainter &p, QColor fore, QColor back);
+  // P0: `traces` is built once by doPaint and reused here (was rebuilt via a
+  // second get_traces() call every frame).
+  void paintSignals(QPainter &p, QColor fore, QColor back,
+                    std::vector<Trace *> &traces);
   void paintProgress(QPainter &p, QColor fore, QColor back);
 
 private:

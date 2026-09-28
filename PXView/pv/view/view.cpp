@@ -674,7 +674,10 @@ void View::resizeEvent(QResizeEvent *event) {
 void View::v_scroll_value_changed(int value) {
   _layout->set_vOffset(value);
   _header->update();
-  viewport_update();
+  // P0: a pure vertical scroll does not change signal content, so do NOT mark
+  // the decode/signal pixmap dirty. SignalPixmapPass sees the vOffset change
+  // and reuses the cached bitmap via a vertical shift + exposed-band rebuild.
+  viewport_update(false);
 }
 
 void View::data_updated() { _data_sync->data_updated(); }
@@ -816,7 +819,7 @@ void View::show_region(uint64_t start, uint64_t end, bool keep) {
   _data_sync->show_region(start, end, keep);
 }
 
-void View::viewport_update() {
+void View::viewport_update(bool decode_dirty) {
 // Suppress viewport updates during decoder analog trigger display-hold.
 // This prevents intermediate-frame flicker while a new repeat frame is
 // being decoded and aligned to the trigger position.
@@ -831,7 +834,10 @@ pv::base::perf::record_repaint_viewport();
 // Mark decode pixmap dirty so it will be rebuilt on next paint.
 // This is needed because decode data can change independently of
 // view parameters (e.g. new decode data arriving).
-if (_time_viewport)
+// P0: the pure vertical-scroll path passes decode_dirty=false — the signal
+// content is identical, so there is nothing to mark dirty; SignalPixmapPass
+// detects the vOffset change itself and shifts the cached bitmap.
+if (decode_dirty && _time_viewport)
 _time_viewport->set_decode_dirty();
 
 _viewcenter->update();

@@ -218,26 +218,26 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
 #ifdef PXVIEW_DECODE_PERF
       {
         const auto _ps_t0 = std::chrono::steady_clock::now();
-        paintSignals(p, fore, back);
+        paintSignals(p, fore, back, traces);
         const auto _ps_t1 = std::chrono::steady_clock::now();
         pv::base::perf::record_track(
             "V_PAINTSIGNALS", 0.0, 0.0,
             std::chrono::duration<double, std::milli>(_ps_t1 - _ps_t0).count(), 0);
       }
 #else
-      paintSignals(p, fore, back);
+      paintSignals(p, fore, back, traces);
 #endif
     } else if (_viewport->view().session().is_realtime_refresh()) {
       _viewport->view().session().have_new_realtime_refresh(false);
 
       if (_viewport->view().session().have_view_data() ||
           _viewport->view().session().is_instant())
-        paintSignals(p, fore, back);
+        paintSignals(p, fore, back, traces);
       else
         paintProgress(p, fore, back);
     } else if (_viewport->view().is_running_status()) {
       if (_viewport->view().session().is_repeat_mode()) {
-        paintSignals(p, fore, back);
+        paintSignals(p, fore, back, traces);
 
         if (!_viewport->transfer_started()) {
           bool triggered;
@@ -255,7 +255,7 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
       }
     }
   } else {
-    paintSignals(p, fore, back);
+    paintSignals(p, fore, back, traces);
   }
 
   // H/L logic-level labels: drawn directly on the widget (NOT the cached
@@ -312,10 +312,8 @@ void ViewportPainter::paintCursors(QPainter &p) {
     cursorPass.render(p, cctx);
 }
 
-void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back) {
-  std::vector<Trace *> traces;
-  _viewport->view().get_traces(_viewport->type(), traces);
-
+void ViewportPainter::paintSignals(QPainter &p, QColor fore, QColor back,
+                                   std::vector<Trace *> &traces) {
   // Build PaintContext snapshot for paint calls in this frame.
   PaintContext pctx;
   pctx.scale = _viewport->view().scale();

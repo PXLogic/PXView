@@ -346,12 +346,16 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
   IRenderView *view = ctx.view;
   const auto &traces = *ctx.traces;
 
-  // Determine if view parameters changed (requires full signal rebuild)
-  const bool view_params_changed =
-      (view->scale() != vp->curScale() ||
-       view->offset() != vp->curOffset() ||
-       view->get_signalHeight() != vp->curSignalHeight() ||
-       view->get_vOffset() != vp->curVOffset());
+  // Which view parameters changed. vOffset is tracked separately: a pure
+  // vertical scroll only shifts the cached bitmap window (scroll fast-path
+  // below) and must NOT trigger a full channel re-rasterization.
+  const bool scale_changed = view->scale() != vp->curScale();
+  const bool offset_changed = view->offset() != vp->curOffset();
+  const bool sigheight_changed =
+      view->get_signalHeight() != vp->curSignalHeight();
+  const bool voffset_changed = view->get_vOffset() != vp->curVOffset();
+  const bool view_params_changed = scale_changed || offset_changed ||
+                                   sigheight_changed || voffset_changed;
 
   const qreal dpr = vp->device_pixel_ratio();
   const QSize pixmapSize = (QSizeF(vp->widget_size()) * dpr).toSize();
@@ -405,27 +409,17 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
     }
   }
 
+  // Full rebuild trigger. vOffset is deliberately excluded — a pure vertical
+  // scroll is handled by the scroll fast-path below (it only shifts the cached
+  // bitmap window; the rendered content is identical).
   const bool rebuild = !decode_only_skip && !edit_in_progress &&
-                       (view_params_changed || vp->need_update() ||
-                        pixmap_changed);
+                       (scale_changed || offset_changed || sigheight_changed ||
+                        vp->need_update() || pixmap_changed);
 
-  if (rebuild) {
-    vp->curScale() = view->scale();
-    vp->curOffset() = view->offset();
-    vp->curSignalHeight() = view->get_signalHeight();
-    vp->curVOffset() = view->get_vOffset();
-
-    // Reuse the cached QPixmap when size & DPR match (avoids heap
-    // alloc/dealloc on every frame).
-    if (pixmap_changed) {
-      vp->pixmap() = QPixmap(pixmapSize);
-      vp->pixmap().setDevicePixelRatio(dpr);
-    }
-    vp->pixmap().fill(Qt::transparent);
-
-    QPainter dbp(&vp->pixmap());
-    dbp.translate(0, -view->get_vOffset());
-
+  // Rasterize the signal layer into the already-translated painter. Shared by
+  // the full rebuild (whole canvas) and the scroll fast-path (exposed band(s)
+  // only, under a clip).
+  auto paint_signal_layer = [&](QPainter &dbp) {
     if (ctx.is_logic_mode) {
       // Logic mode: logic channels rasterize via the rasterize_logic_channel
       // pure function with the PER-CHANNEL theme colour as fallback (NOT the
@@ -511,7 +505,64 @@ void SignalPixmapPass::render(QPainter &p, const RenderContext &ctx) {
                      ctx.back, ctx.pctx);
       }
     }
+  };
+
+  if (rebuild) {
+    vp->curScale() = view->scale();
+    vp->curOffset() = view->offset();
+    vp->curSignalHeight() = view->get_signalHeight();
+    vp->curVOffset() = view->get_vOffset();
+
+    // Reuse the cached QPixmap when size & DPR match (avoids heap
+    // alloc/dealloc on every frame).
+    if (pixmap_changed) {
+      vp->pixmap() = QPixmap(pixmapSize);
+      vp->pixmap().setDevicePixelRatio(dpr);
+    }
+    vp->pixmap().fill(Qt::transparent);
+
+    QPainter dbp(&vp->pixmap());
+    dbp.translate(0, -view->get_vOffset());
+    paint_signal_layer(dbp);
     vp->need_update() = false;
+  } else if (voffset_changed && !pixmap_changed && !edit_in_progress &&
+             !decode_only_skip) {
+    // P0 scroll fast-path: content is identical on a pure vertical scroll, so
+    // shift the cached bitmap by the scroll delta and re-rasterize only the
+    // newly exposed band(s) — instead of every visible channel. Any other
+    // dirty source is covered by the `rebuild` branch above, so this runs only
+    // when the scroll is the sole change.
+    const int delta = view->get_vOffset() - vp->curVOffset();
+    const int w = vp->widget_width();
+    const int h = vp->widget_height();
+    const int adelta = delta < 0 ? -delta : delta;
+
+    if (adelta < h) {
+      // new[y] = old[y + delta]  (content moves up as vOffset grows)
+      QPixmap shifted(pixmapSize);
+      shifted.setDevicePixelRatio(dpr);
+      shifted.fill(Qt::transparent);
+      {
+        QPainter sp(&shifted);
+        sp.drawPixmap(QPointF(0, -delta), vp->pixmap());
+      }
+      vp->pixmap() = shifted;
+
+      const QRect exposed =
+          delta > 0 ? QRect(0, h - delta, w, delta) : QRect(0, 0, w, -delta);
+
+      QPainter dbp(&vp->pixmap());
+      dbp.setClipRect(exposed);
+      dbp.translate(0, -view->get_vOffset());
+      paint_signal_layer(dbp);
+    } else {
+      // Jumped by a full viewport or more — nothing reusable; redraw all.
+      vp->pixmap().fill(Qt::transparent);
+      QPainter dbp(&vp->pixmap());
+      dbp.translate(0, -view->get_vOffset());
+      paint_signal_layer(dbp);
+    }
+    vp->curVOffset() = view->get_vOffset();
   }
 
   p.drawPixmap(0, 0, vp->pixmap());
