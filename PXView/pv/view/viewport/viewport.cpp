@@ -1658,6 +1658,9 @@ void Viewport::UpdateTheme() {
   _prev_edge_btn->UpdateTheme();
   _next_edge_btn->UpdateTheme();
 
+  // P1: theme colours feed the cached overlay (cards/separators/H-L labels).
+  _overlay_dirty = true;
+
   update(UpdateEventType::UPDATE_EV_GENERIC);
 }
 

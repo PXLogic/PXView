@@ -124,77 +124,142 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
   pctx.motion_frame = _viewport->view().is_zoom_animating() ||
                       _viewport->view().is_v_offset_animating();
 
+  // ---- P1: cached static overlay (below the waveform) ----
+  // Group card backgrounds + group separators are static per view-parameter
+  // revision. Baking them into an overlay pixmap lets decode-only and idle
+  // frames blit instead of redrawing; rebuilt only when the signal pixmap (or
+  // its offset), the size/DPR, the H/L setting, or any dirty source changes.
+  const qreal ov_dpr = _viewport->device_pixel_ratio();
+  const QSize ov_size = (QSizeF(_viewport->widget_size()) * ov_dpr).toSize();
+  const bool ov_size_changed =
+      _viewport->overlay_below().isNull() ||
+      _viewport->overlay_below().size() != ov_size ||
+      !qFuzzyCompare(_viewport->overlay_below().devicePixelRatioF(), ov_dpr);
+
+  const int hl_state =
+      (_viewport->type() == TIME_VIEW &&
+       AppConfig::Instance().appOptions.showLogicHlLabels)
+          ? 1
+          : 0;
+  const bool hl_state_changed = _viewport->overlay_hl_state() != hl_state;
+
+  // Compare against the values SignalPixmapPass cached last rebuild — read
+  // BEFORE paintSignals() runs so a change this frame is detected here.
+  const bool params_changed =
+      _viewport->view().scale() != _viewport->curScale() ||
+      _viewport->view().offset() != _viewport->curOffset() ||
+      _viewport->view().get_signalHeight() != _viewport->curSignalHeight() ||
+      _viewport->view().get_vOffset() != _viewport->curVOffset();
+
+  const bool rebuild_overlays = _viewport->overlay_dirty() || ov_size_changed ||
+                                params_changed || hl_state_changed ||
+                                _viewport->need_update();
+
+  if (rebuild_overlays) {
+    _viewport->overlay_below() = QPixmap(ov_size);
+    _viewport->overlay_below().setDevicePixelRatio(ov_dpr);
+    _viewport->overlay_below().fill(Qt::transparent);
+
+    {
+      QPainter op(&_viewport->overlay_below());
+      op.translate(0, -_viewport->view().get_vOffset());
+
+      // Group card backgrounds via GroupCardBackgroundPass.
+      {
+        GroupCardBackgroundPass cardPass;
+        RenderContext ctx;
+        ctx.view = &_viewport->view();
+        ctx.viewport = _viewport;
+        ctx.type = _viewport->type();
+        ctx.viewWidth = _viewport->widget_width();
+        ctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
+        if (ctx.type == TIME_VIEW && ctx.is_logic_mode)
+          ctx.groups = &_viewport->view().get_signal_groups();
+        if (cardPass.should_run(ctx))
+          cardPass.render(op, ctx);
+      }
+
+      QColor dividerColor =
+          AppConfig::Instance().GetThemeColor("@border-strong");
+      if (!dividerColor.isValid()) {
+        double lum =
+            back.red() * 0.299 + back.green() * 0.587 + back.blue() * 0.114;
+        dividerColor =
+            lum < 128 ? QColor(0x37, 0x37, 0x3b) : QColor(0xd5, 0xd5, 0xd5);
+      }
+
+      std::set<Trace *> lastInGroup;
+      if (_viewport->type() == TIME_VIEW &&
+          _viewport->view().is_logic_rendering_mode()) {
+        const auto &groups = _viewport->view().get_signal_groups();
+        for (const auto &group : groups) {
+          if (group.traces.empty())
+            continue;
+          Trace *last = nullptr;
+          for (auto gt : group.traces) {
+            if (gt->enabled())
+              last = gt;
+          }
+          if (last)
+            lastInGroup.insert(last);
+        }
+      }
+
+      // Find the last enabled trace (no divider below it)
+      Trace *lastEnabledTrace = nullptr;
+      for (auto it = traces.rbegin(); it != traces.rend(); ++it) {
+        if ((*it)->enabled() || (*it)->signal_type() == SR_CHANNEL_DSO) {
+          lastEnabledTrace = *it;
+          break;
+        }
+      }
+
+      op.setPen(QPen(dividerColor, 1));
+      for (auto t : traces) {
+        if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
+          continue;
+        if (lastInGroup.count(t))
+          continue;
+        if (t == lastEnabledTrace)
+          continue;
+        // 分隔线按 **visual** 绘制，与波形/卡片在动画期间保持同步。
+        int traceBottom = t->visual_v_offset() + t->get_totalHeight() / 2 +
+                          IRenderView::SignalMargin;
+        op.drawLine(0, traceBottom, _viewport->view().get_view_width(),
+                    traceBottom);
+      }
+    }
+
+    // Above-waveform overlay: H/L level labels (only when enabled).
+    if (hl_state) {
+      _viewport->overlay_above() = QPixmap(ov_size);
+      _viewport->overlay_above().setDevicePixelRatio(ov_dpr);
+      _viewport->overlay_above().fill(Qt::transparent);
+
+      QPainter hp(&_viewport->overlay_above());
+      hp.translate(0, -_viewport->view().get_vOffset());
+      for (auto *t : traces) {
+        if (!t->enabled())
+          continue;
+        auto *logic = t->as_logic();
+        if (!logic || logic->get_y() == INT_MAX)
+          continue;
+        draw_logic_hl_labels(
+            hp, logic->get_y() + logic->get_totalHeight() / 2,
+            logic->get_totalHeight(), fore);
+      }
+    }
+
+    _viewport->overlay_dirty() = false;
+    _viewport->overlay_hl_state() = hl_state;
+  }
+
+  p.drawPixmap(0, 0, _viewport->overlay_below());
+
+  // Trace backgrounds (grid etc.) — still direct: they depend on per-trace
+  // state (back_ready early-out) and are cheap relative to the waveform.
   p.save();
   p.translate(0, -_viewport->view().get_vOffset());
-
-  // Phase 5: Group card background rendering via RenderPass.
-  // All six passes are now wired in: GroupCardBackgroundPass (here in
-  // doPaint), SignalPixmapPass/DecodeTracePass/CursorOverlayPass/
-  // MeasureOverlayPass/TriggerInfoPass (in paintSignals).
-  {
-    GroupCardBackgroundPass cardPass;
-    RenderContext ctx;
-    ctx.view = &_viewport->view();
-    ctx.viewport = _viewport;
-    ctx.type = _viewport->type();
-    ctx.viewWidth = _viewport->widget_width();
-    ctx.is_logic_mode = _viewport->view().is_logic_rendering_mode();
-    if (ctx.type == TIME_VIEW && ctx.is_logic_mode)
-      ctx.groups = &_viewport->view().get_signal_groups();
-    if (cardPass.should_run(ctx))
-      cardPass.render(p, ctx);
-  }
-
-  QColor dividerColor =
-      AppConfig::Instance().GetThemeColor("@border-strong");
-  if (!dividerColor.isValid()) {
-    double lum =
-        back.red() * 0.299 + back.green() * 0.587 + back.blue() * 0.114;
-    dividerColor =
-        lum < 128 ? QColor(0x37, 0x37, 0x3b) : QColor(0xd5, 0xd5, 0xd5);
-  }
-
-  std::set<Trace *> lastInGroup;
-  if (_viewport->type() == TIME_VIEW &&
-      _viewport->view().is_logic_rendering_mode()) {
-    const auto &groups = _viewport->view().get_signal_groups();
-    for (const auto &group : groups) {
-      if (group.traces.empty())
-        continue;
-      Trace *last = nullptr;
-      for (auto gt : group.traces) {
-        if (gt->enabled())
-          last = gt;
-      }
-      if (last)
-        lastInGroup.insert(last);
-    }
-  }
-
-  // Find the last enabled trace (no divider below it)
-  Trace *lastEnabledTrace = nullptr;
-  for (auto it = traces.rbegin(); it != traces.rend(); ++it) {
-    if ((*it)->enabled() || (*it)->signal_type() == SR_CHANNEL_DSO) {
-      lastEnabledTrace = *it;
-      break;
-    }
-  }
-
-  p.setPen(QPen(dividerColor, 1));
-  for (auto t : traces) {
-    if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
-      continue;
-    if (lastInGroup.count(t))
-      continue;
-    if (t == lastEnabledTrace)
-      continue;
-    // 分隔线按 **visual** 绘制，与波形/卡片在动画期间保持同步。
-    int traceBottom =
-        t->visual_v_offset() + t->get_totalHeight() / 2 + IRenderView::SignalMargin;
-    p.drawLine(0, traceBottom, _viewport->view().get_view_width(),
-               traceBottom);
-  }
-
   for (auto t : traces) {
     if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
       continue;
@@ -202,7 +267,6 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (_viewport->view().back_ready())
       break;
   }
-
   p.restore();
 
   if (_viewport->view().is_logic_rendering_mode() ||
@@ -258,31 +322,11 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     paintSignals(p, fore, back, traces);
   }
 
-  // H/L logic-level labels: drawn directly on the widget (NOT the cached
-  // signal pixmap) and UNCONDITIONALLY — including the no-data state above
-  // (is_init_status && !display_doc) where paintSignals() is skipped entirely
-  // — so every logic lane shows them even before any capture. Drawn on top of
-  // the waveform. Gated by the AppConfig showLogicHlLabels switch (an invalid
-  // colour disables them).
-  if (_viewport->type() == TIME_VIEW) {
-    const QColor hl_color = AppConfig::Instance().appOptions.showLogicHlLabels
-                                ? fore
-                                : QColor();
-    if (hl_color.isValid()) {
-      p.save();
-      p.translate(0, -_viewport->view().get_vOffset());
-      for (auto *t : traces) {
-        if (!t->enabled())
-          continue;
-        auto *logic = t->as_logic();
-        if (!logic || logic->get_y() == INT_MAX)
-          continue;
-        draw_logic_hl_labels(
-            p, logic->get_y() + logic->get_totalHeight() / 2,
-            logic->get_totalHeight(), hl_color);
-      }
-      p.restore();
-    }
+  // H/L logic-level labels: blitted from the cached above-waveform overlay.
+  // Built earlier under the same rebuild_overlays gate; drawn UNCONDITIONALLY
+  // when enabled, including the no-data state where paintSignals() is skipped.
+  if (hl_state) {
+    p.drawPixmap(0, 0, _viewport->overlay_above());
   }
 
   p.save();

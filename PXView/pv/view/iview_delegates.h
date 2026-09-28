@@ -458,6 +458,13 @@ public:
   virtual int &curSignalHeight() = 0;
   virtual int &curVOffset() = 0;
 
+  // ---- P1: cached static overlay layers (ViewportPainter::doPaint) ----
+  // Group cards + separators (below the waveform) and H/L labels (above it).
+  virtual QPixmap &overlay_below() = 0;
+  virtual QPixmap &overlay_above() = 0;
+  virtual bool &overlay_dirty() = 0;
+  virtual int &overlay_hl_state() = 0;
+
   // ---- Frame timing bookkeeping (paintEvent) ----
   virtual QElapsedTimer &frame_interval_timer() = 0;
   virtual bool &is_idle() = 0;

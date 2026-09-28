@@ -624,10 +624,16 @@ void View::signals_changed(const Trace *eventTrace) {
         gfp->close();
     }
   }
-  if (_time_viewport)
+  if (_time_viewport) {
     _time_viewport->clear_interaction_state();
-  if (_fft_viewport)
+    // P1: structural change (channel add/remove/enable/reorder) — invalidate
+    // the cached static overlay layers (cards + separators + H/L labels).
+    _time_viewport->set_overlay_dirty();
+  }
+  if (_fft_viewport) {
     _fft_viewport->clear_interaction_state();
+    _fft_viewport->set_overlay_dirty();
+  }
 
   _signal_sync->signals_changed(eventTrace);
 #ifdef PXVIEW_DECODE_PERF

@@ -133,6 +133,11 @@ public:
   void clear_interaction_state();
   void set_need_update(bool update);
   void set_decode_dirty();
+  // P1: force the static overlay layers (cards/separators/H-L labels) to
+  // rebuild on the next paint — used for structural changes (channel
+  // add/remove/enable, theme) that alter the overlay without changing view
+  // params.
+  void set_overlay_dirty() { _overlay_dirty = true; }
   // P2 decode-only paint. Marks this viewport so the next paint runs the
   // decode-only path (SignalPixmapPass skips the signal-pixmap rebuild and
   // just blits the existing cache; DecodeTracePass still redraws). The flag
@@ -248,6 +253,12 @@ public:
   View_type& type() { return _type; }
   bool& need_update() { return _need_update; }
   QPixmap& pixmap() { return _pixmap; }
+  // P1: cached static overlay layers (group cards + separators below the
+  // waveform; H/L labels above it). See ViewportPainter::doPaint.
+  QPixmap& overlay_below() { return _overlay_below; }
+  QPixmap& overlay_above() { return _overlay_above; }
+  bool& overlay_dirty() { return _overlay_dirty; }
+  int& overlay_hl_state() { return _overlay_hl_state; }
   QMenu*& cmenu() { return _cmenu; }
   double& curScale() { return _curScale; }
   int64_t& curOffset() { return _curOffset; }
@@ -382,6 +393,13 @@ private:
   // ViewportPainter::paintSignals.
   bool _decode_only_paint = false;
   QPixmap _pixmap;
+  // P1: cached static overlay layers — group cards + separators (below the
+  // waveform) and H/L level labels (above it). Rebuilt only when the signal
+  // pixmap content/offset or the H/L setting changes.
+  QPixmap _overlay_below;
+  QPixmap _overlay_above;
+  bool _overlay_dirty = true;
+  int _overlay_hl_state = -1; // -1 unknown, 0 off, 1 on
   QMenu *_cmenu;
 
   uint64_t _sample_received;
