@@ -111,8 +111,9 @@ void ViewportInteraction::mousePressEvent(QMouseEvent *event) {
 
   _viewport->mouse_down_point() = event->position().toPoint();
   _viewport->mouse_down_offset() = _viewport->view().offset();
-  // 新的一次按压：结束在跑的惯性滚动（抓住视图即停），并清空速度采样。
+  // 新的一次按压：结束在跑的惯性滚动（抓住视图即停）与平移动画，并清空速度采样。
   _viewport->drag()->reset_drag_samples();
+  _viewport->view().cancel_pan_animation();
   _viewport->elapsed_time().restart();
 
   // 通道高度拉伸的判定区只在 Header（左侧通道面板）内，Viewport 不再命中
@@ -1147,7 +1148,9 @@ void ViewportInteraction::navigate_to_edge(EdgeNavButton::Direction dir) {
     newOffset = static_cast<int64_t>((time / scale - viewWidth * 0.75));
   }
 
-  _viewport->view().set_scale_offset(scale, newOffset);
+  // 用缓动平移动画过渡到目标 offset（方向由目标与当前位置之差决定，左右对称），
+  // 而不是瞬时跳变——跳变没有方向感，观感像"未设计"。
+  _viewport->view().pan_animated(newOffset);
 }
 
 } // namespace view

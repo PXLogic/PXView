@@ -292,6 +292,12 @@ public:
   bool zoom_animated(double steps, int anchor_px);
   // 是否正在跑缩放动画（motion-LOD 降精度栅格化的判定输入）。
   bool is_zoom_animating();
+
+  // 程序化水平平移动画（"跳到上/下一边沿"等）：把 offset 从当前值缓动到
+  // target_offset，由 _pan_anim_timer 在 PanAnimation::DurationMs 内推进。
+  void pan_animated(int64_t target_offset);
+  // 取消在跑的平移动画（立即停车）。
+  void cancel_pan_animation();
   // 是否有通道正在跑 v_offset（让位/拖动）动画；用于让 motion-LOD 在拖动期间
   // 也降精度栅格化，压低每帧重建 pixmap 的成本，对齐 PulseView 的跟手度。
   bool is_v_offset_animating() override;
@@ -764,6 +770,9 @@ private slots:
   // 自行停表。
   void on_zoom_anim_tick();
 
+  // 平移动画帧驱动：每帧把 ViewLayout 的 offset 推向目标，动画结束时自行停表。
+  void on_pan_anim_tick();
+
   void on_traces_moved();
   void on_measure_updated();
 
@@ -907,6 +916,12 @@ private:
   QTimer *_zoom_anim_timer = nullptr;
   QElapsedTimer _zoom_anim_clock;
   static constexpr int ZoomAnimFrameMs = 16; // ~60 FPS 的逐帧节奏
+
+  // ---- 水平平移动画（边沿导航等程序化跳转） ----
+  // 与缩放动画同样复用 16ms 帧定时器 + 单调时钟，各自独立启停。
+  QTimer *_pan_anim_timer = nullptr;
+  QElapsedTimer _pan_anim_clock;
+  static constexpr int PanAnimFrameMs = 16;
 
   // P2: decode-only repaint pending flag. When set, the coalescing timer
   // drains via viewport_update_decode_only() (skips set_decode_dirty) instead

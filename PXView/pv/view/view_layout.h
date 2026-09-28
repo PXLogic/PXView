@@ -28,6 +28,7 @@
 
 #include "pv/view/iview_delegates.h"
 #include "pv/view/zoom_animation.h"
+#include "pv/view/pan_animation.h"
 
 namespace pv {
 namespace view {
@@ -113,6 +114,18 @@ public:
   void cancel_zoom_animation();
   bool zoom_animating() const { return _zoom_anim.active(); }
 
+  // -- animated horizontal pan (程序化跳转的平移动画) --------------------
+  // 启动一次 offset 平移动画（用于"跳到上/下一边沿"等程序化跳转）。scale 不变，
+  // 只把 _offset 从当前值缓动到 target_offset。target 会被夹到有效范围。
+  void pan_animated(int64_t target_offset, int64_t now_ms);
+
+  // 推进平移动画一帧并落地 offset。返回 true = 动画仍在进行。
+  bool tick_pan_animation(int64_t now_ms);
+
+  // 取消在跑的平移动画（即时操作抢占：拖拽、滚轮、滚动条拖动、缩放）。
+  void cancel_pan_animation();
+  bool pan_animating() const { return _pan_anim.active(); }
+
   // 当前视图可见的时间跨度（毫秒）= 秒/像素 * 视口宽度像素 * 1000。
   // 用于缩放诊断日志（"zoom 的总共视图 ms 数范围"）。
   double visible_time_ms();
@@ -133,6 +146,10 @@ private:
   // 滚轮缩放动画状态机（见 zoom_animation.h）。缩放动画只改 _scale/_offset，
   // 每帧走 apply_scale_offset_epilogue() 复用 zoom() 的收尾路径。
   ZoomAnimation _zoom_anim;
+
+  // 水平平移动画状态机（见 pan_animation.h）。程序化跳转（边沿导航等）只改
+  // _offset，每帧同样走 apply_scale_offset_epilogue()。
+  PanAnimation _pan_anim;
 
   // scale/offset 变化的统一收尾（header/ruler/viewport 重绘 + 滚动条同步 +
   // 可见范围通知）。由 zoom() 与 tick_zoom_animation() 共用，避免两处重复。

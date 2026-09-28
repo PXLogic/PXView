@@ -182,6 +182,13 @@ _zoom_anim_timer->setSingleShot(false);
 _zoom_anim_timer->setInterval(ZoomAnimFrameMs);
 connect(_zoom_anim_timer, &QTimer::timeout, this, &View::on_zoom_anim_tick);
 
+// 水平平移动画帧定时器（边沿导航等程序化跳转）。同样只在动画期间运行：
+// 由 pan_animated() 启动、on_pan_anim_tick() 在到达终点时自行停止。
+_pan_anim_timer = new QTimer(this);
+_pan_anim_timer->setSingleShot(false);
+_pan_anim_timer->setInterval(PanAnimFrameMs);
+connect(_pan_anim_timer, &QTimer::timeout, this, &View::on_pan_anim_tick);
+
 #ifdef PXVIEW_DECODE_PERF
 // P3-D4: main-thread event-loop lag detector. A 100ms periodic tick; if the
 // GUI thread is blocked (freeze) the tick fires late and the overshoot is
@@ -1062,6 +1069,21 @@ bool View::zoom_animated(double steps, int anchor_px) {
   return started;
 }
 
+void View::pan_animated(int64_t target_offset) {
+  if (!_pan_anim_clock.isValid())
+    _pan_anim_clock.start();
+
+  _layout->pan_animated(target_offset, _pan_anim_clock.elapsed());
+  if (_layout->pan_animating() && !_pan_anim_timer->isActive())
+    _pan_anim_timer->start();
+}
+
+void View::cancel_pan_animation() {
+  _layout->cancel_pan_animation();
+  if (_pan_anim_timer)
+    _pan_anim_timer->stop();
+}
+
 bool View::is_zoom_animating() { return _layout->zoom_animating(); }
 
 bool View::is_v_offset_animating() {
@@ -1089,6 +1111,20 @@ void View::on_zoom_anim_tick() {
 
   if (!more)
     _zoom_anim_timer->stop();
+}
+
+void View::on_pan_anim_tick() {
+  // tick 内部完成一帧的 offset 落地与重绘（复用 zoom() 同一条
+  // apply_scale_offset_epilogue 收尾路径）。
+  const bool more = _layout->tick_pan_animation(_pan_anim_clock.elapsed());
+
+  // 与缩放动画同理：测量光标的位置由 index2pixel() 从当前 offset 映射而来，
+  // 平移每帧都在改 offset，必须每帧重算，否则读数会停在起点的旧映射上。
+  if (_time_viewport)
+    check_measure();
+
+  if (!more)
+    _pan_anim_timer->stop();
 }
 
 void View::set_scale_offset(double scale, int64_t offset) { _layout->set_scale_offset(scale, offset); }

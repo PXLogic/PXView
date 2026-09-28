@@ -79,8 +79,9 @@ ViewLayout::ViewLayout(View *view) : _view(view) {
 
 void ViewLayout::set_scale_offset(double scale, int64_t offset) {
   // 即时操作抢占：滚动、Alt+滚轮、程序化跳转都必须立刻生效，不能被在跑的
-  // 缩放动画继续覆盖。取消后本函数写下的值就是终值。
+  // 动画（缩放 / 平移）继续覆盖。取消后本函数写下的值就是终值。
   _zoom_anim.cancel();
+  _pan_anim.cancel();
 
   // Bidirectional clamping: both _scale and _offset are clamped to their
   // valid ranges. Without the upper-bound clamp on _offset, trigger cursor
@@ -318,6 +319,9 @@ bool ViewLayout::zoom_animated(double steps, int anchor_px, int64_t now_ms) {
   if (!_zoom_anim.active())
     pv::base::perf::zoom_trace_begin(now_ms, visible_time_ms());
 
+  // 滚轮缩放同样是即时手势，抢占在跑的平移动画（两者都改 offset，不能叠加）。
+  _pan_anim.cancel();
+
   _zoom_anim.retarget_compound(
       _scale, static_cast<double>(anchor_px), _offset,
       std::pow(kWheelZoomPerNotch, -steps), _minscale, _maxscale, now_ms,
@@ -371,13 +375,44 @@ bool ViewLayout::tick_zoom_animation(int64_t now_ms) {
   return more;
 }
 
+void ViewLayout::pan_animated(int64_t target_offset, int64_t now_ms) {
+  // 目标先夹到有效范围：既避免动画跑向越界值，也让 "from == to" 的提前返回
+  // 判定准确。
+  const int64_t target =
+      max(min(target_offset, get_max_offset()), get_min_offset());
+  if (target == _offset) {
+    // 已在目标位置：无需动画（顺带清掉可能残留的状态）。
+    _pan_anim.cancel();
+    return;
+  }
+  // 起点取当前实际 offset：动画中再次调用即为平滑接管（不回跳）。
+  _pan_anim.start(_offset, target, now_ms, PanAnimation::DurationMs);
+}
+
+bool ViewLayout::tick_pan_animation(int64_t now_ms) {
+  if (!_pan_anim.active())
+    return false;
+
+  int64_t raw = _offset;
+  const bool more = _pan_anim.sample(now_ms, raw);
+
+  _preScale = _scale;
+  _preOffset = _offset;
+  _offset = max(min(raw, get_max_offset()), get_min_offset());
+  apply_scale_offset_epilogue();
+  return more;
+}
+
+void ViewLayout::cancel_pan_animation() { _pan_anim.cancel(); }
+
 void ViewLayout::h_scroll_value_changed(int value) {
   // _updating_scroll 期间是动画/缩放的收尾在同步滚动条，不能当作用户拖动。
   if (_updating_scroll)
     return;
 
-  // 用户拖动横向滚动条 = 即时操作，取消在跑的缩放动画。
+  // 用户拖动横向滚动条 = 即时操作，取消在跑的缩放 / 平移动画。
   _zoom_anim.cancel();
+  _pan_anim.cancel();
 
   _preOffset = _offset;
 

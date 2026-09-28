@@ -316,6 +316,14 @@ pv_add_qtest(test_pan_decay
     view/test_pan_decay.cpp
 )
 
+# ==== 水平平移动画状态机：缓出过渡契约 ====
+# 纯逻辑、零依赖（pan_animation.h 只依赖 <cmath>/<cstdint>）。锁死"终点精确、
+# 全程单调逼近不回弹、缓出前段快、时钟跳跃一帧收敛、双向对称、重定目标不回跳"
+# 这几条程序化跳转（边沿导航等）过渡手感的不变量。
+pv_add_qtest(test_pan_animation
+    view/test_pan_animation.cpp
+)
+
 # ==== 让位拖动"整列平移"复现器 ====
 # 按生产代码的真实调用顺序（mousePress 采锚点 → mouseMove 逐帧 force + 让位）
 # 串起来跑一次拖动，验证"其余通道的槽位集合不随被拖项移动而整体平移"。
