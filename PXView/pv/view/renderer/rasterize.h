@@ -106,6 +106,20 @@ void rasterize_logic_channel(
     const PaintContext &ctx,
     const std::vector<GlitchRange> *preview_ranges = nullptr);
 
+// Draw the "H"/"L" logic-level labels at the leftmost of one logic lane.
+// Split out of rasterize_logic_channel so the caller can draw them
+// UNCONDITIONALLY — including on an empty channel with no snapshot/no data —
+// and AFTER the waveform (so they sit on top). Mirrors ATK-Logic's
+// DrawLogicBasics and Saleae Logic 2's DigitalVerticalScale.
+//   y            — lane bottom == get_y() + total_height/2 (same value passed
+//                  to rasterize_logic_channel). The high line / lane top is
+//                  y - total_height; the low line / lane bottom is y.
+//   total_height — lane height (labels are skipped when too short).
+//   text_color   — pass an INVALID QColor to skip (feature disabled). Kept as
+//                  a parameter so the default wiring stays pixel-identical.
+void draw_logic_hl_labels(QPainter &p, int y, int total_height,
+                          const QColor &text_color);
+
 // Rasterize one DSO channel's waveform (extracted from
 // DsoSignal::paint_per_pixel). Pure function with the same guarantees as
 // rasterize_logic_channel. All GUI state that the original read from the

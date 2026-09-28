@@ -50,6 +50,9 @@ namespace App {
     // 回退主题「新通道默认高度」。独立于 .pxc：设备 profile 可能因
     // TabSwitch / 未加载而不参与恢复，高度作为"视图偏好"不能绑在那条路径上。
     static const QString logicChannelHeightScale = "logicChannelHeightScale";
+    // 逻辑通道波形左端是否绘制 H/L 电平标签（ATK / Saleae Logic 2 风格）。
+    // 应用级视图偏好，默认开启；关闭时波形位图与旧版本逐像素一致。
+    static const QString showLogicHlLabels    = "showLogicHlLabels";
     static const QString version             = "version";
     static const QString protocalFormats     = "protocalFormats";
 }

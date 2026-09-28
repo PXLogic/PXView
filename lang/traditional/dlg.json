@@ -684,6 +684,10 @@
         "text": "自動滾動到最新資料"
     },
     {
+        "id": "IDS_DLG_SHOW_LOGIC_HL_LABELS",
+        "text": "顯示 H/L 電平標籤"
+    },
+    {
         "id": "IDS_DLG_WAITING_TRIG",
         "text": "等待觸發"
     },

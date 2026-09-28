@@ -260,6 +260,36 @@ void rasterize_logic_channel(
   }
 }
 
+void draw_logic_hl_labels(QPainter &p, int y, int total_height,
+                          const QColor &text_color) {
+  // H/L logic-level labels at the leftmost of the lane. Kept OUT of
+  // rasterize_logic_channel for two reasons: (1) that function stays a pure
+  // waveform routine, and (2) the caller can draw the labels UNCONDITIONALLY
+  // — including on an empty channel with no snapshot/no data — and AFTER the
+  // waveform, so they sit on top. Mirrors ATK-Logic's DrawLogicBasics H/L text
+  // and Saleae Logic 2's DigitalVerticalScale ticks.
+  //
+  // Geometry mirrors rasterize_logic_channel: y is the lane bottom
+  // (get_y() + total_height/2), so the high line / lane top is y -
+  // total_height and the low line / lane bottom is y. "H" is pinned just
+  // below the top edge, "L" just above the bottom edge. Skipped when the lane
+  // is too short or text_color is invalid (callers pass an invalid colour to
+  // disable the feature).
+  if (total_height < 18 || !text_color.isValid())
+    return;
+
+  const int lane_top = y - total_height;
+  p.save();
+  QFont hl_font = p.font();
+  hl_font.setPixelSize(9);
+  p.setFont(hl_font);
+  p.setPen(QPen(text_color, 1));
+  p.setBrush(Qt::NoBrush);
+  p.drawText(2, lane_top + 10, "H");
+  p.drawText(2, y - 2, "L");
+  p.restore();
+}
+
 // Mirror of View::ForeAlpha (kept local so this pure function has no
 // dependency on the View class).
 static constexpr int kRasterizeForeAlpha = 200;

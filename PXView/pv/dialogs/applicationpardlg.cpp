@@ -271,6 +271,9 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
   _ck_autoScrollLatestData = new QCheckBox();
   _ck_autoScrollLatestData->setChecked(app.appOptions.autoScrollLatestData);
 
+  _ck_logicHl = new QCheckBox();
+  _ck_logicHl->setChecked(app.appOptions.showLogicHlLabels);
+
   _ck_promptSaveOnExit = new QCheckBox();
   _ck_promptSaveOnExit->setChecked(app.appOptions.promptSaveOnExit);
 
@@ -294,6 +297,11 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
                      "Auto scoll latest")),
       2, 0, Qt::AlignLeft);
   logicLay->addWidget(_ck_autoScrollLatestData, 2, 1, Qt::AlignRight);
+  logicLay->addWidget(
+      new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SHOW_LOGIC_HL_LABELS),
+                     "Show H/L labels")),
+      3, 0, Qt::AlignLeft);
+  logicLay->addWidget(_ck_logicHl, 3, 1, Qt::AlignRight);
   lay->addWidget(logicGroup);
 
   QGroupBox *dsoGroup =
@@ -1580,6 +1588,10 @@ void ApplicationParamDlg::saveDisplayOptions() {
   if (app.appOptions.autoScrollLatestData !=
       _ck_autoScrollLatestData->isChecked()) {
     app.appOptions.autoScrollLatestData = _ck_autoScrollLatestData->isChecked();
+    bAppChanged = true;
+  }
+  if (app.appOptions.showLogicHlLabels != _ck_logicHl->isChecked()) {
+    app.appOptions.showLogicHlLabels = _ck_logicHl->isChecked();
     bAppChanged = true;
   }
   if (app.appOptions.promptSaveOnExit != _ck_promptSaveOnExit->isChecked()) {

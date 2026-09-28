@@ -23,6 +23,8 @@
 
 #include "pv/view/renderer/viewport_painter.h"
 #include "pv/view/renderer/render_pass.h"
+#include "pv/view/renderer/rasterize.h"
+#include "pv/view/signal/logicsignal.h"
 #include "pv/view/trace/trace.h"
 #include "pv/view/trace/decodetrace.h"
 
@@ -30,6 +32,7 @@
 
 #include <QPainter>
 #include <QPaintEvent>
+#include <climits>
 #include <cmath>
 #include <set>
 
@@ -253,6 +256,33 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     }
   } else {
     paintSignals(p, fore, back);
+  }
+
+  // H/L logic-level labels: drawn directly on the widget (NOT the cached
+  // signal pixmap) and UNCONDITIONALLY — including the no-data state above
+  // (is_init_status && !display_doc) where paintSignals() is skipped entirely
+  // — so every logic lane shows them even before any capture. Drawn on top of
+  // the waveform. Gated by the AppConfig showLogicHlLabels switch (an invalid
+  // colour disables them).
+  if (_viewport->type() == TIME_VIEW) {
+    const QColor hl_color = AppConfig::Instance().appOptions.showLogicHlLabels
+                                ? fore
+                                : QColor();
+    if (hl_color.isValid()) {
+      p.save();
+      p.translate(0, -_viewport->view().get_vOffset());
+      for (auto *t : traces) {
+        if (!t->enabled())
+          continue;
+        auto *logic = t->as_logic();
+        if (!logic || logic->get_y() == INT_MAX)
+          continue;
+        draw_logic_hl_labels(
+            p, logic->get_y() + logic->get_totalHeight() / 2,
+            logic->get_totalHeight(), hl_color);
+      }
+      p.restore();
+    }
   }
 
   p.save();

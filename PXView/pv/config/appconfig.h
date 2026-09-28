@@ -82,6 +82,10 @@ struct AppOptions
     bool  autoScrollLatestData;
     bool  promptSaveOnExit;
 
+    // 逻辑通道波形左端是否绘制 H/L 电平标签（ATK / Saleae Logic 2 风格）。
+    // 应用级视图偏好，默认开启。关闭时栅格化输出与旧版本逐像素一致。
+    bool  showLogicHlLabels = true;
+
     // 全局通道高度（视图密度）：用户 Ctrl+滚轮缩放后的值。0 = 从未设置过，
     // 此时回退主题「新通道默认高度」（AppConfig::logic_channel_default_height）。
     // 只在"用户显式缩放"时写入；workspace.json 的 session.uiLayout 是 per-tab

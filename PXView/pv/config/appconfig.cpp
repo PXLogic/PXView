@@ -146,6 +146,7 @@ static void _loadApp(AppOptions &o, QSettings &st)
     getFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData, true);
     getFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit, true);
     getFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale, 0);
+    getFiled(keys::App::showLogicHlLabels.toUtf8().constData(), st, o.showLogicHlLabels, true);
     getFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode, false);
 
     getFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid, false);
@@ -203,6 +204,7 @@ static void _saveApp(AppOptions &o, QSettings &st)
     setFiled(keys::App::autoScrollLatestData.toUtf8().constData(), st, o.autoScrollLatestData);
     setFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit);
     setFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale);
+    setFiled(keys::App::showLogicHlLabels.toUtf8().constData(), st, o.showLogicHlLabels);
     setFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode);
 
     setFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid);

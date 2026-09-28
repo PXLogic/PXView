@@ -745,6 +745,13 @@ void SessionEventDispatcher::on_demo_mode_changed(const pv::interface::DemoModeC
 // --- UI options group ---
 void SessionEventDispatcher::on_app_options_changed(const pv::interface::AppOptionsChanged &) {
   _window->update_title_bar_text();
+  // 应用级选项（如 H/L 电平标签）会影响缓存的波形位图（SignalPixmapPass）。
+  // 标记所有视口 need_update 并重绘一次，使开关即时生效，无需等到下一次
+  // 平移/缩放触发的自然重建。
+  if (auto *v = safe_current_view()) {
+    v->set_all_update(true);
+    v->viewport_update();
+  }
 }
 void SessionEventDispatcher::on_font_options_changed(const pv::interface::FontOptionsChanged &) {
   UiManager::Instance()->Update(UI_UPDATE_ACTION_FONT);
