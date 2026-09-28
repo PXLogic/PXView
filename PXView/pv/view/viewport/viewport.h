@@ -36,6 +36,7 @@
 
 
 #include "pv/base/pxvdef.h"
+#include "pv/config/appconfig.h"
 #include "pv/data/decoderanalogdata.h"
 #include "pv/interface/icallbacks.h"
 #include "pv/ui/uimanager.h"
@@ -83,7 +84,8 @@ class ViewportDrag;
 // main graph view port, in the middle region
 // draw the left and right rule scale
 // created by View
-class Viewport : public QWidget, public IUiWindow, public IRenderViewport {
+class Viewport : public QWidget, public IUiWindow, public IRenderViewport,
+                 public SettingChangeListener {
   Q_OBJECT
   Q_PROPERTY(QColor panelBgColor READ panelBgColor WRITE setPanelBgColor)
   Q_PROPERTY(QColor panelTextColor READ panelTextColor WRITE setPanelTextColor)
@@ -101,6 +103,11 @@ public:
 public:
   explicit Viewport(View &parent, View_type type);
   ~Viewport();
+
+  // SettingChangeListener: 帧率上限（keys::App::viewMaxFps）变化时热更新
+  // 进度动画定时器，无需重启。
+  void on_setting_changed(const QString &group, const QString &key,
+                          const QVariant &value) override;
 
   // Public static constant (needed by ViewportInteraction)
   static constexpr int DragFrameInterval = 16;
@@ -364,6 +371,9 @@ public:
   ViewportDrag* drag() const { return _drag.get(); }
 
 private:
+  // 从 AppConfig 读取帧率上限并应用到进度动画定时器。
+  void apply_frame_rate();
+
   // ---- Member variables (private, Spec v2 Task 1) ----
   View &_view;
   View_type _type;

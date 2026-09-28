@@ -53,6 +53,7 @@
 #include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QString>
 #include <QStyledItemDelegate>
@@ -235,6 +236,7 @@ ApplicationParamDlg::ApplicationParamDlg()
     : _nav_list(nullptr), _page_stack(nullptr), _ck_quickScroll(nullptr),
       _ck_trigInMid(nullptr), _ck_profileBar(nullptr), _ck_abortData(nullptr),
       _ck_autoScrollLatestData(nullptr), _ck_promptSaveOnExit(nullptr),
+      _sp_viewMaxFps(nullptr),
       _shortcut_list(nullptr), _shortcut_selected_row(-1), _btn_accept(nullptr),
       _btn_restore(nullptr), _btn_reset_default(nullptr), _btn_delete(nullptr),
       _clash_warning_label(nullptr), _style_category_tree(nullptr),
@@ -276,6 +278,11 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
 
   _ck_promptSaveOnExit = new QCheckBox();
   _ck_promptSaveOnExit->setChecked(app.appOptions.promptSaveOnExit);
+
+  _sp_viewMaxFps = new QSpinBox();
+  _sp_viewMaxFps->setRange(AppConfig::kMinViewFps, AppConfig::kMaxViewFps);
+  _sp_viewMaxFps->setSuffix(" fps");
+  _sp_viewMaxFps->setValue(app.appOptions.viewMaxFps);
 
   QGroupBox *logicGroup =
       new QGroupBox(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_GROUP_LOGIC), "Logic"));
@@ -333,6 +340,11 @@ QWidget *ApplicationParamDlg::createDisplayPage() {
                      "Prompt to save data on exit")),
       1, 0, Qt::AlignLeft);
   uiLay->addWidget(_ck_promptSaveOnExit, 1, 1, Qt::AlignRight);
+  uiLay->addWidget(
+      new QLabel(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_VIEW_MAX_FPS),
+                     "Max refresh rate")),
+      2, 0, Qt::AlignLeft);
+  uiLay->addWidget(_sp_viewMaxFps, 2, 1, Qt::AlignRight);
   lay->addWidget(uiGroup);
 
   lay->addStretch();
@@ -1596,6 +1608,10 @@ void ApplicationParamDlg::saveDisplayOptions() {
   }
   if (app.appOptions.promptSaveOnExit != _ck_promptSaveOnExit->isChecked()) {
     app.appOptions.promptSaveOnExit = _ck_promptSaveOnExit->isChecked();
+    bAppChanged = true;
+  }
+  if (app.appOptions.viewMaxFps != _sp_viewMaxFps->value()) {
+    app.appOptions.viewMaxFps = _sp_viewMaxFps->value();
     bAppChanged = true;
   }
 

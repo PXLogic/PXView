@@ -86,6 +86,11 @@ struct AppOptions
     // 应用级视图偏好，默认开启。关闭时栅格化输出与旧版本逐像素一致。
     bool  showLogicHlLabels = true;
 
+    // 视图刷新帧率上限（fps）。决定主重绘合并定时器与缩放/平移动画、
+    // 进度动画帧定时器的节奏。运行时可热更新（SettingChangeListener）。
+    // 取值范围 [kMinViewFps, kMaxViewFps]，默认 kDefaultViewFps。
+    int   viewMaxFps = 60;
+
     // 全局通道高度（视图密度）：用户 Ctrl+滚轮缩放后的值。0 = 从未设置过，
     // 此时回退主题「新通道默认高度」（AppConfig::logic_channel_default_height）。
     // 只在"用户显式缩放"时写入；workspace.json 的 session.uiLayout 是 per-tab
@@ -267,6 +272,16 @@ public:
   // 决定，不由此值影响。token 缺失/非法时回退 kDefaultLogicChannelHeight。
   static constexpr int kDefaultLogicChannelHeight = 24;
   int logic_channel_default_height() const;
+
+  // 视图刷新帧率上限（fps）的取值范围与默认值。
+  static constexpr int kMinViewFps = 15;
+  static constexpr int kMaxViewFps = 144;
+  static constexpr int kDefaultViewFps = 60;
+
+  // 将 appOptions.viewMaxFps 换算为定时器间隔（ms）：clamp 到
+  // [kMinViewFps, kMaxViewFps]，返回值恒 ≥ 1。View / Viewport 的绘制节奏
+  // 定时器（重绘合并、缩放/平移动画、进度动画）统一取此值。
+  int view_frame_interval_ms() const;
 
   // P2-A: Setting change listener registration.
   void register_setting_listener(SettingChangeListener *listener);

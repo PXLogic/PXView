@@ -147,6 +147,7 @@ static void _loadApp(AppOptions &o, QSettings &st)
     getFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit, true);
     getFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale, 0);
     getFiled(keys::App::showLogicHlLabels.toUtf8().constData(), st, o.showLogicHlLabels, true);
+    getFiled(keys::App::viewMaxFps.toUtf8().constData(), st, o.viewMaxFps, AppConfig::kDefaultViewFps);
     getFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode, false);
 
     getFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid, false);
@@ -205,6 +206,7 @@ static void _saveApp(AppOptions &o, QSettings &st)
     setFiled(keys::App::promptSaveOnExit.toUtf8().constData(), st, o.promptSaveOnExit);
     setFiled(keys::App::logicChannelHeightScale.toUtf8().constData(), st, o.logicChannelHeightScale);
     setFiled(keys::App::showLogicHlLabels.toUtf8().constData(), st, o.showLogicHlLabels);
+    setFiled(keys::App::viewMaxFps.toUtf8().constData(), st, o.viewMaxFps);
     setFiled("tdmRealtimeDecode", st, o.tdmRealtimeDecode);
 
     setFiled("analogDisplayTriggerTdmValid", st, o.analogDisplayTriggerTdmValid);
@@ -487,6 +489,18 @@ void AppConfig::notify_setting_changed(const QString &group,
 {
     for (auto *l : _setting_listeners)
         l->on_setting_changed(group, key, value);
+}
+
+int AppConfig::view_frame_interval_ms() const
+{
+    int fps = appOptions.viewMaxFps;
+    if (fps < kMinViewFps)
+        fps = kMinViewFps;
+    else if (fps > kMaxViewFps)
+        fps = kMaxViewFps;
+
+    const int ms = 1000 / fps;
+    return ms < 1 ? 1 : ms;
 }
 
 AppConfig& AppConfig::Instance()

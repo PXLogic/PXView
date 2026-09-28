@@ -35,6 +35,7 @@
 #include <QTimer>
 
 #include "pv/data/pulse_analyzer.h"
+#include "pv/config/appconfig.h"
 #include "pv/ui/uimanager.h"
 #include "pv/view/dock_ui_state.h"
 #include "pv/view/iview_delegates.h"
@@ -111,7 +112,8 @@ class Signal;
 // SignalGroup moved to iview_delegates.h (widget-free render interfaces).
 
 // created by MainWindow
-class View : public QScrollArea, public IUiWindow, public IRenderView {
+class View : public QScrollArea, public IUiWindow, public IRenderView,
+             public SettingChangeListener {
   Q_OBJECT
   Q_PROPERTY(QColor groupCardColor READ get_group_card_color WRITE
                  set_group_card_color)
@@ -161,6 +163,11 @@ public:
                 QWidget *parent = 0);
 
   ~View();
+
+  // SettingChangeListener: 帧率上限（keys::App::viewMaxFps）变化时热更新
+  // 绘制节奏定时器，无需重启。
+  void on_setting_changed(const QString &group, const QString &key,
+                          const QVariant &value) override;
 
   // ---- Data source / document binding ----
   void set_data_source(pv::data::DataSource *source);
@@ -905,23 +912,22 @@ private:
   // QObject) so it is destroyed automatically.
   QTimer *_viewport_change_timer = nullptr;
 
-  // P1-A: Delayed view-update coalescing timer. Single-shot, 16ms interval.
+  // P1-A: Delayed view-update coalescing timer. Single-shot; 帧间隔取自
+  // AppConfig::view_frame_interval_ms()（用户可配的帧率上限）。
   QTimer *_delayed_view_update_timer = nullptr;
   bool _delayed_view_update_pending = false;
-  static constexpr int MaxViewAutoUpdateRateMs = 16; // ~60 FPS
 
   // ---- 滚轮缩放动画 ----
-  // 复用的 16ms 帧定时器 + 单调时钟。时钟用 QElapsedTimer（单调）而非墙钟，
+  // 帧定时器 + 单调时钟。时钟用 QElapsedTimer（单调）而非墙钟，
   // 使系统时间被改动不会影响动画进度。定时器只在动画期间运行。
+  // 帧间隔同样取自 AppConfig::view_frame_interval_ms()。
   QTimer *_zoom_anim_timer = nullptr;
   QElapsedTimer _zoom_anim_clock;
-  static constexpr int ZoomAnimFrameMs = 16; // ~60 FPS 的逐帧节奏
 
   // ---- 水平平移动画（边沿导航等程序化跳转） ----
-  // 与缩放动画同样复用 16ms 帧定时器 + 单调时钟，各自独立启停。
+  // 与缩放动画同样复用帧定时器 + 单调时钟，各自独立启停。
   QTimer *_pan_anim_timer = nullptr;
   QElapsedTimer _pan_anim_clock;
-  static constexpr int PanAnimFrameMs = 16;
 
   // P2: decode-only repaint pending flag. When set, the coalescing timer
   // drains via viewport_update_decode_only() (skips set_decode_dirty) instead
@@ -931,6 +937,9 @@ private:
   // without marking the signal pixmap dirty (signals unchanged during decode
   // growth). Marks _time_viewport for a decode-only paint then updates.
   void viewport_update_decode_only();
+
+  // 从 AppConfig 读取帧率上限并应用到重绘合并 / 缩放 / 平移三个定时器。
+  void apply_frame_rate();
 
   // P3-D4: main-thread event-loop lag detector. 100ms periodic tick that
   // records the max tick overshoot into the perf log, to prove whether the

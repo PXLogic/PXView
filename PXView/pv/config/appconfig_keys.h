@@ -53,6 +53,8 @@ namespace App {
     // 逻辑通道波形左端是否绘制 H/L 电平标签（ATK / Saleae Logic 2 风格）。
     // 应用级视图偏好，默认开启；关闭时波形位图与旧版本逐像素一致。
     static const QString showLogicHlLabels    = "showLogicHlLabels";
+    // 视图刷新帧率上限（fps，15–144，默认 60）。
+    static const QString viewMaxFps           = "viewMaxFps";
     static const QString version             = "version";
     static const QString protocalFormats     = "protocalFormats";
 }

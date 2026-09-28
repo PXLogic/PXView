@@ -226,7 +226,7 @@ _edge_hit = false;
   // progress toward the actual _sample_received value so the progress
   // circle animates fluidly instead of jumping in discrete steps at
   // each data-packet arrival (which can be as slow as 10–25 FPS).
-  _progress_timer.setInterval(16);
+  _progress_timer.setInterval(AppConfig::Instance().view_frame_interval_ms());
   connect(&_progress_timer, &QTimer::timeout, this, &Viewport::on_progress_timer);
   connect(yAction, &QAction::triggered, this, &Viewport::add_cursor_y);
   connect(xAction, &QAction::triggered, this, &Viewport::add_cursor_x);
@@ -303,11 +303,26 @@ this, &Viewport::configure_analog_measurement);
   _interaction = std::make_unique<ViewportInteraction>(this);
   _drag = std::make_unique<ViewportDrag>(this);
 
+  AppConfig::Instance().register_setting_listener(this);
+
   ADD_UI(this);
 }
 
 Viewport::~Viewport() {
+  AppConfig::Instance().unregister_setting_listener(this);
   REMOVE_UI(this);
+}
+
+void Viewport::on_setting_changed(const QString &group, const QString &key,
+                                  const QVariant &value) {
+  Q_UNUSED(group);
+  Q_UNUSED(value);
+  if (key == pv::config::keys::App::viewMaxFps)
+    apply_frame_rate();
+}
+
+void Viewport::apply_frame_rate() {
+  _progress_timer.setInterval(AppConfig::Instance().view_frame_interval_ms());
 }
 
 int Viewport::get_total_height() {

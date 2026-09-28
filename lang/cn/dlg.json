@@ -688,6 +688,10 @@
         "text": "显示 H/L 电平标签"
     },
     {
+        "id": "IDS_DLG_VIEW_MAX_FPS",
+        "text": "最大刷新率"
+    },
+    {
         "id": "IDS_DLG_WAITING_TRIG",
         "text": "等待触发"
     },

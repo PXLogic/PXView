@@ -688,6 +688,10 @@
         "text": "Show H/L labels"
     },
     {
+        "id": "IDS_DLG_VIEW_MAX_FPS",
+        "text": "Max refresh rate"
+    },
+    {
         "id": "IDS_DLG_WAITING_TRIG",
         "text": "Waiting Trig"
     },

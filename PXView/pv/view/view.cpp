@@ -137,6 +137,10 @@ View::View(SigSession *session, pv::toolbars::SamplingBar *sampling_bar,
   _data_sync->set_data_source_ptr(session);
   _data_sync->set_document_ptr(nullptr);
 
+  // 绘制节奏：主重绘合并 + 缩放/平移动画共用同一帧率上限（AppConfig 可配，
+  // 在“参数设置”里修改；运行时热更新见 on_setting_changed）。
+  const int frame_ms = AppConfig::Instance().view_frame_interval_ms();
+
   // Visible-range debounce timer: coalesce bursts of scale/offset/resize
   // changes into a single visible_range_changed() emission so listeners
   // (e.g. ProtocolDock) don't reset their model on every pixel of a drag.
@@ -147,12 +151,12 @@ connect(_viewport_change_timer, &QTimer::timeout, this,
 [this]() { emit visible_range_changed(); });
 
 // P1-A: Delayed view-update coalescing timer — merges bursts of
-// viewport_update() calls into a single repaint at most once per 16ms
-// (~60 FPS).  This prevents UI stutter when the decode thread fires
-// many new_decode_data signals in rapid succession.
+// viewport_update() calls into a single repaint at most once per frame
+// (frame_ms, 由帧率上限换算).  This prevents UI stutter when the decode
+// thread fires many new_decode_data signals in rapid succession.
 _delayed_view_update_timer = new QTimer(this);
 _delayed_view_update_timer->setSingleShot(true);
-_delayed_view_update_timer->setInterval(MaxViewAutoUpdateRateMs);
+_delayed_view_update_timer->setInterval(frame_ms);
 connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
   if (_delayed_view_update_pending) {
     // A full update was requested (e.g. zoom/scroll/resize/decode-done) —
@@ -175,18 +179,18 @@ connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
 });
 
 // 滚轮缩放动画帧定时器。只在动画期间运行：由 zoom_animated()
-// 启动、on_zoom_anim_tick() 在到达终点时自行停止。周期取 16ms(≈60FPS)，
-// 即每帧推进一次插值。
+// 启动、on_zoom_anim_tick() 在到达终点时自行停止。周期取 frame_ms
+// （由帧率上限换算），即每帧推进一次插值。
 _zoom_anim_timer = new QTimer(this);
 _zoom_anim_timer->setSingleShot(false);
-_zoom_anim_timer->setInterval(ZoomAnimFrameMs);
+_zoom_anim_timer->setInterval(frame_ms);
 connect(_zoom_anim_timer, &QTimer::timeout, this, &View::on_zoom_anim_tick);
 
 // 水平平移动画帧定时器（边沿导航等程序化跳转）。同样只在动画期间运行：
 // 由 pan_animated() 启动、on_pan_anim_tick() 在到达终点时自行停止。
 _pan_anim_timer = new QTimer(this);
 _pan_anim_timer->setSingleShot(false);
-_pan_anim_timer->setInterval(PanAnimFrameMs);
+_pan_anim_timer->setInterval(frame_ms);
 connect(_pan_anim_timer, &QTimer::timeout, this, &View::on_pan_anim_tick);
 
 #ifdef PXVIEW_DECODE_PERF
@@ -359,11 +363,14 @@ fore.setAlpha(View::BackAlpha);
   connect(popup, &GlitchFilterPopup::preview_batch_changed, this,
           &View::on_preview_batch_changed);
 
+  AppConfig::Instance().register_setting_listener(this);
+
   ADD_UI(this);
 }
 
 View::~View() {
   _destroying = true;
+  AppConfig::Instance().unregister_setting_listener(this);
 
   // Disconnect signals and remove event filters before child destruction
   // to prevent callbacks on partially-destroyed View
@@ -397,6 +404,24 @@ _glitch_filter->set_glitch_filter_popup(nullptr);
   // Cursor state (trig/search cursors included) is now fully owned and
   // cleaned up by ViewCursors' destructor. No cross-class deletion needed.
   REMOVE_UI(this);
+}
+
+void View::on_setting_changed(const QString &group, const QString &key,
+                              const QVariant &value) {
+  Q_UNUSED(group);
+  Q_UNUSED(value);
+  if (key == pv::config::keys::App::viewMaxFps)
+    apply_frame_rate();
+}
+
+void View::apply_frame_rate() {
+  const int ms = AppConfig::Instance().view_frame_interval_ms();
+  if (_delayed_view_update_timer)
+    _delayed_view_update_timer->setInterval(ms);
+  if (_zoom_anim_timer)
+    _zoom_anim_timer->setInterval(ms);
+  if (_pan_anim_timer)
+    _pan_anim_timer->setInterval(ms);
 }
 
 void View::set_data_source(pv::data::DataSource *source) {

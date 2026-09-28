@@ -40,6 +40,7 @@ class QLabel;
 class QPushButton;
 class QTableWidget;
 class QCheckBox;
+class QSpinBox;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -126,6 +127,7 @@ namespace dialogs
         QCheckBox *_ck_autoScrollLatestData;
         QCheckBox *_ck_logicHl;
         QCheckBox *_ck_promptSaveOnExit;
+        QSpinBox *_sp_viewMaxFps;
         QListWidget *_shortcut_list;
         int _shortcut_selected_row;
         QPushButton *_btn_accept;
