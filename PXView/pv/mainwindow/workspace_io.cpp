@@ -76,6 +76,8 @@ bool write_workspace_file(const Workspace &ws) {
     QJsonObject o;
     o["title"] = t.title;
     o["filePath"] = t.filePath;
+    o["isImportedFile"] = t.isImportedFile;
+    o["importFormat"] = t.importFormat;
     QJsonObject dev;
     dev["driver"] = t.driver;
     dev["connid"] = t.connid;
@@ -159,6 +161,8 @@ bool read_workspace_file(Workspace &out) {
     WorkspaceTab t;
     t.title = o.value("title").toString();
     t.filePath = o.value("filePath").toString();
+    t.isImportedFile = o.value("isImportedFile").toBool(false);
+    t.importFormat = o.value("importFormat").toString();
     const QJsonObject dev = o.value("device").toObject();
     t.driver = dev.value("driver").toString();
     t.connid = dev.value("connid").toString();

@@ -85,6 +85,20 @@ public:
     inline void set_title(const QString &title) { _title = title; }
     inline void set_file_path(const QString &path) { _file_path = path; }
 
+    // True when _file_path points at a file opened through the *input-module*
+    // import path (VCD / CSV / binary / Saleae / ...), false for a native .pxl
+    // session file loaded through SigSession::set_file(). The two loaders are
+    // not interchangeable: set_file() replays a .pxl session device while
+    // import_file() runs sr_input_scan_file + sr_input_send. Restoring a tab
+    // with the wrong loader silently fails (the file "does not reopen").
+    // Persisted in the workspace so a restored tab knows which one to use.
+    inline bool is_imported_file() const { return _is_imported_file; }
+    inline void set_imported_file(bool v) { _is_imported_file = v; }
+    // Input-module id the tab was imported with (empty = auto-detect). Needed
+    // for formats whose extension cannot decide (e.g. ".bin" → "binary").
+    inline const QString &import_format() const { return _import_format; }
+    inline void set_import_format(const QString &id) { _import_format = id; }
+
     // The device this tab's data came from. NULL_HANDLE for tabs that have
     // never been bound to a device (e.g. a fresh empty tab before any capture).
     //
@@ -208,6 +222,8 @@ private:
     core::DocumentRegistry  *_doc_registry; // owner of the document
     QString                 _title;
     QString                 _file_path;
+    bool                    _is_imported_file = false;
+    QString                 _import_format;
     State                   _state;
     QDateTime               _timestamp;
     ds_device_handle        _device_handle = NULL_HANDLE;

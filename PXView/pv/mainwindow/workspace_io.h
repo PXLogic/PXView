@@ -43,6 +43,14 @@ namespace pv {
 struct WorkspaceTab {
   QString title;        // tab title (user-renamable)
   QString filePath;     // source file of a file-device tab (.pxl, ...); else empty
+  // Which loader `filePath` needs on restore. false = native .pxl session file
+  // (SigSession::set_file); true = input-module import such as VCD/CSV/binary
+  // (SigSession::import_file). The two are not interchangeable — using
+  // set_file() on a VCD file fails, which is why the tab appeared never to
+  // reload. `importFormat` remembers an explicitly chosen module id (empty =
+  // auto-detect) for formats whose extension cannot decide (e.g. ".bin").
+  bool isImportedFile = false;
+  QString importFormat;
   // Device identity. `ds_device_handle` is process-local and never persisted;
   // `(driver, connid)` is the stable cross-session key (see
   // SigSession::resolve_device_handle_by_identity).

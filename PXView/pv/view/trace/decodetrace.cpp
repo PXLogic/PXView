@@ -301,8 +301,13 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   for (size_t i = 0; i < _cur_row_headings.size(); i++) {
     const bool is_analog = static_cast<int>(i) >= annotation_rows;
     const int row_h = is_analog ? analog_h : base_h;
+    // The row-heading arrow marker must use the same theme-aware foreground as
+    // the heading text (built from Viewport::fore_color() → @fg-base). Using
+    // QGuiApplication::palette() here returned the Qt/OS default (black on a
+    // dark theme) instead of the theme colour, so the little "▶" before each
+    // decoder row label stayed dark and was effectively invisible.
     p.setPen(QPen(Qt::NoPen));
-    p.setBrush(QGuiApplication::palette().brush(QPalette::WindowText));
+    p.setBrush(fore);
 
     const QRect r(left + ArrowSize * 2, cur_y, right - left, row_h);
     const QString h(_cur_row_headings[i]);

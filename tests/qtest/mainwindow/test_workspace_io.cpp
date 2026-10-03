@@ -55,6 +55,8 @@ private slots:
   void PathOverrideIsHonored();
   void RoundTripPreservesAllFields();
   void RoundTripPreservesPerTabViewDensity();
+  void RoundTripPreservesImportedFileLoader();
+  void LegacyTabWithoutImportFieldsDefaultsToPxl();
   void MissingFileDegradesGracefully();
   void MalformedJsonDegradesGracefully();
   void UnsupportedVersionIsRejected();
@@ -142,6 +144,72 @@ void TestWorkspaceIo::RoundTripPreservesAllFields() {
   QCOMPARE(out.tabs[1].connid, QString("conn-42"));
   QCOMPARE(out.tabs[1].workMode, 1);
   QVERIFY(out.tabs[1].isFileDevice);
+}
+
+void TestWorkspaceIo::RoundTripPreservesImportedFileLoader() {
+  // The loader kind decides how a restored file tab is replayed: native .pxl
+  // goes through set_file(); VCD/CSV/... through import_file(). Losing this
+  // field made imported tabs use the .pxl loader on restore and never come
+  // back. `importFormat` remembers an explicit module choice (e.g. ".bin" →
+  // "binary").
+  pv::Workspace ws;
+  pv::WorkspaceTab native;
+  native.title = "session";
+  native.filePath = "C:/data/session.pxl";
+  native.isFileDevice = true;
+  native.isImportedFile = false;
+  native.session = QJsonObject{{"work_mode", 0}};
+  ws.tabs.push_back(native);
+
+  pv::WorkspaceTab vcd;
+  vcd.title = "wave";
+  vcd.filePath = "C:/data/wave.vcd";
+  vcd.isFileDevice = true;
+  vcd.isImportedFile = true;
+  vcd.importFormat = "vcd";
+  vcd.session = QJsonObject{{"work_mode", 0}};
+  ws.tabs.push_back(vcd);
+
+  pv::WorkspaceTab rawbin;
+  rawbin.title = "raw";
+  rawbin.filePath = "C:/data/raw.bin";
+  rawbin.isFileDevice = true;
+  rawbin.isImportedFile = true;
+  rawbin.importFormat = "binary";
+  rawbin.session = QJsonObject{{"work_mode", 0}};
+  ws.tabs.push_back(rawbin);
+
+  QVERIFY(pv::write_workspace_file(ws));
+
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 3);
+
+  QVERIFY(!out.tabs[0].isImportedFile);
+  QCOMPARE(out.tabs[0].importFormat, QString());
+
+  QVERIFY(out.tabs[1].isImportedFile);
+  QCOMPARE(out.tabs[1].importFormat, QString("vcd"));
+
+  QVERIFY(out.tabs[2].isImportedFile);
+  QCOMPARE(out.tabs[2].importFormat, QString("binary"));
+}
+
+void TestWorkspaceIo::LegacyTabWithoutImportFieldsDefaultsToPxl() {
+  // An older workspace has no isImportedFile/importFormat. Absent must mean
+  // "native .pxl" (false / empty), preserving the pre-existing behaviour for
+  // sessions written before the fields existed.
+  QVERIFY(writeRaw(R"({"Version":1,"activeTab":0,"tabs":[
+      {"title":"old","filePath":"C:/data/old.pxl",
+       "device":{"driver":"virtual-session","connid":"","workMode":0,
+                 "isFileDevice":true},
+       "session":{"work_mode":0}}]})"));
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 1);
+  QVERIFY(out.tabs[0].isFileDevice);
+  QVERIFY(!out.tabs[0].isImportedFile);
+  QCOMPARE(out.tabs[0].importFormat, QString());
 }
 
 void TestWorkspaceIo::RoundTripPreservesPerTabViewDensity() {

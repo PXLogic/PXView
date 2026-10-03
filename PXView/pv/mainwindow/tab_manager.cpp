@@ -733,6 +733,11 @@ void TabManager::save_workspace() {
     t.title = ctx->title();
     t.filePath = ctx->file_path();
     t.isFileDevice = !t.filePath.isEmpty();
+    // Preserve WHICH loader the path needs: native .pxl session vs input-module
+    // import (VCD/CSV/...). Without this the restore path always used set_file()
+    // and imported files never came back.
+    t.isImportedFile = ctx->is_imported_file();
+    t.importFormat = ctx->import_format();
 
     // 设备身份用 (driver, connid)：ds_device_handle 是进程内句柄，跨会话无意义
     // （契约 "Workspace (tab session) persistence"）。
@@ -851,6 +856,10 @@ int TabManager::restore_workspace() {
                   .arg(static_cast<int>(i) + 1)
             : t.title);
     ctx->set_file_path(t.filePath);
+    // Remember which loader to use on the lazily-reopened tab (import_file for
+    // VCD/CSV/..., set_file for .pxl). See TabManager::save_workspace.
+    ctx->set_imported_file(t.isImportedFile);
+    ctx->set_import_format(t.importFormat);
     if (h != NULL_HANDLE) {
       ctx->set_device_handle(h);
       doc->set_device_handle(h);

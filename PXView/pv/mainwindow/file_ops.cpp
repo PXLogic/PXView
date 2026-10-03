@@ -149,7 +149,16 @@ bool MainWindowFileOps::reload_file_into_context(pv::TabContext *ctx) {
   }
 
   try {
-    if (!_wnd->session()->set_file(path)) {
+    // A tab whose data came from an *input module* (VCD/CSV/binary/Saleae/...)
+    // must be replayed through import_file(), NOT set_file(): set_file() only
+    // understands native .pxl session files (sr_session_load_file_device) and
+    // fails on a VCD header, so the tab silently stayed empty on restore.
+    // Native .pxl session files keep the original set_file() path.
+    const bool ok = ctx->is_imported_file()
+                        ? _wnd->session()->import_file(path, ctx->import_format(),
+                                                       nullptr)
+                        : _wnd->session()->set_file(path);
+    if (!ok) {
       QString strMsg(
           L_S(STR_PAGE_MSG, S_ID(IDS_MSG_FAIL_TO_LOAD), "Failed to load "));
       strMsg += path;
@@ -216,6 +225,11 @@ void MainWindowFileOps::on_import_file(QString file_name, QString format_id,
   QFileInfo fi(file_name);
   ctx->set_title(fi.baseName());
   ctx->set_file_path(file_name);
+  // Mark the loader: this tab's data comes from an input module (VCD/CSV/...),
+  // NOT from a native .pxl session. Workspace restore must replay it through
+  // import_file() — set_file() cannot read an input-module file.
+  ctx->set_imported_file(true);
+  ctx->set_import_format(format_id);
 
   _wnd->add_tab(ctx);
 
