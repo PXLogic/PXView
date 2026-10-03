@@ -75,6 +75,7 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
   _resize_lower_height = 0;
   _mouse_is_down = false;
   _drag_anchor_y = INT_MAX;
+  _drag_start_slot = -1;
   _foreColor = QColor();  // 无效色,UpdateTheme 会填充
 
   nameEdit = new PopupLineEdit(this);
@@ -97,6 +98,7 @@ void Header::clear_interaction_state() {
   // 避免后续 mouseMove/Release 或上下文菜单解引用悬垂指针。
   _drag_traces.clear();
   _drag_anchor_y = INT_MAX;
+  _drag_start_slot = -1;
   _context_trace = nullptr;
   _resize_trace_upper = nullptr;
   _resize_trace_lower = nullptr;
@@ -477,6 +479,7 @@ void Header::mousePressEvent(QMouseEvent *event) {
     // 下方的 NAME/LABEL 分支里），所以这个循环通常什么都不收；让位锚点也因此
     // 不能在这里算（见下方 ★ 注释）。
     _drag_anchor_y = INT_MAX;
+    _drag_start_slot = -1;
     for (auto t : traces) {
       if (t->selected())
         _drag_traces.push_back(make_pair(t, t->get_v_offset()));
@@ -564,6 +567,17 @@ void Header::mousePressEvent(QMouseEvent *event) {
         if (v != INT_MAX)
           _drag_anchor_y = min(_drag_anchor_y, v);
       }
+
+      // ★ 被拖项的**起始槽**同样在这里采集（layout 仍是原值）。它与每帧的
+      // "手槽"一起决定被拖项占哪个槽、谁让位 —— 只知手在哪、不知从哪来，
+      // 是旧实现无法同时满足两份测试的根因（见 make_way.h）。
+      // 槽距 = 被拖项高度 + 2*SignalMargin（与 view_signal_sync 里的 pitch 一致）。
+      const int dragged_h = mTrace->get_totalHeight();
+      const int pitch =
+          (dragged_h > 0 ? dragged_h : traces.front()->get_totalHeight()) +
+          2 * View::SignalMargin;
+      if (pitch > 0 && _drag_anchor_y != INT_MAX)
+        _drag_start_slot = (mTrace->get_v_offset() - _drag_anchor_y) / pitch;
     }
 
     // DsoSignal::mouse_press internally uses get_y() (absolute content
@@ -692,6 +706,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
     pxv_info("Header::mouseReleaseEvent: MOVE FLAG set, persisting layout");
     _drag_traces.clear();
     _drag_anchor_y = INT_MAX;
+    _drag_start_slot = -1;
 
     // 落位动画：先记住各通道"现在画在哪儿"（visual），因为接下来的
     // signals_changed() → layout_time_signals() 会用新的 layout 目标改写
@@ -742,6 +757,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
   } else if (!_drag_traces.empty()) {
     _drag_traces.clear();
     _drag_anchor_y = INT_MAX;
+    _drag_start_slot = -1;
   }
 
   _colorFlag = false;
@@ -971,7 +987,8 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
     // 只在 LOGIC 渲染模式（分组 + view_index 语义生效）下启用，避免影响
     // DSO/ANALOG 的零位拖动语义。
     if (dragged_trace && _view.is_logic_rendering_mode()) {
-      if (_view.animate_make_way_for_drag(dragged_trace, _drag_anchor_y))
+      if (_view.animate_make_way_for_drag(dragged_trace, _drag_anchor_y,
+                                          _drag_start_slot))
         traces_moved();
     }
   }

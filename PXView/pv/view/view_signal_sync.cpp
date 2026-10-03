@@ -1307,43 +1307,39 @@ bool ViewSignalSync::compare_trace_y(const Trace *a, const Trace *b) {
 // ============================================================================
 // 拖动让位动画
 // ----------------------------------------------------------------------------
-// 与 PulseView 的差异（重要，别再写错）：
+// 模型（"手槽 + 起始槽"，取代早先的"排序 + 破并结"）：
 //
-// PulseView 在 TraceTreeItemOwner::restack_items() 里**自上而下**扫一遍，用一个
-// 累计游标 total_offset 从 0 开始逐个摆放：
-//     total_offset += -extents.first;          // 让到本项的上边缘
-//     if (!r->dragging()) r->set_layout_v_offset(total_offset);
-//     total_offset += extents.second;          // 越过本项
-// 被拖项**不重设 offset**，但它照样消耗 total_offset 的推进量 —— 也就是说被拖项
-// 在列表里是一块"**固定占位的障碍**"，其余通道按顺序绕着它排列。
+//   拖动开始时记两个**恒定**量（都在 Header::mousePressEvent 采集）：
+//     anchor     = 全列最高行的 y           → 槽位网格原点 {anchor + k*pitch}
+//     start_slot = 被拖项当时的槽号          → 它的出发格
 //
-// 关键点（两条，都是踩过的坑）：
+//   之后每一帧（本函数）：
+//     h    = floor((被拖项 layout y - anchor) / pitch)   // 手所在槽
+//     slot = clamp(h, 0, n-1)                            // 被拖项占据的槽
+//     if (h == start_slot - 1) slot = start_slot         // 向上"恰好贴到"上方邻居
+//                                                        // 的槽中心 → 尚未越过，不让位
+//     其余项按**起始次序**连续铺进除 slot 之外的槽；每个槽中心 = anchor + 槽号*pitch。
 //
-// (A) 位置是**单向累积出来的**（每项的位置 = 前面所有项高度之和），不是"围着某个
-//     锚点对称展开"。早先的版本用锚点向上下两侧推算，等价于把所有通道围绕被拖项
-//     重新摊开：拖动一格时锚点整体平移一格 → 其余通道跟着整列平移，永远换不了位。
+// ── 为什么不再用排序 + 破并结 ────────────────────────────────────────────
+// 旧实现把被拖项与邻居 `stable_sort`（按 layout 值），撞值时用一个布尔
+// （"是否位于锚点之下"）破并结。**该判据缺一个自由维度**：只知"手在哪"、
+// 不知"从哪来"，因此无法区分两个语义相反的并结时刻 —— 实测两份测试互相冲突，
+// 无论布尔取哪个方向都是 42/43（失败项互换）。引入 `start_slot` 后，槽位变成
+// 整数且互斥，根本不再需要比较器。详见 make_way.h 的 `dragged_slot()`。
 //
-// (B) 锚点必须是**整个拖动期间恒定**的"槽位网格原点"。这是 (A) 容易被忽略的一半：
-//     就算改成累计布局，只要锚点取自"当前其它通道的最小 y"，被拖项离开/进入首槽时
-//     锚点就会跳一个 pitch，整列照样跟着手指平移（用户报的"拖上面的通道下面的也跟
-//     着平移"正是这个）。所以锚点在 mousePressEvent 里算一次（那时 layout 还是原值），
-//     经 Header::_drag_anchor_y 传进来，全程不变。
+// ── 锚点为什么必须恒定 ──────────────────────────────────────────────────
+// 若锚点取自"当前其它通道的最小 y"，被拖项离开/进入首槽时锚点会跳一个 pitch，
+// 整列就跟着手指平移（用户报的"拖上面的通道下面的也跟着平移"正是这个）。
 //
-// 本实现保持 PXView 的扁平结构，因此不复用 restack_items 的 total_offset 游标
-// （那是渲染坐标，PXView 的 v_offset 是**行中心**语义），但照搬它的两条核心语义：
-//   (1) 被拖项按**当前 layout 位置**插进顺序里 —— 它插到哪，哪一段就整体让开；
-//   (2) 其余通道保持相对顺序**依次**排布，不改变彼此的间隔。
-// 于是被拖项越过邻居时，邻居会被"挤"到被拖项原来的格位，形成真正的交换。
-//
-// (C) 被拖项 layout 与邻居 layout **撞值**时必须按行进方向破并结。因为 header
-//     用 y_snap 调 force_to_v_offset，而邻居正好坐在格位中心，手指逐格挪动时
-//     被拖项的 layout 会精确等于某个邻居的 layout。stable_sort 的插入序在
-//     "向下"方向碰巧正确、在"向上"方向必然错（邻居不让位）→ 这就是"只能单方向
-//     交换"的真因，详见 make_way::order_by_layout_offset 的注释。
+// ── 为什么用固定网格而不是 PulseView 的累计游标 ──────────────────────────
+// PulseView 的 `restack_items()` 用 `total_offset` 累计游标，被拖项是一块
+// "固定占位的障碍"。PXView 的 y_snap 让被拖项精确落在格位上，累计游标一推进
+// 整列就跟着平移，因此这里用**固定槽位网格** `anchor + k*pitch`。
 //
 // 纯视觉预览：不碰 view_index / 分组 / 持久化，松手后仍由 Header 按最终 y 排序。
 // ============================================================================
-bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
+bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y,
+                                               int start_slot_y) {
   std::vector<Trace *> traces;
   _view->get_traces(ALL_VIEW, traces);
 
@@ -1382,9 +1378,9 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   if (others.empty())
     return false;
 
-  // --- 3. 插位 + 自上而下依次排布（照搬 restack_items 的累积语义）--------
+  // --- 3. 插位 + 沿固定槽位网格重排 ---------------------------------------
   // 算法本体在 pv/view/trace/make_way.h（纯函数，可单测）。这里只负责把
-  // PXView 的行中心语义（row_gap = 2 * SignalMargin）与槽位锚点接进去。
+  // PXView 的槽距（pitch = 通道高 + 2*SignalMargin）与槽位锚点/起始槽接进去。
   //
   // 锚点优先用调用方传进来的 _drag_anchor_y（拖动开始时算好的常量）。它必须
   // **全程不变** —— 若退化成"当前其它通道的最小 y"（make_way::top_center），
@@ -1392,15 +1388,26 @@ bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
   // 只有在锚点缺失（非拖动调用方传 INT_MAX）时才回退到现算。
   const int anchor = make_way::resolve_anchor(anchor_y, visible);
 
-  // 行进方向：用于在"被拖项 layout 恰好等于某邻居格位"时破并结（详见
-  // make_way::order_by_layout_offset 的注释）。必须来自锚点而不是上一次的
-  // drag 位置 —— 每帧独立判定，不引入跨帧状态。
-  const bool downward = drag->get_v_offset() >= anchor;
+  // 槽距：等高通道下 = 通道高 + 2*SignalMargin。make_way::layout() 用固定网格，
+  // 故这里取"列内首行的总高 + 2*SignalMargin"作为一个统一的 pitch（与旧实现里
+  // 逐项累加在等高时等价）。
+  const int pitch =
+      (drag->get_totalHeight() > 0 ? drag->get_totalHeight() : visible.front()->get_totalHeight()) +
+      2 * View::SignalMargin;
+
+  // 起始槽：由 Header 在 mousePressEvent 采集（与 _drag_anchor_y 同时机），
+  // 全程恒定。这是"手槽 + 起始槽"模型必需的跨帧状态 —— 旧实现只传一个
+  // "是否在锚点之下"的布尔，数学上无法同时满足两份测试（见 make_way.h）。
+  // 缺省（未采集，start_slot < 0）时退化为"用当前手位反推"，即 start==hand，
+  // 此时不会发生任何交换 —— 与非拖动调用方的语义一致。
+  int start_slot = start_slot_y;
+  if (start_slot < 0)
+    start_slot = make_way::dragged_slot(drag->get_v_offset(), anchor, 0, pitch,
+                                        static_cast<int>(visible.size()));
 
   std::vector<Trace *> ordered;
   std::vector<std::pair<Trace *, int>> new_targets;
-  make_way::layout(others, drag, anchor, 2 * View::SignalMargin, downward, ordered,
-                   new_targets);
+  make_way::layout(others, drag, anchor, pitch, start_slot, ordered, new_targets);
 
   // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏（见上）。该校验含
   // 2×stable_sort + vector 全比较，挂在每帧跨网格的输入热路径上；Release（NDEBUG）

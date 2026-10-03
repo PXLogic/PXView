@@ -209,9 +209,6 @@ public:
   static int rowPitch() { return kH + 2 * pv::view::IRenderView::SignalMargin; }
 };
 
-/** 让位布局的相邻行额外间隙，与生产代码一致（两个 SignalMargin）。 */
-static const int kRowGap = 2 * pv::view::IRenderView::SignalMargin;
-
 } // namespace
 
 class TestVOffsetAnimation : public QObject {
@@ -500,16 +497,21 @@ int target_of(const std::vector<std::pair<Trace *, int>> &targets, Trace *t) {
  *   1. 被拖项跟手：`force_to_v_offset(hand_y)`（同时改写 layout + visual，
  *      与 Header::mouseMoveEvent 一致 —— 注意不是 set_visual_v_offset，
  *      那只改 visual，被拖项的 layout 仍停在原槽，排不出真实顺序）；
- *   2. 行进方向 = 手指相对锚点的位置（与 view_signal_sync.cpp 同一判据）；
- *   3. layout() 统一排序 + 破并结。
+ *   2. 起始槽 = 被拖项在 `force_to_v_offset` **之前**的 layout 所在槽（拖动
+ *      开始时算一次，全程恒定 —— 与生产 `Header::_drag_start_slot` 同源）；
+ *   3. layout() 按"手槽 + 起始槽"算出被拖项占的槽，其余项连续铺满其余槽。
+ *
+ * 注意第 2 步必须在 `force_to_v_offset` **之前**取，否则起始槽会被跟手值覆盖。
  */
 std::vector<Trace *> layout_prod(const std::vector<std::unique_ptr<ProbeTrace>> &rows,
                                  Trace *drag, int hand_y, int anchor,
                                  std::vector<std::pair<Trace *, int>> &targets) {
+  const int pitch = ProbeTrace::rowPitch();
+  // ★ 起始槽：拖动开始时的槽号，全程恒定。
+  const int start_slot = (drag->get_v_offset() - anchor) / pitch;
   drag->force_to_v_offset(hand_y);
-  const bool downward = drag->get_v_offset() >= anchor;
   std::vector<Trace *> order;
-  pv::view::make_way::layout(others_of(rows, drag), drag, anchor, kRowGap, downward,
+  pv::view::make_way::layout(others_of(rows, drag), drag, anchor, pitch, start_slot,
                              order, targets);
   return order;
 }
@@ -777,10 +779,11 @@ void TestVOffsetAnimation::MakeWayAnchorResolutionIgnoresDraggedRow() {
     QCOMPARE(anchor, remembered);
 
     // 用生产锚点布局：槽位网格不动，整列不会随 step 平移。
+    // 被拖项是 rows[0]，起始槽恒为 0（拖动开始时算定，与生产一致）。
     std::vector<Trace *> order;
     std::vector<std::pair<Trace *, int>> targets;
-    pv::view::make_way::layout(others, drag, anchor, kRowGap, /*downward=*/true,
-                               order, targets);
+    pv::view::make_way::layout(others, drag, anchor, pitch, /*start_slot=*/0, order,
+                               targets);
 
     std::vector<int> slot_y;
     for (auto &p : targets)

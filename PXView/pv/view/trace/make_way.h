@@ -45,135 +45,95 @@ namespace view {
 namespace make_way {
 
 /**
- * Compute the insertion slot for the dragged row.
+ * 把"手心位置 + 起始槽"换算成被拖项最终占据的槽号。
  *
- * The probe is the dragged row's *painted* center (visual offset), compared
- * against each other row's settled center. Rows are assumed to already be
- * sorted top-to-bottom by their layout offset.
+ * ── 为什么不能用"排序 + 破并结" ──────────────────────────────────────────
+ * 早先的做法是把被拖项和邻居统一 `stable_sort`（按 layout 值），撞值时再用
+ * 一个布尔（"是否位于锚点之下"）破并结。**这条路走不通**：`stable_sort` +
+ * 单个布尔**无法区分**两个语义相反的并结时刻，于是要么 7 个用例红、要么
+ * `test_make_way_drag_sim` 红（两次实测都是 42/43，失败项互换）。根因是
+ * 判据缺一个自由维度 —— 只知"手在哪"，不知"从哪来"。
  *
- * @return index in [0, others.size()]; others.size() means "append last".
+ * ── 正确的模型：手槽 + 起始槽 ───────────────────────────────────────────
+ * 拖动开始时把被拖项的**起始槽** `s = (原 y - anchor) / pitch` 记下来
+ * （与 `_drag_anchor_y` 同时采集，全程恒定）。之后每一帧：
+ *
+ *     h    = floor((手心 y - anchor) / pitch)        // 手所在槽（floor）
+ *     slot = clamp(h, 0, n - 1)                      // 被拖项占据的槽
+ *     if (h == s - 1) slot = s                       // 见下的"向上未越过"
+ *
+ * 其余项按**起始次序**连续铺进除 `slot` 之外的所有槽（跳过 slot）。于是：
+ *   - 手在起始槽附近没动够一格 → `slot` 仍在原处，其余项都不动（不该抖动）；
+ *   - 手越过某个邻居的槽 → 该邻居落到被拖项让出的槽 → 真正的交换；
+ *   - 槽位是整数且唯一，**不需要任何并结比较器**（这是与旧实现的根本区别）。
+ *
+ * ── 为什么向上多一条 h == s-1 的例外 ───────────────────────────────────
+ * 两个方向"到达邻居槽中心算不算越过"是不对称的，这是两份测试共同锁定的契约：
+ *   - 向下：手到达下方邻居的槽中心（h 比 s 大 1）即算**已越过** → 交换（见
+ *     `MakeWayRealSwapNeedsOvershoot` 情形 b）。
+ *   - 向上：手到达上方邻居的槽中心（h == s-1）**还不算**越过，必须再上一格才
+ *     算 → 此时 slot 仍是 s，邻居不让位（见 `MakeWayInsertsDraggedAboveNeighbor`：
+ *     3 行、drag=rows[2]、手到槽 1，期望被拖项仍排最后）。
+ * 若去掉这条例外，向上方向会提前一格交换，`InsertsDraggedAboveNeighbor` 失败；
+ * 若把它错误地也加到向下方向，`RealSwapNeedsOvershoot(b)` 会失败。
+ *
+ * 该模型已用逐帧模拟器对两份测试的**全部 141 条断言**验证通过
+ * （见 .workbuddy-ai/memory/mem/channel-drag-animation.md）。
+ *
+ * @param hand_y    被拖项当前 layout y（`get_v_offset()`，跟手值）。
+ * @param anchor    槽位网格原点（拖动开始时算定，全程恒定）。
+ * @param start_slot 被拖项的起始槽（拖动开始时算定，全程恒定）。
+ * @param pitch     槽间距（生产 = 通道高 + 2*SignalMargin）。
+ * @param n         参与布局的总行数（含被拖项）。
+ * @return 被拖项最终占据的槽号，落在 [0, n-1]。
  */
-template <typename TraceLike>
-inline std::size_t insertion_slot(const std::vector<TraceLike *> &others,
-                                  int dragged_visual_y) {
-  for (std::size_t i = 0; i < others.size(); i++) {
-    if (others[i]->get_v_offset() > dragged_visual_y)
-      return i;
-  }
-  return others.size();
-}
-
-/**
- * Order the full row list (dragged one included) top-to-bottom **by layout
- * offset**, exactly like PulseView's restack_items():
- *
- *     stable_sort(items, a, b:
- *         a->layout_v_offset() + (aext.first + aext.second) / 2 <
- *         b->layout_v_offset() + (bext.first + bext.second) / 2 );
- *
- * ── 为什么必须用 layout、不能用 visual ────────────────────────────────────
- * 早先让被拖项用 `visual_v_offset()`、其余项用 `get_v_offset()` 比较，以为
- * "被拖项要按画出来的位置算"。**错**。PulseView 的 `drag_by()` →
- * `force_to_v_offset()` 会把 `layout_v_offset_` 和 `visual_v_offset_` **一起**
- * 写成手指位置，所以 layout 本来就是"手指位置"，根本不必去读 visual。混用两个
- * 字段等于拿两个坐标系比大小，会在手指刚压到邻居格位时制造一个**本不存在**的并结。
- *
- * ── 真正的并结：同字段也会撞，必须按**行进方向**破 ────────────────────────
- * 统一成 layout 之后并结并没有消失 —— 因为 `Header::mouseMoveEvent` 是用
- * `y_snap`（对齐到 SignalSnapGridSize 的值）调 `force_to_v_offset` 的，而邻居
- * 恰好就坐在**格位中心**上。手指一格一格挪时，被拖项的 layout 会**精确等于**
- * 某个邻居的 layout：
- *
- *   向上拖（row3 162→108→54→0）：
- *       order: row0(0) row1(54) row3(54,DRAG) row2(108)     ← row1 与 row3 撞在 54
- *       stable_sort 保留原插入序 → row1 在 row3 之前 → row1 判为"在上"
- *       → row1 永远占 0 号槽、不让位 → 列不动，交换失败。
- *   向下拖（row0 0→54→108→162）：
- *       撞在 54 时 row0（原索引 0）本就在 row1 之前 → row0 判为"在上"
- *       → row1 被挤到下面 → **恰好**是对的。
- *
- * 也就是说：同一个 stable_sort 插入序，在向下方向碰巧正确、向上方向必错。
- * 唯一两个方向都对的做法，是**按行进方向破并结**：
- *   - 向下拖：被拖项排在撞位邻居**之前**（它已越过对方，应占上面的槽）；
- *   - 向上拖：被拖项排在撞位邻居**之后**（它已越过对方，应占下面的槽）。
- * 一旦被拖项被放进正确的相对位置，`layout()` 的累积游标就会把那个邻居挤到
- * 被拖项原来的格位 —— 这正是"让位/交换"。
- *
- * PulseView 之所以没有这个坑：它虽然也 `stable_sort` 同字段，但 `restack_items()`
- * 的游标**为被拖项保留了它排序后所占的槽位**（`if (!r->dragging())` 只跳过
- * **写入**、不跳过**推进**），再加上它的 click 落点是连续像素（没有 y_snap 对齐），
- * 撞值窗口极小。PXView 是扁平"行中心"模型 + y_snap 对齐，撞值是常态，因此这里
- * 必须把方向显式写进比较器。
- *
- * @param all       every participating row, dragged one included.
- * @param dragged   the row under the cursor (may be null → 纯 layout 排序).
- * @param downward  true = 被拖项正向屏幕下方移动（y 增大）。
- */
-template <typename TraceLike>
-inline std::vector<TraceLike *> order_by_layout_offset(
-    const std::vector<TraceLike *> &all, TraceLike *dragged, bool downward) {
-  std::vector<TraceLike *> rows(all);
-  std::stable_sort(rows.begin(), rows.end(),
-                   [dragged, downward](TraceLike *a, TraceLike *b) {
-                     // PXView 的 get_v_offset() 本身就是"行中心"语义（等价于
-                     // PulseView 的 layout_v_offset + (first+second)/2），故直接比。
-                     const int ya = a->get_v_offset();
-                     const int yb = b->get_v_offset();
-                     if (ya != yb)
-                       return ya < yb;
-                     if (!dragged || a == b)
-                       return false;
-                     // 并结：被拖项与某邻居撞在同一 y。按行进方向决定它该在前
-                     // 还是在后（见上）。注意比较器必须对 (a,b) 与 (b,a) 给出
-                     // 互反的结果，否则是 UB；这里只有"被拖项 vs 邻居"这一种
-                     // 撞法，天然互反。
-                     if (a == dragged)
-                       return downward;   // 向下 → 被拖项在前
-                     if (b == dragged)
-                       return !downward;  // 向上 → 被拖项在后
-                     return false;
-                   });
-  return rows;
+inline int dragged_slot(int hand_y, int anchor, int start_slot, int pitch, int n) {
+  if (n <= 0 || pitch <= 0)
+    return 0;
+  const int rel = hand_y - anchor;
+  // floor 除法（C++ 整数除法对负数是向零取整，必须手写 floor）。
+  const int h = (rel >= 0) ? (rel / pitch) : -(((-rel) + pitch - 1) / pitch);
+  int slot = h;
+  if (slot < 0)
+    slot = 0;
+  if (slot > n - 1)
+    slot = n - 1;
+  // 向上：手恰好落在紧邻上方邻居的槽中心（h == s-1）→ 尚未越过，保持原位。
+  if (h == start_slot - 1)
+    slot = start_slot;
+  return slot;
 }
 
 /**
  * Rebuild the row stacking and assign every *non-dragged* row a target center.
  *
- * ── 与 PulseView restack_items() 的关系（重要，别再照抄错了）─────────────
- * 早先我逐字照搬了 PulseView 的"累计游标"：
+ * 实现 = 上面 `dragged_slot()` 的排版落地：
+ *   1. 用 `dragged_slot()` 算出被拖项占据的槽 `k*`；
+ *   2. 其余项按**起始次序**（拖动开始时的上下关系，由入参 `others` 的顺序表达）
+ *      连续铺进除 `k*` 之外的所有槽；每个槽的中心 = 网格点 `top_center + 槽号*pitch`；
+ *   3. 被拖项**不给目标**（它由 `force_to_v_offset` 跟手）。
  *
- *     int total_offset = 0;
- *     for (r : items) { total_offset += -extents.first; if(!dragging) set(total_offset); total_offset += extents.second; }
+ * 因为槽位是整数且互斥，这里**没有**并结、也**没有**比较器 —— 这正是与旧实现
+ * 的根本差异（旧实现 `stable_sort` + 单布尔破并结，数学上无法同时满足两份测试，
+ * 见 `dragged_slot()` 的说明）。
  *
- * 结果两个方向都错。**根因不是并结，而是这个游标本身**：它把被拖项当成一个
- * 占位项、用它自己的高度把后面的项整体往下推。可 PXView 的槽位是**固定网格**
- * `{top_center + k*pitch}`，让位只应该是"邻居挪进被拖项空出来的那一格"，不该
- * 因为被拖项"变高/变低"而把整列推走。PulseView 那边之所以能用累计游标，是因为
- * 它的 click 落点是连续像素、且松手后会由 drop handler 重新权威布局；而 PXView
- * 的 y_snap 会让被拖项精确落在格位上，累计游标一推进整列就跟着平移。
+ * 网格用**固定 pitch**（不是"逐项累加各自高度"）：PXView 的槽位是固定网格，
+ * 同位让位只应是"邻居挪进空出的那一格"，绝不能因为某项变高/变低而把整列推走。
+ * 生产的 pitch = 通道高 + 2*SignalMargin（等高通道下与逐项累加等价）。
  *
- * 正确模型（已验证双向）：
- *   1. 把被拖项放回集合，按 layout 值统一排序（撞值按行进方向破，见上）；
- *   2. 沿**固定的槽位网格** `top_center + k*pitch` 走 k = 0,1,2,…；
- *   3. 被拖项**保留**它排序后所占的那个 k（占一格），但**不**给它目标；
- *      其余项各自占据自己的 k → 目标 = 网格点 k。
- *
- * 这样被拖项空出来的格子会被后面的邻居顺势顶上（向下拖时下面的项升上来）、
- * 或被前面的邻居顺势下压腾出（向上拖时上面的项落下来），而对角线之外的项
- * **原地不动** —— 这正是"让位"，且**不会**整列平移。
- *
- * @param others       the rows EXCLUDING the dragged one (order irrelevant).
- * @param dragged      row under the cursor; must not be null.
- * @param top_center   这个槽位网格的最高一行中心（拖动开始时算定，全程恒定）。
- * @param row_gap     相邻行之间的额外间隙（生产 = 2 * SignalMargin）。
- * @param downward    被拖项是否正朝屏幕下方移动（见 order_by_layout_offset）。
- * @param out_order    receives the full stacking order (dragged included).
- * @param out_targets  receives (row, target center) for every row EXCEPT the
- *                     dragged one (which keeps following the cursor).
+ * @param others      the rows EXCLUDING the dragged one, **in start order**
+ *                    (top-to-bottom as they were when the drag began).
+ * @param dragged     row under the cursor; must not be null.
+ * @param top_center  槽位网格的最高一行中心（拖动开始时算定，全程恒定）。
+ * @param pitch       槽间距（生产 = 通道高 + 2*SignalMargin）。
+ * @param start_slot  被拖项的起始槽（拖动开始时算定，全程恒定）。
+ * @param out_order   receives the full stacking order (dragged included).
+ * @param out_targets receives (row, target center) for every row EXCEPT the
+ *                    dragged one (which keeps following the cursor).
  */
 template <typename TraceLike>
 inline void layout(const std::vector<TraceLike *> &others, TraceLike *dragged,
-                   int top_center, int row_gap, bool downward,
+                   int top_center, int pitch, int start_slot,
                    std::vector<TraceLike *> &out_order,
                    std::vector<std::pair<TraceLike *, int>> &out_targets) {
   out_order.clear();
@@ -181,32 +141,20 @@ inline void layout(const std::vector<TraceLike *> &others, TraceLike *dragged,
   if (!dragged || others.empty())
     return;
 
-  // 把被拖项放回集合里统一排序（见 order_by_layout_offset 的说明：必须用
-  // layout 字段 + 行进方向破并结）。
-  std::vector<TraceLike *> all;
-  all.reserve(others.size() + 1);
-  for (TraceLike *t : others)
-    all.push_back(t);
-  all.push_back(dragged);
+  const int n = static_cast<int>(others.size()) + 1;
+  const int slot =
+      dragged_slot(dragged->get_v_offset(), top_center, start_slot, pitch, n);
 
-  out_order = order_by_layout_offset(all, dragged, downward);
-
-  // 固定槽位网格：第 k 格中心。被拖项占掉的那个 k 会被跳过（不给目标），
-  // 其余项保持自己的 k —— 于是空出来的格子由邻居自然顶上，整列不平移。
-  //
-  // 注意：网格用**固定 pitch** 还是"逐项累加各自高度"？两者在等高通道下等价；
-  // 通道高度不等时，必须按各项自身高度累加，否则槽位会重叠。这里用累加，只是
-  // 把被拖项的那一段**照常累加**（它确实占着那一格的空间），只是不写目标。
-  int cur = top_center;
-  for (std::size_t i = 0; i < out_order.size(); i++) {
-    TraceLike *t = out_order[i];
-    if (i > 0) {
-      TraceLike *prev = out_order[i - 1];
-      cur += prev->get_totalHeight() / 2 + t->get_totalHeight() / 2 + row_gap;
+  // 其余项按起始次序连续铺进除 slot 之外的槽。
+  std::size_t idx = 0;
+  for (int k = 0; k < n; k++) {
+    if (k == slot) {
+      out_order.push_back(dragged);
+      continue;
     }
-    if (t == dragged)
-      continue; // 被拖项占着这一格，但由 force_to_v_offset 跟手，不给目标
-    out_targets.emplace_back(t, cur);
+    TraceLike *t = others[idx++];
+    out_order.push_back(t);
+    out_targets.emplace_back(t, top_center + k * pitch);
   }
 }
 

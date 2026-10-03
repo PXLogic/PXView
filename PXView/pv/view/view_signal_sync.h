@@ -111,9 +111,15 @@ public:
    *                 slot-grid origin, so the rows can exchange slots without
    *                 the column drifting with the cursor. Pass INT_MAX to
    *                 derive it from the current layout (non-drag callers).
+   * @param start_slot_y the dragged row's slot index captured at drag start
+   *                 (same moment as anchor_y). MUST stay constant: together
+   *                 with the per-frame hand slot it decides which slot the
+   *                 dragged row occupies and therefore who yields. Pass a
+   *                 negative value for non-drag callers (no exchange).
    * @return true if any trace was given a new target (i.e. a repaint is due).
    */
-  bool animate_make_way_for_drag(Trace *dragged, int anchor_y);
+  bool animate_make_way_for_drag(Trace *dragged, int anchor_y,
+                                 int start_slot_y = -1);
 
   // -- theme / colors (Phase J additional) ------------------------------
   void UpdateTheme();

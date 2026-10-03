@@ -599,8 +599,9 @@ void View::set_trig_pos(int percent) {
 
 void View::normalize_layout() { _signal_sync->normalize_layout(); }
 
-bool View::animate_make_way_for_drag(Trace *dragged, int anchor_y) {
-  return _signal_sync->animate_make_way_for_drag(dragged, anchor_y);
+bool View::animate_make_way_for_drag(Trace *dragged, int anchor_y,
+                                     int start_slot_y) {
+  return _signal_sync->animate_make_way_for_drag(dragged, anchor_y, start_slot_y);
 }
 
 void View::mode_changed() { _data_sync->mode_changed(); }

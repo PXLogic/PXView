@@ -350,9 +350,14 @@ public:
    * @param anchor_y the column's top row center captured when the drag began
    *                (must stay constant for the whole drag). Pass INT_MAX to
    *                fall back to deriving it from the current layout.
+   * @param start_slot_y the dragged channel's slot index captured when the
+   *                drag began (must stay constant for the whole drag). With
+   *                the per-frame hand slot it decides which slot the dragged
+   *                channel occupies. Pass a negative value for non-drag callers.
    * @return true if any channel got a new target (repaint is due).
    */
-  bool animate_make_way_for_drag(Trace *dragged, int anchor_y);
+  bool animate_make_way_for_drag(Trace *dragged, int anchor_y,
+                                 int start_slot_y = -1);
 
   void show_trig_cursor(bool show = true);
 

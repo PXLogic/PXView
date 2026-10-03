@@ -40,7 +40,7 @@ using pv::view::Trace;
 namespace {
 
 const int kH = 40;
-const int kRowGap = 2 * 7; // 2 * SignalMargin
+// 注：生产槽距 pitch = 通道高 + 2*SignalMargin（= SimTrace::pitch()）。
 
 class SimTrace : public Trace {
 public:
@@ -92,8 +92,14 @@ int press_and_capture_anchor(const std::vector<Trace *> &all, Trace *clicked,
   return capture_anchor(all);
 }
 
-/** 复刻 ViewSignalSync::animate_make_way_for_drag 的核心（去掉绘图/动画）。 */
-void make_way_step(std::vector<Trace *> &all, Trace *drag, int anchor_y) {
+/**
+ * 复刻 ViewSignalSync::animate_make_way_for_drag 的核心（去掉绘图/动画）。
+ *
+ * `start_slot` 由调用方在 mousePressEvent 那一刻采集（与 `press_and_capture_anchor`
+ * 同一时机），全程恒定 —— 这是"手槽 + 起始槽"模型必需的新状态。
+ */
+void make_way_step(std::vector<Trace *> &all, Trace *drag, int anchor_y,
+                   int start_slot) {
   std::vector<Trace *> others;
   for (auto *t : all)
     if (t != drag)
@@ -101,15 +107,12 @@ void make_way_step(std::vector<Trace *> &all, Trace *drag, int anchor_y) {
   if (others.empty())
     return;
 
-  // 锚点优先用记下来的常量；排序 + 破并结全部由 layout() 内部统一完成。
   const int anchor = pv::view::make_way::resolve_anchor(anchor_y, all);
-  // 行进方向：与生产代码同一条判据（见 view_signal_sync.cpp）。
-  const bool downward = drag->get_v_offset() >= anchor;
 
   std::vector<Trace *> ordered;
   std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others, drag, anchor, kRowGap, downward, ordered,
-                             targets);
+  pv::view::make_way::layout(others, drag, anchor, SimTrace::pitch(), start_slot,
+                             ordered, targets);
 
   for (auto &nt : targets) {
     if (nt.second < 0)
@@ -142,15 +145,17 @@ private slots:
     const int anchor = press_and_capture_anchor(all, drag, drag_traces);
     QVERIFY(anchor != INT_MAX); // 锚点必须真的采到，否则拖到哪都整列平移
     QCOMPARE(anchor, 0);
+    // ★ 起始槽也在 press 时采集（与 _drag_anchor_y 同时机），全程恒定。
+    const int start_slot = (drag->get_v_offset() - anchor) / SimTrace::pitch();
+    QCOMPARE(start_slot, 0);
 
     // ---- 逐帧 mouseMoveEvent ----
-    // 每帧落点 = 邻行格位中心 → 被拖项 layout 与邻居 layout **精确撞值**，
-    // 这正是"必须按行进方向破并结"的触发条件（见 order_by_layout_offset）。
+    // 每帧落点 = 邻行格位中心 → 由"手槽 + 起始槽"模型决定被拖项占哪一格。
     for (int step = 1; step <= 3; step++) {
       // (a) 被拖项跟手：force_to_v_offset（生产在 header.cpp 用 y_snap 对齐）
       drag->force_to_v_offset(step * SimTrace::pitch());
       // (b) 其余通道让位（生产在 header.cpp → animate_make_way_for_drag）
-      make_way_step(all, drag, anchor);
+      make_way_step(all, drag, anchor, start_slot);
     }
 
     // ★ 核心判据（注意：**不是**要求其余行占满全部槽位 —— 那是 drop handler
@@ -188,11 +193,13 @@ private slots:
     const int anchor = press_and_capture_anchor(all, drag, drag_traces);
     QVERIFY(anchor != INT_MAX);
     QCOMPARE(anchor, 0);
+    const int start_slot = (drag->get_v_offset() - anchor) / SimTrace::pitch();
+    QCOMPARE(start_slot, 3);
 
     const int p = SimTrace::pitch();
     for (int step = 1; step <= 3; step++) {
       drag->force_to_v_offset((3 - step) * p); // 3→0 槽，逐格上移（同样撞格位中心）
-      make_way_step(all, drag, anchor);
+      make_way_step(all, drag, anchor, start_slot);
     }
 
     // 被拖项占了 0 号槽，其余三行随之各自落在一个**固定网格点**上（互不重叠），
