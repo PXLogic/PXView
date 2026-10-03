@@ -23,6 +23,7 @@
 #ifndef PXVIEW_PV_MAINWINDOW_WORKSPACE_IO_H
 #define PXVIEW_PV_MAINWINDOW_WORKSPACE_IO_H
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 #include <vector>
@@ -51,6 +52,13 @@ struct WorkspaceTab {
   // auto-detect) for formats whose extension cannot decide (e.g. ".bin").
   bool isImportedFile = false;
   QString importFormat;
+  // Decoder stacks of this tab, exactly StoreSession::gen_decoders_json().
+  // Imported files (VCD/CSV/...) carry no decoder metadata of their own and
+  // file devices never write a `.pxc`, so WITHOUT this the analyzers a user had
+  // configured on such a tab are lost on restart. Native `.pxl` files already
+  // embed their decoders, so the field is only replayed for imported tabs (see
+  // MainWindowFileOps::reload_file_into_context) — this avoids double-adding.
+  QJsonArray decoder;
   // Device identity. `ds_device_handle` is process-local and never persisted;
   // `(driver, connid)` is the stable cross-session key (see
   // SigSession::resolve_device_handle_by_identity).

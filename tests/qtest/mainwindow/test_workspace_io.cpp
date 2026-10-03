@@ -57,6 +57,8 @@ private slots:
   void RoundTripPreservesPerTabViewDensity();
   void RoundTripPreservesImportedFileLoader();
   void LegacyTabWithoutImportFieldsDefaultsToPxl();
+  void RoundTripPreservesDecoderStacks();
+  void LegacyTabWithoutDecoderFieldIsEmpty();
   void MissingFileDegradesGracefully();
   void MalformedJsonDegradesGracefully();
   void UnsupportedVersionIsRejected();
@@ -212,8 +214,66 @@ void TestWorkspaceIo::LegacyTabWithoutImportFieldsDefaultsToPxl() {
   QCOMPARE(out.tabs[0].importFormat, QString());
 }
 
-void TestWorkspaceIo::RoundTripPreservesPerTabViewDensity() {
-  // 视图密度是 per-tab 状态，住在 session.uiLayout 里（不进 .pxc）。
+void TestWorkspaceIo::RoundTripPreservesDecoderStacks() {
+  // Decoder (protocol analyzer) stacks on an *imported* file tab are persisted
+  // NOWHERE else: an imported tab has no `.pxl` (whose embedded `decoders` zip
+  // entry is the native path) and file devices never write a `.pxc` (only
+  // hardware/demo do — see MainWindowConfigIO::save_config). So the workspace
+  // carries them, per tab. Losing this array made everyone's VCD/CSV analyzers
+  // vanish on the next launch.
+  pv::Workspace ws;
+  pv::WorkspaceTab vcd;
+  vcd.title = "wave";
+  vcd.filePath = "C:/data/wave.vcd";
+  vcd.isFileDevice = true;
+  vcd.isImportedFile = true;
+  vcd.importFormat = "vcd";
+  vcd.session = QJsonObject{{"work_mode", 0}};
+  vcd.decoder = QJsonArray{
+      QJsonObject{{"id", "uart"}, {"stacked_ok", false}},
+      QJsonObject{{"id", "spi"}, {"stacked_ok", true}}};
+  ws.tabs.push_back(vcd);
+
+  // A native .pxl tab records none: set_file() replays them from the file, so a
+  // workspace copy would be a duplicate. Empty stays empty.
+  pv::WorkspaceTab native;
+  native.title = "session";
+  native.filePath = "C:/data/session.pxl";
+  native.isFileDevice = true;
+  native.session = QJsonObject{{"work_mode", 0}};
+  ws.tabs.push_back(native);
+
+  QVERIFY(pv::write_workspace_file(ws));
+
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 2);
+
+  const QJsonArray dec = out.tabs[0].decoder;
+  QCOMPARE(dec.size(), 2);
+  QCOMPARE(dec.at(0).toObject().value("id").toString(), QString("uart"));
+  QVERIFY(!dec.at(0).toObject().value("stacked_ok").toBool());
+  QCOMPARE(dec.at(1).toObject().value("id").toString(), QString("spi"));
+  QVERIFY(dec.at(1).toObject().value("stacked_ok").toBool());
+
+  QVERIFY(out.tabs[1].decoder.isEmpty());
+}
+
+void TestWorkspaceIo::LegacyTabWithoutDecoderFieldIsEmpty() {
+  // A workspace written before the `decoder` field existed must read back as an
+  // empty array — the restore path then does nothing extra, i.e. pre-existing
+  // sessions keep their old behaviour instead of failing to parse.
+  QVERIFY(writeRaw(R"({"Version":1,"activeTab":0,"tabs":[
+      {"title":"old","filePath":"C:/data/old.vcd",
+       "isFileDevice":true,"isImportedFile":true,"importFormat":"vcd",
+       "session":{"work_mode":0}}]})"));
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 1);
+  QVERIFY(out.tabs[0].decoder.isEmpty());
+}
+
+void TestWorkspaceIo::RoundTripPreservesPerTabViewDensity() {  // 视图密度是 per-tab 状态，住在 session.uiLayout 里（不进 .pxc）。
   pv::Workspace ws;
   pv::WorkspaceTab a;
   a.title = "A";

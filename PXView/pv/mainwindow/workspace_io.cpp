@@ -78,6 +78,10 @@ bool write_workspace_file(const Workspace &ws) {
     o["filePath"] = t.filePath;
     o["isImportedFile"] = t.isImportedFile;
     o["importFormat"] = t.importFormat;
+    // Only persist a non-empty decoder list — keeps the workspace lean for the
+    // common (no decoder) case while still round-tripping an empty list.
+    if (!t.decoder.isEmpty())
+      o["decoder"] = t.decoder;
     QJsonObject dev;
     dev["driver"] = t.driver;
     dev["connid"] = t.connid;
@@ -163,6 +167,7 @@ bool read_workspace_file(Workspace &out) {
     t.filePath = o.value("filePath").toString();
     t.isImportedFile = o.value("isImportedFile").toBool(false);
     t.importFormat = o.value("importFormat").toString();
+    t.decoder = o.value("decoder").toArray();
     const QJsonObject dev = o.value("device").toObject();
     t.driver = dev.value("driver").toString();
     t.connid = dev.value("connid").toString();

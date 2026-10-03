@@ -52,6 +52,7 @@
 #include "pv/base/pxvdef.h"
 #include "pv/session/sessionmanager.h"
 #include "pv/session/sigsession.h"
+#include "pv/session/storesession.h"
 #include "pv/core/langresource.h"
 #include "pv/ui/msgbox.h"
 #include "pv/utility/path.h"
@@ -59,6 +60,7 @@
 #include "pv/core/documentregistry.h"
 #include "pv/data/document/sessiondocument.h"
 #include "pv/dialogs/storeprogress.h"
+#include "pv/dock/protocoldock.h"
 #include "pv/view/view.h"
 
 namespace pv {
@@ -177,6 +179,30 @@ bool MainWindowFileOps::reload_file_into_context(pv::TabContext *ctx) {
     ctx->make_live();
     ctx->activate();
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));
+
+    // Re-apply the decoder (protocol analyzer) stacks that were open on this tab
+    // before the restart. Only imported files carry them here: native .pxl
+    // embeds its own decoder metadata and set_file() replays it, so applying the
+    // pending list on top would double-add. The channels exist only after the
+    // import above, which is why this runs here and not at restore time
+    // (contract "File-device tabs restore lazily").
+    if (ctx->is_imported_file() && ctx->has_pending_decoders()) {
+      StoreSession ss(_wnd->session());
+      auto *dock = _wnd->dock_manager()->protocol_widget();
+      // load_decoders() mutates the array in place, so hand it a copy — the
+      // tab's own list is cleared right after and must not be consumed twice.
+      QJsonArray decoders = ctx->pending_decoders();
+      ss.load_decoders(
+          [dock](const QString &id, bool stacked_ok,
+                 std::list<pv::data::decode::Decoder *> &subs) {
+            return dock->add_protocol_by_id(id, stacked_ok, subs);
+          },
+          decoders);
+      ctx->clear_pending_decoders();
+      if (auto *v = ctx->view())
+        v->update_all_trace_postion();
+    }
+
     pxv_info("reload_file_into_context: reopened '%s' for tab '%s'",
              path.toUtf8().constData(), ctx->title().toUtf8().constData());
     return true;

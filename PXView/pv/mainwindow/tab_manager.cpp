@@ -50,6 +50,7 @@
 #include "pv/mainwindow/workspace_io.h"
 #include "pv/session/sessionmanager.h"
 #include "pv/session/sigsession.h"
+#include "pv/session/storesession.h"
 #include "pv/session/tabcontext.h"
 #include "pv/toolbars/samplingbar.h"
 #include "pv/ui/draggabletabwidget.h"
@@ -739,6 +740,17 @@ void TabManager::save_workspace() {
     t.isImportedFile = ctx->is_imported_file();
     t.importFormat = ctx->import_format();
 
+    // Decoder (protocol analyzer) stacks. Imported files carry no decoder
+    // metadata of their own and file devices never write a `.pxc` (see
+    // MainWindowConfigIO::save_config — only hardware/demo do), so without this
+    // the analyzers on a VCD/CSV tab would vanish on restart. Scoped to THIS
+    // tab's document so a multi-tab workspace records each tab's own stacks.
+    if (session && ctx->document()) {
+      StoreSession ss(session);
+      ss.set_decoder_doc(ctx->document());
+      ss.gen_decoders_json(t.decoder);
+    }
+
     // 设备身份用 (driver, connid)：ds_device_handle 是进程内句柄，跨会话无意义
     // （契约 "Workspace (tab session) persistence"）。
     if (session && ctx->device_handle() != NULL_HANDLE)
@@ -860,6 +872,11 @@ int TabManager::restore_workspace() {
     // VCD/CSV/..., set_file for .pxl). See TabManager::save_workspace.
     ctx->set_imported_file(t.isImportedFile);
     ctx->set_import_format(t.importFormat);
+    // Decoder stacks to re-apply once the file is lazily reopened. Applied by
+    // MainWindowFileOps::reload_file_into_context — NOT here, because the
+    // decoders need their channels bound and that only happens after the file
+    // device exists (contract "File-device tabs restore lazily").
+    ctx->set_pending_decoders(t.decoder);
     if (h != NULL_HANDLE) {
       ctx->set_device_handle(h);
       doc->set_device_handle(h);

@@ -26,6 +26,7 @@
 
 #include <QString>
 #include <QDateTime>
+#include <QJsonArray>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -98,6 +99,17 @@ public:
     // for formats whose extension cannot decide (e.g. ".bin" → "binary").
     inline const QString &import_format() const { return _import_format; }
     inline void set_import_format(const QString &id) { _import_format = id; }
+
+    // Decoder stacks restored from the workspace for a lazily-reopened file
+    // tab. Held here until reload_file_into_context() has actually re-created
+    // the device (channels must exist before load_decoders can bind probes);
+    // cleared once consumed so a second reopen cannot double-add. Applies to
+    // imported files only — a native `.pxl` embeds its own decoders and is
+    // restored by the existing data-file path.
+    inline bool has_pending_decoders() const { return !_pending_decoders.isEmpty(); }
+    inline const QJsonArray &pending_decoders() const { return _pending_decoders; }
+    inline void set_pending_decoders(const QJsonArray &a) { _pending_decoders = a; }
+    inline void clear_pending_decoders() { _pending_decoders = QJsonArray(); }
 
     // The device this tab's data came from. NULL_HANDLE for tabs that have
     // never been bound to a device (e.g. a fresh empty tab before any capture).
@@ -224,6 +236,7 @@ private:
     QString                 _file_path;
     bool                    _is_imported_file = false;
     QString                 _import_format;
+    QJsonArray              _pending_decoders;
     State                   _state;
     QDateTime               _timestamp;
     ds_device_handle        _device_handle = NULL_HANDLE;
