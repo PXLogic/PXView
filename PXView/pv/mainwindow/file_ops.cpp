@@ -196,13 +196,26 @@ bool MainWindowFileOps::reload_file_into_context(pv::TabContext *ctx) {
     if (ctx->has_pending_decoders() && !ctx->file_has_embedded_decoders()) {
       StoreSession ss(_wnd->session());
       auto *dock = _wnd->dock_manager()->protocol_widget();
-      // load_decoders() mutates the array in place, so hand it a copy — the
-      // tab's own list is cleared right after and must not be consumed twice.
+      // The decoders must be filed under THIS tab's document, and read back
+      // from the same one. Two things must agree for that:
+      //   1. the StoreSession read-back document (set_decoder_doc below), and
+      //   2. the View that actually files the stack (named per-call in the
+      //      callback — see the comment there). The ProtocolDock is shared, so
+      //      its own `_view` is NOT a safe source for this tab's document.
+      ss.set_decoder_doc(ctx->document());
+
       QJsonArray decoders = ctx->pending_decoders();
+      // Name THIS tab's View explicitly. The ProtocolDock is shared across
+      // tabs and its own `_view` is only swapped by bind_context() on tab
+      // switch; this restore runs during the tab change, so the dock can still
+      // be bound to another tab. Routing through the dock's `_view` then filed
+      // the new DecoderStack under the OTHER tab's document, and this tab read
+      // back an empty list.
+      view::View *const tab_view = ctx->view();
       ss.load_decoders(
-          [dock](const QString &id, bool stacked_ok,
-                 std::list<pv::data::decode::Decoder *> &subs) {
-            return dock->add_protocol_by_id(id, stacked_ok, subs);
+          [dock, tab_view](const QString &id, bool stacked_ok,
+                           std::list<pv::data::decode::Decoder *> &subs) {
+            return dock->add_protocol_by_id(id, stacked_ok, subs, tab_view);
           },
           decoders);
       ctx->clear_pending_decoders();

@@ -1842,13 +1842,18 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
     }
 
     int dec_index = -1;
-    
+
     pxv_info("StoreSession::load_decoders: starting to process %d decoders", dec_array.size());
     for (const QJsonValue &dec_value : dec_array)
     {
         QJsonObject dec_obj = dec_value.toObject();
         pxv_info("StoreSession::load_decoders: processing decoder %s", dec_obj["id"].toString().toStdString().c_str());
-        auto &pre_dsigs = _session->get_decoder_stacks();
+        // Same document on both ends: the callback files the new stack under
+        // the View's target document, so reading "after" from the active
+        // document (the pre-fix behaviour) compared against the wrong list and
+        // saw 0-vs-0 during an Open-path replay, where claim_active_document()
+        // is skipped and the active document is null.
+        auto &pre_dsigs = _session->get_decoder_stacks(_decoder_doc);
         std::list<pv::data::decode::Decoder*> sub_decoders;
 
         //get sub decoders
@@ -1905,10 +1910,19 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
 
         std::list<int> bind_indexs;
 
-        auto &aft_dsigs = _session->get_decoder_stacks();
+        auto &aft_dsigs = _session->get_decoder_stacks(_decoder_doc);
         pxv_info("StoreSession::load_decoders: pre_dsigs.size()=%d, aft_dsigs.size()=%d", static_cast<int>(pre_dsigs.size()), static_cast<int>(aft_dsigs.size()));
 
-        if (aft_dsigs.size() >= pre_dsigs.size()) {
+        // `aft_dsigs` empty means the stack did not land where we are looking.
+        // That is NOT the same as "no stack was added": the callback above
+        // created and filed it under a different document. Guarding only on
+        // `aft_dsigs.size() >= pre_dsigs.size()` let `0 >= 0` through and the
+        // following `back()` dereferenced an empty vector (observed SIGSEGV in
+        // reload_file_into_context → load_decoders). Emptiness is the reliable
+        // signal here because pre_dsigs is non-empty when a stack already
+        // existed in this document, and a successful add makes aft_dsigs one
+        // longer than pre_dsigs.
+        if (!aft_dsigs.empty() && aft_dsigs.size() >= pre_dsigs.size()) {
             const GSList *l;
 
             auto new_dsig = aft_dsigs.back();

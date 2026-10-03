@@ -103,8 +103,16 @@ public:
   void set_view(view::View *view);
 
   void del_all_protocol();
+  // Adds a decoder through a View. `target_view` names the View that must own
+  // the resulting DecoderStack / DecodeTrace; pass the caller tab's View when
+  // restoring a file tab, because this dock is SHARED across tabs and its own
+  // `_view` may still be bound to another tab (ProtocolDock::bind_context runs
+  // on tab switch, but lazy file-tab restore can happen before it). Leaving it
+  // nullptr falls back to the dock's current `_view` — correct only for
+  // user-driven adds, which always happen on the visible tab.
   bool add_protocol_by_id(QString id, bool silent,
-                          std::list<pv::data::decode::Decoder *> &sub_decoders);
+                          std::list<pv::data::decode::Decoder *> &sub_decoders,
+                          view::View *target_view = nullptr);
   void rebuild_protocol_layers();
 
   void bind_context(TabContext *ctx) override;

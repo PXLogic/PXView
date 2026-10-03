@@ -592,11 +592,25 @@ void ProtocolDock::on_add_protocol() {
 
 bool ProtocolDock::add_protocol_by_id(
     QString id, bool silent,
-    std::list<pv::data::decode::Decoder *> &sub_decoders) {
+    std::list<pv::data::decode::Decoder *> &sub_decoders,
+    view::View *target_view) {
   int cur_mode = _signals->device()->get_work_mode();
   if (cur_mode != LOGIC && cur_mode != MSO) {
     pxv_info(
         "Protocol Analyzer\nProtocol Analyzer is only valid in Digital Mode!");
+    return false;
+  }
+
+  // This dock is shared by every tab and holds a single `_view` that
+  // bind_context() swaps on tab switch. A file-tab restore can run before that
+  // swap, so the caller may name the owning View explicitly. Without this, the
+  // new DecoderStack is filed under whatever document the dock's stale `_view`
+  // points at (observed: the stack landed in another tab's document, so the
+  // restoring tab read back an empty list and the decoder vanished).
+  view::View *const view = target_view ? target_view : _view;
+  if (!view) {
+    pxv_err("ProtocolDock::add_protocol_by_id: no View available (id=%s)",
+            id.toUtf8().data());
     return false;
   }
 
@@ -626,14 +640,15 @@ bool ProtocolDock::add_protocol_by_id(
   // Route through the View layer so the View can create its own DecodeTrace
   // wrapper for the newly created DecoderStack. The View internally calls
   // Core (SigSession::add_decoder) to create the stack, then creates the
-  pxv_info("ProtocolDock: calling _view->add_decoder for %s, silent=%d",
-           id.toUtf8().data(), silent);
-  if (_view->add_decoder(decoder, silent, dstatus, sub_decoders, stack) ==
+  pxv_info("ProtocolDock: calling view->add_decoder for %s, silent=%d "
+           "(target_view=%p dock_view=%p)",
+           id.toUtf8().data(), silent, (void *)target_view, (void *)_view);
+  if (view->add_decoder(decoder, silent, dstatus, sub_decoders, stack) ==
       false) {
-    pxv_info("ProtocolDock: _view->add_decoder returned false");
+    pxv_info("ProtocolDock: view->add_decoder returned false");
     return false;
   }
-  pxv_info("ProtocolDock: _view->add_decoder returned true");
+  pxv_info("ProtocolDock: view->add_decoder returned true");
 
   // create item layer
   ProtocolItemLayer *layer =
