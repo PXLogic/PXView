@@ -740,11 +740,20 @@ void TabManager::save_workspace() {
     t.isImportedFile = ctx->is_imported_file();
     t.importFormat = ctx->import_format();
 
-    // Decoder (protocol analyzer) stacks. Imported files carry no decoder
-    // metadata of their own and file devices never write a `.pxc` (see
-    // MainWindowConfigIO::save_config — only hardware/demo do), so without this
-    // the analyzers on a VCD/CSV tab would vanish on restart. Scoped to THIS
-    // tab's document so a multi-tab workspace records each tab's own stacks.
+    // Decoder (protocol analyzer) stacks. Two independent reasons the file
+    // device paths cannot supply them on restore:
+    //   1. file devices never write a `.pxc` (see
+    //      MainWindowConfigIO::save_config — only hardware/demo do);
+    //   2. an Open-path archive (.sr) has no "decoders" member of its own
+    //      (unlike .pxl), and VCD/CSV imports have no container at all.
+    // So the workspace is the only carrier for both. Scoped to THIS tab's
+    // document so a multi-tab workspace records each tab's own stacks.
+    //
+    // This only reads a non-empty list if the decoder was actually filed under
+    // ctx->document() — see ViewDerivedTraces::add_decoder(), which now names
+    // the target document explicitly instead of relying on the registry's
+    // global "active document" (unstable during an Open-path replay, because
+    // TabContext::claim_active_document() is skipped while is_working()).
     if (session && ctx->document()) {
       StoreSession ss(session);
       ss.set_decoder_doc(ctx->document());

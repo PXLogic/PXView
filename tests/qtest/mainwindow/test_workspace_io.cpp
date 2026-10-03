@@ -58,6 +58,7 @@ private slots:
   void RoundTripPreservesImportedFileLoader();
   void LegacyTabWithoutImportFieldsDefaultsToPxl();
   void RoundTripPreservesDecoderStacks();
+  void RoundTripPreservesDecoderStacksOnOpenPathArchive();
   void LegacyTabWithoutDecoderFieldIsEmpty();
   void MissingFileDegradesGracefully();
   void MalformedJsonDegradesGracefully();
@@ -271,6 +272,42 @@ void TestWorkspaceIo::LegacyTabWithoutDecoderFieldIsEmpty() {
   QVERIFY(pv::read_workspace_file(out));
   QCOMPARE(static_cast<int>(out.tabs.size()), 1);
   QVERIFY(out.tabs[0].decoder.isEmpty());
+}
+
+void TestWorkspaceIo::RoundTripPreservesDecoderStacksOnOpenPathArchive() {
+  // An Open-path sigrok archive (.sr) is NOT an "imported" file: nothing claims
+  // the .sr extension, so it replays through set_file() → virtual-session, and
+  // isImportedFile stays false. It also has no embedded "decoders" member (its
+  // zip holds only version/logic-1/metadata), so unlike a .pxl the workspace is
+  // its ONLY decoder carrier.
+  //
+  // This is the case that silently lost analyzers: the read-side gate used to
+  // be `is_imported_file() && has_pending_decoders()`, which is permanently
+  // false here, so load_decoders() never ran. The array must therefore be
+  // persisted for isImportedFile=false file tabs too — the discriminator is
+  // "does the container embed its own decoders", not "which loader opened it".
+  pv::Workspace ws;
+  pv::WorkspaceTab sr;
+  sr.title = "nrf24l01-communication";
+  sr.filePath = "C:/dumps/spi/nrf24l01/nrf24l01-communication.sr";
+  sr.isFileDevice = true;
+  sr.isImportedFile = false;   // ← the whole point: Open path, not an import
+  sr.importFormat = QString();
+  sr.session = QJsonObject{{"work_mode", 0}};
+  sr.decoder = QJsonArray{
+      QJsonObject{{"id", "spi"}, {"stacked_ok", false},
+                  {"channel", QJsonObject{{"clk", 2}, {"mosi", 3}, {"miso", 4}}}}};
+  ws.tabs.push_back(sr);
+
+  QVERIFY(pv::write_workspace_file(ws));
+
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 1);
+  QVERIFY(!out.tabs[0].isImportedFile);
+  QCOMPARE(out.tabs[0].decoder.size(), 1);
+  QCOMPARE(out.tabs[0].decoder.at(0).toObject().value("id").toString(),
+           QString("spi"));
 }
 
 void TestWorkspaceIo::RoundTripPreservesPerTabViewDensity() {  // 视图密度是 per-tab 状态，住在 session.uiLayout 里（不进 .pxc）。

@@ -29,6 +29,7 @@
 #include "pv/data/document/sessiondocument.h"
 #include "pv/session/deviceagent.h"
 #include "pv/base/log.h"
+#include "pv/base/ZipMaker.h"
 #include <QDebug>
 #include <algorithm>
 
@@ -103,6 +104,33 @@ void TabContext::rebind_document(std::shared_ptr<data::SessionDocument> doc,
 void TabContext::make_live()
 {
     _state = State::LIVE;
+}
+
+bool TabContext::file_has_embedded_decoders() const
+{
+    // Memoise per path: a restored workspace calls this once when the tab is
+    // lazily reopened, but the answer is stable for the lifetime of the path.
+    if (_embedded_decoders_cache >= 0 && _embedded_decoders_probed == _file_path)
+        return _embedded_decoders_cache != 0;
+
+    _embedded_decoders_probed = _file_path;
+    _embedded_decoders_cache = 0;   // pessimistic default: assume none
+
+    if (_file_path.isEmpty())
+        return false;
+
+    // Both .pxl and .sr are zip containers; GetInnterFileData() returns a null
+    // handle when the member is absent. A non-zip file (VCD/CSV) simply has no
+    // archive -> false. The "decoders" member exists ONLY in containers PXView
+    // wrote itself (Save), which is precisely the set that needs no replay.
+    std::string path = _file_path.toStdString();
+    ZipReader rd(path.c_str());
+    if (rd.HaveArchive() && rd.GetInnterFileData("decoders") != nullptr)
+        _embedded_decoders_cache = 1;
+
+    pxv_info("TabContext::file_has_embedded_decoders('%s') = %d",
+             _file_path.toUtf8().constData(), _embedded_decoders_cache);
+    return _embedded_decoders_cache != 0;
 }
 
 bool TabContext::has_data()

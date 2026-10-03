@@ -181,12 +181,19 @@ bool MainWindowFileOps::reload_file_into_context(pv::TabContext *ctx) {
     _wnd->update_tab_style(_wnd->tab_manager()->contexts().indexOf(ctx));
 
     // Re-apply the decoder (protocol analyzer) stacks that were open on this tab
-    // before the restart. Only imported files carry them here: native .pxl
-    // embeds its own decoder metadata and set_file() replays it, so applying the
-    // pending list on top would double-add. The channels exist only after the
-    // import above, which is why this runs here and not at restore time
-    // (contract "File-device tabs restore lazily").
-    if (ctx->is_imported_file() && ctx->has_pending_decoders()) {
+    // before the restart.
+    //
+    // The gate is "does this file carry its own decoders?", NOT "was it
+    // imported?". A .pxl written by Save embeds a "decoders" member and
+    // set_file() replays it — re-applying the pending list would double-add.
+    // But an Open-path .sr archive has no such member: it replays through
+    // set_file() (virtual-session) just like .pxl, yet carries no analyzer
+    // config, so it needs the pending list exactly like a VCD does. Gating on
+    // is_imported_file() silently dropped every .sr tab's decoders.
+    //
+    // Channels exist only after the replay above, which is why this runs here
+    // and not at restore time (contract "File-device tabs restore lazily").
+    if (ctx->has_pending_decoders() && !ctx->file_has_embedded_decoders()) {
       StoreSession ss(_wnd->session());
       auto *dock = _wnd->dock_manager()->protocol_widget();
       // load_decoders() mutates the array in place, so hand it a copy — the

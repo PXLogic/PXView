@@ -122,10 +122,23 @@ bool ViewDerivedTraces::add_decoder(
 
   out_stack = nullptr;
 
-  // 1. Core layer creates the DecoderStack and adds it to the active
-  //    document's stack list. Core owns the DecoderStack.
+  // 1. Core layer creates the DecoderStack and adds it to THIS view's
+  //    document stack list. Core owns the DecoderStack.
+  //
+  //    The target document MUST be named explicitly. Falling back to the
+  //    registry's global "active document" is not equivalent: an Open-path
+  //    file tab (.sr / .pxl) replays through the real capture pipeline, so
+  //    TabContext::claim_active_document() is skipped for the whole duration
+  //    (`if (!_session->is_working())` guard) and the active document can
+  //    point at another tab — or at nothing at all, in which case
+  //    SigSession::add_decoder() returns the stack via out_stack WITHOUT
+  //    storing it anywhere and the decoder silently vanishes on save.
+  //    Binding to document_ptr() (the render document this view was given by
+  //    TabContext::restore_view_data / on_copy_to_doc_done) keeps the stack
+  //    where save_workspace() reads it back from (ctx->document()).
   if (!_view->data_source()->add_decoder(dec, silent, dstatus, sub_decoders,
-                                        out_stack))
+                                        out_stack,
+                                        _view->data_sync_delegate()->document_ptr()))
     return false;
 
   if (!out_stack)
