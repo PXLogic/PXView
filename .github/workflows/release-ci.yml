@@ -5,8 +5,10 @@ name: PXView Release CI
 #
 # 本工作流在 push 到 main / dev 时自动运行（CI/CD），另可手动触发发布 rc。
 #
-#   push 到 dev（候选通道）只跑 Job 1（全量 E2E）；Job 2-4（ASan / TSan /
-#   clang-tidy）只跑 main push。Job 5（发布）只在手动触发时运行。
+#   push 到 dev（候选通道）：Job 1（全量 E2E）跑完后，Job 5（发布）用 needs
+#   顺序接上，自动把这次 dev 提交的候选包发成 prerelease；Job 2-4（ASan /
+#   TSan / clang-tidy）只跑 main push（main 不自动发布，正式发布仍走 tag push）。
+#   Job 5 也保留手动触发通道（重发某个 dev 提交 / 补发）。
 #
 # Job 1: release-build-and-tests
 #   Release 编译 → 安装 → 全量 E2E 测试 (19 个测试套件)
@@ -30,15 +32,18 @@ name: PXView Release CI
 #   跳过 readability/modernize/misc/performance/cppcoreguidelines
 #   预计 15-20 分钟（vs 全量 57+ 分钟）
 #
-# Job 5: publish-rc（仅手动触发）
-#   push 不发布：dev 上每次 push 只做构建 + 全量测试，候选包留在那次 run 的
-#   artifacts 里。要对外发布时手动 Run workflow 触发本工作流，可选填要发布的
-#   提交 SHA（留空 = dev 最新提交）。本 job 然后：
-#     1. 校验该提交在 dev 上（compare 状态 ahead/identical）；
-#     2. 轮询等待同一提交的 build.yml（打包 + 安装包自检）与 release-ci.yml 的
-#        push run（全量 E2E）跑完并都是 success —— 这就是「CD 全绿」这道门槛。
-#        两套 run 由同一次 push 触发、与本 job 并行，手动发布时往往还在排队或
-#        运行中，所以这里是「等」而不是「查不到/没跑完就失败」；
+# Job 5: publish-rc（dev push 后顺序自动执行；也保留手动触发）
+#   dev 上每次 push：Job 1 跑完全量 E2E 且为 success 后，本 job 靠 needs 顺序接上
+#   （Job 1 失败 / 取消则本 job 跳过，不发布）。本 job 然后：
+#     1. 确定要发布的提交：自动触发时就是本次 push 的提交（github.sha）；手动
+#        触发时可填 SHA（留空 = dev 最新提交）。校验该提交在 dev 上
+#        （compare 状态 ahead/identical）；
+#     2. 轮询等待同一提交的 build.yml（打包 + 安装包自检）跑完并 success ——
+#        这就是「CD 全绿」这道门槛。build.yml 由同一次 push 并行触发，通常还在
+#        排队/运行，所以这里是「等」而不是「查不到/没跑完就失败」。自动触发时
+#        全量 E2E 已由 needs 保证（Job 1 就是那次 release-ci push run，不能再
+#        去轮询它自己，否则等到 job 超时）；手动触发时没有 Job 1 可依赖，两套
+#        push run（build.yml + release-ci.yml）都要轮询等待；
 #     3. 取回那次 build.yml 的产物；版本号从安装包文件名解析（与包内一致，
 #        所以标签与包里的版本号永远对得上）；
 #     4. 该版本标签已存在则失败并提示重新构建（序号在构建时分配）；
@@ -53,13 +58,13 @@ on:
   push:
     branches:
       - main
-      # dev = 集成/候选通道：push 到 dev 只跑 Job 1（全量 E2E），不发布；
-      # 发布由手动触发的 Job 5（publish-rc）完成，见文件头 Job 5。
+      # dev = 集成/候选通道：push 到 dev 先跑 Job 1（全量 E2E），随后 Job 5
+      # （publish-rc）顺序执行、自动发布候选版，见文件头 Job 5。
       - dev
   workflow_dispatch:
     inputs:
       publish_sha:
-        description: '要发布的 dev 提交 SHA（留空 = dev 最新提交）'
+        description: '手动发布时指定 dev 提交 SHA（留空 = dev 最新提交；自动触发忽略此项）'
         required: false
         default: ''
       max_wait_minutes:
@@ -1156,16 +1161,18 @@ jobs:
           if-no-files-found: warn
 
   # ============================================================
-  # Job 5: Publish RC (manual)
+  # Job 5: Publish RC（dev push 后顺序自动执行）
   #
-  # 手动触发的发布通道（每个构建一个 Release，不滚动覆盖）。发布需同时满足：
-  #   1. 触发方式是 workflow_dispatch（push 上本 job 直接跳过）；
+  # 发布通道（每个构建一个 Release，不滚动覆盖）。发布需同时满足：
+  #   1. 自动触发 = push 到 dev 且 Job 1 全绿（needs 顺序保证）；手动触发
+  #      = workflow_dispatch（Job 1 按 push 条件跳过，靠 !cancelled() 撤销连坐）；
   #   2. 目标提交在 dev 上（compare 状态 ahead/identical）；
-  #   3. 同一提交的 build.yml（三平台打包 + 安装包自检）与 release-ci.yml 的
-  #      push run（全量 E2E）都跑完且 success —— 「CD 全绿」就是这道门槛。
-  #      这两套 run 由同一次 push 触发、与本 job 并行，手动点发布时通常还在
-  #      排队/运行，所以本 job 会轮询等待它们结束（上限 max_wait_minutes，
-  #      默认 120 分钟），而不是「检测到没跑完就失败」；
+  #   3. 「CD 全绿」：自动触发时 Job 1（本次 release-ci push run，即全量 E2E）
+  #      已由 needs 保证 success，本 job 只需轮询等待同一提交的 build.yml
+  #      （三平台打包 + 安装包自检）；手动触发时没有 Job 1 可依赖，两套 push
+  #      run 都要等。build.yml 由同一次 push 触发、与本 job 并行，通常还在
+  #      排队/运行，所以本 job 会轮询等待（上限 max_wait_minutes，默认 120
+  #      分钟），而不是「检测到没跑完就失败」；
   #   4. 该版本标签尚未存在（序号在构建时分配，同一个序号只会被发布一次）。
   #
   # 发布形态：每个构建各一个 tag = PXView_v<本次版本号>（如 PXView_v1.6.6-rc.0，
@@ -1177,10 +1184,18 @@ jobs:
   # 正式发布仍走 tag push → build.yml 的 Release 步骤。
   # ============================================================
   publish-rc:
-    name: Publish RC (manual)
-    # 不写 needs：手动触发时 Job 1 是跳过的，needs 会连带把本 job 跳过；
-    # 「CD 全绿」由下面第 2 步轮询等待那两次 push run 保证。
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    name: Publish RC
+    # needs Job 1：automatic 模式下这就是「跑完测试才发布」的顺序保证；
+    # 手动触发时 Job 1 是跳过的（if: push），needs 会把本 job 一起跳过，所以
+    # if 里用 !cancelled() 解除这种连坐，手动路径自行轮询等待那次 push run。
+    # 自动模式只在 dev 上跑：main push 不产生 rc（正式版走 tag push）。
+    needs: [release-build-and-tests]
+    if: |
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/dev'
+          && needs.release-build-and-tests.result == 'success')
+        || github.event_name == 'workflow_dispatch'
+      )
     runs-on: ubuntu-24.04
     # 60 → 180：第 2 步现在会真的等 CD 跑完（默认预算 120 分钟，
     # max_wait_minutes 上限 150），再加取产物 / 生成正文 / 发布的时间；
@@ -1192,6 +1207,9 @@ jobs:
 
     steps:
       # ── 1. 确定要发布的提交 ──────────────────────────────────────
+      # 自动触发（dev push）：目标就是本次 push 的提交 github.sha —— 不能用
+      # 「dev 最新提交」，否则连续两次 push 时，后一次会把前一次的 run 带到
+      # 更新的提交上（而 build.yml 的产物属于前一次提交），发错版本。
       # 手动触发：publish_sha 留空 = dev 最新提交。要求该提交在 dev 上
       # （compare <sha>...dev 的 ahead/identical 表示 sha 是 dev 的祖先），
       # 避免把别处的提交发成候选版。
@@ -1223,6 +1241,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISH_SHA: ${{ github.event.inputs.publish_sha }}
+          # 自动触发时用本次 push 的提交；github.event.inputs 在 push 上为空。
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
         run: |
           # trim：GitHub 对 workflow_dispatch 的字符串输入原样传递，不做首尾
           # 空白清理。从 UI / 终端复制提交号时常带上尾随空格或 Tab，若直接拼进
@@ -1232,8 +1253,15 @@ jobs:
           SHA="${PUBLISH_SHA#"${PUBLISH_SHA%%[![:space:]]*}"}"
           SHA="${SHA%"${SHA##*[![:space:]]}"}"
           if [ -z "$SHA" ]; then
-            SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
-            echo "publish_sha 留空 → 取 dev 最新提交"
+            if [ "$EVENT_NAME" = "push" ]; then
+              # 自动模式：github.sha 就是本次 push 的提交（= 触发本次 run 的
+              # dev 提交），与之对应的 build.yml push run / artifacts 也是它。
+              SHA="$EVENT_SHA"
+              echo "自动触发（dev push）→ 目标提交为本次 push 的提交"
+            else
+              SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/dev" --jq '.sha')
+              echo "publish_sha 留空 → 取 dev 最新提交"
+            fi
           else
             # gh run list 的 --commit 过滤器只认 40 位完整 SHA：短 SHA 不做
             # 展开，静默返回空列表（退出码 0），下游会误报「找不到该提交的
@@ -1269,11 +1297,15 @@ jobs:
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "目标提交：${SHA}（在 dev 上，状态 ${STATUS}）"
 
-      # ── 2. CD 门槛：等同一提交的两套工作流跑完并全绿 ──────────────
-      # build.yml 与 release-ci.yml 由同一次 push 并行触发，彼此不感知，也
-      # 与本 job 并行 —— 刚 push 完就手动点发布时，两套 run 通常还在排队或
-      # 运行中。以前这里「查不到 / 结论不是 success 就立刻失败」，发布只能
-      # 被打回，用户盯着页面等半小时再点一次；现在改为轮询等待：
+      # ── 2. CD 门槛：等同一提交的 build.yml 跑完并全绿 ─────────────
+      # 自动触发（dev push）：全量 E2E 就是本工作流的 Job 1，已由 needs 保证
+      # success；本 run 此刻仍是 in_progress，绝不能去轮询 release-ci.yml 的
+      # push run（那正是本 run 自己，永远等不到 completed，只会把 job 耗到
+      # 超时）。所以自动模式只等 build.yml（打包 + 安装包自检）。
+      # 手动触发：Job 1 被跳过、没有可依赖的对象，两套 push run 都要等。
+      # build.yml 由同一次 push 并行触发、与本 job 并行，通常还在排队或运行
+      # 中。以前这里「查不到 / 结论不是 success 就立刻失败」，发布只能被打回，
+      # 用户盯着页面等半小时再点一次；现在改为轮询等待：
       #   · 还没有 run（push 事件尚未调度出来）            → 等；
       #   · 有 run 但 status != completed（queued/in_progress/waiting）→ 等；
       #   · completed 且 success                           → 记下 run id，放行；
@@ -1288,12 +1320,19 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          # 自动触发（push）没有 workflow_dispatch 输入，这边取到空串。
+          INPUT_MAX_WAIT: ${{ github.event.inputs.max_wait_minutes }}
         run: |
           # SHA 已由「Resolve target commit」规整为 40 位全量：gh run list 的
           # --commit 只认全量 SHA，短 SHA 会静默返回空列表。
           SHA="${{ steps.target.outputs.sha }}"
           REPO="$GITHUB_REPOSITORY"
-          MAX_WAIT_MINUTES="${{ github.event.inputs.max_wait_minutes }}"
+          # 自动触发没有该输入（空串）→ 用默认 120；手动触发沿用输入并校验。
+          MAX_WAIT_MINUTES="$INPUT_MAX_WAIT"
+          if [ -z "$MAX_WAIT_MINUTES" ]; then
+            MAX_WAIT_MINUTES=120
+          fi
           POLL_SECONDS=60
           GRACE_MINUTES=15
 
@@ -1304,8 +1343,9 @@ jobs:
             exit 1
           fi
 
-          # 两套 run 共享一个总预算，避免「等 build 用光预算、e2e 没得等」。
-          # 它们本来并行跑，共享预算等于等两者里较慢的那个，符合预期。
+          # 要等的 run 共享一个总预算，避免「等 build 用光预算、e2e 没得等」。
+          # 它们本来并行跑，共享预算等于等较慢的那个，符合预期（自动模式只有
+          # build.yml 一套要等；手动模式是 build.yml + release-ci.yml 两套）。
           DEADLINE=$(( $(date +%s) + MAX_WAIT_MINUTES * 60 ))
           echo "等待预算 ${MAX_WAIT_MINUTES} 分钟，轮询间隔 ${POLL_SECONDS}s，目标提交 ${SHA}"
 
@@ -1377,7 +1417,16 @@ jobs:
           # 显式 || exit 1：任一等待失败就停在这里，绝不带着空的 run id 往下走
           # （run-on 默认 bash -e 本已会中断，这里不依赖这个默认行为）。
           wait_for_workflow build.yml "PXView Build（打包 + 安装包自检）" build_run_id || exit 1
-          wait_for_workflow release-ci.yml "PXView Release CI（全量 E2E）" e2e_run_id || exit 1
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            # 自动触发：全量 E2E 就是本工作流的 Job 1（needs 已保证 success），
+            # 而本 run 还在运行中 —— 去轮询 release-ci.yml 的 push run 只会
+            # 命中自己，永远等不到 completed。直接把本 run id 当作 E2E 链接。
+            echo "e2e_run_id=${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+            echo "全量 E2E 由 Job 1 完成（本 run ${GITHUB_RUN_ID}），跳过 release-ci.yml 自轮询"
+          else
+            wait_for_workflow release-ci.yml "PXView Release CI（全量 E2E）" e2e_run_id || exit 1
+          fi
 
       # ── 3. 取回打包产物 ─────────────────────────────────────────
       # 每个 artifact 解到 dl/<artifact-name>/ 下。
@@ -1496,16 +1545,16 @@ jobs:
 
       # ── 5. 该版本是否已经发布过 ──────────────────────────────────
       # 序号在构建时分配，而构建时看到的「已发布 rc 最大值」可能落后于当前状态
-      # （例如另一个构建先被发布，占用了同一个序号）。这里明确拒绝而不是硬发：
-      # GitHub 一个标签只能挂一个 Release，硬发只会得到一个难懂的报错；
-      # 正确的处理是重新触发一次 dev 构建（会分配到新序号）后再发布。
+      # （例如另一次 dev push 的构建先被发布，占用了同一个序号）。这里明确拒绝
+      # 而不是硬发：GitHub 一个标签只能挂一个 Release，硬发只会得到一个难懂的
+      # 报错；正确的处理是等下一次 dev 提交构建（会分配到新序号）后再发布。
       - name: Reject when this version is already released
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="PXView_v${{ steps.assets.outputs.version }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "ERROR: ${TAG} 已存在，不能重复发布。请重新触发一次 dev 构建（会分配新的 rc 序号）后再发布。" >&2
+            echo "ERROR: ${TAG} 已存在，不能重复发布。等下一次 dev 提交自动构建（会分配新的 rc 序号）后再发布。" >&2
             exit 1
           fi
           echo "标签 ${TAG} 尚未占用，可以发布"
@@ -1559,7 +1608,7 @@ jobs:
           files: release-assets/*
           body: |
             dev 分支的候选构建（release candidate），供尝鲜与回归验证使用，**不是正式版本**。
-            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除；候选包由维护者手动发布。
+            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除；候选包在 dev 每次提交构建 + 测试全绿后自动发布。
 
             - 开发版本号：`${{ steps.assets.outputs.version }}`
             - 提交：`${{ steps.target.outputs.sha }}`
