@@ -50,10 +50,14 @@
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <algorithm>
 #include <cstring>
+#include <memory>
+#include <set>
 #include "pv/ui/popupdlglist.h"
 
+#include "pv/data/model/signalmodel.h"
 #include "pv/data/stack/decoderstack.h"
 #include "pv/data/decoderanalogdata.h"
 #include "pv/prop/binding/decoderoptions.h"
@@ -402,6 +406,62 @@ void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 }
  
 
+// 按字符自动匹配通道:候选文本 = 解码器通道的 name / id(如 I2C 的 "SCL" / "scl"),
+// 被匹配文本 = 信号名(如 "SCL"、"CH1_SCL")。两档策略:
+//   1) 不区分大小写的全等匹配(优先级高);
+//   2) 全等失败后退化为双向子串包含。
+// 已经被前面通道占用的信号会被跳过,保证一个信号只绑定一个通道。
+// 返回匹配到的信号 index,未匹配返回 -1。
+static int auto_match_signal(const srd_channel *pdch,
+                             const std::vector<std::shared_ptr<pv::data::SignalModel>> &sigs,
+                             const std::set<int> &taken)
+{
+    if (!pdch)
+        return -1;
+
+    // 候选关键字:优先用短 id(更贴近信号命名习惯),其次用显示名。
+    QStringList keys;
+    if (pdch->id)
+        keys << QString::fromUtf8(pdch->id).trimmed();
+    if (pdch->name)
+        keys << QString::fromUtf8(pdch->name).trimmed();
+    keys.removeAll(QString());
+
+    if (keys.isEmpty())
+        return -1;
+
+    // 第一档:不区分大小写全等。
+    for (const QString &key : keys) {
+        for (const auto &s : sigs) {
+            if (!s || s->type() != SR_CHANNEL_LOGIC || !s->enabled())
+                continue;
+            if (taken.count(s->index()))
+                continue;
+            if (QString::fromStdString(s->name()).compare(key, Qt::CaseInsensitive) == 0)
+                return s->index();
+        }
+    }
+
+    // 第二档:双向子串包含(信号名含关键字,或关键字含信号名)。
+    for (const QString &key : keys) {
+        for (const auto &s : sigs) {
+            if (!s || s->type() != SR_CHANNEL_LOGIC || !s->enabled())
+                continue;
+            const int idx = s->index();
+            if (taken.count(idx))
+                continue;
+            const QString sig_name = QString::fromStdString(s->name());
+            if (sig_name.isEmpty())
+                continue;
+            if (sig_name.contains(key, Qt::CaseInsensitive) ||
+                key.contains(sig_name, Qt::CaseInsensitive))
+                return idx;
+        }
+    }
+
+    return -1;
+}
+
 DsComboBox* DecoderOptionsDlg::create_probe_selector(
     QWidget *parent, const data::decode::Decoder *dec,
 	const srd_channel *const pdch)
@@ -436,7 +496,23 @@ DsComboBox* DecoderOptionsDlg::create_probe_selector(
 	}
 
     if (binded_index == -1){
-        selector->setCurrentIndex(0);
+        // 用户没手动指定通道时,尝试按字符自动匹配一个信号。
+        const int matched = auto_match_signal(pdch, sigs, _auto_bound_signals);
+        int matched_dex = -1;
+        if (matched != -1) {
+            matched_dex = selector->findData(QVariant::fromValue(matched));
+        }
+
+        if (matched_dex > 0) {
+            selector->setCurrentIndex(matched_dex);
+            _auto_bound_signals.insert(matched);
+            // 打标记:让用户一眼看出这一项是自动猜出来的,可以手动改。
+            selector->setToolTip(QObject::tr("已按字符自动匹配通道,请确认是否正确"));
+            selector->setStyleSheet("QComboBox{color:#2e7d32;font-weight:bold;}");
+        }
+        else {
+            selector->setCurrentIndex(0);
+        }
     }
 
 	return selector;

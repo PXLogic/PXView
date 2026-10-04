@@ -25,6 +25,7 @@
 
 #include <QObject>
 #include <QWidget>
+#include <set>
 #include <vector>
 #include <QString>
 
@@ -229,6 +230,8 @@ private:
     int          _contentHeight;
     
     std::vector<ProbeSelector> _probe_selectors;
+    // 已被自动字符匹配占用的信号 index,避免多个通道绑定同一个信号。
+    std::set<int> _auto_bound_signals;
     bool        _is_reload_form;
     int         _content_width;
 };
