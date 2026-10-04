@@ -421,65 +421,33 @@ void ViewSignalSync::normalize_view_indices() {
     t->set_view_index(idx++);
   }
 
-  // 赋值完成后立即校验不变量。约定（"本函数先于 compute_signal_groups 调用"）
-  // 靠这条校验兜底 —— 一旦被打破，在这里就能立刻发现，而不是等到下游出现
-  // "通道顺序错乱"这类难以定位的静默软 bug。
-  validate_view_index_invariants();
+  // 不变量 1（view_index 是 0..n-1 的排列）只依赖刚赋的值，可在此立即校验。
+  // 不变量 2（每个 group 内 view_index 连续）依赖 _signal_groups，而后者由
+  // compute_signal_groups() 【在本函数之后】重建——这里若一并校验，读到的是
+  // 【上一轮】的陈旧分组，切 tab / 增删通道时会刷出 "group N 内 view_index
+  // 不连续" 的假告警（序号本身完全合法）。因此不变量 2 的校验移到
+  // signals_changed() 里 compute_signal_groups() 之后。
+  validate_view_index_permutation();
+}
+
+// ---------------------------------------------------------------------------
+// 不变量校验的自由函数实现已抽到 view_index_invariants.cpp（widget-free，
+// 可独立单测：tests/qtest/view/test_view_index_invariants.cpp）。
+// 下面两个成员方法是薄包装，保持 ViewSignalSync 的原有调用点不变。
+// ---------------------------------------------------------------------------
+
+bool ViewSignalSync::validate_view_index_permutation() const {
+  std::vector<Trace *> all_traces;
+  _view->get_traces(ALL_VIEW, all_traces);
+  return view_index_is_permutation(all_traces);
+}
+
+bool ViewSignalSync::validate_signal_group_contiguity() const {
+  return signal_groups_are_contiguous(_signal_groups);
 }
 
 bool ViewSignalSync::validate_view_index_invariants() const {
-  std::vector<Trace *> all_traces;
-  _view->get_traces(ALL_VIEW, all_traces);
-
-  if (all_traces.empty())
-    return true;
-
-  // --- 不变量 1：view_index 必须是 0..n-1 的排列（无重复、无空洞） ---
-  // 这里刻意不依赖 all_traces 的顺序，而是把 view_index 收集起来排序后
-  // 与 0..n-1 逐位比对，这样无论容器顺序如何都能检出重复/空洞。
-  std::vector<int> indices;
-  indices.reserve(all_traces.size());
-  for (auto t : all_traces) {
-    indices.push_back(t->get_view_index());
-  }
-  std::sort(indices.begin(), indices.end());
-
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i] != static_cast<int>(i)) {
-      pxv_assert(false,
-                 "validate_view_index_invariants: view_index 不是 0..%d 的排列"
-                 "（第 %zu 位 = %d，期望 %zu）。"
-                 "normalize_view_indices() 与下游派生态已分叉。",
-                 static_cast<int>(indices.size()) - 1, i, indices[i], i);
-      return false;
-    }
-  }
-
-  // --- 不变量 2：每个 group 内的 view_index 必须连续 ---
-  // 分组连续性由 compute_signal_groups() 依赖（它按 view_index 排序后扫连续段）。
-  // 不连续说明分组逻辑与序号归一化之间存在分叉。
-  for (const auto &group : _signal_groups) {
-    if (group.traces.size() < 2)
-      continue;
-
-    std::vector<int> gi;
-    gi.reserve(group.traces.size());
-    for (auto *t : group.traces)
-      gi.push_back(t->get_view_index());
-    std::sort(gi.begin(), gi.end());
-
-    for (size_t i = 1; i < gi.size(); i++) {
-      if (gi[i] != gi[i - 1] + 1) {
-        pxv_assert(false,
-                   "validate_view_index_invariants: group %d 内 view_index 不连续"
-                   "（%d 后跟 %d）。",
-                   group.group_id, gi[i - 1], gi[i]);
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return validate_view_index_permutation() && validate_signal_group_contiguity();
 }
 
 void ViewSignalSync::classify_traces(std::vector<Trace *> &time_traces,
@@ -724,6 +692,10 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
   normalize_view_indices();
 
   compute_signal_groups();
+
+  // 不变量 2 必须在 compute_signal_groups() 【之后】校验——它依赖刚重建的
+  // _signal_groups；放在 normalize_view_indices() 里会读到上一轮的陈旧分组。
+  validate_signal_group_contiguity();
 
   std::vector<Trace *> time_traces;
   std::vector<Trace *> fft_traces;

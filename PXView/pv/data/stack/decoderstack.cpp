@@ -619,13 +619,39 @@ QString DecoderStack::auto_label() const {
   int probe_idx = dec->first_probe_index();
   if (probe_idx < 0)
     return QString();
-  std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
-  const auto &models = _host->get_signal_models();
-  for (auto &m : models) {
+  // 同 do_decode_work()：标签名必须取自本栈所属文档的模型，否则非活动 tab 的
+  // 解码行标签会套用当前活动 tab 的通道名（跨 tab 串名的展示面）。
+  for (const auto &m : resolve_input_models()) {
     if (m && m->index() == probe_idx)
       return QString::fromStdString(m->name());
   }
   return QString();
+}
+
+std::vector<std::shared_ptr<data::SignalModel>>
+DecoderStack::resolve_input_models() const {
+  // 【必须读本栈所属文档的模型，不能读"当前活动文档"的模型】
+  //
+  // 此前 do_decode_work() 用 _host->get_signal_models()，而它解析到的是
+  // **当前活动文档**的模型列表（SigSession::get_signal_models →
+  // SessionStateContext::signal_models → active_document_models()）。
+  // 多标签页下这是错的：DecodeTaskManager::start_all_decode_tasks() 会遍历
+  // **所有文档**的解码栈并全部启动解码，于是当某个 tab 采集结束时，其它
+  // tab 的栈也会被重跑一遍，而它们的输入通道却被解析成了**当前活动 tab**
+  // 的模型——probe 的 index 只有 0..n-1 的局部含义、跨文档不可比，于是
+  // "解码到了另一个 tab 的数据"（现象：切 tab 后 viewport 注解来自别的
+  // 文件；dock 表格因用绝对时间戳而看似正常）。
+  //
+  // 正确口径 = 本栈真正所属的文档（set_owner_document 在 add_decoder 时已
+  // 写入，见 sigsession.cpp）。仅当它为空（无文档归属的极少数情形）才回落
+  // 到宿主，保持行为不变。owner 存在但模型列表为空时也按 owner 为准
+  // （解码失败报"没有设置需要解码哪些通道的数据"），绝不静默换用宿主
+  // ——宁可报错，不可串数据。
+  data::SessionDocument *owner_doc = get_owner_document();
+  if (owner_doc)
+    return owner_doc->signal_models_snapshot();
+  std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
+  return _host->get_signal_models();
 }
 
 void DecoderStack::clear() { init(); }
@@ -726,11 +752,10 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
     return;
   }
 
-  std::vector<std::shared_ptr<data::SignalModel>> models_snapshot;
-  {
-    std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
-    models_snapshot = _host->get_signal_models();
-  }
+  // 【必须读本栈所属文档的模型，不能读"当前活动文档"的模型】——
+  // 口径与理由见 resolve_input_models() 的声明注释。
+  const std::vector<std::shared_ptr<data::SignalModel>> models_snapshot =
+      resolve_input_models();
 
   pxv_detail("DecoderStack::do_decode_work: required probes OK, signal_models count=%zu",
            models_snapshot.size());

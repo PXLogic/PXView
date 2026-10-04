@@ -44,6 +44,8 @@ set(PXVIEW_GUI_SOURCES
     PXView/pv/view/view_cursors.cpp
     PXView/pv/view/view_derived_traces.cpp
     PXView/pv/view/view_signal_sync.cpp
+    PXView/pv/view/view_index_invariants.cpp
+    PXView/pv/view/view_index_invariants_adapters.cpp
     PXView/pv/view/view_glitch_filter.cpp
     PXView/pv/view/view_data_sync.cpp
     PXView/pv/view/view_context.cpp

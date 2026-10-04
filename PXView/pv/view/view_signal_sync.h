@@ -30,6 +30,7 @@
 #include <QColor>
 
 #include "pv/view/iview_delegates.h"
+#include "pv/view/view_index_invariants.h"
 
 class QColor;
 class QString;
@@ -162,7 +163,12 @@ private:
   // 见 pxv_assert 的 NDEBUG 分支）。
   //
   // 只在 logic 渲染模式（分组生效）时校验分组连续性。
+  //
+  // 拆成两个可单独调用的校验（invariant 2 依赖 _signal_groups，必须等到
+  // compute_signal_groups() 之后；per-mutation 归一路径只跑 permutation）：
   bool validate_view_index_invariants() const;
+  bool validate_view_index_permutation() const;
+  bool validate_signal_group_contiguity() const;
   void classify_traces(std::vector<Trace *> &time_traces,
                         std::vector<Trace *> &fft_traces,
                         std::vector<Trace *> &logic_traces,

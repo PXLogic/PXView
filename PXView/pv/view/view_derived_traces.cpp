@@ -311,14 +311,26 @@ void ViewDerivedTraces::sync_derived_traces() {
 
   _derived_traces_dirty = false;
 
-  auto *source = _view->document_snapshot_source();
-  if (!source)
+  // 【硬约束】解码/频谱/数学轨迹是 per-tab 的：只同步【本 tab 渲染文档】
+  // 持有的栈，绝不按 document_snapshot_source() 的裁决源同步。
+  //
+  // 原因：document_snapshot_source() 的 LiveBuffer / legacy-fallback 分支
+  // 返回会话级 _data_source，而会话源的 get_decoder_stacks() 解析到的是
+  // **全局 active document**。懒恢复文件 tab 激活时采集回放进行中
+  // （is_working），claim_active_document 有意跳过 set_active_document，
+  // "active" 仍是上一个 tab 的文档——于是本 tab 的同步把上一个 tab 的
+  // 解码栈加进当前视口（幽灵轨迹：注解用别家采样率映射 x，波形/行高全部
+  // 错位），本 tab 自己的解码轨迹反而被当作"栈已不存在"删掉。
+  // 这与 ProtocolDock/restore 的教训同构：任何 per-document 的解析都必须
+  // 显式取所属文档，绝不取"当前 active"。
+  auto *doc = _view->data_sync_delegate()->document_ptr();
+  if (!doc)
     return;
 
   bool changed = false;
 
   // ---- Sync DecodeTrace list from DecoderStack list ----
-  auto &decoder_stacks = source->get_decoder_stacks();
+  auto &decoder_stacks = doc->get_decoder_stacks();
 
   // Remove DecodeTrace whose DecoderStack no longer exists.
   for (auto it = _own_decode_traces.begin();
@@ -357,7 +369,7 @@ void ViewDerivedTraces::sync_derived_traces() {
   }
 
   // ---- Sync SpectrumTrace list from SpectrumStack list ----
-  auto &spectrum_stacks = source->get_spectrum_stacks();
+  auto &spectrum_stacks = doc->get_spectrum_stacks();
 
   // Remove SpectrumTrace whose SpectrumStack no longer exists.
   for (auto it = _own_spectrum_traces.begin();
@@ -394,7 +406,7 @@ void ViewDerivedTraces::sync_derived_traces() {
   }
 
   // ---- Sync MathTrace from MathStack ----
-  auto math_stack = source->get_math_stack();
+  auto math_stack = doc->get_math_stack();
   if (math_stack) {
     // 解析 MathStack 的 ch1/ch2 对应的当前 DsoSignal 指针。
     DsoSignal *dso1 = nullptr;
@@ -441,7 +453,10 @@ void ViewDerivedTraces::sync_derived_traces() {
   }
 
   // ---- Sync LissajousTrace from LissajousModel ----
-  auto *lissajous_model = source->get_lissajous_model();
+  // LissajousModel 是会话级对象（DSO XY 视图），仍经数据绑定裁决源取；
+  // 判空保守处理：裁决为 None（外来采集）时跳过，不 destroy 现有轨迹。
+  data::DataSource *source = _view->document_snapshot_source();
+  auto *lissajous_model = source ? source->get_lissajous_model() : nullptr;
   if (lissajous_model && lissajous_model->enabled()) {
     if (!_own_lissajous_trace) {
       auto *snapshot = source->get_dso_snapshot();

@@ -268,7 +268,14 @@ public:
     }
 
     void set_owner_document(data::SessionDocument *doc) { _owner_document = doc; }
-    data::SessionDocument* get_owner_document() { return _owner_document; }
+    data::SessionDocument* get_owner_document() const { return _owner_document; }
+
+    // 解码输入模型解析（唯一口径，do_decode_work 与 auto_label 共用）：
+    // 本栈所属文档（owner）的模型优先 —— probe index 只有 0..n-1 的文档局部
+    // 含义、跨文档不可比，start_all_decode_tasks() 又会重跑所有文档的栈，
+    // 若解析到"当前活动文档"的模型就会拿别 tab 的数据解码（跨 tab 串数据）。
+    // 仅当栈无 owner（无归属的极少数情形）才回落宿主列表，保持旧行为。
+    std::vector<std::shared_ptr<data::SignalModel>> resolve_input_models() const;
 
     // Unique handle id assigned by SigSession when the stack is created.
     inline uint64_t handle_id() const { return _handle_id; }

@@ -1480,84 +1480,19 @@ double SigSession::cur_view_time() {
 }
 
 void SigSession::set_cur_snap_samplerate(uint64_t samplerate) {
-  if (samplerate == 0) {
-    pxv_err("set_cur_snap_samplerate: samplerate=0, ignoring");
-    return;
-  }
-
-  // [PX1-DEBUG] 问题1排查：记录采样率设置来源与值，用于核对 200us→240us 光标偏移。
-  pxv_info("[PX1-DEBUG] set_cur_snap_samplerate: %llu (device=%s)",
-           (unsigned long long)samplerate,
-           _state->device_agent().name().toUtf8().data());
-
-  _state->capture_data()->_cur_snap_samplerate = samplerate;
-  _state->capture_data()->get_logic()->set_samplerate(static_cast<double>(samplerate));
-  _state->capture_data()->get_analog()->set_samplerate(static_cast<double>(samplerate));
-  _state->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplerate));
-
-  int mode = _state->device_agent().get_work_mode();
-
-  if (mode == DSO) {
-    for (auto m : _state->signal_models()) {
-      if (m->type() == SR_CHANNEL_DSO) {
-        // Upstream DSView (sigsession.cpp:428-430):
-        //   uint64_t k = ch->get_vDial()->get_value();
-        //   set_measure_voltage_factor(k, ...);            // V/div 档位 (mV/div)
-        //   set_data_scale(ch->get_scale(), ...);          // height/255 (见下)
-        //
-        // measure_voltage_factor 与 data_scale 是**两个不同的量**:
-        //   measure_voltage_factor = SignalModel::vdiv_mv()  -> mV/div 档位
-        //   data_scale             = 1/255                 -> ADC 计数归一化
-        //   (探头衰减因子不在这里, 它在测量时由 SignalModel::vfactor() 单独乘入)
-        //
-        // 旧代码把两者都写成 vfactor/vdiv, 导致 convert_voltage() 里 vfactor
-        // 被乘两次 (接 10× 探头时读数偏大 10 倍), 且游标 ΔV 路径 (只乘 k,
-        // 不乘 data_scale) 偏差 vdiv 倍. 详见 §4.9.2.
-        //
-        // data_scale 用 height-independent 的 kAdcScale: 上游 get_scale() 是
-        // height/(ref_max-ref_min)*stop_scale, 而每个消费者又除以 height,
-        // 两者相消 —— 净因子恒为 1/(ref_max-ref_min) = 1/255 (8-bit DSO)。
-        //
-        // measure_probe_factor 与 measure_voltage_factor 同属"采集期冻结的测量
-        // 档位"，一并灌进快照 —— 这样 core::convert_voltage() 的全部输入都在
-        // 快照上，读取路径（含 MCP get_samples）不需要回头查 SignalModel，
-        // 也就能把 raw ADC 就地换算成物理量（伏特）。见 §4.9.3。
-        _state->capture_data()->get_dso()->set_measure_voltage_factor(
-            static_cast<uint64_t>(m->vdiv_mv()), m->index());
-        _state->capture_data()->get_dso()->set_measure_probe_factor(
-            static_cast<uint64_t>(m->vfactor()), m->index());
-        _state->capture_data()->get_dso()->set_data_scale(
-            static_cast<float>(core::kAdcScale), m->index());
-      }
-    }
-  }
-
-  // DecoderStack
-  for (auto d : decode_traces()) {
-    d->set_samplerate(static_cast<double>(samplerate));
-  }
-
-  // Math
-  if (_state->math_stack())
-    _state->math_stack()->set_samplerate(static_cast<double>(_state->device_agent().get_sample_rate()));
-  // SpectrumStack
-  for (auto m : _state->spectrum_stacks()) {
-    m->set_samplerate(static_cast<double>(samplerate));
-  }
-
-  cur_snap_samplerate_changed();
+  // 单一实现在 SessionStateContext::set_cur_snap_samplerate（ISessionCoordination
+  // 契约方法，core 管理器经 _coord-> 调用）。本函数曾与它各自维护一份完整拷贝，
+  // 两份并存导致"修掉一份另一份还活着"——2026-10-04 的解码栈采样率盖写缺陷
+  // （decode_traces() 循环把新设备速率盖进上一个 tab 的解码栈）正是同时存在
+  // 于两份中，第一轮修复只清掉了休眠副本。此处仅转发；任何新行为一律加在
+  // 实现侧，不得在此复制函数体。
+  _state->set_cur_snap_samplerate(samplerate);
 }
 
 void SigSession::set_cur_samplelimits(uint64_t samplelimits) {
-  if (samplelimits == 0) {
-    pxv_err("set_cur_samplelimits: samplelimits=0, ignoring");
-    return;
-  }
-  _state->capture_data()->_cur_samplelimits = samplelimits;
-  // R1: symmetric to set_cur_snap_samplerate which fires
-  // cur_snap_samplerate_changed(); notify capture listeners that the
-  // sample limit changed.
-  broadcast_async<interface::SampleLimitsChanged>({});
+  // 同 set_cur_snap_samplerate：单一实现在 SessionStateContext
+  // （ISessionCoordination 契约方法），此处仅转发，不得复制函数体。
+  _state->set_cur_samplelimits(samplelimits);
 }
 
 std::vector<std::shared_ptr<data::SignalModel>> &

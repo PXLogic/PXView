@@ -279,6 +279,12 @@ void SessionStateContext::set_cur_snap_samplerate(uint64_t samplerate) {
     return;
   }
 
+  // [PX1-DEBUG] 本函数是全会话唯一的采样率落账实现（SigSession:: 版本只转发
+  // 到这里）：记录速率设置来源与值。
+  pxv_info("[PX1-DEBUG] set_cur_snap_samplerate: %llu (device=%s)",
+           (unsigned long long)samplerate,
+           _device_agent.name().toUtf8().data());
+
   _buffers->capture_data()->_cur_snap_samplerate = samplerate;
 _buffers->capture_data()->get_logic()->set_samplerate(static_cast<double>(samplerate));
 _buffers->capture_data()->get_analog()->set_samplerate(static_cast<double>(samplerate));
@@ -289,7 +295,8 @@ _buffers->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplera
   if (mode == DSO) {
     for (auto m : signal_models_snapshot()) {
       if (m->type() == SR_CHANNEL_DSO) {
-        // 与 SigSession::set_cur_snap_samplerate 保持一致（见该处注释与 §4.9.2）:
+        // （§4.9.2；本函数是唯一实现，SigSession::set_cur_snap_samplerate
+        // 只转发到这里，不存在需要"保持一致"的第二份函数体）:
         //   measure_voltage_factor = m->vdiv_mv() -> mV/div 档位
         //   measure_probe_factor   = m->vfactor() -> 探头衰减因子
         //   data_scale             = 1/255         -> ADC 计数归一化 (kAdcScale)
@@ -305,10 +312,19 @@ _buffers->capture_data()->get_dso()->set_samplerate(static_cast<double>(samplera
     }
   }
 
-  for (auto d : decode_traces()) {
-    d->set_samplerate(static_cast<double>(samplerate));
-  }
-
+  // 【硬约束】不得把全局设备采样率写进解码栈（原 decode_traces() 循环已删）。
+  //
+  // 解码栈的 _samplerate 语义是"它解码的那份数据的速率"，唯一写入口在
+  // do_decode_work()：从输入快照冻结（_snapshot->samplerate()）。全局
+  // cur_snap_samplerate 的语义是"当前设备"的速率——多标签页下两者必然
+  // 分叉：set_device(TabSwitch) 在 claim_active_document() 之前调用本
+  // 函数，此刻活动文档仍是上一个 tab 的，按活动文档取 decode_traces()
+  // 会把新设备的速率盖进上一个 tab 的解码栈（实测：hantek 8MHz 栈被盖成
+  // nrf 的 12MHz，切回后注解 x 全部按 1.5 倍横移且无自纠机会——切换不
+  // 触发重解码）。实时采集路径也不需要它：快照自身的速率由
+  // SessionData::clear() 注入、由上方 get_logic()->set_samplerate() 更新，
+  // 栈在解码启动时从快照拿，口径唯一。
+  // 同理 math/spectrum 栈保留设备速率（DSO 单 tab 语义）不在本约束内。
   if (_math_stack)
     _math_stack->set_samplerate(static_cast<double>(_device_agent.get_sample_rate()));
   for (auto m : _spectrum_stacks) {

@@ -261,6 +261,22 @@ target_include_directories(test_workspace_io PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 
+# ==== view_index / 信号分组不变量（widget-free 自由函数）====
+# 校验逻辑已从 ViewSignalSync 抽到 view_index_invariants.cpp，其核心判定只吃
+# std::vector<int>（零 View/QWidget/Trace 依赖），因此本测试目标只需编译该
+# 核心 TU —— Trace/SignalGroup 适配层在 view_index_invariants_adapters.cpp，
+# 由 GUI 目标编译，本测试不引用。
+# 锁死两条契约：
+#   1) view_index 必须是 0..n-1 的排列（无重复、无空洞）；
+#   2) 每个 group 内的 view_index 必须连续 —— 且【只能对当轮分组判定】。
+# 原始 bug 形态：不变量 2 的校验被塞在 normalize_view_indices() 末尾（即
+# compute_signal_groups() 之前），读到上一轮陈旧分组 → 切 tab / 增删通道时
+# 刷出 "group 5 内 view_index 不连续（9 后跟 15）" 的假告警。
+pv_add_qtest(test_view_index_invariants
+    view/test_view_index_invariants.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/view/view_index_invariants.cpp
+)
+
 # ==== View layer tests (header-only mocks) ====
 pv_add_qtest(test_view_layout
     view/test_view_layout.cpp

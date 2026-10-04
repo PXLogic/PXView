@@ -330,6 +330,14 @@ void TabContext::apply_device_intent()
     if (!rd || !rd->has_signal_config())
         return;
 
+    // 【懒恢复文件 tab：本 tab 设备尚未建立 ⇒ 本轮整体推迟（不 reload、不重建
+    // View）】—— 判据与理由详见下方 else 分支内的长注释。此处放在函数作用域
+    // 是为了同时闸住末尾的 _view->rebuild_signals_from_config()：Core 侧若
+    // 跳过重建而 View 侧照建 16 个信号，同样造成 Core 行数 ≠ View 行数。
+    const bool own_device_pending =
+        effective_device_handle() == NULL_HANDLE && !file_path().isEmpty() &&
+        !rd->is_file_device_slot();
+
     if (!_session->is_working()) {
         pxv_info("TabContext::apply_device_intent() work_mode=%d ch_count=%d%s",
             rd->get_signal_config().work_mode,
@@ -341,8 +349,31 @@ void TabContext::apply_device_intent()
         // reload 来构建），必须走 reload 构建，否则核心模型为 0 —— 采集被
         // capturemanager 判空拒绝、dock/表头无通道，只剩 View 按 config 造的
         // 临时信号（表象："新建标签一个通道也没有"）。
-        if (effective_device_handle() != NULL_HANDLE &&
-            !rd->signal_models().empty()) {
+        //
+        // 三个分支的判据（互斥、自上而下收敛）：
+        //   1) own_device_pending —— 懒恢复的文件 tab，本 tab 设备尚未建立。
+        //      生命周期：on_tab_changed → activate()【第 1 次】(此刻本 tab 设备
+        //      还不存在；restore_device_for_this_tab() 因 target==NULL_HANDLE
+        //      空转，全局设备仍是【上一个 tab】的，如 Hantek .sr 8ch/8MHz)
+        //      → reload_file_into_context() (才 set_file 建立本 tab 设备)
+        //      → activate()【第 2 次】(handle 有效，正常应用意图)。
+        //      若第 1 次就贸然 reload()，reload 读【当前全局设备】的
+        //      mode/channel_count/samplerate ⇒ Core 按 8ch 建模型，View 侧却按
+        //      rd 的 16ch config 建 16 个信号，Core 行数 ≠ View 行数 ⇒ viewport
+        //      解码注解按错误行高绘制而错位（dock 表格用解码器绝对时间戳故仍
+        //      正确）——即"解码到了不相关的那个 tab"。故本轮整体跳过，交给
+        //      第 2 次 activate()。
+        //   2) handle 有效且文档已持模型 —— 零重建，仅重绑数据快照 + 广播。
+        //   3) 兜底 —— 无 file_path 的真·新 tab，或设备句柄已失效（被关闭）：
+        //      reload() 是"按当前设备状态重建模型"的正确语义。
+        if (own_device_pending) {
+            pxv_info("TabContext::apply_device_intent() file tab device not yet "
+                     "established (handle=%llu, path='%s'), deferring rebuild "
+                     "to the post-reload activate()",
+                     (unsigned long long)effective_device_handle(),
+                     file_path().toUtf8().constData());
+        } else if (effective_device_handle() != NULL_HANDLE &&
+                   !rd->signal_models().empty()) {
             // 模型对象随文档保活（零重建）。仅非文件设备池槽需要重绑当前
             // view_data 快照（解码/测量数据源恢复）——池槽的模型自带本槽
             // 快照（VCD/pxl 数据），绝不能绑全局执行缓冲（别的设备的数据）。
@@ -352,6 +383,10 @@ void TabContext::apply_device_intent()
             // 命令阶段；广播仅让 dock 重读驱动刷新。
             _session->broadcast_async<interface::DeviceOptionsUpdated>({});
         } else {
+            // 兜底全量重建：无 file_path 的空 tab（首次采集前的真·新 tab）、
+            // 或设备句柄已失效（restore 失败置 NULL_HANDLE，如文件设备被
+            // 关闭）——此时 reload 是"按当前设备状态重建模型"的正确语义。
+            // 文件 tab 若设备尚未建立已在上面 own_device_pending 分支拦住。
             _session->reload();
             // R2: reload 重建 SignalModel 后，从 _signal_config 恢复 trig_type。
             // （转发语义下 reload 的 old_model 查找读到的就是本渲染文档旧列表，
@@ -370,13 +405,15 @@ void TabContext::apply_device_intent()
                  "saving pending config");
         rd->set_pending_config(rd->get_signal_config());
     }
-    if (_view) {
+    if (_view && !own_device_pending) {
         // 设备意图的 Core 侧（apply_signal_config/reload）已在上方完成，
         // 这里只做 View 层信号重建；QML/headless tab（view == nullptr）跳过。
+        // own_device_pending 时跳过：本 tab 设备尚未建立，Core 侧本轮刻意不
+        // 重建（见下方注释），View 侧也不得抢跑，否则 Core/View 行数分叉。
         _view->rebuild_signals_from_config(rd->get_signal_config());
         pxv_info("TabContext::apply_device_intent() rebuild done, own_signals=%d",
             static_cast<int>(_view->get_own_signals().size()));
-    } else {
+    } else if (!_view) {
         pxv_info("TabContext::apply_device_intent() no view, skip signal rebuild");
     }
 }

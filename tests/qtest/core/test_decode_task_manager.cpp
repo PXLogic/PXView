@@ -63,6 +63,8 @@
 #include "pv/data/decode/decoder.h"
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/data/stack/decoderstack.h"
+#include "pv/data/document/sessiondocument.h"
+#include "pv/data/model/signalmodel.h"
 
 // pxv_log is provided by pxview-core's log.cpp (which this test links via the
 // pxview-core static lib), so it is NOT re-defined here — a duplicate symbol
@@ -335,6 +337,40 @@ bool wait_idle(DecodeTaskManager &mgr, int timeout_ms = 3000) {
 // are skipped rather than failing).
 struct srd_decoder *g_dec = nullptr;
 
+// ---- 回归锁：解码栈输入模型必须来自 owner 文档（跨 tab 串数据） ----
+//
+// DecodeTaskManager::start_all_decode_tasks() 会遍历所有文档的解码栈并全部
+// 重跑；若栈在输入解析时经宿主（= 当前活动文档）把 probe index 映射到模型，
+// 非活动 tab 的栈就会拿当前 tab 的数据解码（probe index 跨文档不可比）——
+// 即"切 tab 后 viewport 解码注解来自别的文件；dock 表格用绝对时间戳看似
+// 正常"那条缺陷。三条契约（见 DecoderStack::resolve_input_models）：
+//   1) 有 owner：永远解析 owner 文档的模型（哪怕宿主列表同时非空）；
+//   2) 无 owner：回落宿主列表（旧行为）；
+//   3) owner 存在但模型列表为空：仍按 owner 为准返回空 —— 宁可解码报错，
+//      不可静默串用别 tab 的模型。
+
+// index 相同、名字可区分的模型：只有解析来源对了才判得出拿的是哪份。
+static std::shared_ptr<SignalModel> make_model(int index, const char *name)
+{
+    auto m = std::make_shared<SignalModel>();
+    m->set_index(index);
+    m->set_name(name);
+    return m;
+}
+
+// auto_label 需要 probe 已绑定；键（srd_channel*）只作身份与日志用，
+// 不解引用结构体 —— 一个只填 id 的假通道即可。
+static std::map<const srd_channel *, int> fake_probe_map(int index)
+{
+    static srd_channel ch = {};
+    static bool inited = false;
+    if (!inited) {
+        ch.id = const_cast<char *>("QTEST_CH");
+        inited = true;
+    }
+    return {{&ch, index}};
+}
+
 } // namespace
 
 class TestDecodeTaskManager : public QObject {
@@ -349,6 +385,9 @@ private slots:
     void ClearAllDecodeTaskEmptiesAndResetsIndex();
     void test_rst_decoder_normal_path();
     void test_wait_for_task_finished_returns_true_when_not_running();
+    void ResolveInputModelsPrefersOwnerDocument();
+    void ResolveInputModelsFallsBackToHostWithoutOwner();
+    void ResolveInputModelsOwnerWinsEvenIfEmpty();
     void cleanupTestCase();
 };
 
@@ -651,6 +690,73 @@ void TestDecodeTaskManager::test_wait_for_task_finished_returns_true_when_not_ru
     // (decodetaskmanager.cpp, the `if (!wait_for_task_finished(stack))`
     // block) — no stack->clear(), no add_decode_task — so an in-flight
     // worker can never race a reset (null) snapshot.
+}
+
+// 契约 1：有 owner 文档时，输入模型（与 auto_label）必须解析自 owner，
+// 即使宿主（模拟"当前活动文档"）同时持有同样 index 的模型。
+void TestDecodeTaskManager::ResolveInputModelsPrefersOwnerDocument() {
+    if (!g_dec)
+        QSKIP("libsigrokdecode decoder unavailable");
+
+    StubHost host;
+    host.sig_models.push_back(make_model(0, "B0"));
+    host.sig_models.push_back(make_model(1, "B1"));
+
+    auto stack = make_stack(host);
+    QVERIFY(stack);
+
+    pv::data::SessionDocument doc_a(nullptr);
+    doc_a.signal_models().push_back(make_model(0, "A0"));
+    doc_a.signal_models().push_back(make_model(1, "A1"));
+    stack->set_owner_document(&doc_a);
+
+    const auto models = stack->resolve_input_models();
+    QCOMPARE(models.size(), (size_t)2);
+    QVERIFY(models[0] && models[1]);
+    QCOMPARE(QString::fromStdString(models[0]->name()), QStringLiteral("A0"));
+    QCOMPARE(QString::fromStdString(models[1]->name()), QStringLiteral("A1"));
+
+    // auto_label 走同一口径：probe 0 的标签必须取 owner 的通道名 A0
+    //（解析错了会拿到宿主的 B0）。
+    stack->stack().front()->set_probes(fake_probe_map(0));
+    QCOMPARE(stack->auto_label(), QStringLiteral("A0"));
+}
+
+// 契约 2：无 owner（无归属的遗留/边缘路径）回落宿主列表，保持旧行为。
+void TestDecodeTaskManager::ResolveInputModelsFallsBackToHostWithoutOwner() {
+    if (!g_dec)
+        QSKIP("libsigrokdecode decoder unavailable");
+
+    StubHost host;
+    host.sig_models.push_back(make_model(0, "B0"));
+    host.sig_models.push_back(make_model(1, "B1"));
+
+    auto stack = make_stack(host);
+    QVERIFY(stack);
+    QVERIFY(stack->get_owner_document() == nullptr);
+
+    const auto models = stack->resolve_input_models();
+    QCOMPARE(models.size(), (size_t)2);
+    QCOMPARE(QString::fromStdString(models[0]->name()), QStringLiteral("B0"));
+    QCOMPARE(QString::fromStdString(models[1]->name()), QStringLiteral("B1"));
+}
+
+// 契约 3：owner 存在但模型列表为空时仍按 owner 为准返回空 —— 宁可解码
+// 报"没有设置需要解码哪些通道的数据"，也绝不静默串用别 tab 的模型。
+void TestDecodeTaskManager::ResolveInputModelsOwnerWinsEvenIfEmpty() {
+    if (!g_dec)
+        QSKIP("libsigrokdecode decoder unavailable");
+
+    StubHost host;
+    host.sig_models.push_back(make_model(0, "B0"));
+
+    auto stack = make_stack(host);
+    QVERIFY(stack);
+
+    pv::data::SessionDocument doc_a(nullptr);   // 空 doc：无模型
+    stack->set_owner_document(&doc_a);
+
+    QVERIFY(stack->resolve_input_models().empty());
 }
 
 QTEST_MAIN(TestDecodeTaskManager)
