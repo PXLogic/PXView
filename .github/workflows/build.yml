@@ -104,7 +104,7 @@ jobs:
       # actions/cache 会跳过保存），restore-keys 回退到最近一次的缓存，
       # 改动少的 push 绝大多数目标文件直接命中。macOS/Windows job 同理。
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ccache
           key: ccache-linux-${{ github.run_id }}
@@ -115,7 +115,7 @@ jobs:
       # key 固定在 QT_VERSION 上（不用 run_id 滚动）：命中时内容不变、无需再存，
       # 不会像滚动 key 那样每个 run 复制一份 2.5GB 条目挤占 10GB 仓库缓存配额。
       - name: Restore Qt prefix
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.QT_PREFIX }}
           key: qt-${{ env.QT_VERSION }}-linux_gcc_64-ws-mm-sp-v1
@@ -530,7 +530,7 @@ jobs:
 
       # ccache 跨 run 增量编译（同 Linux job 的说明）
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/Library/Caches/ccache
           key: ccache-macos-${{ github.run_id }}
@@ -541,7 +541,7 @@ jobs:
       # key 用 run_id 滚动：bottle 版本会随 brew update 漂移，固定 key 命中后
       # 新版本 bottle 永远存不进去。
       - name: Restore Homebrew downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/Library/Caches/Homebrew
           key: brew-dl-macos-${{ github.run_id }}
@@ -1262,7 +1262,7 @@ jobs:
 
       # ccache 跨 run 增量编译（同 Linux job 的说明）
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-windows-${{ github.run_id }}
