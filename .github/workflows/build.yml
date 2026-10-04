@@ -70,6 +70,10 @@ jobs:
     env:
       QT_PREFIX: ${{ github.workspace }}/Qt
       QT_VERSION: "6.11.0"
+      # ccache 由下方的 Configure CMake 步骤以 CMAKE_*_COMPILER_LAUNCHER 启用；
+      # 这里只调容量与放行宏（__DATE__/__TIME__ 的文件默认会被 ccache 拒缓存重编）。
+      CCACHE_MAXSIZE: "1G"
+      CCACHE_SLOPPINESS: time_macros,pch_defines
 
     steps:
       - name: Resolve ref
@@ -95,6 +99,26 @@ jobs:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
           persist-credentials: false
+
+      # ccache 跨 run 增量编译：key 带 run_id 保证每次都能存（key 已存在时
+      # actions/cache 会跳过保存），restore-keys 回退到最近一次的缓存，
+      # 改动少的 push 绝大多数目标文件直接命中。macOS/Windows job 同理。
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ github.run_id }}
+          restore-keys: ccache-linux-
+
+      # Qt 前缀（aqtinstall + qtwayland 编译产物都在里面）按版本整目录缓存：
+      # 命中时下面的 aqt 下载（约 1GB）与 qtwayland 编译两步整体跳过。
+      # key 固定在 QT_VERSION 上（不用 run_id 滚动）：命中时内容不变、无需再存，
+      # 不会像滚动 key 那样每个 run 复制一份 2.5GB 条目挤占 10GB 仓库缓存配额。
+      - name: Restore Qt prefix
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.QT_PREFIX }}
+          key: qt-${{ env.QT_VERSION }}-linux_gcc_64-ws-mm-sp-v1
 
       # 必须放在 Checkout 之后：基础版本号从 CMakeLists.txt 的 DS_VERSION_* 读，
       # 那是 bump_version.ps1 唯一需要维护的版本号来源。此前 workflow 里各自硬编码
@@ -215,7 +239,7 @@ jobs:
           # Ubuntu 24.04 自带 GCC 14,无需 PPA
           sudo apt-get update
           sudo apt-get install -y \
-            git gcc g++ make cmake ninja-build pkg-config \
+            git gcc g++ make cmake ninja-build ccache pkg-config \
             libglib2.0-dev zlib1g-dev libusb-1.0-0-dev libudev-dev \
             libboost-dev libfftw3-dev libssl-dev nlohmann-json3-dev \
             libmimalloc-dev \
@@ -234,9 +258,20 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Setup Rust toolchain (for Tauri desktop app)
         uses: dtolnay/rust-toolchain@stable
+
+      # Tauri 的几百个 crate 编译耗时最长，按 Cargo.lock 缓存 target 与 registry。
+      # dev 分支 push 成功后默认即保存（rust-cache 不限分支），同分支下次直接命中。
+      - name: Cache Rust (Tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+          # 构建失败的 run 也保存缓存：修 CI 期间的连续迭代不必反复全量编 crate
+          cache-on-failure: true
 
       - name: Install Linux Tauri dependencies
         run: |
@@ -245,6 +280,11 @@ jobs:
 
       - name: Install Qt via aqtinstall
         run: |
+          # 命中 Qt 前缀缓存时整步跳过（aqt 下载约 1GB）
+          if [ -d "${QT_PREFIX}/${QT_VERSION}/gcc_64" ]; then
+            echo "Qt prefix restored from cache, skipping aqt install"
+            exit 0
+          fi
           python3 -m pip install aqtinstall
           aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             -m qtwebsockets qtmultimedia qtserialport --outputdir ${{ env.QT_PREFIX }}
@@ -253,6 +293,11 @@ jobs:
 
       - name: Build qtwayland platform plugin
         run: |
+          # qtwayland 装进 Qt 前缀、随前缀一起缓存；插件在即跳过编译
+          if [ -f "${QT_PREFIX}/${QT_VERSION}/gcc_64/plugins/platforms/libqwayland-egl.so" ]; then
+            echo "qtwayland plugin restored from cache, skipping build"
+            exit 0
+          fi
           sudo apt-get install -y wayland-protocols libwayland-dev
           git clone --branch v${{ env.QT_VERSION }} --depth 1 https://github.com/qt/qtwayland.git
           cd qtwayland
@@ -293,6 +338,8 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX=../install.dir/usr \
             -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}/${{ env.QT_VERSION }}/gcc_64"
 
@@ -452,6 +499,10 @@ jobs:
         arch: [ARM64]
     # macos-14 runner 于 2026-11-02 退役,迁移到 macos-15 (仍为 arm64)
     runs-on: macos-15
+    env:
+      # ccache 由 Configure CMake 的 CMAKE_*_COMPILER_LAUNCHER 启用
+      CCACHE_MAXSIZE: "1G"
+      CCACHE_SLOPPINESS: time_macros,pch_defines
     steps:
       - name: Resolve ref
         id: ref
@@ -476,6 +527,25 @@ jobs:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
           persist-credentials: false
+
+      # ccache 跨 run 增量编译（同 Linux job 的说明）
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-${{ github.run_id }}
+          restore-keys: ccache-macos-
+
+      # 只缓存 bottle 下载（不缓存 Cellar 链接树——跨 run 复用后者容易腐化）。
+      # qt 全家桶几个 GB 的下载命中后免掉，但 pour（解包）仍需执行。
+      # key 用 run_id 滚动：bottle 版本会随 brew update 漂移，固定 key 命中后
+      # 新版本 bottle 永远存不进去。
+      - name: Restore Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-dl-macos-${{ github.run_id }}
+          restore-keys: brew-dl-macos-
 
       # 必须放在 Checkout 之后：基础版本号从 CMakeLists.txt 的 DS_VERSION_* 读，
       # 那是 bump_version.ps1 唯一需要维护的版本号来源。此前 workflow 里各自硬编码
@@ -619,15 +689,25 @@ jobs:
              && case "$(readlink /opt/homebrew/bin/openssl)" in *openssl@1.1*) true ;; *) false ;; esac; then
             rm /opt/homebrew/bin/openssl
           fi
-          brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
+          brew install ccache cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
 
       - name: Setup Node.js (for Web UI)
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Setup Rust toolchain (for Tauri desktop app)
         uses: dtolnay/rust-toolchain@stable
+
+      # Tauri 的几百个 crate 编译耗时最长，按 Cargo.lock 缓存 target 与 registry。
+      - name: Cache Rust (Tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+          # 构建失败的 run 也保存缓存：修 CI 期间的连续迭代不必反复全量编 crate
+          cache-on-failure: true
 
       - name: Build fx2lafw firmware
         run: |
@@ -661,6 +741,8 @@ jobs:
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
             $OSX_ARCH_FLAG \
             -DENABLE_TAURI=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_INSTALL_PREFIX=../install.dir
@@ -1112,6 +1194,13 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: write
+    env:
+      # ccache 由 Configure CMake 的 CMAKE_*_COMPILER_LAUNCHER 启用。
+      # CCACHE_DIR 显式指定：mingw 版 ccache 默认写 %LOCALAPPDATA%\ccache，
+      # 显式路径让 actions/cache 的恢复目录与之一目了然，不赌默认值。
+      CCACHE_DIR: ${{ github.workspace }}\.ccache
+      CCACHE_MAXSIZE: "1G"
+      CCACHE_SLOPPINESS: time_macros,pch_defines
     defaults:
       run:
         shell: msys2 {0}
@@ -1143,6 +1232,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libusb
             mingw-w64-ucrt-x86_64-lcms2
             mingw-w64-ucrt-x86_64-sdcc
+            mingw-w64-ucrt-x86_64-ccache
             zip
             unzip
 
@@ -1169,6 +1259,14 @@ jobs:
           ref: ${{ steps.ref.outputs.value }}
           submodules: recursive
           persist-credentials: false
+
+      # ccache 跨 run 增量编译（同 Linux job 的说明）
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-windows-${{ github.run_id }}
+          restore-keys: ccache-windows-
 
       # 必须放在 Checkout 之后：基础版本号从 CMakeLists.txt 的 DS_VERSION_* 读，
       # 那是 bump_version.ps1 唯一需要维护的版本号来源。此前 workflow 里各自硬编码
@@ -1276,9 +1374,19 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Setup Rust toolchain (for Tauri desktop app)
         uses: dtolnay/rust-toolchain@stable
+
+      # Tauri 的几百个 crate 编译耗时最长，按 Cargo.lock 缓存 target 与 registry。
+      - name: Cache Rust (Tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+          # 构建失败的 run 也保存缓存：修 CI 期间的连续迭代不必反复全量编 crate
+          cache-on-failure: true
 
       - name: Build fx2lafw firmware
         run: |
@@ -1311,6 +1419,8 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TAURI=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX=../install.dir \
             -DNPM_EXECUTABLE="/c/Program Files/nodejs/npm.cmd" \
             -DCARGO_EXECUTABLE="$(cygpath "${CARGO_HOME:-/c/Users/runner/.cargo}/bin/cargo.exe" 2>/dev/null || echo /c/Users/runner/.cargo/bin/cargo.exe)" \
