@@ -606,13 +606,19 @@ jobs:
           # （CMake/deps.cmake，MIMALLOC_LIB=mimalloc-static，MI_OVERRIDE=OFF）。
           # Homebrew 版 mimalloc.h 与子模块版本不一致时会污染 vendored 源码的编译。
           #
-          # 部分 runner 镜像上 openssl@1.1 处于已 link 状态（占着 bin/openssl 符号
-          # 链接）。python@3.14 的依赖 openssl@3 升级时 `brew link` 与之冲突，
-          # brew 以 error 退出，整个 install 步骤失败。unlink 是非破坏性的：
-          # openssl@1.1 在 Cellar 里原样保留，只让出符号链接，依赖它的旧包仍能
-          # 通过 opt 路径找到库。必须在 install 之前做——link 失败发生在 install
-          # 步骤内部，事后补救来不及（步骤已以非零码退出）。
-          brew unlink openssl@1.1 2>/dev/null || true
+          # 部分 runner 镜像上 /opt/homebrew/bin/openssl 是一条指向 openssl@1.1
+          # 的残留符号链接，且不在 openssl@1.1 的 brew link 记录里（实测
+          # `brew unlink openssl@1.1` 报 "0 symlinks removed"，根本摸不到它）。
+          # python@3.14 的依赖 openssl@3 升级时 `brew link` 与这条残留链接冲突，
+          # brew 以 error 退出，整个 install 步骤失败。必须在 install 之前把
+          # 这条链接删掉——link 失败发生在 install 步骤内部，事后补救来不及
+          # （步骤已以非零码退出）。删除前校验目标确实指向 openssl@1.1，不误伤
+          # 其它文件；openssl@1.1 本体在 Cellar 里原样保留，依赖它的旧包仍能
+          # 通过 opt 路径找到库。
+          if [ -L /opt/homebrew/bin/openssl ] \
+             && case "$(readlink /opt/homebrew/bin/openssl)" in *openssl@1.1*) true ;; *) false ;; esac; then
+            rm /opt/homebrew/bin/openssl
+          fi
           brew install cmake ninja gettext glib libusb zlib boost fftw python@3.14 qt pkg-config libzip nettle libftdi sdcc nlohmann-json
 
       - name: Setup Node.js (for Web UI)
