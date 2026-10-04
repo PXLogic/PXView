@@ -642,14 +642,20 @@ DecoderStack::resolve_input_models() const {
   // "解码到了另一个 tab 的数据"（现象：切 tab 后 viewport 注解来自别的
   // 文件；dock 表格因用绝对时间戳而看似正常）。
   //
-  // 正确口径 = 本栈真正所属的文档（set_owner_document 在 add_decoder 时已
-  // 写入，见 sigsession.cpp）。仅当它为空（无文档归属的极少数情形）才回落
-  // 到宿主，保持行为不变。owner 存在但模型列表为空时也按 owner 为准
-  // （解码失败报"没有设置需要解码哪些通道的数据"），绝不静默换用宿主
-  // ——宁可报错，不可串数据。
+  // 正确口径 = 本栈真正所属的文档（set_owner_document 在 add_decoder 时
+  // 已写入，见 sigsession.cpp），**仅当 owner 文档真的持有模型**（GUI 的
+  // 文档都经 reload/init_signals 建过模型，恒非空）。owner 模型列表为空
+  // 时回落宿主：headless/MCP 的解码器登记在专用 api 文档上
+  // （DocumentRegistry::create_api_document 是裸 SessionDocument，没有
+  // 模型也没有 reload），其输入通道只能按活动文档的模型解析——旧代码
+  // 即此行为；若在空 owner 上也坚持"owner 为准"，api 文档的栈会解析到
+  // 空列表、解码全空（CI test_26/23/24/31 的 0 注解回归即由此来）。
   data::SessionDocument *owner_doc = get_owner_document();
-  if (owner_doc)
-    return owner_doc->signal_models_snapshot();
+  if (owner_doc) {
+    auto models = owner_doc->signal_models_snapshot();
+    if (!models.empty())
+      return models;
+  }
   std::shared_lock<std::shared_mutex> lk(_host->signal_models_mutex());
   return _host->get_signal_models();
 }

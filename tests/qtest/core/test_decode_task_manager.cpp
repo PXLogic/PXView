@@ -344,10 +344,12 @@ struct srd_decoder *g_dec = nullptr;
 // 非活动 tab 的栈就会拿当前 tab 的数据解码（probe index 跨文档不可比）——
 // 即"切 tab 后 viewport 解码注解来自别的文件；dock 表格用绝对时间戳看似
 // 正常"那条缺陷。三条契约（见 DecoderStack::resolve_input_models）：
-//   1) 有 owner：永远解析 owner 文档的模型（哪怕宿主列表同时非空）；
-//   2) 无 owner：回落宿主列表（旧行为）；
-//   3) owner 存在但模型列表为空：仍按 owner 为准返回空 —— 宁可解码报错，
-//      不可静默串用别 tab 的模型。
+//   1) owner 文档持有模型：永远解析 owner 的模型（哪怕宿主列表同时非空）；
+//   2) 无 owner，或 owner 模型列表为空：回落宿主列表 —— 空回落是 headless/
+//      MCP 的真实场景：解码器登记在裸 api 文档上（create_api_document 无
+//      模型），输入只能按活动文档解析；早先"owner 为空也坚持 owner"的
+//      语义把 api 文档的栈解析到空列表，CI 全部真实解码用例 0 注解。
+//      GUI 的 owner 文档都经 reload 建有模型，不受回落影响。
 
 // index 相同、名字可区分的模型：只有解析来源对了才判得出拿的是哪份。
 static std::shared_ptr<SignalModel> make_model(int index, const char *name)
@@ -387,7 +389,7 @@ private slots:
     void test_wait_for_task_finished_returns_true_when_not_running();
     void ResolveInputModelsPrefersOwnerDocument();
     void ResolveInputModelsFallsBackToHostWithoutOwner();
-    void ResolveInputModelsOwnerWinsEvenIfEmpty();
+    void ResolveInputModelsFallsBackToHostWhenOwnerModelsEmpty();
     void cleanupTestCase();
 };
 
@@ -741,9 +743,10 @@ void TestDecodeTaskManager::ResolveInputModelsFallsBackToHostWithoutOwner() {
     QCOMPARE(QString::fromStdString(models[1]->name()), QStringLiteral("B1"));
 }
 
-// 契约 3：owner 存在但模型列表为空时仍按 owner 为准返回空 —— 宁可解码
-// 报"没有设置需要解码哪些通道的数据"，也绝不静默串用别 tab 的模型。
-void TestDecodeTaskManager::ResolveInputModelsOwnerWinsEvenIfEmpty() {
+// 契约 3：owner 存在但模型列表为空时回落宿主 —— headless/MCP 的 api 文档
+// 就是这个形态（裸 SessionDocument 无模型），其解码栈的输入通道只能按
+// 活动文档的模型解析（旧代码行为，CI 真实解码用例依赖它）。
+void TestDecodeTaskManager::ResolveInputModelsFallsBackToHostWhenOwnerModelsEmpty() {
     if (!g_dec)
         QSKIP("libsigrokdecode decoder unavailable");
 
@@ -753,10 +756,13 @@ void TestDecodeTaskManager::ResolveInputModelsOwnerWinsEvenIfEmpty() {
     auto stack = make_stack(host);
     QVERIFY(stack);
 
-    pv::data::SessionDocument doc_a(nullptr);   // 空 doc：无模型
+    pv::data::SessionDocument doc_a(nullptr);   // 裸 api 文档：无模型
     stack->set_owner_document(&doc_a);
 
-    QVERIFY(stack->resolve_input_models().empty());
+    const auto models = stack->resolve_input_models();
+    QCOMPARE(models.size(), (size_t)1);
+    QVERIFY(models[0]);
+    QCOMPARE(QString::fromStdString(models[0]->name()), QStringLiteral("B0"));
 }
 
 QTEST_MAIN(TestDecodeTaskManager)

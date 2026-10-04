@@ -271,10 +271,11 @@ public:
     data::SessionDocument* get_owner_document() const { return _owner_document; }
 
     // 解码输入模型解析（唯一口径，do_decode_work 与 auto_label 共用）：
-    // 本栈所属文档（owner）的模型优先 —— probe index 只有 0..n-1 的文档局部
-    // 含义、跨文档不可比，start_all_decode_tasks() 又会重跑所有文档的栈，
-    // 若解析到"当前活动文档"的模型就会拿别 tab 的数据解码（跨 tab 串数据）。
-    // 仅当栈无 owner（无归属的极少数情形）才回落宿主列表，保持旧行为。
+    // 本栈所属文档（owner）持有模型时必须用 owner 的 —— probe index 只有
+    // 0..n-1 的文档局部含义、跨文档不可比，start_all_decode_tasks() 又会
+    // 重跑所有文档的栈，若解析到"当前活动文档"的模型就会拿别 tab 的数据
+    // 解码（跨 tab 串数据）。owner 模型列表为空时回落宿主：headless/MCP
+    // 的解码器登记在裸 api 文档上（无模型），输入只能按活动文档解析。
     std::vector<std::shared_ptr<data::SignalModel>> resolve_input_models() const;
 
     // Unique handle id assigned by SigSession when the stack is created.
