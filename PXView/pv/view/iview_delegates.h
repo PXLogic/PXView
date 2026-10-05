@@ -282,6 +282,7 @@ public:
   static constexpr int ForeAlpha = 200;
   static constexpr int BackAlpha = 100;
   static constexpr int GroupGap = 10;
+  static constexpr int GroupSpacing = GroupGap + 5;
   static constexpr int GroupCardRadius = 6;
   static constexpr int SignalMargin = 7;
 

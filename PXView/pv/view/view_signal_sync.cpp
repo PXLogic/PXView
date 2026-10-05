@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits.h>
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -245,12 +246,14 @@ void ViewSignalSync::compute_signal_groups() {
   }
 
   for (auto &group : _signal_groups) {
-    sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      int va = a->get_v_offset(), vb = b->get_v_offset();
-      if (va != vb)
-        return va < vb;
-      return a->get_index() < b->get_index();
-    });
+    std::stable_sort(group.traces.begin(), group.traces.end(),
+                     [](Trace *a, Trace *b) {
+                       if (a->get_view_index() != b->get_view_index())
+                         return a->get_view_index() < b->get_view_index();
+                       if (a->get_type() != b->get_type())
+                         return a->get_type() < b->get_type();
+                       return a->get_index() < b->get_index();
+                     });
   }
 }
 
@@ -258,22 +261,15 @@ void ViewSignalSync::normalize_view_indices() {
   // ====================================================================
   // 统一 view_index 归一化函数 (redesign-channel-order-architecture)
   // ====================================================================
-  // 这是系统中唯一负责 view_index 赋值的函数。所有其他函数
-  // (compute_signal_groups, classify_traces, rebuild_signals_from_config,
-  //  rebuild_signals) 只设置初始值 (用户配置值或 -1)，不赋递增值。
+  // 这是正常布局/重建路径中唯一负责修复 view_index 的函数；用户拖动只通过
+  // commit_trace_drag_order() 原子提交一次。显式顺序始终保留，缺失顺序才按类型
+  // 初始化，避免 signals_changed() 把用户刚提交的结果改写。
   //
   // 排序规则 (按优先级):
-  // 1. 有用户自定义 view_index (≥0) 的通道按 view_index 排前
-  //    - 相同 view_index (冲突) 时按类型优先级 + channel index 决定先后
-  // 2. 无 view_index (-1) 的通道按类型优先级 + channel index 排后:
-  //    LOGIC (index 升序) → ANALOG (index 升序) → DSO (index 升序)
-  //    → DECODER (插入序) → 其他
-  // 3. 统一赋值 0, 1, 2, ... 连续序列
-  //
-  // 这保证了:
-  // - 默认情况下 LOGIC 通道在前 (按 index 排序), ANALOG/DSO 在后, 不交错
-  // - 用户拖拽后的自定义位置被保留 (vi ≥ 0)
-  // - 模式切换时从旧配置继承的过期 vi 会被类型优先级 + index 覆盖排序
+  // 1. 有用户或配置 view_index (≥0) 的轨道按 view_index 排列；
+  // 2. 无顺序的普通通道按类型 + channel index 初始化；
+  // 3. 无顺序的 decoder 仅按绑定通道选择默认位置；
+  // 4. 压缩成 0, 1, 2, ... 连续序列。
   // ====================================================================
 
   std::vector<Trace *> all_traces;
@@ -299,11 +295,25 @@ void ViewSignalSync::normalize_view_indices() {
   explicit_order.reserve(all_traces.size());
   unset_order.reserve(all_traces.size());
 
+  std::set<Trace *> default_decodes;
   for (auto t : all_traces) {
-    if (t->get_view_index() >= 0)
+    if (auto *decode = t->as_decode()) {
+      const auto stack = decode->decoder();
+      const int hint = stack ? stack->view_index_hint() : t->get_view_index();
+      if (hint >= 0) {
+        t->set_view_index(hint);
+        explicit_order.push_back(t);
+      } else {
+        // No persisted/user order yet: binding may choose the initial slot,
+        // but this trace stops being auto-anchored as soon as a drag commits.
+        default_decodes.insert(t);
+        unset_order.push_back(t);
+      }
+    } else if (t->get_view_index() >= 0) {
       explicit_order.push_back(t);
-    else
+    } else {
       unset_order.push_back(t);
+    }
   }
 
   // 排序显式通道: 按 view_index, 冲突时按类型优先级 + index
@@ -338,14 +348,9 @@ void ViewSignalSync::normalize_view_indices() {
   for (auto t : unset_order)
     sorted.push_back(t);
 
-  // ====================================================================
-  // 解码轨道跟随绑定通道 (redesign-channel-order-architecture)
-  // ====================================================================
-  // 新添加的解码轨道 (create_decode_trace 赋 view_index = 信号数 + 序号)
-  // 会被上面的全局排序推到所有信号之后 (最下面)。这里在逻辑渲染模式下把
-  // 解码轨道重新锚定到其绑定的逻辑通道之后: 解码轨道始终紧跟绑定通道
-  // (与 1.5.8 sort_signal_groups_by_view_index 的分组行为一致)。
-  // 无绑定或绑定通道不在布局中的解码轨道保持原位置 (追加到末尾)。
+  // A decoder without a persisted/user order gets one default placement next
+  // to its latest bound logic channel. Explicit decoder positions are never
+  // removed or re-anchored here; drag commit is authoritative.
   if (_view->is_logic_rendering_mode()) {
     // 逻辑通道 index -> 在 sorted 中的位置
     std::map<int, size_t> logic_pos;
@@ -359,7 +364,7 @@ void ViewSignalSync::normalize_view_indices() {
     std::vector<Trace *> unanchored_decodes;
 
     for (auto t : sorted) {
-      if (t->get_type() != SR_CHANNEL_DECODER)
+      if (default_decodes.find(t) == default_decodes.end())
         continue;
       DecodeTrace *dtrace = t->as_decode();
       if (!dtrace)
@@ -400,8 +405,8 @@ void ViewSignalSync::normalize_view_indices() {
     std::vector<Trace *> reordered;
     reordered.reserve(sorted.size());
     for (auto t : sorted) {
-      if (t->get_type() == SR_CHANNEL_DECODER)
-        continue; // 解码轨道经由锚点放置
+      if (default_decodes.find(t) != default_decodes.end())
+        continue; // only default-placement decoders are reinserted by anchor
       reordered.push_back(t);
       auto it = decodes_by_anchor.find(t);
       if (it != decodes_by_anchor.end())
@@ -418,7 +423,13 @@ void ViewSignalSync::normalize_view_indices() {
   // 统一赋值 0, 1, 2, ... 连续序列
   int idx = 0;
   for (auto t : sorted) {
-    t->set_view_index(idx++);
+    t->set_view_index(idx);
+    if (auto *decode = t->as_decode()) {
+      if (auto stack = decode->decoder();
+          stack && stack->view_index_hint() >= 0)
+        stack->set_view_index_hint(idx);
+    }
+    idx++;
   }
 
   // 不变量 1（view_index 是 0..n-1 的排列）只依赖刚赋的值，可在此立即校验。
@@ -631,7 +642,7 @@ void ViewSignalSync::layout_time_signals(
     }
 
     if (current_group_id != -1 && trace_group_id != current_group_id) {
-      next_v_offset += View::GroupGap + 5;
+      next_v_offset += View::GroupSpacing;
     }
     current_group_id = trace_group_id;
 
@@ -668,12 +679,14 @@ void ViewSignalSync::finalize_signal_layout() {
   _view->normalize_layout();
 
   for (auto &group : _signal_groups) {
-    sort(group.traces.begin(), group.traces.end(), [](Trace *a, Trace *b) {
-      int va = a->get_v_offset(), vb = b->get_v_offset();
-      if (va != vb)
-        return va < vb;
-      return a->get_index() < b->get_index();
-    });
+    std::stable_sort(group.traces.begin(), group.traces.end(),
+                     [](Trace *a, Trace *b) {
+                       if (a->get_view_index() != b->get_view_index())
+                         return a->get_view_index() < b->get_view_index();
+                       if (a->get_type() != b->get_type())
+                         return a->get_type() < b->get_type();
+                       return a->get_index() < b->get_index();
+                     });
   }
 
   _view->header_updated();
@@ -724,6 +737,8 @@ void ViewSignalSync::rebuild_signals_from_config(
     RebuildGuard(bool &f) : flag(f) {}
     ~RebuildGuard() { flag = false; }
   } _rebuild_guard(_rebuild_in_progress);
+
+  _view->cancel_trace_drag_interaction();
 
 std::vector<std::unique_ptr<Signal>> old_signals = std::move(_own_signals);
 _own_signals.clear();
@@ -890,6 +905,7 @@ if (auto *s = sig->as_logic()) {
 }
 
 void ViewSignalSync::rebuild_signals() {
+  _view->cancel_trace_drag_interaction();
   _view->mark_derived_traces_dirty();
 
   // Dead-code removal: the original code guarded the inline config-apply path
@@ -943,9 +959,14 @@ if (sig && sig->model()) {
   // that group channels by type (LOGIC first, then ANALOG/DSO),
   // preventing interleaving.
   for (auto &sig : _own_signals) {
+      // Mixed devices reuse the same index across channel types (LOGIC ch0 vs
+      // DSO ch0), so the config lookup must match the type too. Legacy configs
+      // carry type==0; only that value may fall back to index-only matching.
+      const int sig_type = sig->model() ? sig->model()->type() : sig->signal_type();
       auto it = std::find_if(cfg.channels.begin(), cfg.channels.end(),
                              [&](const data::ChannelConfig &ch) {
-                               return ch.index == sig->get_index();
+                               return ch.index == sig->get_index() &&
+                                      (ch.type == sig_type || ch.type == 0);
                              });
       if (it != cfg.channels.end()) {
         sig->set_v_offset(it->v_offset);
@@ -1036,6 +1057,10 @@ void ViewSignalSync::on_signals_changed() {
   // via their layout helpers, so only Modified needs upgrading.
   if (derived_changed && event == SignalFactory::Modified)
     event = SignalFactory::AllReplaced;
+
+  if (event == SignalFactory::Added || event == SignalFactory::Removed ||
+      event == SignalFactory::AllReplaced)
+    _view->cancel_trace_drag_interaction();
 
   SignalFactory::update_signals(_own_signals, _view->data_source(),
                                 _view->data_source(), event);
@@ -1276,146 +1301,173 @@ bool ViewSignalSync::compare_trace_y(const Trace *a, const Trace *b) {
   return a1->get_v_offset() < b1->get_v_offset();
 }
 
-// ============================================================================
-// 拖动让位动画
-// ----------------------------------------------------------------------------
-// 模型（"手槽 + 起始槽"，取代早先的"排序 + 破并结"）：
-//
-//   拖动开始时记两个**恒定**量（都在 Header::mousePressEvent 采集）：
-//     anchor     = 全列最高行的 y           → 槽位网格原点 {anchor + k*pitch}
-//     start_slot = 被拖项当时的槽号          → 它的出发格
-//
-//   之后每一帧（本函数）：
-//     h    = floor((被拖项 layout y - anchor) / pitch)   // 手所在槽
-//     slot = clamp(h, 0, n-1)                            // 被拖项占据的槽
-//     if (h == start_slot - 1) slot = start_slot         // 向上"恰好贴到"上方邻居
-//                                                        // 的槽中心 → 尚未越过，不让位
-//     其余项按**起始次序**连续铺进除 slot 之外的槽；每个槽中心 = anchor + 槽号*pitch。
-//
-// ── 为什么不再用排序 + 破并结 ────────────────────────────────────────────
-// 旧实现把被拖项与邻居 `stable_sort`（按 layout 值），撞值时用一个布尔
-// （"是否位于锚点之下"）破并结。**该判据缺一个自由维度**：只知"手在哪"、
-// 不知"从哪来"，因此无法区分两个语义相反的并结时刻 —— 实测两份测试互相冲突，
-// 无论布尔取哪个方向都是 42/43（失败项互换）。引入 `start_slot` 后，槽位变成
-// 整数且互斥，根本不再需要比较器。详见 make_way.h 的 `dragged_slot()`。
-//
-// ── 锚点为什么必须恒定 ──────────────────────────────────────────────────
-// 若锚点取自"当前其它通道的最小 y"，被拖项离开/进入首槽时锚点会跳一个 pitch，
-// 整列就跟着手指平移（用户报的"拖上面的通道下面的也跟着平移"正是这个）。
-//
-// ── 为什么用固定网格而不是 PulseView 的累计游标 ──────────────────────────
-// PulseView 的 `restack_items()` 用 `total_offset` 累计游标，被拖项是一块
-// "固定占位的障碍"。PXView 的 y_snap 让被拖项精确落在格位上，累计游标一推进
-// 整列就跟着平移，因此这里用**固定槽位网格** `anchor + k*pitch`。
-//
-// 纯视觉预览：不碰 view_index / 分组 / 持久化，松手后仍由 Header 按最终 y 排序。
-// ============================================================================
-bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged, int anchor_y,
-                                               int start_slot_y) {
+// Group-aware drag transaction. The press-time snapshot is immutable and
+// carries canonical order, real heights and group membership. Every preview
+// frame is derived from it, and release commits the exact preview order.
+bool ViewSignalSync::begin_trace_drag(Trace *dragged) {
+  cancel_trace_drag();
+  if (!dragged || !_view->is_logic_rendering_mode() ||
+      (dragged->get_type() != SR_CHANNEL_LOGIC &&
+       dragged->get_type() != SR_CHANNEL_DECODER))
+    return false;
+
   std::vector<Trace *> traces;
-  _view->get_traces(ALL_VIEW, traces);
+  _view->get_traces(TIME_VIEW, traces);
+  std::stable_sort(traces.begin(), traces.end(), [](Trace *a, Trace *b) {
+    if (a->get_view_index() != b->get_view_index())
+      return a->get_view_index() < b->get_view_index();
+    if (a->get_v_offset() != b->get_v_offset())
+      return a->get_v_offset() < b->get_v_offset();
+    if (a->get_type() != b->get_type())
+      return a->get_type() < b->get_type();
+    return a->get_index() < b->get_index();
+  });
 
-  // --- 1. 收集参与布局的可见通道（与 layout_time_signals 同一套过滤语义）---
-  std::vector<Trace *> visible;
-  visible.reserve(traces.size());
-  for (auto t : traces) {
-    if (t->rows_size() == 0)
-      continue;
-    if (!t->as_dso() && (!t->visible() || !t->enabled()))
-      continue;
-    if (t->get_v_offset() == INT_MAX)  // 尚未布局，不参与
-      continue;
-    visible.push_back(t);
+  if (std::find(traces.begin(), traces.end(), dragged) == traces.end() ||
+      dragged->get_v_offset() == INT_MAX)
+    return false;
+
+  std::map<Trace *, int> layout_group_ids;
+  std::map<Trace *, int> hard_block_ids;
+  for (const auto &group : _signal_groups) {
+    const bool decoder_bound_group = std::any_of(
+        group.traces.begin(), group.traces.end(), [](Trace *trace) {
+          return trace && trace->get_type() == SR_CHANNEL_DECODER;
+        });
+    for (auto *trace : group.traces) {
+      layout_group_ids[trace] = group.group_id;
+      if (decoder_bound_group)
+        hard_block_ids[trace] = group.group_id;
+    }
   }
-  if (visible.size() < 2)
-    return false;
 
-  // --- 2. 收集"除被拖项以外"的可见通道 --------------------------------
-  // 注意：这里**不再**由调用方排序。排序交给 make_way::layout() 内部的
-  // order_by_painted_center()：它按"当前绘制中心"对**全部**行（含被拖项）
-  // 统一排序，被拖项用 visual 值参与比较。若在这里先按 layout 排好再插位，
-  // 由于 force_to_v_offset 会把被拖项的 layout 也改写成跟手值，"被拖项"和
-  // "它正在越过的邻居"可能带着**相同**的 layout 值 → 先后关系分不清 →
-  // 其中一行永远不移动 → 列里留洞、看起来就是整列平移。
-  Trace *drag = dragged;
-  if (!drag)
-    return false;
-
-  std::vector<Trace *> others;
-  others.reserve(visible.size());
-  for (auto t : visible)
-    if (t != drag)
-      others.push_back(t);
-
-  if (others.empty())
-    return false;
-
-  // --- 3. 插位 + 沿固定槽位网格重排 ---------------------------------------
-  // 算法本体在 pv/view/trace/make_way.h（纯函数，可单测）。这里只负责把
-  // PXView 的槽距（pitch = 通道高 + 2*SignalMargin）与槽位锚点/起始槽接进去。
-  //
-  // 锚点优先用调用方传进来的 _drag_anchor_y（拖动开始时算好的常量）。它必须
-  // **全程不变** —— 若退化成"当前其它通道的最小 y"（make_way::top_center），
-  // 被拖项离开/进入首槽时锚点会跳一个 pitch，整列就跟着手指平移、换不了位。
-  // 只有在锚点缺失（非拖动调用方传 INT_MAX）时才回退到现算。
-  const int anchor = make_way::resolve_anchor(anchor_y, visible);
-
-  // 槽距：等高通道下 = 通道高 + 2*SignalMargin。make_way::layout() 用固定网格，
-  // 故这里取"列内首行的总高 + 2*SignalMargin"作为一个统一的 pitch（与旧实现里
-  // 逐项累加在等高时等价）。
-  const int pitch =
-      (drag->get_totalHeight() > 0 ? drag->get_totalHeight() : visible.front()->get_totalHeight()) +
-      2 * View::SignalMargin;
-
-  // 起始槽：由 Header 在 mousePressEvent 采集（与 _drag_anchor_y 同时机），
-  // 全程恒定。这是"手槽 + 起始槽"模型必需的跨帧状态 —— 旧实现只传一个
-  // "是否在锚点之下"的布尔，数学上无法同时满足两份测试（见 make_way.h）。
-  // 缺省（未采集，start_slot < 0）时退化为"用当前手位反推"，即 start==hand，
-  // 此时不会发生任何交换 —— 与非拖动调用方的语义一致。
-  int start_slot = start_slot_y;
-  if (start_slot < 0)
-    start_slot = make_way::dragged_slot(drag->get_v_offset(), anchor, 0, pitch,
-                                        static_cast<int>(visible.size()));
-
-  std::vector<Trace *> ordered;
-  std::vector<std::pair<Trace *, int>> new_targets;
-  make_way::layout(others, drag, anchor, pitch, start_slot, ordered, new_targets);
-
-  // 不变量：插位后顺序必须包含全部可见通道且无重复无遗漏（见上）。该校验含
-  // 2×stable_sort + vector 全比较，挂在每帧跨网格的输入热路径上；Release（NDEBUG）
-  // 下关闭，避免把 O(n log n) 校验留在拖动热路径上拖累跟手度。Debug 仍保留以便
-  // 捕获"整列错位"类回归。
-#ifndef NDEBUG
-  pxv_assert(ordered.size() == visible.size(), "make-way order size mismatch");
-  {
-    std::vector<Trace *> sorted = ordered;
-    std::stable_sort(sorted.begin(), sorted.end());
-    std::vector<Trace *> expect = visible;
-    std::stable_sort(expect.begin(), expect.end());
-    pxv_assert(sorted == expect, "make-way order is not a permutation");
+  int unique_id = -1;
+  int content_top = INT_MAX;
+  bool dragged_visible = false;
+  _drag_snapshot.rows.reserve(traces.size());
+  for (auto *trace : traces) {
+    make_way::DragRow<Trace *> row;
+    row.item = trace;
+    row.center = trace->get_v_offset();
+    row.height = trace->get_totalHeight();
+    const auto layout_group_it = layout_group_ids.find(trace);
+    row.group_id = layout_group_it != layout_group_ids.end()
+                       ? layout_group_it->second
+                       : -1;
+    const auto hard_block_it = hard_block_ids.find(trace);
+    row.block_id = hard_block_it != hard_block_ids.end()
+                       ? hard_block_it->second
+                       : unique_id--;
+    row.visible = trace->rows_size() != 0 &&
+                  (trace->as_dso() ||
+                   (trace->visible() && trace->enabled())) &&
+                  row.center != INT_MAX && row.height > 0;
+    if (row.visible) {
+      content_top = std::min(content_top, row.center - row.height / 2);
+      if (trace == dragged)
+        dragged_visible = true;
+    }
+    _drag_snapshot.rows.push_back(row);
   }
-#endif
 
-  // --- 4. 落地：先写 layout 目标（不动 visual），再启动动画 ---
-  // 必须用 set_v_offset_no_visual_sync：普通 set_v_offset 在"无动画在跑"时
-  // 会把 visual 一起拉过去，通道就瞬移了、没有滑动的过程。
+  if (!dragged_visible) {
+    cancel_trace_drag();
+    return false;
+  }
+
+  _drag_snapshot.dragged = dragged;
+  _drag_snapshot.dragged_start_center = dragged->get_v_offset();
+  _drag_snapshot.content_top = content_top == INT_MAX ? 0 : content_top;
+  _drag_snapshot.margin = View::SignalMargin;
+  _drag_snapshot.group_gap = View::GroupSpacing;
+
+  _drag_preview_order.clear();
+  for (const auto &row : _drag_snapshot.rows)
+    _drag_preview_order.push_back(row.item);
+  return _drag_snapshot.valid();
+}
+
+bool ViewSignalSync::animate_make_way_for_drag(Trace *dragged) {
+  if (!_drag_snapshot.valid() || dragged != _drag_snapshot.dragged)
+    return false;
+
+  const auto layout =
+      make_way::layout_snapshot(_drag_snapshot, dragged->get_v_offset());
+  if (layout.order.empty())
+    return false;
+
+  _drag_preview_order = layout.order;
+
   bool changed = false;
-  for (auto &nt : new_targets) {
-    Trace *t = nt.first;
-    const int target = nt.second;
-    if (target < 0)
-      continue;  // 被推出了顶部之外，跳过以免整列上移出屏
-    if (t->get_v_offset() == target)
+  for (const auto &entry : layout.targets) {
+    Trace *trace = entry.first;
+    const int target = entry.second;
+    if (!trace || target < 0 || trace->get_v_offset() == target)
       continue;
-    t->set_v_offset_no_visual_sync(target);
+    trace->set_v_offset_no_visual_sync(target);
     changed = true;
   }
 
   if (changed) {
-    for (auto &nt : new_targets)
-      nt.first->animate_to_layout_v_offset();
+    for (const auto &entry : layout.targets)
+      if (entry.first)
+        entry.first->animate_to_layout_v_offset();
   }
   return changed;
+}
+
+bool ViewSignalSync::commit_trace_drag_order() {
+  if (!_drag_snapshot.valid() || _drag_preview_order.empty())
+    return false;
+
+  std::vector<Trace *> all_traces;
+  _view->get_traces(ALL_VIEW, all_traces);
+  std::stable_sort(all_traces.begin(), all_traces.end(),
+                   [](Trace *a, Trace *b) {
+                     if (a->get_view_index() != b->get_view_index())
+                       return a->get_view_index() < b->get_view_index();
+                     if (a->get_v_offset() != b->get_v_offset())
+                       return a->get_v_offset() < b->get_v_offset();
+                     if (a->get_type() != b->get_type())
+                       return a->get_type() < b->get_type();
+                     return a->get_index() < b->get_index();
+                   });
+
+  std::set<Trace *> drag_domain;
+  for (const auto &row : _drag_snapshot.rows)
+    drag_domain.insert(row.item);
+
+  std::size_t preview_index = 0;
+  for (auto &trace : all_traces) {
+    if (drag_domain.find(trace) == drag_domain.end())
+      continue;
+    if (preview_index >= _drag_preview_order.size()) {
+      cancel_trace_drag();
+      return false;
+    }
+    trace = _drag_preview_order[preview_index++];
+  }
+  if (preview_index != _drag_preview_order.size()) {
+    cancel_trace_drag();
+    return false;
+  }
+
+  for (std::size_t i = 0; i < all_traces.size(); ++i) {
+    Trace *trace = all_traces[i];
+    trace->set_view_index(static_cast<int>(i));
+    if (auto *decode = trace->as_decode()) {
+      if (auto stack = decode->decoder())
+        stack->set_view_index_hint(static_cast<int>(i));
+    }
+  }
+
+  cancel_trace_drag();
+  return true;
+}
+
+void ViewSignalSync::cancel_trace_drag() {
+  _drag_snapshot = make_way::DragSnapshot<Trace *>();
+  _drag_preview_order.clear();
 }
 
 void ViewSignalSync::normalize_layout() {

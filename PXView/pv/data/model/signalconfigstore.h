@@ -29,12 +29,24 @@ class IDeviceConfigPort;
 // belong to the View layer. They remain in ChannelConfig for .pxc serialization
 // compatibility. Full migration to pv::view::DockUiState is deferred pending
 // .pxc format extension (see fix-remaining-architecture-issues spec C3).
+struct ChannelLayoutKey {
+  int type;
+  int index;
+
+  bool operator<(const ChannelLayoutKey &other) const noexcept {
+    return type != other.type ? type < other.type : index < other.index;
+  }
+};
+
 struct ChannelLayoutState {
   int view_index;
   int v_offset;
   int own_height;
   ChannelLayoutState() : view_index(-1), v_offset(0), own_height(-1) {}
 };
+
+using ChannelLayoutMap = std::map<ChannelLayoutKey, ChannelLayoutState>;
+using ChannelColourMap = std::map<ChannelLayoutKey, std::string>;
 
 struct ChannelConfig {
   int index;
@@ -110,8 +122,8 @@ public:
 
   void save_signal_config(
       const std::vector<std::shared_ptr<SignalModel>> &signal_models = {},
-      const std::map<int, ChannelLayoutState> &channel_layout = {},
-      const std::map<int, std::string> &channel_colours = {});
+      const ChannelLayoutMap &channel_layout = {},
+      const ChannelColourMap &channel_colours = {});
   void apply_signal_config();
   void apply_pending_config();
   bool has_signal_config() const;

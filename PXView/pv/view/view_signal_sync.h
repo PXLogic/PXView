@@ -30,6 +30,7 @@
 #include <QColor>
 
 #include "pv/view/iview_delegates.h"
+#include "pv/view/trace/make_way.h"
 #include "pv/view/view_index_invariants.h"
 
 class QColor;
@@ -90,37 +91,13 @@ public:
   void zoom_vertical(double steps);
   int headerWidth();
 
-  /**
-   * Slide the non-dragged traces aside while a channel drag is in progress.
-   *
-   * This is the "让位" (make-way) half of the drag-reorder UX: the dragged
-   * trace follows the cursor with no animation (Header calls
-   * Trace::force_to_v_offset), while every *other* visible trace is given a
-   * new layout target — the position it would occupy if the drag were
-   * released now — and animates towards it over ~100ms.
-   *
-   * Deliberately does NOT touch view_index, the group structure, or
-   * persistence: those stay the release-time responsibility of
-   * Header::mouseReleaseEvent (which re-sorts by Y and saves the layout).
-   * Keeping the preview purely arithmetic means the animation can never
-   * corrupt the ordering that gets written to the document.
-   *
-   * @param dragged  Trace currently under the cursor (must not be animated;
-   *                 pass nullptr to animate every visible trace instead).
-   * @param anchor_y the column's top row center as captured at drag start.
-   *                 MUST stay constant for the whole drag: it is the fixed
-   *                 slot-grid origin, so the rows can exchange slots without
-   *                 the column drifting with the cursor. Pass INT_MAX to
-   *                 derive it from the current layout (non-drag callers).
-   * @param start_slot_y the dragged row's slot index captured at drag start
-   *                 (same moment as anchor_y). MUST stay constant: together
-   *                 with the per-frame hand slot it decides which slot the
-   *                 dragged row occupies and therefore who yields. Pass a
-   *                 negative value for non-drag callers (no exchange).
-   * @return true if any trace was given a new target (i.e. a repaint is due).
-   */
-  bool animate_make_way_for_drag(Trace *dragged, int anchor_y,
-                                 int start_slot_y = -1);
+  // Capture one immutable ordering/geometry snapshot at mouse press. During
+  // the drag, preview and release both consume this same snapshot so group
+  // gaps, variable row heights and the committed order cannot diverge.
+  bool begin_trace_drag(Trace *dragged);
+  bool animate_make_way_for_drag(Trace *dragged);
+  bool commit_trace_drag_order();
+  void cancel_trace_drag();
 
   // -- theme / colors (Phase J additional) ------------------------------
   void UpdateTheme();
@@ -146,6 +123,9 @@ private:
   std::vector<SignalGroup> _signal_groups;
   QColor _group_card_color;
   bool _rebuild_in_progress = false;
+
+  make_way::DragSnapshot<Trace *> _drag_snapshot;
+  std::vector<Trace *> _drag_preview_order;
 
   // --- signals_changed() split helpers (was 300-line God-method) ---
 

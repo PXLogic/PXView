@@ -216,6 +216,215 @@ private slots:
     QVERIFY(slot[0] > anchor); // 0 号槽让给了被拖项
     QVERIFY(slot[1] > slot[0] && slot[2] > slot[1]); // 不重叠
   }
+
+  void VariableHeightRowsPreserveGroupGap() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 101, 80, 0, 0, true},
+        DragRow<int>{3, 185, 30, 1, 1, true},
+    };
+    snapshot.dragged = 1;
+    snapshot.dragged_start_center = 27;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 101);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 2);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 3);
+    QCOMPARE(layout.targets.size(), std::size_t(2));
+    QCOMPARE(layout.targets[0].first, 2);
+    QCOMPARE(layout.targets[0].second, 47);
+    QCOMPARE(layout.targets[1].first, 3);
+    QCOMPARE(layout.targets[1].second, 185);
+  }
+
+  void CrossingBoundaryMovesWholeGroup() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 101, 80, 0, 0, true},
+        DragRow<int>{3, 185, 30, 1, 1, true},
+    };
+    snapshot.dragged = 1;
+    snapshot.dragged_start_center = 27;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 250);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 3);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 2);
+    QCOMPARE(layout.targets.size(), std::size_t(2));
+    QCOMPARE(layout.targets[0].first, 3);
+    QCOMPARE(layout.targets[0].second, 22);
+    QCOMPARE(layout.targets[1].first, 2);
+    QCOMPARE(layout.targets[1].second, 160);
+  }
+
+  void UngroupedRowsDoNotGainGroupGap() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, -1, -1, true},
+        DragRow<int>{2, 81, 40, -2, -2, true},
+        DragRow<int>{3, 135, 40, -3, -3, true},
+    };
+    snapshot.dragged = 2;
+    snapshot.dragged_start_center = 81;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 135);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 1);
+    QCOMPARE(layout.order[1], 3);
+    QCOMPARE(layout.order[2], 2);
+    QCOMPARE(layout.targets.size(), std::size_t(2));
+    QCOMPARE(layout.targets[0].first, 1);
+    QCOMPARE(layout.targets[0].second, 27);
+    QCOMPARE(layout.targets[1].first, 3);
+    QCOMPARE(layout.targets[1].second, 81);
+  }
+
+  void SingleGroupAllowsEdgeOvershoot() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 81, 40, 0, 0, true},
+        DragRow<int>{3, 135, 40, 0, 0, true},
+    };
+    snapshot.dragged = 3;
+    snapshot.dragged_start_center = 135;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, -100);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 3);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 2);
+  }
+
+  void HiddenRowsRemainInCommittedPermutation() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, INT_MAX, 40, 0, 0, false},
+        DragRow<int>{3, 81, 40, 0, 0, true},
+    };
+    snapshot.dragged = 3;
+    snapshot.dragged_start_center = 81;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 20);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 3);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 2);
+    QCOMPARE(layout.targets.size(), std::size_t(1));
+    QCOMPARE(layout.targets[0].first, 1);
+    QCOMPARE(layout.targets[0].second, 81);
+  }
+
+  void MovingGroupUpwardPreservesItsMembers() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 81, 40, 0, 0, true},
+        DragRow<int>{3, 150, 40, 1, 1, true},
+    };
+    snapshot.dragged = 3;
+    snapshot.dragged_start_center = 150;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 0);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 3);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 2);
+  }
+
+  void NonContiguousGroupIdsAreNotSilentlyMerged() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 81, 40, 1, 1, true},
+        DragRow<int>{3, 135, 40, 0, 0, true},
+    };
+    snapshot.dragged = 2;
+    snapshot.dragged_start_center = 81;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 81);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 1);
+    QCOMPARE(layout.order[1], 2);
+    QCOMPARE(layout.order[2], 3);
+  }
+
+  void VisualGroupDoesNotForceOrdinaryRowsToMoveTogether() {
+    using pv::view::make_way::DragRow;
+    using pv::view::make_way::DragSnapshot;
+
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        // Same visual group, but unique block ids: ordinary rows stay
+        // independently draggable.
+        DragRow<int>{1, 27, 40, 0, -1, true},
+        DragRow<int>{2, 81, 40, 0, -2, true},
+        DragRow<int>{3, 150, 40, 1, 1, true},
+    };
+    snapshot.dragged = 1;
+    snapshot.dragged_start_center = 27;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 81);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.order[0], 2);
+    QCOMPARE(layout.order[1], 1);
+    QCOMPARE(layout.order[2], 3);
+    QCOMPARE(layout.targets.size(), std::size_t(2));
+    QCOMPARE(layout.targets[0].first, 2);
+    QCOMPARE(layout.targets[0].second, 27);
+    QCOMPARE(layout.targets[1].first, 3);
+    QCOMPARE(layout.targets[1].second, 150);
+  }
 };
 
 QTEST_MAIN(TestMakeWayDragSim)

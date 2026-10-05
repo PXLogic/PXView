@@ -133,18 +133,7 @@ private:
     PopupLineEdit *nameEdit;
     std::list<std::pair<Trace*, int> > _drag_traces;
 
-    // 让位动画的固定槽位锚点：拖动开始那一刻整列最高一行的 y。
-    // 必须**整个拖动期间保持不变**（故在 mousePressEvent 里算一次）。
-    // 若改用"当前其它通道的最小 y"当锚点，被拖项离开/进入首槽时锚点会跳变，
-    // 整列就会跟着手指平移、永远换不了位。INT_MAX 表示当前没有拖动。
-    int         _drag_anchor_y;
 
-    // 被拖项的**起始槽**（拖动开始那一刻的槽号），与 _drag_anchor_y 同时机采集。
-    // 与每帧的"手槽"一起决定被拖项占据哪个槽、谁让位 —— 这是"手槽 + 起始槽"
-    // 模型必需的跨帧状态（旧实现只靠一个"是否在锚点之下"的布尔，无法同时满足
-    // test_v_offset_animation 与 test_make_way_drag_sim，见 make_way.h）。
-    // 负值表示当前没有拖动。
-    int         _drag_start_slot;
     Trace *_context_trace;
     Trace       *_resize_trace_upper;
     Trace       *_resize_trace_lower;

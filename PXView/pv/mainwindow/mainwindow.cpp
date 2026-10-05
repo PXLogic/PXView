@@ -837,7 +837,7 @@ void MainWindow::update_toolbar_view_status() {
 // ---------------------------------------------------------------------------
 
 // Phase 2: Public wrapper for SessionEventDispatcher
-std::map<int, pv::data::ChannelLayoutState>
+std::map<pv::data::ChannelLayoutKey, pv::data::ChannelLayoutState>
 MainWindow::build_channel_layout(pv::view::View *view) {
   (void)view;
   // 布局（view_index / v_offset / own_height）不由"事件时机的瞬时快照"写入。

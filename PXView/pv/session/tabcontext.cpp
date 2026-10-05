@@ -474,14 +474,15 @@ void TabContext::harvest_device_state()
     if (!_document || is_borrowing())
         return;
 
-    std::map<int, data::ChannelLayoutState> channel_layout;
+    std::map<pv::data::ChannelLayoutKey, pv::data::ChannelLayoutState>
+        channel_layout;
     if (_view) {
         for (auto &sig : _view->get_own_signals()) {
             data::ChannelLayoutState layout;
             layout.view_index = sig->get_view_index();
             layout.v_offset = sig->get_v_offset();
             layout.own_height = sig->get_own_height();
-            channel_layout[sig->get_index()] = layout;
+            channel_layout[{sig->signal_type(), sig->get_index()}] = layout;
         }
     }
     // R2: 传入 SignalModel 列表，保存 Logic 通道 trig_type

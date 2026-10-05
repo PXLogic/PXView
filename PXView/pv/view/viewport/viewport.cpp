@@ -347,7 +347,7 @@ int Viewport::get_total_height() {
           grouped_traces.push_back(gt);
           h += static_cast<int>((gt->get_totalHeight())) + 2 * View::SignalMargin;
         }
-        h += View::GroupGap + 5;
+        h += View::GroupSpacing;
       }
       // Add heights for non-group traces (ANALOG, DSO, Math, etc.)
       for (auto t : traces) {

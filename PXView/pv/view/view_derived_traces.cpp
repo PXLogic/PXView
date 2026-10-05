@@ -99,7 +99,10 @@ std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
     std::shared_ptr<pv::data::DecoderStack> stack, int index) {
   auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, index);
   dt->set_view(_view);
-  dt->set_view_index(static_cast<int>(_view->get_own_signals().size()) + index);
+  const int restored_index = stack->view_index_hint();
+  dt->set_view_index(restored_index >= 0
+                         ? restored_index
+                         : static_cast<int>(_view->get_own_signals().size()) + index);
   if (!stack->stack().empty() && !stack->stack().front()->shown())
     dt->set_visible(false);
   return dt;
@@ -240,6 +243,8 @@ void ViewDerivedTraces::remove_decoder(DecodeTrace *trace) {
   auto stack = trace->decoder();
   void *key_handel = stack ? stack->get_key_handel() : nullptr;
 
+  _view->cancel_trace_drag_interaction();
+
   // 1. View erases its DecodeTrace (unique_ptr auto-deletes).
   _own_decode_traces.erase(it);
 
@@ -293,6 +298,8 @@ void ViewDerivedTraces::clear_all_decoders() {
   if (!_view->session_ptr())
     return;
 
+  _view->cancel_trace_drag_interaction();
+
   // 1. Clear all View-owned DecodeTrace objects (unique_ptr auto-deletes).
   _own_decode_traces.clear();
 
@@ -331,6 +338,25 @@ void ViewDerivedTraces::sync_derived_traces() {
 
   // ---- Sync DecodeTrace list from DecoderStack list ----
   auto &decoder_stacks = doc->get_decoder_stacks();
+
+  bool decoder_structure_changed =
+      decoder_stacks.size() != _own_decode_traces.size();
+  if (!decoder_structure_changed) {
+    for (const auto &trace : _own_decode_traces) {
+      const auto *target = trace->decoder().get();
+      const bool exists = std::any_of(
+          decoder_stacks.begin(), decoder_stacks.end(),
+          [target](const std::shared_ptr<pv::data::DecoderStack> &stack) {
+            return stack.get() == target;
+          });
+      if (!exists) {
+        decoder_structure_changed = true;
+        break;
+      }
+    }
+  }
+  if (decoder_structure_changed)
+    _view->cancel_trace_drag_interaction();
 
   // Remove DecodeTrace whose DecoderStack no longer exists.
   for (auto it = _own_decode_traces.begin();
@@ -426,6 +452,7 @@ void ViewDerivedTraces::sync_derived_traces() {
 
     if (!_own_math_trace ||
         _own_math_trace->get_math_stack().get() != math_stack.get()) {
+      _view->cancel_trace_drag_interaction();
       if (_own_math_trace) {
         _own_math_trace.reset();
         changed = true;
@@ -447,6 +474,7 @@ void ViewDerivedTraces::sync_derived_traces() {
     }
   } else {
     if (_own_math_trace) {
+      _view->cancel_trace_drag_interaction();
       _own_math_trace.reset();
       changed = true;
     }
@@ -459,6 +487,7 @@ void ViewDerivedTraces::sync_derived_traces() {
   auto *lissajous_model = source ? source->get_lissajous_model() : nullptr;
   if (lissajous_model && lissajous_model->enabled()) {
     if (!_own_lissajous_trace) {
+      _view->cancel_trace_drag_interaction();
       auto *snapshot = source->get_dso_snapshot();
       _own_lissajous_trace = std::make_unique<LissajousTrace>(
           lissajous_model->enabled(), snapshot, lissajous_model->x_index(),
@@ -472,6 +501,7 @@ void ViewDerivedTraces::sync_derived_traces() {
     }
   } else {
     if (_own_lissajous_trace) {
+      _view->cancel_trace_drag_interaction();
       _own_lissajous_trace.reset();
       changed = true;
     }

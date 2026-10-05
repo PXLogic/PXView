@@ -125,6 +125,7 @@ public:
   static const int MinSignalHeight;
   static const int MaxSignalHeight;
   static constexpr int GroupGap = IRenderView::GroupGap;
+  static constexpr int GroupSpacing = IRenderView::GroupSpacing;
   static constexpr int GroupCardRadius = IRenderView::GroupCardRadius;
 
   // static const int SignalHeight;
@@ -340,24 +341,14 @@ public:
 
   void normalize_layout();
 
-  /**
-   * Slide the non-dragged channels aside while a channel drag is in flight
-   * (see ViewSignalSync::animate_make_way_for_drag). Purely a visual preview:
-   * it never touches view_index, grouping or the saved layout.
-   *
-   * @param dragged the channel under the cursor; excluded from the animation
-   *                because it follows the cursor directly.
-   * @param anchor_y the column's top row center captured when the drag began
-   *                (must stay constant for the whole drag). Pass INT_MAX to
-   *                fall back to deriving it from the current layout.
-   * @param start_slot_y the dragged channel's slot index captured when the
-   *                drag began (must stay constant for the whole drag). With
-   *                the per-frame hand slot it decides which slot the dragged
-   *                channel occupies. Pass a negative value for non-drag callers.
-   * @return true if any channel got a new target (repaint is due).
-   */
-  bool animate_make_way_for_drag(Trace *dragged, int anchor_y,
-                                 int start_slot_y = -1);
+  // One drag transaction: capture immutable geometry, preview from it, then
+  // commit the exact preview order. Group gaps and variable heights are part
+  // of the snapshot rather than reconstructed from animated coordinates.
+  bool begin_trace_drag(Trace *dragged);
+  bool animate_make_way_for_drag(Trace *dragged);
+  bool commit_trace_drag_order();
+  void cancel_trace_drag();
+  void cancel_trace_drag_interaction();
 
   void show_trig_cursor(bool show = true);
 

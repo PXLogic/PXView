@@ -218,6 +218,7 @@ private slots:
     // ---- SignalConfigStore ----
     void SavePrefersModelNameOverProbeName();
     void SaveWithModelsSetsValid();
+    void MixedTypeSameIndexKeepsSeparateLayout();
     void JsonHasChannelKeyFields();
     void JsonRoundTripPreservesChannels();
     void ApplySignalConfigWritesDevice();
@@ -799,19 +800,21 @@ void TestSignalModel::SaveWithModelsSetsValid() {
     m1->set_color("#00FF00");
     m1->set_trig_type(SignalModel::NEGTRIG);
 
-    std::map<int, ChannelLayoutState> layout;
-    layout[0] = ChannelLayoutState();
-    layout[0].view_index = 0;
-    layout[0].v_offset = 10;
-    layout[0].own_height = 50;
-    layout[1] = ChannelLayoutState();
-    layout[1].view_index = 1;
-    layout[1].v_offset = 20;
-    layout[1].own_height = 60;
+    std::map<pv::data::ChannelLayoutKey, pv::data::ChannelLayoutState> layout;
+    const pv::data::ChannelLayoutKey logic_key{SR_CHANNEL_LOGIC, 0};
+    const pv::data::ChannelLayoutKey logic_key1{SR_CHANNEL_LOGIC, 1};
+    layout[logic_key] = ChannelLayoutState();
+    layout[logic_key].view_index = 0;
+    layout[logic_key].v_offset = 10;
+    layout[logic_key].own_height = 50;
+    layout[logic_key1] = ChannelLayoutState();
+    layout[logic_key1].view_index = 1;
+    layout[logic_key1].v_offset = 20;
+    layout[logic_key1].own_height = 60;
 
-    std::map<int, std::string> colours;
-    colours[0] = "#FF0000";
-    colours[1] = "#00FF00";
+    std::map<pv::data::ChannelLayoutKey, std::string> colours;
+    colours[logic_key] = "#FF0000";
+    colours[logic_key1] = "#00FF00";
 
     store.save_signal_config({m0, m1}, layout, colours);
     QVERIFY(store.has_signal_config());
@@ -841,6 +844,80 @@ void TestSignalModel::SaveWithModelsSetsValid() {
     QCOMPARE(s1.own_height, 60);
 }
 
+void TestSignalModel::MixedTypeSameIndexKeepsSeparateLayout() {
+    // LOGIC ch0 and DSO ch0 coexist on mixed devices (demo 8+5). The layout
+    // map used to be keyed by index alone, so the second write silently
+    // overwrote the first: one of the two channels lost its view_index /
+    // v_offset / own_height on every persist. Keys are now (type, index).
+    MockDeviceConfigPort mock;
+    std::vector<sr_channel> chs;
+    sr_channel c_logic{};
+    c_logic.index = 0;
+    c_logic.type = SR_CHANNEL_LOGIC;
+    c_logic.enabled = TRUE;
+    c_logic.name = const_cast<char *>("D0");
+    chs.push_back(c_logic);
+    sr_channel c_dso{};
+    c_dso.index = 0;
+    c_dso.type = SR_CHANNEL_DSO;
+    c_dso.enabled = TRUE;
+    c_dso.name = const_cast<char *>("CH0");
+    chs.push_back(c_dso);
+    mock.set_channels(std::move(chs));
+
+    SignalConfigStore store(&mock);
+
+    auto m_logic = std::make_shared<SignalModel>();
+    m_logic->set_index(0);
+    m_logic->set_type(SR_CHANNEL_LOGIC);
+    m_logic->set_name("D0");
+    m_logic->set_enabled(true);
+    auto m_dso = std::make_shared<SignalModel>();
+    m_dso->set_index(0);
+    m_dso->set_type(SR_CHANNEL_DSO);
+    m_dso->set_name("CH0");
+    m_dso->set_enabled(true);
+
+    const pv::data::ChannelLayoutKey logic_key{SR_CHANNEL_LOGIC, 0};
+    const pv::data::ChannelLayoutKey dso_key{SR_CHANNEL_DSO, 0};
+    std::map<pv::data::ChannelLayoutKey, pv::data::ChannelLayoutState> layout;
+    layout[logic_key] = ChannelLayoutState();
+    layout[logic_key].view_index = 0;
+    layout[logic_key].v_offset = 10;
+    layout[logic_key].own_height = 50;
+    layout[dso_key] = ChannelLayoutState();
+    layout[dso_key].view_index = 5;
+    layout[dso_key].v_offset = 70;
+    layout[dso_key].own_height = 90;
+
+    std::map<pv::data::ChannelLayoutKey, std::string> colours;
+    colours[logic_key] = "#FF0000";
+    colours[dso_key] = "#00FF00";
+
+    store.save_signal_config({m_logic, m_dso}, layout, colours);
+    QVERIFY(store.has_signal_config());
+
+    const SignalConfig &cfg = store.get_signal_config();
+    QCOMPARE((int)cfg.channels.size(), 2);
+
+    // Order follows the device channel list: LOGIC first, DSO second.
+    const ChannelConfig &s_logic = cfg.channels[0];
+    QCOMPARE(s_logic.type, (int)SR_CHANNEL_LOGIC);
+    QCOMPARE(s_logic.index, 0);
+    QCOMPARE(s_logic.view_index, 0);
+    QCOMPARE(s_logic.v_offset, 10);
+    QCOMPARE(s_logic.own_height, 50);
+    QCOMPARE(QString::fromStdString(s_logic.colour), QStringLiteral("#FF0000"));
+
+    const ChannelConfig &s_dso = cfg.channels[1];
+    QCOMPARE(s_dso.type, (int)SR_CHANNEL_DSO);
+    QCOMPARE(s_dso.index, 0);
+    QCOMPARE(s_dso.view_index, 5);
+    QCOMPARE(s_dso.v_offset, 70);
+    QCOMPARE(s_dso.own_height, 90);
+    QCOMPARE(QString::fromStdString(s_dso.colour), QStringLiteral("#00FF00"));
+}
+
 void TestSignalModel::JsonHasChannelKeyFields() {
     MockDeviceConfigPort mock;
     std::vector<sr_channel> chs;
@@ -860,8 +937,8 @@ void TestSignalModel::JsonHasChannelKeyFields() {
     m0->set_trig_type(SignalModel::POSTRIG);
     m0->set_enabled(TRUE);   // init_signals mirrors sr_channel->enabled into the model
 
-    std::map<int, std::string> colours;
-    colours[0] = "#FF0000";
+    std::map<pv::data::ChannelLayoutKey, std::string> colours;
+    colours[{SR_CHANNEL_LOGIC, 0}] = "#FF0000";
 
     store.save_signal_config({m0}, {}, colours);
     QVERIFY(store.has_signal_config());

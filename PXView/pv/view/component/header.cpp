@@ -74,8 +74,6 @@ Header::Header(View &parent) : QWidget(&parent), _view(parent) {
   _resize_upper_height = 0;
   _resize_lower_height = 0;
   _mouse_is_down = false;
-  _drag_anchor_y = INT_MAX;
-  _drag_start_slot = -1;
   _foreColor = QColor();  // 无效色,UpdateTheme 会填充
 
   nameEdit = new PopupLineEdit(this);
@@ -97,8 +95,7 @@ void Header::clear_interaction_state() {
   // 信号重建后旧 Signal/Trace 已销毁,清空缓存的裸指针与拖拽/按下状态,
   // 避免后续 mouseMove/Release 或上下文菜单解引用悬垂指针。
   _drag_traces.clear();
-  _drag_anchor_y = INT_MAX;
-  _drag_start_slot = -1;
+  _view.cancel_trace_drag();
   _context_trace = nullptr;
   _resize_trace_upper = nullptr;
   _resize_trace_lower = nullptr;
@@ -478,8 +475,7 @@ void Header::mousePressEvent(QMouseEvent *event) {
     // 注意：这里 `t->selected()` 还是**上一次**的选中态（本次点击的选中发生在
     // 下方的 NAME/LABEL 分支里），所以这个循环通常什么都不收；让位锚点也因此
     // 不能在这里算（见下方 ★ 注释）。
-    _drag_anchor_y = INT_MAX;
-    _drag_start_slot = -1;
+    _view.cancel_trace_drag();
     for (auto t : traces) {
       if (t->selected())
         _drag_traces.push_back(make_pair(t, t->get_v_offset()));
@@ -554,30 +550,18 @@ void Header::mousePressEvent(QMouseEvent *event) {
       mTrace->set_old_v_offset(mTrace->get_v_offset());
     }
 
-    // ★ 让位槽位锚点必须在**这里**采集，不能在上面那个 `if (t->selected())`
-    // 循环里：那个循环跑在 `mTrace->select(true)` 之前，此刻用户点的那一项
-    // 还没被选中 → `_drag_traces` 仍为空 → 锚点被置成 INT_MAX，整个拖动期间
-    // 都退化成"每帧现算"，于是被拖通道一离开首槽锚点就跟着漂，整列平移。
-    // （2026-09-26 实机日志证实：每一次调用传进来的都是 2147483647。）
-    // 此刻 `_drag_traces` 已就绪、且各通道 layout 尚未被 force_to_v_offset 改写，
-    // 取全列最高行的 y 即为恒定的"槽位网格原点"。
-    if (!_drag_traces.empty()) {
-      for (auto t : traces) {
-        const int v = t->get_v_offset();
-        if (v != INT_MAX)
-          _drag_anchor_y = min(_drag_anchor_y, v);
-      }
-
-      // ★ 被拖项的**起始槽**同样在这里采集（layout 仍是原值）。它与每帧的
-      // "手槽"一起决定被拖项占哪个槽、谁让位 —— 只知手在哪、不知从哪来，
-      // 是旧实现无法同时满足两份测试的根因（见 make_way.h）。
-      // 槽距 = 被拖项高度 + 2*SignalMargin（与 view_signal_sync 里的 pitch 一致）。
-      const int dragged_h = mTrace->get_totalHeight();
-      const int pitch =
-          (dragged_h > 0 ? dragged_h : traces.front()->get_totalHeight()) +
-          2 * View::SignalMargin;
-      if (pitch > 0 && _drag_anchor_y != INT_MAX)
-        _drag_start_slot = (mTrace->get_v_offset() - _drag_anchor_y) / pitch;
+    // Capture the authoritative order, real row heights and group boundaries
+    // before mouseMove mutates any layout coordinate.
+    if (!_drag_traces.empty() && mTrace &&
+        (action == Trace::NAME || action == Trace::LABEL) &&
+        (mTrace->get_type() == SR_CHANNEL_LOGIC ||
+         mTrace->get_type() == SR_CHANNEL_DECODER)) {
+      // Selection may contain multiple rows, but reordering is a single-row
+      // transaction. Keeping stale selected rows here makes the preview and
+      // committed primary item disagree.
+      _drag_traces.clear();
+      _drag_traces.push_back(make_pair(mTrace, mTrace->get_zero_vpos()));
+      _view.begin_trace_drag(mTrace);
     }
 
     // DsoSignal::mouse_press internally uses get_y() (absolute content
@@ -642,71 +626,15 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
     }
   }
 
-  // Make view index by Y value;
-  if (_moveFlag && _view.is_logic_rendering_mode()) {
-    const auto &groups = _view.get_signal_groups();
-
-    if (groups.size() <= 1) {
-      std::vector<Trace *> traces;
-      for (auto &s : _view.get_own_decode_traces()) {
-        traces.push_back(s.get());
-      }
-      for (auto &s : _view.get_own_signals()) {
-        traces.push_back(s.get());
-      }
-      sort(traces.begin(), traces.end(), View::compare_trace_y);
-      int index = 0;
-      for (auto t : traces) {
-        t->set_view_index(index++);
-      }
-    } else {
-      Trace *draggedTrace = nullptr;
-      if (!_drag_traces.empty())
-        draggedTrace = _drag_traces.front().first;
-
-      int draggedGroupIndex = -1;
-      if (draggedTrace) {
-        for (int gi = 0; gi < static_cast<int>(groups.size()); gi++) {
-          for (auto gt : groups[gi].traces) {
-            if (gt == draggedTrace) {
-              draggedGroupIndex = gi;
-              break;
-            }
-          }
-          if (draggedGroupIndex != -1)
-            break;
-        }
-      }
-
-      std::vector<int> groupOrder;
-      for (int i = 0; i < static_cast<int>(groups.size()); i++)
-        groupOrder.push_back(i);
-
-      sort(groupOrder.begin(), groupOrder.end(), [&groups](int a, int b) {
-        int minA = INT_MAX, minB = INT_MAX;
-        for (auto gt : groups[a].traces)
-          minA = min(minA, gt->get_v_offset());
-        for (auto gt : groups[b].traces)
-          minB = min(minB, gt->get_v_offset());
-        return minA < minB;
-      });
-
-      int index = 0;
-      for (int gi : groupOrder) {
-        std::vector<Trace *> groupTraces = groups[gi].traces;
-        sort(groupTraces.begin(), groupTraces.end(), View::compare_trace_y);
-        for (auto t : groupTraces) {
-          t->set_view_index(index++);
-        }
-      }
-    }
-  }
+  // Commit exactly the order shown by the group-aware preview. Re-sorting the
+  // animated Y coordinates here would lose group gaps and disagree with the
+  // hard-block semantics used during the drag.
+  if (_moveFlag && _view.is_logic_rendering_mode())
+    _view.commit_trace_drag_order();
 
   if (_moveFlag) {
     pxv_info("Header::mouseReleaseEvent: MOVE FLAG set, persisting layout");
     _drag_traces.clear();
-    _drag_anchor_y = INT_MAX;
-    _drag_start_slot = -1;
 
     // 落位动画：先记住各通道"现在画在哪儿"（visual），因为接下来的
     // signals_changed() → layout_time_signals() 会用新的 layout 目标改写
@@ -756,8 +684,7 @@ void Header::mouseReleaseEvent(QMouseEvent *event) {
     persist_channel_layout();
   } else if (!_drag_traces.empty()) {
     _drag_traces.clear();
-    _drag_anchor_y = INT_MAX;
-    _drag_start_slot = -1;
+    _view.cancel_trace_drag();
   }
 
   _colorFlag = false;
@@ -987,8 +914,7 @@ void Header::mouseMoveEvent(QMouseEvent *event) {
     // 只在 LOGIC 渲染模式（分组 + view_index 语义生效）下启用，避免影响
     // DSO/ANALOG 的零位拖动语义。
     if (dragged_trace && _view.is_logic_rendering_mode()) {
-      if (_view.animate_make_way_for_drag(dragged_trace, _drag_anchor_y,
-                                          _drag_start_slot))
+      if (_view.animate_make_way_for_drag(dragged_trace))
         traces_moved();
     }
   }
@@ -1280,13 +1206,13 @@ void Header::persist_channel_layout() {
     return;
   }
 
-  std::map<int, pv::data::ChannelLayoutState> channel_layout;
+  pv::data::ChannelLayoutMap channel_layout;
   for (auto &sig : _view.get_own_signals()) {
     pv::data::ChannelLayoutState layout;
     layout.view_index = sig->get_view_index();
     layout.v_offset = sig->get_v_offset();
     layout.own_height = sig->get_own_height();
-    channel_layout[sig->get_index()] = layout;
+    channel_layout[{sig->signal_type(), sig->get_index()}] = layout;
   }
   doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
   pxv_info("Header::persist_channel_layout: saved %d channels",

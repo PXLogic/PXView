@@ -45,179 +45,190 @@ namespace view {
 namespace make_way {
 
 /**
- * 把"手心位置 + 起始槽"换算成被拖项最终占据的槽号。
+ * Immutable row geometry captured when a drag begins.
  *
- * ── 为什么不能用"排序 + 破并结" ──────────────────────────────────────────
- * 早先的做法是把被拖项和邻居统一 `stable_sort`（按 layout 值），撞值时再用
- * 一个布尔（"是否位于锚点之下"）破并结。**这条路走不通**：`stable_sort` +
- * 单个布尔**无法区分**两个语义相反的并结时刻，于是要么 7 个用例红、要么
- * `test_make_way_drag_sim` 红（两次实测都是 42/43，失败项互换）。根因是
- * 判据缺一个自由维度 —— 只知"手在哪"，不知"从哪来"。
- *
- * ── 正确的模型：手槽 + 起始槽 ───────────────────────────────────────────
- * 拖动开始时把被拖项的**起始槽** `s = (原 y - anchor) / pitch` 记下来
- * （与 `_drag_anchor_y` 同时采集，全程恒定）。之后每一帧：
- *
- *     h    = floor((手心 y - anchor) / pitch)        // 手所在槽（floor）
- *     slot = clamp(h, 0, n - 1)                      // 被拖项占据的槽
- *     if (h == s - 1) slot = s                       // 见下的"向上未越过"
- *
- * 其余项按**起始次序**连续铺进除 `slot` 之外的所有槽（跳过 slot）。于是：
- *   - 手在起始槽附近没动够一格 → `slot` 仍在原处，其余项都不动（不该抖动）；
- *   - 手越过某个邻居的槽 → 该邻居落到被拖项让出的槽 → 真正的交换；
- *   - 槽位是整数且唯一，**不需要任何并结比较器**（这是与旧实现的根本区别）。
- *
- * ── 为什么向上多一条 h == s-1 的例外 ───────────────────────────────────
- * 两个方向"到达邻居槽中心算不算越过"是不对称的，这是两份测试共同锁定的契约：
- *   - 向下：手到达下方邻居的槽中心（h 比 s 大 1）即算**已越过** → 交换（见
- *     `MakeWayRealSwapNeedsOvershoot` 情形 b）。
- *   - 向上：手到达上方邻居的槽中心（h == s-1）**还不算**越过，必须再上一格才
- *     算 → 此时 slot 仍是 s，邻居不让位（见 `MakeWayInsertsDraggedAboveNeighbor`：
- *     3 行、drag=rows[2]、手到槽 1，期望被拖项仍排最后）。
- * 若去掉这条例外，向上方向会提前一格交换，`InsertsDraggedAboveNeighbor` 失败；
- * 若把它错误地也加到向下方向，`RealSwapNeedsOvershoot(b)` 会失败。
- *
- * 该模型已用逐帧模拟器对两份测试的**全部 141 条断言**验证通过
- * （见 .workbuddy-ai/memory/mem/channel-drag-animation.md）。
- *
- * @param hand_y    被拖项当前 layout y（`get_v_offset()`，跟手值）。
- * @param anchor    槽位网格原点（拖动开始时算定，全程恒定）。
- * @param start_slot 被拖项的起始槽（拖动开始时算定，全程恒定）。
- * @param pitch     槽间距（生产 = 通道高 + 2*SignalMargin）。
- * @param n         参与布局的总行数（含被拖项）。
- * @return 被拖项最终占据的槽号，落在 [0, n-1]。
+ * `group_id` controls the visual separator inserted by the production layout.
+ * `block_id` identifies a hard drag block. Rows with the same contiguous
+ * block id move together; callers give independently draggable rows unique
+ * negative block ids. Hidden rows remain in `rows` so committing a drag does
+ * not scramble their logical order, but they consume no geometry while hidden.
  */
-inline int dragged_slot(int hand_y, int anchor, int start_slot, int pitch, int n) {
-  if (n <= 0 || pitch <= 0)
-    return 0;
-  const int rel = hand_y - anchor;
-  // floor 除法（C++ 整数除法对负数是向零取整，必须手写 floor）。
-  const int h = (rel >= 0) ? (rel / pitch) : -(((-rel) + pitch - 1) / pitch);
-  int slot = h;
-  if (slot < 0)
-    slot = 0;
-  if (slot > n - 1)
-    slot = n - 1;
-  // 向上：手恰好落在紧邻上方邻居的槽中心（h == s-1）→ 尚未越过，保持原位。
-  if (h == start_slot - 1)
-    slot = start_slot;
-  return slot;
+template <typename Item>
+struct DragRow {
+  Item item{};
+  int center = INT_MAX;
+  int height = 0;
+  int group_id = -1;
+  int block_id = -1;
+  bool visible = false;
+};
+
+template <typename Item>
+struct DragSnapshot {
+  std::vector<DragRow<Item>> rows;
+  Item dragged{};
+  int dragged_start_center = INT_MAX;
+  int content_top = 0;
+  int margin = 0;
+  int group_gap = 0;
+
+  bool valid() const {
+    return dragged != Item{} && dragged_start_center != INT_MAX &&
+           !rows.empty();
+  }
+};
+
+template <typename Item>
+struct DragLayout {
+  std::vector<Item> order;
+  std::vector<std::pair<Item, int>> targets;
+};
+
+namespace detail {
+
+template <typename Item>
+struct DragBlock {
+  int group_id = -1;
+  std::vector<DragRow<Item>> rows;
+  int top = INT_MAX;
+  int bottom = INT_MIN;
+  int original_index = -1;
+
+  bool visible() const { return top != INT_MAX && bottom != INT_MIN; }
+  int center() const { return visible() ? top + (bottom - top) / 2 : 0; }
+};
+
+template <typename Item>
+inline void update_block_extents(DragBlock<Item> &block) {
+  block.top = INT_MAX;
+  block.bottom = INT_MIN;
+  for (const auto &row : block.rows) {
+    if (!row.visible || row.center == INT_MAX || row.height <= 0)
+      continue;
+    block.top = std::min(block.top, row.center - row.height / 2);
+    block.bottom = std::max(block.bottom,
+                            row.center + (row.height + 1) / 2);
+  }
 }
 
-/**
- * Rebuild the row stacking and assign every *non-dragged* row a target center.
- *
- * 实现 = 上面 `dragged_slot()` 的排版落地：
- *   1. 用 `dragged_slot()` 算出被拖项占据的槽 `k*`；
- *   2. 其余项按**起始次序**（拖动开始时的上下关系，由入参 `others` 的顺序表达）
- *      连续铺进除 `k*` 之外的所有槽；每个槽的中心 = 网格点 `top_center + 槽号*pitch`；
- *   3. 被拖项**不给目标**（它由 `force_to_v_offset` 跟手）。
- *
- * 因为槽位是整数且互斥，这里**没有**并结、也**没有**比较器 —— 这正是与旧实现
- * 的根本差异（旧实现 `stable_sort` + 单布尔破并结，数学上无法同时满足两份测试，
- * 见 `dragged_slot()` 的说明）。
- *
- * 网格用**固定 pitch**（不是"逐项累加各自高度"）：PXView 的槽位是固定网格，
- * 同位让位只应是"邻居挪进空出的那一格"，绝不能因为某项变高/变低而把整列推走。
- * 生产的 pitch = 通道高 + 2*SignalMargin（等高通道下与逐项累加等价）。
- *
- * @param others      the rows EXCLUDING the dragged one, **in start order**
- *                    (top-to-bottom as they were when the drag began).
- * @param dragged     row under the cursor; must not be null.
- * @param top_center  槽位网格的最高一行中心（拖动开始时算定，全程恒定）。
- * @param pitch       槽间距（生产 = 通道高 + 2*SignalMargin）。
- * @param start_slot  被拖项的起始槽（拖动开始时算定，全程恒定）。
- * @param out_order   receives the full stacking order (dragged included).
- * @param out_targets receives (row, target center) for every row EXCEPT the
- *                    dragged one (which keeps following the cursor).
- */
-template <typename TraceLike>
-inline void layout(const std::vector<TraceLike *> &others, TraceLike *dragged,
-                   int top_center, int pitch, int start_slot,
-                   std::vector<TraceLike *> &out_order,
-                   std::vector<std::pair<TraceLike *, int>> &out_targets) {
-  out_order.clear();
-  out_targets.clear();
-  if (!dragged || others.empty())
+template <typename Item>
+inline void reorder_dragged_inside_block(DragBlock<Item> &block,
+                                         Item dragged,
+                                         int hand_center,
+                                         int dragged_start_center) {
+  auto dragged_it = std::find_if(
+      block.rows.begin(), block.rows.end(),
+      [dragged](const DragRow<Item> &row) { return row.item == dragged; });
+  if (dragged_it == block.rows.end())
     return;
 
-  const int n = static_cast<int>(others.size()) + 1;
-  const int slot =
-      dragged_slot(dragged->get_v_offset(), top_center, start_slot, pitch, n);
+  const DragRow<Item> dragged_row = *dragged_it;
+  block.rows.erase(dragged_it);
 
-  // 其余项按起始次序连续铺进除 slot 之外的槽。
-  std::size_t idx = 0;
-  for (int k = 0; k < n; k++) {
-    if (k == slot) {
-      out_order.push_back(dragged);
+  const bool moving_down = hand_center >= dragged_start_center;
+  std::size_t visible_before = 0;
+  for (const auto &row : block.rows) {
+    if (!row.visible || row.center == INT_MAX)
       continue;
+    if (row.center < hand_center ||
+        (moving_down && row.center == hand_center))
+      visible_before++;
+  }
+
+  std::size_t seen_visible = 0;
+  auto insert_at = block.rows.end();
+  for (auto it = block.rows.begin(); it != block.rows.end(); ++it) {
+    if (it->visible && it->center != INT_MAX) {
+      if (seen_visible == visible_before) {
+        insert_at = it;
+        break;
+      }
+      seen_visible++;
     }
-    TraceLike *t = others[idx++];
-    out_order.push_back(t);
-    out_targets.emplace_back(t, top_center + k * pitch);
   }
+  block.rows.insert(insert_at, dragged_row);
 }
 
-/**
- * Top anchor for the layout: the smallest settled center among the rows.
- *
- * Using the column's own top (rather than the dragged row's current position)
- * is what keeps the exchange in place — anchoring on the dragged row would
- * translate the entire column along with the cursor.
- *
- * NOTE: this is only a *fallback* for callers with no remembered anchor. It is
- * NOT stable across a drag: once the dragged row leaves/enters the top slot the
- * minimum jumps by one row pitch, which translates the whole column. Drag code
- * must therefore capture the column top once (at drag start) with
- * anchor_from_rows(all_rows) and feed it to layout() via a constant. Use
- * resolve_anchor() to express that preference in one place.
- */
-template <typename TraceLike>
-inline int top_center(const std::vector<TraceLike *> &rows) {
-  int top = INT_MAX;
-  for (TraceLike *t : rows)
-    top = std::min(top, t->get_v_offset());
-  return top;
-}
+} // namespace detail
 
 /**
- * Column top over *all* visible rows, including the one about to be dragged.
+ * Compute a group-aware drag preview from immutable press-time geometry.
  *
- * Must be evaluated BEFORE the drag mutates any layout offset. The result is
- * the fixed slot-grid origin for the whole drag.
+ * Unlike the legacy fixed-pitch helper below, this function preserves each
+ * row's real height and the production group gap. A group is a hard block:
+ * while the pointer remains inside its original block only the dragged row is
+ * reordered; once it leaves that block, the whole block moves across sibling
+ * blocks. This matches the View invariant that group view indices are
+ * contiguous and prevents preview/drop semantics from disagreeing.
  */
-template <typename TraceLike>
-inline int anchor_from_rows(const std::vector<TraceLike *> &all_rows) {
-  int top = INT_MAX;
-  for (TraceLike *t : all_rows) {
-    const int y = t->get_v_offset();
-    if (y != INT_MAX) // INT_MAX = "not laid out yet", not a real coordinate
-      top = std::min(top, y);
+template <typename Item>
+inline DragLayout<Item> layout_snapshot(const DragSnapshot<Item> &snapshot,
+                                        int hand_center) {
+  DragLayout<Item> result;
+  if (!snapshot.valid())
+    return result;
+
+  std::vector<detail::DragBlock<Item>> blocks;
+  for (const auto &row : snapshot.rows) {
+    if (blocks.empty() || blocks.back().group_id != row.block_id) {
+      detail::DragBlock<Item> block;
+      block.group_id = row.block_id;
+      block.original_index = static_cast<int>(blocks.size());
+      block.rows.push_back(row);
+      blocks.push_back(std::move(block));
+    } else {
+      blocks.back().rows.push_back(row);
+    }
   }
-  return top;
-}
 
-/**
- * Pick the anchor to lay out with.
- *
- * Prefers the caller-remembered `remembered` anchor (captured at drag start,
- * constant for the whole drag). Only when the caller has none (INT_MAX) — a
- * non-drag caller — does it fall back to deriving one from the current layout,
- * which is acceptable because nothing is moving in that case.
- *
- * This function exists so the "never re-derive the anchor mid-drag" rule has a
- * single, unit-testable home instead of being inlined in the drag handler.
- */
-template <typename TraceLike>
-inline int resolve_anchor(int remembered,
-                          const std::vector<TraceLike *> &all_rows) {
-  if (remembered != INT_MAX)
-    return remembered;
-  return anchor_from_rows(all_rows);
-}
+  for (auto &block : blocks)
+    detail::update_block_extents(block);
 
-} // namespace make_way
-} // namespace view
-} // namespace pv
+  auto source_it = std::find_if(
+      blocks.begin(), blocks.end(), [&snapshot](const auto &block) {
+        return std::any_of(block.rows.begin(), block.rows.end(),
+                           [&snapshot](const auto &row) {
+                             return row.item == snapshot.dragged;
+                           });
+      });
+  if (source_it == blocks.end())
+    return result;
 
-#endif // PXVIEW_PV_VIEW_TRACE_MAKEWAY_H
+  const int source_index = static_cast<int>(source_it - blocks.begin());
+  const int source_top = source_it->top;
+  const int source_bottom = source_it->bottom;
+  const bool inside_source = source_it->visible() &&
+                             hand_center >= source_top &&
+                             hand_center <= source_bottom;
+
+  if (inside_source || blocks.size() == 1) {
+    detail::reorder_dragged_inside_block(*source_it, snapshot.dragged,
+                                         hand_center,
+                                         snapshot.dragged_start_center);
+  } else if (blocks.size() > 1 && source_it->visible()) {
+    detail::DragBlock<Item> source = std::move(*source_it);
+    blocks.erase(source_it);
+
+    const int delta = hand_center - snapshot.dragged_start_center;
+    const int moving_center = source.center() + delta;
+    const bool moving_down = delta >= 0;
+    std::size_t insert_index = 0;
+    for (const auto &block : blocks) {
+      if (!block.visible()) {
+        if (block.original_index < source_index)
+          insert_index++;
+        continue;
+      }
+      if (block.center() < moving_center ||
+          (moving_down && block.center() == moving_center))
+        insert_index++;
+    }
+    blocks.insert(blocks.begin() + static_cast<std::ptrdiff_t>(insert_index),
+                  std::move(source));
+  }
+
+  result.order.reserve(snapshot.rows.size());
+  result.targets.reserve(snapshot.rows.size());
+
+  int cursor = snapshot.content_top;
+  bool have_visible = false;

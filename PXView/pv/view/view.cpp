@@ -599,9 +599,25 @@ void View::set_trig_pos(int percent) {
 
 void View::normalize_layout() { _signal_sync->normalize_layout(); }
 
-bool View::animate_make_way_for_drag(Trace *dragged, int anchor_y,
-                                     int start_slot_y) {
-  return _signal_sync->animate_make_way_for_drag(dragged, anchor_y, start_slot_y);
+bool View::begin_trace_drag(Trace *dragged) {
+  return _signal_sync->begin_trace_drag(dragged);
+}
+
+bool View::animate_make_way_for_drag(Trace *dragged) {
+  return _signal_sync->animate_make_way_for_drag(dragged);
+}
+
+bool View::commit_trace_drag_order() {
+  return _signal_sync->commit_trace_drag_order();
+}
+
+void View::cancel_trace_drag() { _signal_sync->cancel_trace_drag(); }
+
+void View::cancel_trace_drag_interaction() {
+  if (_header)
+    _header->clear_interaction_state();
+  else
+    cancel_trace_drag();
 }
 
 void View::mode_changed() { _data_sync->mode_changed(); }

@@ -192,7 +192,7 @@ public:
     bool reopen_recovered_file_tab(pv::TabContext *ctx);
 
     // Phase 2: exposed for SessionEventDispatcher
-    std::map<int, pv::data::ChannelLayoutState> build_channel_layout(pv::view::View *view);
+    std::map<pv::data::ChannelLayoutKey, pv::data::ChannelLayoutState> build_channel_layout(pv::view::View *view);
     
 public:
 	void setup_ui();

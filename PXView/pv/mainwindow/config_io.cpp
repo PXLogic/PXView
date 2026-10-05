@@ -68,14 +68,15 @@
 
 namespace {
 
-/** Build a channel-index → colour-string map from the View's signal list. */
-std::map<int, std::string>
+/** Build a (channel type, index) → colour-string map from the View's signals. */
+pv::data::ChannelColourMap
 build_channel_colours(pv::view::View *view) {
-  std::map<int, std::string> colours;
+  pv::data::ChannelColourMap colours;
   if (view) {
     for (auto &sig : view->get_own_signals()) {
       QColor c = sig->get_colour();
-      colours[sig->get_index()] = c.isValid() ? c.name().toStdString() : "default";
+      colours[{sig->signal_type(), sig->get_index()}] =
+          c.isValid() ? c.name().toStdString() : "default";
     }
   }
   return colours;
@@ -350,6 +351,7 @@ bool MainWindowConfigIO::gen_config_json(QJsonObject &sessionVar) {
   }
 
   StoreSession ss(_wnd->session());
+  ss.set_decoder_doc(doc);
   QJsonArray decodeJson;
   ss.gen_decoders_json(decodeJson);
   sessionVar["decoder"] = decodeJson;

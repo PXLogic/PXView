@@ -15,6 +15,7 @@
 #include "pv/data/model/signalmodel.h"
 #include <QDebug>
 #include <QJsonArray>
+#include <algorithm>
 #include <libsigrok/libsigrok.h>
 
 namespace pv {
@@ -140,8 +141,8 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
 
 void SignalConfigStore::save_signal_config(
     const std::vector<std::shared_ptr<SignalModel>> &signal_models,
-    const std::map<int, ChannelLayoutState> &channel_layout,
-    const std::map<int, std::string> &channel_colours) {
+    const ChannelLayoutMap &channel_layout,
+    const ChannelColourMap &channel_colours) {
   IDeviceConfigPort *agent = _device_port;
   if (!agent || !agent->have_instance()) {
     return;
@@ -168,9 +169,9 @@ void SignalConfigStore::save_signal_config(
   // 继承（修复禁用通道重新启用后排到尾部的问题），跨模式仍写 -1 由
   // normalize_view_indices() 按类型 + index 统一赋值，防止过期 view_index
   // 跨模式传播导致通道交错排序。
-  std::map<int, ChannelConfig> old_channels;
+  std::map<ChannelLayoutKey, ChannelConfig> old_channels;
   for (const auto &ch : _signal_config.channels)
-    old_channels[ch.index] = ch;
+    old_channels[{ch.type, ch.index}] = ch;
 
   _signal_config.channels.clear();
   int mode = _signal_config.work_mode;
@@ -183,7 +184,8 @@ void SignalConfigStore::save_signal_config(
     // (no model exists yet) falls back to the sr_channel struct.
     std::shared_ptr<SignalModel> matched_model;
     for (auto m : signal_models) {
-      if (m && m->index() == static_cast<int>(probe->index)) {
+      if (m && m->index() == static_cast<int>(probe->index) &&
+          m->type() == static_cast<int>(probe->type)) {
         matched_model = m;
         break;
       }
@@ -268,7 +270,8 @@ void SignalConfigStore::save_signal_config(
     // Task 3: 信号颜色（View 概念，过渡存放）。优先用 View 传入的 channel_colours
     // （与原 MainWindow 路径 B 一致，从 view::Signal::get_colour() 采集）；
     // 回退到 SignalModel::color()；再回退到 "default"。
-    auto col_it = channel_colours.find(cfg.index);
+    const ChannelLayoutKey channel_key{cfg.type, cfg.index};
+    auto col_it = channel_colours.find(channel_key);
     if (col_it != channel_colours.end()) {
       cfg.colour = col_it->second;
     } else if (matched_model && !matched_model->color().empty()) {
@@ -281,13 +284,23 @@ void SignalConfigStore::save_signal_config(
     // 时不从旧配置继承 view_index（防止过期值跨模式传播），只继承
     // v_offset / own_height（不影响排序）。view_index 写 -1，由
     // normalize_view_indices() 按类型 + index 赋正确默认值。
-    auto layout_it = channel_layout.find(cfg.index);
+    auto layout_it = channel_layout.find(channel_key);
     if (layout_it != channel_layout.end()) {
       cfg.view_index = layout_it->second.view_index;
       cfg.v_offset = layout_it->second.v_offset;
       cfg.own_height = layout_it->second.own_height;
     } else {
-      auto old_it = old_channels.find(cfg.index);
+      auto old_it = old_channels.find(channel_key);
+      if (old_it == old_channels.end()) {
+        // Older JSON did not carry `type`; only that invalid type value may
+        // fall back to index-only matching. Never alias two valid channel
+        // types that happen to share an index.
+        old_it = std::find_if(
+            old_channels.begin(), old_channels.end(),
+            [&cfg](const auto &entry) {
+              return entry.first.index == cfg.index && entry.first.type == 0;
+            });
+      }
       if (old_it != old_channels.end()) {
         // 继承 v_offset / own_height。
         cfg.v_offset = old_it->second.v_offset;
@@ -351,11 +364,14 @@ void SignalConfigStore::apply_signal_config() {
     sr_channel *const probe = reinterpret_cast<sr_channel*>(l->data);
     if (!probe)
       continue;
-    // Task 3: 按 index 匹配 ChannelConfig（替代原 positional 匹配，更稳健；
-    // 同设备的 sr_channel 顺序与 save 时一致，index 匹配等价且对顺序变化容错）。
+    // Task 3: 按 (type, index) 匹配 ChannelConfig。混合设备上 LOGIC 与 DSO
+    // 通道的 index 各自独立编号，仅按 index 匹配会把 LOGIC 配置写到同号的
+    // DSO probe 上（enabled 的类型守卫挡住了 enable，但 name 恢复会串写）。
+    // 旧 .pxc 的 type 为 0 时回退到 index-only 匹配。
     const ChannelConfig *cfg_ptr = nullptr;
     for (const auto &c : _signal_config.channels) {
-      if (c.index == static_cast<int>(probe->index)) {
+      if (c.index == static_cast<int>(probe->index) &&
+          (c.type == static_cast<int>(probe->type) || c.type == 0)) {
         cfg_ptr = &c;
         break;
       }

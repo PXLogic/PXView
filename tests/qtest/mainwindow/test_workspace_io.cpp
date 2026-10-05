@@ -231,8 +231,10 @@ void TestWorkspaceIo::RoundTripPreservesDecoderStacks() {
   vcd.importFormat = "vcd";
   vcd.session = QJsonObject{{"work_mode", 0}};
   vcd.decoder = QJsonArray{
-      QJsonObject{{"id", "uart"}, {"stacked_ok", false}},
-      QJsonObject{{"id", "spi"}, {"stacked_ok", true}}};
+      QJsonObject{{"id", "uart"}, {"stacked_ok", false},
+                  {"version", 3}, {"view_index", 4}},
+      QJsonObject{{"id", "spi"}, {"stacked_ok", true},
+                  {"version", 3}, {"view_index", 1}}};
   ws.tabs.push_back(vcd);
 
   // A native .pxl tab records none: set_file() replays them from the file, so a
@@ -254,8 +256,10 @@ void TestWorkspaceIo::RoundTripPreservesDecoderStacks() {
   QCOMPARE(dec.size(), 2);
   QCOMPARE(dec.at(0).toObject().value("id").toString(), QString("uart"));
   QVERIFY(!dec.at(0).toObject().value("stacked_ok").toBool());
+  QCOMPARE(dec.at(0).toObject().value("view_index").toInt(), 4);
   QCOMPARE(dec.at(1).toObject().value("id").toString(), QString("spi"));
   QVERIFY(dec.at(1).toObject().value("stacked_ok").toBool());
+  QCOMPARE(dec.at(1).toObject().value("view_index").toInt(), 1);
 
   QVERIFY(out.tabs[1].decoder.isEmpty());
 }

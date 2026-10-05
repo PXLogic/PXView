@@ -197,8 +197,8 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   void signal_config_from_json(const QJsonObject &obj);
   void save_signal_config(
       const std::vector<std::shared_ptr<SignalModel>> &signal_models = {},
-      const std::map<int, ChannelLayoutState> &channel_layout = {},
-      const std::map<int, std::string> &channel_colours = {}) {
+      const ChannelLayoutMap &channel_layout = {},
+      const ChannelColourMap &channel_colours = {}) {
     _signal_config_store->save_signal_config(signal_models, channel_layout,
                                              channel_colours);
   }

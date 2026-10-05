@@ -63,7 +63,7 @@
 
 #include "pv/core/langresource.h"
 
-#define DEOCDER_CONFIG_VERSION  2
+#define DEOCDER_CONFIG_VERSION  3
  
 namespace pv {
 
@@ -1809,10 +1809,7 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
         }
         dec_obj["label"] = saved_label;
         dec_obj["stacked decoders"] = stack_array;
-        // TODO: adapt — view_index is UI state owned by view::DecodeTrace;
-        // DecoderStack does not expose it. Persist 0 for now and let the
-        // View layer restore the index after it creates DecodeTrace.
-        dec_obj["view_index"] = 0;
+        dec_obj["view_index"] = stack->view_index_hint();
 
         auto rows = stack->get_rows_gshow();
         for (auto i = rows.begin(); i != rows.end(); i++) {
@@ -1901,12 +1898,10 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
             _session->set_decoder_row_label(dec_index, dec_obj["label"].toString());    
         }
 
-        if (dec_obj.contains("view_index")){
-            int chan_view_index = dec_obj["view_index"].toInt();
-            // TODO: adapt — DecoderStack no longer exposes set_view_index; UI state
-            // should be restored by the View layer after it creates DecodeTrace.
-            (void)chan_view_index;
-        }
+        const int restored_view_index =
+            dec_obj.value("version").toInt(-1) >= 3
+                ? dec_obj.value("view_index").toInt(-1)
+                : -1;
 
         std::list<int> bind_indexs;
 
@@ -1927,6 +1922,7 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
 
             auto new_dsig = aft_dsigs.back();
             auto stack = new_dsig;
+            stack->set_view_index_hint(restored_view_index);
             pxv_info("StoreSession::load_decoders: new_dsig=%p", new_dsig.get());
 
             auto &decoder_list = stack->stack();

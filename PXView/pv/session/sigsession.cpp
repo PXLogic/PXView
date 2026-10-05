@@ -2234,9 +2234,12 @@ bool SigSession::restore_decoders(const QJsonArray &dec_array,
 
     auto stack = out_stack;
 
-    // Restore the custom label.
+    // Restore the custom label and neutral View ordering hint. Headless mode
+    // ignores the hint, but retaining it keeps a later View sync lossless.
     if (dec_obj.contains("label"))
       stack->set_label(dec_obj["label"].toString());
+    if (dec_obj.value("version").toInt(-1) >= 3)
+      stack->set_view_index_hint(dec_obj.value("view_index").toInt(-1));
 
     auto &decoder_list = stack->stack();
     for (auto &up : decoder_list) {

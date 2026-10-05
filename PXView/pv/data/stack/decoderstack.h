@@ -288,6 +288,11 @@ public:
     inline QString label() const { return _label; }
     inline void set_label(const QString &label) { _label = label; }
 
+    // View-layer ordering hint carried as neutral document data. -1 means no
+    // user/restored order exists, so the View may choose the default placement.
+    inline int view_index_hint() const { return _view_index_hint; }
+    inline void set_view_index_hint(int value) { _view_index_hint = value; }
+
     // Auto-generate a display label from the first bound channel name
     QString auto_label() const;
 
@@ -434,6 +439,7 @@ private:
     std::atomic<uint64_t> _ann_dropped_row{0};
 
     QString         _label; // custom user-facing label for this decoder stack
+    int             _view_index_hint = -1;
 
 	friend class DecoderStackTest::TwoDecoderStack;
 };
