@@ -195,6 +195,9 @@ private:
 
     void load_decoder_forms(QWidget *container);  
 
+    // 收集当前文档中已被其它解码器栈绑定的信号 index(自动匹配时跳过)。
+    void collect_occupied_signals();
+
     DsComboBox* create_probe_selector(QWidget *parent, const data::decode::Decoder *dec,
             const srd_channel *const pdch);
  
@@ -232,6 +235,9 @@ private:
     std::vector<ProbeSelector> _probe_selectors;
     // 已被自动字符匹配占用的信号 index,避免多个通道绑定同一个信号。
     std::set<int> _auto_bound_signals;
+    // 当前文档中已被**其它解码器栈**绑定的信号 index。自动匹配时一并跳过,
+    // 免得新解码器把已经接给别人的线(如已添加的 SPI 解码器占用的 rpi_CLK)抢走。
+    std::set<int> _occupied_signals;
     bool        _is_reload_form;
     int         _content_width;
 };

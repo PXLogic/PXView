@@ -389,7 +389,10 @@ void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 	using pv::data::decode::Decoder;
 	if (!container) return;
 	assert(container);
- 
+
+    // 先算出"别人已经接了的线",自动匹配时跳过它们。
+    collect_occupied_signals();
+
     for(auto &up : _trace->decoder()->stack()) 
     { 
         auto dec = up.get();
@@ -410,10 +413,14 @@ void DecoderOptionsDlg::load_decoder_forms(QWidget *container)
 // 被匹配文本 = 信号名(如 "SCL"、"CH1_SCL")。两档策略:
 //   1) 不区分大小写的全等匹配(优先级高);
 //   2) 全等失败后退化为双向子串包含。
-// 已经被前面通道占用的信号会被跳过,保证一个信号只绑定一个通道。
+// 两类信号会被跳过:
+//   - occupied:当前文档里已被**其它解码器栈**绑定的信号(不抢别人已接的线,
+//     例如已经有一个 SPI 解码器绑了 rpi_CLK,新解码器应匹配到 uc_CLK);
+//   - taken:本次弹窗内已被前面通道自动占用的信号(一个信号只绑一个通道)。
 // 返回匹配到的信号 index,未匹配返回 -1。
 static int auto_match_signal(const srd_channel *pdch,
                              const std::vector<std::shared_ptr<pv::data::SignalModel>> &sigs,
+                             const std::set<int> &occupied,
                              const std::set<int> &taken)
 {
     if (!pdch)
@@ -430,12 +437,16 @@ static int auto_match_signal(const srd_channel *pdch,
     if (keys.isEmpty())
         return -1;
 
+    const auto is_available = [&](int idx) {
+        return occupied.count(idx) == 0 && taken.count(idx) == 0;
+    };
+
     // 第一档:不区分大小写全等。
     for (const QString &key : keys) {
         for (const auto &s : sigs) {
             if (!s || s->type() != SR_CHANNEL_LOGIC || !s->enabled())
                 continue;
-            if (taken.count(s->index()))
+            if (!is_available(s->index()))
                 continue;
             if (QString::fromStdString(s->name()).compare(key, Qt::CaseInsensitive) == 0)
                 return s->index();
@@ -448,7 +459,7 @@ static int auto_match_signal(const srd_channel *pdch,
             if (!s || s->type() != SR_CHANNEL_LOGIC || !s->enabled())
                 continue;
             const int idx = s->index();
-            if (taken.count(idx))
+            if (!is_available(idx))
                 continue;
             const QString sig_name = QString::fromStdString(s->name());
             if (sig_name.isEmpty())
@@ -460,6 +471,51 @@ static int auto_match_signal(const srd_channel *pdch,
     }
 
     return -1;
+}
+
+// 收集"当前文档里已被其它解码器栈绑定"的信号 index。
+//
+// 目的:添加新解码器时,不把已经接给别的解码器的线抢走。典型场景是同一组
+// 总线上挂了两套引脚(rpi_* / uc_*),先给 rpi 组加了一个 SPI 解码器,再给
+// uc 组加第二个 SPI 解码器时,自动匹配应跳过 rpi_CLK 而落到 uc_CLK。
+//
+// 口径:本栈所属文档(add_decoder 时由 Core 显式 set_owner_document)下的
+// **全部**解码器栈,遍历每个解码器的已绑定探针取其信号 index。
+void DecoderOptionsDlg::collect_occupied_signals()
+{
+    _occupied_signals.clear();
+    if (!_trace)
+        return;
+
+    auto stack = _trace->decoder();
+    if (!stack)
+        return;
+
+    auto *view = _trace->get_view();
+    if (!view)
+        return;
+
+    // 显式用本栈的 owner document,而不是全局活动文档:标签页切换 / 采集
+    // 回放期间活动文档可能指向别的标签页(见 ViewDerivedTraces::add_decoder
+    // 的注释)。owner 为空时 get_decoder_stacks 回落活动文档,行为不变。
+    data::SessionDocument *doc = stack->get_owner_document();
+    auto &stacks = view->session().get_decoder_stacks(doc);
+
+    for (auto &s : stacks) {
+        if (!s)
+            continue;
+        for (auto &up : s->stack()) {
+            auto *dec = up.get();
+            if (!dec)
+                continue;
+            const auto probes = dec->binded_probe_list();
+            for (const srd_channel *pdch : probes) {
+                const int idx = dec->binded_probe_index(pdch);
+                if (idx >= 0)
+                    _occupied_signals.insert(idx);
+            }
+        }
+    }
 }
 
 DsComboBox* DecoderOptionsDlg::create_probe_selector(
@@ -497,7 +553,9 @@ DsComboBox* DecoderOptionsDlg::create_probe_selector(
 
     if (binded_index == -1){
         // 用户没手动指定通道时,尝试按字符自动匹配一个信号。
-        const int matched = auto_match_signal(pdch, sigs, _auto_bound_signals);
+        // 已被其它解码器占用、或本次弹窗内已分配的信号都会跳过。
+        const int matched = auto_match_signal(pdch, sigs, _occupied_signals,
+                                              _auto_bound_signals);
         int matched_dex = -1;
         if (matched != -1) {
             matched_dex = selector->findData(QVariant::fromValue(matched));
