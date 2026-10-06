@@ -105,6 +105,10 @@ public:
 
   inline std::shared_ptr<pv::data::DecoderStack> decoder() { return _decoder_stack; }
 
+  // Mirror the height into DecoderStack::height_hint so the .pxc profile
+  // persists it (same contract as view_index_hint).
+  void set_own_height(int height) override;
+
   void set_view(pv::view::IRenderView *view) override;
 
   /**

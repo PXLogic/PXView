@@ -259,7 +259,9 @@ public:
         return _ownHeight;
     }
 
-    inline void set_own_height(int height){
+    // Virtual: DecodeTrace overrides it to mirror the height into
+    // DecoderStack::height_hint for .pxc persistence.
+    inline virtual void set_own_height(int height){
          _ownHeight = height;
     }
 

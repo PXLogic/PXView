@@ -293,6 +293,12 @@ public:
     inline int view_index_hint() const { return _view_index_hint; }
     inline void set_view_index_hint(int value) { _view_index_hint = value; }
 
+    // View-layer per-channel height hint: mirrors the DecodeTrace's
+    // own_height so the .pxc profile can persist it (same contract as
+    // view_index_hint). -1 = auto (follow the global row height).
+    inline int height_hint() const { return _height_hint; }
+    inline void set_height_hint(int value) { _height_hint = value; }
+
     // Auto-generate a display label from the first bound channel name
     QString auto_label() const;
 
@@ -440,6 +446,7 @@ private:
 
     QString         _label; // custom user-facing label for this decoder stack
     int             _view_index_hint = -1;
+    int             _height_hint = -1;
 
 	friend class DecoderStackTest::TwoDecoderStack;
 };

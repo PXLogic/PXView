@@ -926,6 +926,64 @@ void Header::leaveEvent(QEvent *) {
   update();
 }
 
+// 统一菜单样式:背景/文字/选中态/边框全部跟随主题 token,
+// Zone A 滤波菜单与 Zone B 行高菜单(含子菜单)共用同一外观。
+static void apply_menu_style(QMenu *m) {
+  if (!m)
+    return;
+  const auto token = [](const char *name) {
+    return AppConfig::Instance().GetThemeTokenValue(name);
+  };
+  const QString bg = token("@bg-overlay");
+  const QString fg = token("@fg-base");
+  const QString fgMuted = token("@fg-muted");
+  const QString border = token("@border-strong");
+  QString accent = token("@accent");
+  if (accent.isEmpty())
+    accent = token("@toolbtn-hover");
+  if (bg.isEmpty() || fg.isEmpty())
+    return;  // 主题未加载,回退系统默认外观
+  QString sheet =
+      QString(
+          "QMenu { background: %1; color: %2; border: 1px solid %3; }"
+          "QMenu::item { padding: 4px 18px; background: transparent; }"
+          "QMenu::item:selected { background: %4; color: %2; }"
+          "QMenu::item:disabled { color: %5; }"
+          "QMenu::separator { height: 1px; background: %3; margin: 4px 8px; }")
+          .arg(bg, fg, border, accent, fgMuted.isEmpty() ? fg : fgMuted);
+  m->setStyleSheet(sheet);
+}
+
+/** 行高菜单(重置/全部重置/设置通道高度/批量设置)。
+ *  逻辑通道 Zone B(LABEL 区)与解码轨道箭头(LABEL 区)共用。 */
+void Header::show_row_height_menu(const QPoint &global_pos) {
+  QMenu menu(this);
+  menu.addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ROW_HEIGHT), "Reset Row Height"),
+      this, &Header::on_reset_row_height);
+  menu.addAction(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ALL_ROW_HEIGHT),
+          "Reset All Row Heights"),
+      this, &Header::on_reset_all_row_height);
+  menu.addSeparator();
+
+  QMenu *channelMenu = create_height_submenu(false);
+  channelMenu->setTitle(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SET_CHANNEL_HEIGHT),
+          "Set Channel Height"));
+  menu.addMenu(channelMenu);
+
+  QMenu *batchMenu = create_height_submenu(true);
+  batchMenu->setTitle(
+      L_S(STR_PAGE_DLG, S_ID(IDS_DLG_BATCH_SET_HEIGHT), "Batch Set"));
+  menu.addMenu(batchMenu);
+
+  apply_menu_style(&menu);
+  apply_menu_style(channelMenu);
+  apply_menu_style(batchMenu);
+  menu.exec(global_pos);
+}
+
 QMenu *Header::create_height_submenu(bool is_batch) {
   QMenu *menu = new QMenu(this);
 
@@ -979,47 +1037,26 @@ void Header::keyPressEvent(QKeyEvent *event) {
 }
 
 void Header::contextMenuEvent(QContextMenuEvent *event) {
-  // 统一菜单样式:背景/文字/选中态/边框全部跟随主题 token,
-  // Zone A 滤波菜单与 Zone B 行高菜单(含子菜单)共用同一外观。
-  auto apply_menu_style = [](QMenu *m) {
-    if (!m)
-      return;
-    const auto token = [](const char *name) {
-      return AppConfig::Instance().GetThemeTokenValue(name);
-    };
-    const QString bg = token("@bg-overlay");
-    const QString fg = token("@fg-base");
-    const QString fgMuted = token("@fg-muted");
-    const QString border = token("@border-strong");
-    QString accent = token("@accent");
-    if (accent.isEmpty())
-      accent = token("@toolbtn-hover");
-    if (bg.isEmpty() || fg.isEmpty())
-      return;  // 主题未加载,回退系统默认外观
-    QString sheet =
-        QString(
-            "QMenu { background: %1; color: %2; border: 1px solid %3; }"
-            "QMenu::item { padding: 4px 18px; background: transparent; }"
-            "QMenu::item:selected { background: %4; color: %2; }"
-            "QMenu::item:disabled { color: %5; }"
-            "QMenu::separator { height: 1px; background: %3; margin: 4px 8px; }")
-            .arg(bg, fg, border, accent, fgMuted.isEmpty() ? fg : fgMuted);
-    m->setStyleSheet(sheet);
-  };
-
   const QPoint pt = event->pos() + QPoint(0, _view.get_vOffset());
   int action = 0;
   const auto t = get_mTrace(action, pt);
 
-  // 解码通道:任何模式下都弹"更改颜色"菜单(左键改色已删除,统一右键入口)
+  // 解码通道:右键按区域分发 —— LABEL(右缘箭头方块)弹行高菜单(与逻辑通道
+  // Zone B 一致,含重置/设置行高),其余区域弹"更改颜色"菜单(左键改色已删除,
+  // 统一右键入口)。解码轨道的 own_height 由 layout_time_signals 遵循,经
+  // DecoderStack::height_hint 持久化(见 storesession save/load_decoders)。
   if (t && t->as_decode()) {
     _context_trace = t;
-    QMenu menu(this);
-    menu.addAction(
-        L_S(STR_PAGE_SIGNAL_PROC, "IDS_CHANGE_COLOR", "Change Color"),
-        this, &Header::on_change_color_triggered);
-    apply_menu_style(&menu);
-    menu.exec(event->globalPos());
+    if (action == Trace::LABEL) {
+      show_row_height_menu(event->globalPos());
+    } else {
+      QMenu menu(this);
+      menu.addAction(
+          L_S(STR_PAGE_SIGNAL_PROC, "IDS_CHANGE_COLOR", "Change Color"),
+          this, &Header::on_change_color_triggered);
+      apply_menu_style(&menu);
+      menu.exec(event->globalPos());
+    }
     return;
   }
 
@@ -1067,31 +1104,7 @@ void Header::contextMenuEvent(QContextMenuEvent *event) {
 
   // ===== Zone B: 右侧 LABEL 区域 → 行高菜单(原始行为) =====
   if (action == Trace::LABEL) {
-    QMenu menu(this);
-    menu.addAction(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ROW_HEIGHT), "Reset Row Height"),
-        this, &Header::on_reset_row_height);
-    menu.addAction(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RESET_ALL_ROW_HEIGHT),
-            "Reset All Row Heights"),
-        this, &Header::on_reset_all_row_height);
-    menu.addSeparator();
-
-    QMenu *channelMenu = create_height_submenu(false);
-    channelMenu->setTitle(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_SET_CHANNEL_HEIGHT),
-            "Set Channel Height"));
-    menu.addMenu(channelMenu);
-
-    QMenu *batchMenu = create_height_submenu(true);
-    batchMenu->setTitle(
-        L_S(STR_PAGE_DLG, S_ID(IDS_DLG_BATCH_SET_HEIGHT), "Batch Set"));
-    menu.addMenu(batchMenu);
-
-    apply_menu_style(&menu);
-    apply_menu_style(channelMenu);
-    apply_menu_style(batchMenu);
-    menu.exec(event->globalPos());
+    show_row_height_menu(event->globalPos());
     return;
   }
 

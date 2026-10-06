@@ -1810,6 +1810,9 @@ bool StoreSession::gen_decoders_json(QJsonArray &array)
         dec_obj["label"] = saved_label;
         dec_obj["stacked decoders"] = stack_array;
         dec_obj["view_index"] = stack->view_index_hint();
+        // DecodeTrace own_height mirrored into the stack by
+        // DecodeTrace::set_own_height(); -1 = auto.
+        dec_obj["height"] = stack->height_hint();
 
         auto rows = stack->get_rows_gshow();
         for (auto i = rows.begin(); i != rows.end(); i++) {
@@ -1902,6 +1905,10 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
             dec_obj.value("version").toInt(-1) >= 3
                 ? dec_obj.value("view_index").toInt(-1)
                 : -1;
+        const int restored_height =
+            dec_obj.value("version").toInt(-1) >= 3
+                ? dec_obj.value("height").toInt(-1)
+                : -1;
 
         std::list<int> bind_indexs;
 
@@ -1923,6 +1930,7 @@ bool StoreSession::load_decoders(const AddProtocolFn &add_protocol, QJsonArray &
             auto new_dsig = aft_dsigs.back();
             auto stack = new_dsig;
             stack->set_view_index_hint(restored_view_index);
+            stack->set_height_hint(restored_height);
             pxv_info("StoreSession::load_decoders: new_dsig=%p", new_dsig.get());
 
             auto &decoder_list = stack->stack();

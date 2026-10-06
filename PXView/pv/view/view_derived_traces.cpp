@@ -103,6 +103,10 @@ std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
   dt->set_view_index(restored_index >= 0
                          ? restored_index
                          : static_cast<int>(_view->get_own_signals().size()) + index);
+  // Restore the persisted per-channel height (menu set / separator drag).
+  // -1 = auto: leave the default.
+  if (stack->height_hint() > 0)
+    dt->set_own_height(stack->height_hint());
   if (!stack->stack().empty() && !stack->stack().front()->shown())
     dt->set_visible(false);
   return dt;

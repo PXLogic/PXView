@@ -99,6 +99,7 @@ private slots:
     void on_reset_all_row_height();
     void on_set_channel_height();
     void on_batch_set_height();
+    void show_row_height_menu(const QPoint &global_pos);
 
     // 布局（view_index / v_offset / own_height）持久化的唯一出口。
     // 调用时机必须是"用户显式改变了布局"：拖动分隔条松手、右键菜单设置/重置

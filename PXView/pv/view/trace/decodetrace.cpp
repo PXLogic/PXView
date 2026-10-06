@@ -1793,6 +1793,15 @@ QRectF DecodeTrace::get_rect(DecodeSetRegions type, int y, int right) {
 
 void *DecodeTrace::get_key_handel() { return _decoder_stack->get_key_handel(); }
 
+void DecodeTrace::set_own_height(int height) {
+  Trace::set_own_height(height);
+  // Keep the persistence hint in sync at every mutation point (menu set /
+  // reset, batch set, border double-click, separator drag) — the .pxc save
+  // serializes the hint, it never reads the View-owned trace directly.
+  if (_decoder_stack)
+    _decoder_stack->set_height_hint(height);
+}
+
 // DecodeTrace::create_popup was split out of this TU (Task 3.2) into
 // pv/view/trace/decodetrace_popup.cpp (GUI archive): this file now compiles
 // into pxview-render (widget-free decode paint pipeline) while the QDialog
