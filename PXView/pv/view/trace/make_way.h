@@ -105,9 +105,12 @@ inline void update_block_extents(DragBlock<Item> &block) {
   for (const auto &row : block.rows) {
     if (!row.visible || row.center == INT_MAX || row.height <= 0)
       continue;
-    block.top = std::min(block.top, row.center - row.height / 2);
+    // 上下边界与生产布局同口径：中心 = 顶边 + ceil(h/2)（生产 qRound 对
+    // x.5 向上取整），底边 = 顶边 + h。±1px 的口径差会让整块搬移的
+    // inside/outside 判定漂移。
+    block.top = std::min(block.top, row.center - (row.height + 1) / 2);
     block.bottom = std::max(block.bottom,
-                            row.center + (row.height + 1) / 2);
+                            row.center + row.height / 2);
   }
 }
 
@@ -283,7 +286,10 @@ inline DragLayout<Item> layout_snapshot(const DragSnapshot<Item> &snapshot,
       // The dragged row occupies its slot in the cursor walk (the others must
       // make way for it) but emits no target: it follows the cursor.
       if (row.item != snapshot.dragged)
-        result.targets.emplace_back(row.item, cursor + row.height / 2);
+        // 半高用 ceil(h/2) 与生产布局 qRound(x.5) 逐像素同口径：整数除法在
+      // 奇数高度上差 1px，预览每帧重发全列目标，会让奇数高度的行每次拖动
+      // 都被推 1px（表现为远处通道"稍微上移/下移"）。
+      result.targets.emplace_back(row.item, cursor + (row.height + 1) / 2);
       cursor += row.height + 2 * snapshot.margin;
     }
   }

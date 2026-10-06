@@ -1548,7 +1548,9 @@ bool ViewSignalSync::begin_trace_drag(Trace *dragged) {
                    (trace->visible() && trace->enabled())) &&
                   row.center != INT_MAX && row.height > 0;
     if (row.visible) {
-      content_top = std::min(content_top, row.center - row.height / 2);
+      // 顶边 = 中心 - ceil(h/2)，与生产布局 qRound(x.5) 同口径；整数除法
+      // 在奇数高度上会让 content_top 偏 1px，经产出循环传导给整列目标。
+      content_top = std::min(content_top, row.center - (row.height + 1) / 2);
       if (trace == dragged)
         dragged_visible = true;
     }

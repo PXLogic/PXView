@@ -404,6 +404,40 @@ private slots:
     QCOMPARE(gap.order[5], 6);
   }
 
+  /**
+   * 回归：奇数高度行的预览目标必须与生产布局 qRound(x.5) 逐像素同口径。
+   * 旧实现用整数除法 h/2（向下截断），奇数高度差 1px——预览每帧重发全列
+   * 目标，导致远处奇数高度的行每次拖动都被推 1px。
+   *
+   * 生产几何（margin=7，从顶边 14 起堆叠）：h41 中心 = 顶 + 21，h40 中心 =
+   * 顶 + 20；顶边 = 中心 - ceil(h/2)。
+   */
+  void OddHeightRowsMatchProductionRounding() {
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 35, 41, -1, -1, true},   // 顶 14，中心 14+21
+        DragRow<int>{2, 89, 40, -1, -2, true},   // 顶 69，中心 69+20
+        DragRow<int>{3, 144, 41, -1, -3, true},  // 顶 123，中心 123+21
+    };
+    snapshot.dragged = 3;
+    snapshot.dragged_start_center = 144;
+    snapshot.content_top = 14;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    const auto layout = pv::view::make_way::layout_snapshot(snapshot, 144);
+    QCOMPARE(layout.order.size(), std::size_t(3));
+    QCOMPARE(layout.targets.size(), std::size_t(2));
+    for (const auto &t : layout.targets) {
+      if (t.first == 1)
+        QCOMPARE(t.second, 35);
+      else if (t.first == 2)
+        QCOMPARE(t.second, 89);
+      else
+        QFAIL("unexpected target row");
+    }
+  }
+
   void VisualGroupDoesNotForceOrdinaryRowsToMoveTogether() {    DragSnapshot<int> snapshot;
     snapshot.rows = {
         // Same visual group, but unique block ids: ordinary rows stay
