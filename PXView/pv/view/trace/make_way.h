@@ -216,6 +216,33 @@ inline DragLayout<Item> layout_snapshot(const DragSnapshot<Item> &snapshot,
     // with every block below sliding up to fill the vacated slot at once.
     const int moving_center = hand_center;
     const bool moving_down = hand_center >= snapshot.dragged_start_center;
+
+    // The hand is outside the source block: the dragged row rides at the
+    // leading edge of its block in the direction of travel (down → tail,
+    // up → head). Without this the row would keep its original in-block slot
+    // after the block crosses a boundary — dragging the group's first channel
+    // past another group produced "6-12345" (channel back at the same
+    // in-group spot) instead of "6-23451" (channel at the near edge).
+    // Outside the block the direction is unambiguous: hand below the block
+    // bottom is always past the dragged row's start center when it started
+    // anywhere inside, and vice versa. The inside-branch reorders by hand
+    // again as soon as the hand re-enters, so this stays stateless per frame.
+    {
+      auto dragged_it = std::find_if(
+          source.rows.begin(), source.rows.end(),
+          [&snapshot](const DragRow<Item> &row) {
+            return row.item == snapshot.dragged;
+          });
+      if (dragged_it != source.rows.end() && source.rows.size() > 1) {
+        DragRow<Item> row = *dragged_it;
+        source.rows.erase(dragged_it);
+        if (moving_down)
+          source.rows.push_back(std::move(row));
+        else
+          source.rows.insert(source.rows.begin(), std::move(row));
+      }
+    }
+
     std::size_t insert_index = 0;
     for (const auto &block : blocks) {
       if (!block.visible()) {

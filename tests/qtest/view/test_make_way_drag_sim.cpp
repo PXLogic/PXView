@@ -171,14 +171,15 @@ private slots:
 
     const auto layout = pv::view::make_way::layout_snapshot(snapshot, 250);
     QCOMPARE(layout.order.size(), std::size_t(3));
+    // 整块搬移 + 被拖行（组头顶行）骑到运动前缘（向下 → 组尾）。
     QCOMPARE(layout.order[0], 3);
-    QCOMPARE(layout.order[1], 1);
-    QCOMPARE(layout.order[2], 2);
+    QCOMPARE(layout.order[1], 2);
+    QCOMPARE(layout.order[2], 1);
     QCOMPARE(layout.targets.size(), std::size_t(2));
     QCOMPARE(layout.targets[0].first, 3);
     QCOMPARE(layout.targets[0].second, 22);
     QCOMPARE(layout.targets[1].first, 2);
-    QCOMPARE(layout.targets[1].second, 160);
+    QCOMPARE(layout.targets[1].second, 106);
   }
 
   void UngroupedRowsDoNotGainGroupGap() {
@@ -312,20 +313,19 @@ private slots:
     snapshot.margin = 7;
     snapshot.group_gap = 15;
 
-    // 手在组 B 中心(150)之下（即使已越过块 A 底部 101）：整组不得提前跳位。
-    // 旧实现在 hand > 123 就跳 —— 偏差 27px。等值点由方向破并结规则恰在
-    // hand == 150 触发。
+    // 手在组 B 中心(150)之下、块 A 之外（已越过块 A 底部 101）：块未落位，
+    // 但被拖行已骑到组尾（运动前缘）。旧实现在这里既不落位也不重排。
     for (int hand = 110; hand <= 149; hand++) {
       const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
-      QCOMPARE(layout.order[0], 1);
-      QCOMPARE(layout.order[1], 2);
+      QCOMPARE(layout.order[0], 2);
+      QCOMPARE(layout.order[1], 1);
       QCOMPARE(layout.order[2], 3);
     }
-    // 手越过组 B 中心：整组搬移，B 让到顶上。
+    // 手越过组 B 中心：整组搬移，B 让到顶上，被拖行仍在组尾。
     const auto moved = pv::view::make_way::layout_snapshot(snapshot, 150);
     QCOMPARE(moved.order[0], 3);
-    QCOMPARE(moved.order[1], 1);
-    QCOMPARE(moved.order[2], 2);
+    QCOMPARE(moved.order[1], 2);
+    QCOMPARE(moved.order[2], 1);
   }
 
   /** 对称场景：拖住组 A 的**底行**向上，触发点同样必须跟手而不是跟块中心。 */
@@ -346,19 +346,62 @@ private slots:
     snapshot.margin = 7;
     snapshot.group_gap = 15;
 
-    // 手已到块 A 顶部(76)之上但未过组 Z 中心(27)：不得提前跳位。
-    // 旧实现在 hand < 54 就跳 —— 提前 27px。
-    for (int hand = 30; hand <= 76; hand++) {
+    // 手已到块 A 顶部(76)之上但未过组 Z 中心(27)：块未落位，但被拖行（组底
+    // 行）已骑到组头（向上 → 运动前缘）。
+    for (int hand = 30; hand <= 75; hand++) {
       const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
       QCOMPARE(layout.order[0], 1);
+      QCOMPARE(layout.order[1], 3);
+      QCOMPARE(layout.order[2], 2);
       QCOMPARE(layout.order[3], 4);
     }
-    // 手越过组 Z 中心：整组 A 搬到 Z 上面，成员顺序不变。
+    // 手越过组 Z 中心：整组 A 搬到 Z 上面，被拖行仍在组头。
     const auto moved = pv::view::make_way::layout_snapshot(snapshot, 20);
-    QCOMPARE(moved.order[0], 2);
-    QCOMPARE(moved.order[1], 3);
+    QCOMPARE(moved.order[0], 3);
+    QCOMPARE(moved.order[1], 2);
     QCOMPARE(moved.order[2], 1);
     QCOMPARE(moved.order[3], 4);
+  }
+
+  /**
+   * 用户场景回归：组 A={1,2,3,4,5}，组 B={6}（"12345--6"）。把 1 向下拖过 6，
+   * 结果必须是 "6-23451"（6 到顶、2/3/4/5 保序、1 落到组尾），而不是
+   * "6-12345"（1 回到组内原位）。
+   */
+  void CrossingGroupBoundaryRidesDraggedRowToGroupTail() {
+    DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 81, 40, 0, 0, true},
+        DragRow<int>{3, 135, 40, 0, 0, true},
+        DragRow<int>{4, 189, 40, 0, 0, true},
+        DragRow<int>{5, 243, 40, 0, 0, true},
+        DragRow<int>{6, 312, 40, 1, 1, true},
+    };
+    snapshot.dragged = 1;
+    snapshot.dragged_start_center = 27;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    // 手越过组 B 中心(312)：整组 A 搬到 B 之后，1 骑到组尾 → "6-23451"。
+    const auto crossed = pv::view::make_way::layout_snapshot(snapshot, 320);
+    QCOMPARE(crossed.order[0], 6);
+    QCOMPARE(crossed.order[1], 2);
+    QCOMPARE(crossed.order[2], 3);
+    QCOMPARE(crossed.order[3], 4);
+    QCOMPARE(crossed.order[4], 5);
+    QCOMPARE(crossed.order[5], 1);
+    // 6 让位到最顶端。
+    for (const auto &t : crossed.targets)
+      if (t.first == 6)
+        QCOMPARE(t.second, 27);
+
+    // 手在组 A 之下、组 B 中心之上（组间空隙）：块未落位，但 1 已在组尾。
+    const auto gap = pv::view::make_way::layout_snapshot(snapshot, 280);
+    QCOMPARE(gap.order[0], 2);
+    QCOMPARE(gap.order[4], 1);
+    QCOMPARE(gap.order[5], 6);
   }
 
   void VisualGroupDoesNotForceOrdinaryRowsToMoveTogether() {    DragSnapshot<int> snapshot;
