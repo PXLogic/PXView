@@ -1,125 +1,59 @@
 // 让位拖动"整列平移"复现器：按生产代码的**真实调用顺序**逐帧模拟一次拖动，
-// 逐帧打印每个通道的 layout/visual 坐标，用于定位"拖动最上面的通道时其余通道
-// 跟着整列平移"的根因。
+// 逐帧检查每个通道的目标坐标，用于锁死快照事务模型的两条跨帧行为：
 //
-// 与 test_v_offset_animation 的区别：那个只测"给定锚点，layout() 算出什么"；
-// 本用例把 Header::mousePressEvent 的锚点采集 + mouseMoveEvent 的
-// force_to_v_offset + animate_make_way_for_drag 三段串起来跑，因此能暴露
-// "锚点采集时机/被拖项 layout 被改写"这类**跨帧状态**问题。
+//   1. 锚点恒定 —— 所有目标都从按下时捕获的 content_top 推导，无论手移到哪，
+//      整列绝不跟着手指平移；
+//   2. 被拖项空出的槽位由邻居接管 —— 这是"真的发生让位"的判据。
+//
+// 与 test_v_offset_animation 的区别：那个测 Trace 双层 y 坐标原语；本文件测
+// make_way::layout_snapshot 的**几何语义**（分组间距、真实高度、隐藏行、
+// 硬块整组搬移），外加跨帧仿真。
 
 #include <QtTest/QtTest>
 
-// ── 标准库头必须在目标头之前 include ──
+#include <algorithm>
 #include <cstdint>
-#include <list>
-#include <memory>
 #include <vector>
 
-// ── xlog stub: trace.cpp 经 log.h 引用 pxv_log + xlog_* ──
-#include "log/xlog.h"
-xlog_writer *pxv_log = nullptr;
-extern "C" {
-int xlog_err(xlog_writer *w, const char *, ...) { (void)w; return 0; }
-int xlog_warn(xlog_writer *w, const char *, ...) { (void)w; return 0; }
-int xlog_info(xlog_writer *w, const char *, ...) { (void)w; return 0; }
-int xlog_dbg(xlog_writer *w, const char *, ...) { (void)w; return 0; }
-int xlog_detail(xlog_writer *w, const char *, ...) { (void)w; return 0; }
-}
-
 #include "pv/view/trace/make_way.h"
-#include "pv/view/trace/trace.h"
-// IRenderView 只前向声明 Cursor/XCursor/Signal，而 Trace 按引用返回它们的容器，
-// 因此这些类型必须是完整类型。
-#include "pv/view/cursor/cursor.h"
-#include "pv/view/cursor/xcursor.h"
-#include "pv/view/signal/signal.h"
 
-using pv::view::Trace;
+using pv::view::make_way::DragRow;
+using pv::view::make_way::DragSnapshot;
 
-// Trace 的构造函数 protected 且带参；唯一纯虚成员是 enabled()。
 namespace {
 
 const int kH = 40;
-// 注：生产槽距 pitch = 通道高 + 2*SignalMargin（= SimTrace::pitch()）。
-
-class SimTrace : public Trace {
-public:
-  explicit SimTrace(int idx) : Trace(QStringLiteral("ch%1").arg(idx), idx, 10000) {
-    set_totalHeight(kH);
-  }
-  bool enabled() override { return true; }
-  static int pitch() { return kH + 2 * 7; }
-};
-
-/** 复刻 Header::mousePressEvent 采集锚点的逻辑。 */
-int capture_anchor(const std::vector<Trace *> &all) {
-  int anchor = INT_MAX;
-  for (auto *t : all) {
-    const int y = t->get_v_offset();
-    if (y != INT_MAX)
-      anchor = std::min(anchor, y);
-  }
-  return anchor;
-}
+const int kMargin = 7;
+const int kTop = 7;
+// 生产槽距 pitch = 通道高 + 2*SignalMargin。
+const int kPitch = kH + 2 * kMargin;
 
 /**
- * 复刻 Header::mousePressEvent 的**真实顺序**，返回本次拖动用的锚点。
+ * 造 n 个等高未分组行，中心依次落在 kTop+h/2, +kPitch, …，返回快照。
  *
- * 关键：`_drag_traces` 在"用户点的那一项被 select(true)"之后才填充。
- * 若在 select 之前读 `t->selected()` 去算锚点，此刻什么也收不到 → 锚点退化成
- * INT_MAX → 整个拖动期间每帧现算 → 整列跟着手指平移。
- * 本函数按正确顺序（先 select，再按 `_drag_traces` 非空采集锚点）实现。
+ * 生产语义（begin_trace_drag）：未分组行的 group_id 一律是 -1（同值），
+ * 只有 block_id 才拿互异的负数 id；item id 从 1 起 —— 0 会被
+ * DragSnapshot::valid() 的 Item{} 哨兵当成"未设置"。
  */
-int press_and_capture_anchor(const std::vector<Trace *> &all, Trace *clicked,
-                             std::vector<Trace *> &drag_traces) {
-  // --- (1) 早期循环：读的是**上一次**的选中态，此时什么都没选中 ---
-  for (auto *t : all) {
-    if (t->selected())
-      drag_traces.push_back(t);
+DragSnapshot<int> make_snapshot(int n, int dragged_index) {
+  DragSnapshot<int> snapshot;
+  for (int i = 0; i < n; i++) {
+    DragRow<int> row;
+    row.item = i + 1;
+    row.center = kTop + kH / 2 + i * kPitch;
+    row.height = kH;
+    row.group_id = -1; // 未分组：共享 -1，不触发组间距
+    row.block_id = -1 - i; // 未分组：每行独立成块
+    row.visible = true;
+    snapshot.rows.push_back(row);
   }
-
-  // --- (2) NAME/LABEL 分支：选中被点击项并填充 _drag_traces ---
-  clicked->select(true);
-  for (auto *t : all)
-    if (t != clicked)
-      t->select(false);
-  drag_traces.clear();
-  drag_traces.push_back(clicked);
-
-  // --- (3) ★ 锚点采集（必须在这里，_drag_traces 已就绪）---
-  if (drag_traces.empty())
-    return INT_MAX;
-  return capture_anchor(all);
-}
-
-/**
- * 复刻 ViewSignalSync::animate_make_way_for_drag 的核心（去掉绘图/动画）。
- *
- * `start_slot` 由调用方在 mousePressEvent 那一刻采集（与 `press_and_capture_anchor`
- * 同一时机），全程恒定 —— 这是"手槽 + 起始槽"模型必需的新状态。
- */
-void make_way_step(std::vector<Trace *> &all, Trace *drag, int anchor_y,
-                   int start_slot) {
-  std::vector<Trace *> others;
-  for (auto *t : all)
-    if (t != drag)
-      others.push_back(t);
-  if (others.empty())
-    return;
-
-  const int anchor = pv::view::make_way::resolve_anchor(anchor_y, all);
-
-  std::vector<Trace *> ordered;
-  std::vector<std::pair<Trace *, int>> targets;
-  pv::view::make_way::layout(others, drag, anchor, SimTrace::pitch(), start_slot,
-                             ordered, targets);
-
-  for (auto &nt : targets) {
-    if (nt.second < 0)
-      continue;
-    nt.first->set_v_offset_no_visual_sync(nt.second);
-    nt.first->animate_to_layout_v_offset();
-  }
+  snapshot.dragged = dragged_index + 1;
+  snapshot.dragged_start_center =
+      snapshot.rows[dragged_index].center;
+  snapshot.content_top = kTop;
+  snapshot.margin = kMargin;
+  snapshot.group_gap = 15;
+  return snapshot;
 }
 
 } // namespace
@@ -128,99 +62,76 @@ class TestMakeWayDragSim : public QObject {
   Q_OBJECT
 
 private slots:
+  // ---- 跨帧仿真：锚点恒定 + 邻居接管空槽 -------------------------------
+
   void SimDraggingTopRowDownward() {
-    std::vector<std::unique_ptr<SimTrace>> rows;
-    for (int i = 0; i < 4; i++) {
-      rows.push_back(std::make_unique<SimTrace>(i));
-      rows.back()->force_to_v_offset(i * SimTrace::pitch());
-    }
-    std::vector<Trace *> all;
-    for (auto &r : rows)
-      all.push_back(r.get());
+    const auto snapshot = make_snapshot(4, 0);
 
-    Trace *drag = rows[0].get(); // 拖最上面那一行
-
-    // ---- mousePressEvent：按真实顺序（先选中、再采锚点）----
-    std::vector<Trace *> drag_traces;
-    const int anchor = press_and_capture_anchor(all, drag, drag_traces);
-    QVERIFY(anchor != INT_MAX); // 锚点必须真的采到，否则拖到哪都整列平移
-    QCOMPARE(anchor, 0);
-    // ★ 起始槽也在 press 时采集（与 _drag_anchor_y 同时机），全程恒定。
-    const int start_slot = (drag->get_v_offset() - anchor) / SimTrace::pitch();
-    QCOMPARE(start_slot, 0);
-
-    // ---- 逐帧 mouseMoveEvent ----
-    // 每帧落点 = 邻行格位中心 → 由"手槽 + 起始槽"模型决定被拖项占哪一格。
+    // 逐帧 mouseMoveEvent：手从原槽逐格下移（量化坐标），每帧都从
+    // **同一个不可变快照**重算 —— 生产中 animate_make_way_for_drag 就是
+    // 每个量化步调一次 layout_snapshot(_drag_snapshot, y_snap)。
+    std::vector<int> first_targets;
     for (int step = 1; step <= 3; step++) {
-      // (a) 被拖项跟手：force_to_v_offset（生产在 header.cpp 用 y_snap 对齐）
-      drag->force_to_v_offset(step * SimTrace::pitch());
-      // (b) 其余通道让位（生产在 header.cpp → animate_make_way_for_drag）
-      make_way_step(all, drag, anchor, start_slot);
+      const int hand = kTop + kH / 2 + step * kPitch;
+      const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
+      QCOMPARE(layout.order.size(), std::size_t(4));
+
+      // 被拖项不拿目标（跟手），其余行目标全部落在固定网格上。
+      int seen = 0;
+      for (const auto &t : layout.targets) {
+        QVERIFY(t.first != snapshot.dragged);
+        const int slot = (t.second - kTop - kH / 2) / kPitch;
+        QCOMPARE((t.second - kTop - kH / 2) % kPitch, 0); // 固定网格 → 无整列平移
+        QVERIFY(slot >= 0);
+        seen++;
+      }
+      QCOMPARE(seen, 3);
+      if (step == 1) {
+        for (const auto &t : layout.targets)
+          first_targets.push_back(t.second);
+      }
     }
 
-    // ★ 核心判据（注意：**不是**要求其余行占满全部槽位 —— 那是 drop handler
-    //   signals_changed() 才做的权威重排；拖动预览只保证"槽位网格固定 + 被拖项
-    //   空出的那一格由邻居顶上"）：
-    //   1. 其余通道必须两两不重叠、且全部落在固定网格 {anchor + k*pitch} 上；
-    //   2. 被拖项原占的 0 号槽必须被邻居接管（否则就是"整列平移"导致换不了位）。
-    std::vector<int> slot;
-    for (int i = 1; i < 4; i++)
-      slot.push_back(rows[i]->get_v_offset());
-    std::stable_sort(slot.begin(), slot.end());
-    const int p = SimTrace::pitch();
-    for (int y : slot) {
-      QCOMPARE((y - anchor) % p, 0); // 严格落在固定网格上 → 没有被整体平移
-      QVERIFY(y >= anchor);
-    }
-    QCOMPARE(slot[0], anchor); // 0 号槽被邻居接管 = 真的发生了让位
-    QVERIFY(slot[1] > slot[0] && slot[2] > slot[1]); // 不重叠
+    // 最终帧：被拖项排到最后，其原占的 0 号槽由邻居接管。
+    const auto final_layout =
+        pv::view::make_way::layout_snapshot(snapshot, kTop + kH / 2 + 3 * kPitch);
+    QCOMPARE(final_layout.order[0], 2);
+    QCOMPARE(final_layout.order[3], 1);
+    // 第一帧之后邻居进入 0 号槽且不再离开：锚点恒定的直接推论。
+    QCOMPARE(first_targets[0], kTop + kH / 2);
   }
 
   void SimDraggingBottomRowUpward() {
-    // 反向场景：从最底往上拖。这是"并结破错方向"必然失败的那个方向 ——
-    // stable_sort 的插入序在向下方向碰巧对、向上方向必错（邻居不让位）。
-    std::vector<std::unique_ptr<SimTrace>> rows;
-    for (int i = 0; i < 4; i++) {
-      rows.push_back(std::make_unique<SimTrace>(i));
-      rows.back()->force_to_v_offset(i * SimTrace::pitch());
-    }
-    std::vector<Trace *> all;
-    for (auto &r : rows)
-      all.push_back(r.get());
+    const auto snapshot = make_snapshot(4, 3);
 
-    Trace *drag = rows[3].get(); // 拖最下面那一行往上
-    std::vector<Trace *> drag_traces;
-    const int anchor = press_and_capture_anchor(all, drag, drag_traces);
-    QVERIFY(anchor != INT_MAX);
-    QCOMPARE(anchor, 0);
-    const int start_slot = (drag->get_v_offset() - anchor) / SimTrace::pitch();
-    QCOMPARE(start_slot, 3);
-
-    const int p = SimTrace::pitch();
+    // 反向场景：从最底往上拖。旧实现的 stable_sort 插入序在这个方向必错
+    // （邻居不让位）；快照模型必须两个方向对称。
     for (int step = 1; step <= 3; step++) {
-      drag->force_to_v_offset((3 - step) * p); // 3→0 槽，逐格上移（同样撞格位中心）
-      make_way_step(all, drag, anchor, start_slot);
+      const int hand = kTop + kH / 2 + (3 - step) * kPitch;
+      const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
+      QCOMPARE(layout.order.size(), std::size_t(4));
+      for (const auto &t : layout.targets) {
+        QVERIFY(t.first != snapshot.dragged);
+        QCOMPARE((t.second - kTop - kH / 2) % kPitch, 0);
+        QVERIFY(t.second >= kTop + kH / 2); // 整列未被向上拽走
+      }
     }
 
-    // 被拖项占了 0 号槽，其余三行随之各自落在一个**固定网格点**上（互不重叠），
-    // 且整列**没有**被向上拽走 —— 若锚点漂移，它们会整体上移、脱离网格。
-    std::vector<int> slot;
-    for (int i = 0; i < 3; i++)
-      slot.push_back(rows[i]->get_v_offset());
-    std::stable_sort(slot.begin(), slot.end());
-    for (int y : slot) {
-      QCOMPARE((y - anchor) % p, 0); // 落在固定网格上 → 整体未被平移
-      QVERIFY(y >= anchor);
-      QVERIFY(y <= anchor + 3 * p);
-    }
-    QVERIFY(slot[0] > anchor); // 0 号槽让给了被拖项
-    QVERIFY(slot[1] > slot[0] && slot[2] > slot[1]); // 不重叠
+    // 最终帧：被拖项占据 0 号槽，其余三行依次下移一格。
+    const auto final_layout =
+        pv::view::make_way::layout_snapshot(snapshot, kTop + kH / 2);
+    QCOMPARE(final_layout.order[0], 4);
+    QCOMPARE(final_layout.order[1], 1);
+    std::vector<int> centers;
+    for (const auto &t : final_layout.targets)
+      centers.push_back(t.second);
+    std::sort(centers.begin(), centers.end());
+    QCOMPARE(centers[0], kTop + kH / 2 + kPitch); // 0 号槽让给了被拖项
   }
 
-  void VariableHeightRowsPreserveGroupGap() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
+  // ---- 快照几何语义 -----------------------------------------------------
 
+  void VariableHeightRowsPreserveGroupGap() {
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -246,9 +157,6 @@ private slots:
   }
 
   void CrossingBoundaryMovesWholeGroup() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -274,9 +182,6 @@ private slots:
   }
 
   void UngroupedRowsDoNotGainGroupGap() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, -1, -1, true},
@@ -302,9 +207,6 @@ private slots:
   }
 
   void SingleGroupAllowsEdgeOvershoot() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -325,9 +227,6 @@ private slots:
   }
 
   void HiddenRowsRemainInCommittedPermutation() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -351,9 +250,6 @@ private slots:
   }
 
   void MovingGroupUpwardPreservesItsMembers() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -374,9 +270,6 @@ private slots:
   }
 
   void NonContiguousGroupIdsAreNotSilentlyMerged() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
     DragSnapshot<int> snapshot;
     snapshot.rows = {
         DragRow<int>{1, 27, 40, 0, 0, true},
@@ -396,11 +289,79 @@ private slots:
     QCOMPARE(layout.order[2], 3);
   }
 
-  void VisualGroupDoesNotForceOrdinaryRowsToMoveTogether() {
-    using pv::view::make_way::DragRow;
-    using pv::view::make_way::DragSnapshot;
-
+  /**
+   * 回归：整块搬移的触发点必须跟随**被拖行**的中心，而不是块的几何中心。
+   * 旧实现 moving_center = block.center() + delta，拖住多行块的边缘行时偏差
+   * 达半个块高 —— 整组迟迟不跟手，越过阈值后突然跳位，下方所有组同时向上
+   * 补齐空档（"拖到组顶以上一段距离引发连锁错乱"）。
+   *
+   * 几何（生产公式）：组 A={1,2}，组 B={3}，组间距 15：
+   *   row1 c27, row2 c81（块 A: top 7, bottom 101, center 54）
+   *   row3 c150（块 B: top 130, bottom 170, center 150）
+   */
+  void WholeBlockTriggerFollowsHandNotBlockCentroid() {
     DragSnapshot<int> snapshot;
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 0, 0, true},
+        DragRow<int>{2, 81, 40, 0, 0, true},
+        DragRow<int>{3, 150, 40, 1, 1, true},
+    };
+    snapshot.dragged = 1; // 拖住组 A 的**顶行**：块中心偏差最大的位置
+    snapshot.dragged_start_center = 27;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    // 手在组 B 中心(150)之下（即使已越过块 A 底部 101）：整组不得提前跳位。
+    // 旧实现在 hand > 123 就跳 —— 偏差 27px。等值点由方向破并结规则恰在
+    // hand == 150 触发。
+    for (int hand = 110; hand <= 149; hand++) {
+      const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
+      QCOMPARE(layout.order[0], 1);
+      QCOMPARE(layout.order[1], 2);
+      QCOMPARE(layout.order[2], 3);
+    }
+    // 手越过组 B 中心：整组搬移，B 让到顶上。
+    const auto moved = pv::view::make_way::layout_snapshot(snapshot, 150);
+    QCOMPARE(moved.order[0], 3);
+    QCOMPARE(moved.order[1], 1);
+    QCOMPARE(moved.order[2], 2);
+  }
+
+  /** 对称场景：拖住组 A 的**底行**向上，触发点同样必须跟手而不是跟块中心。 */
+  void WholeBlockUpwardTriggerFollowsHand() {
+    DragSnapshot<int> snapshot;
+    // 视觉顺序：组 Z={1}，组 A={2,3}，组 B={4}
+    //   row1 c27（块 Z center 27），row2 c96, row3 c150
+    //   （块 A: top 76, bottom 170, center 123），row4 c205
+    snapshot.rows = {
+        DragRow<int>{1, 27, 40, 1, 1, true},
+        DragRow<int>{2, 96, 40, 0, 0, true},
+        DragRow<int>{3, 150, 40, 0, 0, true},
+        DragRow<int>{4, 205, 40, 2, 2, true},
+    };
+    snapshot.dragged = 3; // 拖住组 A 的**底行**
+    snapshot.dragged_start_center = 150;
+    snapshot.content_top = 7;
+    snapshot.margin = 7;
+    snapshot.group_gap = 15;
+
+    // 手已到块 A 顶部(76)之上但未过组 Z 中心(27)：不得提前跳位。
+    // 旧实现在 hand < 54 就跳 —— 提前 27px。
+    for (int hand = 30; hand <= 76; hand++) {
+      const auto layout = pv::view::make_way::layout_snapshot(snapshot, hand);
+      QCOMPARE(layout.order[0], 1);
+      QCOMPARE(layout.order[3], 4);
+    }
+    // 手越过组 Z 中心：整组 A 搬到 Z 上面，成员顺序不变。
+    const auto moved = pv::view::make_way::layout_snapshot(snapshot, 20);
+    QCOMPARE(moved.order[0], 2);
+    QCOMPARE(moved.order[1], 3);
+    QCOMPARE(moved.order[2], 1);
+    QCOMPARE(moved.order[3], 4);
+  }
+
+  void VisualGroupDoesNotForceOrdinaryRowsToMoveTogether() {    DragSnapshot<int> snapshot;
     snapshot.rows = {
         // Same visual group, but unique block ids: ordinary rows stay
         // independently draggable.

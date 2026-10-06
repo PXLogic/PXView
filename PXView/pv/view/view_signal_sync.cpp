@@ -623,6 +623,19 @@ void ViewSignalSync::layout_time_signals(
     t->set_view(_view);
     t->set_viewport(_view->get_time_view());
 
+    // 拖动事务进行中：快照域内轨道的 y 坐标由让位预览（不可变快照）唯一驱动。
+    // 解码进度/数据拷贝完成会异步触发 signals_changed() → 本函数，若在这里
+    // 用按下时的旧 view_index 顺序改写 v_offset，下一帧预览又会改回来 ——
+    // 两个写入源逐帧互相覆盖，表现就是"拖第 1 个通道、组内第 5 个通道抖动"。
+    // 参照 Logic 2 的 isReorderingRows：拖动期间布局写入权归拖动事务独占，
+    // 正式布局等松手 commit 之后的 signals_changed() 再做（那时快照已清）。
+    if (_drag_snapshot.valid() &&
+        std::any_of(_drag_snapshot.rows.begin(), _drag_snapshot.rows.end(),
+                    [t](const make_way::DragRow<Trace *> &row) {
+                      return row.item == t;
+                    }))
+      continue;
+
     if (t->rows_size() == 0)
       continue;
 

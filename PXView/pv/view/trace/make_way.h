@@ -209,9 +209,13 @@ inline DragLayout<Item> layout_snapshot(const DragSnapshot<Item> &snapshot,
     detail::DragBlock<Item> source = std::move(*source_it);
     blocks.erase(source_it);
 
-    const int delta = hand_center - snapshot.dragged_start_center;
-    const int moving_center = source.center() + delta;
-    const bool moving_down = delta >= 0;
+    // The reference that follows the hand 1:1 is the dragged ROW's snapshot
+    // center, not the block centroid: using source.center() + delta biases
+    // the trigger by (block.center - row.center) — up to half a block for an
+    // edge row, so the whole group lags behind the hand and then jumps,
+    // with every block below sliding up to fill the vacated slot at once.
+    const int moving_center = hand_center;
+    const bool moving_down = hand_center >= snapshot.dragged_start_center;
     std::size_t insert_index = 0;
     for (const auto &block : blocks) {
       if (!block.visible()) {
@@ -232,3 +236,36 @@ inline DragLayout<Item> layout_snapshot(const DragSnapshot<Item> &snapshot,
 
   int cursor = snapshot.content_top;
   bool have_visible = false;
+  int current_group_id = -1;
+  for (const auto &block : blocks) {
+    for (const auto &row : block.rows) {
+      // Hidden rows keep their position in `order` (so the committed
+      // permutation stays complete) but consume no geometry — same rule as
+      // layout_time_signals().
+      result.order.push_back(row.item);
+      if (!row.visible || row.center == INT_MAX || row.height <= 0)
+        continue;
+      // Group gap: only where the group id changes between two laid-out rows,
+      // and never out of an ungrouped run (group_id == -1) — the exact rule
+      // production layout applies.
+      if (have_visible && current_group_id != -1 &&
+          row.group_id != current_group_id)
+        cursor += snapshot.group_gap;
+      current_group_id = row.group_id;
+      have_visible = true;
+      // The dragged row occupies its slot in the cursor walk (the others must
+      // make way for it) but emits no target: it follows the cursor.
+      if (row.item != snapshot.dragged)
+        result.targets.emplace_back(row.item, cursor + row.height / 2);
+      cursor += row.height + 2 * snapshot.margin;
+    }
+  }
+
+  return result;
+}
+
+} // namespace make_way
+} // namespace view
+} // namespace pv
+
+#endif // PXVIEW_PV_VIEW_TRACE_MAKEWAY_H
