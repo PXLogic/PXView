@@ -405,11 +405,12 @@ void ViewSignalSync::normalize_view_indices() {
 
   std::set<Trace *> default_decodes;
   for (auto t : all_traces) {
-    if (auto *decode = t->as_decode()) {
-      const auto stack = decode->decoder();
-      const int hint = stack ? stack->view_index_hint() : t->get_view_index();
-      if (hint >= 0) {
-        t->set_view_index(hint);
+    if (t->as_decode()) {
+      // 解码轨道与普通通道同源：view_index 即顺序真相。出生时由 .pxc hint
+      // 恢复、rebuild 时由 tab 文档布局覆盖；-1 = 无用户/恢复顺序 → 默认锚定。
+      // DecoderStack 的 hint 只是 .pxc 持久化运输载具，由
+      // capture_decoder_layout() 统一回写，不参与这里的分类。
+      if (t->get_view_index() >= 0) {
         explicit_order.push_back(t);
       } else {
         // No persisted/user order yet: binding may choose the initial slot,
@@ -543,11 +544,6 @@ void ViewSignalSync::normalize_view_indices() {
   int idx = 0;
   for (auto t : sorted) {
     t->set_view_index(idx);
-    if (auto *decode = t->as_decode()) {
-      if (auto stack = decode->decoder();
-          stack && stack->view_index_hint() >= 0)
-        stack->set_view_index_hint(idx);
-    }
     idx++;
   }
 
@@ -855,6 +851,55 @@ void ViewSignalSync::signals_changed(const Trace *eventTrace) {
   finalize_signal_layout();
 }
 
+pv::data::DecoderLayoutMap ViewSignalSync::capture_decoder_layout() {
+  pv::data::DecoderLayoutMap layout;
+  std::vector<Trace *> traces;
+  _view->get_traces(ALL_VIEW, traces);
+  for (auto t : traces) {
+    auto *decode = t->as_decode();
+    if (!decode)
+      continue;
+    // .pxc 运输载具同步：save_decoders 序列化 hint，不直读 View 轨道。
+    // 这是 hint 唯一的回写出口。
+    if (auto stack = decode->decoder()) {
+      stack->set_view_index_hint(t->get_view_index());
+      stack->set_height_hint(t->get_own_height());
+    }
+    pv::data::DecoderLayoutState st;
+    st.view_index = t->get_view_index();
+    st.own_height = t->get_own_height();
+    layout[t->get_index()] = st;
+  }
+  return layout;
+}
+
+void ViewSignalSync::apply_decoder_layout_from_document() {
+  pv::data::SessionDocument *doc = nullptr;
+  if (_view->data_sync_delegate() && _view->data_sync_delegate()->document_ptr())
+    doc = _view->data_sync_delegate()->document_ptr();
+  if (!doc && _view->session_ptr())
+    doc = _view->session_ptr()->get_active_document();
+  if (!doc)
+    return;
+  const auto &layout = doc->get_decoder_layout();
+  if (layout.empty())
+    return;
+
+  std::vector<Trace *> traces;
+  _view->get_traces(ALL_VIEW, traces);
+  for (auto t : traces) {
+    auto *decode = t->as_decode();
+    if (!decode)
+      continue;
+    const auto it = layout.find(t->get_index());
+    if (it == layout.end())
+      continue;
+    t->set_view_index(it->second.view_index);
+    if (it->second.own_height > 0)
+      t->set_own_height(it->second.own_height);
+  }
+}
+
 void ViewSignalSync::rebuild_signals_from_config(
     const pv::data::SignalConfig &config) {
   // Re-entrancy guard: if a nested broadcast (e.g. DeviceOptionsUpdated
@@ -1033,6 +1078,10 @@ if (auto *s = sig->as_logic()) {
     }
   }
 
+  // 解码器布局与信号 view_index/own_height 同一时机恢复（tab 文档优先，
+  // 出生时的 .pxc hint 只在文档无记录时生效）。
+  apply_decoder_layout_from_document();
+
   signals_changed(nullptr);
 }
 
@@ -1122,6 +1171,10 @@ if (sig && sig->model()) {
   if (_view->data_sync_delegate()->document_ptr() && _view->data_sync_delegate()->document_ptr()->has_data()) {
     _view->set_data_document(_view->data_sync_delegate()->document_ptr());
   }
+
+  // 解码器布局与信号 view_index/own_height 同一时机恢复（tab 文档优先，
+  // 出生时的 .pxc hint 只在文档无记录时生效）。
+  apply_decoder_layout_from_document();
 
   signals_changed(nullptr);
 }
@@ -1587,10 +1640,6 @@ bool ViewSignalSync::commit_trace_drag_order() {
   for (std::size_t i = 0; i < all_traces.size(); ++i) {
     Trace *trace = all_traces[i];
     trace->set_view_index(static_cast<int>(i));
-    if (auto *decode = trace->as_decode()) {
-      if (auto stack = decode->decoder())
-        stack->set_view_index_hint(static_cast<int>(i));
-    }
   }
 
   cancel_trace_drag();

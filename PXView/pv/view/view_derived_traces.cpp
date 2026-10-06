@@ -99,12 +99,10 @@ std::unique_ptr<DecodeTrace> ViewDerivedTraces::create_decode_trace(
     std::shared_ptr<pv::data::DecoderStack> stack, int index) {
   auto dt = std::make_unique<DecodeTrace>(_view->session_ptr(), stack, index);
   dt->set_view(_view);
-  const int restored_index = stack->view_index_hint();
-  dt->set_view_index(restored_index >= 0
-                         ? restored_index
-                         : static_cast<int>(_view->get_own_signals().size()) + index);
-  // Restore the persisted per-channel height (menu set / separator drag).
-  // -1 = auto: leave the default.
+  // 出生顺序只从 .pxc hint 回退（tab 文档布局由 rebuild 路径的
+  // apply_decoder_layout_from_document() 统一覆盖）。-1 = 无用户/恢复顺序，
+  // 由 normalize_view_indices() 按绑定默认锚定，不再伪造显式序号。
+  dt->set_view_index(stack->view_index_hint());
   if (stack->height_hint() > 0)
     dt->set_own_height(stack->height_hint());
   if (!stack->stack().empty() && !stack->stack().front()->shown())

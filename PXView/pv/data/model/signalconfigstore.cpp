@@ -65,6 +65,17 @@ QJsonObject SignalConfigStore::signal_config_to_json() const {
   }
   obj["channels"] = ch_array;
 
+  // 解码器布局随 tab 会话 JSON 持久化（workspace.json，无旧版兼容负担）。
+  QJsonArray dec_layout_array;
+  for (const auto &[index, st] : _decoder_layout) {
+    QJsonObject o;
+    o["index"] = index;
+    o["view_index"] = st.view_index;
+    o["own_height"] = st.own_height;
+    dec_layout_array.append(o);
+  }
+  obj["decoder_layout"] = dec_layout_array;
+
   return obj;
 }
 
@@ -136,7 +147,30 @@ void SignalConfigStore::signal_config_from_json(const QJsonObject &obj) {
     }
   }
 
+  _decoder_layout.clear();
+  if (obj.contains("decoder_layout")) {
+    for (const auto &v : obj["decoder_layout"].toArray()) {
+      const QJsonObject o = v.toObject();
+      DecoderLayoutState st;
+      st.view_index =
+          o.contains("view_index") ? o["view_index"].toInt() : -1;
+      st.own_height =
+          o.contains("own_height") ? o["own_height"].toInt() : -1;
+      _decoder_layout[o["index"].toInt()] = st;
+    }
+  }
+
   _signal_config.is_valid = true;
+}
+
+void SignalConfigStore::decoder_layout_remove_at(int index) {
+  DecoderLayoutMap next;
+  for (const auto &[k, v] : _decoder_layout) {
+    if (k == index)
+      continue;
+    next[k > index ? k - 1 : k] = v;
+  }
+  _decoder_layout.swap(next);
 }
 
 void SignalConfigStore::save_signal_config(

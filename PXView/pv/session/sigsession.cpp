@@ -2401,6 +2401,10 @@ void SigSession::remove_decoder(int index, data::SessionDocument *doc) {
   auto stack = (*it);
   decode_traces(target).erase(it);
 
+  // 解码器布局表（tab 文档）键 = 位置序号：删除后整体左移一位，保持键与
+  // 剩余轨道对齐，防止下次恢复时错位。
+  target->decoder_layout_remove_at(index);
+
   // decode_traces(target) returns target->get_decoder_stacks() (or
   // _empty_decoder_stacks), so the erase above already removed it from the
   // document's list.
@@ -2590,9 +2594,10 @@ void SigSession::clear_all_decoder(bool bUpdateView) {
   // set_device→clear_active_document_decoders 会同时清同一份文档栈，若各自
   // .clear() 会数据竞争/双释放 → Windows 堆损坏/SIGSEGV。这里与 Core 侧
   // 用同一把 _stacks_mutex 串行化（后到的看到空向量即无操作）。
-  if (auto *doc = _document_registry->get_active_document())
+  if (auto *doc = _document_registry->get_active_document()) {
     doc->clear_decoder_stacks();
-  else
+    doc->decoder_layout_clear();
+  } else
     decode_traces().clear();  // 无活动文档兜底（极少：headless 单文档场景）
 
   // decode_traces() returns _active_document->get_decoder_stacks() (or

@@ -662,6 +662,12 @@ public:
   // ---- Signal lifecycle (signals_changed event family) ----
   void signals_changed(const Trace *eventTrace);
 
+  /** 解码器布局单一采集出口：回写 .pxc 运输 hint 并产出 per-tab 文档布局表。
+   *  调用时机 = 布局持久化（persist_channel_layout / harvest / 存档保存）。 */
+  pv::data::DecoderLayoutMap capture_decoder_layout() {
+    return _signal_sync->capture_decoder_layout();
+  }
+
   /**
    * Handler for the Core-layer signals_changed event.
    * Incrementally updates _own_signals to match the Core's SignalModel

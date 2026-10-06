@@ -48,6 +48,19 @@ struct ChannelLayoutState {
 using ChannelLayoutMap = std::map<ChannelLayoutKey, ChannelLayoutState>;
 using ChannelColourMap = std::map<ChannelLayoutKey, std::string>;
 
+// 解码器布局（per-tab，随 workspace.json 的 session JSON 持久化）。键是解码器
+// 在文档解码器列表中的位置序号（与 DecodeTrace::get_index() 同源）；删除中间
+// 的解码器时由 decoder_layout_remove_at() 整体左移，保持键与轨道对齐。
+// .pxc 里的 DecoderStack::view_index_hint/height_hint 只承担"设备档案出生"的
+// 回退，不再是 per-tab 顺序的存储。
+struct DecoderLayoutState {
+  int view_index;
+  int own_height;
+  DecoderLayoutState() : view_index(-1), own_height(-1) {}
+};
+
+using DecoderLayoutMap = std::map<int, DecoderLayoutState>;
+
 struct ChannelConfig {
   int index;
   bool enabled;
@@ -140,10 +153,22 @@ public:
     return _signal_config.channels;
   }
 
+  // --- decoder layout (per-tab, serialized inside signal_config JSON) ---
+  void save_decoder_layout(const DecoderLayoutMap &layout) {
+    _decoder_layout = layout;
+  }
+  const DecoderLayoutMap &get_decoder_layout() const {
+    return _decoder_layout;
+  }
+  // 删除位置 index 的解码器后调用：抹掉该项并把其后项整体左移一位。
+  void decoder_layout_remove_at(int index);
+  void decoder_layout_clear() { _decoder_layout.clear(); }
+
 private:
   IDeviceConfigPort *_device_port;
   SignalConfig _signal_config;
   SignalConfig _pending_device_config;
+  DecoderLayoutMap _decoder_layout;
 };
 
 } // namespace data

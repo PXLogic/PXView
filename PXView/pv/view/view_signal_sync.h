@@ -32,6 +32,7 @@
 #include "pv/view/iview_delegates.h"
 #include "pv/view/trace/make_way.h"
 #include "pv/view/view_index_invariants.h"
+#include "pv/data/model/signalconfigstore.h"
 
 class QColor;
 class QString;
@@ -73,6 +74,13 @@ public:
   // -- signal rebuild ----------------------------------------------------
   void rebuild_signals_from_config(const pv::data::SignalConfig &config);
   void rebuild_signals();
+
+  // -- decoder layout（per-tab 顺序/高度的单一采集与应用出口）-------------
+  // 采集：遍历解码轨道回写 .pxc 运输 hint 并产出文档布局表。
+  pv::data::DecoderLayoutMap capture_decoder_layout();
+  // 应用：rebuild 恢复路径在 signals_changed() 前把 tab 文档的解码器布局
+  // 写回解码轨道（与信号 view_index/own_height 恢复同一时机）。
+  void apply_decoder_layout_from_document();
 
   // -- incremental signal-change events --------------------------------
   void on_signals_changed();

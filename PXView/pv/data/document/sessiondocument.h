@@ -206,6 +206,19 @@ std::shared_ptr<LogicSnapshot> get_logic_snapshot_shared() override { return _lo
   void apply_pending_config() {
     _signal_config_store->apply_pending_config();
   }
+
+  // --- decoder layout（per-tab，随 signal_config JSON 一起序列化）---
+  void save_decoder_layout(const DecoderLayoutMap &layout) {
+    _signal_config_store->save_decoder_layout(layout);
+  }
+  const DecoderLayoutMap &get_decoder_layout() const {
+    return _signal_config_store->get_decoder_layout();
+  }
+  void decoder_layout_remove_at(int index) {
+    _signal_config_store->decoder_layout_remove_at(index);
+  }
+  void decoder_layout_clear() { _signal_config_store->decoder_layout_clear(); }
+
   bool has_signal_config() const {
     return _signal_config_store->has_signal_config();
   }

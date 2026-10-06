@@ -1228,6 +1228,9 @@ void Header::persist_channel_layout() {
     channel_layout[{sig->signal_type(), sig->get_index()}] = layout;
   }
   doc->save_signal_config(session.get_signal_models_snapshot(), channel_layout);
+  // 解码器布局与信号同一出口、同一时机落进 tab 文档（workspace.json）；
+  // 顺带回写 .pxc 运输 hint（capture 内部完成）。
+  doc->save_decoder_layout(_view.capture_decoder_layout());
   pxv_info("Header::persist_channel_layout: saved %d channels",
            static_cast<int>(channel_layout.size()));
 }

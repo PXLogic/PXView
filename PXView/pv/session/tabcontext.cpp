@@ -484,6 +484,10 @@ void TabContext::harvest_device_state()
             layout.own_height = sig->get_own_height();
             channel_layout[{sig->signal_type(), sig->get_index()}] = layout;
         }
+        // 解码器布局随本 tab 文档收割（与信号同一时机）——per-tab 解码器
+        // 顺序/高度从此存在 workspace.json；.pxc hint 仅作设备档案出生回退，
+        // 顺带在此同步（capture 内部回写）。
+        _document->save_decoder_layout(_view->capture_decoder_layout());
     }
     // R2: 传入 SignalModel 列表，保存 Logic 通道 trig_type
     // UI 布局状态经 channel_layout 持久化到 ChannelConfig
