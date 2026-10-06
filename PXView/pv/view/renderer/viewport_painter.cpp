@@ -205,12 +205,22 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
         }
       }
 
-      // Find the last enabled trace (no divider below it)
+      // 找**视觉上最靠下**的一条 enabled 通道——它下面不画分隔线。
+      // 不能用 traces 的排序末元素：traces 按类型优先排序
+      // （LOGIC=10000 < ANALOG < DSO < DECODER=10003），只要存在解码轨道就恒把
+      // 解码轨道排在末尾。于是「处在分组中间」的解码轨道会被误判成最后一条、
+      // 丢掉它本该有的底部分隔线（逻辑通道没有这个毛病）。
       Trace *lastEnabledTrace = nullptr;
-      for (auto it = traces.rbegin(); it != traces.rend(); ++it) {
-        if ((*it)->enabled() || (*it)->signal_type() == SR_CHANNEL_DSO) {
-          lastEnabledTrace = *it;
-          break;
+      int lastBottom = INT_MIN;
+      for (auto t : traces) {
+        if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
+          continue;
+        if (t->visual_v_offset() == INT_MAX)  // 尚未布局
+          continue;
+        const int bottom = t->visual_v_offset() + t->get_totalHeight() / 2;
+        if (bottom > lastBottom) {
+          lastBottom = bottom;
+          lastEnabledTrace = t;
         }
       }
 
@@ -218,6 +228,8 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
       for (auto t : traces) {
         if (!t->enabled() && t->signal_type() != SR_CHANNEL_DSO)
           continue;
+        // 解码轨道与逻辑通道**同一条规则**：处在组中间就画底部分隔线，
+        // 处在组末尾（组内最后一条）就不画——后者由分组卡片的底边收口。
         if (lastInGroup.count(t))
           continue;
         if (t == lastEnabledTrace)

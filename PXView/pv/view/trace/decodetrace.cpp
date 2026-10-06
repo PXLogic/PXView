@@ -240,13 +240,16 @@ void DecodeTrace::paint_back(QPainter &p, int left, int right, QColor fore,
   if (get_v_offset() == INT_MAX)
     return;
 
+  // 通道中心水平点线已移除（与 Trace::paint_back 的同类清理保持一致，见
+  // trace.cpp 注释）：解码轨道本身是多行注解块，横穿其纵向中心的虚线既不
+  // 对应任何行边界，也会被误读成一条"中线"。
+  // 这里仍保留画笔设置——下面的解码区域控制标记（起点/终点竖线与三角）
+  // 复用的是同一支画笔。
   QColor backFore = fore;
   backFore.setAlpha(IRenderView::BackAlpha);
   QPen pen(backFore);
   pen.setStyle(Qt::DotLine);
   p.setPen(pen);
-  const double sigY = get_y();
-  p.drawLine(left, static_cast<int>(sigY), right, static_cast<int>(sigY));
 
   // --draw decode region control
   uint64_t doc_samplerate = 0;

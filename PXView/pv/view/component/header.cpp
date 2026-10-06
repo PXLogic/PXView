@@ -301,12 +301,22 @@ void Header::paintEvent(QPaintEvent *) {
     }
   }
 
-  // Find the last enabled trace (no divider below it)
+  // 找**视觉上最靠下**的一条 enabled 通道——它下面不画分隔线。理由与
+  // viewport_painter.cpp 同名循环一致：traces 按类型优先排序
+  // （LOGIC < ANALOG < DSO < DECODER），取排序末元素会让处在分组中间的
+  // 解码轨道被误判成最后一条、丢掉本该有的底部分隔线。两处规则必须一致，
+  // 否则分隔线会在表头与波形区的交界处断掉。
   Trace *lastEnabledTrace = nullptr;
-  for (auto it = traces.rbegin(); it != traces.rend(); ++it) {
-    if ((*it)->enabled() || (*it)->as_dso()) {
-      lastEnabledTrace = *it;
-      break;
+  int lastBottom = INT_MIN;
+  for (auto t : traces) {
+    if (!t->enabled() && !t->as_dso())
+      continue;
+    if (t->visual_v_offset() == INT_MAX)  // 尚未布局
+      continue;
+    const int bottom = t->visual_v_offset() + t->get_totalHeight() / 2;
+    if (bottom > lastBottom) {
+      lastBottom = bottom;
+      lastEnabledTrace = t;
     }
   }
 
@@ -314,6 +324,7 @@ void Header::paintEvent(QPaintEvent *) {
   for (auto t : traces) {
     if (!t->enabled() && !t->as_dso())
       continue;
+    // 解码轨道与逻辑通道**同一条规则**：组中间画底部分隔线，组末尾不画。
     if (lastInGroup.count(t))
       continue;
     if (t == lastEnabledTrace)
