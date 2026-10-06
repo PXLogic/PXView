@@ -257,6 +257,114 @@ void ViewSignalSync::compute_signal_groups() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 加载期分组连续性修复（不变量 2 的被动 Repair，见 normalize_view_indices
+// 内调用点注释）。
+// ---------------------------------------------------------------------------
+
+static std::set<int> decoder_bound_logic_indices(Trace *t) {
+  std::set<int> bound;
+  auto *dtrace = t ? t->as_decode() : nullptr;
+  if (!dtrace)
+    return bound;
+  if (auto stack = dtrace->decoder()) {
+    for (auto &up : stack->stack()) {
+      auto decoder = up.get();
+      for (auto probe : decoder->binded_probe_list())
+        bound.insert(decoder->binded_probe_index(probe));
+    }
+  }
+  return bound;
+}
+
+// 单趟修复：把与其绑定通道不连续的显式解码轨道重新插到绑定块之后（组内
+// 多个解码轨道共享绑定集时整组搬运、保持相对顺序）。返回 true 表示列表
+// 被修改，调用方需要再跑一趟直到收敛。
+static bool repair_decoder_contiguity_pass(std::vector<Trace *> &sorted) {
+  std::vector<Trace *> decoders;
+  for (auto t : sorted)
+    if (t->get_type() == SR_CHANNEL_DECODER && t->enabled())
+      decoders.push_back(t);
+  if (decoders.empty())
+    return false;
+
+  // 绑定集 + 并查集：共享绑定逻辑通道的解码轨道属于同一解码组。
+  std::vector<std::set<int>> bounds(decoders.size());
+  std::vector<int> parent(decoders.size());
+  for (size_t i = 0; i < decoders.size(); i++) {
+    bounds[i] = decoder_bound_logic_indices(decoders[i]);
+    parent[i] = static_cast<int>(i);
+  }
+  const auto find = [&parent](int x) {
+    while (parent[x] != x)
+      x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  for (size_t i = 0; i < decoders.size(); i++)
+    for (size_t j = i + 1; j < decoders.size(); j++) {
+      bool shares = false;
+      for (int idx : bounds[j])
+        if (bounds[i].count(idx)) {
+          shares = true;
+          break;
+        }
+      if (shares)
+        parent[find(static_cast<int>(i))] = find(static_cast<int>(j));
+    }
+  std::map<int, std::vector<Trace *>> groups;
+  for (size_t i = 0; i < decoders.size(); i++)
+    groups[find(static_cast<int>(i))].push_back(decoders[i]);
+
+  for (auto &[root, members] : groups) {
+    (void)root;
+    std::set<int> bound_union;
+    for (size_t i = 0; i < members.size(); i++) {
+      const auto it =
+          std::find(decoders.begin(), decoders.end(), members[i]);
+      bound_union.insert(bounds[it - decoders.begin()].begin(),
+                         bounds[it - decoders.begin()].end());
+    }
+
+    // 成员位次 = 组内解码轨道 + 绑定逻辑通道；必须构成连续区段。
+    std::vector<size_t> member_pos;
+    for (size_t i = 0; i < sorted.size(); i++) {
+      Trace *t = sorted[i];
+      const bool is_member_decoder =
+          std::find(members.begin(), members.end(), t) != members.end();
+      const bool is_bound_logic = t->get_type() == SR_CHANNEL_LOGIC &&
+                                  bound_union.count(t->get_index()) != 0;
+      if (is_member_decoder || is_bound_logic)
+        member_pos.push_back(i);
+    }
+    if (member_pos.empty())
+      continue;
+    if (member_pos.back() - member_pos.front() + 1 == member_pos.size())
+      continue; // 已连续
+
+    // 抽出组内解码轨道，插回最后一个绑定逻辑通道之后。
+    std::vector<Trace *> extracted;
+    std::vector<Trace *> reduced;
+    for (auto t : sorted) {
+      if (std::find(members.begin(), members.end(), t) != members.end())
+        extracted.push_back(t);
+      else
+        reduced.push_back(t);
+    }
+    size_t insert_at = 0;
+    for (size_t i = 0; i < reduced.size(); i++) {
+      Trace *t = reduced[i];
+      if (t->get_type() == SR_CHANNEL_LOGIC &&
+          bound_union.count(t->get_index()) != 0)
+        insert_at = i + 1;
+    }
+    reduced.insert(reduced.begin() + static_cast<std::ptrdiff_t>(insert_at),
+                   extracted.begin(), extracted.end());
+    sorted.swap(reduced);
+    return true;
+  }
+  return false;
+}
+
 void ViewSignalSync::normalize_view_indices() {
   // ====================================================================
   // 统一 view_index 归一化函数 (redesign-channel-order-architecture)
@@ -352,6 +460,17 @@ void ViewSignalSync::normalize_view_indices() {
   // to its latest bound logic channel. Explicit decoder positions are never
   // removed or re-anchored here; drag commit is authoritative.
   if (_view->is_logic_rendering_mode()) {
+    // 不变量 2 的被动修复（先于默认锚定）：hint 显式的解码轨道必须与其绑定
+    // 通道连续。信号 view_index 存在标签页文档（harvest_device_state 只收割
+    // own_signals）、解码 hint 存在 .pxc 设备档案，两个存储写入时机不同；
+    // 启动加载一旦漂移（最典型：同一位次冲突，tie-break 让逻辑通道排到解码
+    // 轨道前面），解码轨道就落到异组通道另一侧——分组卡片被劈开，启动即
+    // 分组错乱，要拖一次 commit 重编号才复位。用户拖动以硬块为单位让位，
+    // 不会产生该状态，故这里只在不变量被破坏时修复，正常路径零干预。
+    for (size_t guard = 0; guard <= sorted.size(); guard++)
+      if (!repair_decoder_contiguity_pass(sorted))
+        break;
+
     // 逻辑通道 index -> 在 sorted 中的位置
     std::map<int, size_t> logic_pos;
     for (size_t i = 0; i < sorted.size(); i++)
