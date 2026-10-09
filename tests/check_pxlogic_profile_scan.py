@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""判定 PXLogic 驱动是否在 scan 阶段按 logic_mode 区分设备变体。
+
+不依赖硬件，纯静态核对四件事：
+  1. supported_PX[] 表里同一 (vid,pid,usb_speed) 下是否真的存在多个变体
+     （ch32 / ch16 Pro / ch16 Plus / ch16 Base 共用 0x16C0:0x05DC）
+  2. logic_check_conf_profile() 是否真的去读 logic_mode 寄存器
+     （8192 + 22*4）—— 一旦退回"*logic_mode = 0; 不读寄存器"，
+     hw_scan 就只能选中表里第一个 logic_mode=0 的 32 通道 profile
+  3. scan() 选表时是否用 logic_mode 参与匹配
+  4. hw_usb_open() 的 profile 修正是否"整套"跟着换
+     （sdi->model + 探针列表），只换 devc->profile 会让设备名与通道数留在旧值
+
+用法：python tests/check_pxlogic_profile_scan.py [--c FILE] [--h FILE]
+退出码：0 一致 / 1 不一致 / 2 解析失败
+"""
+import argparse
+import re
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+PXLOGIC_C = REPO / "libsigrok/src/hardware/pxlogic/pxlogic.c"
+PXLOGIC_H = REPO / "libsigrok/src/hardware/pxlogic/pxlogic.h"
+
+# 表项头部：{vid, pid, LIBUSB_SPEED_x, logic_mode, "vendor", "model",
+ENTRY_RE = re.compile(
+    r'\{\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*'
+    r'(LIBUSB_SPEED_\w+)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"'
+)
+MASK_RE = re.compile(r'\(1\s*<<\s*(\w+)\)')
+DEFAULT_RE = re.compile(r'SR_Gn\(\d+\)\s*,\s*0\s*,\s*(\w+)\s*,')
+CHMODE_ROW_RE = re.compile(
+    r'\{\s*(\w+)\s*,\s*PXLOGIC_MODE_\w+\s*,\s*SR_CHANNEL_\w+\s*,\s*\d+\s*,\s*(\d+)\s*,'
+)
+
+
+def body_of(src, signature):
+    """取出某个函数体（按大括号配对，从 signature 后第一个 { 开始）。"""
+    i = src.find(signature)
+    if i < 0:
+        return None
+    i = src.find("{", i + len(signature))
+    if i < 0:
+        return None
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:j + 1]
+    return None
+
+
+def parse_profiles(hdr):
+    start = hdr.find("supported_PX[] = {")
+    if start < 0:
+        return None
+    end = hdr.find("\n};", start)
+    body = hdr[start:end if end > 0 else len(hdr)]
+
+    hits = list(ENTRY_RE.finditer(body))
+    profiles = []
+    for n, m in enumerate(hits):
+        stop = hits[n + 1].start() if n + 1 < len(hits) else len(body)
+        caps = body[m.end():stop]
+        dflt = DEFAULT_RE.search(caps)
+        profiles.append({
+            "vid": int(m.group(1), 16),
+            "pid": int(m.group(2), 16),
+            "speed": m.group(3),
+            "logic_mode": int(m.group(4)),
+            "vendor": m.group(5),
+            "model": m.group(6),
+            "mask": MASK_RE.findall(caps),
+            "default": dflt.group(1) if dflt else None,
+        })
+    return profiles
+
+
+def parse_enum(hdr):
+    start = hdr.find("enum PX_CHANNEL_ID {")
+    if start < 0:
+        return None
+    end = hdr.find("}", start)
+    names = re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|,)', hdr[start:end])
+    return {n: i for i, n in enumerate(names)}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--c", type=Path, default=PXLOGIC_C)
+    ap.add_argument("--h", type=Path, default=PXLOGIC_H)
+    a = ap.parse_args()
+
+    src = a.c.read_text(encoding="utf-8", errors="replace")
+    hdr = a.h.read_text(encoding="utf-8", errors="replace")
+
+    profiles = parse_profiles(hdr)
+    enum = parse_enum(hdr)
+    if not profiles:
+        print("[fatal] 未能从 pxlogic.h 解析出 supported_PX[]", file=sys.stderr)
+        return 2
+    if not enum:
+        print("[fatal] 未能从 pxlogic.h 解析出 enum PX_CHANNEL_ID", file=sys.stderr)
+        return 2
+
+    print(f"表项数: {len(profiles)}，通道模式枚举 {len(enum)} 项")
+
+    # --- 1. (vid,pid,speed,logic_mode) 唯一性 --------------------------------
+    seen = {}
+    dup = []
+    for p in profiles:
+        k = (p["vid"], p["pid"], p["speed"], p["logic_mode"])
+        if k in seen:
+            dup.append(k)
+        seen[k] = p
+    if dup:
+        print("\n=== 不一致：设备表存在重复的 (vid,pid,speed,logic_mode) ===")
+        for k in dup:
+            print(f"  0x{k[0]:04X}:0x{k[1]:04X} {k[2]} logic_mode={k[3]}")
+        print("  => 变体无法被 logic_mode 唯一区分。")
+        return 1
+
+    # --- 2. 同一 (vid,pid,speed) 下的变体分组 --------------------------------
+    groups = {}
+    for p in profiles:
+        groups.setdefault((p["vid"], p["pid"], p["speed"]), []).append(p)
+    multi = {k: v for k, v in groups.items() if len(v) > 1}
+    for k, v in sorted(multi.items()):
+        print(f"  0x{k[0]:04X}:0x{k[1]:04X} {k[2]}: " +
+              ", ".join(f"logic_mode={p['logic_mode']} -> {p['model']}" for p in v))
+    if not multi:
+        print("\n[note] 表中没有共用 (vid,pid,speed) 的多变体，scan 无需读 logic_mode。")
+        return 0
+
+    problems = []
+
+    # --- 3. scan 阶段必须真的读 logic_mode 寄存器 ---------------------------
+    ckp = body_of(src, "logic_check_conf_profile(")
+    if not ckp:
+        problems.append("找不到 logic_check_conf_profile() 函数体")
+    else:
+        if not re.search(r'usb_rd_reg\s*\(', ckp):
+            problems.append(
+                "logic_check_conf_profile() 没有调用 usb_rd_reg —— scan 阶段读不到 "
+                "logic_mode，多变体设备会被当成表里第一个（logic_mode=0）的型号")
+        elif not re.search(r'8192\s*\+\s*22\s*\*\s*4', ckp):
+            problems.append(
+                "logic_check_conf_profile() 读的寄存器地址不是 logic_mode(8192 + 22*4)")
+
+    # --- 4. scan() 选表时必须用 logic_mode 匹配 ------------------------------
+    scan = body_of(src, "static GSList *scan(")
+    if not scan:
+        problems.append("找不到 scan() 函数体")
+    elif not re.search(r'logic_mode\s*==\s*supported_PX\[\w+\]\.logic_mode', scan):
+        problems.append("scan() 选表时没有比较 logic_mode —— 变体区分失效")
+
+    # --- 5. hw_usb_open() 的修正必须同步型号名与探针 -------------------------
+    openf = body_of(src, "static int hw_usb_open(")
+    if not openf:
+        problems.append("找不到 hw_usb_open() 函数体")
+    else:
+        if not re.search(r'8192\s*\+\s*22\s*\*\s*4', openf):
+            problems.append("hw_usb_open() 没有兜底读 logic_mode（scan 读失败时无从修正）")
+        if "sr_dev_inst_model_set" not in openf:
+            problems.append(
+                "hw_usb_open() 修正 profile 后没有更新 sdi->model —— 设备选项栏/设备列表"
+                "仍显示旧型号（16 Pro 显示成 channel 32）")
+        if not re.search(r'setup_probes\s*\(', openf):
+            problems.append(
+                "hw_usb_open() 修正 profile 后没有重建探针 —— 通道数仍是旧 profile 的数量")
+
+    # --- 6. 每个 profile 的 default_channelmode 必须在自己支持的通道模式里 ----
+    for p in profiles:
+        d = p["default"]
+        if d is None:
+            problems.append(f"{p['model']}: 未解析到 default_channelmode")
+            continue
+        if d not in enum:
+            problems.append(f"{p['model']}: default_channelmode {d} 不在 enum PX_CHANNEL_ID 中")
+            continue
+        if d not in p["mask"]:
+            problems.append(
+                f"{p['model']}: default_channelmode {d} 不在自身 dev_caps.channels 掩码内")
+
+    if problems:
+        print("\n=== 不一致 ===")
+        for s in problems:
+            print(f"  - {s}")
+        print("\n  => 多变体设备会在设备列表 / 设备选项栏里显示成错误型号，"
+              "通道数也按错误 profile 建立。")
+        return 1
+
+    print("\n一致：scan 阶段读 logic_mode，选表与 profile 修正均完整。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
