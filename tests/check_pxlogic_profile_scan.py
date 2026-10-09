@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """判定 PXLogic 驱动是否在 scan 阶段按 logic_mode 区分设备变体。
 
-不依赖硬件，纯静态核对四件事：
+不依赖硬件，纯静态核对五件事：
   1. supported_PX[] 表里同一 (vid,pid,usb_speed) 下是否真的存在多个变体
      （ch32 / ch16 Pro / ch16 Plus / ch16 Base 共用 0x16C0:0x05DC）
   2. logic_check_conf_profile() 是否真的去读 logic_mode 寄存器
      （8192 + 22*4）—— 一旦退回"*logic_mode = 0; 不读寄存器"，
      hw_scan 就只能选中表里第一个 logic_mode=0 的 32 通道 profile
-  3. scan() 选表时是否用 logic_mode 参与匹配
-  4. hw_usb_open() 的 profile 修正是否"整套"跟着换
+  3. 该函数 claim 之前是否调用了 libusb_set_raw_io_default(hdl, 0) ——
+     fork 版 libusb 的 RAW_IO 默认开启，16 字节寄存器读会被 WinUSB 拒绝
+  4. scan() 选表时是否用 logic_mode 参与匹配
+  5. hw_usb_open() 的 profile 修正是否"整套"跟着换
      （sdi->model + 探针列表），只换 devc->profile 会让设备名与通道数留在旧值
 
 用法：python tests/check_pxlogic_profile_scan.py [--c FILE] [--h FILE]
@@ -33,6 +35,13 @@ DEFAULT_RE = re.compile(r'SR_Gn\(\d+\)\s*,\s*0\s*,\s*(\w+)\s*,')
 CHMODE_ROW_RE = re.compile(
     r'\{\s*(\w+)\s*,\s*PXLOGIC_MODE_\w+\s*,\s*SR_CHANNEL_\w+\s*,\s*\d+\s*,\s*(\d+)\s*,'
 )
+
+
+def strip_comments(src):
+    """去掉 /* */ 与 // 注释，避免注释里提到的函数名干扰顺序判断。"""
+    src = re.sub(r'/\*.*?\*/', ' ', src, flags=re.S)
+    src = re.sub(r'//[^\n]*', ' ', src)
+    return src
 
 
 def body_of(src, signature):
@@ -143,19 +152,39 @@ def main():
     if not ckp:
         problems.append("找不到 logic_check_conf_profile() 函数体")
     else:
-        if not re.search(r'usb_rd_reg\s*\(', ckp):
+        code = strip_comments(ckp)
+        if not re.search(r'usb_rd_reg\s*\(', code):
             problems.append(
                 "logic_check_conf_profile() 没有调用 usb_rd_reg —— scan 阶段读不到 "
                 "logic_mode，多变体设备会被当成表里第一个（logic_mode=0）的型号")
-        elif not re.search(r'8192\s*\+\s*22\s*\*\s*4', ckp):
+        elif not re.search(r'8192\s*\+\s*22\s*\*\s*4', code):
             problems.append(
                 "logic_check_conf_profile() 读的寄存器地址不是 logic_mode(8192 + 22*4)")
+
+        # ★ claim 之前必须关掉 RAW_IO。fork 版 libusb 的 libusb_open() 把每个
+        # handle 的 raw_io_default 初始化为 1，claim 时会给所有 IN 端点打开
+        # RAW_IO；RAW_IO 要求传输长度是最大包长（USB3.0=1024）的整数倍，
+        # 16 字节寄存器读会被 WinUSB 直接拒绝（ERROR_INVALID_FUNCTION=1）。
+        raw = code.find("libusb_set_raw_io_default")
+        claim = code.find("libusb_claim_interface")
+        if raw < 0:
+            problems.append(
+                "logic_check_conf_profile() claim 之前没有调用 "
+                "libusb_set_raw_io_default(hdl, 0) —— RAW_IO 默认开启，"
+                "16 字节寄存器读必然失败（日志表现为 "
+                "\"detected I/O error 1\" / LIBUSB_ERROR_IO）")
+        elif claim >= 0 and raw > claim:
+            problems.append(
+                "logic_check_conf_profile() 的 libusb_set_raw_io_default 出现在 "
+                "libusb_claim_interface 之后 —— RAW_IO 管道策略是在 claim 里设的，"
+                "必须在 claim 之前关")
 
     # --- 4. scan() 选表时必须用 logic_mode 匹配 ------------------------------
     scan = body_of(src, "static GSList *scan(")
     if not scan:
         problems.append("找不到 scan() 函数体")
-    elif not re.search(r'logic_mode\s*==\s*supported_PX\[\w+\]\.logic_mode', scan):
+    elif not re.search(r'logic_mode\s*==\s*supported_PX\[\w+\]\.logic_mode',
+                       strip_comments(scan)):
         problems.append("scan() 选表时没有比较 logic_mode —— 变体区分失效")
 
     # --- 5. hw_usb_open() 的修正必须同步型号名与探针 -------------------------
@@ -163,13 +192,14 @@ def main():
     if not openf:
         problems.append("找不到 hw_usb_open() 函数体")
     else:
-        if not re.search(r'8192\s*\+\s*22\s*\*\s*4', openf):
+        ocode = strip_comments(openf)
+        if not re.search(r'8192\s*\+\s*22\s*\*\s*4', ocode):
             problems.append("hw_usb_open() 没有兜底读 logic_mode（scan 读失败时无从修正）")
-        if "sr_dev_inst_model_set" not in openf:
+        if "sr_dev_inst_model_set" not in ocode:
             problems.append(
                 "hw_usb_open() 修正 profile 后没有更新 sdi->model —— 设备选项栏/设备列表"
                 "仍显示旧型号（16 Pro 显示成 channel 32）")
-        if not re.search(r'setup_probes\s*\(', openf):
+        if not re.search(r'setup_probes\s*\(', ocode):
             problems.append(
                 "hw_usb_open() 修正 profile 后没有重建探针 —— 通道数仍是旧 profile 的数量")
 
