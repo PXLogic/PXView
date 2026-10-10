@@ -350,6 +350,22 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
     return true;
 }
 
+void DeviceAgent::close_stale_handle()
+{
+    if (!_di)
+        return;
+    // 文件设备没有 USB 句柄；sr_dev_close 会毁掉 virtual-session 的会话上下文
+    // （见 release() 里的同一说明），必须跳过。
+    if (_dev_type == DEV_TYPE_FILELOG)
+        return;
+
+    pxv_info("close_stale_handle: releasing USB handle of detached device \"%s\"",
+             _dev_name.toUtf8().constData());
+    sr_dev_close(_di);
+    // 刻意不动 _di / _dev_handle / _dev_name：界面继续显示这台已掉线的设备，
+    // 用户从设备列表重新选中它时走 open_by_handle() → sr_dev_open() 新开句柄。
+}
+
 void DeviceAgent::release(bool destroy_file_device)
 {
     // 数据模型重构步骤5：入口处捕获待释放设备的 handle。set_device 的切换

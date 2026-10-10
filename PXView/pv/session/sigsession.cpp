@@ -3925,9 +3925,22 @@ void SigSession::on_hotplug_event_(int event, void *device_handle) {
     if (_state->is_working()) {
       // Capture in flight — give the device a 500ms grace period to
       // re-enumerate (e.g. firmware re-download) before tearing down.
+      // 采集期间**不能**在这里关句柄：驱动还有在途的 libusb transfer，
+      // hw_usb_close() 只 release+close、不 cancel，会把回调的句柄变成悬空。
+      // 关句柄放在 stop_capture() 之后的 on_reconnect_timeout_() 里。
       start_reconnect_watchdog_();
     } else {
-      // Idle — refresh list and notify immediately.
+      // Idle — 先放掉陈旧句柄再刷列表（顺序要紧：rescan 里的 libusb_open
+      // 只有在我们自己不再持有该设备时才可能成功）。
+      //
+      // 为什么必须放：设备已经不在总线上，可 libusb_device_handle 还开着。
+      // 上位机重新枚举同一台设备后，本进程若仍持有该设备对象，扫描阶段的
+      // libusb_open 会被 WinUSB 拒绝（CreateFileA → ERROR_ACCESS_DENIED →
+      // LIBUSB_ERROR_ACCESS）：既读不到 logic_mode（设备列表把 16 Pro 显示成
+      // "channel 32"），也让用户重新选中这台设备时根本打不开。
+      // 实测 2026-10-10：拔插一次必现。
+      // 只关句柄、保留 DeviceAgent 的身份信息，界面照旧显示这台掉线的设备。
+      _state->device_agent().close_stale_handle();
       refresh_device_list();
       _event_bus->broadcast_async<interface::DeviceDetached>({});
     }

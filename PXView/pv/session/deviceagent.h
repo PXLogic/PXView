@@ -144,6 +144,20 @@ public:
     // then the device is released explicitly via SigSession::close_file().
     void release(bool destroy_file_device = true);
 
+    // 只释放底层 USB 句柄，保留设备身份信息（_di / _dev_handle / _dev_name）。
+    //
+    // 用于热插拔 DETACH：设备已经掉线，但 libusb_device_handle 还开着。
+    // 上位机重新枚举同一台设备后，本进程若仍持有该设备对象，扫描阶段的
+    // libusb_open 会被 WinUSB 拒绝（CreateFileA → ERROR_ACCESS_DENIED →
+    // LIBUSB_ERROR_ACCESS）：既读不到 logic_mode（设备列表把 16 Pro 显示成
+    // "channel 32"），也让用户重新选中这台设备时根本打不开。
+    // 实测 2026-10-10：拔插一次必现。
+    //
+    // 与 release() 的区别：不销毁 sr_session、不清 _di/_dev_name，界面照旧
+    // 显示这台已掉线的设备；驱动侧 hw_dev_close() 只关句柄并把 status 置回
+    // SR_ST_INACTIVE，不动 channels，所以已采集的数据与通道列表都不受影响。
+    void close_stale_handle();
+
     // Refresh device info (name/driver/type) from the active SDI.
     void update();
 

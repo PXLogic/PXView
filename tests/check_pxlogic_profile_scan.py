@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """判定 PXLogic 驱动是否在 scan 阶段按 logic_mode 区分设备变体。
 
-不依赖硬件，纯静态核对五件事：
+不依赖硬件，纯静态核对六件事：
   1. supported_PX[] 表里同一 (vid,pid,usb_speed) 下是否真的存在多个变体
      （ch32 / ch16 Pro / ch16 Plus / ch16 Base 共用 0x16C0:0x05DC）
-  2. logic_check_conf_profile() 是否真的去读 logic_mode 寄存器
-     （8192 + 22*4）—— 一旦退回"*logic_mode = 0; 不读寄存器"，
-     hw_scan 就只能选中表里第一个 logic_mode=0 的 32 通道 profile
+  2. logic_check_conf_profile() 是否真的去读 logic_mode 寄存器（8192 + 22*4）
   3. 该函数 claim 之前是否调用了 libusb_set_raw_io_default(hdl, 0) ——
      fork 版 libusb 的 RAW_IO 默认开启，16 字节寄存器读会被 WinUSB 拒绝
-  4. scan() 选表时是否用 logic_mode 参与匹配
-  5. hw_usb_open() 的 profile 修正是否"整套"跟着换
-     （sdi->model + 探针列表），只换 devc->profile 会让设备名与通道数留在旧值
+  4. 读不到时是否标成 PX_LOGIC_MODE_UNKNOWN（而不是回落 0 = 冒充 32 通道），
+     以及设备已被本进程打开时是否复用其 profile->logic_mode
+  5. scan() 选表时是否用 logic_mode 参与匹配、未识别时是否如实标 "model unknown"
+  6. hw_usb_open() 的 profile 修正是否"整套"跟着换（sdi->model + 探针列表），
+     以及是否把 model_unknown 也当成触发条件
 
 用法：python tests/check_pxlogic_profile_scan.py [--c FILE] [--h FILE]
 退出码：0 一致 / 1 不一致 / 2 解析失败
@@ -32,9 +32,6 @@ ENTRY_RE = re.compile(
 )
 MASK_RE = re.compile(r'\(1\s*<<\s*(\w+)\)')
 DEFAULT_RE = re.compile(r'SR_Gn\(\d+\)\s*,\s*0\s*,\s*(\w+)\s*,')
-CHMODE_ROW_RE = re.compile(
-    r'\{\s*(\w+)\s*,\s*PXLOGIC_MODE_\w+\s*,\s*SR_CHANNEL_\w+\s*,\s*\d+\s*,\s*(\d+)\s*,'
-)
 
 
 def strip_comments(src):
@@ -188,13 +185,32 @@ def main():
                 "profile->logic_mode —— 设备被本进程占用（拔插后 libusb_open "
                 "报 LIBUSB_ERROR_ACCESS）时会回落成 0，型号显示错误")
 
+        # ★ "读不到" 不能与 "确实是 logic_mode=0（ch32 变体）" 混为一谈。
+        # 读不到就回落 0 = 冒充 32 通道机型，是本 bug 反复出现的放大器。
+        if not re.search(r'\*logic_mode\s*=\s*PX_LOGIC_MODE_UNKNOWN', code):
+            problems.append(
+                "logic_check_conf_profile() 没有把读不到的情况标成 "
+                "PX_LOGIC_MODE_UNKNOWN —— 回落 0 等于冒充 32 通道机型")
+        if re.search(r'\*logic_mode\s*=\s*0\s*;', code):
+            problems.append(
+                "logic_check_conf_profile() 仍在把 *logic_mode 置 0 —— 0 是设备表里"
+                "合法的 ch32 变体值，不能用它表示\"没读到\"")
+
     # --- 4. scan() 选表时必须用 logic_mode 匹配 ------------------------------
     scan = body_of(src, "static GSList *scan(")
     if not scan:
         problems.append("找不到 scan() 函数体")
-    elif not re.search(r'logic_mode\s*==\s*supported_PX\[\w+\]\.logic_mode',
-                       strip_comments(scan)):
-        problems.append("scan() 选表时没有比较 logic_mode —— 变体区分失效")
+    else:
+        scode = strip_comments(scan)
+        if not re.search(r'logic_mode\s*==\s*supported_PX\[\w+\]\.logic_mode', scode):
+            problems.append("scan() 选表时没有比较 logic_mode —— 变体区分失效")
+
+        # ★ 未识别时必须如实标出来，不能冒用表里第一条的型号。
+        if "model_unknown" not in scode or "model unknown" not in scode:
+            problems.append(
+                "scan() 没有处理\"型号未识别\"：应把 devc->model_unknown 置真并给设备"
+                "一个中性名（如 \"PX-Logic U3 (model unknown)\"），而不是冒用表里"
+                "第一条的 \"channel 32\"")
 
     # --- 5. hw_usb_open() 的修正必须同步型号名与探针 -------------------------
     openf = body_of(src, "static int hw_usb_open(")
@@ -211,6 +227,12 @@ def main():
         if not re.search(r'setup_probes\s*\(', ocode):
             problems.append(
                 "hw_usb_open() 修正 profile 后没有重建探针 —— 通道数仍是旧 profile 的数量")
+        # scan 标了 model_unknown 时，即使读回来的 logic_mode 与占位 profile 相同
+        # （真的就是 ch32、值 0），也必须走修正把型号名换回来。
+        if "model_unknown" not in ocode:
+            problems.append(
+                "hw_usb_open() 的修正条件没有考虑 devc->model_unknown —— 扫描阶段没识别出"
+                "型号、而设备恰好真是 32 通道时，名字会永远停在 \"model unknown\"")
 
     # --- 6. 每个 profile 的 default_channelmode 必须在自己支持的通道模式里 ----
     for p in profiles:
