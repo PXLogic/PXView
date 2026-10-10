@@ -179,6 +179,15 @@ def main():
                 "libusb_claim_interface 之后 —— RAW_IO 管道策略是在 claim 里设的，"
                 "必须在 claim 之前关")
 
+        # ★ 设备已被本进程打开时必须复用它的 logic_mode，不能直接回落 0。
+        # 拔插后 libusb_open 会报 LIBUSB_ERROR_ACCESS（PXView 掉线时不关句柄），
+        # 回落 0 就会把 16 Pro 显示成 "channel 32"。
+        if "profile->logic_mode" not in code:
+            problems.append(
+                "logic_check_conf_profile() 没有从已打开的活动实例复用 "
+                "profile->logic_mode —— 设备被本进程占用（拔插后 libusb_open "
+                "报 LIBUSB_ERROR_ACCESS）时会回落成 0，型号显示错误")
+
     # --- 4. scan() 选表时必须用 logic_mode 匹配 ------------------------------
     scan = body_of(src, "static GSList *scan(")
     if not scan:
