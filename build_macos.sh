@@ -298,17 +298,25 @@ if [ "$BUILD_DMG" = true ]; then
         echo "   [警告] 未找到 Python.framework"
     fi
 
-    # ── pxviewd: 校验 Qt 库引用已改为 bundle 内 rpath ──
-    # pxviewd (console headless daemon) 安装在 Contents/MacOS/ 里，紧邻 GUI 主程序。
-    # 上面的 macdeployqt 已经带 -executable= 处理它，正常情况下这段无事可做。
-    # 保留它的两个理由：(1) 万一某版 macdeployqt 的 -executable= 行为变化，这里能
-    # 兜底改写；(2) 末尾那句自检会在仍残留 Homebrew 绝对路径时报错，等于给
-    # -executable= 加了一道守卫。pxviewd 依赖的 Qt 组件是 GUI 主程序依赖的子集，
-    # 因此 Frameworks 里一定齐全。
-    PXVIEWD_BIN="$BUNDLE/Contents/MacOS/pxviewd"
-    if [ -f "$PXVIEWD_BIN" ]; then
-        echo "   重写 pxviewd 的库引用 (otool/install_name_tool)..."
-        otool -L "$PXVIEWD_BIN" | awk 'NR>1 {print $1}' | while read -r dep; do
+    # ── 顶层二进制: 重写指向 Homebrew 的库引用 ──
+    # 覆盖 PXView（GUI 主程序）与 pxviewd（headless daemon），二者同在
+    # Contents/MacOS/ 下，INSTALL_RPATH 均为 "@executable_path/../Frameworks"
+    # （见 CMakeLists.txt 的 APPLE 分支）。
+    #
+    # 为什么需要手动改：macdeployqt 会把 libpython 复制进
+    # Contents/Frameworks/Python.framework，但**不改写**顶层可执行文件对它的
+    # 引用 —— load command 里仍留着构建机的
+    # /opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/Python
+    # 绝对路径。用户机器（无 Homebrew）上 dyld 找不到 → 启动即崩。
+    # 以前「能过」只是因为 Homebrew 升级 python@3.14 的窗口期内 /opt/homebrew/opt
+    # 那条链短暂不存在，CMake 记录的绝对路径恰好没进二进制。
+    #
+    # 末尾自检与 CI 的 Verify DMG(2a) 守卫对齐：残留即报错退出，不再只警告。
+    BREW_PREFIX="$(brew --prefix)"
+    for BIN in "$BUNDLE/Contents/MacOS/PXView" "$BUNDLE/Contents/MacOS/pxviewd"; do
+        [ -f "$BIN" ] || continue
+        echo "   重写 $(basename "$BIN") 的库引用 (otool/install_name_tool)..."
+        otool -L "$BIN" | awk 'NR>1 {print $1}' | while read -r dep; do
             case "$dep" in
                 /usr/lib/*|/System/*|@*) continue ;;  # 系统库/已是 rpath 形式
                 *.framework/*)
@@ -318,18 +326,26 @@ if [ "$BUILD_DMG" = true ]; then
                     rel="$(basename "$dep")"
                     ;;
             esac
-            install_name_tool -change "$dep" "@rpath/$rel" "$PXVIEWD_BIN" 2>/dev/null || true
+            install_name_tool -change "$dep" "@rpath/$rel" "$BIN" 2>/dev/null || true
         done
-        # 自检: 不应再残留指向 Homebrew 的绝对路径
-        if otool -L "$PXVIEWD_BIN" | grep -q "$BREW_PREFIX\|/usr/local/opt"; then
-            echo "   [警告] pxviewd 仍存在指向 Homebrew 的库引用，请检查:"
-            otool -L "$PXVIEWD_BIN" | grep "$BREW_PREFIX\|/usr/local/opt" | sed 's/^/       /'
-        else
-            echo "   [OK] pxviewd 库引用已全部指向 bundle 内部"
+        # install_name_tool 作废原签名，就地重签（后面的 codesign --deep 会再兜一层）
+        codesign --force --sign - "$BIN" 2>/dev/null || true
+    done
+    # 自检: 不应再残留指向 Homebrew 的绝对路径
+    LEAK=0
+    for BIN in "$BUNDLE/Contents/MacOS/PXView" "$BUNDLE/Contents/MacOS/pxviewd"; do
+        [ -f "$BIN" ] || continue
+        if otool -L "$BIN" | grep -q "$BREW_PREFIX\|/usr/local/opt"; then
+            echo "   [错误] $(basename "$BIN") 仍存在指向 Homebrew 的库引用:"
+            otool -L "$BIN" | grep "$BREW_PREFIX\|/usr/local/opt" | sed 's/^/       /'
+            LEAK=$((LEAK+1))
         fi
-    else
-        echo "   [警告] 未找到 $PXVIEWD_BIN (pxviewd 未随 bundle 安装?)"
+    done
+    if [ "$LEAK" -gt 0 ]; then
+        echo "   [错误] $LEAK 个顶层二进制仍引用 Homebrew 绝对路径，用户机器上会崩溃"
+        exit 1
     fi
+    echo "   [OK] PXView / pxviewd 库引用已全部指向 bundle 内部"
 
     # ── 清除隔离标记 ──
     xattr -cr "$BUNDLE" 2>/dev/null || true

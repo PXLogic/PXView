@@ -932,6 +932,46 @@ jobs:
             echo "WARNING: Python.framework not found in bundle"
           fi
 
+          # ── 修顶层二进制的 libpython 绝对路径引用 ──
+          # macdeployqt 会把 libpython 复制进 Contents/Frameworks/Python.framework，
+          # 但**不会改写**顶层可执行文件对它的引用：PXView 与 pxviewd 的 load
+          # command 里仍留着构建机的 /opt/homebrew/opt/python@3.14/Frameworks/
+          # Python.framework/Versions/3.14/Python 绝对路径。用户机器（无 Homebrew）
+          # 上 dyld 直接找不到 → 启动即崩。verify 步骤的 2a 守卫抓的正是这两条。
+          #
+          # 为什么以前「能过」：Homebrew 升级 python@3.14 的窗口期内，配方最后一步
+          # 的 link 被跳过，/opt/homebrew/opt/... 那条链短暂不存在，CMake 记录的
+          # 绝对路径恰好没进二进制，于是守卫误判为通过；升级完成后缺陷即暴露。
+          #
+          # 改成 @rpath 相对引用即可 —— 两个二进制的 INSTALL_RPATH 都是
+          # "@executable_path/../Frameworks"（见 CMakeLists.txt 的 APPLE 分支），
+          # 因此 @rpath/Python.framework/Versions/<ver>/Python 能解析到 bundle 内部。
+          # 同时兼容带/不带 Versions/Current 软链的情况（用实际版本号目录）。
+          for BIN in install.dir/PXView.app/Contents/MacOS/PXView \
+                     install.dir/PXView.app/Contents/MacOS/pxviewd; do
+            [ -f "$BIN" ] || continue
+            LEAK_DEPS=$(otool -L "$BIN" 2>/dev/null \
+                        | awk '/\/opt\/homebrew|\/usr\/local\/opt/ {print $1}')
+            [ -n "$LEAK_DEPS" ] || continue
+            echo "Fixing Homebrew absolute paths in top-level binary: $BIN"
+            while IFS= read -r dep; do
+              [ -n "$dep" ] || continue
+              # 还原成 bundle 内的相对路径：.../Python.framework/Versions/<ver>/Python
+              rel="${dep#*/Python.framework/}"
+              if [ "$rel" = "$dep" ]; then
+                # 不是 Python.framework 引用（其它 Homebrew 库）——退回 basename
+                rel="$(basename "$dep")"
+              else
+                rel="Python.framework/$rel"
+              fi
+              install_name_tool -change "$dep" "@rpath/$rel" "$BIN" 2>/dev/null || true
+              echo "  $dep -> @rpath/$rel"
+            done <<< "$LEAK_DEPS"
+            # install_name_tool 会作废原签名；后面的逐层签名只签 .dylib/.framework
+            # 和主程序，覆盖不到这里改过引用的二进制，所以就地重签。
+            codesign --force --sign - "$BIN" 2>/dev/null || true
+          done
+
           # 清除隔离标记
           xattr -cr install.dir/PXView.app 2>/dev/null || true
 
