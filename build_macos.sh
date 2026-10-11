@@ -185,46 +185,84 @@ if [ "$BUILD_DMG" = true ]; then
     BUNDLE="$INSTALL_PREFIX/PXView.app"
 
     # ── Python framework 路径修正 + 补回 altinstall 删除的软链 ──
-    # (1) Homebrew python@3.x 把 framework 放在 <prefix>/Frameworks/Python.framework，
-    #     而 macdeployqt 期望在 <prefix>/lib/Python.framework → 补一条软链。
-    # (2) 关键：python@3.14 是 altinstall，Homebrew 会 rm 掉与主 python3 formula 冲突
-    #     的 4 个软链 Python.framework/{Headers,Python,Resources,Versions/Current}，
-    #     真实内容只在 Versions/3.14/ 下。macdeployqt 解析 framework 依赖时走
-    #     Versions/Current/Python，被删后它放弃部署整个 framework（报
-    #     "no file at <prefix>/lib/Python.framework/Versions/3.14/Python"），
-    #     于是包里没有 Python.framework。这里在打包前补回（幂等，已存在则跳过）。
-    # 取 python prefix：优先 python3（用户显式装过时才有），否则自动探测已安装的
-    # 最新 python@3.x。不用硬编码 python@3.14/@3.13 链——Homebrew 一升到 3.15 就全落空。
-    # 依据：python@3.14 的 formula 里 `altinstall? = name != Formula["python3"].name`，
-    # 且 aliases 为空 ⇒ `brew --prefix python3` 在只装 python@3.14 的机器上必失败。
-    PY_PREFIX="$(brew --prefix python3 2>/dev/null)"
-    if [ -z "$PY_PREFIX" ]; then
-        PY_FORMULA="$(brew list --formula --versions 2>/dev/null \
-                      | grep -E '^python@3\.' | cut -d' ' -f1 | sort -V | tail -1)"
-        [ -n "$PY_FORMULA" ] && PY_PREFIX="$(brew --prefix "$PY_FORMULA" 2>/dev/null)"
+    # 背景（python@3.14.rb, git aa25dece, 3.14.8_2）：
+    #   第 128 行  def altinstall? = name != Formula["python3"].name
+    #   第 260 行  rm frameworks.glob("Python.framework/{Headers,Python,Resources,Versions/Current}") if altinstall?
+    #   python@3.14 的 name 不是 python3 ⇒ altinstall? 恒真 ⇒ 上述 4 个软链必被删除，
+    #   真实 dylib 只在 Versions/3.14/ 下。macdeployqt 解析 framework 依赖走符号入口
+    #   （<prefix>/lib/Python.framework/Versions/Current/Python 或顶层 Python），两条都
+    #   不可达即放弃部署整个 framework，报
+    #     ERROR: no file at "<prefix>/lib/Python.framework/Versions/3.14/Python"
+    #   并只留一行 WARNING: Python.framework not found in bundle。
+    #   注意错误里的 3.14 是它把 Current 展开后的落点，并非版本目录本身缺失。
+    #
+    # 历史教训：上一版用 `brew --prefix python3` 取前缀 —— CI 只装 python@3.14，而
+    #   `python3` 这个 alias 当前指向 python@3.15（未安装），该命令必失败；兜底链又写死
+    #   python@3.14/@3.13，Homebrew 一升级就全落空。实测第一轮 CI（run 38120502809）
+    #   本段**零输出**、macdeployqt 仍报 no file at，即前缀根本没取到。现改为直接枚举
+    #   <brew-prefix>/opt/python@3.*，取版本最高者，全程打印诊断（不再静默），
+    #   并对 lib/Python.framework 做穿透性检查。
+    BREW_ROOT="$(brew --prefix 2>/dev/null)"
+    echo "   --- Python framework 修正（Homebrew 根: ${BREW_ROOT:-<未知>}）---"
+    PY_PREFIX=""
+    PY_VER=""
+    if [ -n "$BREW_ROOT" ]; then
+        for d in "$BREW_ROOT"/opt/python@3.*; do
+            [ -d "$d/Frameworks/Python.framework" ] || continue
+            v="$(basename "$d")"
+            v="${v#python@}"
+            if [ -z "$PY_VER" ] || [ "$(printf '%s\n%s\n' "$PY_VER" "$v" | sort -V | tail -1)" = "$v" ]; then
+                PY_VER="$v"
+                PY_PREFIX="$d"
+            fi
+        done
     fi
+    echo "   选定: ${PY_PREFIX:-<未找到 python@3.x>}"
     if [ -n "$PY_PREFIX" ]; then
-        mkdir -p "$PY_PREFIX/lib"
-        if [ ! -e "$PY_PREFIX/lib/Python.framework" ] && [ -e "$PY_PREFIX/Frameworks/Python.framework" ]; then
-            ln -s "$PY_PREFIX/Frameworks/Python.framework" "$PY_PREFIX/lib/Python.framework"
-        fi
         FW_REAL="$PY_PREFIX/Frameworks/Python.framework"
+        LINK="$PY_PREFIX/lib/Python.framework"
+        mkdir -p "$PY_PREFIX/lib"
+        # 判据用「能否穿透到 Versions」而非比较 readlink 字符串：
+        # msys 下 readlink 会改写路径形式（/c/... vs C:/...）导致误判。
+        if [ -d "$LINK/Versions" ]; then
+            echo "   lib/Python.framework 已就绪"
+        else
+            if [ -L "$LINK" ]; then
+                echo "   lib/Python.framework 失效，重建"
+                rm -f "$LINK"
+            fi
+            echo "   建立 lib/Python.framework -> $FW_REAL"
+            ln -s "$FW_REAL" "$LINK"
+        fi
         if [ -d "$FW_REAL/Versions" ]; then
+            # 取该 framework 下版本最高的 3.x（Cellar 可能残留旧版本目录）
+            CUR_V=""
             for vdir in "$FW_REAL"/Versions/3.*; do
                 [ -d "$vdir" ] || continue
-                ver="$(basename "$vdir")"
+                v="$(basename "$vdir")"
+                if [ -z "$CUR_V" ] || [ "$(printf '%s\n%s\n' "$CUR_V" "$v" | sort -V | tail -1)" = "$v" ]; then
+                    CUR_V="$v"
+                fi
+            done
+            if [ -n "$CUR_V" ]; then
+                # 补链前先清掉「断链残留」：-e 对断链返回假（需补），但 ln 会因
+                # 同名条目已存在而失败（File exists）—— Homebrew 升级后旧链接即此形态。
                 if [ ! -e "$FW_REAL/Versions/Current" ]; then
-                    echo "   补回缺失的 Versions/Current -> $ver"
-                    ln -s "$ver" "$FW_REAL/Versions/Current"
+                    [ -L "$FW_REAL/Versions/Current" ] && rm -f "$FW_REAL/Versions/Current"
+                    echo "   补 Versions/Current -> $CUR_V"
+                    ln -s "$CUR_V" "$FW_REAL/Versions/Current"
                 fi
                 for name in Python Headers Resources; do
-                    if [ ! -e "$FW_REAL/$name" ] && [ -e "$vdir/$name" ]; then
-                        echo "   补回缺失的 Python.framework/$name"
+                    if [ ! -e "$FW_REAL/$name" ] && [ -e "$FW_REAL/Versions/$CUR_V/$name" ]; then
+                        [ -L "$FW_REAL/$name" ] && rm -f "$FW_REAL/$name"
+                        echo "   补 Python.framework/$name -> Versions/Current/$name"
                         ln -s "Versions/Current/$name" "$FW_REAL/$name"
                     fi
                 done
-                break
-            done
+                for p in "Versions/Current/Python" "Python"; do
+                    printf '   入口 %-28s %s\n' "$p" "$([ -e "$FW_REAL/$p" ] && echo OK || echo MISSING)"
+                done
+            fi
         fi
     fi
 
