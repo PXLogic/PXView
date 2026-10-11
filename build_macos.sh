@@ -184,17 +184,47 @@ if [ "$BUILD_DMG" = true ]; then
     MACDEPLOYQT="$(brew --prefix qt)/bin/macdeployqt"
     BUNDLE="$INSTALL_PREFIX/PXView.app"
 
-    # ── Python framework 路径修正 ──
-    # Homebrew python@3.x 把 framework 放在 <prefix>/Frameworks/Python.framework,
-    # 但 macdeployqt 期望在 <prefix>/lib/Python.framework
-    PY_PREFIX="$(brew --prefix python3 2>/dev/null \
-                 || brew --prefix python@3.14 2>/dev/null \
-                 || brew --prefix python@3.13 2>/dev/null \
-                 || brew --prefix python@3.12 2>/dev/null)"
+    # ── Python framework 路径修正 + 补回 altinstall 删除的软链 ──
+    # (1) Homebrew python@3.x 把 framework 放在 <prefix>/Frameworks/Python.framework，
+    #     而 macdeployqt 期望在 <prefix>/lib/Python.framework → 补一条软链。
+    # (2) 关键：python@3.14 是 altinstall，Homebrew 会 rm 掉与主 python3 formula 冲突
+    #     的 4 个软链 Python.framework/{Headers,Python,Resources,Versions/Current}，
+    #     真实内容只在 Versions/3.14/ 下。macdeployqt 解析 framework 依赖时走
+    #     Versions/Current/Python，被删后它放弃部署整个 framework（报
+    #     "no file at <prefix>/lib/Python.framework/Versions/3.14/Python"），
+    #     于是包里没有 Python.framework。这里在打包前补回（幂等，已存在则跳过）。
+    # 取 python prefix：优先 python3（用户显式装过时才有），否则自动探测已安装的
+    # 最新 python@3.x。不用硬编码 python@3.14/@3.13 链——Homebrew 一升到 3.15 就全落空。
+    # 依据：python@3.14 的 formula 里 `altinstall? = name != Formula["python3"].name`，
+    # 且 aliases 为空 ⇒ `brew --prefix python3` 在只装 python@3.14 的机器上必失败。
+    PY_PREFIX="$(brew --prefix python3 2>/dev/null)"
+    if [ -z "$PY_PREFIX" ]; then
+        PY_FORMULA="$(brew list --formula --versions 2>/dev/null \
+                      | grep -E '^python@3\.' | cut -d' ' -f1 | sort -V | tail -1)"
+        [ -n "$PY_FORMULA" ] && PY_PREFIX="$(brew --prefix "$PY_FORMULA" 2>/dev/null)"
+    fi
     if [ -n "$PY_PREFIX" ]; then
         mkdir -p "$PY_PREFIX/lib"
         if [ ! -e "$PY_PREFIX/lib/Python.framework" ] && [ -e "$PY_PREFIX/Frameworks/Python.framework" ]; then
             ln -s "$PY_PREFIX/Frameworks/Python.framework" "$PY_PREFIX/lib/Python.framework"
+        fi
+        FW_REAL="$PY_PREFIX/Frameworks/Python.framework"
+        if [ -d "$FW_REAL/Versions" ]; then
+            for vdir in "$FW_REAL"/Versions/3.*; do
+                [ -d "$vdir" ] || continue
+                ver="$(basename "$vdir")"
+                if [ ! -e "$FW_REAL/Versions/Current" ]; then
+                    echo "   补回缺失的 Versions/Current -> $ver"
+                    ln -s "$ver" "$FW_REAL/Versions/Current"
+                fi
+                for name in Python Headers Resources; do
+                    if [ ! -e "$FW_REAL/$name" ] && [ -e "$vdir/$name" ]; then
+                        echo "   补回缺失的 Python.framework/$name"
+                        ln -s "Versions/Current/$name" "$FW_REAL/$name"
+                    fi
+                done
+                break
+            done
         fi
     fi
 
