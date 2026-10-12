@@ -567,22 +567,15 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                   } else {
                     std::vector<uint8_t> col_valid(vis_width, 0);
                     std::vector<uint8_t> col_color(vis_width, 0);
-                    row_data->for_each_index(
-                        start_idx, end_idx,
-                        [&](const Annotation &a, size_t) {
-                          // In dense mode, ALL annotations (both instant and
-                          // range) are sub-pixel wide, so they are all bucketed
-                          // into 1px colour blocks. Instant annotations get the
-                          // same treatment as range annotations: their colour
-                          // overwrites the column (last-writer-wins). This
-                          // avoids the distorted, flickering shapes that
-                          // draw_instant would produce when min_annWidth < 2px
-                          // (rounded-rect narrower than its corner radius).
-                          const double x = static_cast<double>(a.start_sample()) / samples_per_pixel -
-                                           static_cast<double>(pixels_offset);
-                          if (x < left - DrawPadding || x > right + DrawPadding)
-                            return;
-                          const int col = static_cast<int>(x);
+                    // Route B LOD: leapfrog scan bounded by screen width O(vis_width * log seg).
+                    // In dense mode where millions of annotations share the visible window,
+                    // this skips redundant sub-pixel annotations in the same pixel column,
+                    // reducing iteration count from tens of millions to <= vis_width without
+                    // skipping any non-empty pixel columns.
+                    row_data->for_each_dense_column(
+                        start_idx, end_idx, samples_per_pixel,
+                        static_cast<double>(pixels_offset), left, right,
+                        [&](const Annotation &a, int col) {
                           if (col >= left && col < left + vis_width) {
                             col_valid[col - left] = 1;
                             col_color[col - left] =

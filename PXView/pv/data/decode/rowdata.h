@@ -24,6 +24,7 @@
 #define PXVIEW_PV_DATA_DECODE_ROWDATA_H
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <memory>
 #include <shared_mutex>
@@ -129,6 +130,85 @@ public:
         const size_t hi = std::min(n, end_idx - offset);
         for (size_t i = lo; i < hi; ++i)
           fn(seg->anns[i], offset + i);
+      }
+      offset += n;
+    }
+  }
+
+  // Route B LOD dense scan: visits at most one annotation per pixel column by
+  // leaping across sub-pixel clusters using binary search on segment boundaries.
+  // Guarantees O(vis_width * log(segment_size)) runtime regardless of whether
+  // the visible range contains thousands or tens of millions of annotations,
+  // without skipping any non-empty pixel column.
+  template <typename Fn>
+  void for_each_dense_column(size_t start_idx, size_t end_idx,
+                             double samples_per_pixel, double pixels_offset,
+                             int left, int right, Fn &&fn) const {
+    if (start_idx >= end_idx || samples_per_pixel <= 0.0 || right < left)
+      return;
+
+    size_t offset = 0;
+    uint64_t next_sample = 0;
+    for (size_t s = 0; s < _segments.size(); ++s) {
+      const auto &seg = _segments[s];
+      const size_t n = seg->anns.size();
+      if (end_idx <= offset)
+        break;
+
+      if (start_idx < offset + n) {
+        // If next_sample is active from a previous segment, check if the entire segment can be skipped
+        if (next_sample > 0 && n > 0 && seg->anns.back().start_sample() < next_sample) {
+          offset += n;
+          continue;
+        }
+
+        size_t lo = (start_idx > offset) ? (start_idx - offset) : 0;
+        const size_t hi = std::min(n, end_idx - offset);
+
+        // If next_sample is active, leap past redundant annotations in this segment
+        if (next_sample > 0 && lo < hi && seg->anns[lo].start_sample() < next_sample) {
+          auto it = std::lower_bound(
+              seg->anns.begin() + lo, seg->anns.begin() + hi, next_sample,
+              [](const Annotation &ann, uint64_t sample) {
+                return ann.start_sample() < sample;
+              });
+          lo = static_cast<size_t>(std::distance(seg->anns.begin(), it));
+        }
+
+        while (lo < hi) {
+          const Annotation &a = seg->anns[lo];
+          const double x = static_cast<double>(a.start_sample()) / samples_per_pixel - pixels_offset;
+          const int col = static_cast<int>(x);
+
+          if (col > right + 20) {
+            // Annotations are monotonic in start_sample, so all subsequent
+            // annotations are off-screen to the right.
+            return;
+          }
+
+          fn(a, col);
+
+          // Calculate next column boundary in sample coordinates.
+          // If still to the left of the visible window, leap straight to left.
+          // Otherwise leap to the start of the next pixel column (col + 1).
+          const double next_col_x = (col < left) ? static_cast<double>(left)
+                                                 : static_cast<double>(col + 1);
+          next_sample = static_cast<uint64_t>(
+              std::max(0.0, (next_col_x + pixels_offset) * samples_per_pixel));
+
+          // Check whether the immediate next annotation is already in a new column (sparse fast path)
+          if (lo + 1 < hi && seg->anns[lo + 1].start_sample() >= next_sample) {
+            ++lo;
+          } else {
+            // Dense cluster: leapfrog all annotations in the current column
+            auto it = std::lower_bound(
+                seg->anns.begin() + lo + 1, seg->anns.begin() + hi, next_sample,
+                [](const Annotation &ann, uint64_t sample) {
+                  return ann.start_sample() < sample;
+                });
+            lo = static_cast<size_t>(std::distance(seg->anns.begin(), it));
+          }
+        }
       }
       offset += n;
     }
