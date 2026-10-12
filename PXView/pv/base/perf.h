@@ -84,23 +84,27 @@
 
 #else  // !PXV_PERF
 
-#define PXV_PERF_ADD(id, n)      do { (void)(n); } while (0)
-#define PXV_PERF_GAUGE(id, v)    do { (void)(v); } while (0)
-#define PXV_PERF_OBSERVE(id, ms) do { (void)(ms); } while (0)
+// Every disabled form is a PURE no-op that does NOT reference its arguments.
+// That is load-bearing, not stylistic: the locals that feed these macros live
+// inside `#ifdef PXV_PERF` at the call sites (e.g. decodetrace's row timers),
+// so evaluating an argument here would reference a name that does not exist in
+// a normal build. Not evaluating also makes the zero-cost promise literal.
+// Call sites that keep a local OUTSIDE the gate mark it [[maybe_unused]].
+#define PXV_PERF_ADD(id, n)      do { } while (0)
+#define PXV_PERF_GAUGE(id, v)    do { } while (0)
+#define PXV_PERF_OBSERVE(id, ms) do { } while (0)
 #define PXV_PERF_SCOPE(id)       do { } while (0)
-#define PXV_PERF_TRACK_ROW(name) do { (void)(name); } while (0)
-#define PXV_PERF_TRACK_AUX_NS(ns) do { (void)(ns); } while (0)
-#define PXV_PERF_TRACK_COUNT(n)   do { (void)(n); } while (0)
-#define PXV_PERF_OP_MAX(name, ...) \
-  do { (void)(name); (void)sizeof((__VA_ARGS__)); } while (0)
-#define PXV_PERF_TRACK_AUX_MS(ms) do { (void)(ms); } while (0)
-#define PXV_PERF_TRACK_ROW_VALUES(name, total_ms, aux_ms, count) \
-  do { (void)(name); (void)(total_ms); (void)(aux_ms); (void)(count); } while (0)
-#define PXV_PERF_TRACK_COUNT_ONCE(name, n) do { (void)(name); (void)(n); } while (0)
+#define PXV_PERF_TRACK_ROW(name) do { } while (0)
+#define PXV_PERF_TRACK_AUX_NS(ns) do { } while (0)
+#define PXV_PERF_TRACK_COUNT(n)   do { } while (0)
+#define PXV_PERF_OP_MAX(name, ...) do { } while (0)
+#define PXV_PERF_TRACK_AUX_MS(ms) do { } while (0)
+#define PXV_PERF_TRACK_ROW_VALUES(name, total_ms, aux_ms, count) do { } while (0)
+#define PXV_PERF_TRACK_COUNT_ONCE(name, n) do { } while (0)
 #define PXV_PERF_HEARTBEAT() do { } while (0)
 #define PXV_PERF_ZOOM_FRAME() do { } while (0)
-#define PXV_PERF_COPY_STAGING(bytes) do { (void)(bytes); } while (0)
-#define PXV_PERF_COPY_EXPORT(bytes) do { (void)(bytes); } while (0)
+#define PXV_PERF_COPY_STAGING(bytes) do { } while (0)
+#define PXV_PERF_COPY_EXPORT(bytes) do { } while (0)
 
 #endif  // PXV_PERF
 
@@ -402,6 +406,15 @@ std::string snapshot_to_json(const Snapshot &s);
         ::pv::base::perf::MetricId::FramePaintMid, \
         static_cast<double>(::pv::base::perf::ns_since(_pxv_pm_t0)) / 1e6); \
   } while (0)
+
+#else  // !PXV_PERF
+
+// These three MUST have a disabled branch. They were originally only defined
+// under PXV_PERF, which broke every non-instrumented build of decodetrace.cpp
+// and viewport_painter.cpp ("was not declared in this scope").
+#define PXV_PERF_SCOPE_VIEWPORT() do { } while (0)
+#define PXV_PERF_PAINTMID_START() do { } while (0)
+#define PXV_PERF_PAINTMID_END()   do { } while (0)
 
 #endif  // PXV_PERF
 

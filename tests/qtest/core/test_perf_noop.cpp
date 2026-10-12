@@ -48,6 +48,26 @@ private slots:
 
     PXV_PERF_ADD(::pv::base::perf::MetricId::PaintCalls, 1);
 
+    // The scope macros MUST have a disabled branch too. They were originally
+    // defined only under PXV_PERF, which broke every non-instrumented build of
+    // decodetrace.cpp / viewport_painter.cpp ("PXV_PERF_SCOPE_VIEWPORT was not
+    // declared in this scope"). That was a real CI failure — this block is the
+    // guard against repeating it.
+    {
+      PXV_PERF_SCOPE_VIEWPORT();
+      PXV_PERF_PAINTMID_START();
+      PXV_PERF_PAINTMID_END();
+    }
+
+    // Every remaining macro, so none can silently lose its disabled branch.
+    PXV_PERF_HEARTBEAT();
+    PXV_PERF_ZOOM_FRAME();
+    PXV_PERF_COPY_STAGING(4096);
+    PXV_PERF_COPY_EXPORT(4096);
+    PXV_PERF_TRACK_AUX_MS(ms_local);
+    PXV_PERF_TRACK_ROW_VALUES(name_local, ms_local, ms_local, 3);
+    PXV_PERF_TRACK_COUNT_ONCE(name_local, 3);
+
     // Nothing may have been mutated: the macros are pure no-ops.
     QCOMPARE(count_local, 7);
     QCOMPARE(ms_local, 1.5);
