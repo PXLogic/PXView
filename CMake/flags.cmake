@@ -103,25 +103,39 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 add_compile_definitions($<$<CONFIG:Debug>:_GLIBCXX_ASSERTIONS>)
 
 #===============================================================================
-#= Decode render performance instrumentation
+#= UI perf instrumentation — metric registry + pluggable sinks
 #-------------------------------------------------------------------------------
-# When ON, defines PXVIEW_DECODE_PERF which turns on per-frame and per-track-row
-# timing inside DecodeTrace::paint_mid(). Aggregates are flushed periodically
-# (every ~2s or 120 frames) to %TEMP%/pxv_decode_perf.log, sorted by total
-# track time so the jank hotspot is easy to spot. Default OFF — zero runtime
-# cost in normal builds.
+# When ON, defines PXV_PERF: the single compile gate for pv/base/perf.h.
+# Metrics are declared once in a table, sampled through O(1) MetricId indices
+# (no string lookup, no allocation on the hot path), and emitted through
+# pluggable sinks: a rotating text file, xlog/PXView.log, and NDJSON for the
+# /perf/metrics HTTP endpoint.
 #
-# It also defines PXVIEW_COPY_AUDIT (P1-e), which counts the remaining
-# whole-payload copies on the real capture/export paths and prints a COPY_AUDIT
-# line in the same window flush. The counters live in the deliberately
-# lightweight pv/base/copy_audit.h so the capture/export translation units can
-# include them without pulling in windows.h / glib.h.
+# Verbosity is a RUNTIME knob (PXVIEW_PERF_LEVEL=off|basic|verbose) so tuning
+# does not require a rebuild. Default OFF; with the gate off every PXV_PERF_*
+# macro expands to a no-op, so a normal build keeps the documented zero-cost
+# promise (no atomic, no branch, no symbol).
+#
+# This is the ONLY perf gate. The three legacy switches it replaced
+# (ENABLE_DECODE_PERF -> PXVIEW_DECODE_PERF, PXVIEW_COPY_AUDIT,
+# PXVIEW_DECODE_DEBUG) are gone: PXVIEW_DECODE_DEBUG became
+# ENABLE_PERF_INVESTIGATE below, the other two are just PXV_PERF.
 #-------------------------------------------------------------------------------
-option(ENABLE_DECODE_PERF "Enable decode-render timing instrumentation" OFF)
-if(ENABLE_DECODE_PERF)
-    add_compile_definitions(PXVIEW_DECODE_PERF)
-    add_compile_definitions(PXVIEW_COPY_AUDIT)
-    message(STATUS "Decode render perf instrumentation: ENABLED (incl. P1-e copy audit)")
+option(ENABLE_PERF "Enable the perf metric registry (pv/base/perf.h)" OFF)
+if(ENABLE_PERF)
+    add_compile_definitions(PXV_PERF)
+    message(STATUS "Perf metric registry: ENABLED (PXV_PERF)")
+endif()
+
+# One-off probes whose hypotheses are already resolved (Windows heap topology,
+# decode-thread heap placement). Parked behind their own gate so they stay out
+# of the registry and out of normal instrumented builds, but can still be
+# re-run deliberately. Implies PXV_PERF.
+option(ENABLE_PERF_INVESTIGATE "Enable resolved one-off perf probes (heap topology etc.)" OFF)
+if(ENABLE_PERF_INVESTIGATE)
+    add_compile_definitions(PXV_PERF)
+    add_compile_definitions(PXV_PERF_INVESTIGATE)
+    message(STATUS "Perf investigation probes: ENABLED")
 endif()
 
 #===============================================================================

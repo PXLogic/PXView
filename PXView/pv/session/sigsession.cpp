@@ -79,7 +79,7 @@
 #include "pv/data/decode/decoderstatus.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 #include "pv/core/langresource.h"
 #include "pv/utility/path.h"
 
@@ -2698,8 +2698,8 @@ void SigSession::on_notify_batch_timeout() {
     for (const auto &sp : batch)
       _event_bus->dispatch_async([sp]() { sp->new_decode_data(); });
 
-#ifdef PXVIEW_DECODE_PERF
-    pv::base::perf::record_track("NOTIFY_BATCH", 0.0, 0.0, 0.0, batch.size());
+#ifdef PXV_PERF
+    PXV_PERF_TRACK_COUNT_ONCE("NOTIFY_BATCH", batch.size());
 #endif
   }
 

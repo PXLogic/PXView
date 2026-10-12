@@ -68,7 +68,7 @@
 #include "pv/dialogs/lissajousoptions.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 #include <string>
 #include <thread>
 
@@ -163,17 +163,15 @@ connect(_delayed_view_update_timer, &QTimer::timeout, this, [this]() {
     // it supersedes any pending decode-only repaint.
     _delayed_view_update_pending = false;
     _decode_only_repaint_pending = false;
-#ifdef PXVIEW_DECODE_PERF
-    pv::base::perf::record_repaint_delayed(/*full=*/true);
-#endif
+    PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintDelayed, 1);
+    PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintDelayedFull, 1);
     viewport_update();
   } else if (_decode_only_repaint_pending) {
     // P2: decode-growth repaint — decode trace layer only, no signal-pixmap
     // rebuild (skips set_decode_dirty()).
     _decode_only_repaint_pending = false;
-#ifdef PXVIEW_DECODE_PERF
-    pv::base::perf::record_repaint_delayed(/*full=*/false);
-#endif
+    PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintDelayed, 1);
+    PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintDelayedDecodeOnly, 1);
     viewport_update_decode_only();
   }
 });
@@ -193,7 +191,7 @@ _pan_anim_timer->setSingleShot(false);
 _pan_anim_timer->setInterval(frame_ms);
 connect(_pan_anim_timer, &QTimer::timeout, this, &View::on_pan_anim_tick);
 
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
 // P3-D4: main-thread event-loop lag detector. A 100ms periodic tick; if the
 // GUI thread is blocked (freeze) the tick fires late and the overshoot is
 // recorded in the perf log (EVENT_LAG_MAX). This distinguishes "main thread
@@ -202,10 +200,24 @@ connect(_pan_anim_timer, &QTimer::timeout, this, &View::on_pan_anim_tick);
 // in cores) → high util alongside a large EVENT_LAG_MAX means the decode
 // threads saturate the machine and starve the GUI thread.
 _event_lag_timer = new QTimer(this);
-_event_lag_timer->setInterval(100);
+// 10ms instead of the historical 100ms: a 100ms tick can only resolve freezes
+// longer than ~100ms, which misses the single-frame stalls that actually show
+// up as jank. The registry owns the expected interval so the overshoot maths
+// stays in one place.
+_event_lag_timer->setInterval(10);
+pv::base::perf::set_heartbeat_interval_ms(10);
 connect(_event_lag_timer, &QTimer::timeout, this, []() {
-  pv::base::perf::record_event_lag();
+  PXV_PERF_HEARTBEAT();
 #ifdef _WIN32
+  // CPU utilisation is sampled on a ~100ms window, NOT on every 10ms tick:
+  // GetProcessTimes only updates at the Windows scheduler granularity
+  // (~15.6ms), so a 10ms window alternates between "no delta" and "double
+  // delta" and the ratio becomes nonsense (measured: 172 cores). The freeze
+  // detector needs the fine tick; this metric does not.
+  static int _cpu_tick = 0;
+  if (++_cpu_tick < 10)
+    return;
+  _cpu_tick = 0;
   static ULARGE_INTEGER _last_kt{}, _last_ut{};
   static std::chrono::steady_clock::time_point _last_cpu_t{};
   FILETIME _ct, _et, _kt, _ut;
@@ -223,7 +235,7 @@ connect(_event_lag_timer, &QTimer::timeout, this, []() {
                    (u.QuadPart - _last_ut.QuadPart))) /
           10000.0;
       const double util = sec > 0 ? cpu_ms / (sec * 1000.0) : 0.0;
-      pv::base::perf::record_cpu_util(util);
+      PXV_PERF_GAUGE(::pv::base::perf::MetricId::CpuUtilMax, util);
     }
     _last_kt = k; _last_ut = u; _last_cpu_t = now;
   }
@@ -623,7 +635,7 @@ void View::cancel_trace_drag_interaction() {
 void View::mode_changed() { _data_sync->mode_changed(); }
 
 void View::signals_changed(const Trace *eventTrace) {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D5: timing candidate for the EVENT_LAG_MAX block — full signal
   // relayout (normalize + group + layout_time_signals).
   const auto _op_t0 = std::chrono::steady_clock::now();
@@ -653,12 +665,9 @@ void View::signals_changed(const Trace *eventTrace) {
   }
 
   _signal_sync->signals_changed(eventTrace);
-#ifdef PXVIEW_DECODE_PERF
-  pv::base::perf::record_op_max(
-      "signals_changed",
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - _op_t0).count());
-#endif
+  PXV_PERF_OP_MAX("signals_changed",
+                  std::chrono::duration<double, std::milli>(
+                      std::chrono::steady_clock::now() - _op_t0).count());
 }
 
 bool View::eventFilter(QObject *object, QEvent *event) {
@@ -849,9 +858,9 @@ void View::viewport_update(bool decode_dirty) {
 if (_decoder_analog_trigger_hold)
 return;
 
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
 // P3-D: full viewport_update() entry (any caller).
-pv::base::perf::record_repaint_viewport();
+PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintViewport, 1);
 #endif
 
 // Mark decode pixmap dirty so it will be rebuilt on next paint.
@@ -894,9 +903,9 @@ void View::viewport_update_decode_only() {
   if (_decoder_analog_trigger_hold)
     return;
 
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D: decode-only update entry (decode growth path).
-  pv::base::perf::record_repaint_decode_only();
+  PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintDecodeOnly, 1);
 #endif
 
   // Deliberately do NOT call _time_viewport->set_decode_dirty(): decode

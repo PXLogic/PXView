@@ -78,7 +78,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/ui/fn.h"
 #include "pv/core/langresource.h"
@@ -565,11 +565,11 @@ void Viewport::set_receive_len(quint64 length) {
 }
 
 void Viewport::update(int event) {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D: counts EVERY direct viewport update() call (from view_data_sync,
   // view_glitch_filter, viewport.cpp internals, interaction, update_view_port,
   // check_measure...).
-  pv::base::perf::record_repaint_update_direct();
+  PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintUpdateDirect, 1);
 #endif
   QWidget::update();
   (void)event;
@@ -824,9 +824,9 @@ void Viewport::on_progress_timer() {
     return;
   }
 
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D: every remaining tick issues a repaint (snap or lerp branch below).
-  pv::base::perf::record_repaint_progress();
+  PXV_PERF_ADD(::pv::base::perf::MetricId::RepaintProgress, 1);
 #endif
 
   if (qAbs(diff) < 0.0005) {

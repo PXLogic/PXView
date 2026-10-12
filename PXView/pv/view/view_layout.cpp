@@ -36,7 +36,7 @@
 #include <QDebug>
 #include <QScrollBar>
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 
 #include "pv/view/view.h"
 #include "pv/view/viewport/viewport.h"
@@ -317,7 +317,7 @@ bool ViewLayout::zoom_animated(double steps, int anchor_px, int64_t now_ms) {
   constexpr double kWheelZoomPerNotch = 1.4142135623730951;  // sqrt(2)
 
   if (!_zoom_anim.active())
-    pv::base::perf::zoom_trace_begin(now_ms, visible_time_ms());
+    PXV_PERF_ADD(::pv::base::perf::MetricId::ZoomGestures, 1);
 
   // 滚轮缩放同样是即时手势，抢占在跑的平移动画（两者都改 offset，不能叠加）。
   _pan_anim.cancel();
@@ -339,7 +339,7 @@ void ViewLayout::cancel_zoom_animation() {
   if (!_zoom_anim.active())
     return;
   _zoom_anim.cancel();
-  pv::base::perf::zoom_trace_end("cancel", visible_time_ms());
+  // (the per-gesture trace file is gone; the aggregate lives in zoom.gestures)
 }
 
 bool ViewLayout::tick_zoom_animation(int64_t now_ms) {
@@ -368,9 +368,9 @@ bool ViewLayout::tick_zoom_animation(int64_t now_ms) {
 
   // 诊断：必须在 _scale 落地之后再取 view_ms（本帧的可见跨度）。
   const double view_ms = visible_time_ms();
-  pv::base::perf::zoom_trace_frame(now_ms, _zoom_anim.progress(now_ms), view_ms);
-  if (!more)
-    pv::base::perf::zoom_trace_end("done", view_ms);
+  PXV_PERF_ADD(::pv::base::perf::MetricId::ZoomTicks, 1);
+  PXV_PERF_ZOOM_FRAME();
+  (void)view_ms;
 
   return more;
 }

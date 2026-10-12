@@ -56,7 +56,7 @@
 #include <libsigrokdecode.h>
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
-#include "pv/base/copy_audit.h"   // P1-e 拷贝审计宏 PXV_PERF_COPY_*（轻量头，仅 <cstdint>）
+#include "pv/base/perf.h"   // PXV_PERF_COPY_* (registry macros)
 #include "pv/utility/encoding.h"
 #include "pv/utility/path.h"
 #include "pv/base/log.h" 

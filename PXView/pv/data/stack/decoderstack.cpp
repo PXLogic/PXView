@@ -29,7 +29,8 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
+#include "pv/base/perf_investigate.h"  // record_decode_thread_heap (probe, gated)
 #include "pv/config/appconfig.h"
 #include "pv/data/isession_host.h"
 #include "pv/data/decode/annotation.h"
@@ -476,8 +477,8 @@ void DecoderStack::publish_snapshot() {
   // GUI thread after it observes the pointer.
   _published.store(std::move(snap), std::memory_order_release);
   _snapshot_generation.fetch_add(1, std::memory_order_relaxed);
-#ifdef PXVIEW_DECODE_PERF
-  pv::base::perf::record_publish();
+#ifdef PXV_PERF
+  PXV_PERF_ADD(::pv::base::perf::MetricId::PublishCount, 1);
 #endif
 }
 
@@ -1352,7 +1353,7 @@ void DecoderStack::annotation_callback(srd_proto_data *pdata, void *self) {
       reinterpret_cast<const srd_proto_data_annotation*>(pdata->data);
   int ann_format = pda->ann_class;
 
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D8: sample, once per process, which heap a g_malloc'd block lands on
   // from a decode thread (reported as HEAP_TOPOLOGY decode_thread_glib). If it
   // equals the main-thread CRT heap, all decode threads + GUI share one lock.
@@ -1437,9 +1438,11 @@ void DecoderStack::annotation_callback_batch(srd_ann_batch *batch, void *self) {
 
   d->_result_count += batch->n;
 
-#ifdef PXVIEW_DECODE_PERF
-  // P3-E: batch-annotation pipeline stats (see perflog.h BATCH_STATS).
-  pv::base::perf::record_batch_stats(batch->n);
+#ifdef PXV_PERF
+  // Batch-annotation pipeline stats (metric: decode.batch_*).
+  PXV_PERF_ADD(::pv::base::perf::MetricId::BatchFlushes, 1);
+  PXV_PERF_ADD(::pv::base::perf::MetricId::BatchAnn, batch->n);
+  PXV_PERF_GAUGE(::pv::base::perf::MetricId::BatchMax, batch->n);
   // P3-D8: sample, once per process, which heap a g_malloc'd block lands on
   // from a decode thread (reported as HEAP_TOPOLOGY decode_thread_glib). If it
   // equals the main-thread CRT heap, all decode threads + GUI share one lock.

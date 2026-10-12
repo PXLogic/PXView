@@ -50,13 +50,32 @@ endif()
 find_program(NPM_EXECUTABLE npm)
 
 if(NPM_EXECUTABLE)
+    # The web client must rebuild when its SOURCES change, not only when
+    # package.json does. Depending on the directory alone is not enough:
+    # a directory timestamp only changes when entries are added or removed,
+    # so editing web/src/** or web/public/** silently left web/dist stale
+    # (observed: a rewritten web/public/perf.html never reached the install
+    # directory, and the page kept serving the previous version).
+    # CONFIGURE_DEPENDS re-globs at build time so new files are picked up.
+    # Only the two DIRECTORIES are globbed. The single files are listed as
+    # plain paths below on purpose: GLOB_RECURSE treats its argument as a
+    # directory prefix, so globbing web/index.html also matched the generated
+    # web/dist/index.html and produced a dependency cycle on the OUTPUT.
+    file(GLOB_RECURSE WEBUI_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/src/*
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/public/*
+    )
+    list(APPEND WEBUI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/vite.config.ts
+    )
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html
         COMMAND ${NPM_EXECUTABLE} install --registry=https://registry.npmjs.org/
         COMMAND ${NPM_EXECUTABLE} run build
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/web
         COMMENT "Building Vite web client..."
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/package.json
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/package.json ${WEBUI_SOURCES}
     )
 
     add_custom_target(webui

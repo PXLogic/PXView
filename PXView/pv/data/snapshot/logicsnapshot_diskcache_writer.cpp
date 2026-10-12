@@ -31,7 +31,7 @@
 
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/copy_audit.h"   // P1-e 拷贝审计宏 PXV_PERF_COPY_*（轻量头，仅 <cstdint>）
+#include "pv/base/perf.h"   // PXV_PERF_COPY_* (registry macros)
 #include "pv/data/snapshot/logicsnapshot.h"
 #include "pv/data/snapshot/logicsnapshot_diskcache_writer.h"
 
@@ -238,7 +238,6 @@ void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
             _async_drain_cv.wait_for(lock, std::chrono::milliseconds(50));
         }
         std::copy_n(data, static_cast<size_t>(length), slot);
-        // P1-e 拷贝审计（仅在 ENABLE_DECODE_PERF 构建下计数，见 pv/base/perflog.h）
         PXV_PERF_COPY_STAGING(length);
         payload.slot = slot;
     } else {

@@ -39,7 +39,7 @@
 #include "pv/config/appconfig.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 #include "pv/ui/dockfonts.h"
 #include "pv/core/langresource.h"
 
@@ -291,14 +291,14 @@ void ViewportPainter::doPaint(const QRect & /* dirtyRect */) {
     if (_viewport->view().is_init_status() && !display_doc) {
       paintCursors(p);
     } else if (_viewport->view().is_stopped_status() || display_doc) {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
       {
         const auto _ps_t0 = std::chrono::steady_clock::now();
         paintSignals(p, fore, back, traces);
         const auto _ps_t1 = std::chrono::steady_clock::now();
-        pv::base::perf::record_track(
-            "V_PAINTSIGNALS", 0.0, 0.0,
-            std::chrono::duration<double, std::milli>(_ps_t1 - _ps_t0).count(), 0);
+        PXV_PERF_OP_MAX(
+            "V_PAINTSIGNALS",
+            std::chrono::duration<double, std::milli>(_ps_t1 - _ps_t0).count());
       }
 #else
       paintSignals(p, fore, back, traces);

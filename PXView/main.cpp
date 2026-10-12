@@ -51,6 +51,8 @@
 #include <QPalette>
 #include <string>
 #include "pv/view/trace/selectableitem.h"
+#include "pv/base/perf_sinks.h"
+#include "pv/base/perf.h"
 #include <ds_types.h>
 #include <QFontDatabase>
 #include <QFont>
@@ -254,6 +256,14 @@ int main(int argc, char *argv[])
 
 	//----------------------init log
 	pxv_log_init(); // Don't call before QApplication be inited
+
+#ifdef PXV_PERF
+	// Perf instrumentation: compile gate PXV_PERF, runtime level via
+	// PXVIEW_PERF_LEVEL=off|basic|verbose. Sinks are the ONLY thing that knows
+	// where a window goes; the metric code never touches a file path.
+	pv::base::perf::init_from_env();
+	pv::base::perf::install_default_sinks();
+#endif
 
 	// QML migration Phase 3 Task 3.1: SelectableItem's highlight pen now lives
 	// in the widget-free pxview-render library. Install the provider that maps

@@ -30,7 +30,7 @@
 #include <libsigrokdecode.h>
 
 #include "pv/data/decode/rowdata.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 
 using std::max;
 using std::min;
@@ -141,12 +141,14 @@ const Annotation *RowDataSnapshot::_annotation_at(size_t index) const {
 
 std::pair<size_t, size_t> RowDataSnapshot::get_visible_range(
     uint64_t start_sample, uint64_t end_sample) const {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   const auto _t0 = std::chrono::steady_clock::now();
   auto _perf_done = [&]() {
-    pv::base::perf::record_vrange_snap(
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - _t0).count());
+    // NOTE: the whole expression must stay parenthesised — the comma in
+    // duration<double, std::milli> would otherwise split the macro args.
+    PXV_PERF_OBSERVE(::pv::base::perf::MetricId::VrangeSnap,
+                     (std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - _t0).count()));
   };
 #else
   auto _perf_done = []() {};
@@ -310,8 +312,9 @@ std::shared_ptr<const RowDataSnapshot> RowData::frozen_snapshot() {
     constexpr size_t kMaxSegAnnotations = 500000;
     size_t start = _published_count;
     const size_t total = _annotations.size();
-#ifdef PXVIEW_DECODE_PERF
-    pv::base::perf::record_publish_delta(total - _published_count);
+#ifdef PXV_PERF
+    PXV_PERF_GAUGE(::pv::base::perf::MetricId::MaxPublishDelta,
+                   total - _published_count);
 #endif
     while (start < total) {
       const size_t end = std::min(total, start + kMaxSegAnnotations);
@@ -495,12 +498,14 @@ bool RowData::get_annotation(Annotation *ann, uint64_t index) {
 
 std::pair<size_t, size_t> RowData::get_visible_range(uint64_t start_sample,
                                                      uint64_t end_sample) {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   const auto _t0 = std::chrono::steady_clock::now();
   auto _perf_done = [&]() {
-    pv::base::perf::record_vrange_live(
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - _t0).count());
+    // NOTE: the whole expression must stay parenthesised — the comma in
+    // duration<double, std::milli> would otherwise split the macro args.
+    PXV_PERF_OBSERVE(::pv::base::perf::MetricId::VrangeLive,
+                     (std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - _t0).count()));
   };
 #else
   auto _perf_done = []() {};

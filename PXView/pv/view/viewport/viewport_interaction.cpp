@@ -51,7 +51,7 @@
 #include <set>
 
 #include "pv/config/appconfig.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 #include "pv/base/pxvdef.h"
 #include "pv/base/log.h"
 #include "pv/ui/dockfonts.h"
@@ -799,13 +799,14 @@ void ViewportInteraction::wheelEvent(QWheelEvent *event) {
           event->pixelDelta().isNull() && (delta % 120) == 0 && delta != 0;
 
       // 诊断：确认分流判定是否符合预期（触摸板若被误判为物理滚轮，就会被迫走
-      // 100ms 动画路径，手感会比直接落地明显迟钝）。写 %TEMP%/pxv_zoom_trace.log。
-      pv::base::perf::wheel_route_log(anglex, angley,
-                                      event->pixelDelta().x(),
-                                      event->pixelDelta().y(), is_physical_wheel,
-                                      event->source() ==
-                                          Qt::MouseEventSynthesizedBySystem,
-                                      is_physical_wheel ? "anim" : "coalesce");
+      // 100ms 动画路径，手感会比直接落地明显迟钝）。此前写 %TEMP%/pxv_zoom_trace.log，
+      // 现走 PXView.log（受日志等级控制，不再另开文件）。
+      pxv_dbg("perf WHEEL angleX=%d angleY=%d pixel=(%d,%d) physical=%d "
+              "synth=%d path=%s",
+              anglex, angley, event->pixelDelta().x(),
+              event->pixelDelta().y(), is_physical_wheel ? 1 : 0,
+              event->source() == Qt::MouseEventSynthesizedBySystem ? 1 : 0,
+              is_physical_wheel ? "anim" : "coalesce");
 
       // Vertical scrolling is interpreted as zooming in/out
 #ifdef Q_OS_DARWIN

@@ -54,7 +54,7 @@ void *annotation_heap_alloc(void *heap, std::size_t n) {
   if (heap)
     return mi_heap_malloc(static_cast<mi_heap_t *>(heap), n);
   // null heap -> standard C allocator (safe fallback for callers that pass a
-  // null handle explicitly, e.g. perflog.h probes).
+  // null handle explicitly, e.g. the perf_investigate.h probes).
   return std::malloc(n);
 }
 

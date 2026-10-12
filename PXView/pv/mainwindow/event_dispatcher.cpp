@@ -577,18 +577,8 @@ void SessionEventDispatcher::on_device_open_failed(const pv::interface::DeviceOp
 }
 
 // --- Device options group ---
-#include <fstream>
-static void dock_dbg(const std::string &s) {
-    std::ofstream f("C:/Users/admin/AppData/Local/Temp/pxv_dock_dbg.log",
-                    std::ios::app);
-    if (f) {
-        f << "[" << QDateTime::currentMSecsSinceEpoch() << "] " << s << "\n";
-    }
-}
 void SessionEventDispatcher::on_device_options_updated(const pv::interface::DeviceOptionsUpdated &ev) {
   pxv_info("on_device_options_updated: from_external=%d", static_cast<int>(ev.from_external));
-  dock_dbg(std::string("on_device_options_updated: from_external=") +
-           std::to_string(static_cast<int>(ev.from_external)));
   // 命令/通知拆分（2026-09-16）：本 handler 是纯通知订阅者 —— 只刷新读
   // 驱动值的控件并收割当前布局到 tab 文档。Core 模型重建已由广播方在发
   // 事件之前经显式命令 apply_device_options()（内部 reload()）同步完成，
@@ -620,7 +610,7 @@ void SessionEventDispatcher::on_device_options_updated(const pv::interface::Devi
     ctx->document()->save_signal_config(
         _window->session()->get_signal_models(), _window->build_channel_layout(safe_current_view()));
   }
-  dock_dbg("on_device_options_updated: notice handling done");
+  pxv_dbg("on_device_options_updated: notice handling done");
 }
 void SessionEventDispatcher::on_dso_view_option_changed(const pv::interface::DsoViewOptionChanged &) {
   _window->dock_manager()->trigger_widget()->device_updated();

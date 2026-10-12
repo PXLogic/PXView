@@ -19,6 +19,9 @@
 
 #include "PXView/config.h"
 #include "pv/base/log.h"
+#include "pv/base/perf.h"
+#include "pv/base/perf_sinks.h"
+#include <QTimer>
 #include "pv/config/appconfig.h"
 #include "pv/core/appcontrol.h"
 
@@ -140,6 +143,22 @@ int run_headless(int argc, char *argv[], const HeadlessOptions &opt)
 
     //----------------------init log
     pxv_log_init();
+
+#ifdef PXV_PERF
+    // Same registry + sinks as the GUI, minus the widget layer. headless has no
+    // frames, so the window roll is driven by a plain timer instead of the
+    // UpdateRequest filter — the daemon must still produce perf output for
+    // automated runs.
+    pv::base::perf::init_from_env();
+    pv::base::perf::install_default_sinks();
+    // No UpdateRequest here (no widgets), so the window roll is driven by a
+    // plain timer. The registry itself is unchanged.
+    QTimer perf_flush_timer;
+    QObject::connect(&perf_flush_timer, &QTimer::timeout, []() {
+        pv::base::perf::flush_window();
+    });
+    perf_flush_timer.start(2000);
+#endif
 
     int logLevel = opt.log_level;
     const bool bStoreLog = opt.store_log;

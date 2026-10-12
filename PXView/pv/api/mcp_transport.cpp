@@ -4,12 +4,14 @@
 
 #include "pv/core/eventbus.h"
 #include "pv/core/qt_async_dispatcher.h"
+#include "pv/base/perf.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QThread>
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 
 using json = nlohmann::json;
@@ -391,9 +393,40 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
     if (http_method == "GET") {
         QByteArray path = parts[1].trimmed();
 
+        // Dedicated perf endpoint. Deliberately NOT registered as an MCP tool:
+        // the perf page is a plain browser page, and keeping it off the MCP
+        // surface means the AI agent never sees it and no client-side tool
+        // filtering is needed. Read-only, same-origin, no auth (the whole
+        // transport binds to localhost).
+        //
+        // reset=false: the endpoint PEEKS at the live window. It must not roll
+        // the accumulators, otherwise opening the perf page would steal the
+        // window from the file sink.
+        if (path == "/perf/metrics") {
+#ifdef PXV_PERF
+            const std::string perf_json = pv::base::perf::snapshot_to_json(
+                pv::base::perf::take_snapshot(/*reset=*/false));
+            send_http_response(socket, 200, QByteArray::fromStdString(perf_json),
+                               "application/json");
+#else
+            send_http_response(
+                socket, 404,
+                "{\"error\":\"perf instrumentation not compiled in\","
+                "\"hint\":\"rebuild with -DENABLE_PERF=ON\"}",
+                "application/json");
+#endif
+            return;
+        }
+
         // Default to index.html for root path
         if (path == "/")
             path = "/index.html";
+
+        // Convenience alias so the perf page has a clean URL. The page itself
+        // needs no C++ support — it is a static file in webui/ (copied from
+        // web/public/ by Vite), so /perf.html already worked.
+        if (path == "/perf")
+            path = "/perf.html";
 
         // Security: reject paths with ".." to prevent directory traversal
         if (path.contains("..")) {

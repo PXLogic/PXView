@@ -35,7 +35,7 @@
 #include "pv/core/langresource.h"
 #include "pv/view/cursor/cursor.h"
 #include "pv/view/signal/logicsignal.h"
-#include "pv/base/perflog.h"
+#include "pv/base/perf.h"
 // Task 3.2: widget-free — decodetrace.cpp moved from gui_sources to
 // pxview-render; the QDialog/QMenu/widget includes (and create_popup) moved
 // to decodetrace_popup.cpp in the GUI archive. QGuiApplication keeps the
@@ -66,33 +66,35 @@ const int DecodeTrace::DrawPadding = 100;
 const int DecodeTrace::ControlRectWidth;
 
 // Debug instrumentation: OFF by default. Enable temporarily while diagnosing
-// annotation-visibility bugs by compiling with -DPXVIEW_DECODE_DEBUG (or by
+// annotation-visibility bugs by compiling with -DPXV_PERF_INVESTIGATE (or by
 // flipping the #if below). When ON it overlays diagnostic drawing on the
 // decoder tracks AND writes a per-row numeric summary to
 // %TEMP%/pxv_decode_dbg.log. The overlay brute-forces every annotation in
 // the row every frame (O(total annotations)), so it must stay OFF in normal
 // builds.
 static bool pxv_decode_debug() {
-#if defined(PXVIEW_DECODE_DEBUG)
+#if defined(PXV_PERF_INVESTIGATE)
   return true;
 #else
   return false;
 #endif
 }
 static void pxv_decode_log(const char *fmt, ...) {
-#if defined(PXVIEW_DECODE_DEBUG)
-  static long fcount = 0;
-  fcount++;
-  const char *mode = (fcount == 1) ? "w" : "a";
-  QString path = QDir::temp().filePath("pxv_decode_dbg.log");
-  FILE *lf = fopen(path.toUtf8().constData(), mode);
-  if (!lf)
-    return;
+#if defined(PXV_PERF_INVESTIGATE)
+  // 句柄只开一次（首次以 "w" 截断，进程内后续追加）。此前每次调用都
+  // fopen + fclose，而调用点在逐行遍历内层循环里，每帧要付出上百次
+  // 系统调用；改为静态句柄后调用成本降到一次 vfprintf。
+  static FILE *lf = nullptr;
+  if (!lf) {
+    const QString path = QDir::temp().filePath("pxv_decode_dbg.log");
+    lf = fopen(path.toUtf8().constData(), "w");
+    if (!lf)
+      return;
+  }
   va_list ap;
   va_start(ap, fmt);
   vfprintf(lf, fmt, ap);
   va_end(ap);
-  fclose(lf);
 #else
   (void)fmt;
 #endif
@@ -100,9 +102,8 @@ static void pxv_decode_log(const char *fmt, ...) {
 
 // ----------------------------------------------------------------------------
 // Decode / viewport render performance instrumentation.
-// Implemented in pv/base/perflog.h (included at global scope above). OFF
-// unless the build defines PXVIEW_DECODE_PERF (CMake option
-// ENABLE_DECODE_PERF). The local macros below keep call sites readable.
+// unless the build defines PXV_PERF (CMake option
+// ENABLE_PERF). The local macros below keep call sites readable.
 // ----------------------------------------------------------------------------
 #define PXV_PERF_FRAME_START()  PXV_PERF_PAINTMID_START()
 #define PXV_PERF_FRAME_END()    PXV_PERF_PAINTMID_END()
@@ -847,21 +848,18 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
             }
           }
 
-#ifdef PXVIEW_DECODE_PERF
-          const double _perf_row_ms = std::chrono::duration<double, std::milli>(
-              std::chrono::steady_clock::now() - _perf_row_t0).count();
-          pv::base::perf::record_track(_perf_row_name, _perf_row_ms,
-                                       _perf_vr_ms, _perf_row_ms - _perf_vr_ms,
-                                       _perf_ann);
-          pv::base::perf::frame_add_rows(_perf_is_dense ? 1 : 0,
-                                         _perf_is_dense ? 0 : 1, _perf_ann);
-#else
-          (void)_perf_row_name;
-          (void)_perf_row_t0;
-          (void)_perf_vr_ms;
-          (void)_perf_ann;
-          (void)_perf_is_dense;
-#endif
+          PXV_PERF_TRACK_ROW_VALUES(
+              _perf_row_name.toUtf8().constData(),
+              // parenthesised: the comma in duration<double, std::milli>
+              // would otherwise split the macro arguments
+              (std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - _perf_row_t0).count()),
+              _perf_vr_ms, _perf_ann);
+          PXV_PERF_ADD(::pv::base::perf::MetricId::DenseRows,
+                       _perf_is_dense ? 1 : 0);
+          PXV_PERF_ADD(::pv::base::perf::MetricId::MidRows,
+                       _perf_is_dense ? 0 : 1);
+          PXV_PERF_ADD(::pv::base::perf::MetricId::AnnInRange, _perf_ann);
 
           y += annotation_height;
           _cur_row_headings.push_back(row.title());
@@ -1372,7 +1370,7 @@ void DecodeTrace::draw_unshown_row(QPainter &p, int y, int h, int left,
 }
 
 void DecodeTrace::on_new_decode_data() {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D5: timing candidate for the EVENT_LAG_MAX block — decode notification
   // handling (progress, possible signals_changed relayout, decode-only update).
   const auto _op_t0 = std::chrono::steady_clock::now();
@@ -1439,18 +1437,15 @@ void DecodeTrace::on_new_decode_data() {
       _view->request_decode_only_update();
     }
   }
-#ifdef PXVIEW_DECODE_PERF
-  pv::base::perf::record_op_max(
-      "on_new_decode_data",
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - _op_t0).count());
-#endif
+  PXV_PERF_OP_MAX("on_new_decode_data",
+                  std::chrono::duration<double, std::milli>(
+                      std::chrono::steady_clock::now() - _op_t0).count());
 }
 
 int DecodeTrace::get_progress() { return _decoder_stack->get_progress(); }
 
 void DecodeTrace::on_decode_done() {
-#ifdef PXVIEW_DECODE_PERF
+#ifdef PXV_PERF
   // P3-D5: timing candidate for the EVENT_LAG_MAX block — decode completion
   // (final progress, possible signals_changed relayout, coalesced repaint).
   const auto _op_t0 = std::chrono::steady_clock::now();
@@ -1483,12 +1478,9 @@ void DecodeTrace::on_decode_done() {
   }
 
   _data_source->decode_done();
-#ifdef PXVIEW_DECODE_PERF
-  pv::base::perf::record_op_max(
-      "on_decode_done",
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - _op_t0).count());
-#endif
+  PXV_PERF_OP_MAX("on_decode_done",
+                  std::chrono::duration<double, std::milli>(
+                      std::chrono::steady_clock::now() - _op_t0).count());
 }
 
 void DecodeTrace::on_error_message_changed(const QString &msg) {

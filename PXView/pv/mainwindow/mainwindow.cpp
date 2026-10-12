@@ -22,6 +22,7 @@
  */
 
 #include "pv/widgets/searchpatterninput.h"
+#include "pv/base/perf.h"
 #include "pv/widgets/sidebar.h"
 #include "pv/widgets/smoothscrollarea.h"
 #include <QAbstractButton>
@@ -291,6 +292,16 @@ void MainWindow::setup_ui() {
 
   // event filter (non-dock widgets)
   initial_view->installEventFilter(this);
+#ifdef PXV_PERF
+  // QEvent::UpdateRequest is posted to the TOP-LEVEL widget. MainWindow is a
+  // child of pv::MainFrame, so filtering `this` (or the QWindow handle) would
+  // never see it — measured: frame.paint_calls stayed empty while the
+  // viewport was clearly repainting. Install on the application object
+  // instead, which sees every delivered event regardless of the window
+  // hierarchy. The filter body is one type compare, so the per-event cost is
+  // negligible — and the whole thing is compiled out when PXV_PERF is off.
+  qApp->installEventFilter(this);
+#endif
   _sampling_bar->installEventFilter(this);
   _trig_bar->installEventFilter(this);
   _file_bar->installEventFilter(this);
@@ -477,6 +488,16 @@ int MainWindow::resolveShortcutAction(int key, int modifiers) {
 bool MainWindow::eventFilter(QObject *object, QEvent *event) {
   if (event->type() == QEvent::KeyPress)
     return _shortcut_manager->handleKeyPress(object, event);
+#ifdef PXV_PERF
+  // Frame boundary + window roll. Measured on Qt 6.11: QEvent::UpdateRequest
+  // is delivered to the top-level QWidget, never to the QWindow, and it fires
+  // once per child repaint batch — so this single filter sees every delivered
+  // frame. It is also the flush driver that replaces the old one, which only
+  // ever ran from DecodeTrace::paint_mid and therefore produced NOTHING when no
+  // protocol decoder was configured.
+  if (event->type() == QEvent::UpdateRequest)
+    pv::base::perf::frame_boundary();
+#endif
   return false;
 }
 

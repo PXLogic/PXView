@@ -102,6 +102,22 @@ pv_add_qtest(test_voltage_scale_factors
     ${PXVIEW_INCLUDE_DIR}/pv/core/measure_format.cpp
 )
 
+# ==== 性能指标注册表契约 ====
+# 计数类指标是确定性的，断言精确值（驱动 N 次 → calls==N）；耗时类依赖墙钟，
+# 只断言不变量（min<=avg<=max、窗口清零、无负数），绝不断言数值。注册表刻意
+# Qt-free，所以直接编 perf.cpp 即可，无需链接 pxview-core。
+pv_add_qtest(test_perf_registry
+    core/test_perf_registry.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
+)
+target_compile_definitions(test_perf_registry PRIVATE PXV_PERF)
+
+# 不定义 PXV_PERF：证明关闭时宏展开为空操作，且不产生 unused-variable 告警、
+# 不需要 #ifdef/#else（旧 perflog.h 迫使每个调用点写 15 行分支）。
+pv_add_qtest(test_perf_noop
+    core/test_perf_noop.cpp
+)
+
 # ==== 语言文件契约（顶层数组 + 注册页齐全 + 导入选项 id 三语齐全）====
 # 回归保护：lang/cn/input_output.json 曾用 {"language":…,"items":[…]} 包装，而
 # LangResource::load_page() 只认顶层数组 → 整页静默不加载，导入选项对话框全部
@@ -132,6 +148,14 @@ set(_CM_TEST_COMMON_SOURCES
 pv_add_qtest(test_capture_manager
     core/test_capture_manager.cpp
     ${_CM_TEST_COMMON_SOURCES}
+    # pv/base/perf.cpp must be listed EXPLICITLY, not just inherited from
+    # libpxview-core.a: these tests put libpxview-core BEFORE
+    # libpxview-data on the link line, while pxview-data translation units
+    # (decoderstack.cpp) reference the perf registry. A static archive can
+    # only resolve against what it has already seen, so the reference stays
+    # undefined — and with `-Wl,--whole-archive libsigrok` this ld fails
+    # SILENTLY (`ld returned 5`, zero diagnostics).
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
 )
 target_include_directories(test_capture_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
@@ -172,6 +196,14 @@ endif()
 pv_add_qtest(test_decode_task_manager
     core/test_decode_task_manager.cpp
     ${_CM_TEST_COMMON_SOURCES}
+    # pv/base/perf.cpp must be listed EXPLICITLY, not just inherited from
+    # libpxview-core.a: these tests put libpxview-core BEFORE
+    # libpxview-data on the link line, while pxview-data translation units
+    # (decoderstack.cpp) reference the perf registry. A static archive can
+    # only resolve against what it has already seen, so the reference stays
+    # undefined — and with `-Wl,--whole-archive libsigrok` this ld fails
+    # SILENTLY (`ld returned 5`, zero diagnostics).
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
 )
 target_include_directories(test_decode_task_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
@@ -202,6 +234,14 @@ endif()
 pv_add_qtest(test_filter_processor
     core/test_filter_processor.cpp
     ${_CM_TEST_COMMON_SOURCES}
+    # pv/base/perf.cpp must be listed EXPLICITLY, not just inherited from
+    # libpxview-core.a: these tests put libpxview-core BEFORE
+    # libpxview-data on the link line, while pxview-data translation units
+    # (decoderstack.cpp) reference the perf registry. A static archive can
+    # only resolve against what it has already seen, so the reference stays
+    # undefined — and with `-Wl,--whole-archive libsigrok` this ld fails
+    # SILENTLY (`ld returned 5`, zero diagnostics).
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
 )
 target_include_directories(test_filter_processor PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
@@ -364,6 +404,11 @@ pv_add_qtest(test_rasterize
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -399,6 +444,11 @@ pv_add_qtest(test_logic_render_cost
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -424,6 +474,11 @@ pv_add_qtest(test_logic_snapshot_raw
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -441,6 +496,11 @@ pv_add_qtest(test_logic_snapshot_query
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -459,6 +519,11 @@ pv_add_qtest(test_logic_snapshot_cross_throughput
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -478,6 +543,11 @@ pv_add_qtest(test_feed_staging_copy_cost
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -498,6 +568,11 @@ pv_add_qtest(test_decode_chunk_alignment
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -517,6 +592,11 @@ pv_add_qtest(test_mmap_region_lifetime
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -536,6 +616,11 @@ pv_add_qtest(test_sample_span
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -564,6 +649,11 @@ pv_add_qtest(test_logic_snapshot_cross_alignment
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -581,6 +671,11 @@ pv_add_qtest(test_glitch_filter
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -599,6 +694,11 @@ pv_add_qtest(test_logic_snapshot_pattern_search
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
@@ -656,11 +756,16 @@ target_link_libraries(test_signal_model PRIVATE -lglib-2.0)
 # ==== RowData 批量/逐注解落库等价性（方案 E）====
 # 直接编译 decode 数据层源文件（不链接 pxview-data），内部 stub xlog。
 # 依赖: rowdata / annotation / annotationrestable / decoderstatus / annotation_heap
-#       + libsigrokdecode 头 + common (xlog.h)。PXVIEW_DECODE_PERF 下 rowdata.cpp
+#       + libsigrokdecode 头 + common (xlog.h)。PXV_PERF 下 rowdata.cpp
 #       经 perflog.h 引入 glib.h（全局 include/link dirs 已就绪，-lglib-2.0 显式链接）。
 pv_add_qtest(test_rowdata_batch
     data/test_rowdata_batch.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/decode/rowdata.cpp
+    # The perf registry is now a real library (pv/base/perf.cpp) rather
+    # than header-only globals: copy_audit.h / perflog.h forward into it,
+    # so every target that compiles a snapshot/capture source directly
+    # must carry the implementation too.
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/decode/annotation.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/decode/annotationrestable.cpp
     ${PXVIEW_INCLUDE_DIR}/pv/data/decode/decoderstatus.cpp
@@ -684,6 +789,14 @@ target_link_libraries(test_rowdata_batch PRIVATE -lglib-2.0)
 pv_add_qtest(test_session_document
     data/test_session_document.cpp
     ${_CM_TEST_COMMON_SOURCES}
+    # pv/base/perf.cpp must be listed EXPLICITLY, not just inherited from
+    # libpxview-core.a: these tests put libpxview-core BEFORE
+    # libpxview-data on the link line, while pxview-data translation units
+    # (decoderstack.cpp) reference the perf registry. A static archive can
+    # only resolve against what it has already seen, so the reference stays
+    # undefined — and with `-Wl,--whole-archive libsigrok` this ld fails
+    # SILENTLY (`ld returned 5`, zero diagnostics).
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
 )
 target_include_directories(test_session_document PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include
@@ -714,6 +827,14 @@ endif()
 pv_add_qtest(test_multi_tab_session
     core/test_multi_tab_session.cpp
     ${_CM_TEST_COMMON_SOURCES}
+    # pv/base/perf.cpp must be listed EXPLICITLY, not just inherited from
+    # libpxview-core.a: these tests put libpxview-core BEFORE
+    # libpxview-data on the link line, while pxview-data translation units
+    # (decoderstack.cpp) reference the perf registry. A static archive can
+    # only resolve against what it has already seen, so the reference stays
+    # undefined — and with `-Wl,--whole-archive libsigrok` this ld fails
+    # SILENTLY (`ld returned 5`, zero diagnostics).
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
 )
 target_include_directories(test_multi_tab_session PRIVATE
     ${CMAKE_SOURCE_DIR}/libsigrok/include

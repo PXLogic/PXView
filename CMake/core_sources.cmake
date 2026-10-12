@@ -51,6 +51,12 @@ set(PXVIEW_CORE_SOURCES
     PXView/pv/base/eventobject.cpp
     PXView/pv/base/pxvdef.cpp
     PXView/pv/base/ZipMaker.cpp
+    # Perf metric registry + pluggable sinks. Replaces the ad-hoc global
+    # counters and hand-written fprintf() flush that used to live in
+    # the old pv/base/perflog.h. Deliberately Qt-free so the unit test can link it
+    # without a QApplication.
+    PXView/pv/base/perf.cpp
+    PXView/pv/base/perf_sinks.cpp
     PXView/pv/session/storesession.cpp
     # Application lifecycle + API transports owner. Widget-free since the
     # top-window pointer moved to pv::mainwindow TopWindowTracker.

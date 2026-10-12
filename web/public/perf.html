@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PXView 性能面板</title>
+<!--
+  Dedicated perf page. Deliberately a standalone file (not a webui route):
+  the webui is a single-page app with no router, and this is a developer tool
+  that must not be entangled with the AI chat surface.
+
+  Data comes from GET /perf/metrics — a plain HTTP endpoint on the same MCP
+  server (port 10110). It is NOT an MCP tool, so the AI agent never sees it.
+
+  Two things this page does that a naive renderer does not:
+   1. It keeps a STABLE metric list. The endpoint only reports metrics that
+      were actually sampled in the window (a metric with no activity is
+      omitted), so a direct render makes rows appear and disappear every
+      500ms. Here every metric ever seen stays in the table; a missing one
+      shows "本窗口无采样" instead of vanishing.
+   2. Frame rate / frame cost get real time charts with axes, not 30px
+      sparklines: the interesting question is the trend and where it dropped.
+-->
+<style>
+  :root {
+    --bg: #16161a; --panel: #1e1e23; --panel-2: #26262c;
+    --fg: #e8e8ea; --fg-dim: #9a9aa2; --fg-faint: #6b6b73;
+    --line: #32323a; --grid: #2a2a31;
+    --accent: #7f9cf5; --accent3: #68d391;
+    --good: #68d391; --warn: #f6ad55; --bad: #fc8181;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f7f8; --panel: #ffffff; --panel-2: #f0f0f2;
+      --fg: #1a1a1e; --fg-dim: #5a5a63; --fg-faint: #8a8a93;
+      --line: #e0e0e4; --grid: #ececf0;
+      --accent: #3b5bdb; --accent3: #2f855a;
+      --good: #2f855a; --warn: #b7791f; --bad: #c53030;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 24px 48px;
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 26px 0 8px; color: var(--fg-dim);
+       text-transform: uppercase; letter-spacing: .06em; }
+  .sub { color: var(--fg-dim); font-size: 12px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         margin-right: 6px; vertical-align: middle; background: var(--fg-faint); }
+  .dot.ok { background: var(--good); }
+  .dot.bad { background: var(--bad); }
+  .dot.warn { background: var(--warn); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+           gap: 12px; margin-top: 16px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 10px 14px; }
+  .stat .label { font-size: 11px; color: var(--fg-dim); letter-spacing: .04em; }
+  .stat .big { font: 600 22px/1.35 var(--mono); }
+  .stat .unit { font-size: 12px; color: var(--fg-faint); font-weight: 400; margin-left: 3px; }
+  .stat .foot { font-size: 11px; color: var(--fg-faint); font-family: var(--mono); }
+
+  .chartbox { background: var(--panel); border: 1px solid var(--line);
+              border-radius: 10px; padding: 10px 12px 4px; margin-top: 10px; }
+  .chartbox .hd { display: flex; justify-content: space-between; align-items: baseline;
+                  font-size: 12px; color: var(--fg-dim); margin-bottom: 2px; }
+  .legend { display: flex; gap: 14px; font-family: var(--mono); font-size: 11px; }
+  .legend i { display: inline-block; width: 10px; height: 2px; vertical-align: middle;
+              margin-right: 5px; }
+  svg.chart { display: block; width: 100%; height: auto; }
+
+  table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line);
+           white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--fg-faint); font-weight: 500; font-size: 11px;
+       text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr:hover { background: var(--panel-2); }
+  .name { font-family: var(--mono); }
+  .dim { color: var(--fg-faint); }
+  .warnv { color: var(--warn); }
+  .badv { color: var(--bad); }
+  .scroll { max-height: 340px; overflow: auto; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 10px; }
+  .ops { display: flex; flex-wrap: wrap; gap: 8px 16px; font: 12px var(--mono);
+         color: var(--fg-dim); }
+  .ops b { color: var(--fg); font-weight: 600; }
+  .banner { margin-top: 16px; padding: 12px 14px; border-radius: 10px;
+            border: 1px solid var(--line); background: var(--panel); line-height: 1.75; }
+  .banner.bad { border-color: var(--bad); }
+  code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 5px;
+         border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>PXView 性能面板</h1>
+<div class="sub" id="status"><span class="dot"></span>正在连接…</div>
+
+<div id="banner"></div>
+
+<div class="stats" id="stats"></div>
+
+<h2>帧率趋势</h2>
+<div class="chartbox">
+  <div class="hd">
+    <span>最近 60 秒（每 0.5 秒一个采样点）</span>
+    <span class="legend" id="legend-fps"></span>
+  </div>
+  <svg class="chart" id="chart-fps" viewBox="0 0 680 190" preserveAspectRatio="none"></svg>
+</div>
+
+<h2>帧耗时与卡顿趋势</h2>
+<div class="chartbox">
+  <div class="hd">
+    <span>整帧绘制耗时 / 事件循环滞后（滞后 &gt; 16ms 即掉帧）</span>
+    <span class="legend" id="legend-ms"></span>
+  </div>
+  <svg class="chart" id="chart-ms" viewBox="0 0 680 190" preserveAspectRatio="none"></svg>
+</div>
+
+<h2>全部指标</h2>
+<div class="scroll"><table id="metrics">
+  <thead><tr>
+    <th>指标</th><th>单位</th><th>calls</th><th>avg</th><th>max</th><th>min</th><th>窗口值</th>
+  </tr></thead>
+  <tbody></tbody>
+</table></div>
+
+<h2>解码轨道（按耗时排序）</h2>
+<div class="scroll"><table id="rows">
+  <thead><tr>
+    <th>轨道</th><th>calls</th><th>total ms</th><th>max ms</th><th>avg ms</th>
+    <th>查区间 avg</th><th>注解 avg</th>
+  </tr></thead>
+  <tbody></tbody>
+</table></div>
+
+<h2>主线程操作最大值</h2>
+<div class="ops" id="ops"><span class="dim">—</span></div>
+
+<script>
+"use strict";
+
+const POLL_MS = 500;
+const HISTORY = 120;              // 120 * 0.5s = 60s
+const hist = new Map();           // metric id -> number[HISTORY]
+const seenOrder = [];             // 稳定顺序：第一次见到的顺序
+const seen = new Set();
+const metaById = new Map();       // id -> 最近一次看到的元数据
+
+const FPS_SERIES = [
+  { id: "frame.fps",          name: "整软件 fps", color: "var(--accent)"  },
+  { id: "frame.viewport_fps", name: "视口 fps",   color: "var(--accent3)" }
+];
+const MS_SERIES = [
+  { id: "frame.viewport",     name: "整帧耗时 ms",     color: "var(--accent)" },
+  { id: "loop.event_lag_max", name: "事件循环滞后 ms", color: "var(--bad)"    }
+];
+
+const $ = (id) => document.getElementById(id);
+
+function fmt(v) {
+  if (v === undefined || v === null || Number.isNaN(v)) return "—";
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (a >= 1e4) return (v / 1e3).toFixed(1) + "k";
+  if (a >= 100) return v.toFixed(0);
+  if (a >= 1) return v.toFixed(2);
+  return v.toFixed(4);
+}
+
+function pushHist(id, v) {
+  let a = hist.get(id);
+  if (!a) { a = new Array(HISTORY).fill(0); hist.set(id, a); }
+  a.push(v);
+  if (a.length > HISTORY) a.shift();
+}
+
+// 把上界取整到好看的刻度（1/2/5 × 10^n）
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const n = v / base;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return step * base;
+}
+
+// 带坐标轴的时间序列图：X 轴是时间，Y 轴按所有序列的最大值自适应。
+function renderChart(svgEl, series, unit) {
+  const W = 680, H = 190;
+  const L = 56, R = 672, T = 12, B = 158;
+  const plotW = R - L, plotH = B - T;
+
+  let max = 0;
+  for (const s of series) {
+    const a = hist.get(s.id);
+    if (a) for (const v of a) if (v > max) max = v;
+  }
+  const top = niceCeil(max);
+
+  const xAt = (i) => L + (i / (HISTORY - 1)) * plotW;
+  const yAt = (v) => B - (v / top) * plotH;
+
+  let out = "";
+
+  for (let k = 0; k <= 4; k++) {
+    const v = (top * k) / 4;
+    const y = yAt(v).toFixed(1);
+    out += '<line x1="' + L + '" y1="' + y + '" x2="' + R + '" y2="' + y +
+           '" stroke="var(--grid)" stroke-width="1"/>';
+    out += '<text x="' + (L - 8) + '" y="' + y + '" text-anchor="end" ' +
+           'dominant-baseline="central" font-size="10" font-family="var(--mono)" ' +
+           'fill="var(--fg-faint)">' + fmt(v) + '</text>';
+  }
+
+  const totalS = (HISTORY * POLL_MS) / 1000;
+  const xticks = [[0, "-" + totalS.toFixed(0) + "s", "start"],
+                  [0.5, "-" + (totalS / 2).toFixed(0) + "s", "middle"],
+                  [1, "现在", "end"]];
+  for (const [f, label, anchor] of xticks) {
+    const x = L + f * plotW;
+    out += '<text x="' + x.toFixed(1) + '" y="' + (B + 16) + '" text-anchor="' + anchor +
+           '" font-size="10" font-family="var(--mono)" fill="var(--fg-faint)">' +
+           label + '</text>';
+  }
+
+  for (const s of series) {
+    const a = hist.get(s.id);
+    if (!a) continue;
+    const pts = a.map((v, i) => xAt(i).toFixed(1) + "," + yAt(v).toFixed(1)).join(" ");
+    out += '<polyline fill="none" stroke="' + s.color + '" stroke-width="1.6" ' +
+           'stroke-linejoin="round" points="' + pts + '"/>';
+  }
+
+  out += '<text x="' + L + '" y="' + (T - 1) + '" font-size="10" ' +
+         'font-family="var(--mono)" fill="var(--fg-faint)">' + unit + '</text>';
+
+  svgEl.innerHTML = out;
+}
+
+function renderLegend(el, series) {
+  el.innerHTML = series.map((s) => {
+    const a = hist.get(s.id);
+    const cur = a ? a[a.length - 1] : 0;
+    return '<span><i style="background:' + s.color + '"></i>' + s.name +
+           ' <b>' + fmt(cur) + '</b></span>';
+  }).join("");
+}
+
+function renderStats(mById) {
+  const items = [
+    ["frame.fps", "整软件帧率"],
+    ["frame.viewport_fps", "视口帧率"],
+    ["frame.viewport", "整帧耗时"],
+    ["loop.event_lag_max", "最大事件循环滞后"]
+  ];
+  $("stats").innerHTML = items.map(([id, label]) => {
+    const m = mById.get(id);
+    const v = m ? m.value : null;
+    let cls = "";
+    if (id.endsWith("fps")) {
+      if (v > 0 && v < 15) cls = "badv"; else if (v > 0 && v < 30) cls = "warnv";
+    }
+    if (id === "loop.event_lag_max" && v !== null) {
+      if (v > 100) cls = "badv"; else if (v > 16) cls = "warnv";
+    }
+    const shown = (m && m.unit === "fps") ? (v === null ? "—" : Number(v).toFixed(1)) : fmt(v);
+    return '<div class="stat"><div class="label">' + label + '</div>' +
+           '<div class="big ' + cls + '">' + shown +
+             '<span class="unit">' + (m ? m.unit : "") + '</span></div>' +
+           '<div class="foot">' + (m ? "avg " + fmt(m.avg) + " · max " + fmt(m.max)
+                                      : "本窗口无采样") + '</div></div>';
+  }).join("");
+}
+
+// 稳定表格：见过一次就一直在；本窗口没采样的行保留位置并标注。
+function renderMetrics(mById) {
+  $("metrics").tBodies[0].innerHTML = seenOrder.map((id) => {
+    const m = mById.get(id);
+    const meta = metaById.get(id) || {};
+    if (!m || m.calls === 0) {
+      return '<tr class="dim"><td class="name">' + id + '</td><td>' +
+             (meta.unit || "") + '</td><td colspan="5">本窗口无采样</td></tr>';
+    }
+    return '<tr><td class="name">' + m.id + '</td><td class="dim">' + m.unit + '</td>' +
+           '<td>' + m.calls + '</td><td>' + fmt(m.avg) + '</td>' +
+           '<td>' + fmt(m.max) + '</td><td>' + fmt(m.min) + '</td>' +
+           '<td><b>' + fmt(m.value) + '</b></td></tr>';
+  }).join("");
+}
+
+function renderRows(rows) {
+  const tb = $("rows").tBodies[0];
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="7" class="dim">本窗口没有解码轨道绘制</td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map((r) =>
+    '<tr><td>' + r.name + '</td><td>' + r.calls + '</td>' +
+    '<td>' + fmt(r.total_ms) + '</td><td>' + fmt(r.max_ms) + '</td>' +
+    '<td>' + fmt(r.avg_ms) + '</td><td>' + fmt(r.aux_avg_ms) + '</td>' +
+    '<td>' + fmt(r.count_avg) + '</td></tr>').join("");
+}
+
+function renderOps(ops) {
+  const el = $("ops");
+  if (!ops.length) { el.innerHTML = '<span class="dim">—</span>'; return; }
+  el.innerHTML = ops.map((o) =>
+    '<span>' + o.name + ' <b>' + fmt(o.max_ms) + 'ms</b></span>').join("");
+}
+
+function banner(html, bad) {
+  $("banner").innerHTML = html
+    ? '<div class="banner' + (bad ? ' bad' : '') + '">' + html + '</div>' : "";
+}
+
+function setStatus(cls, text) {
+  $("status").innerHTML = '<span class="dot ' + cls + '"></span>' + text;
+}
+
+const EMPTY_HINT =
+  "<b>为什么没有帧耗时/帧率？</b>指标是「有活干才打点」，不是定时采样的：" +
+  "<br>· 帧率与耗时类（<code>frame.*</code>、<code>loop.*</code>）只在<b>发生渲染</b>时产生。" +
+  "无头 <code>pxviewd</code> 不渲染，所以这些指标<b>永远不会出现</b>——请打开<b>界面版 PXView</b> 并连接设备采集。" +
+  "<br>· 数据层类（<code>decode.*</code>、<code>vrange.*</code>、<code>copy.*</code>）需要真的在采集/解码才会打点。" +
+  "<br>· 采集结束后界面静止，帧率会自然衰减到 0（这是正确行为，不是故障）。";
+
+async function poll() {
+  try {
+    const res = await fetch("/perf/metrics", { cache: "no-store" });
+    if (res.status === 404) {
+      setStatus("warn", "已连接，但该构建未编译性能插桩");
+      banner("这个 PXView 是未插桩构建。<code>/perf/metrics</code> 返回 404。" +
+             "用 <code>-DENABLE_PERF=ON</code> 重新配置并编译即可。", true);
+      return;
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+
+    const mById = new Map();
+    for (const m of d.metrics) {
+      mById.set(m.id, m);
+      metaById.set(m.id, m);
+      if (!seen.has(m.id)) { seen.add(m.id); seenOrder.push(m.id); }
+    }
+    // 每个历史序列推进一格。指标缺失（端点只上报本窗口采样过的指标）或本窗口
+    // 零采样时**沿用上一个值**，不要补 0：汇总窗口每 2 秒滚动一次，滚动的那一瞬
+    // 计数为零、last 也刚被清零，补 0 会在图上留下一个假尖峰。
+    // 真正空闲时不需要担心漏掉 —— 心跳仍每 10ms 给帧率打点，值会自然衰减到 0。
+    for (const s of FPS_SERIES.concat(MS_SERIES)) {
+      const m = mById.get(s.id);
+      let v;
+      if (m && m.calls > 0) {
+        v = m.value;
+      } else {
+        const a = hist.get(s.id);
+        v = (a && a.length) ? a[a.length - 1] : 0;
+      }
+      pushHist(s.id, v);
+    }
+
+    const hasFrameData = d.metrics.some((m) => m.id.startsWith("frame.") || m.id.startsWith("loop."));
+    if (d.metrics.length === 0) {
+      setStatus("warn", "已连接，但本窗口还没有任何采样");
+      banner(EMPTY_HINT);
+    } else {
+      setStatus("ok", "本窗口 " + d.window_s.toFixed(2) + " s（每 2s 自动汇总） · 有采样 " +
+                      d.metrics.length + "/" + seenOrder.length + " 项 · 每 " +
+                      (POLL_MS / 1000) + "s 刷新");
+      banner(hasFrameData ? "" : EMPTY_HINT);
+    }
+
+    renderStats(mById);
+    renderLegend($("legend-fps"), FPS_SERIES);
+    renderLegend($("legend-ms"), MS_SERIES);
+    renderChart($("chart-fps"), FPS_SERIES, "fps");
+    renderChart($("chart-ms"), MS_SERIES, "ms");
+    renderMetrics(mById);
+    renderRows(d.rows || []);
+    renderOps(d.ops || []);
+  } catch (e) {
+    setStatus("bad", "连接失败：" + e.message);
+    banner("取不到 <code>/perf/metrics</code>。" +
+           "确认 PXView / pxviewd 正在运行（MCP 服务在 10110 端口）。" +
+           "注意 GUI 版与 pxviewd 不能同时运行（端口冲突）。", true);
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
