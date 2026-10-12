@@ -1607,17 +1607,15 @@ jobs:
           fail_on_unmatched_files: true
           files: release-assets/*
           body: |
-            dev 分支的候选构建（release candidate），供尝鲜与回归验证使用，**不是正式版本**。
-            本条目只对应下面这一个提交，不会随后续构建被覆盖或删除；候选包在 dev 每次提交构建 + 测试全绿后自动发布。
+            > 🧪 **预发布版本（Release Candidate）** — 对应 dev 分支的一个提交，在「构建 + 全量 E2E」全绿后自动产出，并独立保留、可随时回溯下载。如果想体验最新改动的话欢迎试用rc版本。
+            > 作为预发布版本，稳定性可能弱于正式版；如果在关键项目上使用，建议继续用 [稳定版 Releases](${{ github.server_url }}/${{ github.repository }}/releases)。
+            > 遇到问题欢迎到 [Issues](${{ github.server_url }}/${{ github.repository }}/issues) 反馈。
 
-            - 开发版本号：`${{ steps.assets.outputs.version }}`
-            - 提交：`${{ steps.target.outputs.sha }}`
-            - 打包与安装包自检：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.build_run_id }})
-            - 全量 E2E：[PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.e2e_run_id }})
+            * **版本**：`${{ steps.assets.outputs.version }}`
+            * **对应 Commit**：`${{ steps.target.outputs.sha }}`
+            * **构建日志**：[PXView Build run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.build_run_id }}) | [PXView Release CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.gate.outputs.e2e_run_id }})
 
-            正式版本请到 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 里选择带版本号的发布。
-
-            ### 本次提交
+            ### 本次变更
 
             ```
             ${{ steps.assets.outputs.commit_msg }}
