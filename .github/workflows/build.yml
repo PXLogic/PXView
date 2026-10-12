@@ -70,10 +70,42 @@ jobs:
     env:
       QT_PREFIX: ${{ github.workspace }}/Qt
       QT_VERSION: "6.11.0"
-      # ccache 由下方的 Configure CMake 步骤以 CMAKE_*_COMPILER_LAUNCHER 启用；
-      # 这里只调容量与放行宏（__DATE__/__TIME__ 的文件默认会被 ccache 拒缓存重编）。
+      # ccache 由下方的 Configure CMake 步骤以 CMAKE_*_COMPILER_LAUNCHER 启用。
+      #
+      # ★ 实测（run 38122087836）：三个 job 的 ccache 都「恢复成功」，但主构建步
+      #   Linux 46s / Windows 344s / macOS 339s，而三平台 ninja 边数几乎相同
+      #   （1466 / 1484 / 1467，构成也逐项相同）。即 Linux 拿到 5~7 倍加速，
+      #   Win/mac 约等于零命中。下面三项按「已证实」与「仅消除误伤」分开记。
+      #
+      # · CCACHE_COMPILERCHECK=content —— 已本地双向验证，是本轮的主修复。
+      #   ccache 默认按「编译器的 mtime + size」算哈希（手册 compiler_check：
+      #   "Hash the compiler's mtime and size ... This is the default."）。Win/mac
+      #   每个 run 都要重铺工具链（pacman 重解包 2.8 GiB 的 UCRT64 树、Homebrew
+      #   重新 pour 每个 bottle），编译器 mtime 一变整表 miss；Linux 的 gcc 来自
+      #   runner 镜像、Qt 来自 actions/cache 的 tar，时间戳稳定才命中。
+      #   验证：造一个内容不变的编译器包装二进制，只 touch 它的 mtime ——
+      #   compiler_check=mtime 时 H=0/M=1（未命中），改成 content 后 H=1/M=0。
+      # · CCACHE_SLOPPINESS 补回 include_file_mtime,include_file_ctime。
+      #   该安全阀的语义是「include 的 mtime/ctime ≥ ccache 被调用时刻 ⇒ 该次编译
+      #   彻底不缓存」（手册 "Handling of newly created source files"），而
+      #   actions/checkout 与 actions/cache 正是手册所说「频繁改写文件时间戳」的
+      #   构建系统。★ 但本地实测：在「touch 后内容未变」的场景下它**没有**可观测
+      #   差别（ccache 4.x 在 stat 变化时会重新哈希内容）——所以它是「只可能造成
+      #   miss、不可能造成误命中」的一类检查，不是 Win/mac 零命中的根因，别把它
+      #   当主修复读。time_macros 必须留着：本工程有 __DATE__/__TIME__ 的文件。
+      # · CCACHE_BASEDIR 把工作区下的绝对路径归一化后再入哈希（本地已验证不影响
+      #   命中，属可选项）。
+      #
+      # ★ 上面几项都会改变哈希：落地后三个平台第一次都是全量 miss，第二次起见效。
+      # ★ 下一次 run 请先看新增的 `ccache statistics` 步：
+      #   Cacheable calls 接近 ninja 边数而 Direct 命中率仍低 ⇒ 根因不是这几项配置，
+      #   要往「编译命令行的内容每个 run 都在变」查（如工具链版本漂移导致头文件
+      #   内容变化）；若 Direct 命中率上来了但构建仍慢，则瓶颈不在编译而在链接/
+      #   代码生成（Windows 另有 220 次 shared module 链接）。
       CCACHE_MAXSIZE: "1G"
-      CCACHE_SLOPPINESS: time_macros,pch_defines
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: time_macros,pch_defines,include_file_mtime,include_file_ctime
+      CCACHE_BASEDIR: ${{ github.workspace }}
 
     steps:
       - name: Resolve ref
@@ -332,6 +364,14 @@ jobs:
             echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
+      # 打印生效的 ccache 配置（确认上面几个 env 真的传进去了）并清零统计，供构建
+      # 结束后的 `ccache statistics` 对照。过滤用 sed 而不是 grep：grep 无匹配时退出
+      # 码为 1，会让 run: 在 `bash -e -o pipefail` 下当场静默退出。
+      - name: Reset ccache stats
+        run: |
+          ccache -p | sed -n '/compiler_check\|sloppiness\|base_dir\|max_size/p'
+          ccache -z
+
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
@@ -356,6 +396,14 @@ jobs:
 
       - name: Install
         run: cd build && ninja install
+
+      # ★ 判断 ccache 到底有没有生效只看这一步的输出：
+      #   Direct 命中率高        = 健康；
+      #   Preprocessed 命中率高  = 退到了预处理器模式，每条边贵 5~10 倍；
+      #   Cacheable calls 远小于 ninja 边数 = 有编译压根没进缓存（命令行不受支持、
+      #   或被「新建文件」安全阀挡掉）。
+      - name: ccache statistics
+        run: ccache -s
 
       - name: Bundle runtime libraries (Qt, plugins, whitelisted system deps)
         run: |
@@ -500,9 +548,25 @@ jobs:
     # macos-14 runner 于 2026-11-02 退役,迁移到 macos-15 (仍为 arm64)
     runs-on: macos-15
     env:
-      # ccache 由 Configure CMake 的 CMAKE_*_COMPILER_LAUNCHER 启用
+      # ccache 由 Configure CMake 的 CMAKE_*_COMPILER_LAUNCHER 启用。
+      # 这四项与 Linux/Windows job 逐项一致；各项「已证实 / 仅消除误伤」的区分、
+      # 本地验证手法与后续排查方向，见 Linux job env 里那段长注释，别在这里重复。
+      # 对本 job 最相关的一条：macOS 每个 run 都要重新 pour 全部 bottle（实测 85 个
+      # 包，含整套 Qt 与 runner 预装的 openjdk/gradle/kotlin/maven/selenium-server），
+      # 工具链与头文件的时间戳每轮都变，compiler_check 必须改成 content。
       CCACHE_MAXSIZE: "1G"
-      CCACHE_SLOPPINESS: time_macros,pch_defines
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: time_macros,pch_defines,include_file_mtime,include_file_ctime
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      # ★ 关掉 Homebrew 的「已装依赖检查」。日志实测这一项会额外重装 7 个与构建
+      #   完全无关的包（runner 镜像预装的 openjdk / gradle / kotlin / maven /
+      #   selenium-server / gradle-completion …）：`brew update` 让 brew 认为
+      #   python@3.14、glib、ca-certificates、openssl@4 等过期，升级它们之后 brew
+      #   又会去「修」依赖它们的已装包，于是把这些大包整套重新 pour。官方文档对该
+      #   变量的描述正是「This will result in fewer dependents (and their
+      #   dependencies) being upgraded or reinstalled」。runner 是一次性的，这些包
+      #   的链接陈旧与否对本构建毫无影响。
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
     steps:
       - name: Resolve ref
         id: ref
@@ -538,14 +602,16 @@ jobs:
 
       # 只缓存 bottle 下载（不缓存 Cellar 链接树——跨 run 复用后者容易腐化）。
       # qt 全家桶几个 GB 的下载命中后免掉，但 pour（解包）仍需执行。
-      # key 用 run_id 滚动：bottle 版本会随 brew update 漂移，固定 key 命中后
-      # 新版本 bottle 永远存不进去。
+      # ★ key 固定（带人工版本号），不再用 run_id 滚动：滚动 key 每轮都会新存一份
+      #   ~1 GB 的条目（缓存列表里 38122087836 与 37946912628 各占一份，合计 2 GB），
+      #   而仓库 10 GB 配额已经用满、超出后按 LRU 淘汰 —— 被淘汰的可能正是 ccache
+      #   条目，而 ccache 才是真正省构建时间的那一份。bottle 版本随 brew update 漂移
+      #   导致缓存里的旧 bottle 不再被需要时，把 v1 手工递增到 v2 即可。
       - name: Restore Homebrew downloads
         uses: actions/cache@v5
         with:
           path: ~/Library/Caches/Homebrew
-          key: brew-dl-macos-${{ github.run_id }}
-          restore-keys: brew-dl-macos-
+          key: brew-dl-macos-v1
 
       # 必须放在 Checkout 之后：基础版本号从 CMakeLists.txt 的 DS_VERSION_* 读，
       # 那是 bump_version.ps1 唯一需要维护的版本号来源。此前 workflow 里各自硬编码
@@ -729,6 +795,14 @@ jobs:
             echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
+      # 打印生效的 ccache 配置（确认上面几个 env 真的传进去了）并清零统计，供构建
+      # 结束后的 `ccache statistics` 对照。过滤用 sed 而不是 grep：grep 无匹配时退出
+      # 码为 1，会让 run: 在 `bash -e -o pipefail` 下当场静默退出。
+      - name: Reset ccache stats
+        run: |
+          ccache -p | sed -n '/compiler_check\|sloppiness\|base_dir\|max_size/p'
+          ccache -z
+
       - name: Configure CMake
         run: |
           rm -rf build && mkdir -p build && cd build
@@ -755,6 +829,14 @@ jobs:
 
       - name: Install
         run: cd build && ninja install
+
+      # ★ 判断 ccache 到底有没有生效只看这一步的输出：
+      #   Direct 命中率高        = 健康；
+      #   Preprocessed 命中率高  = 退到了预处理器模式，每条边贵 5~10 倍；
+      #   Cacheable calls 远小于 ninja 边数 = 有编译压根没进缓存（命令行不受支持、
+      #   或被「新建文件」安全阀挡掉）。
+      - name: ccache statistics
+        run: ccache -s
 
       - name: Create DMG using macdeployqt
         run: |
@@ -1302,9 +1384,15 @@ jobs:
       # ccache 由 Configure CMake 的 CMAKE_*_COMPILER_LAUNCHER 启用。
       # CCACHE_DIR 显式指定：mingw 版 ccache 默认写 %LOCALAPPDATA%\ccache，
       # 显式路径让 actions/cache 的恢复目录与之一目了然，不赌默认值。
+      # 其余四项与 Linux/macOS job 逐项一致；各项「已证实 / 仅消除误伤」的区分、
+      # 本地验证手法与后续排查方向，见 Linux job env 里那段长注释，别在这里重复。
+      # 对本 job 最相关的一条：pacman 每个 run 都从零解包 186 个包（2841 MiB）的
+      # UCRT64 树，gcc 的 mtime 每轮都变，compiler_check 必须改成 content。
       CCACHE_DIR: ${{ github.workspace }}\.ccache
       CCACHE_MAXSIZE: "1G"
-      CCACHE_SLOPPINESS: time_macros,pch_defines
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: time_macros,pch_defines,include_file_mtime,include_file_ctime
+      CCACHE_BASEDIR: ${{ github.workspace }}
     defaults:
       run:
         shell: msys2 {0}
@@ -1312,6 +1400,13 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
+          # ★ update: true 不要去掉。它在本次 121s 的 Setup MSYS2 里只占约 18s
+          #   （pacman -Syuu 两轮），剩下约 103s 是 pacman 从零解包 186 个包、
+          #   2841 MiB 的 UCRT64 树——runner 是全新 VM，C:\msys64 装好的树不在任何
+          #   缓存里，这一项删不掉；而 runner 镜像自带的 pacman 数据库是镜像构建时
+          #   的，不 update 就可能因旧版本包已从镜像站下架而 404，让 job 变得不稳定。
+          #   工具链每轮重装会让 gcc 的 mtime 每次都变，这件事由
+          #   CCACHE_COMPILERCHECK=content 免疫，不需要动这里。
           update: true
           msystem: UCRT64
           install: >-
@@ -1512,6 +1607,14 @@ jobs:
             echo "::warning::fx2lafw firmware incomplete: expected 15, found ${FW_COUNT}"
           fi
 
+      # 打印生效的 ccache 配置（确认上面几个 env 真的传进去了）并清零统计，供构建
+      # 结束后的 `ccache statistics` 对照。过滤用 sed 而不是 grep：grep 无匹配时退出
+      # 码为 1，会让 run: 在 `bash -e -o pipefail` 下当场静默退出。
+      - name: Reset ccache stats
+        run: |
+          ccache -p | sed -n '/compiler_check\|sloppiness\|base_dir\|max_size/p'
+          ccache -z
+
       - name: Configure CMake
         run: |
           # Make Rust toolchain (cargo/rustc) discoverable in the MSYS2 UCRT64 shell.
@@ -1547,6 +1650,14 @@ jobs:
 
       - name: Install
         run: cd build && ninja install
+
+      # ★ 判断 ccache 到底有没有生效只看这一步的输出：
+      #   Direct 命中率高        = 健康；
+      #   Preprocessed 命中率高  = 退到了预处理器模式，每条边贵 5~10 倍；
+      #   Cacheable calls 远小于 ninja 边数 = 有编译压根没进缓存（命令行不受支持、
+      #   或被「新建文件」安全阀挡掉）。
+      - name: ccache statistics
+        run: ccache -s
 
       - name: Package (bundle DLLs and resources)
         run: |
