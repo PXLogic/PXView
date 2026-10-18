@@ -558,6 +558,44 @@ target_include_directories(test_feed_staging_copy_cost PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 
+# ==== Demo 模式 1GHz 125ms 采集性能全链路量化测试 ====
+pv_add_qtest(test_demo_1ghz_benchmark
+    data/test_demo_1ghz_benchmark.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_demo_1ghz_benchmark PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_compile_options(test_demo_1ghz_benchmark PRIVATE -O2)
+
+# ==== PXL 外部导入回放性能全链路量化测试 ====
+pv_add_qtest(test_pxl_import_benchmark
+    data/test_pxl_import_benchmark.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/snapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_diskcache_writer.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_glitch_filter.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_pattern_search.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/snapshot/logicsnapshot_edge_scan.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/data/cache/mmap_allocator.cpp
+)
+target_include_directories(test_pxl_import_benchmark PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_compile_options(test_pxl_import_benchmark PRIVATE -O2)
+
+
+
 # ==== P1-a 解码 chunk 对齐契约回归 ====
 # 锁定 decoderstack.cpp P1-a 修复依赖的两条不变式:
 #   1) 迭代器指针按字节向下取整 (非 8 对齐起点 == 对齐起点同指针)
