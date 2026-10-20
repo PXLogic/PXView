@@ -37,10 +37,12 @@
 #define PXVIEW_PV_VIEW_RENDERER_RASTERIZE_H
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include <QColor>
 #include <QPainter>
+#include <QRect>
 
 #include "pv/view/trace/paint_context.h"
 
@@ -61,6 +63,32 @@ struct GlitchRange {
     uint64_t start;
     uint64_t end;
 };
+
+// Expand the togs (toggle) list produced by LogicSnapshot::get_display_edges
+// into the 1px fill rects the logic waveform is drawn with: one horizontal
+// run per constant-level segment plus one full-height vertical bar per toggle.
+//
+// togs layout: [ (0, starting_level), (x1, level_after_1), ...,
+//                (last_x, final_level) ]  — i.e. head + optional toggles + tail.
+//
+// SIZE CONTRACT (the reason this is a separate, directly testable function):
+//   size() >= 2 — normal path, draws 2*(n-2)+1 rects.
+//   size() == 1 — only when max_togs <= 1 (a lane narrower than 20px); no
+//                 toggle was recorded. Draws NOTHING.
+//   size() == 0 — get_display_edges FAILED (invalid range, or the roll-mode
+//                 race where the ring buffer is reset between the caller's
+//                 get_ring_sample_count() and the scan). Draws NOTHING.
+// Drawing a fabricated flat level for either degenerate size would paint a
+// "stuck low" lane over a window with no valid data, so both must be skipped.
+//
+// Historical note: the original loop iterated `begin()+1 .. end()-1` without
+// checking the size. With size()<2 the start iterator is already past the end
+// iterator and the `i != end()-1` condition can never become true, so the loop
+// ran off the end of the vector until it hit an unmapped page (0xc0000005 in
+// roll mode). Index-based iteration below makes that class of bug impossible.
+void logic_edge_rects(const std::vector<std::pair<uint16_t, bool>> &togs,
+                      int high_offset, int low_offset,
+                      std::vector<QRect> &out);
 
 // Rasterize one logic channel's waveform (extracted from
 // LogicSignal::paint_mid_align). Pure function:

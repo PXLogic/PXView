@@ -221,6 +221,12 @@ private slots:
     void analog_polyline_mode_draws();
     // Analog: channel index != internal order (demo-style _ch_index) draws.
     void analog_non_identity_channel_index_draws();
+    // Logic: togs 展开契约（size()<2 不绘制；正常情形矩形逐项锁定）。
+    void logic_edge_rects_size_contract();
+    // Logic: 窄通道（togs.size()==1）按像素绘制，高低两段都在。
+    void logic_narrow_channel_draws_both_levels();
+    // 契约: get_display_edges 失败时必须清空 togs/edges；无跳变沿时 size()==2。
+    void display_edges_failure_clears_togs();
 };
 
 void TestRasterize::logic_waveform_draws_pixels()
@@ -575,6 +581,155 @@ void TestRasterize::analog_non_identity_channel_index_draws()
     QVERIFY2(img_ch8 != img_ch9,
              "channel 8 and 9 hold opposite ramps; identical bitmaps mean the "
              "order lookup collapsed both channels onto one channel");
+}
+
+// Regression（roll 模式崩溃，0xc0000005 @ 逻辑波形跳变沿遍历）：
+//
+// get_display_edges 的 togs 契约是「首点 (0, 起始电平) + 若干 toggle + 尾点」。
+// 旧实现只判断 `size() < max_togs` 就进 `begin()+1 .. end()-1` 的双向偏移遍历：
+// size()<2 时起点已经越过终点，而循环条件是"不相等才继续"，两个端点一旦"错车"
+// 就永不相等，迭代器一路狂奔读越界内存（现场 %r12 比 %rdx 大 838KB 后撞上未
+// 提交页）。
+//
+// 崩溃只可能由 size()==0（get_display_edges 失败，roll 模式下环形缓冲被重置的
+// 竞态）触发；size()==1 只会出现在 max_togs<=1 的窄通道，而那时
+// `1 < max_togs` 为假、旧代码根本进不了循环（所以窄通道用例无法复现崩溃）。
+// 失败态在渲染层不可确定性构造（需要并发竞态），故本用例直接驱动被抽出来的
+// 纯函数 logic_edge_rects，把「size()<2 不绘制」这条契约钉死。
+//
+// 双向验证：把 logic_edge_rects 的函数体换回旧写法（无守卫 + 迭代器 ±1），
+// 本用例在 (0)/(1) 两步就会越界崩溃。
+void TestRasterize::logic_edge_rects_size_contract()
+{
+    const int high = 5, low = 25;   // 与 rasterize 的 high_offset/low_offset 同义
+    std::vector<QRect> out;
+    std::vector<std::pair<uint16_t, bool>> togs;
+
+    // (0) 空容器 == get_display_edges 失败：不绘制任何东西，且不得越界。
+    pv::view::logic_edge_rects(togs, high, low, out);
+    QCOMPARE((int)out.size(), 0);
+
+    // (1) 只有首点（窄通道 max_togs<=1）：同样不绘制。
+    togs.push_back({0, true});
+    out.clear();
+    pv::view::logic_edge_rects(togs, high, low, out);
+    QCOMPARE((int)out.size(), 0);
+
+    // (2) 首点 + 尾点（窗口内无跳变）：一条贯穿全宽的高电平线。
+    togs.push_back({15, true});
+    out.clear();
+    pv::view::logic_edge_rects(togs, high, low, out);
+    QCOMPARE((int)out.size(), 1);
+    QCOMPARE(out[0], QRect(0, high, 16, 1));
+
+    // (3) 中间一个跳变（0..7 高，8..15 低）：水平段 + 竖线 + 水平段。
+    togs.clear();
+    togs.push_back({0, true});
+    togs.push_back({8, false});
+    togs.push_back({15, false});
+    out.clear();
+    pv::view::logic_edge_rects(togs, high, low, out);
+    QCOMPARE((int)out.size(), 3);
+    QCOMPARE(out[0], QRect(0, high, 9, 1));                    // 高电平段 0..8
+    QCOMPARE(out[1], QRect(8, high, 1, low - high + 1));       // 跳变竖线
+    QCOMPARE(out[2], QRect(8, low, 8, 1));                     // 低电平段 8..15
+}
+
+// 行为锁定（**不是**崩溃回归）：窄通道（width<=19px ⇒ max_togs<=1）时
+// get_display_edges 只给出首点，togs.size()==1，渲染必须落到 pulses 分支按像素
+// 绘制、高低两段都在。
+//
+// 旧实现在这里也不会崩（`1 < max_togs` 为假，进不了那个循环），所以本用例在旧
+// 实现下同样通过；它的价值是挡住另一种"修复"：把 size()<2 一律画成一条贯穿全宽
+// 的平线 —— 那样低电平段会消失，本用例的第 2 条断言会失败。
+void TestRasterize::logic_narrow_channel_draws_both_levels()
+{
+    const size_t N = 200;
+    LogicFixture fx(1, N);
+    LogicSnapshot snap;
+    fx.feed(snap, N, [](size_t s, int ch) {
+        (void)ch;
+        return s < 8;   // 8 个样本高，其后低
+    });
+
+    const int left = 0, right = 15, y = 25, total_height = 20;
+    const int high_offset = y - total_height;   // 5
+    const int low_offset = y;                   // 25
+
+    // 前置条件：确认本条用例真的走 togs.size()==1 那条路（width/10 == 1）。
+    // 参数与 rasterize_logic_channel 内部完全一致（spp = 1000 * 0.001 = 1）。
+    {
+        std::vector<std::pair<bool, bool>> pulses;
+        std::vector<std::pair<uint16_t, bool>> togs;
+        snap.get_display_edges(pulses, togs, 0, 16, (uint16_t)(right - left),
+                               (uint16_t)((right - left) / 10), 0.0, 1.0, 0);
+        QCOMPARE((int)togs.size(), 1);
+    }
+
+    QImage img(40, total_height * 2, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+
+    pv::view::PaintContext ctx;
+    ctx.scale = 0.001;   // spp = 1
+    ctx.offset = 0;
+    pv::view::rasterize_logic_channel(
+        p, &snap, 0, left, right, y, total_height, QColor(255, 255, 255),
+        ctx.scale, 0, N - 1, ctx, nullptr);
+    p.end();
+
+    QVERIFY2(img.pixelColor(3, high_offset).alpha() > 0,
+             "high-level segment must be drawn (samples 0..7)");
+    QVERIFY2(img.pixelColor(12, low_offset).alpha() > 0,
+             "low-level segment must be drawn (samples 8..14) — a blanket "
+             "flat line here would leave the low row empty");
+}
+
+// 契约：get_display_edges 失败时必须把 edges/togs 清空。
+//
+// 调用方（rasterize_logic_channel）依赖「空容器 ⇔ 失败」来跳过绘制，它的
+// `cur_edges.size() >= 2` 守卫正是由此而来。注意返回值是**起始电平**而不是
+// 成功标志（失败时同样返回 false），所以只有"是否为空"能区分两者。
+//
+// 双向验证：把 logicsnapshot_edge_scan.cpp 开头的 clear 删掉（或挪到 return
+// 之后），本用例会因残留上一轮数据而失败。
+void TestRasterize::display_edges_failure_clears_togs()
+{
+    const size_t N = 200;
+    LogicFixture fx(1, N);
+    LogicSnapshot snap;
+    // ch0: 方波，s=0 为高（首点电平 true）；ch1: 恒低。
+    fx.feed(snap, N, [](size_t s, int ch) {
+        if (ch == 0)
+            return (s % 40) < 20;
+        return false;
+    });
+
+    std::vector<std::pair<bool, bool>> pulses;
+    std::vector<std::pair<uint16_t, bool>> togs;
+
+    // (1) 正常窗口：成功，且有边沿 —— togs 至少 2 个（首点 + 尾点）。
+    const bool lvl = snap.get_display_edges(pulses, togs, 0, 199, 200, 20, 0.0,
+                                            1.0, 0);
+    QVERIFY2(lvl, "channel starts high, so the returned initial level is true");
+    QVERIFY2(!pulses.empty(), "successful scan must fill edges");
+    QVERIFY2(togs.size() >= 2, "successful scan must push head + tail toggles");
+
+    // (2) 窗口内没有跳变沿（ch1 恒低）：不是失败，togs 恰好是首尾两点。
+    pulses.clear();
+    togs.clear();
+    snap.get_display_edges(pulses, togs, 0, 199, 200, 20, 0.0, 1.0, 1);
+    QCOMPARE((int)togs.size(), 2);
+
+    // (3) 非法区间（start > end）：失败，两个容器都必须被清空 —— 哪怕上一轮
+    //     刚填满数据。
+    const bool bad = snap.get_display_edges(pulses, togs, 50, 10, 200, 20, 0.0,
+                                            1.0, 0);
+    QVERIFY2(!bad, "failure path returns false (same value as a low level)");
+    QVERIFY2(togs.empty(),
+             "failed scan must leave togs EMPTY — a stale non-empty container "
+             "would drive the renderer's edge loop out of bounds");
+    QVERIFY2(pulses.empty(), "failed scan must leave edges EMPTY");
 }
 
 QTEST_MAIN(TestRasterize)

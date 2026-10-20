@@ -56,6 +56,36 @@ static constexpr uint16_t kRasterizeTogMaxScale = 10;
 // 全精度重建，用户最终看到的仍是完整细节。
 static constexpr uint16_t kRasterizeMotionTogDivisor = 4;
 
+void logic_edge_rects(const std::vector<std::pair<uint16_t, bool>> &togs,
+                      int high_offset, int low_offset,
+                      std::vector<QRect> &out) {
+  // 契约见 rasterize.h。size()<2 一律不绘制：
+  //   0 — get_display_edges 失败（非法区间，或 roll 模式下环形缓冲被重置/缩小
+  //       的竞态；它清空容器后提前 return）；
+  //   1 — 该通道 max_togs<=1（width<=19px），一个 toggle 都没记录。
+  //
+  // 这条守卫是必需的：点对点遍历的端点是 begin()+1 与 end()-1，size()<2 时起点
+  // 已经越过终点，而循环条件是"不相等才继续"——两个端点一旦"错车"就永不相等，
+  // 迭代器会一路狂奔读越界内存（现场崩溃：%r12 比 %rdx 大 838KB 后撞上未提交
+  // 页，0xc0000005）。此处改用下标遍历，结构上不可能错车。
+  const size_t n = togs.size();
+  if (n < 2)
+    return;
+
+  int preX = 0;
+  // 起始电平就是首点携带的电平（get_display_edges 的返回值与之相同）。
+  int preY = togs[0].second ? high_offset : low_offset;
+  for (size_t k = 1; k + 1 < n; ++k) {
+    const int x = togs[k].first;
+    out.push_back(QRect(preX, preY, x - preX + 1, 1));
+    out.push_back(QRect(x, high_offset, 1, low_offset - high_offset + 1));
+    preX = x;
+    preY = togs[k].second ? high_offset : low_offset;
+  }
+  const int x = togs[n - 1].first;
+  out.push_back(QRect(preX, preY, x - preX + 1, 1));
+}
+
 void rasterize_logic_channel(
     QPainter &p, data::LogicSnapshot *snapshot, int channel_index,
     int left, int right, int y, int total_height, const QColor &colour,
@@ -67,6 +97,12 @@ void rasterize_logic_channel(
   if (!snapshot)
     return;
   assert(right >= left);
+
+  // 运行期守卫：`assert` 在 Release 被剔除，而 `right < left` 会让下面
+  // `uint16_t width = right - left` 把负数截成 ~65535，进而以 width=65531
+  // 之类的值去扫边沿（不崩，但是一次无意义的巨量扫描 + 越界绘制）。
+  if (right <= left)
+    return;
 
   if (scale <= 0)
     return;
@@ -161,18 +197,14 @@ void rasterize_logic_channel(
   int preY = first_sample ? high_offset : low_offset;
   int x = preX;
 
-  if (cur_edges.size() < max_togs) {
-    std::vector<std::pair<uint16_t, bool>>::const_iterator i;
-    for (i = cur_edges.begin() + 1; i != cur_edges.end() - 1; i++) {
-      x = (*i).first;
-      wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
-      wave_rects.push_back(
-          QRect(x, high_offset, 1, low_offset - high_offset + 1));
-      preX = x;
-      preY = (*i).second ? high_offset : low_offset;
-    }
-    x = (*i).first;
-    wave_rects.push_back(QRect(preX, preY, x - preX + 1, 1));
+  // cur_edges（togs）展开成 1px 填充矩形。要求 size()>=2 才能走点对点遍历：
+  //   - size()==0 ⇒ get_display_edges 失败（非法区间 / roll 模式下环形缓冲被
+  //     重置的竞态），此时 pulses 同样为空，落到下面的分支后"什么都不画"；
+  //   - size()==1 ⇒ 窄通道（max_togs<=1，width<=19px）一个 toggle 都没记录，
+  //     落到 pulses 分支按像素绘制比画一条平线更准。
+  // 两种退化情形都绝不伪造电平，与函数内其它失败守卫（return 不绘制）一致。
+  if (cur_edges.size() >= 2 && cur_edges.size() < max_togs) {
+    logic_edge_rects(cur_edges, high_offset, low_offset, wave_rects);
   } else if (cur_pulses.size() > 0) {
     std::vector<std::pair<bool, bool>>::const_iterator i = cur_pulses.begin();
     while (i != cur_pulses.end() - 1) {

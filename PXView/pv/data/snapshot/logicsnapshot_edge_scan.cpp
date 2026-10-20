@@ -154,8 +154,16 @@ bool LogicSnapshotEdgeScan::get_display_edges(
 
   std::lock_guard<std::recursive_mutex> lock(_host->_mutex);
 
-  if (_host->_ring_sample_count == 0)
+  if (_host->_ring_sample_count == 0) {
+    // 静默返回会让调用方拿到一个**空** togs（见 rasterize_logic_channel 对
+    // size()<2 的防御）。这条路径在 roll 模式下是真实可达的竞态：调用方读
+    // get_ring_sample_count() 之后、这里读 _ring_sample_count 之前，缓冲被
+    // 重置/缩小。留一条日志，否则修好崩溃后现场无从确认竞态是否仍在发生。
+    pxv_warn("LogicSnapshot::get_display_edges: ring_sample_count==0 "
+             "(start=%llu end=%llu), buffer reset during paint?",
+             (unsigned long long)start, (unsigned long long)end);
     return false;
+  }
 
   // Guard: end/start may be invalid when called during file loading or
   // after a stale config restore. Original asserts crash via MSVC dialog.
