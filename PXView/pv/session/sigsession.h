@@ -475,6 +475,9 @@ void on_load_config_end();
       // are invisible in the GUI until a tab switch or repaint triggers sync.
       signals_changed();
   }
+  void rebuild_decoder_pannel_layers_only() {
+      if (_decoder_pannel) _decoder_pannel->rebuild_layers();
+  }
   void update_dso_data_scale() override;
   void remove_decode_task(std::shared_ptr<data::DecoderStack> stack);
   double get_logic_data_view_time() override;

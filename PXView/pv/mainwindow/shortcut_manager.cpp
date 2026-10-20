@@ -217,7 +217,7 @@ bool MainWindowShortcutManager::handleKeyPress(QObject *object,
              key);
     static bool in_forward = false;
     if (in_forward)
-      return true;
+      return false;
     in_forward = true;
     qApp->sendEvent(target, &newEvent);
     in_forward = false;

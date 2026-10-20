@@ -819,7 +819,7 @@ void ProtocolDock::rebuild_protocol_layers() {
   // Replace _protocol_lay_items with the ordered new_items list.
   _protocol_lay_items = std::move(new_items);
 
-  protocol_updated();
+  update_model();
   adjustPannelSize();
 }
 

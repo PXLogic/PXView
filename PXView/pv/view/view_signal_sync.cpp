@@ -1202,6 +1202,15 @@ void ViewSignalSync::on_signals_changed() {
     return;
   }
 
+  if (_rebuild_in_progress)
+    return;
+  _rebuild_in_progress = true;
+  struct RebuildGuard {
+    bool &flag;
+    RebuildGuard(bool &f) : flag(f) {}
+    ~RebuildGuard() { flag = false; }
+  } _guard(_rebuild_in_progress);
+
   // --- Plan B: detect derived-trace (decoder/spectrum) changes ---
   //
   // compute_change_event only compares SignalModels (Logic/Dso/Analog).
@@ -1300,7 +1309,7 @@ void ViewSignalSync::on_signals_changed() {
   // (no synchronous re-entry), and the throttle timer coalesces it, so this
   // cannot cause infinite recursion.
   if (derived_changed && _view->session_ptr())
-    _view->session_ptr()->rebuild_decoder_pannel();
+    _view->session_ptr()->rebuild_decoder_pannel_layers_only();
 }
 
 void ViewSignalSync::signals_added_layout() {
