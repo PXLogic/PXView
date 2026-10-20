@@ -10,11 +10,14 @@
   1. `.fw`  — FX2 USB 重枚举固件，由 scan() 里的 ezusb_upload_firmware() 在
               设备首次插入（尚未跑固件）时上传。设备跑完它才会以
               "DreamSourceLab USB-based Instrument" 重新枚举成可用设备。
-              注意：`.fw` **不是每型号一份**。FX2（Cypress CY7C68013A）只负责
-              重枚举，全族共用一份；真正区分型号的是 `.bin`。
-              世上只存在 4 个 `.fw`：DSLogic.fw / DSLogicPro.fw / DSCope.fw /
-              DSCope20.fw。旧 fork dsl.h 里那 25 个不同的 `.fw` 名字有 21 个
-              从未被任何人分发过，照抄过来必然上传失败。
+              注意：`.fw` **不是每型号一份，但也不是"全族共用一份"**——每个
+              blob 里烧死了一个 USB 设备描述符（实测：DSLogic.fw=2A0E:0001、
+              DSLogicPro.fw=0003、DSCope.fw=0002、DSCope20.fw=0004），上传
+              哪个 blob，设备就以哪个 PID 重枚举，因此它只能给 PID 相同的型号
+              用（见 api.c 的 dslogic_fx2_blob_for_pid()）。
+              世上只存在这 4 个 `.fw`（本仓库与 DSView 官方包 DSView/res/
+              都只有这 4 个）；旧 fork dsl.h 里另外 21 个逐型号名字从未被
+              任何人分发过，照抄过来必然上传失败。
   2. `.bin` — FPGA bitstream，由 dslogic_fpga_firmware_upload() 在 dev_open()
               里上传。**这一项才是逐型号独立的**，21 个 bitstream 与 profile
               一一对应。
@@ -76,6 +79,13 @@ def split_entries(block: str) -> list[str]:
     return entries
 
 
+def strip_comments(s: str) -> str:
+    """去掉 C 注释，避免"注释里提到函数名"骗过调用点检查。"""
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
+    s = re.sub(r"//[^\n]*", " ", s)
+    return s
+
+
 def parse_profiles(api_path: Path) -> list[dict]:
     try:
         src = api_path.read_text(encoding="utf-8", errors="replace")
@@ -120,10 +130,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="DSLogic/DSCope 固件完整性检查")
     ap.add_argument("--res", type=Path, default=DEFAULT_RES,
                     help=f"res 固件目录（默认 {DEFAULT_RES}）")
+    ap.add_argument("--api", type=Path, default=API_C,
+                    help="驱动的 api.c（默认 libsigrok/.../dreamsourcelab-dslogic/api.c）")
     ap.add_argument("--quiet", action="store_true", help="只输出摘要与缺失项")
     args = ap.parse_args()
 
-    profiles = parse_profiles(API_C)
+    profiles = parse_profiles(args.api)
     if not profiles:
         print("[fatal] 未解析到任何 profile", file=sys.stderr)
         return 2
@@ -147,7 +159,7 @@ def main() -> int:
     missing_bin = sorted(b for b in bin_users if b not in present)
 
     if not args.quiet:
-        print(f"源文件 : {API_C.relative_to(REPO_ROOT)}")
+        print(f"源文件 : {args.api.relative_to(REPO_ROOT) if args.api.is_relative_to(REPO_ROOT) else args.api}")
         print(f"res 目录: {res_dir.relative_to(REPO_ROOT) if res_dir.is_relative_to(REPO_ROOT) else res_dir}")
         print(f"profile : {len(profiles)} 个")
         print()
@@ -187,6 +199,35 @@ def main() -> int:
         print("=== 缺失的 FPGA bitstream ===")
         for bit in missing_bin:
             print(f"  {bit}")
+
+    # --- 上传前的 PID 守卫 ---------------------------------------------------
+    # blob 里的 USB 描述符是烧死的，把某个 blob 传给 PID 不同的型号，设备会以
+    # 那个 PID 重新枚举（例如 0x0030 -> 0x0001）：按 0x0030 建的实例再也打不开，
+    # 重扫还会把它当 "DSLogic" 并往 PGL12 板子上装 DSLogic33.bin。所以 scan()
+    # 必须先经 dslogic_fx2_blob_for_pid() 查表，查不到就跳过设备。
+    src = args.api.read_text(encoding="utf-8", errors="replace")
+    guard_problems: list[str] = []
+    if "dslogic_fx2_blob_for_pid" not in src:
+        guard_problems.append(
+            "api.c 里没有 dslogic_fx2_blob_for_pid() —— 上传 .fw 前没有按 PID 校验")
+    else:
+        i = src.find("static GSList *scan(")
+        if i < 0:
+            guard_problems.append("找不到 scan() 函数体")
+        elif not re.search(r"dslogic_fx2_blob_for_pid\s*\(",
+                           strip_comments(src[i:i + 12000])):
+            guard_problems.append(
+                "scan() 上传 .fw 时没有经过 dslogic_fx2_blob_for_pid() 查表 —— "
+                "会给 PID 不匹配的型号上传 blob，设备将以另一个型号重新枚举")
+        for name in ("DSLogic.fw", "DSLogicPro.fw", "DSCope.fw", "DSCope20.fw"):
+            if f'"{name}"' not in src:
+                guard_problems.append(f"dslogic_fx2_blob_for_pid() 里缺少 {name} 的分支")
+    if guard_problems:
+        print()
+        print("=== FX2 上传守卫缺失 ===")
+        for s in guard_problems:
+            print(f"  - {s}")
+        return 1
 
     if missing_fw or missing_bin:
         return 1

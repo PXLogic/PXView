@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <string>
 #include <thread>
 #include <QFileInfo>
 #include <libsigrok/libsigrok.h>  // sdi->model 字段写入需完整类型
@@ -175,6 +176,21 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
         pxv_info("open_by_handle: nullptr driver — treating as virtual input-module device");
     }
 
+    // The firmware burn inside hw_usb_open() ends with "rst usb", which makes
+    // the device drop off the bus and re-enumerate, so the retry loop below has
+    // to identify it again by its *stable* USB port path. sr_dev_inst_connid_get()
+    // derives that path lazily — by matching bus/address against the live libusb
+    // device list (libsigrok/src/device.c) — and caches it in sdi->connection_id.
+    // Capture it BEFORE sr_dev_open(): once the device has been reset it is gone
+    // from the bus, the lookup returns NULL, and the loop used to abort before
+    // its very first rescan ("cannot get connection_id for retry").
+    std::string conn_id;
+    if (!is_virtual_session) {
+        const char *cid = sr_dev_inst_connid_get(sdi);
+        if (cid)
+            conn_id = cid;
+    }
+
     int open_ret = SR_OK;
     if (!is_virtual_session) {
         open_ret = sr_dev_open(sdi);
@@ -190,22 +206,22 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
     if (open_ret == SR_ERR_DEV_CLOSED) {
         pxv_info("open_by_handle: device reset after firmware upgrade (ret=-7), "
                  "waiting for re-enumeration...");
-        for (int retry = 0; retry < 5; retry++) {
+        // No explicit sr_dev_close() here: the driver already released and
+        // closed the handle on this path (px_usb_close_handle in pxlogic.c),
+        // and sr_dev_close() would refuse anyway — it requires
+        // sdi->status == SR_ST_ACTIVE while this path leaves INITIALIZING.
+
+        if (conn_id.empty())
+            pxv_err("open_by_handle: no stable connection_id captured before "
+                    "the firmware reset; cannot identify the re-enumerated device");
+
+        for (int retry = 0; retry < 5 && !conn_id.empty(); retry++) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             pxv_info("open_by_handle: retry %d/5 after firmware reset", retry + 1);
             // Rescan to get the freshly-enumerated sdi with a new
             // libusb_device_handle. The old sdi's conn handle is stale.
-            // Caller (SigSession) must refresh_device_list before retrying;
-            // we use the externally-provided refresh callback if set, or
-            // directly re-scan via the context.
-            // The sdi pointer may be freed by sr_driver_scan's clear_instances
-            // — re-find by connection_id (USB port path) which is stable.
-            const char *old_conn_id = sr_dev_inst_connid_get(sdi);
-            if (!old_conn_id) {
-                pxv_err("open_by_handle: cannot get connection_id for retry");
-                break;
-            }
-            // Re-scan: find sdi with same connection_id
+            // The device comes back at the same USB port path but (usually) a
+            // different bus address, so the port path is the only stable key.
             struct sr_dev_inst *new_sdi = nullptr;
             struct sr_dev_driver **drivers = sr_driver_list(ctx);
             if (drivers) {
@@ -216,11 +232,13 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
                     for (GSList *l = devs; l; l = l->next) {
                         struct sr_dev_inst *s = (struct sr_dev_inst *)l->data;
                         const char *cid = sr_dev_inst_connid_get(s);
-                        if (cid && strcmp(cid, old_conn_id) == 0) {
+                        if (cid && conn_id == cid) {
                             new_sdi = s;
                             break;
                         }
                     }
+                    if (new_sdi)
+                        break;
                 }
             }
             if (!new_sdi) {
@@ -231,12 +249,22 @@ bool DeviceAgent::open_by_handle(ds_device_handle handle, struct sr_context *ctx
             sdi = new_sdi;
             open_ret = sr_dev_open(sdi);
             if (open_ret == SR_OK) {
+                // Keep handle -> sdi in sync: _scanned_sdi is indexed by handle,
+                // and the instance we just opened is a NEW one created by the
+                // rescan above, not the one this handle was bound to. Without
+                // this, handle_of_sdi(_di) returns NULL_HANDLE and every
+                // close/remove path silently misses this device.
+                _dev_mgr.replace_scanned_sdi(handle, sdi);
                 pxv_info("open_by_handle: device reopened successfully after firmware upgrade");
                 break;
             }
             if (open_ret != SR_ERR_DEV_CLOSED) {
-                // Different error — not a firmware reset, surface it
-                break;
+                // 失败常常是暂时的：设备已经枚举出来，但寄存器接口还没起来
+                // （刚复位完 usb_rd_reg 会失败），于是 hw_usb_open 的固件版本
+                // 读失败返回 SR_ERR。这类错误不能一撞就放弃 —— 继续下一轮重试，
+                // 否则就退回到"设备变成 Unknown、必须拔插"的老现象。
+                pxv_info("open_by_handle: reopen attempt %d failed (%d, %s), retrying...",
+                         retry + 1, open_ret, sr_strerror(open_ret));
             }
         }
     }

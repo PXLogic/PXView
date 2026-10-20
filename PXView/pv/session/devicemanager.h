@@ -39,6 +39,22 @@ public:
     {
         _scanned_sdi = sdis;
     }
+
+    /** 把扫描区里 handle 对应的 sdi 换成新实例。
+     *
+     *  固件升级后的重开路径（DeviceAgent::open_by_handle 的 DEV_CLOSED 重试）
+     *  会重新扫描拿到一个**新的** sdi 并打开它；若不回写这里，
+     *  find_sdi_by_handle(handle) 仍指向旧实例，handle_of_sdi(_di) 返回
+     *  NULL_HANDLE，关闭/移除路径会静默漏掉这台设备。越界（handle 不属于
+     *  扫描区）时是 no-op。 */
+    void replace_scanned_sdi(ds_device_handle handle, struct sr_dev_inst *sdi)
+    {
+        if (handle == NULL_HANDLE || !sdi)
+            return;
+        const int idx = static_cast<int>(handle) - 1;
+        if (idx >= 0 && idx < static_cast<int>(_scanned_sdi.size()))
+            _scanned_sdi[idx] = sdi;
+    }
     const std::vector<struct sr_dev_inst *> &scanned_sdi() const
     {
         return _scanned_sdi;

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """判定 PXLogic 驱动是否在 scan 阶段按 logic_mode 区分设备变体。
 
-不依赖硬件，纯静态核对六件事：
+不依赖硬件，纯静态核对九件事：
   1. supported_PX[] 表里同一 (vid,pid,usb_speed) 下是否真的存在多个变体
      （ch32 / ch16 Pro / ch16 Plus / ch16 Base 共用 0x16C0:0x05DC）
   2. logic_check_conf_profile() 是否真的去读 logic_mode 寄存器（8192 + 22*4）
@@ -12,6 +12,11 @@
   5. scan() 选表时是否用 logic_mode 参与匹配、未识别时是否如实标 "model unknown"
   6. hw_usb_open() 的 profile 修正是否"整套"跟着换（sdi->model + 探针列表），
      以及是否把 model_unknown 也当成触发条件
+  7. hw_dev_open() 在 hw_usb_open() 失败时是否关闭已 claim 的 USB 句柄 ——
+     固件烧录后设备复位重枚举，句柄不关会让重扫的 libusb_open 被拒绝，
+     型号退化成 "model unknown" 且只能物理拔插恢复
+  8. dreamsourcelab-dslogic 的 dsl_dev_open() 是否有同样的句柄收口（claim
+     之后的每条失败路径都要 release+close），清理函数是否真的 release/close/置 NULL
 
 用法：python tests/check_pxlogic_profile_scan.py [--c FILE] [--h FILE]
 退出码：0 一致 / 1 不一致 / 2 解析失败
@@ -24,6 +29,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PXLOGIC_C = REPO / "libsigrok/src/hardware/pxlogic/pxlogic.c"
 PXLOGIC_H = REPO / "libsigrok/src/hardware/pxlogic/pxlogic.h"
+DSLOGIC_PROTOCOL_C = (
+    REPO / "libsigrok/src/hardware/dreamsourcelab-dslogic/protocol.c")
 
 # 表项头部：{vid, pid, LIBUSB_SPEED_x, logic_mode, "vendor", "model",
 ENTRY_RE = re.compile(
@@ -99,6 +106,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--c", type=Path, default=PXLOGIC_C)
     ap.add_argument("--h", type=Path, default=PXLOGIC_H)
+    ap.add_argument("--dsl", type=Path, default=DSLOGIC_PROTOCOL_C,
+                    help="dreamsourcelab-dslogic 的 protocol.c（第 8 项检查用）")
     a = ap.parse_args()
 
     src = a.c.read_text(encoding="utf-8", errors="replace")
@@ -234,6 +243,39 @@ def main():
                 "hw_usb_open() 的修正条件没有考虑 devc->model_unknown —— 扫描阶段没识别出"
                 "型号、而设备恰好真是 32 通道时，名字会永远停在 \"model unknown\"")
 
+    # --- 7. hw_usb_open() 的失败路径必须关闭已经 claim 的 USB 句柄 ----------
+    # 固件版本不一致时 hw_usb_open() 会下发新固件、写 "rst usb" 让设备复位并
+    # 以新设备身份重新枚举。这条路径（以及另外两条失败路径）若在 return 前不
+    # 关句柄，本进程会继续持有复位前那台设备的 WinUSB 文件对象：重扫阶段的
+    # libusb_open 被拒绝（ERROR_ACCESS_DENIED -> LIBUSB_ERROR_ACCESS），读不到
+    # logic_mode，设备被标成 "model unknown" 且再也打不开，只能物理拔插。
+    devopen = body_of(src, "static int hw_dev_open(")
+    if not devopen:
+        problems.append("找不到 hw_dev_open() 函数体")
+    else:
+        dcode = strip_comments(devopen)
+        m = re.search(
+            r'if\s*\(\s*ret\s*!=\s*SR_OK\s*\)\s*\{?\s*(\w+)\s*\(\s*sdi\s*\)', dcode)
+        if not m:
+            problems.append(
+                "hw_dev_open() 在 hw_usb_open() 失败时没有关闭 USB 句柄 —— 固件烧录后"
+                "设备复位重枚举，本进程仍持有复位前的 WinUSB 句柄，重扫的 libusb_open "
+                "会得到 LIBUSB_ERROR_ACCESS，型号退化成 model unknown 且只能拔插恢复")
+        else:
+            helper = m.group(1)
+            hbody = body_of(src, "static void " + helper + "(")
+            if not hbody:
+                problems.append(f"hw_dev_open() 调用的 {helper}() 找不到定义")
+            else:
+                hcode = strip_comments(hbody)
+                for need, why in (
+                    (r'libusb_release_interface\s*\(', "没有 release 接口"),
+                    (r'libusb_close\s*\(', "没有 libusb_close"),
+                    (r'devhdl\s*=\s*NULL', "没有把 usb->devhdl 置空（幂等性依赖它）"),
+                ):
+                    if not re.search(need, hcode):
+                        problems.append(f"{helper}() {why} —— 句柄没有真正释放")
+
     # --- 6. 每个 profile 的 default_channelmode 必须在自己支持的通道模式里 ----
     for p in profiles:
         d = p["default"]
@@ -247,12 +289,78 @@ def main():
             problems.append(
                 f"{p['model']}: default_channelmode {d} 不在自身 dev_caps.channels 掩码内")
 
+    # --- 8. dreamsourcelab-dslogic: dsl_dev_open() 失败必须关句柄 -------------
+    # 与第 7 项同一类问题。claim 之后的三条失败路径（HW_STATUS 读失败 / FPGA
+    # 配置失败 / EEPROM 读失败）若直接 return，句柄会比这次失败的打开活得更久：
+    # api.c 的重枚举重试循环下一次 libusb_claim_interface 直接 BUSY，一次失败
+    # 就永久打不开，只能退出进程。
+    if a.dsl.exists():
+        dsrc = a.dsl.read_text(encoding="utf-8", errors="replace")
+        dopen = body_of(dsrc, "SR_PRIV int dsl_dev_open(")
+        if not dopen:
+            problems.append("找不到 dsl_dev_open() 函数体")
+        else:
+            dcode = strip_comments(dopen)
+            i = dcode.find("libusb_claim_interface")
+            if i < 0:
+                problems.append("dsl_dev_open() 里找不到 libusb_claim_interface —— 解析失败")
+            else:
+                tail = dcode[i:]
+                bad = []
+                for m in re.finditer(r'return\s+(?:SR_ERR|ret)\s*;', tail):
+                    ctx = tail[max(0, m.start() - 160):m.start()]
+                    if not re.search(r'dsl_release_handle\s*\(\s*sdi\s*\)', ctx):
+                        bad.append(tail[max(0, m.start() - 60):m.end()].replace("\n", " "))
+                if bad:
+                    problems.append(
+                        "dsl_dev_open() 在 claim 之后有失败路径没有关闭 USB 句柄 —— "
+                        "句柄会活过这次失败的打开，重试循环的下一次 claim 直接 BUSY："
+                        + " || ".join(bad[:3]))
+                hbody = body_of(dsrc, "static void dsl_release_handle(")
+                if not hbody:
+                    problems.append("dsl_dev_open() 的清理函数 dsl_release_handle() 找不到定义")
+                else:
+                    hcode = strip_comments(hbody)
+                    for need, why in (
+                        (r'libusb_release_interface\s*\(', "没有 release 接口"),
+                        (r'libusb_close\s*\(', "没有 libusb_close"),
+                        (r'devhdl\s*=\s*NULL', "没有把 usb->devhdl 置空（幂等性依赖它）"),
+                    ):
+                        if not re.search(need, hcode):
+                            problems.append(f"dsl_release_handle() {why} —— 句柄没有真正释放")
+
+    # --- 9. dreamsourcelab-dslogic: 采集启动顺序 ------------------------------
+    # 设备一旦收到 DSL_CTL_START 就开始推数据，此时主机必须已经排好 IN 传输，
+    # 否则 stream 模式会丢掉开头一段；SR_DF_HEADER 又必须最后发，否则前端会在
+    # 不知道采集已开始的情况下先收到数据。参考顺序（DSView 1.3.2
+    # dslogic.c:1468 start_transfers → :1477 START → :1510 header）。
+    if a.dsl.exists():
+        dsrc = a.dsl.read_text(encoding="utf-8", errors="replace")
+        astart = body_of(dsrc, "SR_PRIV int dslogic_acquisition_start(")
+        if not astart:
+            problems.append("找不到 dslogic_acquisition_start() 函数体")
+        else:
+            acode = strip_comments(astart)
+            i_xfer = acode.find("start_transfers(")
+            i_start = acode.find("command_start_acquisition(")
+            i_hdr = acode.find("std_session_send_df_header(")
+            if min(i_xfer, i_start, i_hdr) < 0:
+                problems.append(
+                    "dslogic_acquisition_start() 里缺少 start_transfers() / "
+                    "command_start_acquisition() / std_session_send_df_header() 之一")
+            elif not (i_xfer < i_start < i_hdr):
+                problems.append(
+                    "dslogic_acquisition_start() 的顺序不对：必须是 "
+                    "start_transfers（提交触发包+数据 transfers）→ START → "
+                    "SR_DF_HEADER。START 早于 transfers 会让 stream 模式丢开头数据，"
+                    "header 早于 START 会让前端先收到数据")
+
     if problems:
         print("\n=== 不一致 ===")
         for s in problems:
             print(f"  - {s}")
-        print("\n  => 多变体设备会在设备列表 / 设备选项栏里显示成错误型号，"
-              "通道数也按错误 profile 建立。")
+        print("\n  => 以上任一不一致都会让设备在扫描/打开阶段显示成错误型号、"
+              "通道数按错误 profile 建立，或者干脆打不开。")
         return 1
 
     print("\n一致：scan 阶段读 logic_mode，选表与 profile 修正均完整。")
