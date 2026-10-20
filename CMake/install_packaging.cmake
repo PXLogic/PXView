@@ -416,6 +416,14 @@ install(CODE "
     if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html\")
         file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\"
              TYPE DIRECTORY FILES \"${CMAKE_CURRENT_SOURCE_DIR}/web/dist/\")
+        if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/web/public/perf.html\")
+            file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\"
+                 TYPE FILE FILES \"${CMAKE_CURRENT_SOURCE_DIR}/web/public/perf.html\")
+        endif()
+        if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/web/public/inspector.html\")
+            file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\"
+                 TYPE FILE FILES \"${CMAKE_CURRENT_SOURCE_DIR}/web/public/inspector.html\")
+        endif()
         message(STATUS \"Installing web client to: \${CMAKE_INSTALL_PREFIX}/${MAC_RES_PREFIX}bin/webui\")
     else()
         message(STATUS \"Web client not built, skipping. Run: ninja webui\")

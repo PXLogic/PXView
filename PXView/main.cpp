@@ -40,6 +40,7 @@
 #include "pv/core/appcontrol.h"
 #include "pv/core/headless_run.h"
 #include "pv/core/ui_hooks.h"
+#include "pv/mainwindow/widget_inspector.h"
 #include "pv/api/iapp_service.h"
 #include "pv/api/isession_service.h"
 #include "pv/base/log.h"
@@ -227,6 +228,7 @@ int main(int argc, char *argv[])
 	pv::set_notify_user_hook([](const QString &message) {
 		MsgBox::Show(message);
 	});
+	pv::set_dump_ui_tree_hook(&pv::mainwindow::dump_ui_tree_json);
     a.setStyle(new MyStyle);
 
     QFont font = a.font();

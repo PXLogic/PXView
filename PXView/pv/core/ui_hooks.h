@@ -46,4 +46,14 @@ void set_notify_user_hook(NotifyUserFn fn);
 
 void notify_user(const QString &message);
 
+/// Dump the live QWidget UI tree hierarchy as a JSON string. The GUI binds
+/// a serializer that walks QApplication::topLevelWidgets() on the main thread.
+/// Headless builds (pxviewd) leave it unbound and return an empty fallback.
+using DumpUiTreeFn = QString (*)();
+
+void set_dump_ui_tree_hook(DumpUiTreeFn fn);
+
+QString dump_ui_tree();
+
 } // namespace pv
+

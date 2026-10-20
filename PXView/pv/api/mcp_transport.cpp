@@ -4,7 +4,11 @@
 
 #include "pv/core/eventbus.h"
 #include "pv/core/qt_async_dispatcher.h"
+#include "pv/core/appcontrol.h"
+#include "pv/core/ui_hooks.h"
+#include "pv/session/sigsession.h"
 #include "pv/base/perf.h"
+#include "pv/interface/events.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -388,10 +392,48 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
     }
 
     QByteArray http_method = parts[0];
+    QByteArray path = parts[1].trimmed();
+
+    // Active benchmark trigger endpoint (supports both GET and POST)
+    if (path.startsWith("/perf/benchmark")) {
+#ifdef PXV_PERF
+        int duration_s = 5;
+        qsizetype q_idx = path.indexOf("duration=");
+        if (q_idx >= 0) {
+            qsizetype end_idx = path.indexOf('&', q_idx);
+            QByteArray val_str = (end_idx >= 0) ? path.mid(q_idx + 9, end_idx - (q_idx + 9)) : path.mid(q_idx + 9);
+            bool ok = false;
+            int val = val_str.toInt(&ok);
+            if (ok) duration_s = val;
+        }
+        if (duration_s > 0)
+            duration_s = std::clamp(duration_s, 1, 60);
+        else
+            duration_s = 0; // 0 or negative means abort
+
+        if (auto *ctrl = ::AppControl::Instance()) {
+            if (auto *sess = ctrl->GetSession()) {
+                sess->broadcast_async<pv::interface::BenchmarkRequested>(
+                    { duration_s * 1000 });
+            }
+        }
+
+        QByteArray res_body = QString("{\"status\":\"%1\",\"duration_s\":%2}")
+                                  .arg(duration_s > 0 ? "running" : "stopped")
+                                  .arg(duration_s).toUtf8();
+        send_http_response(socket, 200, res_body, "application/json");
+#else
+        send_http_response(
+            socket, 404,
+            "{\"error\":\"perf instrumentation not compiled in\","
+            "\"hint\":\"rebuild with -DENABLE_PERF=ON\"}",
+            "application/json");
+#endif
+        return;
+    }
 
     // Handle GET requests — serve static files from webui/ directory
     if (http_method == "GET") {
-        QByteArray path = parts[1].trimmed();
 
         // Dedicated perf endpoint. Deliberately NOT registered as an MCP tool:
         // the perf page is a plain browser page, and keeping it off the MCP
@@ -418,6 +460,12 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
             return;
         }
 
+        if (path == "/ui/tree" || path == "/ui/tree.json") {
+            const QString ui_json = pv::dump_ui_tree();
+            send_http_response(socket, 200, ui_json.toUtf8(), "application/json");
+            return;
+        }
+
         // Default to index.html for root path
         if (path == "/")
             path = "/index.html";
@@ -427,6 +475,9 @@ void McpTransport::handle_http_request(QTcpSocket* socket, const QByteArray& dat
         // web/public/ by Vite), so /perf.html already worked.
         if (path == "/perf")
             path = "/perf.html";
+
+        if (path == "/inspector")
+            path = "/inspector.html";
 
         // Security: reject paths with ".." to prevent directory traversal
         if (path.contains("..")) {

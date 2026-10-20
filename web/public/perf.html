@@ -55,9 +55,12 @@
   .dot.bad { background: var(--bad); }
   .dot.warn { background: var(--warn); }
 
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-           gap: 12px; margin-top: 16px; }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  /* flex 而不是 grid auto-fit：auto-fit 不会把没占满的那一栏空间分掉，
+     卡片会挤在左边留下一大块空白。flex: 1 1 140px 让卡片自己把行铺满。
+     （140 而不是 150：成绩卡在 .bench 的内边距里，6 张 × 150 会差十几像素换行。） */
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+  .stat { flex: 1 1 140px; min-width: 140px;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
           padding: 10px 14px; }
   .stat .label { font-size: 11px; color: var(--fg-dim); letter-spacing: .04em; }
   .stat .big { font: 600 22px/1.35 var(--mono); }
@@ -94,16 +97,165 @@
   .banner.bad { border-color: var(--bad); }
   code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 5px;
          border-radius: 4px; }
+
+  /* ---- 主动压测：控件 / 进度 / 成绩卡 ---- */
+  .bench { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 12px 14px; margin-top: 10px; }
+  .bench-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { background: transparent; border: 0; border-right: 1px solid var(--line);
+                color: var(--fg-dim); font: 12px/1.5 var(--mono); padding: 4px 11px; cursor: pointer; }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: var(--panel-2); color: var(--fg); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .num { width: 54px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+         color: var(--fg); font: 12px var(--mono); padding: 4px 6px; text-align: center; }
+  .act { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--fg);
+         font: 600 12px/1.5 system-ui, sans-serif; padding: 5px 14px; cursor: pointer;
+         transition: background .15s, border-color .15s, color .15s; }
+  .act:hover { border-color: var(--accent); color: var(--accent); }
+  .act.go, .act.go:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .act.stop, .act.stop:hover { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .act:disabled, .act:disabled:hover { background: var(--panel-2); border-color: var(--line);
+                                       color: var(--fg-faint); cursor: not-allowed; }
+  .hint { color: var(--fg-faint); font-size: 11px; }
+  .mono { font-family: var(--mono); }
+  .track { height: 3px; border-radius: 2px; background: var(--panel-2); overflow: hidden;
+           margin-top: 12px; }
+  .track > i { display: block; height: 100%; width: 0; background: var(--accent);
+               transition: width .12s linear; }
+  .run-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 5px;
+              font: 11px var(--mono); color: var(--fg-dim); }
+  .card-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+             margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .card-hd .say { font-size: 12px; color: var(--fg-dim); }
+  .card-hd .note { margin-left: auto; font-size: 11px; color: var(--fg-faint); }
+  .err { margin-top: 10px; padding: 8px 11px; border-radius: 8px; font-size: 12px;
+         border: 1px solid var(--bad); color: var(--bad); }
+
+  /* ---- 实时判定：徽章 / 状态条 / 对照表 ---- */
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 9px;
+          border: 1px solid currentColor; border-radius: 999px;
+          font: 600 11px/1.9 var(--mono); white-space: nowrap; }
+  .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+                  background: currentColor; }
+  .c-idle { color: var(--fg-dim); }
+  .c-smooth { color: var(--good); }
+  .c-render { color: var(--warn); }
+  .c-lock { color: var(--bad); }
+  .verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px;
+             padding: 9px 12px; background: var(--panel); border: 1px solid var(--line);
+             border-radius: 10px; font-size: 12px; }
+  .verdict .why { color: var(--fg-dim); }
+  .verdict .nums { margin-left: auto; font: 11px var(--mono); color: var(--fg-faint);
+                   white-space: nowrap; }
+  details.ref { margin-top: 8px; background: var(--panel); border: 1px solid var(--line);
+                border-radius: 10px; }
+  details.ref > summary { display: flex; justify-content: space-between; align-items: center;
+                          gap: 10px; padding: 9px 12px; cursor: pointer; font-size: 12px;
+                          color: var(--fg-dim); list-style: none; }
+  details.ref > summary::-webkit-details-marker { display: none; }
+  details.ref > summary::after { content: "展开"; font-size: 11px; color: var(--fg-faint); }
+  details.ref[open] > summary::after { content: "收起"; }
+  details.ref[open] > summary { border-bottom: 1px solid var(--line); }
+  details.ref .body { padding: 10px 12px 12px; font-size: 12px; color: var(--fg-dim);
+                      line-height: 1.75; }
+  table.matrix { margin-top: 6px; }
+  table.matrix th, table.matrix td { text-align: left; vertical-align: top; }
+  table.matrix td:first-child { white-space: nowrap; }
+  table.matrix .dim { color: var(--fg-faint); }
 </style>
 </head>
 <body>
 
-<h1>PXView 性能面板</h1>
-<div class="sub" id="status"><span class="dot"></span>正在连接…</div>
+<div style="display:flex; justify-content:space-between; align-items:baseline;">
+  <div>
+    <h1>PXView 性能面板</h1>
+    <div class="sub" id="status"><span class="dot"></span>正在连接…</div>
+  </div>
+  <a href="/inspector.html" style="font-size:12px; color:var(--accent); text-decoration:none; padding:4px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel);">UI 结构检查器 ›</a>
+</div>
 
 <div id="banner"></div>
 
 <div class="stats" id="stats"></div>
+
+<h2>实时判定</h2>
+<div class="verdict">
+  <span class="chip c-idle" id="v-chip">等待数据</span>
+  <span class="why" id="v-why">正在读取性能窗口…</span>
+  <span class="nums" id="v-nums"></span>
+</div>
+
+<details class="ref">
+  <summary><span>判定对照表 · 怎么区分「渲染瓶颈」和「锁争用」</span></summary>
+  <div class="body">
+    指标口径：帧率 = 最近 1 秒内的视口帧数；单帧耗时 = 窗口平均 / 峰值
+    <code>frame.viewport</code>；心跳滞后 = 10 ms 心跳被主线程拖后的最大幅度
+    <code>loop.event_lag_max</code>；CPU 峰值 = 进程口径
+    <code>loop.cpu_util_max</code>，单位「核」，1.0 即单核打满。
+    <table class="matrix">
+      <thead><tr>
+        <th>帧率（上限 144）</th><th>单帧耗时</th><th>心跳滞后</th><th>CPU 峰值</th>
+        <th>物理状态与排查方向</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>0 ~ 6 fps</td><td>1 ~ 3 ms</td><td>0 ~ 2 ms</td><td>≈ 0.02 核</td>
+          <td><span class="chip c-idle">节能空闲</span>
+              数据源没有新数据，事件循环通畅 —— 正确行为，不用优化</td>
+        </tr>
+        <tr>
+          <td>0 ~ 6 fps</td><td>100+ ms</td><td>100+ ms</td><td>≈ 1 核</td>
+          <td><span class="chip c-render">渲染瓶颈</span>
+              单帧绘制本身就吃力，查视口绘制与注解密度</td>
+        </tr>
+        <tr>
+          <td>0 ~ 6 fps</td><td>1 ~ 3 ms</td><td>100+ ms</td><td>低（在睡眠等待）</td>
+          <td><span class="chip c-lock">锁争用</span>
+              画得很快，但主线程在别处等锁 / 等同步 IO</td>
+        </tr>
+        <tr>
+          <td>140+ fps</td><td>1 ~ 5 ms</td><td>0 ~ 2 ms</td><td>1 核上下</td>
+          <td><span class="chip c-smooth">满血极速</span>
+              已经打到配置上限或硬件上限</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<h2>主动压测</h2>
+<div class="bench">
+  <div class="bench-top">
+    <div class="seg" id="seg">
+      <button data-s="3">3s</button>
+      <button data-s="5" class="on">5s</button>
+      <button data-s="10">10s</button>
+    </div>
+    <input type="number" id="dur-num" class="num" value="5" min="1" max="60"
+           aria-label="压测时长（秒）">
+    <span class="sub">秒</span>
+    <button id="go" class="act go">开始压测</button>
+    <span class="hint" id="bench-hint">让 View 以视口上限帧率连续重绘，测真实算力与锁争用。</span>
+  </div>
+  <div id="run" hidden>
+    <div class="track"><i id="bar"></i></div>
+    <div class="run-meta">
+      <span>全速重绘中，结束后自动出成绩卡</span>
+      <span id="run-time">0.0 / 5.0 s</span>
+    </div>
+  </div>
+  <div id="bench-err" class="err" hidden></div>
+  <div id="card" hidden>
+    <div class="card-hd">
+      <span class="chip c-idle" id="grade">—</span>
+      <span class="say" id="grade-note"></span>
+      <span class="note" id="card-note"></span>
+    </div>
+    <div class="stats" id="score"></div>
+  </div>
+</div>
 
 <h2>帧率趋势</h2>
 <div class="chartbox">
@@ -339,6 +491,7 @@ async function poll() {
       setStatus("warn", "已连接，但该构建未编译性能插桩");
       banner("这个 PXView 是未插桩构建。<code>/perf/metrics</code> 返回 404。" +
              "用 <code>-DENABLE_PERF=ON</code> 重新配置并编译即可。", true);
+      disableBench("未插桩构建（-DENABLE_PERF=ON），压测端点不可用。");
       return;
     }
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -385,6 +538,8 @@ async function poll() {
     renderMetrics(mById);
     renderRows(d.rows || []);
     renderOps(d.ops || []);
+
+    updateVerdict(mById);
   } catch (e) {
     setStatus("bad", "连接失败：" + e.message);
     banner("取不到 <code>/perf/metrics</code>。" +
@@ -393,6 +548,269 @@ async function poll() {
   }
 }
 
+// ===========================================================================
+// 实时判定：把指标翻译成「物理状态」
+//
+// 端点上报的是窗口聚合口径，判定必须按窗口字段读，否则会误判：
+//   frame.viewport      Agg::Avg  → value/avg = 窗口平均单帧耗时，max = 窗口峰值
+//   loop.event_lag_max  Agg::Max  → value 就是窗口内最大的心跳超时（心跳 10ms）
+//   loop.cpu_util_max   Agg::Max  → 窗口内进程 CPU 峰值，单位「核」
+//   frame.viewport_fps  Agg::Last → 最近 1 秒内的视口帧数
+// ===========================================================================
+const VERDICT = {
+  none:   ["c-idle",   "无渲染采样"],
+  idle:   ["c-idle",   "节能空闲"],
+  smooth: ["c-smooth", "满血流畅"],
+  render: ["c-render", "渲染瓶颈"],
+  lock:   ["c-lock",   "锁争用"]
+};
+const WHY = {
+  none:   "本窗口没有 frame.* / loop.* 打点：无头 pxviewd 不渲染，或界面完全静止。",
+  idle:   "数据源没有新数据，事件循环通畅 —— 正确行为，不是故障。",
+  smooth: "刷新充分，主线程没有被阻塞。",
+  render: "单帧绘制本身就慢，瓶颈在视口绘制与注解密度，与锁无关。",
+  lock:   "绘制本身很快，但主线程在别处被挂起：等互斥锁或同步 IO。"
+};
+
+function pick(mById, id) {
+  const m = mById.get(id);
+  return (m && m.calls > 0) ? m : null;
+}
+
+// 从一份指标里取出判定与打分要用的字段。
+function readFrameState(mById) {
+  const fpsM = pick(mById, "frame.viewport_fps") || pick(mById, "frame.fps");
+  const durM = pick(mById, "frame.viewport");
+  const lagM = pick(mById, "loop.event_lag_max");
+  const cpuM = pick(mById, "loop.cpu_util_max");
+  return {
+    hasFrame: !!(fpsM || durM || pick(mById, "frame.paint_calls")),
+    fps: fpsM ? fpsM.value : 0,
+    dur: durM ? durM.avg : 0,        // 窗口平均单帧耗时
+    durCalls: durM ? durM.calls : 0,
+    durMax: durM ? durM.max : 0,     // 窗口峰值
+    lag: lagM ? lagM.value : 0,
+    cpu: cpuM ? cpuM.value : null
+  };
+}
+
+// 顺序有讲究：「锁争用」的特征是画得快、但主线程被拖住，必须先判，
+// 否则 dur 小的那一路会先掉进「流畅」分支。
+// 只剩这四种：none / idle / smooth / render / lock —— 兜底归 smooth，
+// 即「没有观察到瓶颈特征」；具体数值就在右边的 nums 里，不另设中间档。
+function classify(f) {
+  if (!f.hasFrame) return "none";
+  if (f.lag >= 50 && f.dur < 10) return "lock";
+  if (f.dur >= 33) return "render";                   // 一帧就超过 30fps 的预算
+  if (f.fps >= 60 && f.lag < 16) return "smooth";
+  if (f.fps <= 30 && f.lag < 16 && f.dur < 16) return "idle";
+  return "smooth";
+}
+
+function updateVerdict(mById) {
+  const chip = $("v-chip"), why = $("v-why"), nums = $("v-nums");
+  const f = readFrameState(mById);
+
+  if (bench.active) {
+    chip.className = "chip c-smooth";
+    chip.textContent = "压测运行中";
+    why.textContent = "正在以视口上限帧率连续重绘，剩 " + bench.left.toFixed(1) + " 秒。";
+  } else {
+    const k = classify(f);
+    chip.className = "chip " + VERDICT[k][0];
+    chip.textContent = VERDICT[k][1];
+    why.textContent = WHY[k];
+  }
+
+  nums.textContent = f.fps.toFixed(1) + " fps · 单帧 " + f.dur.toFixed(1) +
+                     " ms（峰 " + f.durMax.toFixed(1) + "） · 滞后 " + f.lag.toFixed(1) +
+                     " ms" + (f.cpu === null ? "" : " · cpu " + f.cpu.toFixed(2) + " 核");
+}
+
+// ===========================================================================
+// 主动压测：前端只负责「下命令 + 采样 + 出成绩」，重绘由 View 在主线程驱动
+// （POST /perf/benchmark → BenchmarkRequested → View 的 QTimer 全速 paint）。
+// 采样比趋势图更密（200ms 一次）：成绩卡要的是峰值和滞后，不是趋势曲线；
+// /perf/metrics 是 peek 语义（不滚动窗口），多一个读者不影响文件 sink。
+// ===========================================================================
+const BENCH_HZ = 5;             // 200ms 一个采样点
+const BENCH_WARMUP_MS = 600;    // 丢掉起步预热：fps 是 1 秒滑动窗，前段必然偏低
+const JANK_MS = 16.7;
+
+const bench = { active: false, ok: true, dur: 5, left: 0, t0: 0,
+                samples: [], uiTimer: null, sampler: null };
+
+function setDur(s) {
+  const v = Math.max(1, Math.min(60, parseInt(s, 10) || 5));
+  bench.dur = v;
+  $("dur-num").value = v;
+  for (const b of $("seg").children)
+    b.classList.toggle("on", parseInt(b.dataset.s, 10) === v);
+}
+
+function benchError(msg) {
+  const el = $("bench-err");
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+// 插桩缺失（/perf/metrics 返回 404）时直接封掉按钮，不让人点出一个必然失败的操作。
+function disableBench(hint) {
+  bench.ok = false;
+  $("go").disabled = true;
+  $("bench-hint").textContent = hint;
+}
+
+async function fetchMetrics() {
+  const res = await fetch("/perf/metrics", { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function sampleOnce() {
+  try {
+    const d = await fetchMetrics();
+    const mById = new Map();
+    for (const m of d.metrics) mById.set(m.id, m);
+    bench.samples.push(Object.assign(readFrameState(mById),
+                                     { t: performance.now() - bench.t0 }));
+  } catch (e) {
+    // 丢一个采样点不影响压测本身，成绩卡按实际采到的点算。
+  }
+}
+
+async function toggleBench() {
+  if (bench.active) { stopBench(true); return; }
+  if (!bench.ok) return;
+
+  try {
+    const res = await fetch("/perf/benchmark?duration=" + bench.dur, { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  } catch (e) {
+    benchError("启动压测失败：" + e.message +
+               " —— 确认 PXView 正在运行，且是 -DENABLE_PERF=ON 的插桩构建。");
+    return;
+  }
+  benchError("");
+
+  bench.active = true;
+  bench.left = bench.dur;
+  bench.t0 = performance.now();
+  bench.samples = [];
+
+  const go = $("go");
+  go.textContent = "中止压测";
+  go.className = "act stop";
+  $("run").hidden = false;
+  $("card").hidden = true;
+  $("bar").style.width = "0%";
+  $("run-time").textContent = "0.0 / " + bench.dur.toFixed(1) + " s";
+
+  bench.uiTimer = setInterval(() => {
+    const el = (performance.now() - bench.t0) / 1000;
+    bench.left = Math.max(0, bench.dur - el);
+    $("bar").style.width = Math.min(100, (el / bench.dur) * 100).toFixed(1) + "%";
+    $("run-time").textContent = el.toFixed(1) + " / " + bench.dur.toFixed(1) + " s";
+    if (el >= bench.dur) stopBench(false);   // 兜底：后端也有自己的停止定时器
+  }, 100);
+
+  bench.sampler = setInterval(sampleOnce, 1000 / BENCH_HZ);
+}
+
+function stopBench(userAbort) {
+  if (!bench.active) return;
+  bench.active = false;
+  clearInterval(bench.uiTimer); bench.uiTimer = null;
+  clearInterval(bench.sampler); bench.sampler = null;
+
+  const go = $("go");
+  go.textContent = "开始压测";
+  go.className = "act go";
+  $("run").hidden = true;
+
+  // 手动中止时显式通知后端停，避免它继续空转重绘到自己的定时器结束。
+  if (userAbort)
+    fetch("/perf/benchmark?duration=0", { method: "POST" }).catch(() => {});
+
+  scorecard(userAbort ? "手动中止" : "自然结束");
+}
+
+// 成绩卡：只用窗口聚合字段 —— 单帧平均按窗口 calls 加权，峰值取各窗口 max 的最大值。
+function scorecard(how) {
+  const use = bench.samples.filter((s) => s.t >= BENCH_WARMUP_MS);
+  if (!use.length) {
+    benchError("压测期间没采到 frame.* / loop.* 指标 —— 无头 pxviewd 不渲染，压测只会空转。");
+    return;
+  }
+
+  let fpsSum = 0, fpsN = 0, fpsPeak = 0;
+  let durW = 0, durWn = 0, durMax = 0, lagMax = 0, cpuMax = null, jank = 0;
+  for (const s of use) {
+    if (s.fps > 0) { fpsSum += s.fps; fpsN++; if (s.fps > fpsPeak) fpsPeak = s.fps; }
+    if (s.dur > 0) { durW += s.dur * s.durCalls; durWn += s.durCalls; }
+    if (s.durMax > durMax) durMax = s.durMax;
+    if (s.lag > lagMax) lagMax = s.lag;
+    if (s.cpu !== null && (cpuMax === null || s.cpu > cpuMax)) cpuMax = s.cpu;
+    if (s.durMax > JANK_MS) jank++;     // 该采样窗口内出现过超时帧
+  }
+
+  const avgFps = fpsN ? fpsSum / fpsN : 0;
+  const avgDur = durWn ? durW / durWn : 0;
+
+  let cls, label, say;
+  if (lagMax >= 50 && avgDur < 10) {
+    cls = "c-lock"; label = "C 锁争用";
+    say = "单帧只画 " + avgDur.toFixed(1) + " ms，心跳却被拖后 " + lagMax.toFixed(0) +
+          " ms —— 瓶颈不在绘制，在主线程等锁或等同步 IO。";
+  } else if (avgFps >= 120 && lagMax < 16) {
+    cls = "c-smooth"; label = "A+ 满血极速";
+    say = "全速连续重绘下稳在 " + avgFps.toFixed(1) + " fps，事件循环没有卡顿 —— 已打到上限。";
+  } else if (avgFps >= 60 && lagMax < 33) {
+    cls = "c-smooth"; label = "A 流畅";
+    say = "稳定过 60 fps，单帧余量充足。";
+  } else if (avgDur >= 33) {
+    cls = "c-render"; label = "B 渲染瓶颈";
+    say = "单帧平均 " + avgDur.toFixed(1) + " ms（峰值 " + durMax.toFixed(1) +
+          " ms）—— 视口里轨道/波形太密，优化点在绘制而不是锁。";
+  } else {
+    cls = "c-idle"; label = "B 平稳";
+    say = "平均 " + avgFps.toFixed(1) + " fps，没有明显的瓶颈特征。";
+  }
+
+  const grade = $("grade");
+  grade.className = "chip " + cls;
+  grade.textContent = label;
+  $("grade-note").textContent = say;
+  $("card-note").textContent =
+    "采样 " + use.length + " 点（200ms 一次，跳过前 0.6s 预热） · 峰值取窗口 max · " + how;
+
+  // 注释文字都控制在 1 行内：.stat 卡片最窄只有 140px，写长了一律折行。
+  $("score").innerHTML = [
+    ["达成帧率", avgFps.toFixed(1), "fps", "峰值 " + fpsPeak.toFixed(1) + " fps"],
+    ["单帧平均", avgDur.toFixed(2), "ms", "窗口均值 · 加权"],
+    ["单帧峰值", durMax.toFixed(2), "ms", "窗口峰值"],
+    ["最大心跳滞后", lagMax.toFixed(1), "ms", "心跳 10ms 周期"],
+    ["CPU 峰值", cpuMax === null ? "—" : cpuMax.toFixed(2), "核", "1.0 = 单核打满"],
+    ["超时采样", jank + " / " + use.length, "", "窗口内 >" + JANK_MS + "ms"]
+  ].map(([l, v, u, foot]) =>
+    '<div class="stat"><div class="label">' + l + '</div>' +
+    '<div class="big">' + v + (u ? '<span class="unit">' + u + '</span>' : '') + '</div>' +
+    '<div class="foot">' + foot + '</div></div>').join("");
+
+  $("card").hidden = false;
+}
+
+function initBench() {
+  setDur(5);
+  $("seg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (b) setDur(b.dataset.s);
+  });
+  $("dur-num").addEventListener("change", (e) => setDur(e.target.value));
+  $("go").addEventListener("click", toggleBench);
+}
+
+initBench();
 poll();
 setInterval(poll, POLL_MS);
 </script>

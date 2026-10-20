@@ -9,6 +9,7 @@ set(PXVIEW_GUI_SOURCES
     PXView/main.cpp
     PXView/application.cpp
     PXView/pv/mainwindow/topwindowtracker.cpp
+    PXView/pv/mainwindow/widget_inspector.cpp
     PXView/pv/mainwindow/mainwindow.cpp
     PXView/pv/mainwindow/config_io.cpp
     PXView/pv/mainwindow/workspace_io.cpp

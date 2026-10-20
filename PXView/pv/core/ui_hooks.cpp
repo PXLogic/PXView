@@ -10,12 +10,17 @@
 #include "pv/core/ui_hooks.h"
 
 #include "pv/base/log.h"
+#include "pv/core/eventbus.h"
+
+#include <condition_variable>
+#include <mutex>
 
 namespace pv {
 
 namespace {
 AskSaveFileFn g_ask_save_file = nullptr;
 NotifyUserFn g_notify_user = nullptr;
+DumpUiTreeFn g_dump_ui_tree = nullptr;
 }
 
 void set_ask_save_file_hook(AskSaveFileFn fn)
@@ -46,6 +51,36 @@ void notify_user(const QString &message)
     }
     // No UI bound (headless process): the log is the user-facing surface.
     pxv_err("%s", message.toUtf8().constData());
+}
+
+void set_dump_ui_tree_hook(DumpUiTreeFn fn)
+{
+    g_dump_ui_tree = fn;
+}
+
+QString dump_ui_tree()
+{
+    if (g_dump_ui_tree == nullptr) {
+        return QStringLiteral("{\"headless\":true,\"windows\":[]}");
+    }
+    if (pv::core::EventBus::on_main_thread()) {
+        return g_dump_ui_tree();
+    }
+    QString result;
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    pv::core::EventBus::post_async_dispatch([&]() {
+        result = g_dump_ui_tree();
+        {
+            std::lock_guard<std::mutex> lock(m);
+            done = true;
+            cv.notify_one();
+        }
+    });
+    std::unique_lock<std::mutex> lock(m);
+    cv.wait(lock, [&done]() { return done; });
+    return result;
 }
 
 } // namespace pv

@@ -1,0 +1,995 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PXView UI 检查器</title>
+<style>
+  :root {
+    --bg: #141417; --panel: #1b1b20; --panel-2: #23232a; --panel-3: #2d2d36;
+    --fg: #ececf0; --fg-dim: #9e9ea8; --fg-faint: #6c6c76;
+    --line: #32323c; --grid: #262630;
+    --accent: #7f9cf5; --accent-hover: #9bb2f8; --accent-bg: rgba(127, 156, 245, 0.15);
+    --good: #68d391; --warn: #f6ad55; --bad: #fc8181;
+    --wireframe-bg: #0f0f13;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f7; --panel: #ffffff; --panel-2: #eaebf0; --panel-3: #dfe1e8;
+      --fg: #1c1d22; --fg-dim: #5c5e69; --fg-faint: #8d909d;
+      --line: #dcdfe6; --grid: #eceef2;
+      --accent: #3b5bdb; --accent-hover: #4c6ef5; --accent-bg: rgba(59, 91, 219, 0.12);
+      --good: #2f855a; --warn: #b7791f; --bad: #c53030;
+      --wireframe-bg: #f8f9fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    user-select: none;
+  }
+
+  /* Header Bar */
+  header {
+    height: 48px; min-height: 48px; padding: 0 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; z-index: 10;
+  }
+  .hd-left, .hd-right { display: flex; align-items: center; gap: 12px; }
+  .title { font-weight: 600; font-size: 14px; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint); display: inline-block; }
+  .dot.ok { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .dot.bad { background: var(--bad); }
+
+  .btn {
+    padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--fg); display: inline-flex; align-items: center; gap: 6px;
+    transition: all .15s ease;
+  }
+  .btn:hover { background: var(--panel-3); border-color: var(--fg-dim); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-hover); }
+
+  .search-box {
+    position: relative; width: 220px;
+  }
+  .search-box input {
+    width: 100%; padding: 4px 8px 4px 24px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--fg); font-size: 12px; outline: none;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box svg {
+    position: absolute; left: 7px; top: 7px; width: 13px; height: 13px; fill: var(--fg-dim);
+  }
+
+  .toggle-lbl {
+    font-size: 12px; color: var(--fg-dim); display: flex; align-items: center; gap: 5px; cursor: pointer;
+  }
+  .toggle-lbl input { cursor: pointer; }
+
+  /* Main Container */
+  .main-layout {
+    flex: 1; display: flex; height: calc(100% - 48px); overflow: hidden;
+  }
+
+  /* Left Canvas / Wireframe Pane */
+  .wireframe-pane {
+    flex: 1; display: flex; flex-direction: column; position: relative;
+    background: var(--wireframe-bg); border-right: 1px solid var(--line);
+    min-width: 320px; overflow: hidden;
+  }
+  .wireframe-toolbar {
+    position: absolute; top: 12px; left: 12px; z-index: 5;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 4px 8px; display: flex; gap: 6px; align-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  .canvas-container {
+    flex: 1; width: 100%; height: 100%; position: relative; cursor: grab;
+  }
+  .canvas-container.grabbing { cursor: grabbing; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .hover-tooltip {
+    position: absolute; z-index: 20; pointer-events: none; display: none;
+    background: rgba(20, 20, 24, 0.92); backdrop-filter: blur(4px);
+    border: 1px solid var(--accent); border-radius: 6px;
+    padding: 6px 10px; font-size: 11px; font-family: var(--mono);
+    color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+  }
+
+  /* Right Sidebar Split (Tree & Details) */
+  .sidebar-pane {
+    width: 440px; min-width: 300px; max-width: 650px;
+    display: flex; flex-direction: column; background: var(--panel);
+  }
+  .pane-hd {
+    padding: 8px 14px; background: var(--panel-2); font-weight: 600;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--fg-dim); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  /* Tree View */
+  .tree-container {
+    flex: 1; overflow-y: auto; overflow-x: auto; padding: 6px 0;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .tree-node {
+    display: flex; align-items: center; height: 26px; padding: 0 8px;
+    cursor: pointer; white-space: nowrap; transition: background .1s ease;
+    border-left: 2px solid transparent;
+  }
+  .tree-node:hover { background: var(--panel-2); }
+  .tree-node.selected {
+    background: var(--accent-bg); border-left-color: var(--accent); color: var(--accent);
+    font-weight: 600;
+  }
+  .tree-node.highlighted { background: rgba(127, 156, 245, 0.08); }
+  .tree-indent { display: inline-block; }
+  .tree-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; color: var(--fg-dim); font-size: 10px;
+    cursor: pointer; border-radius: 3px;
+  }
+  .tree-toggle:hover { color: var(--fg); background: var(--panel-3); }
+  .node-class { color: var(--accent); font-weight: 500; }
+  .node-name { color: var(--warn); margin-left: 5px; font-size: 11px; }
+  .node-text { color: var(--good); margin-left: 5px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  .node-size { color: var(--fg-faint); margin-left: auto; padding-left: 8px; font-size: 10px; }
+  .node-hidden { opacity: 0.45; }
+
+  /* Details Pane */
+  .details-pane {
+    height: 250px; min-height: 180px; max-height: 420px;
+    border-top: 1px solid var(--line); display: flex; flex-direction: column;
+    background: var(--panel);
+  }
+  .breadcrumb-bar {
+    padding: 6px 12px; background: var(--panel-2); font-size: 11px;
+    color: var(--fg-dim); border-bottom: 1px solid var(--line);
+    white-space: nowrap; overflow-x: auto; font-family: var(--mono);
+    display: flex; gap: 4px; align-items: center;
+  }
+  .breadcrumb-item {
+    cursor: pointer; padding: 1px 4px; border-radius: 3px;
+  }
+  .breadcrumb-item:hover { background: var(--panel-3); color: var(--accent); }
+
+  .props-table-wrap {
+    flex: 1; overflow-y: auto; padding: 8px 12px;
+  }
+  table.props-table {
+    width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono);
+  }
+  table.props-table tr { border-bottom: 1px solid var(--line); }
+  table.props-table td { padding: 4px 6px; vertical-align: top; }
+  table.props-table td.key {
+    width: 110px; color: var(--fg-dim); font-weight: 500; font-size: 11px;
+  }
+  table.props-table td.val { color: var(--fg); word-break: break-all; }
+  .badge {
+    display: inline-block; padding: 1px 5px; border-radius: 4px;
+    font-size: 10px; font-weight: 500; background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .badge.true { background: rgba(104, 211, 145, 0.15); color: var(--good); border-color: rgba(104, 211, 145, 0.3); }
+  .badge.false { background: rgba(252, 129, 129, 0.15); color: var(--bad); border-color: rgba(252, 129, 129, 0.3); }
+
+  /* Empty state */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--fg-dim); text-align: center; gap: 8px; padding: 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hd-left">
+    <div class="title">
+      <span class="dot" id="status-dot"></span>
+      <span>PXView UI 检查器</span>
+    </div>
+    <button class="btn" id="btn-refresh" title="重新采样 UI 结构树">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.418A6 6 0 1 1 8 2v1z"/>
+        <path d="M8 0v4l3-2-3-2z"/>
+      </svg>
+      刷新
+    </button>
+    <label class="toggle-lbl">
+      <input type="checkbox" id="auto-refresh"> 自动刷新
+    </label>
+    <label class="toggle-lbl">
+      <input type="checkbox" id="filter-visible" checked> 仅可见组件
+    </label>
+  </div>
+  <div class="hd-right">
+    <div class="search-box">
+      <svg viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
+      <input type="text" id="filter-input" placeholder="筛选类名 / 对象名 / 文本...">
+    </div>
+    <a href="/perf.html" class="btn" style="text-decoration:none;">性能面板</a>
+  </div>
+</header>
+
+<div class="main-layout">
+  <!-- Left Wireframe View -->
+  <div class="wireframe-pane">
+    <div class="wireframe-toolbar">
+      <button class="btn" id="btn-zoom-fit" title="自适应窗口大小">适应</button>
+      <button class="btn" id="btn-zoom-100" title="100% 原始比例">1:1</button>
+      <button class="btn" id="btn-zoom-in" title="放大">+</button>
+      <button class="btn" id="btn-zoom-out" title="缩小">-</button>
+      <span style="font-size:11px;color:var(--fg-dim);font-family:var(--mono);" id="zoom-lbl">100%</span>
+    </div>
+    <div class="canvas-container" id="canvas-container">
+      <canvas id="wireframe-canvas"></canvas>
+      <div class="hover-tooltip" id="canvas-tooltip"></div>
+    </div>
+  </div>
+
+  <!-- Right Inspector View -->
+  <div class="sidebar-pane">
+    <div class="pane-hd">
+      <span>组件层次树 (<span id="widget-count">0</span>)</span>
+      <span style="font-size:10px;font-weight:400;color:var(--fg-faint);" id="last-update">未采样</span>
+    </div>
+    <div class="tree-container" id="tree-container">
+      <div class="empty-state">正在拉取 UI 结构...</div>
+    </div>
+
+    <!-- Details View -->
+    <div class="details-pane">
+      <div class="pane-hd">
+        <span>组件属性详情</span>
+      </div>
+      <div class="breadcrumb-bar" id="breadcrumb-bar">
+        <span style="color:var(--fg-faint);">未选中任何组件</span>
+      </div>
+      <div class="props-table-wrap" id="props-wrap">
+        <div class="empty-state" style="font-size:12px;">在左侧视图或树中点击选中组件</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // Application State
+  let rawData = null;
+  let flatNodes = []; // All nodes with parent reference & bounds
+  let nodeMap = new Map(); // id -> node
+  let selectedNodeId = null;
+  let hoveredNodeId = null;
+  let collapsedSet = new Set();
+  let filterText = "";
+  let visibleOnly = true;
+
+  // Viewport Transform (Pan & Zoom)
+  let zoom = 1.0;
+  let panX = 40;
+  let panY = 40;
+  let isDragging = false;
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+  let autoRefreshTimer = null;
+
+  // DOM Elements
+  const canvas = document.getElementById("wireframe-canvas");
+  const ctx = canvas.getContext("2d");
+  const canvasContainer = document.getElementById("canvas-container");
+  const tooltip = document.getElementById("canvas-tooltip");
+  const statusDot = document.getElementById("status-dot");
+  const treeContainer = document.getElementById("tree-container");
+  const breadcrumbBar = document.getElementById("breadcrumb-bar");
+  const propsWrap = document.getElementById("props-wrap");
+  const widgetCountLbl = document.getElementById("widget-count");
+  const lastUpdateLbl = document.getElementById("last-update");
+  const zoomLbl = document.getElementById("zoom-lbl");
+  const btnRefresh = document.getElementById("btn-refresh");
+  const autoRefreshCb = document.getElementById("auto-refresh");
+  const filterVisibleCb = document.getElementById("filter-visible");
+  const filterInput = document.getElementById("filter-input");
+
+  // Colors for wireframe
+  const DEPTH_COLORS = [
+    { border: "rgba(127, 156, 245, 0.8)", fill: "rgba(127, 156, 245, 0.05)" },
+    { border: "rgba(104, 211, 145, 0.7)", fill: "rgba(104, 211, 145, 0.04)" },
+    { border: "rgba(246, 173, 85, 0.7)", fill: "rgba(246, 173, 85, 0.04)" },
+    { border: "rgba(183, 148, 244, 0.7)", fill: "rgba(183, 148, 244, 0.04)" },
+    { border: "rgba(99, 179, 237, 0.7)", fill: "rgba(99, 179, 237, 0.04)" },
+    { border: "rgba(246, 135, 179, 0.7)", fill: "rgba(246, 135, 179, 0.04)" }
+  ];
+
+  // Fetch UI Tree from backend
+  async function fetchUiTree() {
+    try {
+      const resp = await fetch("/ui/tree", { cache: "no-store" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      onDataReceived(data);
+      statusDot.className = "dot ok";
+      statusDot.title = "已连接到 PXView";
+    } catch (err) {
+      console.warn("Failed to fetch UI tree:", err);
+      statusDot.className = "dot bad";
+      statusDot.title = "拉取失败: " + err.message;
+      if (!rawData) {
+        treeContainer.innerHTML = `<div class="empty-state">
+          <div>无法拉取 UI 结构 (${err.message})</div>
+          <div style="font-size:11px;color:var(--fg-faint);">请确保 PXView (GUI 模式) 正在运行且 MCP 端口 (10110) 开启</div>
+        </div>`;
+      }
+    }
+  }
+
+  function onDataReceived(data) {
+    rawData = data;
+    flatNodes = [];
+    nodeMap.clear();
+
+    let seq = 0;
+    function processNode(node, parentId, depth, path) {
+      const id = "w_" + (++seq);
+      node._id = id;
+      node._parentId = parentId;
+      node._depth = depth;
+      node._path = [...path, node];
+
+      flatNodes.push(node);
+      nodeMap.set(id, node);
+
+      if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+          processNode(child, id, depth + 1, node._path);
+        }
+      }
+    }
+
+    if (data.windows) {
+      for (const win of data.windows) {
+        processNode(win, null, 0, []);
+      }
+    }
+
+    widgetCountLbl.textContent = flatNodes.length;
+    lastUpdateLbl.textContent = new Date().toLocaleTimeString();
+
+    renderTree();
+    renderDetails();
+    drawCanvas();
+  }
+
+  // Filter Match
+  function matchFilter(node) {
+    if (visibleOnly && !node.visible) return false;
+    if (!filterText) return true;
+    const q = filterText.toLowerCase();
+    const clz = (node.class || "").toLowerCase();
+    const nm = (node.name || "").toLowerCase();
+    const txt = (node.text || "").toLowerCase();
+    const title = (node.title || "").toLowerCase();
+    return clz.includes(q) || nm.includes(q) || txt.includes(q) || title.includes(q);
+  }
+
+  function hasMatchingDescendant(node) {
+    if (matchFilter(node)) return true;
+    if (node.children) {
+      for (const child of node.children) {
+        if (hasMatchingDescendant(child)) return true;
+      }
+    }
+    return false;
+  }
+
+  // Render Component Tree
+  function renderTree() {
+    if (!rawData || !rawData.windows || rawData.windows.length === 0) {
+      treeContainer.innerHTML = '<div class="empty-state">未发现任何活动窗口</div>';
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    function renderNodeItem(node) {
+      if (!hasMatchingDescendant(node)) return;
+
+      const row = document.createElement("div");
+      row.className = "tree-node" +
+        (node._id === selectedNodeId ? " selected" : "") +
+        (node._id === hoveredNodeId ? " highlighted" : "") +
+        (!node.visible ? " node-hidden" : "");
+      row.dataset.id = node._id;
+
+      // Indent
+      const indent = document.createElement("span");
+      indent.className = "tree-indent";
+      indent.style.width = (node._depth * 16) + "px";
+      row.appendChild(indent);
+
+      // Expand / Collapse Chevron
+      const hasChildren = node.children && node.children.length > 0;
+      const isCollapsed = collapsedSet.has(node._id);
+      const toggle = document.createElement("span");
+      toggle.className = "tree-toggle";
+      if (hasChildren) {
+        toggle.textContent = isCollapsed ? "▸" : "▾";
+        toggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (isCollapsed) collapsedSet.delete(node._id);
+          else collapsedSet.add(node._id);
+          renderTree();
+        });
+      } else {
+        toggle.innerHTML = "&nbsp;";
+      }
+      row.appendChild(toggle);
+
+      // Virtual Badge and Color
+      if (node.is_virtual) {
+        const vBadge = document.createElement("span");
+        vBadge.className = "badge";
+        vBadge.style.marginRight = "4px";
+        vBadge.style.fontSize = "9px";
+        vBadge.style.background = node.virtual_type === "trace" ? "rgba(104,211,145,0.18)" : "rgba(246,173,85,0.18)";
+        vBadge.style.color = node.virtual_type === "trace" ? "var(--good)" : "var(--warn)";
+        vBadge.style.borderColor = "transparent";
+        vBadge.textContent = node.virtual_type === "trace" ? "Trace" : "Cursor";
+        row.appendChild(vBadge);
+
+        if (node.color) {
+          const dot = document.createElement("span");
+          dot.style.cssText = `display:inline-block;width:7px;height:7px;border-radius:50%;background:${node.color};margin-right:5px;flex-shrink:0;`;
+          row.appendChild(dot);
+        }
+      }
+
+      // Class Name
+      const clz = document.createElement("span");
+      clz.className = "node-class";
+      clz.textContent = node.class.replace(/^pv::view::/, '');
+      row.appendChild(clz);
+
+      // Object Name
+      if (node.name) {
+        const nm = document.createElement("span");
+        nm.className = "node-name";
+        nm.textContent = "#" + node.name;
+        row.appendChild(nm);
+      }
+
+      // Text / Title preview
+      const previewText = node.title || node.text;
+      if (previewText) {
+        const txt = document.createElement("span");
+        txt.className = "node-text";
+        txt.textContent = `"${previewText}"`;
+        row.appendChild(txt);
+      }
+
+      // Size badge
+      if (node.rect) {
+        const sz = document.createElement("span");
+        sz.className = "node-size";
+        sz.textContent = `${node.rect.w}×${node.rect.h}`;
+        row.appendChild(sz);
+      }
+
+      // Interaction
+      row.addEventListener("mouseenter", () => {
+        hoveredNodeId = node._id;
+        drawCanvas();
+        highlightTreeNode(node._id, false);
+      });
+      row.addEventListener("mouseleave", () => {
+        if (hoveredNodeId === node._id) {
+          hoveredNodeId = null;
+          drawCanvas();
+          clearTreeHighlight();
+        }
+      });
+      row.addEventListener("click", () => {
+        selectNode(node._id);
+      });
+
+      fragment.appendChild(row);
+
+      // Recursive children
+      if (hasChildren && !isCollapsed) {
+        for (const child of node.children) {
+          renderNodeItem(child);
+        }
+      }
+    }
+
+    for (const win of rawData.windows) {
+      renderNodeItem(win);
+    }
+
+    treeContainer.innerHTML = "";
+    treeContainer.appendChild(fragment);
+  }
+
+  function highlightTreeNode(nodeId, scroll = true) {
+    const el = treeContainer.querySelector(`[data-id="${nodeId}"]`);
+    if (el) {
+      el.classList.add("highlighted");
+      if (scroll) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  function clearTreeHighlight() {
+    treeContainer.querySelectorAll(".tree-node.highlighted").forEach(el => el.classList.remove("highlighted"));
+  }
+
+  function selectNode(nodeId) {
+    selectedNodeId = nodeId;
+
+    // Ensure parents are expanded
+    const node = nodeMap.get(nodeId);
+    if (node && node._path) {
+      for (const p of node._path) {
+        collapsedSet.delete(p._id);
+      }
+    }
+
+    renderTree();
+    renderDetails();
+    drawCanvas();
+
+    const selectedEl = treeContainer.querySelector(`[data-id="${nodeId}"]`);
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  // Render Details Panel
+  function renderDetails() {
+    const node = nodeMap.get(selectedNodeId);
+    if (!node) {
+      breadcrumbBar.innerHTML = '<span style="color:var(--fg-faint);">未选中任何组件</span>';
+      propsWrap.innerHTML = '<div class="empty-state" style="font-size:12px;">在左侧视图或树中点击选中组件</div>';
+      return;
+    }
+
+    // Breadcrumbs
+    breadcrumbBar.innerHTML = "";
+    if (node._path) {
+      node._path.forEach((p, idx) => {
+        const item = document.createElement("span");
+        item.className = "breadcrumb-item";
+        item.textContent = p.class + (p.name ? `#${p.name}` : "");
+        item.title = `点击切换到父组件: ${p.class}`;
+        item.addEventListener("click", () => selectNode(p._id));
+        breadcrumbBar.appendChild(item);
+
+        if (idx < node._path.length - 1) {
+          const sep = document.createElement("span");
+          sep.textContent = "›";
+          sep.style.color = "var(--fg-faint)";
+          breadcrumbBar.appendChild(sep);
+        }
+      });
+    }
+
+    // Properties Table
+    const r = node.rect || {};
+    const rows = [
+      ["类名 (class)", `<b style="color:var(--accent);">${escapeHtml(node.class)}</b>`],
+      ["对象名 (name)", node.name ? `<b style="color:var(--warn);">#${escapeHtml(node.name)}</b>` : '<span style="color:var(--fg-faint);">-</span>'],
+      ["窗口标题 (title)", node.title ? escapeHtml(node.title) : '<span style="color:var(--fg-faint);">-</span>'],
+      ["文本内容 (text)", node.text ? escapeHtml(node.text) : '<span style="color:var(--fg-faint);">-</span>'],
+      ["提示文本 (tooltip)", node.tooltip ? escapeHtml(node.tooltip) : '<span style="color:var(--fg-faint);">-</span>'],
+      ["布局管理 (layout)", node.layout ? escapeHtml(node.layout) : '<span style="color:var(--fg-faint);">-</span>'],
+      ["局部几何 (local rect)", `x:${r.x}, y:${r.y}, w:${r.w}, h:${r.h}`],
+      ["屏幕全局坐标 (global)", `gx:${r.gx}, gy:${r.gy}`],
+      ["状态标记 (flags)", `
+        <span class="badge ${node.visible}">${node.visible ? "Visible" : "Hidden"}</span>
+        <span class="badge ${node.enabled}">${node.enabled ? "Enabled" : "Disabled"}</span>
+        ${node.is_window ? '<span class="badge true">TopLevel Window</span>' : ''}
+        ${node.is_virtual ? '<span class="badge" style="background:rgba(246,173,85,0.2);color:var(--warn);border-color:transparent;">Virtual ' + (node.virtual_type || '') + '</span>' : ''}
+      `],
+      ["子组件数 (children)", `${(node.children || []).length} 个`]
+    ];
+
+    if (node.is_virtual) {
+      if (node.color) {
+        rows.push(["图元颜色 (color)", `<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${node.color};vertical-align:middle;margin-right:6px;border:1px solid rgba(255,255,255,0.3);"></span><code>${node.color}</code>`]);
+      }
+      if (node.time !== undefined) {
+        rows.push(["时间位置 (time)", `<code>${node.time} s</code>`]);
+      }
+      if (node.index !== undefined) {
+        rows.push(["采样点序号 (index)", `<code>${node.index}</code>`]);
+      }
+      if (node.channel_index !== undefined) {
+        rows.push(["硬件通道序号 (ch)", `<code>${node.channel_index}</code>`]);
+      }
+    }
+    if (node.scale !== undefined) {
+      rows.push(["时间分度 (scale)", `<code>${node.scale} s/div</code>`]);
+      rows.push(["时间偏置 (offset)", `<code>${node.offset} s</code>`]);
+      rows.push(["垂直滚动偏置 (v_offset)", `<code>${node.v_offset} px</code>`]);
+    }
+
+    let html = '<table class="props-table"><tbody>';
+    for (const [k, v] of rows) {
+      html += `<tr><td class="key">${k}</td><td class="val">${v}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    propsWrap.innerHTML = html;
+  }
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Canvas Wireframe Rendering
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvasContainer.clientWidth;
+    const h = canvasContainer.clientHeight;
+    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+    }
+    drawCanvas();
+  }
+
+  function drawCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    // Background Grid
+    ctx.save();
+    ctx.strokeStyle = "rgba(100, 100, 110, 0.12)";
+    ctx.lineWidth = 1;
+    const gridSize = 32 * zoom;
+    const startX = panX % gridSize;
+    const startY = panY % gridSize;
+    ctx.beginPath();
+    for (let x = startX; x < w; x += gridSize) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, h);
+    }
+    for (let y = startY; y < h; y += gridSize) {
+      ctx.moveTo(0, y); ctx.lineTo(w, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    if (!rawData || !rawData.windows) {
+      ctx.restore();
+      return;
+    }
+
+    // Apply viewport transform
+    ctx.save();
+    ctx.translate(panX, panY);
+    ctx.scale(zoom, zoom);
+
+    // Draw Screens if available
+    if (rawData.screens) {
+      ctx.save();
+      for (const s of rawData.screens) {
+        ctx.strokeStyle = "rgba(127, 156, 245, 0.25)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 6]);
+        ctx.strokeRect(s.x, s.y, s.w, s.h);
+        ctx.fillStyle = "rgba(127, 156, 245, 0.35)";
+        ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue('--mono');
+        ctx.fillText(`Screen: ${s.name || "Default"} (${s.w}×${s.h}, DPR:${s.dpr})`, s.x + 8, s.y + 18);
+      }
+      ctx.restore();
+    }
+
+    // Draw widgets recursively
+    function drawNode(node) {
+      if (!node.visible && visibleOnly) return;
+      const r = node.rect;
+      if (!r || r.w <= 0 || r.h <= 0) return;
+
+      const isHovered = (node._id === hoveredNodeId);
+      const isSelected = (node._id === selectedNodeId);
+      const colorScheme = DEPTH_COLORS[node._depth % DEPTH_COLORS.length];
+
+      // Virtual Cursor rendering
+      if (node.is_virtual && node.virtual_type === "cursor") {
+        ctx.save();
+        ctx.lineWidth = isSelected ? 3.0 / zoom : (isHovered ? 2.5 / zoom : 1.5 / zoom);
+        ctx.strokeStyle = isSelected ? "#fff" : (node.color || "#fc8181");
+        ctx.setLineDash([5 / zoom, 3 / zoom]);
+        ctx.beginPath();
+        ctx.moveTo(r.gx, r.gy);
+        ctx.lineTo(r.gx, r.gy + r.h);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        const tagText = node.name || "Cursor";
+        const tagW = Math.max(40, (tagText.length * 7 + 8));
+        ctx.fillStyle = isSelected ? "#7f9cf5" : (node.color || "#fc8181");
+        ctx.fillRect(r.gx - tagW / (2 * zoom), r.gy, tagW / zoom, 16 / zoom);
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold ${Math.round(10 / zoom)}px ` + getComputedStyle(document.body).getPropertyValue('--mono');
+        ctx.fillText(tagText, r.gx - tagW / (2 * zoom) + 4 / zoom, r.gy + 12 / zoom);
+        ctx.restore();
+        return;
+      }
+
+      // Virtual Trace rendering
+      if (node.is_virtual && node.virtual_type === "trace") {
+        ctx.save();
+        ctx.fillStyle = isSelected
+          ? "rgba(127, 156, 245, 0.35)"
+          : (isHovered ? "rgba(127, 156, 245, 0.22)" : (node.color ? (node.color + "18") : "rgba(100,100,120,0.08)"));
+        ctx.fillRect(r.gx, r.gy, r.w, r.h);
+
+        ctx.lineWidth = isSelected ? 2.5 / zoom : (isHovered ? 2.0 / zoom : 1.0 / zoom);
+        ctx.strokeStyle = isSelected ? "#7f9cf5" : (node.color || "#68d391");
+        ctx.strokeRect(r.gx, r.gy, r.w, r.h);
+
+        // Center baseline
+        ctx.strokeStyle = (node.color ? (node.color + "35") : "rgba(255,255,255,0.12)");
+        ctx.lineWidth = 1 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(r.gx, r.gy + r.h / 2);
+        ctx.lineTo(r.gx + r.w, r.gy + r.h / 2);
+        ctx.stroke();
+
+        // Label on left edge
+        if (r.h * zoom > 14) {
+          ctx.font = "bold 11px " + getComputedStyle(document.body).getPropertyValue('--mono');
+          ctx.fillStyle = node.color || "#fff";
+          ctx.fillText(`[${node.name || "CH"}]`, r.gx + 8, r.gy + r.h / 2 + 4);
+        }
+        ctx.restore();
+        return;
+      }
+
+      // Fill
+      ctx.fillStyle = isSelected
+        ? "rgba(127, 156, 245, 0.22)"
+        : (isHovered ? "rgba(127, 156, 245, 0.15)" : colorScheme.fill);
+      ctx.fillRect(r.gx, r.gy, r.w, r.h);
+
+      // Stroke
+      ctx.lineWidth = isSelected ? 2.5 / zoom : (isHovered ? 2.0 / zoom : 1.0 / zoom);
+      ctx.strokeStyle = isSelected
+        ? "#7f9cf5"
+        : (isHovered ? "#9bb2f8" : colorScheme.border);
+      ctx.strokeRect(r.gx, r.gy, r.w, r.h);
+
+      // Label (only if box is large enough)
+      const renderW = r.w * zoom;
+      const renderH = r.h * zoom;
+      if (renderW > 45 && renderH > 16) {
+        ctx.save();
+        ctx.font = "10px " + getComputedStyle(document.body).getPropertyValue('--mono');
+        ctx.fillStyle = isSelected ? "#fff" : "rgba(220, 220, 230, 0.75)";
+        const label = node.class.replace(/^pv::view::|^pv::/, '') + (node.name ? `#${node.name}` : '');
+        ctx.fillText(label, r.gx + 3, r.gy + 11);
+        ctx.restore();
+      }
+
+      // Draw children
+      if (node.children) {
+        for (const child of node.children) {
+          drawNode(child);
+        }
+      }
+    }
+
+    for (const win of rawData.windows) {
+      drawNode(win);
+    }
+
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // Hit Testing: find innermost visible node containing (screenX, screenY)
+  function findHitNode(globalX, globalY) {
+    let bestNode = null;
+    let smallestArea = Infinity;
+
+    for (const node of flatNodes) {
+      if (!node.visible && visibleOnly) continue;
+      const r = node.rect;
+      if (!r || r.w <= 0 || r.h <= 0) continue;
+
+      const hitMargin = (node.virtual_type === "cursor") ? Math.max(6, 6 / zoom) : 0;
+      if (globalX >= r.gx - hitMargin && globalX <= r.gx + r.w + hitMargin &&
+          globalY >= r.gy && globalY <= r.gy + r.h) {
+        const area = (node.virtual_type === "cursor") ? 1 : (r.w * r.h);
+        if (area <= smallestArea) {
+          smallestArea = area;
+          bestNode = node;
+        }
+      }
+    }
+    return bestNode;
+  }
+
+  function screenToGlobal(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = clientX - rect.left;
+    const cy = clientY - rect.top;
+    return {
+      gx: (cx - panX) / zoom,
+      gy: (cy - panY) / zoom
+    };
+  }
+
+  // Canvas Interactions
+  canvasContainer.addEventListener("mousedown", (e) => {
+    if (e.button === 0) { // Left click
+      isDragging = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      canvasContainer.classList.add("grabbing");
+    }
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (isDragging) {
+      isDragging = false;
+      canvasContainer.classList.remove("grabbing");
+    }
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (isDragging) {
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      panX += dx;
+      panY += dy;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      drawCanvas();
+      return;
+    }
+
+    // Hover detection
+    const { gx, gy } = screenToGlobal(e.clientX, e.clientY);
+    const hit = findHitNode(gx, gy);
+    if (hit) {
+      if (hoveredNodeId !== hit._id) {
+        hoveredNodeId = hit._id;
+        drawCanvas();
+        highlightTreeNode(hit._id, true);
+      }
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.clientX - canvasContainer.getBoundingClientRect().left + 14) + "px";
+      tooltip.style.top = (e.clientY - canvasContainer.getBoundingClientRect().top + 14) + "px";
+      tooltip.innerHTML = `<div><b style="color:var(--accent);">${escapeHtml(hit.class)}</b> ${hit.name ? '<span style="color:var(--warn);">#' + escapeHtml(hit.name) + '</span>' : ''}</div>
+                           <div style="font-size:10px;color:var(--fg-dim);">尺寸: ${hit.rect.w}×${hit.rect.h} (gx:${hit.rect.gx}, gy:${hit.rect.gy})</div>
+                           ${hit.text ? '<div style="color:var(--good);margin-top:2px;">文本: "' + escapeHtml(hit.text) + '"</div>' : ''}`;
+    } else {
+      if (hoveredNodeId !== null) {
+        hoveredNodeId = null;
+        drawCanvas();
+        clearTreeHighlight();
+      }
+      tooltip.style.display = "none";
+    }
+  });
+
+  canvasContainer.addEventListener("click", (e) => {
+    const { gx, gy } = screenToGlobal(e.clientX, e.clientY);
+    const hit = findHitNode(gx, gy);
+    if (hit) {
+      selectNode(hit._id);
+    }
+  });
+
+  canvasContainer.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    const newZoom = Math.max(0.05, Math.min(10.0, zoom * zoomFactor));
+
+    panX = mouseX - (mouseX - panX) * (newZoom / zoom);
+    panY = mouseY - (mouseY - panY) * (newZoom / zoom);
+    zoom = newZoom;
+    zoomLbl.textContent = Math.round(zoom * 100) + "%";
+
+    drawCanvas();
+  }, { passive: false });
+
+  // Zoom Fit Calculation
+  function zoomFit() {
+    if (!rawData || !rawData.windows || rawData.windows.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const win of rawData.windows) {
+      if (!win.visible && visibleOnly) continue;
+      const r = win.rect;
+      if (!r || r.w <= 0 || r.h <= 0) continue;
+      minX = Math.min(minX, r.gx);
+      minY = Math.min(minY, r.gy);
+      maxX = Math.max(maxX, r.gx + r.w);
+      maxY = Math.max(maxY, r.gy + r.h);
+    }
+
+    if (minX === Infinity) return;
+
+    const totalW = maxX - minX;
+    const totalH = maxY - minY;
+    const canvasW = canvasContainer.clientWidth - 80;
+    const canvasH = canvasContainer.clientHeight - 80;
+
+    zoom = Math.min(canvasW / totalW, canvasH / totalH, 1.0);
+    panX = (canvasContainer.clientWidth - totalW * zoom) / 2 - minX * zoom;
+    panY = (canvasContainer.clientHeight - totalH * zoom) / 2 - minY * zoom;
+    zoomLbl.textContent = Math.round(zoom * 100) + "%";
+    drawCanvas();
+  }
+
+  // Event Listeners for Controls
+  btnRefresh.addEventListener("click", () => fetchUiTree());
+
+  autoRefreshCb.addEventListener("change", (e) => {
+    if (e.target.checked) {
+      autoRefreshTimer = setInterval(fetchUiTree, 1500);
+    } else {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+  });
+
+  filterVisibleCb.addEventListener("change", (e) => {
+    visibleOnly = e.target.checked;
+    renderTree();
+    drawCanvas();
+  });
+
+  filterInput.addEventListener("input", (e) => {
+    filterText = e.target.value.trim();
+    renderTree();
+    drawCanvas();
+  });
+
+  document.getElementById("btn-zoom-fit").addEventListener("click", zoomFit);
+  document.getElementById("btn-zoom-100").addEventListener("click", () => {
+    zoom = 1.0; panX = 40; panY = 40;
+    zoomLbl.textContent = "100%";
+    drawCanvas();
+  });
+  document.getElementById("btn-zoom-in").addEventListener("click", () => {
+    zoom = Math.min(10.0, zoom * 1.25);
+    zoomLbl.textContent = Math.round(zoom * 100) + "%";
+    drawCanvas();
+  });
+  document.getElementById("btn-zoom-out").addEventListener("click", () => {
+    zoom = Math.max(0.05, zoom * 0.8);
+    zoomLbl.textContent = Math.round(zoom * 100) + "%";
+    drawCanvas();
+  });
+
+  window.addEventListener("resize", resizeCanvas);
+
+  // Initial setup
+  resizeCanvas();
+  fetchUiTree().then(() => {
+    setTimeout(zoomFit, 100);
+  });
+})();
+</script>
+</body>
+</html>

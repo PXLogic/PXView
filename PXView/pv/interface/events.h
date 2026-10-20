@@ -454,6 +454,13 @@ struct DecoderAnalogTriggerDisplayHold {
     uint64_t generation;
 };
 
+// BenchmarkRequested — request active frame rendering benchmark.
+// When duration_ms > 0, View drives continuous paintEvent at max FPS.
+// When duration_ms <= 0, any running benchmark is aborted early.
+struct BenchmarkRequested {
+    int duration_ms = 5000;
+};
+
 } // namespace interface
 } // namespace pv
 

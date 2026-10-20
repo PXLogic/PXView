@@ -190,6 +190,12 @@ SessionEventDispatcher::SessionEventDispatcher(MainWindow *window, core::EventBu
       [this](const pv::interface::DecoderAnalogTriggerFound &e) { on_decoder_analog_trigger_found(e); }));
   _subscriptions.push_back(_bus->subscribe<pv::interface::DecoderAnalogTriggerDisplayHold>(
       [this](const pv::interface::DecoderAnalogTriggerDisplayHold &e) { on_decoder_analog_trigger_display_hold(e); }));
+  _subscriptions.push_back(_bus->subscribe<pv::interface::BenchmarkRequested>(
+      [this](const pv::interface::BenchmarkRequested &e) {
+        PV_WIN_GUARD();
+        if (auto *v = safe_current_view())
+          v->start_benchmark(e.duration_ms);
+      }));
 }
 // P0/P1: Safely resolve the current view. Returns nullptr if MainWindow is
 // gone (QPointer) or no tab is active. Callers MUST null-check the result

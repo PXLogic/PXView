@@ -63,6 +63,25 @@ int xlog_detail(xlog_writer *w, const char *, ...) { (void)w; return 0; }
 
 namespace {
 
+struct PxlFixture {
+    std::vector<sr_channel> chs;
+    std::vector<GSList> nodes;
+    int channel_num;
+
+    explicit PxlFixture(int ch_count)
+        : chs(ch_count), nodes(ch_count), channel_num(ch_count)
+    {
+        for (int i = 0; i < ch_count; ++i) {
+            chs[i].index = i;
+            chs[i].type = SR_CHANNEL_LOGIC;
+            chs[i].enabled = TRUE;
+            chs[i].name = nullptr;
+            nodes[i].data = &chs[i];
+            nodes[i].next = (i + 1 < ch_count) ? &nodes[i + 1] : nullptr;
+        }
+    }
+};
+
 // 模拟参数配置：针对典型测试场景
 // 10M 样本点 (16 通道 = 20MB, 32 通道 = 40MB) 用于快速单测
 // 125M 样本点 (16 通道 = 250MB, 32 通道 = 500MB) 用于外推与大文件量化
@@ -205,16 +224,7 @@ void TestPxlImportBenchmark::benchmark_stage2_snapshot_deinterleave_ingest() {
 
     std::vector<uint8_t> interleaved_data(payload_bytes, 0xA5);
 
-    std::vector<sr_channel> chs(ch_count);
-    std::vector<GSList> nodes(ch_count);
-    for (int i = 0; i < ch_count; ++i) {
-        chs[i].index = i;
-        chs[i].type = SR_CHANNEL_LOGIC;
-        chs[i].enabled = TRUE;
-        nodes[i].data = &chs[i];
-        nodes[i].next = (i + 1 < ch_count) ? &nodes[i + 1] : nullptr;
-    }
-
+    PxlFixture fx(ch_count);
     pv::data::LogicSnapshot snapshot;
 
     sr_datafeed_logic first_logic{};
@@ -224,7 +234,7 @@ void TestPxlImportBenchmark::benchmark_stage2_snapshot_deinterleave_ingest() {
     first_logic.format = LA_SPLIT_DATA;
 
     // first_payload
-    snapshot.first_payload(first_logic, samples * 4, &nodes[0], false);
+    snapshot.first_payload(first_logic, samples * 4, &fx.nodes[0], false);
 
     // 测量连续 4 次 append_payload_impl 的处理时间 (共 8M 样本 = 16MB)
     const int append_count = 4;
@@ -271,16 +281,7 @@ void TestPxlImportBenchmark::benchmark_stage3_zero_transpose_passthrough() {
 
     std::vector<uint8_t> cross_data(payload_bytes, 0xA5);
 
-    std::vector<sr_channel> chs(ch_count);
-    std::vector<GSList> nodes(ch_count);
-    for (int i = 0; i < ch_count; ++i) {
-        chs[i].index = i;
-        chs[i].type = SR_CHANNEL_LOGIC;
-        chs[i].enabled = TRUE;
-        nodes[i].data = &chs[i];
-        nodes[i].next = (i + 1 < ch_count) ? &nodes[i + 1] : nullptr;
-    }
-
+    PxlFixture fx(ch_count);
     pv::data::LogicSnapshot snapshot;
 
     sr_datafeed_logic first_logic{};
@@ -289,7 +290,7 @@ void TestPxlImportBenchmark::benchmark_stage3_zero_transpose_passthrough() {
     first_logic.data = cross_data.data();
     first_logic.format = LA_CROSS_DATA;
 
-    snapshot.first_payload(first_logic, samples * 4, &nodes[0], false);
+    snapshot.first_payload(first_logic, samples * 4, &fx.nodes[0], false);
 
     // 测量 4 次 append_cross_payload (共 8M 样本 = 16MB)
     const int append_count = 4;
@@ -332,16 +333,7 @@ void TestPxlImportBenchmark::benchmark_stage4_mipmap_computation() {
 
     std::vector<uint8_t> buf(payload_bytes, 0x55);
 
-    std::vector<sr_channel> chs(ch_count);
-    std::vector<GSList> nodes(ch_count);
-    for (int i = 0; i < ch_count; ++i) {
-        chs[i].index = i;
-        chs[i].type = SR_CHANNEL_LOGIC;
-        chs[i].enabled = TRUE;
-        nodes[i].data = &chs[i];
-        nodes[i].next = (i + 1 < ch_count) ? &nodes[i + 1] : nullptr;
-    }
-
+    PxlFixture fx(ch_count);
     pv::data::LogicSnapshot snapshot;
 
     sr_datafeed_logic logic{};
@@ -350,7 +342,7 @@ void TestPxlImportBenchmark::benchmark_stage4_mipmap_computation() {
     logic.data = buf.data();
     logic.format = LA_SPLIT_DATA;
 
-    snapshot.first_payload(logic, samples, &nodes[0], false);
+    snapshot.first_payload(logic, samples, &fx.nodes[0], false);
 
     auto t0 = std::chrono::steady_clock::now();
     snapshot.capture_ended();

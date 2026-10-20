@@ -434,6 +434,39 @@ void View::apply_frame_rate() {
     _zoom_anim_timer->setInterval(ms);
   if (_pan_anim_timer)
     _pan_anim_timer->setInterval(ms);
+  if (_benchmark_timer)
+    _benchmark_timer->setInterval(ms > 0 ? ms : 7);
+}
+
+void View::start_benchmark(int duration_ms) {
+  if (duration_ms <= 0) {
+    stop_benchmark();
+    return;
+  }
+  if (!_benchmark_timer) {
+    _benchmark_timer = new QTimer(this);
+    connect(_benchmark_timer, &QTimer::timeout, this, [this]() {
+      viewport_update();
+    });
+  }
+  if (!_benchmark_stop_timer) {
+    _benchmark_stop_timer = new QTimer(this);
+    _benchmark_stop_timer->setSingleShot(true);
+    connect(_benchmark_stop_timer, &QTimer::timeout, this, [this]() {
+      stop_benchmark();
+    });
+  }
+  const int interval = AppConfig::Instance().view_frame_interval_ms();
+  _benchmark_timer->setInterval(interval > 0 ? interval : 7);
+  _benchmark_timer->start();
+  _benchmark_stop_timer->start(duration_ms);
+}
+
+void View::stop_benchmark() {
+  if (_benchmark_timer && _benchmark_timer->isActive())
+    _benchmark_timer->stop();
+  if (_benchmark_stop_timer && _benchmark_stop_timer->isActive())
+    _benchmark_stop_timer->stop();
 }
 
 void View::set_data_source(pv::data::DataSource *source) {

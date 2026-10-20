@@ -596,6 +596,10 @@ public:
 
   void update_view_port();
 
+  // 性能压测驱动：全速触发视口重绘，直到 duration_ms 结束。
+  void start_benchmark(int duration_ms);
+  void stop_benchmark();
+
   inline void update_all_trace_postion() { signals_changed(nullptr); }
 
   inline Viewport *get_time_view() { return _time_viewport; }
@@ -951,6 +955,10 @@ private:
   // records the max tick overshoot into the perf log, to prove whether the
   // GUI thread is actually blocked (freeze) and for how long.
   QTimer *_event_lag_timer = nullptr;
+
+  // Active benchmark frame driver and auto-stop timer
+  QTimer *_benchmark_timer = nullptr;
+  QTimer *_benchmark_stop_timer = nullptr;
 
   // (trigger position fix _trig_hoff is declared above in the layout section)
 
