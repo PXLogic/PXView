@@ -112,7 +112,11 @@ QJsonObject serialize_widget(QWidget *w)
         const int vp_h = vp->height();
 
         obj["scale"] = view.scale();
-        obj["offset"] = view.offset();
+        // 必须显式转 qint64：offset() 返回 int64_t，它在 Linux/glibc 上是 long，
+        // 而 QJsonValue 的构造重载是 qint64(long long)/int/double/bool —— long
+        // 到这几个都不是精确匹配，赋值会产生歧义（Windows 上 int64_t 恰好就是
+        // long long，所以只有 Linux 的 CI 报错）。
+        obj["offset"] = static_cast<qint64>(view.offset());
         obj["v_offset"] = vOffset;
 
         // 1. Virtual Traces (Logic, Analog, DSO, DecodeTrace, MathTrace, etc.)
