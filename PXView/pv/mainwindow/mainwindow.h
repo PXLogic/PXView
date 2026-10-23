@@ -251,6 +251,7 @@ public:
     bool save_config_to_file(QString file);
     QJsonDocument get_config_json_from_data_file(QString file, bool &bSucesss);
     QJsonArray get_decoder_json_from_data_file(QString file, bool &bSucesss);
+    QJsonObject get_cursors_json_from_data_file(QString file, bool &bSucesss);
     void check_config_file_version(); 
     void load_demo_decoder_config(QString optname);
 
@@ -285,7 +286,7 @@ public:
 private:
 
     //ISessionDataGetter
-    bool genSessionData(std::string &str) override;
+    bool genSessionData(std::string &str, uint64_t start_index = 0, uint64_t end_index = 0) override;
 
     //IServiceEventListener — receive View operation broadcasts from SessionService
     //(show_region, zoom_fit, zoom_in/out, cursor operations). In GUI mode these are

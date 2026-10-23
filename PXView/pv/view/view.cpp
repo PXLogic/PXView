@@ -1246,6 +1246,7 @@ Cursor *View::get_cursor_by_index(int index) { return _cursors->get_cursor_by_in
 // Task C2.7: forward drag-position write-back and Core list reconciliation
 // to the ViewCursors delegate.
 void View::sync_cursor_position(TimeMarker *marker) { _cursors->sync_cursor_position_to_core(marker); }
+void View::sync_cursors_to_core() { _cursors->sync_cursors_to_core(); }
 void View::sync_cursors_from_core() { _cursors->sync_cursors_from_core(); }
 void View::set_search_pos(uint64_t search_pos, bool hit) { _cursors->set_search_pos(search_pos, hit); }
 uint64_t View::get_cursor_samples(int index) { return _cursors->get_cursor_samples(index); }

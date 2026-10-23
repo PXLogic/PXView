@@ -399,6 +399,7 @@ public:
   // CursorRegistry via DataSource::set_cursor_position. Called by the
   // ruler / viewport drag handlers after TimeMarker::set_index.
   void sync_cursor_position(TimeMarker *marker);
+  void sync_cursors_to_core();
 
   // Task C2.7: reconcile the View's rendering cursor list with the Core
   // CursorRegistry. Called on data-source binding so cursors added by MCP

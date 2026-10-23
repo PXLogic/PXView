@@ -231,10 +231,12 @@ bool StoreSession::save_start()
     std::string meta_data;
     std::string decoder_data;
     std::string session_data;
+    std::string cursor_data;
     
     meta_gen(snapshot, meta_data);
     decoders_gen(decoder_data);
-    _sessionDataGetter->genSessionData(session_data);
+    cursors_gen(cursor_data);
+    _sessionDataGetter->genSessionData(session_data, _start_index, _end_index);
 
     if (meta_data.empty()) {
         set_error(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_STORESESS_SAVESTART_ERROR4), "Generate temp file data failed."));
@@ -266,6 +268,10 @@ bool StoreSession::save_start()
         }
         else
         {
+            if (!cursor_data.empty()) {
+                m_zipDoc.AddFromBuffer("cursors", cursor_data.c_str(), cursor_data.size());
+            }
+
             // Gap 2: join previous save if still running
             if (_save_future.valid())
                 _save_future.wait();
@@ -1716,6 +1722,50 @@ bool StoreSession::decoders_gen(std::string &str)
     // 否则 .pxl 的 "decoders" 入口可能被截断，加载时无法恢复解码器设置。
     QByteArray ba = sessionDoc.toJson();
     str = std::string(ba.constData(), ba.size());
+    return true;
+}
+
+bool StoreSession::cursors_gen(std::string &str)
+{
+    QJsonObject cur_obj;
+    if (!gen_cursors_json(cur_obj))
+        return false;
+    QJsonDocument sessionDoc(cur_obj);
+    QByteArray ba = sessionDoc.toJson();
+    str = std::string(ba.constData(), ba.size());
+    return true;
+}
+
+bool StoreSession::gen_cursors_json(QJsonObject &cursor_obj)
+{
+    if (!_session)
+        return false;
+
+    auto cursors = _session->get_cursors();
+    if (cursors.empty())
+        return false;
+
+    QJsonArray cur_array;
+    for (const auto &c : cursors) {
+        uint64_t pos = c.sample_position;
+        if (_start_index < _end_index) {
+            if (pos < _start_index || pos > _end_index)
+                continue;
+            pos -= _start_index;
+        }
+        QJsonObject co;
+        co["index"] = c.index;
+        co["sample"] = static_cast<qint64>(pos);
+        co["sample_position"] = static_cast<qint64>(pos);
+        co["visible"] = c.visible;
+        cur_array.append(co);
+    }
+
+    if (cur_array.isEmpty())
+        return false;
+
+    cursor_obj["cursors"] = cur_array;
+    cursor_obj["show_cursors"] = true;
     return true;
 }
 

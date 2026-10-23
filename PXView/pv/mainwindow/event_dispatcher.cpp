@@ -399,6 +399,35 @@ void SessionEventDispatcher::on_current_device_changed(const pv::interface::Curr
       }
     }
 
+    // Fallback: If session JSON didn't contain cursors, check dedicated "cursors" zip entry
+    if (!doc.isObject() || !doc.object().contains("cursors")) {
+      bool bCurSuccess = false;
+      QJsonObject cObj = _window->get_cursors_json_from_data_file(
+          _window->device_agent()->path(), bCurSuccess);
+      if (bCurSuccess && cObj.contains("cursors")) {
+        pv::view::View *v = safe_current_view();
+        if (v) {
+          v->clear_cursors();
+          QJsonArray curArray = cObj["cursors"].toArray();
+          for (const QJsonValue &cv : curArray) {
+            QJsonObject co = cv.toObject();
+            uint64_t pos = 0;
+            if (co.contains("sample")) {
+              pos = static_cast<uint64_t>(co["sample"].toVariant().toULongLong());
+            } else if (co.contains("sample_position")) {
+              pos = static_cast<uint64_t>(co["sample_position"].toVariant().toULongLong());
+            } else if (co.contains("position")) {
+              pos = static_cast<uint64_t>(co["position"].toVariant().toULongLong());
+            }
+            v->add_cursor(pos);
+          }
+          if (!curArray.isEmpty()) {
+            v->show_cursors(cObj.value("show_cursors").toBool(true));
+          }
+        }
+      }
+    }
+
     if (auto *v = safe_current_view()) v->update_all_trace_postion();
     if (!_window->device_agent()->is_input_module()) {
       QTimer::singleShot(100, _window,

@@ -773,6 +773,21 @@ void TabManager::save_workspace() {
     // 视图密度是 per-tab 状态：随 tab 会话走，不进 .pxc（.pxc 的自然键是
     // (driver, workMode)，同一设备同模式的多个 tab 会互相覆盖）。
     capture_session_ui_layout(ctx->view(), t.session);
+    if (ctx->view()) {
+      QJsonArray cursor_arr;
+      for (const auto &c : ctx->view()->get_cursorList()) {
+        if (!c) continue;
+        QJsonObject co;
+        co["index"] = c->order() - 1;
+        co["sample"] = static_cast<qint64>(c->index());
+        co["sample_position"] = static_cast<qint64>(c->index());
+        co["order"] = c->order();
+        co["color"] = c->get_color().name();
+        cursor_arr.append(co);
+      }
+      t.session["cursors"] = cursor_arr;
+      t.session["show_cursors"] = ctx->view()->cursors_shown();
+    }
     ws.tabs.push_back(t);
   }
 
@@ -815,6 +830,18 @@ int TabManager::restore_workspace() {
       if (auto *v = ctx0->view()) {
         v->rebuild_signals();
         apply_session_ui_layout(v, t0.session);
+        if (t0.session.contains("cursors")) {
+          v->clear_cursors();
+          for (const auto &val : t0.session["cursors"].toArray()) {
+            QJsonObject co = val.toObject();
+            uint64_t pos = co.contains("sample") ? co["sample"].toVariant().toULongLong()
+                         : co["sample_position"].toVariant().toULongLong();
+            v->add_cursor(pos);
+          }
+          if (!t0.session["cursors"].toArray().isEmpty()) {
+            v->show_cursors(t0.session.value("show_cursors").toBool(true));
+          }
+        }
       }
       if (!t0.title.isEmpty()) {
         ctx0->set_title(t0.title);
@@ -892,6 +919,18 @@ int TabManager::restore_workspace() {
     }
     // per-tab 视图密度先落到 ViewLayout；切到该 tab 时的 rebuild 会用上它。
     apply_session_ui_layout(view, t.session);
+    if (t.session.contains("cursors")) {
+      view->clear_cursors();
+      for (const auto &val : t.session["cursors"].toArray()) {
+        QJsonObject co = val.toObject();
+        uint64_t pos = co.contains("sample") ? co["sample"].toVariant().toULongLong()
+                     : co["sample_position"].toVariant().toULongLong();
+        view->add_cursor(pos);
+      }
+      if (!t.session["cursors"].toArray().isEmpty()) {
+        view->show_cursors(t.session.value("show_cursors").toBool(true));
+      }
+    }
 
     add_tab_silent(ctx);
     ++restored;

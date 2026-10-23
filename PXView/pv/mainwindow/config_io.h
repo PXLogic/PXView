@@ -59,7 +59,7 @@ public:
   bool gen_config_json(QJsonObject &sessionVar);
   void save_config();
   bool save_config_to_file(QString file);
-  bool genSessionData(std::string &str);
+  bool genSessionData(std::string &str, uint64_t start_index = 0, uint64_t end_index = 0);
 
   // ---- Load (deserialize from JSON) ----
   bool load_config_from_file(QString file);
@@ -71,6 +71,7 @@ public:
   // ---- Data file embedded config ----
   QJsonDocument get_config_json_from_data_file(QString file, bool &bSuccess);
   QJsonArray get_decoder_json_from_data_file(QString file, bool &bSuccess);
+  QJsonObject get_cursors_json_from_data_file(QString file, bool &bSuccess);
 
 private:
   MainWindow *_wnd;

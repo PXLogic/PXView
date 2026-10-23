@@ -485,7 +485,7 @@ bool MainWindow::on_store_session(QString name) {
 
 bool MainWindow::save_config_to_file(QString name) { return _config_io->save_config_to_file(name); }
 
-bool MainWindow::genSessionData(std::string &str) { return _config_io->genSessionData(str); }
+bool MainWindow::genSessionData(std::string &str, uint64_t start_index, uint64_t end_index) { return _config_io->genSessionData(str, start_index, end_index); }
 
 ::DockOptions *MainWindow::getDockOptions() { return _dock_manager->getDockOptions(); }
 void MainWindow::restore_dock() { _dock_manager->restore_dock(); }
@@ -822,6 +822,9 @@ QJsonDocument MainWindow::get_config_json_from_data_file(QString file,
 
 QJsonArray MainWindow::get_decoder_json_from_data_file(QString file,
                                                        bool &bSucesss) { return _config_io->get_decoder_json_from_data_file(file, bSucesss); }
+
+QJsonObject MainWindow::get_cursors_json_from_data_file(QString file,
+                                                        bool &bSucesss) { return _config_io->get_cursors_json_from_data_file(file, bSucesss); }
 
 void MainWindow::update_capture_ui_status() {
   _dock_manager->update_toolbar_view_status();

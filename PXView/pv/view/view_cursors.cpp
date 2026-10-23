@@ -197,6 +197,9 @@ void ViewCursors::add_cursor(QColor color, uint64_t sampleIndex) {
   get_cursorList().push_back(std::move(newCursor));
   make_cursors_order();
   _view->cursor_update();
+  if (_view->data_source()) {
+    _view->data_source()->add_cursor(sampleIndex);
+  }
 }
 
 void ViewCursors::add_cursor(uint64_t sampleIndex) {
@@ -205,27 +208,39 @@ void ViewCursors::add_cursor(uint64_t sampleIndex) {
   get_cursorList().push_back(std::move(newCursor));
   make_cursors_order();
   _view->cursor_update();
+  if (_view->data_source()) {
+    _view->data_source()->add_cursor(sampleIndex);
+  }
 }
 
 void ViewCursors::del_cursor(Cursor *cursor) {
   assert(cursor);
 
   auto &lst = get_cursorList();
-  for (auto it = lst.begin(); it != lst.end(); ++it) {
+  int idx = 0;
+  bool found = false;
+  for (auto it = lst.begin(); it != lst.end(); ++it, ++idx) {
     if (it->get() == cursor) {
       lst.erase(it);
+      found = true;
       break;
     }
   }
   make_cursors_order();
+
+  if (found && _view->data_source()) {
+    _view->data_source()->remove_cursor(idx);
+  }
 
   _view->cursor_update();
 }
 
 void ViewCursors::clear_cursors() {
   auto &lst = get_cursorList();
-  // unique_ptr elements are auto-deleted when the list is cleared.
   lst.clear();
+  if (_view->data_source()) {
+    _view->data_source()->clear_cursors();
+  }
 }
 
 void ViewCursors::set_cursor_middle(int index) {
@@ -367,6 +382,18 @@ void ViewCursors::sync_cursor_position_to_core(TimeMarker *marker) {
 // the View is created. Existing View cursors that already match a Core entry
 // by index are left untouched (their position is not overwritten — the user
 // may have dragged them since).
+void ViewCursors::sync_cursors_to_core() {
+  if (!_view->data_source())
+    return;
+
+  _view->data_source()->clear_cursors();
+  for (auto &c : get_cursorList()) {
+    if (c) {
+      _view->data_source()->add_cursor(c->index());
+    }
+  }
+}
+
 void ViewCursors::sync_cursors_from_core() {
   if (!_view->data_source())
     return;
@@ -383,12 +410,13 @@ void ViewCursors::sync_cursors_from_core() {
   if (view_count >= core_count)
     return;
 
-  // Create rendering objects for the trailing Core entries that have no
-  // matching View cursor. Use add_cursor(uint64_t) which assigns the next
-  // _order and triggers cursor_update().
+  static int lastOrder = 1;
   for (int i = view_count; i < core_count; ++i) {
-    add_cursor(core_entries[i].sample_position);
+    auto newCursor = std::make_unique<Cursor>(*_view, lastOrder++, core_entries[i].sample_position);
+    view_cursors.push_back(std::move(newCursor));
   }
+  make_cursors_order();
+  _view->cursor_update();
 }
 
 } // namespace view

@@ -81,7 +81,7 @@ public:
     HeadlessSessionDataGetter(pv::SigSession *session, DeviceAgent *device)
         : _session(session), _device(device) {}
 
-    bool genSessionData(std::string &str) override {
+    bool genSessionData(std::string &str, uint64_t start_index = 0, uint64_t end_index = 0) override {
         if (!_session || !_device)
             return false;
 
@@ -93,6 +93,26 @@ public:
         sessionVar["Language"] = 0;
         sessionVar["Title"] = QJsonValue::fromVariant(
             QString("PXView v") + QCoreApplication::applicationVersion());
+
+        auto cursors = _session->get_cursors();
+        if (!cursors.empty()) {
+            QJsonArray cur_array;
+            for (const auto &c : cursors) {
+                uint64_t pos = c.sample_position;
+                if (start_index < end_index) {
+                    if (pos < start_index || pos > end_index)
+                        continue;
+                    pos -= start_index;
+                }
+                QJsonObject co;
+                co["index"] = c.index;
+                co["sample"] = static_cast<qint64>(pos);
+                co["sample_position"] = static_cast<qint64>(pos);
+                cur_array.append(co);
+            }
+            sessionVar["cursors"] = cur_array;
+            sessionVar["show_cursors"] = true;
+        }
 
         QJsonDocument doc(sessionVar);
         QString data = QString::fromUtf8(doc.toJson());
@@ -4005,6 +4025,57 @@ Result<void> SessionService::load_file(const std::string &path) {
                              perr.errorString().toUtf8().constData());
                 }
             }
+            // Restore cursors from "cursors" or "session" zip entry
+            auto cur_data = zip.GetInnterFileData("cursors");
+            if (cur_data && cur_data->data() && cur_data->size() > 0) {
+                QByteArray raw(cur_data->data(), cur_data->size());
+                QJsonParseError perr;
+                QJsonDocument jdoc = QJsonDocument::fromJson(raw, &perr);
+                if (perr.error == QJsonParseError::NoError && jdoc.isObject()) {
+                    QJsonObject root = jdoc.object();
+                    if (root.contains("cursors")) {
+                        _session->clear_cursors();
+                        for (const auto &val : root["cursors"].toArray()) {
+                            QJsonObject co = val.toObject();
+                            uint64_t pos = 0;
+                            if (co.contains("sample")) {
+                                pos = static_cast<uint64_t>(co["sample"].toVariant().toULongLong());
+                            } else if (co.contains("sample_position")) {
+                                pos = static_cast<uint64_t>(co["sample_position"].toVariant().toULongLong());
+                            } else if (co.contains("position")) {
+                                pos = static_cast<uint64_t>(co["position"].toVariant().toULongLong());
+                            }
+                            _session->add_cursor(pos);
+                        }
+                    }
+                }
+            } else {
+                auto ses_data = zip.GetInnterFileData("session");
+                if (ses_data && ses_data->data() && ses_data->size() > 0) {
+                    QByteArray raw(ses_data->data(), ses_data->size());
+                    QJsonParseError perr;
+                    QJsonDocument jdoc = QJsonDocument::fromJson(raw, &perr);
+                    if (perr.error == QJsonParseError::NoError && jdoc.isObject()) {
+                        QJsonObject root = jdoc.object();
+                        if (root.contains("cursors")) {
+                            _session->clear_cursors();
+                            for (const auto &val : root["cursors"].toArray()) {
+                                QJsonObject co = val.toObject();
+                                uint64_t pos = 0;
+                                if (co.contains("sample")) {
+                                    pos = static_cast<uint64_t>(co["sample"].toVariant().toULongLong());
+                                } else if (co.contains("sample_position")) {
+                                    pos = static_cast<uint64_t>(co["sample_position"].toVariant().toULongLong());
+                                } else if (co.contains("position")) {
+                                    pos = static_cast<uint64_t>(co["position"].toVariant().toULongLong());
+                                }
+                                _session->add_cursor(pos);
+                            }
+                        }
+                    }
+                }
+            }
+
             zip.Close();
         }
     } catch (...) {

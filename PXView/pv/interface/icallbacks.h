@@ -39,7 +39,7 @@
 class ISessionDataGetter
 {
 public:
-    virtual bool genSessionData(std::string &str) = 0;
+    virtual bool genSessionData(std::string &str, uint64_t start_index = 0, uint64_t end_index = 0) = 0;
 };
 
 

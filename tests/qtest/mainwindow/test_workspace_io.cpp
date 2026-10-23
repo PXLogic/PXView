@@ -58,6 +58,7 @@ private slots:
   void RoundTripPreservesImportedFileLoader();
   void LegacyTabWithoutImportFieldsDefaultsToPxl();
   void RoundTripPreservesDecoderStacks();
+  void RoundTripPreservesCursorsInSession();
   void RoundTripPreservesDecoderStacksOnOpenPathArchive();
   void LegacyTabWithoutDecoderFieldIsEmpty();
   void MissingFileDegradesGracefully();
@@ -262,6 +263,55 @@ void TestWorkspaceIo::RoundTripPreservesDecoderStacks() {
   QCOMPARE(dec.at(1).toObject().value("view_index").toInt(), 1);
 
   QVERIFY(out.tabs[1].decoder.isEmpty());
+}
+
+void TestWorkspaceIo::RoundTripPreservesCursorsInSession() {
+  pv::Workspace ws;
+  ws.activeTab = 0;
+
+  pv::WorkspaceTab tab;
+  tab.title = "Waveform with Cursors";
+  tab.driver = "demo";
+  tab.workMode = 0;
+  tab.isFileDevice = false;
+
+  QJsonArray cursors;
+  QJsonObject c1;
+  c1["index"] = 0;
+  c1["sample"] = 12345;
+  c1["sample_position"] = 12345;
+  c1["order"] = 1;
+  cursors.append(c1);
+
+  QJsonObject c2;
+  c2["index"] = 1;
+  c2["sample"] = 67890;
+  c2["sample_position"] = 67890;
+  c2["order"] = 2;
+  cursors.append(c2);
+
+  QJsonObject session;
+  session["work_mode"] = 0;
+  session["cursors"] = cursors;
+  session["show_cursors"] = true;
+  tab.session = session;
+
+  ws.tabs.push_back(tab);
+
+  QVERIFY(pv::write_workspace_file(ws));
+
+  pv::Workspace out;
+  QVERIFY(pv::read_workspace_file(out));
+  QCOMPARE(static_cast<int>(out.tabs.size()), 1);
+
+  const QJsonObject &sOut = out.tabs[0].session;
+  QVERIFY(sOut.contains("cursors"));
+  QVERIFY(sOut.value("show_cursors").toBool());
+
+  const QJsonArray curOut = sOut.value("cursors").toArray();
+  QCOMPARE(curOut.size(), 2);
+  QCOMPARE(curOut.at(0).toObject().value("sample").toVariant().toULongLong(), 12345ULL);
+  QCOMPARE(curOut.at(1).toObject().value("sample").toVariant().toULongLong(), 67890ULL);
 }
 
 void TestWorkspaceIo::LegacyTabWithoutDecoderFieldIsEmpty() {

@@ -325,14 +325,8 @@ class TestCursorPersistence:
         # The number of cursors after load should match (or be close to)
         # the number before save. Some implementations may not persist
         # cursors, in which case this test documents that gap.
-        if len(cursors_after) == 0:
-            # Cursor persistence is not supported — document this as a
-            # known limitation rather than failing the test.
-            pytest.skip(
-                "Cursor persistence not implemented: cursors are not "
-                "saved to/restored from .pxl session files. "
-                "This is a known gap to address."
-            )
+        assert len(cursors_after) >= len(cursor_positions), \
+            f"Expected >= {len(cursor_positions)} cursors after load, got {len(cursors_after)}"
 
         # If cursors ARE restored, verify positions match
         positions_after = [

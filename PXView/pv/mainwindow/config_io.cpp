@@ -392,10 +392,35 @@ bool MainWindowConfigIO::save_config_to_file(QString name) {
   return true;
 }
 
-bool MainWindowConfigIO::genSessionData(std::string &str) {
+bool MainWindowConfigIO::genSessionData(std::string &str, uint64_t start_index, uint64_t end_index) {
   QJsonObject sessionVar;
   if (!gen_config_json(sessionVar)) {
     return false;
+  }
+
+  // Persist cursors for waveform file (.pxl)
+  pv::view::View *view = _wnd->current_view();
+  if (view) {
+    QJsonArray cursor_arr;
+    auto &lst = view->get_cursorList();
+    for (auto &c : lst) {
+      if (!c) continue;
+      uint64_t pos = c->index();
+      if (start_index < end_index) {
+        if (pos < start_index || pos > end_index)
+          continue;
+        pos -= start_index;
+      }
+      QJsonObject c_obj;
+      c_obj["index"] = c->order() - 1;
+      c_obj["sample"] = static_cast<qint64>(pos);
+      c_obj["sample_position"] = static_cast<qint64>(pos);
+      c_obj["order"] = c->order();
+      c_obj["color"] = c->get_color().name();
+      cursor_arr.append(c_obj);
+    }
+    sessionVar["cursors"] = cursor_arr;
+    sessionVar["show_cursors"] = view->cursors_shown();
   }
 
   QJsonDocument sessionDoc(sessionVar);
@@ -842,6 +867,31 @@ bool MainWindowConfigIO::load_config_from_json(QJsonDocument &doc, bool &haveDec
     bottom_bar->load_session(sessionObj["measure"].toArray(), format_ver);
   }
 
+  // load cursors
+  if (sessionObj.contains("cursors")) {
+    QJsonArray curArray = sessionObj["cursors"].toArray();
+    pv::view::View *view = _wnd->current_view();
+    if (view) {
+      view->clear_cursors();
+      for (const QJsonValue &v : curArray) {
+        QJsonObject c_obj = v.toObject();
+        uint64_t sample_pos = 0;
+        if (c_obj.contains("sample")) {
+          sample_pos = static_cast<uint64_t>(c_obj["sample"].toVariant().toULongLong());
+        } else if (c_obj.contains("sample_position")) {
+          sample_pos = static_cast<uint64_t>(c_obj["sample_position"].toVariant().toULongLong());
+        } else if (c_obj.contains("position")) {
+          sample_pos = static_cast<uint64_t>(c_obj["position"].toVariant().toULongLong());
+        }
+        view->add_cursor(sample_pos);
+      }
+      bool show = sessionObj.value("show_cursors").toBool(true);
+      if (!curArray.isEmpty()) {
+        view->show_cursors(show);
+      }
+    }
+  }
+
   return true;
 }
 
@@ -985,6 +1035,40 @@ QJsonArray MainWindowConfigIO::get_decoder_json_from_data_file(QString file,
   }
 
   return dec_array;
+}
+
+QJsonObject MainWindowConfigIO::get_cursors_json_from_data_file(QString file,
+                                                                bool &bSucesss) {
+  QJsonObject cur_obj;
+  QJsonParseError error;
+
+  bSucesss = false;
+
+  if (file == "") {
+    pxv_err("File name is empty.");
+    return QJsonObject();
+  }
+
+  auto f_name = path::ConvertPath(file);
+  ZipReader rd(f_name.c_str());
+  auto data = rd.GetInnterFileData("cursors");
+
+  if (data != nullptr) {
+    QByteArray qbs = QByteArray(data->data(), static_cast<int>(data->size()));
+    QJsonDocument curDoc = QJsonDocument::fromJson(qbs, &error);
+
+    if (error.error != QJsonParseError::NoError) {
+      QString estr = error.errorString();
+      pxv_err(
+          "MainWindowConfigIO::get_cursors_json_from_data_file(), parse json error:\"%s\"!",
+          estr.toUtf8().data());
+    } else if (curDoc.isObject()) {
+      bSucesss = true;
+      cur_obj = curDoc.object();
+    }
+  }
+
+  return cur_obj;
 }
 
 // ===========================================================================

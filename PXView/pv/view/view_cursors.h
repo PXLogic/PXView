@@ -120,6 +120,7 @@ public:
   // the position simply does not persist, which is the historical
   // behaviour).
   void sync_cursor_position_to_core(TimeMarker *marker);
+  void sync_cursors_to_core();
 
   // Reconcile the View's rendering cursor list with the Core-layer
   // CursorRegistry. Creates view::Cursor rendering objects for any Core

@@ -310,6 +310,7 @@ void TabContext::finalize_view()
         return;
     _view->update_scale_offset();
     _view->signals_changed(nullptr);
+    _view->sync_cursors_to_core();
 }
 
 // 架构重构 Phase 3：设备意图协议 —— 应用阶段。

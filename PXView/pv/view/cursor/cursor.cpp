@@ -82,8 +82,7 @@ const int Cursor::CloseSize = 10;
 Cursor::Cursor(IRenderView &view, int order, uint64_t sampleIndex) :
     TimeMarker(view, sampleIndex)
 {
-   (void)order;
-   _order = _order;
+    _order = order;
 }
 
 QRect Cursor::get_label_rect(const QRect &rect, bool &visible, bool has_hoff)

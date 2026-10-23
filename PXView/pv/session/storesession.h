@@ -77,12 +77,14 @@ private:
     void export_proc(pv::data::Snapshot *snapshot);
     void export_exec(pv::data::Snapshot *snapshot);
     bool decoders_gen(std::string &str);
+    bool cursors_gen(std::string &str);
     /// Thread-safe setter for the error string.
     void set_error(const QString &err);
  
 
 public:    
     bool gen_decoders_json(QJsonArray &array);
+    bool gen_cursors_json(QJsonObject &cursor_obj);
     /// Decoder-creation callback supplied by the View layer. In GUI mode the
     /// View binds ProtocolDock::add_protocol_by_id; headless/API callers bind
     /// a Core-side creator (or skip). Returns false when the decoder id is
