@@ -1033,6 +1033,7 @@ _own_signals.clear();
 
     if (signal) {
       signal->set_enabled(ch.enabled);
+      signal->set_visible(ch.enabled);
       // Task 7 (purify-architecture-concepts): visible is no longer a
       // Core-serialized field. In-memory visible state across rebuilds is
       // preserved by SignalFactory::save_ui_state/restore_ui_state ONLY — it is

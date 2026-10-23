@@ -336,6 +336,8 @@ void Header::paintEvent(QPaintEvent *) {
   }
 
   for (auto t : traces) {
+    if (!t->enabled() && !t->as_dso())
+      continue;
     t->paint_label(painter, w, dragging ? QPoint(-1, -1) : _mouse_point, fore);
   }
 

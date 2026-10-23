@@ -39,6 +39,8 @@ Signal::Signal(std::shared_ptr<data::SignalModel> model, data::DataSource *data_
   // Establish Qt signal connections directly from _model — no need to
   // query the session for the model by index (the model is injected).
   if (_model) {
+    _local_enabled = _model->enabled();
+    set_visible(_local_enabled);
     connect(_model.get(), &data::SignalModel::appearance_changed, this,
             &Signal::on_appearance_changed);
     connect(_model.get(), &data::SignalModel::visibility_changed, this,
@@ -50,6 +52,7 @@ Signal::Signal(const Signal &s, std::shared_ptr<data::SignalModel> model,
                data::DataSource *data_source)
     : Trace((const Trace &)s), _model(model), _data_source(data_source),
       _local_enabled(s._local_enabled) {
+  set_visible(_local_enabled);
   if (_model) {
     connect(_model.get(), &data::SignalModel::appearance_changed, this,
             &Signal::on_appearance_changed);
@@ -62,6 +65,7 @@ bool Signal::enabled() { return _local_enabled; }
 
 void Signal::set_enabled(bool en) {
   _local_enabled = en;
+  set_visible(en);
   // R2: 实时写回 Core (sr_channel->enabled)，让 SigSession::reload() 重建
   // SignalModel 时能读到正确的 enabled 状态。
   // 不在此处广播 DeviceOptionsUpdated: MainWindow::on_event 收到该
