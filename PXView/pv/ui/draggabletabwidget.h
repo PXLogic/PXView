@@ -78,6 +78,7 @@ private:
     QPushButton *_add_button;
     QWidget *_tab_bottom_line;
     QList<QPointer<SubMainFrame>> _detached_windows;
+    bool _is_closing_all{false};
 };
 
 } // namespace ui

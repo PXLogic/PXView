@@ -55,6 +55,9 @@ public:
 
 	void commit();
 
+    void set_special_value_text(const QString &text) { _special_value_text = text; }
+    const QString &special_value_text() const { return _special_value_text; }
+
 private slots:
     void on_value_changed(int);
     /* The wide editor reports a settled value (editing finished / step). */
@@ -70,6 +73,7 @@ private:
     QWidget *create_wide_spin_box(QWidget *parent, bool auto_commit);
 
 	const QString _suffix;
+    QString _special_value_text;
 	const std::optional< std::pair<int64_t, int64_t> > _range;
 
     GVariant *_value;

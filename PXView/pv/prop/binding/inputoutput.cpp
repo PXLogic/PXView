@@ -166,7 +166,12 @@ InputOutput::InputOutput(const struct sr_option **options, const QVariantMap &pr
             prop = new Double(name, label, 2, QString(), std::nullopt,
                               std::nullopt, getter, setter);
         } else if (data::sr_options::is_integer_type(type)) {
-            prop = new Int(name, label, QString(), std::nullopt, getter, setter);
+            Int *int_prop = new Int(name, label, QString(), std::nullopt, getter, setter);
+            if (name == QLatin1String("numchannels")) {
+                int_prop->set_special_value_text(
+                    QString::fromUtf8(L_S(STR_PAGE_INPUT_OUTPUT, "IDS_OPTION_AUTO", "Auto")));
+            }
+            prop = int_prop;
         } else if (type && g_variant_type_equal(type, G_VARIANT_TYPE_STRING)) {
             prop = new String(name, label, getter, setter);
         } else if (type) {

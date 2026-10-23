@@ -110,8 +110,21 @@ void IntSpinBox::setSuffix(const QString &suffix)
     updateText();
 }
 
+void IntSpinBox::setSpecialValueText(const QString &text)
+{
+    _special_value_text = text;
+    updateText();
+}
+
 QString IntSpinBox::valueToText() const
 {
+    if (!_special_value_text.isEmpty()) {
+        const bool is_special = _signed ? (_signed_value == _signed_minimum)
+                                        : (_unsigned_value == _unsigned_minimum);
+        if (is_special)
+            return _special_value_text;
+    }
+
     const QString number = _signed ? QString::number(_signed_value)
                                    : QString::number(_unsigned_value);
     return number + _suffix;
@@ -121,6 +134,16 @@ bool IntSpinBox::parseText(const QString &text, uint64_t *unsigned_out,
                            int64_t *signed_out) const
 {
     QString trimmed = text.trimmed();
+    if (!_special_value_text.isEmpty() && trimmed == _special_value_text) {
+        if (_signed) {
+            *signed_out = _signed_minimum;
+            *unsigned_out = static_cast<uint64_t>(_signed_minimum);
+        } else {
+            *unsigned_out = _unsigned_minimum;
+            *signed_out = static_cast<int64_t>(_unsigned_minimum);
+        }
+        return true;
+    }
     // The suffix is part of the field's text ("1000000Hz"): the number is what
     // precedes it.
     if (!_suffix.isEmpty() && trimmed.endsWith(_suffix))
@@ -232,6 +255,14 @@ QAbstractSpinBox::StepEnabled IntSpinBox::stepEnabled() const
 QValidator::State IntSpinBox::validate(QString &input, int &pos) const
 {
     Q_UNUSED(pos);
+
+    if (!_special_value_text.isEmpty()) {
+        QString s = input.trimmed();
+        if (s == _special_value_text)
+            return QValidator::Acceptable;
+        if (!s.isEmpty() && _special_value_text.startsWith(s, Qt::CaseInsensitive))
+            return QValidator::Intermediate;
+    }
 
     QString text = input.trimmed();
     if (!_suffix.isEmpty() && text.endsWith(_suffix))

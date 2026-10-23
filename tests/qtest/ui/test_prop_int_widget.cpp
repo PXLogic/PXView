@@ -93,6 +93,7 @@ public:
 
     /// 驱动 OK 路径：commit() 应把编辑器里的值交给 setter。
     void commit() { _prop->commit(); }
+    pv::prop::Int *prop() { return _prop; }
 
     /// 最近一次 setter 收到的值（新引用，属于本对象）。
     GVariant *committed() const { return _committed; }
@@ -142,6 +143,7 @@ private slots:
 
     /* 编辑器里改值后 commit() 会带着新值回调 setter。 */
     void commitDeliversTheEditedValue();
+    void specialValueTextDisplaysOnMinimumAndSubmitsZero();
 };
 
 void TestPropIntWidget::narrowTypesKeepTheSpinBox()
@@ -320,6 +322,41 @@ void TestPropIntWidget::commitDeliversTheEditedValue()
     spin->setValue(64);
     narrow_harness.commit();
     QCOMPARE(g_variant_get_int32(narrow_harness.committed()), 64);
+}
+
+void TestPropIntWidget::specialValueTextDisplaysOnMinimumAndSubmitsZero()
+{
+    IntHarness harness(g_variant_new_uint32(0));
+    harness.prop()->set_special_value_text(QStringLiteral("Auto"));
+
+    IntSpinBox *const editor = harness.wide();
+    QVERIFY(editor != nullptr);
+
+    // Initial value is 0 (minimum): text must show "Auto"
+    QCOMPARE(editor->text(), QStringLiteral("Auto"));
+
+    // Step up to 1: text must show "1"
+    editor->stepBy(1);
+    QCOMPARE(editor->text(), QStringLiteral("1"));
+    QCOMPARE(editor->unsignedValue(), static_cast<uint64_t>(1));
+
+    // Step down back to 0: text must show "Auto"
+    editor->stepBy(-1);
+    QCOMPARE(editor->text(), QStringLiteral("Auto"));
+    QCOMPARE(editor->unsignedValue(), static_cast<uint64_t>(0));
+
+    // Type a number e.g. "16"
+    typeInto(editor, QStringLiteral("16"));
+    QCOMPARE(editor->unsignedValue(), static_cast<uint64_t>(16));
+
+    // Type "0"
+    typeInto(editor, QStringLiteral("0"));
+    QCOMPARE(editor->unsignedValue(), static_cast<uint64_t>(0));
+    QCOMPARE(editor->text(), QStringLiteral("Auto"));
+
+    harness.commit();
+    QVERIFY(harness.committed() != nullptr);
+    QCOMPARE(g_variant_get_uint32(harness.committed()), static_cast<guint32>(0));
 }
 
 QTEST_MAIN(TestPropIntWidget)

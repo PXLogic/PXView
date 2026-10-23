@@ -340,7 +340,9 @@ void DraggableTabWidget::onDetachedWindowClosed(QWidget *content, const QString 
 {
     int idx = addTab(content, title);
     emit tabAttached(content, title);
-    setCurrentIndex(idx);
+    if (!_is_closing_all) {
+        setCurrentIndex(idx);
+    }
 
     SubMainFrame *window = qobject_cast<SubMainFrame*>(sender());
     if (window) {
@@ -351,12 +353,14 @@ void DraggableTabWidget::onDetachedWindowClosed(QWidget *content, const QString 
 
 void DraggableTabWidget::closeAllDetachedWindows()
 {
+    _is_closing_all = true;
     for (auto &ptr : _detached_windows) {
         if (ptr) {
             ptr->close();
         }
     }
     _detached_windows.clear();
+    _is_closing_all = false;
 }
 
 void DraggableTabWidget::onTabMoveRequested(int from, int to)

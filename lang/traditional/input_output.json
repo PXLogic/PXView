@@ -1,11 +1,15 @@
 [
     {
+        "id": "IDS_OPTION_AUTO",
+        "text": "自動"
+    },
+    {
         "id": "IDS_OPTION_NUMCHANNELS",
         "text": "通道數"
     },
     {
         "id": "IDS_OPTION_NUMCHANNELS_DESC",
-        "text": "資料中的通道數。"
+        "text": "數據中的通道數（0 或「自動」表示自動讀取文件中的全部通道）。"
     },
     {
         "id": "IDS_OPTION_SAMPLERATE",

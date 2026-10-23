@@ -121,6 +121,8 @@ QWidget* Int::create_spin_box(QWidget *parent, bool auto_commit)
 
     _spin_box = new pv::ui::DsSpinBox(parent);
     _spin_box->setSuffix(_suffix);
+    if (!_special_value_text.isEmpty())
+        _spin_box->setSpecialValueText(_special_value_text);
 
     const GVariantType *const type = g_variant_get_type(_value);
 
@@ -207,6 +209,8 @@ QWidget* Int::create_wide_spin_box(QWidget *parent, bool auto_commit)
     // QAbstractSpinBox has the suffix support a QLineEdit would have needed a
     // composite widget for.
     _int_spin_box->setSuffix(_suffix);
+    if (!_special_value_text.isEmpty())
+        _int_spin_box->setSpecialValueText(_special_value_text);
 
     if (g_variant_type_equal(type, G_VARIANT_TYPE_INT64)) {
         // The accepted range: whatever the declared type can hold, narrowed by

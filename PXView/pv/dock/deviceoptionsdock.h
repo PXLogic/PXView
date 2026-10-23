@@ -32,6 +32,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <vector>
+#include <QPointer>
 
 #include "pv/session/deviceagent.h"
 #include "pv/dialogs/deviceoptions.h"
@@ -141,7 +142,7 @@ private slots:
   void on_anlog_tab_changed(int index);
 
 private:
-  std::vector<QCheckBox *> _probes_checkBox_list;
+  std::vector<QPointer<QCheckBox>> _probes_checkBox_list;
   QTimer _mode_check_timer;
   /* Task 10/Phase 3: OPERATION_MODE config_get returns a string now. */
   QString _opt_mode;

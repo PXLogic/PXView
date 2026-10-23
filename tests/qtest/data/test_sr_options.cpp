@@ -138,6 +138,9 @@ private slots:
     /* A) 历史持久化的导出格式必须被"归一化"到白名单内的格式。 */
     void exportFormatHistoryIsSanitized();
 
+    /* G) VCD 支持 Verilog 的 parameter/event 忽略及 tri/wand 等扩展网络类型。 */
+    void vcdImportSupportsParametersAndExtendedNetTypes();
+
 private:
     static const struct sr_input_module *binaryModule()
     {
@@ -622,6 +625,52 @@ void TestSrOptions::exportFormatHistoryIsSanitized()
     // is not honoured there.
     QCOMPARE(normalize_export_module_id(QStringLiteral(".binary"), false), QStringLiteral("csv"));
     QCOMPARE(normalize_export_module_id(QStringLiteral(".vcd"), false), QStringLiteral("csv"));
+}
+
+void TestSrOptions::vcdImportSupportsParametersAndExtendedNetTypes()
+{
+    const struct sr_input_module *module = sr_input_find("vcd");
+    QVERIFY(module != nullptr);
+
+    const struct sr_input *input = sr_input_new(module, nullptr);
+    QVERIFY(input != nullptr);
+
+    const char *vcd_content =
+        "$date Fri Oct 23 2026 $end\n"
+        "$version Icarus Verilog $end\n"
+        "$timescale 1ns $end\n"
+        "$scope module top $end\n"
+        "$var wire 1 ! clk $end\n"
+        "$var tri 1 \" data_bus $end\n"
+        "$var parameter 32 # duty $end\n"
+        "$var event 1 $ ev $end\n"
+        "$upscope $end\n"
+        "$enddefinitions $end\n"
+        "$dumpall\n"
+        "b1010 #\n"
+        "$end\n"
+        "#0\n"
+        "$dumpvars\n"
+        "0!\n"
+        "1\"\n"
+        "$end\n"
+        "#10\n"
+        "1!\n";
+
+    GString *chunk = g_string_new(vcd_content);
+    const int ret = sr_input_send(input, chunk);
+    g_string_free(chunk, TRUE);
+
+    QCOMPARE(ret, SR_OK);
+
+    struct sr_dev_inst *sdi = sr_input_dev_inst_get(input);
+    QVERIFY(sdi != nullptr);
+
+    GSList *channels = sr_dev_inst_channels_get(sdi);
+    // parameter (#) and event ($) are skipped; wire (!) and tri (") are logic channels (2 channels total)
+    QCOMPARE(static_cast<int>(g_slist_length(channels)), 2);
+
+    sr_input_free(input);
 }
 
 QTEST_MAIN(TestSrOptions)

@@ -266,7 +266,7 @@ void DeviceOptionsDock::commit_channels() {
       }
       // notify=true: this is a user-driven checkbox change, so the View needs
       // the visibility_changed() relayout SignalModel emits.
-      set_channel_enabled(probe, _probes_checkBox_list.at(index)->isChecked());
+      if (_probes_checkBox_list.at(index)) set_channel_enabled(probe, _probes_checkBox_list.at(index)->isChecked());
       index++;
       if (channel_enabled(probe))
         hasEnabled = true;
@@ -695,7 +695,8 @@ int contentHeight = 0;
 void DeviceOptionsDock::set_all_probes(bool set) {
   setUpdatesEnabled(false);
   for (auto box : _probes_checkBox_list) {
-    box->setCheckState(set ? Qt::Checked : Qt::Unchecked);
+    if (box)
+      box->setCheckState(set ? Qt::Checked : Qt::Unchecked);
   }
   setUpdatesEnabled(true);
 }
@@ -703,7 +704,7 @@ void DeviceOptionsDock::set_all_probes(bool set) {
 void DeviceOptionsDock::enable_max_probes() {
   int cur_ch_num = 0;
   for (auto box : _probes_checkBox_list) {
-    if (box->isChecked())
+    if (box && box->isChecked())
       cur_ch_num++;
   }
 
@@ -728,7 +729,7 @@ return;
     if (cur_ch_num >= vld_ch_num) {
       break;
     }
-    if (box->isChecked() == false) {
+    if (box && box->isChecked() == false) {
       box->setChecked(true);
       cur_ch_num++;
     }
@@ -925,7 +926,7 @@ void DeviceOptionsDock::analog_channel_check() {
 
   _lst_probe_enabled_status.clear();
   for (auto ck : _probes_checkBox_list) {
-    _lst_probe_enabled_status.push_back(ck->isChecked());
+    _lst_probe_enabled_status.push_back(ck ? ck->isChecked() : false);
   }
 
   build_dynamic_panel();
@@ -950,7 +951,7 @@ void DeviceOptionsDock::channel_checkbox_clicked(QCheckBox *sc) {
 
     int cur_ch_num = 0;
     for (auto box : _probes_checkBox_list) {
-      if (box->isChecked())
+      if (box && box->isChecked())
         cur_ch_num++;
     }
 
@@ -1027,6 +1028,7 @@ void DeviceOptionsDock::dso_probes(QGridLayout &layout) {
   pxv_info("DeviceOptionsDock::dso_probes: ENTER");
 
   _probes_checkBox_list.clear();
+  _channel_mode_indexs.clear();
   _probe_options_binding_list.clear();
   _dso_channel_list.clear();
 
@@ -1144,6 +1146,7 @@ void DeviceOptionsDock::analog_probes(QGridLayout &layout) {
   pxv_info("DeviceOptionsDock::analog_probes: ENTER");
 
   _probes_checkBox_list.clear();
+  _channel_mode_indexs.clear();
   _probe_options_binding_list.clear();
   _dso_channel_list.clear();
 
@@ -1353,6 +1356,9 @@ void DeviceOptionsDock::build_dynamic_panel() {
     }
     delete _dynamic_panel;
     _dynamic_panel = nullptr;
+    _probes_checkBox_list.clear();
+    _channel_mode_indexs.clear();
+    _dso_channel_list.clear();
   }
 
   QFont sectionTitleFont = dock_font_section_title();
@@ -1607,6 +1613,9 @@ void DeviceOptionsDock::on_mode_changed() {
   _probe_options_binding_list.clear();
   delete _device_options_binding;
   _device_options_binding = nullptr;
+  _probes_checkBox_list.clear();
+  _channel_mode_indexs.clear();
+  _dso_channel_list.clear();
 
   // 2. Delete old Mode section container (property widgets already deleted
   //    by binding destructors; only labels/layout shell remain)
@@ -1822,7 +1831,9 @@ QJsonObject DeviceOptionsDock::get_session() {
   if (mode == LOGIC) {
     QString ch_mode;
     for (auto &p : _channel_mode_indexs) {
-      QRadioButton *bt = static_cast<QRadioButton *>(p.key);
+      if (!p.key)
+        continue;
+      QRadioButton *bt = p.key.data();
       if (bt->isChecked()) {
         ch_mode = p.value;
         break;
@@ -1838,7 +1849,7 @@ QJsonObject DeviceOptionsDock::get_session() {
     QJsonObject ch_obj;
     ch_obj["index"] = static_cast<int>(probe->index);
 
-    if (idx < static_cast<int>(_probes_checkBox_list.size())) {
+    if (idx < static_cast<int>(_probes_checkBox_list.size()) && _probes_checkBox_list[idx]) {
       ch_obj["enabled"] = _probes_checkBox_list[idx]->isChecked();
     } else {
       ch_obj["enabled"] = channel_enabled(probe);
@@ -1962,7 +1973,7 @@ void DeviceOptionsDock::set_session(QJsonObject &obj) {
         // the dock panels are being rebuilt; the caller refreshes the View
         // afterwards. One relayout beats N.
         set_channel_enabled(probe, restored_enabled, false);
-        if (idx < static_cast<int>(_probes_checkBox_list.size())) {
+        if (idx < static_cast<int>(_probes_checkBox_list.size()) && _probes_checkBox_list[idx]) {
           _probes_checkBox_list[idx]->setChecked(channel_enabled(probe));
         }
 

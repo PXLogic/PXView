@@ -438,6 +438,7 @@ void TabManager::on_tab_changed(int index) {
 
   if (old_index >= 0 && old_index < _tab_contexts.size() &&
       old_index != index) {
+    unbind_docks();
     _tab_contexts[old_index]->deactivate();
     update_tab_style(old_index);
   }
@@ -469,11 +470,6 @@ void TabManager::on_tab_changed(int index) {
   pv::view::View *view = current_view();
   _wnd->update_sample_period();
   if (view) {
-    if (old_index >= 0 && old_index < _tab_contexts.size() &&
-        old_index != index) {
-      unbind_docks();
-    }
-
     pv::TabContext *new_ctx = _tab_contexts[index];
     bind_docks(new_ctx);
 

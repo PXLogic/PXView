@@ -91,6 +91,9 @@ public:
     void setSuffix(const QString &suffix);
     const QString &suffix() const { return _suffix; }
 
+    void setSpecialValueText(const QString &text);
+    const QString &specialValueText() const { return _special_value_text; }
+
     void stepBy(int steps) override;
     StepEnabled stepEnabled() const override;
     QValidator::State validate(QString &input, int &pos) const override;
@@ -126,6 +129,7 @@ private:
     uint64_t _single_step = 1;
 
     QString _suffix;
+    QString _special_value_text;
 };
 
 } // ui

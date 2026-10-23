@@ -1,11 +1,15 @@
 [
     {
+        "id": "IDS_OPTION_AUTO",
+        "text": "Auto"
+    },
+    {
         "id": "IDS_OPTION_NUMCHANNELS",
         "text": "Number of channels"
     },
     {
         "id": "IDS_OPTION_NUMCHANNELS_DESC",
-        "text": "The number of channels in the data."
+        "text": "The number of channels in the data (0 or Auto reads all channels from file)."
     },
     {
         "id": "IDS_OPTION_SAMPLERATE",

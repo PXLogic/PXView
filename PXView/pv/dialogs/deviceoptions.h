@@ -82,9 +82,12 @@ private:
     static const QColor PROBE_COLORS[8];
 };
 
+#include <QPointer>
+
+class QRadioButton;
 struct ChannelModePair
 {
-    void *key;
+    QPointer<QRadioButton> key;
     QString value;
 };
 
