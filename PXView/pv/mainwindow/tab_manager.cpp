@@ -31,6 +31,7 @@
 #include <QDebug>
 #include <QJsonObject>
 #include <QTimer>
+#include <QFile>
 #include <cstdio>
 
 #include "pv/core/documentregistry.h"
@@ -86,59 +87,14 @@ static ds_device_handle default_capture_handle(SigSession *session)
 }
 
 // ---------------------------------------------------------------------------
-// per-tab 视图密度（随 tab 会话走，不进 .pxc）
-// ---------------------------------------------------------------------------
-
-// 视图密度是 per-tab 状态：.pxc 的自然键是 (driver, workMode)，同设备同模式的
-// 多个 tab 会互相覆盖（见 AGENT_CONTRACTS.md "Workspace (tab session)
-// persistence"）。这里是 ViewLayout 与 JSON 的唯一转换点 —— 刻意放在
-// tab_manager 而不是 workspace_io，让后者保持零 View 依赖、可独立单测。
-static void capture_session_ui_layout(pv::view::View *view,
-                                      QJsonObject &session) {
-  if (!view)
-    return;
-  QJsonObject ui = session.value("uiLayout").toObject();
-  ui["signalHeightScale"] = view->layout_delegate()->signalHeightScale();
-  session["uiLayout"] = ui;
-}
-
-static void apply_session_ui_layout(pv::view::View *view,
-                                    const QJsonObject &session) {
-  if (!view || !session.contains("uiLayout"))
-    return;
-  const QJsonObject ui = session.value("uiLayout").toObject();
-  const int shs = ui.value("signalHeightScale").toInt(0);
-  if (shs <= 0) {
-    pxv_warn("apply_session_ui_layout: invalid signalHeightScale (%d), "
-             "keeping current view density", shs);
-    return;
-  }
-  // set_signalHeightScale() 会把该值标记为"显式设置" → 主题默认值不再覆盖
-  // 这个恢复出来的 per-tab 密度。
-  view->layout_delegate()->set_signalHeightScale(shs);
-  view->layout_delegate()->set_signalHeight(shs);
-  view->update_all_trace_postion();
-  pxv_info("apply_session_ui_layout: restored signalHeightScale=%d", shs);
-}
-
-// ---------------------------------------------------------------------------
 // TabManager — construction / destruction
 // ---------------------------------------------------------------------------
 
 TabManager::TabManager(MainWindow *wnd) : _wnd(wnd) {
-  // workspace 的事件驱动写入（2s 防抖）。只在退出时写会在崩溃/强杀时丢掉整个
-  // tab 结构；退出路径仍会立即写一次（MainWindow::able_to_close）。
-  if (wnd) {
-    _ws_save_timer = new QTimer(wnd);
-    _ws_save_timer->setSingleShot(true);
-    QObject::connect(_ws_save_timer, &QTimer::timeout, wnd,
-                     [this]() { save_workspace(); });
-  }
 }
 
 void TabManager::schedule_workspace_save() {
-  if (_ws_save_timer && !_ws_save_timer->isActive())
-    _ws_save_timer->start(2000);
+  // 工作区持久化功能已取消
 }
 
 TabManager::~TabManager() {
@@ -717,239 +673,20 @@ void TabManager::on_tab_attached_extended(QWidget *widget,
 }
 
 // ---------------------------------------------------------------------------
-// Workspace (跨会话 tab 会话持久化)
-// 契约见 AGENT_CONTRACTS.md "Workspace (tab session) persistence"。
+// Workspace (跨会话 tab 会话持久化已取消)
 // ---------------------------------------------------------------------------
 
 void TabManager::save_workspace() {
-  Workspace ws;
-  ws.activeTab = _current_tab_index;
-
-  SigSession *session = _wnd ? _wnd->session() : nullptr;
-
-  for (pv::TabContext *ctx : _tab_contexts) {
-    if (!ctx)
-      continue;
-    WorkspaceTab t;
-    t.title = ctx->title();
-    t.filePath = ctx->file_path();
-    t.isFileDevice = !t.filePath.isEmpty();
-    // Preserve WHICH loader the path needs: native .pxl session vs input-module
-    // import (VCD/CSV/...). Without this the restore path always used set_file()
-    // and imported files never came back.
-    t.isImportedFile = ctx->is_imported_file();
-    t.importFormat = ctx->import_format();
-
-    // Decoder (protocol analyzer) stacks. Two independent reasons the file
-    // device paths cannot supply them on restore:
-    //   1. file devices never write a `.pxc` (see
-    //      MainWindowConfigIO::save_config — only hardware/demo do);
-    //   2. an Open-path archive (.sr) has no "decoders" member of its own
-    //      (unlike .pxl), and VCD/CSV imports have no container at all.
-    // So the workspace is the only carrier for both. Scoped to THIS tab's
-    // document so a multi-tab workspace records each tab's own stacks.
-    //
-    // This only reads a non-empty list if the decoder was actually filed under
-    // ctx->document() — see ViewDerivedTraces::add_decoder(), which now names
-    // the target document explicitly instead of relying on the registry's
-    // global "active document" (unstable during an Open-path replay, because
-    // TabContext::claim_active_document() is skipped while is_working()).
-    if (session && ctx->document()) {
-      StoreSession ss(session);
-      ss.set_decoder_doc(ctx->document());
-      ss.gen_decoders_json(t.decoder);
-    }
-
-    // 设备身份用 (driver, connid)：ds_device_handle 是进程内句柄，跨会话无意义
-    // （契约 "Workspace (tab session) persistence"）。
-    if (session && ctx->device_handle() != NULL_HANDLE)
-      session->device_identity_of_handle(ctx->device_handle(), &t.driver,
-                                         &t.connid);
-
-    if (ctx->document()) {
-      t.session = ctx->document()->signal_config_to_json();
-      t.workMode = ctx->document()->get_signal_config().work_mode;
-    }
-    // 视图密度是 per-tab 状态：随 tab 会话走，不进 .pxc（.pxc 的自然键是
-    // (driver, workMode)，同一设备同模式的多个 tab 会互相覆盖）。
-    capture_session_ui_layout(ctx->view(), t.session);
-    if (ctx->view()) {
-      QJsonArray cursor_arr;
-      for (const auto &c : ctx->view()->get_cursorList()) {
-        if (!c) continue;
-        QJsonObject co;
-        co["index"] = c->order() - 1;
-        co["sample"] = static_cast<qint64>(c->index());
-        co["sample_position"] = static_cast<qint64>(c->index());
-        co["order"] = c->order();
-        co["color"] = c->get_color().name();
-        cursor_arr.append(co);
-      }
-      t.session["cursors"] = cursor_arr;
-      t.session["show_cursors"] = ctx->view()->cursors_shown();
-    }
-    ws.tabs.push_back(t);
-  }
-
-  write_workspace_file(ws);
+  // 工作区持久化功能已取消，不再写入 workspace.json
 }
 
 int TabManager::restore_workspace() {
-  Workspace ws;
-  if (!read_workspace_file(ws))
-    return 0;  // 无 workspace / 解析失败 / 版本不支持 → 保持单 tab 行为
-
-  SigSession *session = _wnd ? _wnd->session() : nullptr;
-  if (!session)
-    return 0;
-  DeviceAgent *da = session->get_device();
-  if (!da || !da->have_instance()) {
-    pxv_warn("restore_workspace: no active device instance, skipping restore");
-    return 0;
+  // 工作区持久化功能已取消：若存在残留的 workspace.json，清理以防混淆，并保持单 tab 行为
+  const QString path = workspace_file_path();
+  if (!path.isEmpty() && QFile::exists(path)) {
+    QFile::remove(path);
   }
-
-  const int cur_mode = da->get_work_mode();
-  const QString cur_driver = da->driver_name();
-
-  // 恢复期间屏蔽 QTabWidget 的 currentChanged：addTab 期间若触发切换会反复
-  // activate()（切设备 / 重放数据）。末尾再统一 setCurrentIndex(activeTab)。
-  const bool blocked = _tab_widget->blockSignals(true);
-
-  // --- tabs[0] → 已初始化的初始 tab ---
-  // 双重守卫：workMode 一致 + driver 一致（老 workspace 无 driver 信息时放行）。
-  // 模式不同时 apply_signal_config() 会切换设备模式，超出"FirstInit 已完成"的
-  // 既有语义（契约 mode guard）；driver 不同说明当前设备与保存时不是同一台，
-  // 套用会把别的设备（甚至别的通道数）的配置写进当前设备。
-  pv::TabContext *ctx0 = current_context();
-  if (ctx0 && ctx0->document() && !ws.tabs.empty()) {
-    const WorkspaceTab &t0 = ws.tabs.front();
-    const bool driver_ok = t0.driver.isEmpty() || t0.driver == cur_driver;
-    if (t0.workMode == cur_mode && driver_ok && !t0.session.isEmpty()) {
-      ctx0->document()->signal_config_from_json(t0.session);
-      ctx0->document()->apply_signal_config();
-      if (auto *v = ctx0->view()) {
-        v->rebuild_signals();
-        apply_session_ui_layout(v, t0.session);
-        if (t0.session.contains("cursors")) {
-          v->clear_cursors();
-          for (const auto &val : t0.session["cursors"].toArray()) {
-            QJsonObject co = val.toObject();
-            uint64_t pos = co.contains("sample") ? co["sample"].toVariant().toULongLong()
-                         : co["sample_position"].toVariant().toULongLong();
-            v->add_cursor(pos);
-          }
-          if (!t0.session["cursors"].toArray().isEmpty()) {
-            v->show_cursors(t0.session.value("show_cursors").toBool(true));
-          }
-        }
-      }
-      if (!t0.title.isEmpty()) {
-        ctx0->set_title(t0.title);
-        _tab_widget->setTabText(0, t0.title);
-      }
-      pxv_info("restore_workspace: applied session to initial tab '%s'",
-               t0.title.toUtf8().constData());
-    } else {
-      pxv_info("restore_workspace: initial tab session skipped "
-               "(saved mode=%d/driver=%s, current=%d/%s) — keeping profile result",
-               t0.workMode, t0.driver.toUtf8().constData(), cur_mode,
-               cur_driver.toUtf8().constData());
-    }
-  }
-
-  // --- tabs[1..] → 新建 tab（不激活） ---
-  int restored = 0;
-  for (size_t i = 1; i < ws.tabs.size(); ++i) {
-    const WorkspaceTab &t = ws.tabs[i];
-
-    // 设备句柄按 (driver, connid) 重新解析：ds_device_handle 是进程内句柄，
-    // 旧值跨会话无效（契约 logical restore only）。解析不到时降级为"当前设备
-    // 列表里第一个可用设备"。
-    ds_device_handle h = NULL_HANDLE;
-    if (!t.isFileDevice) {
-      h = session->resolve_device_handle_by_identity(t.driver, t.connid);
-      if (h == NULL_HANDLE)
-        h = default_capture_handle(session);
-    }
-    // 文件设备 tab 故意保持未绑定（h == NULL_HANDLE）：不在启动时读文件，
-    // 首次切到该 tab 时由 on_tab_changed 按 filePath 懒加载重开。
-
-    auto *view = new pv::view::View(session, _wnd->sampling_bar(), _wnd);
-    size_t doc_idx = session->document_registry()->take_document(
-        std::make_unique<pv::data::SessionDocument>(session->get_device()));
-    pv::data::SessionDocument *doc =
-        session->document_registry()->get_document_by_index(doc_idx);
-    if (!doc) {
-      delete view;
-      pxv_warn("restore_workspace: document registry refused tab %d",
-               static_cast<int>(i));
-      continue;
-    }
-
-    if (!t.session.isEmpty())
-      doc->signal_config_from_json(t.session);
-
-    pv::TabContext *ctx = SessionManager::instance()->create_context(
-        view, session, doc, doc_idx, session->document_registry());
-    if (!ctx) {
-      pxv_warn("restore_workspace: create_context failed for tab %d",
-               static_cast<int>(i));
-      continue;
-    }
-
-    ctx->set_title(
-        t.title.isEmpty()
-            ? QString::fromUtf8(
-                  L_S(STR_PAGE_MSG, S_ID(IDS_TAB_TITLE), "Tab %1"))
-                  .arg(static_cast<int>(i) + 1)
-            : t.title);
-    ctx->set_file_path(t.filePath);
-    // Remember which loader to use on the lazily-reopened tab (import_file for
-    // VCD/CSV/..., set_file for .pxl). See TabManager::save_workspace.
-    ctx->set_imported_file(t.isImportedFile);
-    ctx->set_import_format(t.importFormat);
-    // Decoder stacks to re-apply once the file is lazily reopened. Applied by
-    // MainWindowFileOps::reload_file_into_context — NOT here, because the
-    // decoders need their channels bound and that only happens after the file
-    // device exists (contract "File-device tabs restore lazily").
-    ctx->set_pending_decoders(t.decoder);
-    if (h != NULL_HANDLE) {
-      ctx->set_device_handle(h);
-      doc->set_device_handle(h);
-    }
-    // per-tab 视图密度先落到 ViewLayout；切到该 tab 时的 rebuild 会用上它。
-    apply_session_ui_layout(view, t.session);
-    if (t.session.contains("cursors")) {
-      view->clear_cursors();
-      for (const auto &val : t.session["cursors"].toArray()) {
-        QJsonObject co = val.toObject();
-        uint64_t pos = co.contains("sample") ? co["sample"].toVariant().toULongLong()
-                     : co["sample_position"].toVariant().toULongLong();
-        view->add_cursor(pos);
-      }
-      if (!t.session["cursors"].toArray().isEmpty()) {
-        view->show_cursors(t.session.value("show_cursors").toBool(true));
-      }
-    }
-
-    add_tab_silent(ctx);
-    ++restored;
-  }
-
-  _tab_widget->blockSignals(blocked);
-
-  // 统一切到保存时的活动 tab（触发 on_tab_changed → activate()）。
-  const int target =
-      (ws.activeTab >= 0 && ws.activeTab < static_cast<int>(_tab_contexts.size()))
-          ? ws.activeTab
-          : 0;
-  if (_tab_widget->currentIndex() != target)
-    _tab_widget->setCurrentIndex(target);
-  _current_tab_index = target;
-
-  pxv_info("restore_workspace: restored %d extra tab(s), active=%d",
-           restored, target);
-  return restored;
+  return 0;
 }
 
 } // namespace pv

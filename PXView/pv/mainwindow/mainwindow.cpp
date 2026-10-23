@@ -441,7 +441,7 @@ bool MainWindow::able_to_close() {
   // 触发 onDetachedWindowClosed → setCurrentIndex(idx) 把 tab 收回主窗口并
   // **设为当前**，最后一个被收回的 tab 会成为 current —— 若在其后再收集，
   // activeTab 记的就不是用户真正的最后活动 tab。
-  _tab_manager->save_workspace();
+  // _tab_manager->save_workspace(); // workspace cancelled
 
   _tab_manager->close_detached_windows();
 
