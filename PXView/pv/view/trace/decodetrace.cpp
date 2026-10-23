@@ -502,10 +502,43 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
           // max_ann_width covers range annotations; min_annWidth covers instant
           // annotations (whose visual width = min(min_annWidth, h)). If either
           // is >= 2px, some annotations are wide enough for normal rendering.
+          // 密度实测量：dense 路径（含 for_each_dense_column 的跳跃扫描）
+          // 对每个注解只标记**起点所在的那一列**，宽注解不会铺满它覆盖的像素。
+          // 缩小时注解本来就是亚像素，1px 色块是对的；放大后一个 UART 字节
+          // 横跨上百像素，却只画 1px —— 解码轨看上去就是"空的/消失了"。
+          //
+          // 因此 near_frontier 不能再无条件强制 dense：只有当可见注解确实
+          // 多于屏幕像素（真·密集）时，用色块兜住 ~60Hz 重绘开销才有意义。
+          // 放大后 n_visible 远小于阈值，回落到逐注解绘制，宽注解正常显示。
+          const RowDataSnapshot *const row_data_lod = srow.data.get();
+          const auto range_lod =
+              row_data_lod->get_visible_range(start_sample, end_sample);
+          const size_t n_visible =
+              (range_lod.second > range_lod.first)
+                  ? (range_lod.second - range_lod.first)
+                  : 0;
+          const int vis_width_lod = right - left + 1;
+          const size_t dense_threshold_lod =
+              static_cast<size_t>(std::max(8, vis_width_lod)) * 4;
+          const bool too_many = n_visible > dense_threshold_lod;
+
           // Exception: near_frontier forces dense during active decoding to
-          // keep the ~60Hz repaint cost bounded (drawText would stall GUI).
-          const bool use_dense =
-              (max_ann_width < 2.0 && min_annWidth < 2.0) || near_frontier;
+          // keep the ~60Hz repaint cost bounded (drawText would stall GUI) —
+          // but ONLY when the visible slice is genuinely dense (too_many).
+          // Otherwise fall back to per-annotation rendering so wide
+          // annotations keep their real width when zoomed in.
+          //
+          // 结论：dense 的唯一判据就是"可见注解确实多于屏幕像素"。它同时
+          // 覆盖了原来两个条件要防的性能场景（亚像素宽 = 数量必然 > 像素；
+          // 前沿密集 = n_visible 大），而不再把"宽注解但数量少"的放大场景
+          // 误判成 dense —— 那正是放大后解码轨看起来空掉的原因。
+          // 纯 instant 注解行（max_annotation==0）也一并修正：此前
+          // max_ann_width/min_annWidth 都是 0，无论怎么放大都恒为 dense，
+          // 本该画成圆形气泡的 instant 注解被压成 1px 色点。
+          const bool use_dense = too_many;
+          (void)near_frontier;
+          (void)max_ann_width;
+          (void)min_annWidth;
           _perf_is_dense = use_dense;
 
           const RowDataSnapshot *const row_data = srow.data.get();
@@ -576,10 +609,28 @@ void DecodeTrace::paint_mid(QPainter &p, int left, int right, QColor fore,
                         start_idx, end_idx, samples_per_pixel,
                         static_cast<double>(pixels_offset), left, right,
                         [&](const Annotation &a, int col) {
-                          if (col >= left && col < left + vis_width) {
-                            col_valid[col - left] = 1;
-                            col_color[col - left] =
-                                static_cast<uint8_t>(((a.type() % MaxAnnType) % 16));
+                          if (col < left || col >= left + vis_width)
+                            return;
+                          const uint8_t c =
+                              static_cast<uint8_t>(((a.type() % MaxAnnType) % 16));
+                          // 按注解的真实像素跨度铺满，而不是只标起点那一列。
+                          // for_each_dense_column 的跳跃语义是"每个像素列只报
+                          // 一个注解"，它报的是**起点列**；宽注解若只标起点，
+                          // 在放大视图里就退化成 1px 色点 —— 这正是"LOD 很粗糙"
+                          // 的观感来源。这里把 [col, end_col] 整段都置位，最终
+                          // 的逐列 fillRect 会连成一条宽度正确的色块，视觉上与
+                          // 逐注解绘制等价，而迭代仍是 O(vis_width·logN)。
+                          int c1 = col;
+                          const double x1 =
+                              static_cast<double>(a.end_sample()) / samples_per_pixel -
+                              static_cast<double>(pixels_offset);
+                          if (x1 > static_cast<double>(col) + 1.0)
+                            c1 = static_cast<int>(x1);
+                          if (c1 > left + vis_width - 1)
+                            c1 = left + vis_width - 1;
+                          for (int cc = col; cc <= c1; ++cc) {
+                            col_valid[cc - left] = 1;
+                            col_color[cc - left] = c;
                           }
                         });
 
@@ -1422,8 +1473,14 @@ void DecodeTrace::on_new_decode_data() {
     // 本 ctx 文档是显示来源（含其他 ctx 采集、静止查看）即重绘；本 ctx
     // 自身采集的实时刷新路径不受影响（两判定同为 false，与原行为一致）。
     // 数据模型澄清：is_stopped_status 改走 per-tab 显示状态（IRenderView）。
+    // 边采集边解码：本 tab 正在实时采集时，上面两个判定都为 false（见前面
+    // 注释），解码轨的增量重绘请求会被整段跳过 —— 采集过程中注解就表现为
+    // "不显示 / 追不上波形"。实时刷新期间同样需要只重绘解码层：
+    // request_decode_only_update() 跳过信号 pixmap 重建，只重画 DecodeTracePass，
+    // 代价很低，且已被 100ms 节流。
     if (_view && (_view->is_stopped_status() ||
-                  _view->display_source_is_document())) {
+                  _view->display_source_is_document() ||
+                  _view->session().is_realtime_refresh())) {
       // P2: decode-only repaint — skips the signal-pixmap rebuild (signals
       // are unchanged during decode growth; the decode layer is drawn by
       // DecodeTracePass outside the cached pixmap).

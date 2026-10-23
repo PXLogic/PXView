@@ -307,8 +307,33 @@ void DecodeTaskManager::start_all_decode_tasks() {
     _decode_pool.grow(traces.size());
   }
 
+  // 边采集边解码：本次采集已在启动点下发过流式解码任务时，这些栈已经从 0
+  // 解到了收尾。这里若再 add 一遍，do_decode_work() 会先 init() 抹掉注解，
+  // 用户看到的就是"注解先消失、再从零一格格重新长出来"。
+  //
+  // 只对"本次确实被流式解码覆盖"的采集生效；buffer 模式 / repeat 后续帧 /
+  // loop 模式不会置位，仍走原有全量重解路径。仍在跑的栈由 add_decode_task()
+  // 的重复保护兜住，这里额外覆盖"流式解码已正常结束"的情况。
+  const bool skip_stream_decoded = _state->stream_decode_launched();
+
   for (auto stack : traces) {
-    stack->set_capture_end_flag(true);
+    // 【必须先通知收尾，再谈跳不跳过】
+    //
+    // 正在跑的流式解码线程靠 set_capture_end_flag(true) 才能跳出等待循环：
+    // 它的退出条件是 "i >= committed && capture_end"。采集结束后 i 必然等于
+    // committed，但 capture_end 只有这里能置位。一旦被下面的 skip 分支连着
+    // 一起跳过，解码线程就永远停在 WAIT —— IsRunning() 恒为 true、progress
+    // 恒为 0、也不会再发最终的 new_decode_data()/DecodeDone，界面拿不到收尾
+    // 刷新，看起来就是"只解了前面一小部分"。
+    if (stack)
+      stack->set_capture_end_flag(true);
+
+    if (skip_stream_decoded && stack && stack->list_annotation_size() > 0) {
+      pxv_info("DecodeTaskManager: stack %p already decoded by stream "
+               "live-decode, skip re-decode",
+               stack.get());
+      continue;
+    }
     stack->frame_ended();
     add_decode_task(stack);
   }

@@ -698,7 +698,7 @@ void DecoderStack::stop_decode_work() {
   }
   _decode_state.store(decode_state::Stopped, std::memory_order_release);
   // P0-1 fix: wake up the decode thread if it's waiting on the condition variable
-  _data_cond.notify_all();
+  notify_data_cond();
 }
 
 void DecoderStack::begin_decode_work() {
@@ -833,7 +833,7 @@ pxv_err("ERROR:%s", error_message().toStdString().c_str());
 void DecoderStack::notify_data_ready() {
   // P0-1 fix: Wake up the decode thread which may be waiting in
   // decode_data() for new sample data to arrive.
-  _data_cond.notify_all();
+  notify_data_cond();
 }
 
 void DecoderStack::decode_data(const uint64_t decode_start,
@@ -904,6 +904,7 @@ void DecoderStack::decode_data(const uint64_t decode_start,
   std::vector<bool> iter_valid;
 
   bool bCheckEnd = false;
+  auto _last_wait_log = std::chrono::steady_clock::now();
   uint64_t end_index = decode_end;
 
   _progress.store(0);
@@ -918,8 +919,14 @@ void DecoderStack::decode_data(const uint64_t decode_start,
       if (!bCheckEnd) {
         bCheckEnd = true;
 
-        uint64_t align_sample_count = _snapshot->get_sample_count();
-        pxv_detail("DecoderStack debug: bCheckEnd triggered. get_sample_count() = %llu, end_index = %llu",
+        // 用 committed（已写入）样本数，不是 get_sample_count()。
+        // LogicSnapshot::append_payload 里 _sample_count 是**先自增、后写
+        // 数据**（元数据段持锁先加，数据段解锁写入），而 _ring_sample_count
+        // 在写入 + calc_mipmap 全部完成后才更新。所以 get_sample_count() 会
+        // 领先真实数据，解码线程照它取样本 = 读到还没写的区域 → 解码结果错乱。
+        // 上游 DSView 此处用的正是 get_ring_sample_count()。
+        uint64_t align_sample_count = _snapshot->get_ring_sample_count();
+        pxv_detail("DecoderStack debug: bCheckEnd triggered. ring_sample_count() = %llu, end_index = %llu",
                  (unsigned long long)align_sample_count, (unsigned long long)end_index);
 
         if (end_index >= align_sample_count) {
@@ -930,31 +937,105 @@ void DecoderStack::decode_data(const uint64_t decode_start,
 
         if (i >= align_sample_count) {
           pxv_info("ERROR: the decoding sample index is out of range.");
+          // 追平数据后退出（i == align_sample_count）也算正常收尾：置
+          // bEndTime 让下面的 srd_session_end() 执行，解码器才能 flush 出
+          // 最后一段未闭合的状态（如 UART 的半个起始位/停止位），并发出最终
+          // 的 new_decode_data()。原先直接 break 会把这次 flush 丢掉。
+          if (i == align_sample_count)
+            bEndTime = true;
           break;
         }
       }
-    } else if (i >= _snapshot->get_sample_count()) {
+    } else if (i >= _snapshot->get_ring_sample_count()) {
       // P0-1 fix: Use condition_variable instead of sleep_for(100ms) polling.
       // The decode thread waits until either:
       //   1) new data arrives (notify_data_ready() is called), or
       //   2) capture ends (set_capture_end_flag() notifies), or
       //   3) stop is requested (stop_decode_work() notifies), or
       //   4) a 1-second timeout expires (safety net to recheck state).
+      //
+      // 等的是"已落盘"的样本数（_ring_sample_count），不是 _sample_count：
+      // 后者由 append_payload 在写数据之前就自增，用它判断会读到未写入区域。
+      {
+        const auto _now = std::chrono::steady_clock::now();
+        if (_now - _last_wait_log >= std::chrono::seconds(1)) {
+          _last_wait_log = _now;
+          pxv_detail("[STREAMDBG] WAIT i=%llu committed=%llu written=%llu "
+                  "cap_end=%d stop=%d",
+                  (unsigned long long)i,
+                  (unsigned long long)_snapshot->get_ring_sample_count(),
+                  (unsigned long long)_snapshot->get_sample_count(),
+                  (int)_is_capture_end.load(),
+                  (int)(_stask_stauts && _stask_stauts->_bStop.load()));
+        }
+      }
       std::unique_lock<std::mutex> wait_lk(_data_wait_mutex);
       _data_cond.wait_for(wait_lk, std::chrono::seconds(1),
           [this, &i]() {
-            return i < _snapshot->get_sample_count() ||
+            return i < _snapshot->get_ring_sample_count() ||
                    _is_capture_end ||
                    (_stask_stauts && _stask_stauts->_bStop.load());
           });
       continue;
     }
 
-    if (_is_capture_end && i >= _snapshot->get_sample_count()) {
+    if (_is_capture_end && i >= _snapshot->get_ring_sample_count()) {
       break;
     }
 
     uint64_t chunk_end = end_index;
+
+    // 【边采边解的正确性基石】绝不能把还没写进 mmap 的样本交给解码器。
+    //
+    // 边采边解时 end_index 是 UINT64_MAX（实时分支），chunk_end 只受单批上限
+    // chunk_limit 约束 —— 也就是说一批准能往后推 16384 个样本，而采集缓冲区
+    // 里那一截可能还根本没写。解码器读到的是未初始化/上一帧残留的字节，解出
+    // 来的 UART/I2C 值自然是错的（而且不是偶发：解码线程一直贴着写入前沿跑）。
+    //
+    // get_ring_sample_count() 是"已落盘"边界：append_payload 在数据写入 +
+    // calc_mipmap 全部完成后才更新它；而 get_sample_count() 在写数据之前就
+    // 自增，用它当上界等于放行未提交区域。这里按已落盘量夹一次。
+    if (!_is_capture_end) {
+      const uint64_t committed = _snapshot->get_ring_sample_count();
+      if (chunk_end > committed)
+        chunk_end = committed;
+    }
+
+    // 【边采边解：迭代器失活后必须重建】
+    //
+    // LogicSnapshot::continue_sample_iteration() 的末尾是：
+    //     if (it->current_sample >= _ring_published.load()) it->exhausted = true;
+    // 而函数开头是 `if (!it || it->exhausted) return;` —— 也就是说它按"一次性
+    // 读者读完即弃"设计：一旦追平当前已发布样本末尾，迭代器就**永久失活**，
+    // 之后再也不推进、chunk_data 也不再刷新。
+    //
+    // 边采边解复用同一组迭代器跑整段采集，而解码线程永远比写入快，必然追平
+    // 写入前沿 —— 于是第一次追平后，此后每个 chunk 的所有通道 data_ptr 都是
+    // nullptr。libsigrokdecode 会把"data_ptr 为空 + chunk_const"理解成整块
+    // 恒为该电平，边沿全部丢失：实测 I2C 实时解出 983 条、离线重解 74278 条，
+    // 且标注区间被拉成 25312..130176（离线是 25312..27175）。
+    //
+    // 修法：发现失活就按当前位置 i 重建迭代器（重建走 begin_sample_iteration
+    // 的常规快照路径，得到该位置所在的正确 leaf block 指针）。必须先
+    // end_sample_iteration 释放旧迭代器，否则 _iterator_count 只增不减，
+    // 会挡住 free_head_blocks 的延迟释放。
+    {
+      bool any_exhausted = false;
+      for (auto &it : iterators) {
+        if (it && it->exhausted) {
+          any_exhausted = true;
+          break;
+        }
+      }
+      if (any_exhausted) {
+        for (auto &it : iterators) {
+          if (it)
+            _snapshot->end_sample_iteration(std::move(it));
+        }
+        iterators.clear();
+        iter_valid.clear();
+      }
+    }
 
     // P1-B: Initialize iterators on first iteration (or after wait).
     if (iterators.empty()) {
@@ -1058,6 +1139,28 @@ return;
           chunk_end = i + max_samples;
       }
     }
+    // 无法前进守卫：上面几处截断（已落盘边界、单批上限、leaf block 边界）
+    // 都可能把 chunk_end 压回到 i。此时若继续往下走，srd_session_send() 会
+    // 以长度 0 反复调用、i 永远不递增 —— 解码线程就地空转：IsRunning() 恒为
+    // true、进度恒为 0、注解永远停在第一批（release 下 assert 被裁剪，不报错）。
+    //
+    // 采集已结束就直接收尾退出；否则回循环顶部，那里会走条件变量等待新数据
+    // （chunk_end 被夹到 committed 时必然有 i >= ring，等待分支一定会命中，
+    // 不会退化成忙等）。
+    if (chunk_end <= i) {
+      pxv_detail("[STREAMDBG] NO-PROGRESS i=%llu chunk_end=%llu end_index=%llu "
+              "committed=%llu written=%llu cap_end=%d",
+              (unsigned long long)i, (unsigned long long)chunk_end,
+              (unsigned long long)end_index,
+              (unsigned long long)_snapshot->get_ring_sample_count(),
+              (unsigned long long)_snapshot->get_sample_count(),
+              (int)_is_capture_end.load());
+      if (_is_capture_end) {
+        bEndTime = (i >= end_index);
+        break;
+      }
+      continue;
+    }
     assert((i & 7) == 0 && chunk_end > i);
 
     bEndTime = (chunk_end == end_index);
@@ -1115,6 +1218,13 @@ return;
           std::chrono::milliseconds(200)) {
         publish_snapshot();
         _last_publish_time = now;
+        pxv_detail("[STREAMDBG] stack=%p PUBLISH i=%llu ring=%llu written=%llu "
+                 "results=%llu cap_end=%d",
+                 (void *)this, (unsigned long long)i,
+                 (unsigned long long)_snapshot->get_ring_sample_count(),
+                 (unsigned long long)_snapshot->get_sample_count(),
+                 (unsigned long long)_result_count.load(),
+                 (int)_is_capture_end.load());
         // P1: do NOT post a per-stack new_decode_data event here. The 24
         // stacks all align on the same 200ms gate, so posting individually
         // bursts 24 events onto the main thread at once, then dies to a
@@ -1191,7 +1301,9 @@ void DecoderStack::execute_decode_stack() {
     return;
   }
 
-  _sample_count.store(_snapshot->get_sample_count());
+  // 已落盘样本数（见 decode_data 里对两个计数的说明）。离线解码时它与
+  // get_sample_count() 相等；边采边解时它是唯一安全的解码上界。
+  _sample_count.store(_snapshot->get_ring_sample_count());
 
   for (auto &up : _stack) {
     auto dec = up.get();
@@ -1222,6 +1334,13 @@ srd_session_destroy(session);
     }
   }
 
+  pxv_detail("[STREAMDBG] stack=%p rt=%d cap_end=%d start=%llu end=%llu "
+           "sample_count=%llu",
+           (void *)this, (int)_host->is_realtime_refresh(),
+           (int)_is_capture_end.load(), (unsigned long long)decode_start,
+           (unsigned long long)decode_end,
+           (unsigned long long)_sample_count.load());
+
   int meta_ret = srd_session_metadata_set(session, SRD_CONF_SAMPLERATE,
                            g_variant_new_uint64(static_cast<uint64_t>(_samplerate.load(std::memory_order_acquire))));
 
@@ -1229,7 +1348,16 @@ srd_session_destroy(session);
   uint64_t decode_sample_count = _sample_count.load(std::memory_order_acquire);
   if (decode_end != UINT64_MAX && decode_end >= decode_start)
     decode_sample_count = decode_end - decode_start + 1;
-  if (meta_ret == SRD_OK)
+  else if (decode_sample_count == 0) {
+    // 边采集边解码：任务下发时一个样本都还没有，decode_end 是 UINT64_MAX，
+    // 上面两个分支都给不出长度。此时绝不能下发 CAPTURE_SAMPLES=0 —— 解码器
+    // 在 metadata()/start() 里据此判断捕获长度，拿到 0 会走异常/空捕获分支，
+    // 解码结果就是错的。上游 DSView 根本不设这个 key，这里同样跳过。
+    pxv_detail("DecoderStack: streaming decode, skip SRD_CONF_CAPTURE_SAMPLES "
+               "(length unknown)");
+    decode_sample_count = 0;
+  }
+  if (meta_ret == SRD_OK && decode_sample_count > 0)
     meta_ret = srd_session_metadata_set(session, SRD_CONF_CAPTURE_SAMPLES,
                            g_variant_new_uint64(decode_sample_count));
 

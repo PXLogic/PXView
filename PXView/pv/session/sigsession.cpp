@@ -2867,7 +2867,29 @@ void SigSession::on_rev_end_packet() {
       }
     }
 
-    if (bAddDecoder) {
+    // 边采集边解码：采集启动时下发的流式解码线程此刻正在收尾（或已解完），
+    // 它里面的就是本次采集的真实结果。上游 DSView 在 single+stream 下把
+    // bAddDecoder 判为 false（sigsession.cpp:2253-2257），目的正是不把已解出
+    // 的内容 clear 掉再全量重跑一遍。
+    //
+    // PXView 里 bAddDecoder 还兼管"数据落地到文档 / 推进文档状态机"，不能
+    // 整体置 false，所以只豁免"清空 + 重解"这两步：
+    //   * clear_decode_result() 会对每个栈 init() 抹掉注解，流式结果全丢；
+    //   * clear_all_decode_task2() 会 stop 掉正在收尾的解码线程。
+    // 后续 start_all_decode_tasks() 对已在跑的栈会命中 add_decode_task() 的
+    // 重复保护而跳过，只补齐尚未启动的栈，并给它们置
+    // set_capture_end_flag(true) —— 对在跑的栈这正好是收尾通知。
+    const bool stream_decode_active = _capture_manager->is_stream_decode_active();
+    if (stream_decode_active) {
+      pxv_info("RevEndPacket: stream live-decode in flight, skip clear & "
+               "re-decode (mode=%d single=%d)",
+               cur_mode, _capture_manager->is_single_mode());
+      // 标志生命周期到此为止：之后 is_realtime_refresh() 回到常规判定，
+      // 下一次 exec_capture() 也会重新复位。
+      _capture_manager->set_stream_decode_active(false);
+    }
+
+    if (bAddDecoder && !stream_decode_active) {
       clear_all_decode_task2();
       _capture_manager->clear_decode_result();
     }

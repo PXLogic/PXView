@@ -389,6 +389,11 @@ bool CaptureManager::action_start_capture(bool instant,
 }
 
 bool CaptureManager::exec_capture(data::SessionDocument *pending_owner) {
+  // 本次采集的流式解码标志从干净状态开始；只有下面真正下发了解码任务才置
+  // true。放在最前面也保证任何提前 return 都不会残留上一次采集的标志。
+  _stream_decode_active.store(false);
+  _state->set_stream_decode_launched(false);
+
   if (_state->device_agent().is_collecting()) {
     pxv_err("Error!Device is running.");
     return false;
@@ -563,19 +568,42 @@ bool CaptureManager::exec_capture(data::SessionDocument *pending_owner) {
   // paintSignals，波形不渲染。
   _state->set_device_status(ST_RUNNING);
 
+  bool stream_decode_started = false;
   if (mode == LOGIC) {
     for (auto de : _state->decode_traces()) {
       if (bAddDecoder) {
-        // 彻底禁止 Stream 模式下“边采边解”（会导致严重的内存锁竞争和 GUI 渲染卡死）。
-        // 采集结束时（收到 RevEndPacket 后），底层的 start_all_decode_tasks() 会自动启动离线解码。
-        if (!_is_stream_mode.load()) {
-          de->set_capture_end_flag(false);
-          de->frame_ended();
-          _state->add_decode_task(de);
-        }
+        // 【恢复边采集边解码】对齐上游 DSView（sigsession.cpp:731-740）：
+        // bAddDecoder 只在 Stream 模式下为真（single+stream，或 repeat+stream
+        // 的首帧），因此这里启动的就是"采集刚开始、数据还在持续灌入"的流式
+        // 解码任务：_is_capture_end=false 且 is_realtime_refresh()=true，
+        // DecoderStack::execute_decode_stack() 会把 decode_end 取成 UINT64_MAX，
+        // decode_data() 每解完一批就在条件变量上等 notify_data_ready() 唤醒，
+        // 直到 RevEndPacket 置 set_capture_end_flag(true) 收尾。
+        //
+        // V1.5.3 曾在此处加 `if (!_is_stream_mode)` 一刀切禁用，原因是当时
+        // LogicSnapshot 缺少读写生命周期协议、MmapAllocator 重建会让解码线程
+        // 拿到野指针。现在底层已具备：条件变量等待（替代 sleep 轮询）、
+        // _pinned_region 钉住 mmap、leaf block 池化 + 迭代器引用计数、
+        // publish_snapshot 双缓冲无锁发布，故可安全恢复。
+        de->set_capture_end_flag(false);
+        de->frame_ended();
+        _state->add_decode_task(de);
+        stream_decode_started = true;
       }
     }
   }
+  // 仅当确实下发了流式解码任务才置位：Buffer 模式（bAddDecoder=false）或
+  // 根本没有解码器时保持 false，feed_in_logic 的"首包前停解码"协议与 leaf
+  // block 释放策略维持原样。
+  if (stream_decode_started)
+    _stream_decode_active.store(true);
+
+  // "本次采集由采集启动点的流式解码覆盖"——跨 RevEndPacket/CopyToDocDone
+  // 存活，用于阻止收尾阶段把已解完的栈清空后从头重解。与
+  // _stream_decode_active 分开：后者会影响 is_realtime_refresh()，必须在
+  // RevEndPacket 就清掉（否则采集结束后 viewport 还走实时分支、卡在
+  // have_new_realtime_refresh 门控上不刷新）。
+  _state->set_stream_decode_launched(stream_decode_started);
 
   return true;
 }
@@ -707,6 +735,16 @@ void CaptureManager::exit_capture() {
 
   if (_state->device_agent().is_collecting())
     _state->device_agent().stop();
+
+  // 边采边解安全网：正常情况下 RevEndPacket 会给在跑的流式解码线程置
+  // set_capture_end_flag(true) 让它收尾退出。若设备异常停止而 SR_DF_END
+  // 没有到达，解码线程会一直等在条件变量上（只有 1s 兜底超时），这里补一
+  // 次结束通知，避免线程悬挂到会话关闭。标志本身不清——RevEndPacket 稍后
+  // 到达时仍要按"流式解码在跑"处理（不清空、不重解）。
+  if (_stream_decode_active.load()) {
+    for (auto de : _state->decode_traces())
+      de->set_capture_end_flag(true);
+  }
 }
 
 bool CaptureManager::get_capture_status(bool &triggered, int &progress) {

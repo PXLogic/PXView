@@ -180,7 +180,13 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     // stuck, clear_all_decode_task() has its own internal timeout via
     // the decode thread's stop flag. No change needed for correctness;
     // the blocking is a deliberate trade-off.
-    if (_decode_mgr->has_running_tasks()) {
+    // 边采边解豁免：Stream 模式下 exec_capture() 已在设备启动后下发了解码
+    // 任务，它解码的正是本快照。此时"先停解码再改快照"的协议不适用（它保护
+    // 的是"上一帧的解码线程还在读即将被重写的快照"这一场景），掐掉等于刚起
+    // 就死。豁免期间的内存安全由 first_payload() 的 able_free=false（见下方
+    // bNotFree）与 DecoderStack 的 _pinned_region / 迭代器引用计数保证。
+    if (_decode_mgr->has_running_tasks() &&
+        !_capture_mgr->is_stream_decode_active()) {
       pxv_info("feed_in_logic: stopping decoder thread(s) before "
                "first_payload (snapshot lifecycle protocol)");
       int runDex = 0;
@@ -197,7 +203,14 @@ void DataFeedParser::feed_in_logic(const sr_datafeed_logic &o) {
     // In stream mode (view_data != capture_data), the UI reads from
     // view_data (previous capture's buffer), so decommitting blocks in
     // the capture buffer is safe.
-    bool bNotFree = (_state->view_data() == cd);
+    //
+    // 边采边解期间必须禁止释放 leaf block：解码线程持有指向 block 内数据的
+    // 裸指针（di->inbuf / 迭代器），释放会把它们变成野指针 —— 这正是 V1.5.3
+    // 禁用流式解码的崩溃成因。此处与上游 DSView 的
+    // `_is_decoding && _view_data == _capture_data` 判据等价，但用显式的
+    // 流式解码标志表达，不依赖"解码中"这一瞬时态。
+    bool bNotFree =
+        (_state->view_data() == cd) || _capture_mgr->is_stream_decode_active();
 
     cd->get_logic()->first_payload(
         o, _state->device_agent().get_sample_limit(),

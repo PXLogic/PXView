@@ -103,6 +103,29 @@ public:
   inline void set_is_instant(bool v) { _is_instant.store(v); }
   inline bool is_stream_mode() const { return _is_stream_mode.load(); }
   inline void set_is_stream_mode(bool v) { _is_stream_mode.store(v); }
+
+  // 边采集边解码（Stream 实时流式解码）进行中标志。
+  //
+  // exec_capture() 在 Stream 模式下于设备启动后立刻下发解码任务，此时：
+  //   * _state->is_working() 仍为 false（它要等 exec_capture() 返回后才置位），
+  //     于是 is_realtime_refresh() 返回 false，DecoderStack 会走离线分支
+  //     （decode_end = min(dec_end, sample_count-1)）并以 "Decode data is
+  //     empty" 直接放弃 —— 流式解码根本起不来。本标志把"实时刷新"的判定
+  //     提前到采集启动点。
+  //   * DataFeedParser::feed_in_logic 的首包分支会在 first_payload() 前
+  //     clear_all_decode_task() 杀掉所有解码线程（快照生命周期协议，为修
+  //     repeat 模式 SIGSEGV 而加）。边采边解的线程解码的就是正在写入的
+  //     快照，必须豁免，否则解码线程刚起就被掐死。
+  //
+  // 生命周期：exec_capture() 成功下发流式解码任务时置 true；采集收尾
+  // （RevEndPacket）处理完毕后置 false；下一次 exec_capture() 开头无条件
+  // 复位。即"本次采集中存在由采集启动点下发的在跑解码任务"这一真值。
+  inline bool is_stream_decode_active() const {
+    return _stream_decode_active.load();
+  }
+  inline void set_stream_decode_active(bool v) {
+    _stream_decode_active.store(v);
+  }
   inline bool is_action() const { return _is_action.load(); }
   inline double get_repeat_intvl() const { return _repeat_intvl.load(); }
   inline void set_repeat_intvl(double interval) { _repeat_intvl.store(interval); }
@@ -189,6 +212,7 @@ private:
   std::atomic<uint64_t> _rt_ck_refresh_time_id;
   DEVICE_COLLECT_MODE _clt_mode; // main-thread-only (set in action_start_capture)
   std::atomic<bool> _is_stream_mode;
+  std::atomic<bool> _stream_decode_active{false}; // 见 is_stream_decode_active()
 
   std::atomic<bool> _is_action;
   std::atomic<uint64_t> _dso_packet_count;

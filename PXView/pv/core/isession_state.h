@@ -100,6 +100,20 @@ public:
     virtual int device_status() const = 0;
     virtual void set_device_status(int v) = 0;
 
+    // --- 边采集边解码（Stream 实时流式解码）---
+    //
+    // true 表示"本次采集在启动点就下发过流式解码任务"，即这些栈已经把整段
+    // 采集从 0 解到了收尾。采集收尾（RevEndPacket / CopyToDocDone）不能再
+    // 把它们 init() 清空后从头重解一遍 —— 那会让用户看到注解先消失、再
+    // 从零一格格重新长出来。
+    //
+    // 生命周期：CaptureManager::exec_capture() 成功下发任务时置 true，函数
+    // 开头无条件复位；下一次采集自然清零。
+    // 非纯虚：默认"没有下发过"（适用于测试桩与不参与采集的状态实现），
+    // 只有 SessionStateContext 真正持有该状态。
+    virtual bool stream_decode_launched() const { return false; }
+    virtual void set_stream_decode_launched(bool v) { (void)v; }
+
     // --- Device ---
     virtual DeviceAgent &device_agent() = 0;
 

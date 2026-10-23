@@ -246,6 +246,18 @@ public:
     // (do_decode_work()'s wait predicate and end-check). Predicate state of
     // _data_cond, so it lives with the other atomics of this class rather than
     // being a plain bool (see _is_capture_end's declaration comment).
+    // 唤醒等待中的解码线程。
+    //
+    // 必须持 _data_wait_mutex 再 notify_all：等待方在 wait_for(pred) 内部是
+    // "持锁检查谓词 → 原子地解锁并入队"，若通知正好发生在"检查谓词为假"
+    // 与"入队"之间，这次唤醒就丢了，解码线程只能干等满 1s 兜底超时。
+    // 边采边解下数据到达非常密集，丢一次唤醒 = 白白空转 1s，流式注解会明显
+    // 一顿一顿。三个通知点（数据到达 / 采集结束 / 停止解码）统一走这里。
+    inline void notify_data_cond(){
+        std::lock_guard<std::mutex> lk(_data_wait_mutex);
+        _data_cond.notify_all();
+    }
+
     inline void set_capture_end_flag(bool isEnd){
         _is_capture_end = isEnd;
         if (!isEnd){
@@ -254,7 +266,7 @@ public:
         }
         // P0-1 fix: notify the decode thread that capture has ended so it
         // can wake up from the condition variable wait and check the flag.
-        _data_cond.notify_all();
+        notify_data_cond();
     }
 
     inline int get_progress(){

@@ -381,7 +381,14 @@ public:
   }
   bool is_single_mode() { return _capture_manager->is_single_mode(); }
   bool is_loop_mode() { return _capture_manager->is_loop_mode(); }
-  bool is_realtime_refresh() override { return _capture_manager->is_realtime_refresh(); }
+  // 边采集边解码：CaptureManager::is_realtime_refresh() 的前置条件是
+  // is_working()，而采集启动点下发流式解码任务时 is_working() 尚未置位
+  // （要等 exec_capture() 返回）。把"流式解码已下发"也算作实时刷新，否则
+  // DecoderStack 会走离线分支并在快照为空时直接放弃解码。
+  bool is_realtime_refresh() override {
+    return _capture_manager->is_realtime_refresh() ||
+           _capture_manager->is_stream_decode_active();
+  }
   bool is_repeating() override { return _capture_manager->is_repeating(); }
   void session_save() override { broadcast_async<interface::SaveRequested>({}); }
   void show_region(uint64_t start, uint64_t end, bool keep) { broadcast_async<interface::ShowRegion>({start, end, keep}); }

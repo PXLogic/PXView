@@ -188,6 +188,14 @@ public:
   int device_status() const { return _device_status.load(); }
   void set_device_status(int v) { _device_status.store(v); }
 
+  // --- 边采集边解码（见 ISessionState 的注释）---
+  bool stream_decode_launched() const override {
+    return _stream_decode_launched.load();
+  }
+  void set_stream_decode_launched(bool v) override {
+    _stream_decode_launched.store(v);
+  }
+
   // --- Device ---
   DeviceAgent &device_agent() { return _device_agent; }
 
@@ -414,6 +422,8 @@ private:
   int _map_zoom = 0;
 
   std::atomic<bool> _is_working{false};
+  // 本次采集是否已在启动点下发过流式解码任务（见 stream_decode_launched()）。
+  std::atomic<bool> _stream_decode_launched{false};
   std::atomic<int> _device_status{0}; // ST_INIT = 0
   std::atomic<uint64_t> _next_decoder_handle_id{1};
 
