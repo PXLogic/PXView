@@ -288,12 +288,12 @@ void TestFeedStagingCopyCost::test_staging_copy_cost()
             };
 
             // 预热：配置槽位池并产生 1 个可复用槽位
-            writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA);
+            writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA, 8);
             recycle_one();
 
             const auto t0 = Clock::now();
             for (int i = 0; i < N; ++i) {
-                writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA);
+                writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA, 8);
                 recycle_one();
             }
             now_ms = std::min(now_ms, ms_since(t0));
@@ -312,7 +312,7 @@ void TestFeedStagingCopyCost::test_staging_copy_cost()
             LogicSnapshotDiskCacheWriter writer(nullptr);
             const auto t0 = Clock::now();
             for (int i = 0; i < N; ++i)
-                writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA);
+                writer.enqueue(payload.data(), PAYLOAD, LA_CROSS_DATA, 8);
             no_recycle_ms = std::min(no_recycle_ms, ms_since(t0));
             now_peak_queue_bytes = std::max(now_peak_queue_bytes,
                                             writer.get_async_queue_bytes());

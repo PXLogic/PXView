@@ -200,13 +200,14 @@ void LogicSnapshotDiskCacheWriter::SlotPool::release(uint8_t *slot)
 // ----------------------------------------------------------------------------
 
 void LogicSnapshotDiskCacheWriter::enqueue(const uint8_t *data, uint64_t length,
-                                            int format)
+                                            int format, uint16_t block_bytes)
 {
     if (length == 0) return;
 
     AsyncPayload payload;
     payload.length = length;
     payload.format = format;
+    payload.block_bytes = block_bytes;
 
     std::unique_lock<std::mutex> lock(_async_mutex);
 
@@ -405,6 +406,9 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
         logic.length = payload.length;
         logic.data = payload.data();
         logic.format = payload.format;
+        // CROSS 交织块宽度必须随队列一起带过来：worker 是重新构造
+        // sr_datafeed_logic，不显式赋值就会把栈垃圾传给接收端。
+        logic.block_bytes = payload.block_bytes;
 
         // LA_CROSS_DATA: raw channel-block — forward to append_cross_payload
         //   (v1.49 bit-copy algorithm, no deinterleave).
@@ -412,10 +416,12 @@ void LogicSnapshotDiskCacheWriter::async_write_worker()
         //   append_payload_impl which deinterleaves into the chunk tree.
         // unitsize is only used by the SPLIT path; CROSS ignores it.
         if (logic.format == LA_CROSS_DATA) {
-            // Cross data length must be a multiple of (channel_num * 8) bytes
-            // (each channel gets 8 bytes = 64 samples per chunk). Truncate
-            // incomplete chunks to prevent channel desync.
-            uint64_t chunk_size = static_cast<uint64_t>(_owner->_channel_num) * 8;
+            // Cross data length must be a multiple of (channel_num *
+            // block_bytes) bytes (each channel gets `block_bytes` per
+            // interleave block). Truncate incomplete blocks to prevent
+            // channel desync.
+            const uint64_t per_ch = (logic.block_bytes >= 8) ? logic.block_bytes : 8;
+            uint64_t chunk_size = static_cast<uint64_t>(_owner->_channel_num) * per_ch;
             if (chunk_size > 0)
                 logic.length -= logic.length % chunk_size;
             // unitsize unused for CROSS path; set to 1 to avoid div-by-zero.

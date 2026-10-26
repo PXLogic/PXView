@@ -3,12 +3,18 @@
  *
  * 契约 (spec harden-review-findings T5 / R3):
  *   LogicSnapshot::append_cross_payload() 解析 LA_CROSS_DATA 时按
- *     chunk = 使能通道数(_channel_num) * 8 字节 / 64 样本 分块。
- *   某 group g、通道 c 的 8 字节 u64 位于 buf[(g*N + c)*8 .. +8),
- *   该 u64 的 bit i 对应样本 (g*64 + i)。本测试作为"跨格式契约"单元回归:
- *     - N 通道 (7 / 32) 喂入对齐 cross payload → 采样解析完整、样本数正确;
- *     - 64 样本边界 / 余数(部分块) / 跨多个 group 连续性;
- *     - 不匹配 chunk 尺寸 / 空负载 → 不越界、不崩溃, 按既有语义截断。
+ *     chunk = 使能通道数(_channel_num) * block_bytes 字节分块，其中
+ *     block_bytes 由 sr_datafeed_logic.block_bytes 给出（0 = 缺省 8）。
+ *   block_bytes 是"每通道每拍多少字节"：250MHz×64bit 机型一拍 64 样本
+ *   = 8 字节，125MHz×128bit 机型一拍 128 样本 = 16 字节。
+ *   某 block b、通道 c 的第 j 个 8 字节 u64 位于
+ *     buf[(b*N + c)*B + j*8 .. +8)，对应样本 (b*B*8 + j*64 .. +64)。
+ *   本测试作为"跨格式契约"单元回归:
+ *     - N 通道 (7 / 32) × block_bytes (8 / 16 / 32) 喂入对齐 cross payload
+ *       → 采样解析完整、样本数正确;
+ *     - 64 样本边界 / 余数(部分块) / 跨多个 block 连续性;
+ *     - 不匹配 chunk 尺寸 / 空负载 → 不越界、不崩溃, 按既有语义截断;
+ *     - 宽块(block_bytes > 8) 遇到非整块负载 → 显式丢弃而不是静默串通道。
  *
  * 依赖链同 test_logic_snapshot_raw (直接编译 raw 数据层源, 内部 stub xlog):
  *   snapshot / logicsnapshot / diskcache_writer / glitch_filter / mmap_allocator
@@ -105,6 +111,27 @@ std::vector<uint8_t> build_cross(size_t N, size_t G)
     return d;
 }
 
+// 构造任意块宽的 cross 负载（B = 每通道每块字节数，W = B/8 个 u64 槽）。
+// 布局: [block b][ch c][slot j] → buf[(b*N + c)*B + j*8]。
+// 第 (b*W + j) 个全局槽装 make_word(c, b*W + j)，与 build_cross 的
+// 样本编号完全一致 —— 所以 expected_bit(c, s) 对任何块宽都成立：
+// 每通道样本 s 永远落在全局槽 s/64 的第 s%64 位。
+std::vector<uint8_t> build_cross_wide(size_t N, size_t blocks, size_t B)
+{
+    const size_t W = B / kBytesPerChannel;
+    std::vector<uint8_t> d(N * blocks * B);
+    for (size_t b = 0; b < blocks; ++b) {
+        for (size_t c = 0; c < N; ++c) {
+            for (size_t j = 0; j < W; ++j) {
+                const uint64_t w = make_word((int)c, (uint64_t)(b * W + j));
+                const size_t off = (b * N + c) * B + j * kBytesPerChannel;
+                std::memcpy(&d[off], &w, kBytesPerChannel);
+            }
+        }
+    }
+    return d;
+}
+
 // 构造 N 个使能 logic 通道的 GSList (通道 index == 列表内位置 0..N-1)。
 struct CrossFixture {
     std::vector<sr_channel> chs;
@@ -150,6 +177,19 @@ private slots:
     void test_cross_aligned_7ch_multi_group();
     // 不同通道数 (N=32): 分块尺寸变化
     void test_cross_aligned_32ch();
+    // 宽块 (16 字节/通道/拍, 125MHz×128bit): N=7
+    void test_cross_wide_block_16B_7ch();
+    // 宽块 16B + 32 通道
+    void test_cross_wide_block_16B_32ch();
+    // 宽块 32B (W=4), 非 2 的幂通道数
+    void test_cross_wide_block_32B_7ch();
+    // 宽块负载非整块 → 显式丢弃, 不得静默串通道
+    void test_cross_wide_misaligned_dropped();
+    // block_bytes 是栈垃圾 (非法值) → 按缺省 8 解析
+    void test_cross_block_bytes_garbage_falls_back_to_8();
+    // 走真实链路 (append_payload → 异步 writer → append_cross_payload):
+    // block_bytes 必须随队列传递, 否则 worker 侧会拿到栈垃圾
+    void test_cross_wide_via_async_writer();
     // 负载小于一个 chunk / 空负载: 直接忽略, 样本数 0
     void test_cross_payload_short_ignored();
     // 负载不匹配 chunk 尺寸 (长度非 N*8 整数倍): 不越界不崩溃, 按语义截断
@@ -227,6 +267,167 @@ void TestLogicSnapshotCrossAlignment::test_cross_aligned_32ch()
 
     QCOMPARE(snap.committed_sample_count(), total);
 
+    for (size_t c = 0; c < N; ++c)
+        for (uint64_t s = 0; s < total; ++s)
+            QCOMPARE((int)snap.get_sample(s, (int)c),
+                     (int)expected_bit((int)c, s));
+}
+
+// ── 宽块（block_bytes > 8）公共校验 ──
+// 构造 N 通道 / blocks 个交织块 / B 字节每块的 cross 负载，直接喂
+// append_cross_payload，逐样本比对并校验首块 word 落位。
+static void check_wide_cross(size_t N, size_t blocks, size_t B)
+{
+    const size_t W = B / kBytesPerChannel;
+    const uint64_t total = (uint64_t)blocks * W * kSamplesPerGroup;
+
+    CrossFixture fx(N, total);
+    std::vector<uint8_t> data = build_cross_wide(N, blocks, B);
+
+    LogicSnapshot snap;
+    fx.setup(snap);
+
+    sr_datafeed_logic l{};
+    l.length = data.size();            // blocks * N * B
+    l.unitsize = 1;
+    l.format = LA_CROSS_DATA;
+    l.block_bytes = (uint16_t)B;
+    l.data = data.data();
+    snap.append_cross_payload(l);
+    snap.capture_ended();
+
+    QCOMPARE(snap.committed_sample_count(), total);
+
+    for (size_t c = 0; c < N; ++c) {
+        for (uint64_t s = 0; s < total; ++s) {
+            const bool got = snap.get_sample(s, (int)c);
+            const bool exp = expected_bit((int)c, s);
+            if (got != exp) {
+                QFAIL(QString("wide cross mismatch N=%1 B=%2 ch=%3 s=%4 got=%5 exp=%6")
+                          .arg(N).arg(B).arg(c).arg(s)
+                          .arg((int)got).arg((int)exp)
+                          .toUtf8().constData());
+            }
+        }
+    }
+
+    // 首块落位: 通道 c 第 b 块的第 j 槽 == leaf 块 word (b*W + j)
+    for (size_t c = 0; c < N; ++c) {
+        void *lbp = snap._ch_data[c].front().lbp[0];
+        QVERIFY2(lbp != nullptr, "leaf block must be allocated");
+        for (size_t b = 0; b < blocks; ++b) {
+            for (size_t j = 0; j < W; ++j) {
+                const uint64_t stored =
+                    ((const uint64_t *)lbp)[b * W + j];
+                QVERIFY2(stored == make_word((int)c, (uint64_t)(b * W + j)),
+                         "wide cross block not bit-copied into per-channel block");
+            }
+        }
+    }
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_wide_block_16B_7ch()
+{
+    // 125MHz×128bit: 每通道每拍 16 字节 = 128 样本
+    check_wide_cross(7, 3, 16);
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_wide_block_16B_32ch()
+{
+    check_wide_cross(32, 2, 16);
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_wide_block_32B_7ch()
+{
+    // W = 4：块内 4 个连续 u64 槽，通道数非 2 的幂
+    check_wide_cross(7, 2, 32);
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_wide_misaligned_dropped()
+{
+    // 宽块没有"跨包续块"：非整块负载必须被整条丢弃（而不是按 8 字节块
+    // 解交织，那会静默把通道串位）。契约：committed 不前进、不崩溃。
+    const size_t N = 7;
+    const size_t B = 16;
+    const uint64_t total = 2 * kSamplesPerGroup;
+
+    CrossFixture fx(N, total);
+    std::vector<uint8_t> data = build_cross_wide(N, 1, B);
+    data.insert(data.end(), kBytesPerChannel, 0xAB);   // 112 + 8 = 120 字节
+
+    LogicSnapshot snap;
+    fx.setup(snap);
+
+    sr_datafeed_logic l{};
+    l.length = data.size();
+    l.unitsize = 1;
+    l.format = LA_CROSS_DATA;
+    l.block_bytes = (uint16_t)B;
+    l.data = data.data();
+    snap.append_cross_payload(l);
+
+    QCOMPARE(snap.committed_sample_count(), (uint64_t)0);
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_block_bytes_garbage_falls_back_to_8()
+{
+    // 驱动侧 struct sr_datafeed_logic 是栈变量，未赋值的 block_bytes 是垃圾
+    // 而不是 0。非法值（这里取 5：既不是 8 的倍数，也小于一个 u64 槽）必须
+    // 按缺省 8 解析，绝不能当成"半字节块"去移位。
+    const size_t N = 7;
+    const size_t G = 2;
+    const uint64_t total = G * kSamplesPerGroup;
+
+    CrossFixture fx(N, total);
+    std::vector<uint8_t> data = build_cross(N, G);
+
+    LogicSnapshot snap;
+    fx.setup(snap);
+
+    sr_datafeed_logic l{};
+    l.length = data.size();
+    l.unitsize = 1;
+    l.format = LA_CROSS_DATA;
+    l.block_bytes = 5;                 // 垃圾值
+    l.data = data.data();
+    snap.append_cross_payload(l);
+    snap.capture_ended();
+
+    QCOMPARE(snap.committed_sample_count(), total);
+    for (size_t c = 0; c < N; ++c)
+        for (uint64_t s = 0; s < total; ++s)
+            QCOMPARE((int)snap.get_sample(s, (int)c),
+                     (int)expected_bit((int)c, s));
+}
+
+void TestLogicSnapshotCrossAlignment::test_cross_wide_via_async_writer()
+{
+    // 真实链路: append_payload 只把字节 + format + block_bytes 塞进队列，
+    // worker 线程再重新构造 sr_datafeed_logic 调 append_cross_payload。
+    // 漏传 block_bytes 时 worker 侧拿到 0/垃圾 → 按 8 字节块解析 → 通道串位，
+    // 本用例会逐样本失配。
+    const size_t N = 32;
+    const size_t B = 16;
+    const size_t blocks = 2;
+    const size_t W = B / kBytesPerChannel;
+    const uint64_t total = (uint64_t)blocks * W * kSamplesPerGroup;
+
+    CrossFixture fx(N, total);
+    std::vector<uint8_t> data = build_cross_wide(N, blocks, B);
+
+    LogicSnapshot snap;
+    fx.setup(snap);
+
+    sr_datafeed_logic l{};
+    l.length = data.size();
+    l.unitsize = 1;
+    l.format = LA_CROSS_DATA;
+    l.block_bytes = (uint16_t)B;
+    l.data = data.data();
+    snap.append_payload(l);            // 入队（异步）
+    snap.capture_ended();              // 排空 + finalize
+
+    QCOMPARE(snap.committed_sample_count(), total);
     for (size_t c = 0; c < N; ++c)
         for (uint64_t s = 0; s < total; ++s)
             QCOMPARE((int)snap.get_sample(s, (int)c),

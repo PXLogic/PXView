@@ -71,7 +71,12 @@ public:
     //   LA_CROSS_DATA (1): channel-block raw (PXLogic/DSLogic fork drivers)
     // The worker thread dispatches to append_payload_impl (SPLIT) or
     // append_cross_payload (CROSS) accordingly.
-    void enqueue(const uint8_t *data, uint64_t length, int format);
+    // `block_bytes` is sr_datafeed_logic.block_bytes: bytes per channel per
+    // CROSS interleave block (0 = 8). Ignored for SPLIT. It MUST be carried
+    // through AsyncPayload — the worker rebuilds a fresh sr_datafeed_logic
+    // from the queued bytes and would otherwise pass a stack-garbage width.
+    void enqueue(const uint8_t *data, uint64_t length, int format,
+                 uint16_t block_bytes);
 
     // ---- mmap slot state ----
     bool is_mmap_slot_fresh(uint16_t channel, uint64_t global_block_seq) const;
@@ -112,6 +117,7 @@ private:
         std::vector<uint8_t> heap;
         uint64_t length = 0;
         int format = 0;  // LA_SPLIT_DATA or LA_CROSS_DATA
+        uint16_t block_bytes = 0;  // CROSS: bytes per channel per block (0 = 8)
 
         const uint8_t *data() const { return slot ? slot : heap.data(); }
         uint8_t *data() { return slot ? slot : heap.data(); }

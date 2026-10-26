@@ -704,7 +704,7 @@ void LogicSnapshot::append_payload(const sr_datafeed_logic &logic) {
   // The async worker preserves format and does the actual chunk-tree write
   // under _mutex, with 256MB backpressure between feed thread and disk write.
   _disk_cache_writer->enqueue(reinterpret_cast<const uint8_t*>(logic.data), logic.length,
-                              logic.format);
+                              logic.format, logic.block_bytes);
 }
 
 bool LogicSnapshot::is_mmap_slot_fresh(uint16_t channel, uint64_t global_block_seq) const {
@@ -1114,23 +1114,31 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
 
 void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   // Raw channel-block (LA_CROSS_DATA) input — v1.49 bit-copy algorithm.
-  // Hardware DMA layout: 64 samples for ch0, 64 samples for ch1, ...,
-  // 64 samples for chN-1, then repeat. Each "chunk" is (channel_num * 8)
-  // bytes = (channel_num * 64) samples.
+  // Hardware DMA layout: block_bytes for ch0, block_bytes for ch1, ...,
+  // block_bytes for chN-1, then repeat. One block is one FPGA beat:
+  //   250 MHz / 64-bit  → 8 bytes  = 64 samples  per channel per beat
+  //   125 MHz / 128-bit → 16 bytes = 128 samples per channel per beat
+  // (same throughput, wider block). `block_bytes` carries this width; it used
+  // to be the hardcoded 8 that this function assumed.
   //
   // The per-channel chunk tree stores each channel's samples independently
-  // (8 samples per byte, LeafBlockSamples=65536 samples per leaf block).
-  // Because the input is already channel-separated (just interleaved in
-  // 64-sample blocks), we can bit-copy each channel's 8-byte u64 directly
-  // into the destination — no per-bit deinterleave needed. This is ~20x
-  // faster than the sample-interleaved path (append_payload_impl).
+  // (8 samples per byte, Scale=64 samples per mipmap unit, LeafBlockSamples
+  // = 2^24 samples per leaf block — NOT 65536, that comment was stale).
+  // Because the input is already channel-separated, each channel's block is
+  // `block_bytes/8` whole u64 slots and can be copied straight into the
+  // destination — no per-bit deinterleave needed. This is ~20x faster than
+  // the sample-interleaved path (append_payload_impl).
   //
   // State machine (continued across calls):
-  //   _ch_fraction:   current channel index within the 64-sample chunk
+  //   _ch_fraction:   current channel index within the interleave block
   //   _byte_fraction: bit offset within the current 8-byte u64 (0..7)
   //   _dest_ptr:      next byte to write in the current leaf block
-  //   _ring_sample_count: per-channel sample count (advances by Scale=64
-  //                       each time we complete one channel's chunk)
+  //   _ring_sample_count: per-channel sample count (advances by one whole
+  //                       block = Scale * (block_bytes/8) samples each time
+  //                       we complete every channel's block)
+  // Note: for block_bytes > 8 the payload is always block-aligned, so only
+  // the blocked-transpose fast path runs and no partial state is ever carried
+  // between calls.
   //
   // See v1.49 PXView/src/data/logicsnapshot.cpp:208 for the original.
 
@@ -1143,12 +1151,39 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
 
   if (logic.length == 0) return;
 
-  // Cross data must be chunk-aligned: each chunk is (channel_num * 8) bytes
-  // (64 samples per channel × 8 bytes per 64 samples / 8 samples per byte).
-  // The async worker already truncates length to a multiple of chunk_size,
-  // but assert defensively.
-  const uint64_t chunk_size = static_cast<uint64_t>(_channel_num) * 8;
+  // 每通道每交织块的字节数（sr_datafeed_logic.block_bytes）。一个块 = 一拍
+  // 硬件：250MHz×64bit 一拍 64 样本 = 8 字节；125MHz×128bit 一拍 128 样本
+  // = 16 字节。0 / 非法值一律按缺省 8 处理（与 libsigrok 侧归一化一致）。
+  // 合法值必须是 8 的倍数且 ≤ 8192：块宽小于一个 u64 槽（8 字节 = 64 样本）
+  // 时，同一通道的块会横跨两个 u64 的位域，下面的位拷贝快路径表达不了。
+  const uint16_t block_bytes =
+      (logic.block_bytes >= 8 && logic.block_bytes <= 8192 &&
+       (logic.block_bytes & 7) == 0) ? logic.block_bytes : 8;
+  const uint64_t slots_per_block = block_bytes / 8;  // 每通道每块的 u64 槽数
+
+  // Cross data must be block-aligned: each interleave block is
+  // (channel_num * block_bytes) bytes. The async worker already truncates
+  // length to a multiple of chunk_size, but assert defensively.
+  const uint64_t chunk_size = static_cast<uint64_t>(_channel_num) * block_bytes;
   if (logic.length < chunk_size) return;
+
+  // 宽块（block_bytes > 8）不存在"跨包续块"：驱动按整块提交、writer 按整块
+  // 截断，所以状态机进到这里必然是干净的。若仍有半个 u64 残留，只可能是上一条
+  // payload 是 SPLIT（混合格式采集）留下的 —— 宽块的字节→样本映射与 8 字节块
+  // 不同（同一通道的块是 W 个连续 u64，跨通道才跳），续写会静默错位通道。
+  // 显式丢弃这一条并报错，好过悄悄画错波形。
+  // 位置必须在任何状态修改之前（_ring_sample_count / _loop_offset / _dest_ptr
+  // 都还没动），这样直接 return 等价于"本条 payload 从未到过"。
+  if (slots_per_block > 1 && (_ch_fraction != 0 || _byte_fraction != 0)) {
+    pxv_err("append_cross_payload: block_bytes=%u with pending residue "
+            "(ch=%u byte=%u); wide block cannot continue a partial u64, "
+            "dropping %llu bytes",
+            static_cast<unsigned>(block_bytes),
+            static_cast<unsigned>(_ch_fraction),
+            static_cast<unsigned>(_byte_fraction),
+            (unsigned long long)logic.length);
+    return;
+  }
 
   uint8_t *data_src_ptr = reinterpret_cast<uint8_t*>(logic.data);
   uint64_t len = logic.length;
@@ -1308,28 +1343,37 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   }
 
   // ---- Main phase: chunk-aligned fast path ----
-  // INVARIANT: _ch_fraction == 0, _byte_fraction == 0, _ring_sample_count % Scale == 0
+  // INVARIANT: _ch_fraction == 0, _byte_fraction == 0,
+  //            _ring_sample_count % (Scale * slots_per_block) == 0
   assert(_ch_fraction == 0);
   assert(_byte_fraction == 0);
   // Mixed-format capture: soft-trigger pre-trigger data arrives as
   // LA_SPLIT_DATA (sample-interleaved — generic soft-trigger.c sends the
   // pre-trigger ring buffer with format unset) and advances _ring_sample_count
   // by an arbitrary amount (e.g. 16 samples when the trigger fires mid-chunk).
-  // The following LA_CROSS_DATA payloads then violate the 64-alignment
+  // The following LA_CROSS_DATA payloads then violate the alignment
   // invariant and the assert below fired as a crash dialog (2nd capture with
-  // trigger enabled). Re-anchor to the chunk boundary instead: dropping the
-  // partial (<64) pre-trigger samples keeps post-trigger CROSS chunks
-  // contiguous — an acceptable loss for a sub-chunk tail.
-  if (_ring_sample_count % Scale != 0) {
-    const uint64_t rem = _ring_sample_count % Scale;
-    pxv_warn("append_cross_payload: _ring_sample_count=%llu not %d-aligned "
-             "(mixed SPLIT/CROSS capture after soft trigger); re-anchoring, "
-             "dropping %llu partial samples",
-             (unsigned long long)_ring_sample_count, static_cast<int>(Scale),
+  // trigger enabled). Re-anchor to the block boundary instead: dropping the
+  // partial pre-trigger samples keeps post-trigger CROSS blocks contiguous —
+  // an acceptable loss for a sub-block tail.
+  //
+  // The boundary is one interleave block (= block_bytes * 8 samples = Scale *
+  // slots_per_block), not Scale: with a 16-byte block the ring must advance in
+  // 128-sample steps, otherwise blk_off would start mid-block and the blocked
+  // transpose below would write every channel shifted by 64 samples.
+  const uint64_t block_samples = Scale * slots_per_block;
+  if (_ring_sample_count % block_samples != 0) {
+    const uint64_t rem = _ring_sample_count % block_samples;
+    pxv_warn("append_cross_payload: _ring_sample_count=%llu not %llu-aligned "
+             "(block_bytes=%u, mixed SPLIT/CROSS capture after soft trigger); "
+             "re-anchoring, dropping %llu partial samples",
+             (unsigned long long)_ring_sample_count,
+             (unsigned long long)block_samples,
+             static_cast<unsigned>(block_bytes),
              (unsigned long long)rem);
     _ring_sample_count -= rem;
   }
-  assert(_ring_sample_count % Scale == 0);
+  assert(_ring_sample_count % block_samples == 0);
 
   uint64_t align_sample_count = _ring_sample_count;
   // chunk_size already declared above (line ~1067) — reuse it.
@@ -1376,36 +1420,54 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
     }
 
     const uint64_t *src = reinterpret_cast<const uint64_t*>(data_src_ptr);
-    uint64_t full_chunks = len / chunk_size;
+    uint64_t full_blocks = len / chunk_size;  // 整块数（一块 = 每通道 block_bytes）
     uint64_t processed = 0;  // samples per channel consumed this payload
 
-    while (full_chunks > 0) {
-      // Chunks until the leaf-block boundary (all channels together).
-      uint64_t chunks_to_boundary = (LeafBlockSamples - blk_off) / Scale;
-      uint64_t nb = std::min(full_chunks, chunks_to_boundary);
+    while (full_blocks > 0) {
+      // 到 leaf 块边界还剩几个整块（所有通道同步推进）。blk_off 与
+      // LeafBlockSamples 都是 block_samples 的整数倍，故整除无余。
+      uint64_t blocks_to_boundary = (LeafBlockSamples - blk_off) / block_samples;
+      uint64_t nb = std::min(full_blocks, blocks_to_boundary);
       if (nb == 0)
         break;  // defensive: boundary already reached in a prior iteration
 
-      // Lock-free transpose of nb chunks. Data written here is uncommitted
+      // Lock-free transpose of nb blocks. Data written here is uncommitted
       // and writer-private (readers only see samples released via
       // _ring_published / under _mutex in loop mode) → no lock needed.
       lock.unlock();
       {
         const auto pd_w0 = std::chrono::steady_clock::now();
-        for (uint64_t k = 0; k < nb; k++) {
-          const uint64_t *chunk = src + k * _channel_num;
-          for (uint64_t c = 0; c < _channel_num; c++)
-            dst[c][k] = chunk[c];
+        if (slots_per_block == 1) {
+          // 历史机型（block_bytes = 8）：块宽就是一个 u64，保持原始内层循环，
+          // 不给 2400 MB/s 的摄取门槛加任何额外分支开销。
+          for (uint64_t k = 0; k < nb; k++) {
+            const uint64_t *chunk = src + k * _channel_num;
+            for (uint64_t c = 0; c < _channel_num; c++)
+              dst[c][k] = chunk[c];
+          }
+        } else {
+          // 宽块机型（block_bytes = 16/32/…）：一块的输入布局是
+          // [ch0 W槽][ch1 W槽]…[chN-1 W槽]，每通道 W 个 u64 连续落到该通道
+          // 的 leaf 块里，所以是 W 宽的块转置，仍然全是 u64 连续拷贝。
+          for (uint64_t k = 0; k < nb; k++) {
+            const uint64_t *blk_src = src + k * _channel_num * slots_per_block;
+            for (uint64_t c = 0; c < _channel_num; c++) {
+              const uint64_t *ch_src = blk_src + c * slots_per_block;
+              uint64_t *ch_dst = dst[c] + k * slots_per_block;
+              for (uint64_t j = 0; j < slots_per_block; j++)
+                ch_dst[j] = ch_src[j];
+            }
+          }
         }
         pd_write_ms += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - pd_w0).count();
       }
       lock.lock();  // re-acquire for metadata (calc_mipmap/allocate_block)
 
-      processed += nb * Scale;
-      blk_off += nb * Scale;
-      full_chunks -= nb;
-      src += nb * _channel_num;
+      processed += nb * block_samples;
+      blk_off += nb * block_samples;
+      full_blocks -= nb;
+      src += nb * _channel_num * slots_per_block;
 
       if (blk_off == LeafBlockSamples) {
         // All channels completed this leaf block simultaneously → calc
@@ -1458,6 +1520,18 @@ void LogicSnapshot::append_cross_payload(const sr_datafeed_logic &logic) {
   } else {
   // ---- Original per-channel strided loop (fallback: non-chunk-aligned
   //      payload, or pending partial u64 from a previous call) ----
+  // 这条路径的读取步长写死为"每通道 1 个 u64 / 块"（read_ptr += _channel_num），
+  // 只对 block_bytes == 8 成立。宽块下它不可达（writer 已按整块截断，且上面的
+  // 残留守卫会拦住脏状态机），真进来了说明有人绕过了 writer，直接报错比按错
+  // 步长解交织（会静默串通道）安全。
+  if (slots_per_block > 1) {
+    pxv_err("append_cross_payload: non-block-aligned payload (%llu bytes) with "
+            "block_bytes=%u; the strided fallback only supports 8-byte blocks, "
+            "dropping payload",
+            (unsigned long long)len, static_cast<unsigned>(block_bytes));
+    _dest_ptr = nullptr;
+    return;
+  }
   uint64_t *read_ptr = reinterpret_cast<uint64_t*>(data_src_ptr);
   void *end_read_ptr = reinterpret_cast<uint8_t*>(data_src_ptr) + len;
 

@@ -1465,7 +1465,7 @@ void StoreSession::export_exec(data::Snapshot *snapshot)
             const uint16_t unitsize = static_cast<uint16_t>(ceil(static_cast<double>(buf_vec.size()) / 8.0));
             unsigned int usize = 8192;
             unsigned int size = usize;
-            struct sr_datafeed_logic lp;
+            struct sr_datafeed_logic lp = {};
 
             for(uint64_t i = 0; !_canceled && i < buf_sample_num; i+=usize){
                 if(buf_sample_num - i < usize)
