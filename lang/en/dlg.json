@@ -2046,5 +2046,25 @@
     {
         "id": "IDS_DLG_IAP_FAIL_MSG",
         "text": "Firmware upgrade failed. See the log for details."
+    },
+    {
+        "id": "IDS_DLG_OPEN_USER_DECODERS",
+        "text": "Open User Decoders Directory"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_PY_DECODERS",
+        "text": "Open System Python Decoders Directory"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_C_DECODERS",
+        "text": "Open System C Decoders Directory"
+    },
+    {
+        "id": "IDS_DLG_IMPORT_USER_DECODER",
+        "text": "Import User Decoder..."
+    },
+    {
+        "id": "IDS_DLG_RELOAD_DECODERS",
+        "text": "Rescan and Reload All Decoders"
     }
 ]

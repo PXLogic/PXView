@@ -262,3 +262,19 @@ if(ENABLE_ASAN OR ENABLE_TSAN OR ENABLE_UBSAN OR ENABLE_CLANG_TIDY)
     message(STATUS "│  Build type: ${CMAKE_BUILD_TYPE}                    │")
     message(STATUS "└─────────────────────────────────────────────┘")
 endif()
+
+#===============================================================================
+#= Fast Linker (LLD)
+#-------------------------------------------------------------------------------
+if(ENABLE_LLD AND NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-fuse-ld=")
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version
+        OUTPUT_VARIABLE _lld_out
+        ERROR_QUIET
+        RESULT_VARIABLE _lld_res
+    )
+    if(_lld_res EQUAL 0)
+        message(STATUS "Fast linker detected: LLVM LLD (-fuse-ld=lld)")
+        add_link_options(-fuse-ld=lld)
+    endif()
+endif()

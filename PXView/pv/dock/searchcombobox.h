@@ -61,6 +61,7 @@ public:
   QString _name;
   void *_data_handle;
   bool _is_c_decoder;
+  bool _is_user_decoder = false;
   QWidget *_control;
 };
 
@@ -76,7 +77,7 @@ public:
   void ShowDlg(QWidget *editline);
 
   void AddDataItem(QString id, QString name, void *data_handle,
-                   bool is_c_decoder = false);
+                   bool is_c_decoder = false, bool is_user_decoder = false);
 
   inline void SetItemClickHandle(ISearchItemClick *click) {
     _item_click = click;

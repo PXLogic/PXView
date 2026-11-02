@@ -240,3 +240,6 @@ python/*.zip
 
 # Windows 资源管理器残留文件
 desktop.ini
+
+# Test junk files
+test_junk.txt

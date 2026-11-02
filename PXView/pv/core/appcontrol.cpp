@@ -359,7 +359,16 @@ bool AppControl::Init()
         pxv_err("ERROR: libsigrokdecode init failed.");
         return false;
     }
+    
     pxv_info("DBG: srd_init done");
+
+    // Add user decoders search path
+    {
+        QString userDecDir = GetUserDecodersDir();
+        std::string user_cs = pv::path::ConvertPath(userDecDir);
+        srd_decoder_user_searchpath_add(user_cs.c_str());
+        pxv_info("User decoders path: \"%s\"", user_cs.c_str());
+    }
 
     // Add C decoder search paths
     {

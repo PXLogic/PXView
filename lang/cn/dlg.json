@@ -2050,5 +2050,25 @@
     {
         "id": "IDS_DLG_IAP_FAIL_MSG",
         "text": "固件升级失败，详见日志。"
+    },
+    {
+        "id": "IDS_DLG_OPEN_USER_DECODERS",
+        "text": "打开用户自定义解码器文件夹"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_PY_DECODERS",
+        "text": "打开系统 Python 解码器文件夹"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_C_DECODERS",
+        "text": "打开系统 C 解码器文件夹"
+    },
+    {
+        "id": "IDS_DLG_IMPORT_USER_DECODER",
+        "text": "导入用户解码器..."
+    },
+    {
+        "id": "IDS_DLG_RELOAD_DECODERS",
+        "text": "重新扫描并加载所有解码器"
     }
 ]

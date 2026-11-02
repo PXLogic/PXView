@@ -152,12 +152,13 @@ void SearchComboBox::ShowDlg(QWidget *editline) {
 }
 
 void SearchComboBox::AddDataItem(QString id, QString name, void *data_handle,
-                                 bool is_c_decoder) {
+                                 bool is_c_decoder, bool is_user_decoder) {
   SearchDataItem *item = new SearchDataItem();
   item->_id = id;
-  item->_name = name;
+  item->_name = is_user_decoder ? (name + " (user)") : name;
   item->_data_handle = data_handle;
   item->_is_c_decoder = is_c_decoder;
+  item->_is_user_decoder = is_user_decoder;
   this->_items.push_back(item);
 }
 
@@ -231,6 +232,8 @@ void SearchComboBox::on_keyword_changed(const QString &value) {
       type_match = o->_is_c_decoder;
     else if (filter_index == 2)
       type_match = !o->_is_c_decoder;
+    else if (filter_index == 3)
+      type_match = o->_is_user_decoder;
 
     if (keyword_match && type_match) {
       if (o->_control->isHidden()) {

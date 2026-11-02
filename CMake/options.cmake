@@ -8,6 +8,7 @@ set(ENABLE_COTIRE FALSE) #Enable cotire
 option(CMAKE_UNITY_BUILD "Enable unity build (batch compilation) for faster builds" OFF)
 option(ENABLE_PCH "Enable precompiled headers" ON)
 set(ENABLE_TESTS FALSE CACHE BOOL "Enable unit tests (QTest + CTest). Use -DENABLE_TESTS=ON to enable.") # CACHE: 允许 -DENABLE_TESTS=ON 覆盖默认值，避免普通变量与根 CMakeLists option() 冲突（CMP0077）导致自动重配置时测试目标丢失
+option(ENABLE_LLD "Use LLVM lld linker for 5-10x faster linking if available" ON)
 set(STATIC_PKGDEPS_LIBS FALSE) #Statically link to (pkg-config) libraries
 
 if(WIN32)

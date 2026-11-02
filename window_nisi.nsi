@@ -325,6 +325,12 @@ Function .onInit
 
       ; Run the old uninstaller silently
       ClearErrors
+            ; Backup old decoders to AppData before uninstall wipes $INSTDIR (Issue #13 protection)
+      ${If} ${FileExists} "$INSTDIR\decoders"
+        CreateDirectory "$APPDATA\PXlogicV20\PXView\userdecoders\_backup_before_upgrade"
+        CopyFiles /SILENT "$INSTDIR\decoders\*.*" "$APPDATA\PXlogicV20\PXView\userdecoders\_backup_before_upgrade"
+      ${EndIf}
+
       ExecWait '"$TEMP\_pxview_old_uninst.exe" /S _?=$INSTDIR' $R0
 
       ; Clean up the temp uninstaller copy

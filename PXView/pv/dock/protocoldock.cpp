@@ -1,3 +1,5 @@
+#include <QDesktopServices>
+#include <QFileDialog>
 /*
  * This file is part of the PXView project.
  * PXView is based on DSView.
@@ -86,46 +88,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   // owned by SigSession. Qt parent ownership (this) handles destruction.
   _decoder_model = new pv::view::DecoderModel(this);
 
-  //-----------------------------get protocol list
-  GSList *l = const_cast<GSList *>(srd_decoder_list());
-  std::map<std::string, int> pro_key_table;
-  QString repeatNammes;
-
-  for (; l; l = l->next) {
-    const srd_decoder *const d = reinterpret_cast<srd_decoder*>(l->data);
-    if (!d) {
-      pxv_warn("%s", "ProtocolDock: decoder list item d is nullptr, skipping");
-      continue;
-    }
-    assert(d);
-    (void)d;
-
-    DecoderInfoItem *info = new DecoderInfoItem();
-    srd_decoder *dec = reinterpret_cast<srd_decoder*>((l->data));
-    info->_data_handle = dec;
-    _decoderInfoList.push_back(info);
-
-    std::string prokey(dec->id);
-    if (pro_key_table.find(prokey) != pro_key_table.end()) {
-      if (repeatNammes != "")
-        repeatNammes += ",";
-      repeatNammes += QString(dec->id);
-    } else {
-      pro_key_table[prokey] = 1;
-    }
-  }
-  g_slist_free(l);
-
-  sort(_decoderInfoList.begin(), _decoderInfoList.end(),
-       ProtocolDock::protocol_sort_callback);
-
-  if (repeatNammes != "") {
-    QString err = L_S(STR_PAGE_MSG, S_ID(IDS_MSG_DECODER_REPEAT),
-                      "Any decoder have repeated id or name:");
-    err += repeatNammes;
-    MsgBox::Show(L_S(STR_PAGE_MSG, S_ID(IDS_MSG_ERROR), "error"),
-                 err.toUtf8().data());
-  }
+  sync_decoder_list(false);
 
   //-----------------------------top panel
   QWidget *top_panel = new QWidget();
@@ -148,9 +111,17 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   _pro_type_combo->addItem("All");
   _pro_type_combo->addItem("C");
   _pro_type_combo->addItem("Python");
+  _pro_type_combo->addItem("User");
   _pro_type_combo->setCurrentIndex(0);
-  _pro_type_combo->setFixedWidth(70);
+  _pro_type_combo->setFixedWidth(75);
   _pro_type_combo->setFixedHeight(28);
+
+  _user_dec_btn = new QPushButton(top_panel);
+  _user_dec_btn->setObjectName("dock_content");
+  _user_dec_btn->setFlat(true);
+  _user_dec_btn->setToolTip("用户解码器管理 (User Decoders)");
+  connect(_user_dec_btn, &QPushButton::clicked, this, &ProtocolDock::on_user_dec_menu);
+
   QHBoxLayout *pro_search_lay = new QHBoxLayout();
   pro_search_lay->setSpacing(2);
   pro_search_lay->setAlignment(Qt::AlignVCenter);
@@ -158,6 +129,7 @@ ProtocolDock::ProtocolDock(QWidget *parent, view::View *view,
   pro_search_lay->addWidget(_del_all_button, 0, Qt::AlignVCenter);
   pro_search_lay->addWidget(_pro_keyword_edit, 1, Qt::AlignVCenter);
   pro_search_lay->addWidget(_pro_type_combo, 0, Qt::AlignVCenter);
+  pro_search_lay->addWidget(_user_dec_btn, 0, Qt::AlignVCenter);
 
   _top_layout = new QVBoxLayout();
   _top_layout->addLayout(pro_search_lay);
@@ -494,6 +466,9 @@ void ProtocolDock::reStyle() {
   }
 
   _pro_add_button->setIcon(IconCache::Instance().icon(iconPath + "/add.svg"));
+  if (_user_dec_btn) {
+    _user_dec_btn->setIcon(IconCache::Instance().icon(iconPath + "/import.svg"));
+  }
   _del_all_button->setIcon(IconCache::Instance().icon(iconPath + "/del.svg"));
   _bot_set_button->setIcon(IconCache::Instance().icon(iconPath + "/gear.svg"));
   _bot_save_button->setIcon(IconCache::Instance().icon(iconPath + "/save.svg"));
@@ -1457,6 +1432,9 @@ bool ProtocolDock::protocol_sort_callback(const DecoderInfoItem *o1,
                                           const DecoderInfoItem *o2) {
   srd_decoder *dec1 = reinterpret_cast<srd_decoder*>((o1->_data_handle));
   srd_decoder *dec2 = reinterpret_cast<srd_decoder*>((o2->_data_handle));
+  if (dec1->is_user_decoder != dec2->is_user_decoder) {
+    return dec1->is_user_decoder > dec2->is_user_decoder;
+  }
   const char *s1 = dec1->name;
   const char *s2 = dec2->name;
   char c1 = 0;
@@ -1545,7 +1523,7 @@ void ProtocolDock::show_protocol_select() {
   for (auto info : _decoderInfoList) {
     srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
     panel->AddDataItem(QString(dec->id), QString(dec->name), info,
-                       dec->is_c_decoder);
+                       dec->is_c_decoder, dec->is_user_decoder);
   }
 
   // Set the filter to match the current combo selection
@@ -1564,7 +1542,8 @@ void ProtocolDock::OnItemClick(void *sender, void *data_handle) {
   if (data_handle != nullptr) {
     DecoderInfoItem *info = reinterpret_cast<DecoderInfoItem*>(data_handle);
     srd_decoder *dec = reinterpret_cast<srd_decoder*>((info->_data_handle));
-    this->_pro_keyword_edit->SetInputText(QString(dec->name));
+    QString displayName = dec->is_user_decoder ? (QString(dec->name) + " (user)") : QString(dec->name);
+    this->_pro_keyword_edit->SetInputText(displayName);
     _selected_protocol_id = QString(dec->id);
     this->on_add_protocol();
   }
@@ -1580,6 +1559,8 @@ void ProtocolDock::update_view_status() {
   _pro_keyword_edit->setEnabled(bEnable);
   _pro_add_button->setEnabled(bEnable);
   _pro_type_combo->setEnabled(bEnable);
+  if (_user_dec_btn)
+    _user_dec_btn->setEnabled(bEnable);
 }
 
 void ProtocolDock::update_deocder_item_name(void *trace_handel,
@@ -1997,6 +1978,163 @@ void ProtocolDock::on_decoder_combo_changed(int index) {
 
   search_done();
   resize_table_view(_decoder_model);
+}
+
+
+
+
+void ProtocolDock::reload_decoder_list() {
+  int old_total = static_cast<int>(_decoderInfoList.size());
+  sync_decoder_list(true);
+  int new_total = static_cast<int>(_decoderInfoList.size());
+  int user_count = 0;
+  for (auto info : _decoderInfoList) {
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>(info->_data_handle);
+    if (dec && dec->is_user_decoder) user_count++;
+  }
+  QString msg = QString("解码器重新扫描完成！\n当前共加载 %1 个解码器（其中用户自定义: %2 个）")
+                    .arg(new_total).arg(user_count);
+  if (new_total > old_total) {
+    msg += QString("\n本次新增: %1 个").arg(new_total - old_total);
+  }
+  MsgBox::Show("PXView", msg.toUtf8().data());
+}
+
+void ProtocolDock::sync_decoder_list(bool scan_new) {
+  RELEASE_ARRAY(_decoderInfoList);
+  _decoderInfoList.clear();
+
+  if (scan_new) {
+    srd_decoder_load_all();
+  }
+
+  GSList *l = const_cast<GSList *>(srd_decoder_list());
+  std::map<std::string, DecoderInfoItem*> pro_key_table;
+  QStringList duplicate_ids;
+
+  for (; l; l = l->next) {
+    srd_decoder *dec = reinterpret_cast<srd_decoder*>(l->data);
+    if (!dec || !dec->id) {
+      continue;
+    }
+
+    std::string prokey(dec->id);
+    auto it = pro_key_table.find(prokey);
+    if (it != pro_key_table.end()) {
+      srd_decoder *prev_dec = reinterpret_cast<srd_decoder*>(it->second->_data_handle);
+      if (dec->is_user_decoder && !prev_dec->is_user_decoder) {
+        // User decoder has higher priority over system decoder: override it
+        it->second->_data_handle = dec;
+        pxv_info("Decoder '%s': system version overridden by user version", dec->id);
+      } else {
+        // Duplicate ID detected: keep first valid item, drop secondary
+        if (!duplicate_ids.contains(QString(dec->id))) {
+          duplicate_ids.append(QString(dec->id));
+        }
+        pxv_warn("Duplicate decoder id '%s' skipped to prevent conflict", dec->id);
+      }
+      continue;
+    }
+
+    DecoderInfoItem *info = new DecoderInfoItem();
+    info->_data_handle = dec;
+    pro_key_table[prokey] = info;
+    _decoderInfoList.push_back(info);
+  }
+  g_slist_free(l);
+
+  sort(_decoderInfoList.begin(), _decoderInfoList.end(),
+       ProtocolDock::protocol_sort_callback);
+
+  if (!duplicate_ids.isEmpty()) {
+    pxv_warn("Duplicate decoder ids detected and auto-resolved: %s",
+             duplicate_ids.join(", ").toUtf8().data());
+  }
+}
+
+void ProtocolDock::on_user_dec_menu() {
+  QMenu menu(this);
+  QAction *actOpenUser = menu.addAction(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OPEN_USER_DECODERS), "Open User Decoders Directory"));
+  QAction *actOpenSysPy = menu.addAction(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OPEN_SYS_PY_DECODERS), "Open System Python Decoders Directory"));
+  QAction *actOpenSysC = menu.addAction(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_OPEN_SYS_C_DECODERS), "Open System C Decoders Directory"));
+  menu.addSeparator();
+  QAction *actImport = menu.addAction(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_IMPORT_USER_DECODER), "Import User Decoder..."));
+  QAction *actReload = menu.addAction(L_S(STR_PAGE_DLG, S_ID(IDS_DLG_RELOAD_DECODERS), "Rescan and Reload All Decoders"));
+
+  QAction *selected = menu.exec(QCursor::pos());
+  if (selected == actOpenUser) {
+    on_open_user_decoders_dir();
+  } else if (selected == actOpenSysPy) {
+    on_open_sys_py_decoders_dir();
+  } else if (selected == actOpenSysC) {
+    on_open_sys_c_decoders_dir();
+  } else if (selected == actImport) {
+    on_import_user_decoder();
+  } else if (selected == actReload) {
+    reload_decoder_list();
+  }
+}
+
+void ProtocolDock::on_open_sys_py_decoders_dir() {
+  QString dir = GetDecodeScriptDir();
+  if (dir.isEmpty() || !QDir(dir).exists()) {
+    MsgBox::Show("PXView", "System Python decoders directory not found.");
+    return;
+  }
+  QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void ProtocolDock::on_open_sys_c_decoders_dir() {
+  QString dir = GetSystemCDecodersDir();
+  if (dir.isEmpty() || !QDir(dir).exists()) {
+    MsgBox::Show("PXView", "System C decoders directory not found.");
+    return;
+  }
+  QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void ProtocolDock::on_open_user_decoders_dir() {
+  QString dir = GetUserDecodersDir();
+  if (dir.isEmpty() || !QDir(dir).exists()) {
+    MsgBox::Show("PXView", "User decoders directory not found.");
+    return;
+  }
+  QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void ProtocolDock::on_import_user_decoder() {
+  QString dir = QFileDialog::getExistingDirectory(this, "选择协议解码器文件夹");
+  if (dir.isEmpty())
+    return;
+
+  QDir srcDir(dir);
+  QString targetDir = GetUserDecodersDir() + "/" + srcDir.dirName();
+
+  auto copyDir = [](auto &self, const QString &src, const QString &dst) -> bool {
+    QDir s(src);
+    if (!s.exists()) return false;
+    QDir d(dst);
+    if (!d.exists()) d.mkpath(".");
+    for (const QFileInfo &info : s.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)) {
+      QString srcItem = info.filePath();
+      QString dstItem = dst + "/" + info.fileName();
+      if (info.isDir()) {
+        if (!self(self, srcItem, dstItem)) return false;
+      } else {
+        if (QFile::exists(dstItem)) QFile::remove(dstItem);
+        if (!QFile::copy(srcItem, dstItem)) return false;
+      }
+    }
+    return true;
+  };
+
+  if (copyDir(copyDir, dir, targetDir)) {
+    reload_decoder_list();
+    _pro_type_combo->setCurrentIndex(3);
+    MsgBox::Show("提示", "解码器导入成功并已刷新！");
+  } else {
+    MsgBox::Show("错误", "导入解码器失败，请检查文件权限。");
+  }
 }
 
 } // namespace dock

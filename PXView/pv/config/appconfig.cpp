@@ -930,6 +930,68 @@ QString GetUserDataDir()
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 }
 
+QString GetUserDecodersDir()
+{
+    QString path = GetUserDataDir() + "/userdecoders";
+    QDir dir(path);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+        QString readme = path + "/README.txt";
+        if (!QFile::exists(readme)) {
+            QFile f(readme);
+            if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream ts(&f);
+                ts << "PXView User Decoders Directory\n"
+                   << "=============================\n"
+                   << "Place your custom protocol decoder folders here.\n"
+                   << "Each protocol decoder is a directory containing __init__.py and pd.py.\n"
+                   << "In PXView Protocol Dock, select 'User' in the type dropdown to view them.\n";
+                f.close();
+            }
+        }
+    }
+    return path;
+}
+
+QString GetSystemCDecodersDir()
+{
+    // 1. Try install directory layout: <appDirPath>/../share/libsigrokdecode/c_decoders
+    QDir dirInstall(QCoreApplication::applicationDirPath());
+    if (dirInstall.cd("..") && dirInstall.cd("share") && dirInstall.cd("libsigrokdecode") && dirInstall.cd("c_decoders")) {
+        return dirInstall.absolutePath();
+    }
+
+    // 2. Try build directory layout: <appDirPath>/decoders/c_decoders (e.g. build.dir/decoders/c_decoders)
+    QDir dirBuild(QCoreApplication::applicationDirPath());
+    if (dirBuild.cd("decoders") && dirBuild.cd("c_decoders")) {
+        return dirBuild.absolutePath();
+    }
+
+    // 3. Try <appDirPath>/../decoders/c_decoders
+    QDir dirBuildUp(QCoreApplication::applicationDirPath());
+    if (dirBuildUp.cd("..") && dirBuildUp.cd("decoders") && dirBuildUp.cd("c_decoders")) {
+        return dirBuildUp.absolutePath();
+    }
+
+    // 4. Try source tree libsigrokdecode/c_decoders
+    QDir dirSource(QCoreApplication::applicationDirPath());
+    if (dirSource.cd("..") && dirSource.cd("libsigrokdecode") && dirSource.cd("c_decoders")) {
+        return dirSource.absolutePath();
+    }
+
+    // 5. Try AppData/decoders/c_decoders
+    QString base = GetAppDataDir();
+    QDir dirAppData(base);
+    if (dirAppData.cd("decoders") && dirAppData.cd("c_decoders")) {
+        return dirAppData.absolutePath();
+    }
+    if (dirAppData.cd("c_decoders")) {
+        return dirAppData.absolutePath();
+    }
+
+    return "";
+}
+
 QString GetDecodeScriptDir()
 {
     QString path = GetAppDataDir() + "/decoders";

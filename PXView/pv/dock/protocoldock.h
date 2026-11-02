@@ -162,12 +162,19 @@ signals:
 
 public slots:
   void update_model();
+  void reload_decoder_list();
+  void sync_decoder_list(bool scan_new = true);
 
 protected:
   void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
   void on_add_protocol();
+  void on_user_dec_menu();
+  void on_open_user_decoders_dir();
+  void on_open_sys_py_decoders_dir();
+  void on_open_sys_c_decoders_dir();
+  void on_import_user_decoder();
   void on_del_all_protocol();
   void decoded_progress(int progress);
   void on_decoder_progress();
@@ -236,6 +243,7 @@ private:
   KeywordLineEdit *_pro_keyword_edit;
   QString _selected_protocol_id;
   DsComboBox *_pro_type_combo;
+  QPushButton *_user_dec_btn = nullptr;
 
   mutable std::mutex _search_mutex;
   bool _search_edited;

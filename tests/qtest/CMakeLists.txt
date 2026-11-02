@@ -174,7 +174,7 @@ target_link_libraries(test_capture_manager PRIVATE pxview-core Qt6::Gui)
 # 一锤定音: CMake 会把 pxview-core 的传递静态库 (config/data) 追加在显式 Qt6Gui
 # 之后, 主 exe 靠自身 GUI 符号保住 Qt6Gui, 本测试自身对象很少引 QtGui → --as-needed
 # 仍可能在 config 需要 QColor 前丢弃 Qt6Gui。显式关闭 --as-needed 确保 Qt6Gui 保留。
-target_link_options(test_capture_manager PRIVATE -Wl,--no-as-needed)
+target_link_options(test_capture_manager PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 if(WIN32)
     target_link_libraries(test_capture_manager PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -216,7 +216,7 @@ target_sources(test_decode_task_manager PRIVATE
     ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
 )
 target_link_libraries(test_decode_task_manager PRIVATE pxview-core Qt6::Gui)
-target_link_options(test_decode_task_manager PRIVATE -Wl,--no-as-needed)
+target_link_options(test_decode_task_manager PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 if(WIN32)
     target_link_libraries(test_decode_task_manager PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -254,7 +254,7 @@ target_sources(test_filter_processor PRIVATE
     ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
 )
 target_link_libraries(test_filter_processor PRIVATE pxview-core Qt6::Gui)
-target_link_options(test_filter_processor PRIVATE -Wl,--no-as-needed)
+target_link_options(test_filter_processor PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 if(WIN32)
     target_link_libraries(test_filter_processor PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -353,7 +353,7 @@ target_include_directories(test_v_offset_animation PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 target_link_libraries(test_v_offset_animation PRIVATE pxview-render Qt6::Gui)
-target_link_options(test_v_offset_animation PRIVATE -Wl,--no-as-needed)
+target_link_options(test_v_offset_animation PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 
 # ==== 滚轮缩放动画状态机：复合目标累计契约 ====
 # 纯逻辑、零依赖（zoom_animation.h 只依赖 <cstdint>），因此不需要链接任何
@@ -391,7 +391,7 @@ target_include_directories(test_make_way_drag_sim PRIVATE
     ${CMAKE_SOURCE_DIR}/common
 )
 target_link_libraries(test_make_way_drag_sim PRIVATE pxview-render Qt6::Gui)
-target_link_options(test_make_way_drag_sim PRIVATE -Wl,--no-as-needed)
+target_link_options(test_make_way_drag_sim PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 
 # ==== 波形光栅化纯函数直测 (modernize-thread-model Task 2.6) ====
 # 直接编译 rasterize.cpp + 三个快照数据层源文件, 内部 stub xlog。
@@ -847,7 +847,7 @@ target_sources(test_session_document PRIVATE
 )
 # 顺序: 须把 Qt6::Gui 放在静态库之后 (见 test_capture_manager 注释)。
 target_link_libraries(test_session_document PRIVATE pxview-core Qt6::Gui)
-target_link_options(test_session_document PRIVATE -Wl,--no-as-needed)
+target_link_options(test_session_document PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 if(WIN32)
     target_link_libraries(test_session_document PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -885,7 +885,7 @@ target_sources(test_multi_tab_session PRIVATE
     ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
 )
 target_link_libraries(test_multi_tab_session PRIVATE pxview-core Qt6::Gui)
-target_link_options(test_multi_tab_session PRIVATE -Wl,--no-as-needed)
+target_link_options(test_multi_tab_session PRIVATE $<$<NOT:$<BOOL:${ENABLE_LLD}>>:-Wl,--no-as-needed>)
 if(WIN32)
     target_link_libraries(test_multi_tab_session PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -1008,3 +1008,27 @@ pv_add_qtest(test_binary_name_hints
     data/test_binary_name_hints.cpp
 )
 
+# ==== 用户解码器热重载与同名覆盖测试 ====
+pv_add_qtest(test_user_decoder_reload
+    core/test_user_decoder_reload.cpp
+    ${_CM_TEST_COMMON_SOURCES}
+    ${PXVIEW_INCLUDE_DIR}/pv/base/perf.cpp
+)
+target_include_directories(test_user_decoder_reload PRIVATE
+    ${CMAKE_SOURCE_DIR}/libsigrok/include
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/libsigrokdecode
+)
+target_sources(test_user_decoder_reload PRIVATE
+    ${PXVIEW_INCLUDE_DIR}/pv/base/dstimer.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/stack/decoderstack.h
+    ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
+)
+target_link_libraries(test_user_decoder_reload PRIVATE pxview-core Qt6::Gui)
+if(WIN32)
+    target_link_libraries(test_user_decoder_reload PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+elseif(NOT APPLE)
+    target_link_libraries(test_user_decoder_reload PRIVATE
+        "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
+endif()

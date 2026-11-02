@@ -2042,5 +2042,25 @@
     {
         "id": "IDS_DLG_IAP_FAIL_MSG",
         "text": "韌體升級失敗，詳見日誌。"
+    },
+    {
+        "id": "IDS_DLG_OPEN_USER_DECODERS",
+        "text": "開啟使用者自訂解砤器資料夾"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_PY_DECODERS",
+        "text": "開啟系統 Python 解砤器資料夾"
+    },
+    {
+        "id": "IDS_DLG_OPEN_SYS_C_DECODERS",
+        "text": "開啟系統 C 解砤器資料夾"
+    },
+    {
+        "id": "IDS_DLG_IMPORT_USER_DECODER",
+        "text": "匯入使用者解砤器..."
+    },
+    {
+        "id": "IDS_DLG_RELOAD_DECODERS",
+        "text": "重新掃描並載入所有解砤器"
     }
 ]
