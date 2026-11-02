@@ -31,7 +31,7 @@ set(DS_DESCRIPTION "A GUI for instruments of PXTOOL")
 
 set(DS_VERSION_MAJOR 1)
 set(DS_VERSION_MINOR 6)
-set(DS_VERSION_MICRO 6)
+set(DS_VERSION_MICRO 7)
 # 开发构建（nightly）在配置时传 -DDS_VERSION_SUFFIX=-rc.0：这样 App 内显示的版本号（About 对话框 / --version / MCP serverInfo / 启动日志）就是 1.6.6-rc.0，
 # 而下面三个数字字段与 macOS bundle 版本保持纯数值。正式版（tag/main）后缀留空。
 set(DS_VERSION_SUFFIX "" CACHE STRING "开发构建的版本后缀，如 -rc.0；正式版留空")
