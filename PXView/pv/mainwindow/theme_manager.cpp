@@ -240,8 +240,9 @@ void MainWindowThemeManager::setupRibbonCategories() {
   // 固件升级（CH32H417）：放在「帮助」里，复用「更新」的图标（/update.svg）。
   // 入口刻意常驻、不依赖设备已被识别 —— 首次升级时设备运行在 IAP 模式，
   // 上位机还没"认到"它（详见 pv/dialogs/iapdialog.*）。
-  _wnd->title_bar()->addSeparator(_wnd->category_help_index());
-  _wnd->title_bar()->addAction(_wnd->category_help_index(), _wnd->logo_bar()->_iap);
+  // 固件升级（CH32H417）：暂时屏蔽 Ribbon 显示，避免用户误解
+  // _wnd->title_bar()->addSeparator(_wnd->category_help_index());
+  // _wnd->title_bar()->addAction(_wnd->category_help_index(), _wnd->logo_bar()->_iap);
 }
 
 void MainWindowThemeManager::retranslateRibbon() {
