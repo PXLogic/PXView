@@ -1746,6 +1746,23 @@ jobs:
             exit 1
           }
 
+      - name: Create Portable zip
+        shell: pwsh
+        run: |
+          $zip = "PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip"
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z a -tzip -mx=9 $zip .\package\*
+          } else {
+            Compress-Archive -Path "package\*" -DestinationPath $zip -CompressionLevel Optimal
+          }
+          if (Test-Path $zip) {
+            Write-Host "Portable zip created: $zip"
+            Get-Item $zip | Format-List Name, Length, LastWriteTime
+          } else {
+            Write-Error "Portable zip not found: $zip"
+            exit 1
+          }
+
       - name: Upload NSIS Installer Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -1768,6 +1785,7 @@ jobs:
         with:
           files: |
             PXView-Windows-x86_64-Setup-${{ steps.version.outputs.value }}.exe
+            PXView-Windows-x86_64-Portable-${{ steps.version.outputs.value }}.zip
           draft: true
           name: PXView ${{ steps.version.outputs.value }}
         env:
