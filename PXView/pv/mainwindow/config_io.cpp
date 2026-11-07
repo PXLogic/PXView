@@ -61,6 +61,7 @@
 #include <QJsonValue>
 #include <QMessageBox>
 #include <QString>
+#include <QStringList>
 #include <QTextStream>
 #include <glib.h>
 #include <cassert>
@@ -1075,13 +1076,255 @@ QJsonObject MainWindowConfigIO::get_cursors_json_from_data_file(QString file,
 // Demo decoder config
 // ===========================================================================
 
+// Channel order actually emitted by PATTERN_MIXED. See mixed_get_sample() in
+// libsigrok/src/hardware/demo/protocol.c:
+//   ch0 SCL | ch1 SDA | ch2 CS | ch3 SCLK | ch4 MOSI | ch5 MISO | ch6 UART RX
+//   ch7 CAN RX | ch8 PWM | ch9 I2S SCK | ch10 I2S WS | ch11 I2S SD
+//   ch12 MIPI D0N | ch13 MIPI D0P | ch14 SWDIO | ch15 SWCLK
+// ch16..ch31 mirror ch0..ch15.
+//
+// This deliberately does NOT read protocol.demo. Its "decoders" entry belongs
+// to that archive's own virtual-demo replay data (header: probe0=SDA,
+// probe1=SCL, probe5=UART, probe9=CAN-FD, probe12=CLK, probe13=CS#,
+// probe14=MOSI, probe15=MISO) -- a completely different channel map. Restoring
+// it for a math-generated waveform bound every analyzer to the wrong line.
+static QJsonObject make_decoder_entry(const QString &id, const QString &label,
+                                      const QJsonArray &channels,
+                                      const QJsonObject &options,
+                                      const QJsonObject &show) {
+  QJsonObject obj;
+  obj.insert(QStringLiteral("id"), id);
+  obj.insert(QStringLiteral("label"), label);
+  obj.insert(QStringLiteral("channel"), channels);
+  obj.insert(QStringLiteral("options"), options);
+  // DEOCDER_CONFIG_VERSION in storesession.cpp is 3; anything other than -1
+  // makes load_decoders() resolve "show" keys through Row::title_id(), which
+  // is also what gen_decoders_json() writes.
+  obj.insert(QStringLiteral("version"), 3);
+  if (!show.isEmpty())
+    obj.insert(QStringLiteral("show"), show);
+  return obj;
+}
+
+static QJsonObject decoder_channel(const char *id, int index) {
+  QJsonObject obj;
+  obj.insert(QString::fromUtf8(id), index);
+  return obj;
+}
+
+// Row visibility keys are "<decoder id>: <annotation row title>" (see
+// data::decode::Row::title_id()); the bare id controls the decoder trace.
+// Without a "show" entry every annotation row of all eight analyzers stays
+// expanded and floods the waveform area.
+static QJsonObject make_show(const QString &id, const QJsonObject &rows) {
+  QJsonObject obj;
+  obj.insert(id, true);
+  for (auto it = rows.constBegin(); it != rows.constEnd(); ++it)
+    obj.insert(id + QStringLiteral(": ") + it.key(), it.value());
+  return obj;
+}
+
+static QJsonArray make_mixed_decoder_preset(uint64_t samplerate) {
+  // The generator expresses bit timing in samples-per-bit, so asynchronous
+  // decoders need bitrates derived from the live samplerate instead of the
+  // hard-coded 115200 / 500000 from the replay archive.
+  // protocol.h: I2C_SPB=50, SPI_SPB=40, UART_SPB=80, CAN_SPB=40.
+  const uint64_t sr = samplerate ? samplerate : 200000;  // api.c default SR_KHZ(200)
+  const int uart_baud = static_cast<int>(sr / 80);
+  const int can_bitrate = static_cast<int>(sr / 40);
+
+  pxv_info("load_demo_decoder_config: mixed preset at %llu Hz -> UART %d baud, "
+           "CAN %d bit/s",
+           static_cast<unsigned long long>(sr), uart_baud, can_bitrate);
+
+  QJsonArray result;
+
+  {  // I2C: ch0=SCL, ch1=SDA
+    QJsonArray ch;
+    ch.append(decoder_channel("scl", 0));
+    ch.append(decoder_channel("sda", 1));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("address_format"), QStringLiteral("shifted"));
+    QJsonObject show;
+    show.insert(QStringLiteral("Address/Data"), true);
+    show.insert(QStringLiteral("Bits"), false);
+    show.insert(QStringLiteral("Warnings"), false);
+    result.append(make_decoder_entry(
+        QStringLiteral("1:i2c"), QStringLiteral("I2C  ch0=SCL ch1=SDA"), ch,
+        opts, make_show(QStringLiteral("1:i2c"), show)));
+  }
+
+  {  // SPI: ch2=CS, ch3=SCLK, ch4=MOSI, ch5=MISO
+    QJsonArray ch;
+    ch.append(decoder_channel("clk", 3));
+    ch.append(decoder_channel("miso", 5));
+    ch.append(decoder_channel("mosi", 4));
+    ch.append(decoder_channel("cs", 2));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("bitorder"), QStringLiteral("msb-first"));
+    opts.insert(QStringLiteral("cpha"), 0);
+    opts.insert(QStringLiteral("cpol"), 0);
+    opts.insert(QStringLiteral("cs_polarity"), QStringLiteral("active-low"));
+    opts.insert(QStringLiteral("frame"), QStringLiteral("yes"));
+    opts.insert(QStringLiteral("wordsize"), 8);
+    QJsonObject show;
+    show.insert(QStringLiteral("MISO data"), true);
+    show.insert(QStringLiteral("MISO transfer"), true);
+    show.insert(QStringLiteral("MOSI data"), true);
+    show.insert(QStringLiteral("MOSI transfer"), true);
+    show.insert(QStringLiteral("MISO bits"), false);
+    show.insert(QStringLiteral("MOSI bits"), false);
+    show.insert(QStringLiteral("Other"), false);
+    result.append(make_decoder_entry(
+        QStringLiteral("1:spi"),
+        QStringLiteral("SPI  ch2=CS ch3=CLK ch4=MOSI ch5=MISO"), ch, opts,
+        make_show(QStringLiteral("1:spi"), show)));
+  }
+
+  {  // UART: ch6=RX, 8N1, LSB first (UART_FRAME_BITS=12, UART_SPB=80)
+    QJsonArray ch;
+    ch.append(decoder_channel("rxtx", 6));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("baudrate"), uart_baud);
+    opts.insert(QStringLiteral("anno_startstop"), QStringLiteral("yes"));
+    opts.insert(QStringLiteral("bit_order"), QStringLiteral("lsb-first"));
+    opts.insert(QStringLiteral("format"), QStringLiteral("hex"));
+    opts.insert(QStringLiteral("invert"), QStringLiteral("no"));
+    opts.insert(QStringLiteral("num_data_bits"), 8);
+    opts.insert(QStringLiteral("num_stop_bits"), 1);
+    opts.insert(QStringLiteral("parity_check"), QStringLiteral("yes"));
+    opts.insert(QStringLiteral("parity_type"), QStringLiteral("none"));
+    QJsonObject show;
+    show.insert(QStringLiteral("RX/TX"), true);
+    show.insert(QStringLiteral("Bits"), false);
+    show.insert(QStringLiteral("Warnings"), false);
+    show.insert(QStringLiteral("break"), false);
+    result.append(make_decoder_entry(QStringLiteral("1:uart"),
+                                     QStringLiteral("UART  ch6=RX"), ch, opts,
+                                     make_show(QStringLiteral("1:uart"), show)));
+  }
+
+  {  // CAN: ch7=RX. Standard CAN 2.0 frame with NRZ bit stuffing, no FD
+     // phase, so nominal and fast rates are equal.
+    QJsonArray ch;
+    ch.append(decoder_channel("can_rx", 7));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("nominal_bitrate"), can_bitrate);
+    opts.insert(QStringLiteral("fast_bitrate"), can_bitrate);
+    opts.insert(QStringLiteral("sample_point"), 70);
+    QJsonObject show;
+    show.insert(QStringLiteral("Fields"), true);
+    show.insert(QStringLiteral("Bits"), false);
+    show.insert(QStringLiteral("Warnings"), false);
+    result.append(make_decoder_entry(QStringLiteral("can-fd"),
+                                     QStringLiteral("CAN  ch7=RX"), ch, opts,
+                                     make_show(QStringLiteral("can-fd"), show)));
+  }
+
+  {  // PWM: ch8=DATA
+    QJsonArray ch;
+    ch.append(decoder_channel("data", 8));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("polarity"), QStringLiteral("active-high"));
+    QJsonObject show;
+    show.insert(QStringLiteral("Duty cycle"), true);
+    show.insert(QStringLiteral("Period"), false);
+    result.append(make_decoder_entry(QStringLiteral("pwm"),
+                                     QStringLiteral("PWM  ch8"), ch, opts,
+                                     make_show(QStringLiteral("pwm"), show)));
+  }
+
+  {  // I2S: ch9=SCK, ch10=WS, ch11=SD (no annotation_rows declared)
+    QJsonArray ch;
+    ch.append(decoder_channel("sck", 9));
+    ch.append(decoder_channel("ws", 10));
+    ch.append(decoder_channel("sd", 11));
+    result.append(make_decoder_entry(
+        QStringLiteral("i2s"),
+        QStringLiteral("I2S  ch9=SCK ch10=WS ch11=SD"), ch, QJsonObject(),
+        make_show(QStringLiteral("i2s"), QJsonObject())));
+  }
+
+  {  // MIPI DSI: ch12=D0N, ch13=D0P
+    QJsonArray ch;
+    ch.append(decoder_channel("D0N", 12));
+    ch.append(decoder_channel("D0P", 13));
+    // The registered id is 'MIPI_DSI' (upper case), not the directory name;
+    // get_protocol_index_by_id() does an exact match.
+    QJsonObject show;
+    // Despite its name, "LPData" (classes 0-3) only holds raw LP-xx state
+    // labels, while every real annotation -- DATA (class 7), ESC (4),
+    // BTA (5), LPDT (6), STOP (11) -- lives on the "LP" row
+    // (c_decoders/mipi_dsi_c.c: mipi_dsi_row_lp_classes). Hiding "LP"
+    // therefore blanks the whole DSI trace. Keep both rows visible: the
+    // View and the MCP reader use different row-visibility maps
+    // (_rows_gshow vs _rows_lshow), so hiding either one can starve a
+    // consumer of the data.
+    show.insert(QStringLiteral("LPData"), true);
+    show.insert(QStringLiteral("LP"), true);
+    result.append(make_decoder_entry(
+        QStringLiteral("MIPI_DSI"),
+        QStringLiteral("MIPI DSI  ch12=D0N ch13=D0P"), ch, QJsonObject(),
+        make_show(QStringLiteral("MIPI_DSI"), show)));
+  }
+
+  {  // SWD: ch14=SWDIO, ch15=SWCLK (no annotation_rows declared)
+    QJsonArray ch;
+    ch.append(decoder_channel("swclk", 15));
+    ch.append(decoder_channel("swdio", 14));
+    QJsonObject opts;
+    opts.insert(QStringLiteral("strict_start"), QStringLiteral("no"));
+    result.append(make_decoder_entry(
+        QStringLiteral("swd"),
+        QStringLiteral("SWD  ch14=SWDIO ch15=SWCLK"), ch, opts,
+        make_show(QStringLiteral("swd"), QJsonObject())));
+  }
+
+  return result;
+}
+
+// PATTERN_I2C emits a single I2C bus on ch0=SCL / ch1=SDA (protocol.c:1047).
+static QJsonArray make_i2c_decoder_preset() {
+  QJsonArray ch;
+  ch.append(decoder_channel("scl", 0));
+  ch.append(decoder_channel("sda", 1));
+  QJsonObject opts;
+  opts.insert(QStringLiteral("address_format"), QStringLiteral("shifted"));
+  QJsonObject show;
+  show.insert(QStringLiteral("Address/Data"), true);
+  show.insert(QStringLiteral("Bits"), false);
+  show.insert(QStringLiteral("Warnings"), false);
+  QJsonArray result;
+  result.append(make_decoder_entry(
+      QStringLiteral("1:i2c"), QStringLiteral("I2C  ch0=SCL ch1=SDA"), ch,
+      opts, make_show(QStringLiteral("1:i2c"), show)));
+  return result;
+}
+
 void MainWindowConfigIO::load_demo_decoder_config(QString optname) {
-  QString file = GetAppDataDir() + "/demo/logic/" + optname + ".demo";
-  bool bLoadSurccess = false;
+  const QString pattern = optname.trimmed();
+  QJsonArray deArray;
 
-  QJsonArray deArray = get_decoder_json_from_data_file(file, bLoadSurccess);
+  // SR_CONF_PATTERN_MODE names a *math generator*, not a .demo replay file.
+  // Only patterns that actually carry protocol traffic get analyzers; all
+  // others (sigrok/random/walking-*/squid/...) are pure display patterns.
+  if (pattern.compare(QStringLiteral("mixed"), Qt::CaseInsensitive) == 0) {
+    uint64_t sr = _wnd->session()->cur_samplerate();
+    if (sr == 0 && _wnd->device_agent())
+      sr = _wnd->device_agent()->get_sample_rate();
+    deArray = make_mixed_decoder_preset(sr);
+  } else if (pattern.compare(QStringLiteral("i2c"), Qt::CaseInsensitive) == 0) {
+    deArray = make_i2c_decoder_preset();
+  } else {
+    pxv_info("load_demo_decoder_config: math pattern '%s' carries no protocol "
+             "traffic, no analyzers restored",
+             pattern.toUtf8().constData());
+  }
 
-  if (bLoadSurccess) {
+  if (!deArray.isEmpty()) {
+    pxv_info("load_demo_decoder_config: restoring %d decoder stack(s) for "
+             "pattern '%s'",
+             static_cast<int>(deArray.size()), pattern.toUtf8().constData());
     StoreSession ss(_wnd->session());
     auto *dock = _wnd->dock_manager()->protocol_widget();
     ss.load_decoders(
