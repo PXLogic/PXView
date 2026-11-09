@@ -286,26 +286,32 @@ void MainFrame::OnParentNaitveWindowEvent(int msg)
     Q_UNUSED(msg);
 
 #ifdef _WIN32
-    if (_parentNativeWidget != nullptr 
-            && msg == PARENT_EVENT_DISPLAY_CHANGED){
-        
-        qApp->processEvents(); //wait the screen dpi ready.
+    if (_parentNativeWidget == nullptr || msg != PARENT_EVENT_DISPLAY_CHANGED)
+        return;
 
-        QTimer::singleShot(100, this, [this](){                
-            auto screen = _parentNativeWidget->GetPointScreen();
-            if (screen == nullptr){
-                pxv_info("ERROR: MainFrame::OnParentNaitveWindowEvent, failed to get pointing screen.");
-                screen = QGuiApplication::primaryScreen();
-            }
-
+    // WinNativeWidget::WndProc already applied the new monitor handle, DPI,
+    // suggested window rectangle and child-window screen synchronously in
+    // WM_DPICHANGED. This delayed pass only re-syncs Qt-side state.
+    //
+    // Do not call qApp->processEvents() here: this runs inside a native
+    // WndProc, and pumping the Qt event queue from there can re-enter
+    // arbitrary UI code while Windows is still dispatching the DPI change.
+    QTimer::singleShot(100, this, [this](){
+        QScreen *screen = _parentNativeWidget->GetPointScreen();
+        if (screen != nullptr) {
             PopupDlgList::TryCloseAllByScreenChanged(screen);
             PopupDlgList::SetCurrentScreen(screen);
-           
-            _parentNativeWidget->UpdateChildDpi();
-            _parentNativeWidget->ResizeChild();
-            _parentNativeWidget->ReShowWindow();
-        });       
-    }
+        } else {
+            // Falling back to primaryScreen() here rebinds every popup to the
+            // 4K display on a mixed-DPI desktop. Skip the rebind instead.
+            pxv_warn("%s", "MainFrame: no matching screen after DPI change; "
+                           "skipping popup screen rebind.");
+        }
+
+        _parentNativeWidget->UpdateChildDpi();
+        _parentNativeWidget->ResizeChild();
+        _parentNativeWidget->ReShowWindow();
+    });
 #endif
 }
  

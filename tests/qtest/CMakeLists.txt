@@ -1025,6 +1025,13 @@ target_sources(test_user_decoder_reload PRIVATE
     ${PXVIEW_INCLUDE_DIR}/pv/data/model/signalmodel.h
 )
 target_link_libraries(test_user_decoder_reload PRIVATE pxview-core Qt6::Gui)
+# srd_init() in this test probes relative decoder directories. From ctest's
+# default working directory (build/tests/qtest) none of them resolve, so no
+# system decoders load and test_system_decoders_loaded() fails on "i2c".
+# Run it from the repository root, where package/decoders and
+# install.dir/share/libsigrokdecode/decoders both exist (verified 6/6 there).
+set_tests_properties(test_user_decoder_reload PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 if(WIN32)
     target_link_libraries(test_user_decoder_reload PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
@@ -1032,3 +1039,26 @@ elseif(NOT APPLE)
     target_link_libraries(test_user_decoder_reload PRIVATE
         "-Wl,--whole-archive" libsigrok "-Wl,--no-whole-archive")
 endif()
+
+# ==== 中文路径保存/打开往返（1.6.6 现场问题）====
+# ConvertPath() 是 UTF-8、ToUnicodePath() 曾用 QStringEncoder::System(GBK)，
+# 而 minizip / GLib / libzip / xlog 在 Windows 上统一按 UTF-8 解释 char* 路径。
+# 这里把两个转换、ZipMaker 存→ZipReader 取、xlog 建文件放到同一个中文目录里
+# 跑一遍，锁住「能存不能开」不再复现。
+pv_add_qtest(test_path_encoding
+    core/test_path_encoding.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/utility/path.cpp
+    ${PXVIEW_INCLUDE_DIR}/pv/base/ZipMaker.cpp
+    ${common_SOURCES}
+)
+target_include_directories(test_path_encoding PRIVATE
+    ${CMAKE_SOURCE_DIR}/common
+)
+target_link_libraries(test_path_encoding PRIVATE -lz)
+
+# ==== 跨屏 DPI 选屏判据（1.6.6 现场问题）====
+# 锁住 HMONITOR 精确匹配与 DPR 兜底，以及「无匹配时不得默认回退主屏」。
+# 纯逻辑、跨平台可编，不链接 winnativewidget.cpp 的 Win32 实现。
+pv_add_qtest(test_dpi_screen_match
+    ui/test_dpi_screen_match.cpp
+)

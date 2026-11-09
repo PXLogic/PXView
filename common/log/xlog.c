@@ -28,8 +28,54 @@
 #include <stdarg.h>
 #include <pthread.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define RECEIVER_MAX_COUNT  10
 #define LOG_MAX_LENGTH      1000
+
+/*
+ * PXView hands every file path to C code as UTF-8 (see pv::path::ConvertPath).
+ * On Windows the CRT's fopen() interprets a char* path through the process
+ * ANSI code page, so a log file under a Chinese user name or any non-ASCII
+ * directory silently lands in a mangled path (or fails to open). minizip's
+ * ioapi.c already solves this with CP_UTF8 + _wfopen; do exactly the same here
+ * so the log receiver follows the same convention as the rest of the app.
+ *
+ * If the bytes are not valid UTF-8 the conversion fails and we fall back to
+ * plain fopen(), preserving the behaviour for any non-PXView caller that still
+ * passes a native ANSI path.
+ */
+static FILE *xlog_open_file(const char *file_path, const char *mode)
+{
+#ifdef _WIN32
+    FILE *fh;
+    wchar_t *wpath;
+    wchar_t wmode[8];
+    size_t i;
+    int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                   file_path, -1, NULL, 0);
+    if (wlen <= 0)
+        return fopen(file_path, mode);
+
+    wpath = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+    if (wpath == NULL)
+        return NULL;
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                        file_path, -1, wpath, wlen);
+
+    for (i = 0; mode[i] != '\0' && i < sizeof(wmode) / sizeof(wmode[0]) - 1; ++i)
+        wmode[i] = (wchar_t)(unsigned char)mode[i];
+    wmode[i] = L'\0';
+
+    fh = _wfopen(wpath, wmode);
+    free(wpath);
+    return fh;
+#else
+    return fopen(file_path, mode);
+#endif
+}
 
 enum xlog_receiver_type{ 
     RECEIVER_TYPE_CONSOLE = 0,
@@ -303,9 +349,9 @@ XLOG_API int xlog_add_receiver_from_file(xlog_context* ctx, const char *file_pat
     }
 
     if (bAppend)
-        fh = fopen(file_path, "a+");
+        fh = xlog_open_file(file_path, "a+");
     else
-        fh = fopen(file_path, "w+");
+        fh = xlog_open_file(file_path, "w+");
 
     if (fh == NULL){
         strcpy(ctx->_error, "open file error");
@@ -346,7 +392,7 @@ XLOG_API int xlog_reset_log_file(xlog_context* ctx, int receiver_index, const ch
         fclose(ctx->_receivers[receiver_index]._file);
         ctx->_receivers[receiver_index]._file = NULL;
 
-        fh = fopen(file_path, "w+");
+        fh = xlog_open_file(file_path, "w+");
 
         if (fh == NULL){
             strcpy(ctx->_error, "open file error");

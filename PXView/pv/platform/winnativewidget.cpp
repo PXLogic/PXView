@@ -34,12 +34,19 @@
 #include <QtWidgets>
 #include <qmath.h>
 #include <cstring>
+#include <vector>
+
+// Qt 6.11 public native interface: QNativeInterface::QWindowsScreen::handle()
+// exposes the HMONITOR behind a QScreen. This is the only coordinate-system
+// independent way to map a Win32 monitor to a QScreen on a mixed-DPI desktop.
+#include <QtGui/qscreen_platform.h>
 
 #include "pv/base/log.h"
 #include "pv/mainwindow/mainframe.h"
 #include "pv/base/pxvdef.h"
 #include "pv/core/appcontrol.h"
 #include "pv/mainwindow/topwindowtracker.h"
+#include "pv/platform/dpi_screen_match.h"
 
 #define FIXED_WIDTH(widget) (widget->minimumWidth() >= widget->maximumWidth())
 #define FIXED_HEIGHT(widget) (widget->minimumHeight() >= widget->maximumHeight())
@@ -54,6 +61,52 @@ namespace pv {
 namespace
 {
     bool g_enable_ncclient = true;
+
+    using GetDpiForWindowFn = UINT (WINAPI *)(HWND);
+    using GetDpiForMonitorFn = HRESULT (WINAPI *)(HMONITOR, int, UINT *, UINT *);
+    constexpr int kMdtEffectiveDpi = 0;
+
+    template <typename Fn>
+    Fn resolve_win32_proc(const wchar_t *module, const char *name)
+    {
+        HMODULE mod = GetModuleHandleW(module);
+        if (mod == nullptr)
+            mod = LoadLibraryW(module);
+        if (mod == nullptr)
+            return nullptr;
+        return reinterpret_cast<Fn>(GetProcAddress(mod, name));
+    }
+
+    // DPI of the monitor the top-level HWND currently sits on, expressed as a
+    // Qt-style devicePixelRatio. Returns 0.0 when neither API is available.
+    //
+    // This is authoritative and updates synchronously with WM_DPICHANGED.
+    // QWindow::devicePixelRatio() cannot be relied on here: the Qt widget is
+    // an embedded child HWND, and Windows sends WM_DPICHANGED only to the
+    // top-level window, so Qt's platform plugin never sees the change.
+    UINT win32_window_dpi(HWND hwnd)
+    {
+        static GetDpiForWindowFn fn =
+            resolve_win32_proc<GetDpiForWindowFn>(L"user32.dll", "GetDpiForWindow");
+        return (fn != nullptr && hwnd != nullptr) ? fn(hwnd) : 0;
+    }
+
+    double win32_device_pixel_ratio(HWND hwnd, HMONITOR monitor)
+    {
+        static GetDpiForMonitorFn get_dpi_for_monitor =
+            resolve_win32_proc<GetDpiForMonitorFn>(L"shcore.dll", "GetDpiForMonitor");
+
+        UINT dpi = win32_window_dpi(hwnd);
+
+        if (dpi == 0 && get_dpi_for_monitor != nullptr && monitor != nullptr) {
+            UINT dx = 0;
+            UINT dy = 0;
+            if (SUCCEEDED(get_dpi_for_monitor(monitor, kMdtEffectiveDpi, &dx, &dy)))
+                dpi = dx;
+        }
+
+        return dpi == 0 ? 0.0 : static_cast<double>(dpi) / 96.0;
+    }
 }
 
 //-----------------------------WinNativeWidget 
@@ -291,16 +344,47 @@ LRESULT CALLBACK WinNativeWidget::WndProc(HWND hWnd, UINT message, WPARAM wParam
             break;
         }
         case WM_DPICHANGED:
-        case WM_DISPLAYCHANGE:            
+        case WM_DISPLAYCHANGE:
         {
-            if (message == WM_DPICHANGED){
-                pxv_info("dpi changed.");
+            if (message == WM_DPICHANGED)
+            {
+                // LOWORD(wParam) is the new DPI of this window. Refresh the
+                // monitor handle here rather than waiting for WM_MOVE: Windows
+                // may send WM_DPICHANGED first, and every DPR query below
+                // resolves through _hCurrentMonitor.
+                const UINT new_dpi = LOWORD(wParam);
+                self->_hCurrentMonitor =
+                    MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+                pxv_info("dpi changed. newDpi=%u", new_dpi);
+
+                // Windows supplies a suggested window rectangle already
+                // scaled to the new DPI. The old code dropped it, leaving the
+                // 4K-sized geometry behind on the 1080p monitor.
+                if (!self->IsMaxsized() && lParam != 0) {
+                    const RECT *suggested = reinterpret_cast<const RECT *>(lParam);
+                    SetWindowPos(hWnd, nullptr,
+                                 suggested->left, suggested->top,
+                                 suggested->right - suggested->left,
+                                 suggested->bottom - suggested->top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+
+                // The embedded Qt child HWND never receives WM_DPICHANGED
+                // (Windows sends it to top-level windows only), so Qt keeps
+                // the launch screen's devicePixelRatio unless we explicitly
+                // rebind its QWindow to the screen that owns this monitor.
+                self->UpdateChildDpi();
+                self->ResizeChild();
+
             }
             else{
                 pxv_info("display changed.");
             }
 
-            if (self->_event_callback != nullptr && self->_childWindow != nullptr){ 
+            // MainFrame performs a second, delayed pass (closing popups,
+            // shadow, ReShowWindow). Keep it: Qt may not have finished its
+            // own DPR change event when this WndProc returns.
+            if (self->_event_callback != nullptr && self->_childWindow != nullptr){
                 self->_event_callback->OnParentNativeEvent(PARENT_EVENT_DISPLAY_CHANGED);
             }
             break;
@@ -468,15 +552,37 @@ LRESULT WinNativeWidget::hitTest(HWND hWnd, WPARAM wParam, LPARAM lParam)
         if (x > left + 2 * k && x < left + titleWidth)
         {
             if (y > top + 2 * k && y < top + titleHeight){
-                QPoint globalPos(GET_X_LPARAM(lParam) / k, GET_Y_LPARAM(lParam) / k);
-                QPoint localPos = _titleBarWidget->mapFromGlobal(globalPos);
+                // Win32 gives PHYSICAL screen coordinates. The old code used
+                // mapFromGlobal(QPoint(x / k, y / k)); that only works when the
+                // virtual desktop origin is (0,0) and every monitor shares one
+                // DPR. Qt6 on Windows keeps the screen ORIGIN in physical
+                // pixels but the SIZE in logical pixels, so on the secondary
+                // monitor (S123 at x=-1920, DPR 1.5) plain division is off by
+                // hundreds of pixels. childAt() then never hit the QTabBar,
+                // every press in the title row returned HTCAPTION, Windows
+                // started a native window drag, and Qt received no mouse
+                // event -- exactly the "left menu cannot be clicked, right
+                // buttons still work" report (the rightmost 138*k pixels are
+                // excluded from this branch and always fall through to
+                // HTCLIENT).
+                //
+                // Convert RELATIVE to the window instead. The embedded Qt
+                // child HWND fills the client area and its devicePixelRatio
+                // equals k, so (physical delta / k) is a valid Qt logical
+                // coordinate regardless of which monitor the window is on.
+                const auto logical =
+                    platform::hit_test_local_point(x, y, left, top, k);
+                QWidget *topLevel = _titleBarWidget->window();
+                const QPoint localPos = _titleBarWidget->mapFrom(
+                    topLevel, QPoint(logical.x, logical.y));
 
                 if (_titleBarWidget->rect().contains(localPos)) {
                     QWidget *child = _titleBarWidget->childAt(localPos);
                     if (child) {
                         QWidget *temp = child;
                         while (temp && temp != _titleBarWidget) {
-                            if (temp->inherits("QTabBar") || temp->inherits("QToolButton")) {
+                            if (temp->inherits("QTabBar") ||
+                                temp->inherits("QToolButton")) {
                                 return HTCLIENT;
                             }
                             temp = temp->parentWidget();
@@ -623,17 +729,29 @@ void WinNativeWidget::UpdateChildDpi()
 {
     QScreen *screen = GetPointScreen();
 
-    if (screen == nullptr){
-        pxv_info("ERROR: failed to get pointing screen, will select the primary.");
-        screen = QGuiApplication::primaryScreen();
+    // Do NOT substitute primaryScreen() here. On a mixed-DPI desktop the
+    // primary is usually the 4K display, and re-binding the embedded Qt
+    // child window to it is exactly what pinned devicePixelRatio at the
+    // launch value after the window was moved to a 1080p monitor.
+    if (screen == nullptr) {
+        pxv_warn("%s", "UpdateChildDpi: no matching screen; leaving the "
+                       "child window's screen unchanged.");
+        return;
     }
 
-    if (screen != nullptr && _childWidget != nullptr){
-        _childWidget->windowHandle()->setScreen(screen);
-        if (_shadow != nullptr){
-            _shadow->windowHandle()->setScreen(screen);
-        }
+    if (_childWidget == nullptr || _childWidget->windowHandle() == nullptr)
+        return;
+
+    QWindow *child = _childWidget->windowHandle();
+    if (child->screen() != screen) {
+        pxv_info("UpdateChildDpi: rebind child window to screen '%s', dpr*100=%d",
+                 screen->name().toUtf8().constData(),
+                 static_cast<int>(screen->devicePixelRatio() * 100));
+        child->setScreen(screen);
     }
+
+    if (_shadow != nullptr && _shadow->windowHandle() != nullptr)
+        _shadow->windowHandle()->setScreen(screen);
 }
 
 QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
@@ -642,53 +760,60 @@ QScreen* WinNativeWidget::screenFromCurrentMonitorHandle()
         pxv_warn("%s", "WinNativeWidget::screenFromCurrentMonitorHandle: _hWnd is nullptr");
         return nullptr;
     }
-    assert(_hWnd);
 
     HMONITOR hMonitor = _hCurrentMonitor;
-    RECT rc;
-
-    if (hMonitor != nullptr)
-    {
-        rc = GetMonitorArea(hMonitor, true);
-
-        if (rc.right - rc.left == 0){
-          //  pxv_info("ERROR: Got an invalid monitor information from current monitor handle.");
-            hMonitor = nullptr;
-        }
-    }
- 
-    if (hMonitor == nullptr){
+    if (hMonitor == nullptr)
         hMonitor = MonitorFromWindow(_hWnd, MONITOR_DEFAULTTONEAREST);
+    if (hMonitor == nullptr) {
+        pxv_warn("%s", "WinNativeWidget::screenFromCurrentMonitorHandle: no monitor for window");
+        return nullptr;
+    }
 
-        if (hMonitor == nullptr){
-            pxv_info("ERROR: MonitorFromWindow() can't returns a handle.");
-            return nullptr;
-        }
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (screens.isEmpty())
+        return nullptr;
 
-        rc = GetMonitorArea(hMonitor, true);
+    // Exact HMONITOR match. QScreen::geometry() is in Qt logical pixels while
+    // MONITORINFO.rcMonitor is in physical pixels, so the old topLeft()
+    // equality check could never match a secondary monitor on a mixed-DPI
+    // desktop (4K@150% primary + 1080p@100% secondary: Win32 left=3840 vs
+    // Qt left=2560). GetPointScreen() then returned nullptr and every caller
+    // fell back to primaryScreen() -- the 4K one -- so the high-DPI scale
+    // factor stayed on after the window was dragged to the 1080p display.
+    std::vector<const void *> handles;
+    handles.reserve(static_cast<std::size_t>(screens.size()));
+    for (QScreen *screen : screens) {
+        auto *native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+        handles.push_back(native != nullptr
+                              ? static_cast<const void *>(native->handle())
+                              : nullptr);
+    }
 
-        if (rc.right - rc.left == 0){
-          //  pxv_info("ERROR: Got an invalid monitor information from window handle.");
-            return nullptr;
-        }
-    } 
+    int index = platform::select_screen_by_monitor(
+        handles, static_cast<const void *>(hMonitor));
 
-    QPoint top_left;
-    top_left.setX(rc.left);
-    top_left.setY(rc.top);
-
-    for (QScreen *screen : QGuiApplication::screens())
-    {
-        if (screen->geometry().topLeft() == top_left)
-        {   
-            TopWindowTracker::Instance()->screenRect = screen->availableGeometry();
-            return screen;
+    // Secondary path: match the Win32 DPI of the monitor against each
+    // screen's devicePixelRatio. Deliberately never defaults to index 0 /
+    // primaryScreen; see select_screen_by_dpr().
+    if (index < 0) {
+        const double dpr = win32_device_pixel_ratio(_hWnd, hMonitor);
+        if (dpr > 0.0) {
+            std::vector<double> dprs;
+            dprs.reserve(static_cast<std::size_t>(screens.size()));
+            for (QScreen *screen : screens)
+                dprs.push_back(screen->devicePixelRatio());
+            index = platform::select_screen_by_dpr(dprs, dpr);
         }
     }
 
-   // pxv_info("ERROR: can't match a monitor.");
-  
-    return nullptr;
+    if (index < 0) {
+        pxv_warn("%s", "WinNativeWidget: no QScreen matched the current monitor; "
+                       "keeping the existing screen instead of the primary one.");
+        return nullptr;
+    }
+
+    TopWindowTracker::Instance()->screenRect = screens.at(index)->availableGeometry();
+    return screens.at(index);
 }
 
 QScreen* WinNativeWidget::GetPointScreen()
@@ -835,13 +960,28 @@ bool WinNativeWidget::IsWin7()
 
 double WinNativeWidget::GetDevicePixelRatio()
 {
-    auto screen = GetPointScreen();
-    if (screen != nullptr){
+    // Prefer the Win32 DPI of the monitor the top-level window is actually
+    // on: it is authoritative and updates synchronously with WM_DPICHANGED.
+    // The embedded Qt child HWND is not top-level, so Windows never sends it
+    // WM_DPICHANGED and Qt's own devicePixelRatio() can lag indefinitely.
+    HMONITOR monitor = _hCurrentMonitor;
+    if (monitor == nullptr && _hWnd != nullptr)
+        monitor = MonitorFromWindow(_hWnd, MONITOR_DEFAULTTONEAREST);
+
+    const double dpr = win32_device_pixel_ratio(_hWnd, monitor);
+    if (dpr > 0.0)
+        return dpr;
+
+    QScreen *screen = GetPointScreen();
+    if (screen != nullptr)
         return screen->devicePixelRatio();
-    }
-    else{
-        return QGuiApplication::primaryScreen()->devicePixelRatio();
-    } 
+
+    // Last resort only. Silently using primaryScreen() here was the original
+    // cross-monitor bug: on a 4K primary + 1080p secondary setup it kept the
+    // 4K scale factor alive after the window was dragged to the 1080p screen.
+    pxv_warn("%s", "GetDevicePixelRatio: Win32 DPI unavailable and no screen "
+                   "matched; falling back to 1.0");
+    return 1.0;
 }
 
 bool WinNativeWidget::IsVisible()
