@@ -772,6 +772,20 @@ void LogicSnapshot::append_payload_impl(const sr_datafeed_logic &logic) {
   assert(logic.data);
   assert(_channel_num > 0);
 
+  // assert() 在 Release 构建中是空操作，而数据记录仪（Analog）模式下可以
+  // 没有任何数字通道启用：此时 _channel_num 为 0、_ch_data 为空，驱动侧却
+  // 仍会持续送来 PRV 格式的 logic 包，下面的 _ch_data[0].size() 就对空容器
+  // 取下标（UB），实测解引用 nullptr 直接 SIGSEGV。
+  // 与 append_cross_payload() 已有的 _channel_num == 0 保护保持对称，只告警一次。
+  if (_channel_num == 0) {
+    static std::atomic<bool> no_ch_warned{false};
+    if (!no_ch_warned.exchange(true))
+      pxv_warn("append_payload_impl: no enabled logic channel in snapshot, "
+               "dropping logic payloads (%llu bytes/packet)",
+               (unsigned long long)logic.length);
+    return;
+  }
+
   if (logic.length == 0) return;
 
   uint64_t unitsize = logic.unitsize;
