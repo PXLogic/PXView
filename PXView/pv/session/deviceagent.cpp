@@ -935,6 +935,28 @@ void DeviceAgent::set_work_mode(int mode)
     // so the hardware switches its channel configuration.
     if (_dev_handle && is_dsl_device())
         set_config_int16(SR_CONF_DEVICE_MODE, mode);
+
+    // wch-ch32h417 通过 SR_CONF_PATTERN_MODE 切换硬件通路，驱动只接受
+    // "Logic Analyzer" / "ADC"（见驱动 mode_names[]）。此前这里从不下发，
+    // 导致数据记录仪（Analog）模式下驱动仍按逻辑采集参数运行（日志始终是
+    // Setting logic params / Starting logic acquisition），模拟快照
+    // ANALOG_FIRST_PAYLOAD 建好了却收不到任何数据。切模式时同步下发。
+    if (_dev_handle && _driver_name == "wch-ch32h417") {
+        const char *pattern = nullptr;
+        switch (mode) {
+        case ANALOG: pattern = "ADC"; break;
+        case LOGIC:
+        case MSO:    pattern = "Logic Analyzer"; break;
+        default: break;
+        }
+        if (pattern) {
+            if (set_config_string(SR_CONF_PATTERN_MODE, pattern))
+                pxv_info("set_work_mode: PATTERN_MODE -> '%s'", pattern);
+            else
+                pxv_warn("set_work_mode: driver rejected PATTERN_MODE '%s'",
+                         pattern);
+        }
+    }
 }
 
 const GSList* DeviceAgent::get_device_mode_list()
