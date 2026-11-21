@@ -11,6 +11,7 @@
 #include "pv/data/stack/mathstack.h"
 #include "pv/data/stack/lissajousmodel.h"
 #include "pv/base/log.h"
+#include "pv/base/pxvdef.h"
 #include "pv/core/langresource.h"
 #include "pv/core/ui_hooks.h"
 #include "pv/utility/path.h"
@@ -295,6 +296,29 @@ bool CaptureManager::action_start_capture(bool instant,
   }
 
   _disk_cache_config.enabled = false;
+
+  // 设备 profile（*.ses.pxc）加载会把 driver 模式重置回 "Logic Analyzer"
+  // （日志可见 Device mode set to Logic Analyzer），覆盖 set_work_mode() 刚
+  // 下发的 PATTERN_MODE。若不在采集前再对齐一次，数据记录仪（Analog）实际
+  // 仍跑逻辑采集，模拟快照永远收不到数据。切换模式会把 cur_samplerate 重置
+  // 为采样率列表首项，故下发后恢复原采样率。
+  if (_state->device_agent().driver_name() == "wch-ch32h417") {
+    const int wm = _state->device_agent().get_work_mode();
+    const char *pattern = (wm == ANALOG)                        ? "ADC"
+                          : (wm == LOGIC || wm == MSO)           ? "Logic Analyzer"
+                                                                 : nullptr;
+    if (pattern) {
+      const uint64_t want_sr = _state->device_agent().get_sample_rate();
+      if (_state->device_agent().set_config_string(SR_CONF_PATTERN_MODE, pattern))
+        pxv_info("start_capture: re-applied PATTERN_MODE '%s' (work_mode=%d)",
+                 pattern, wm);
+      else
+        pxv_warn("start_capture: PATTERN_MODE '%s' rejected (work_mode=%d)",
+                 pattern, wm);
+      if (want_sr > 0)
+        _state->device_agent().set_config_uint64(SR_CONF_SAMPLERATE, want_sr);
+    }
+  }
 
   pxv_info(
       "SigSession::start_capture: _is_stream_mode=%d, disk_cache_enabled=%d",
